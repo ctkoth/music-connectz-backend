@@ -937,9 +937,8 @@ function requestGPS() {
   // Quick diagnostics so the user knows why the browser may not prompt
   const secure = window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
   if (!secure) {
-    status.textContent = '✗ GPS needs HTTPS or localhost (use a local dev server)';
-    alert('GPS is blocked on insecure origins. Please run this file via https:// or http://localhost/.');
-    return;
+    status.textContent = `⚠️ GPS may be blocked on insecure origins (${location.protocol}//${location.hostname}). Use http://localhost:8000.`;
+    alert('GPS can be blocked on non-HTTPS origins. Please use http://localhost:8000 for local testing.');
   }
 
   if (navigator.permissions && navigator.permissions.query) {
@@ -1495,7 +1494,6 @@ function formatBudgetRange(budgetRange) {
 function renderCollabFeed() {
   const feed = document.getElementById('collabFeed');
   appState.filteredCollabs = [...appState.collabs];
-  applyFilters();
   const filterPersona = document.getElementById('filterPersona').value;
   const filterLocation = document.getElementById('filterLocation').value;
   if (filterPersona) appState.filteredCollabs = appState.filteredCollabs.filter(c => c.personaName === filterPersona);
@@ -1933,89 +1931,6 @@ function refreshNotificationToggles() {
   // Push notifications do not require verification
   document.getElementById('pushNotifToggle').classList.toggle('on', appState.settings.pushNotifications);
 }
-
-// Stripe Integration
-let stripe = null;
-let stripePublishableKey = 'pk_test_YOUR_PUBLISHABLE_KEY'; // Replace with your Stripe publishable key
-
-try {
-  stripe = Stripe(stripePublishableKey);
-} catch (e) {
-  console.warn('Stripe not initialized. Set your publishable key.');
-}
-
-function createStripeCheckout() {
-  const amount = document.getElementById('serviceAmount').value;
-  const description = document.getElementById('serviceDesc').value;
-  const taxMode = document.getElementById('taxMode').value;
-  const email = appState.user.email || '';
-
-  if (!amount || amount <= 0) {
-    alert('Please enter a valid service amount');
-    return;
-  }
-
-  if (!description) {
-    alert('Please enter a service description');
-    return;
-  }
-
-  // Show loading state
-  const btn = event.target;
-  const originalText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '⏳ Creating payment...';
-
-  // Call backend to create checkout session
-  fetch('http://localhost:3000/api/create-checkout', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      amount: parseFloat(amount),
-      description: description,
-      taxMode: taxMode,
-      customerEmail: email,
-    }),
-  })
-  .then(response => response.json())
-  .then(data => {
-    btn.disabled = false;
-    btn.textContent = originalText;
-
-    if (!data.url) {
-      throw new Error(data.error || 'Failed to create checkout session');
-    }
-
-    // Show payment link
-    document.getElementById('paymentLink').href = data.url;
-    document.getElementById('paymentLink').textContent = '✓ Open Stripe Checkout';
-    document.getElementById('paymentLinkDisplay').style.display = 'block';
-
-    console.log('✅ Checkout session created:', data.sessionId);
-  })
-  .catch(error => {
-    btn.disabled = false;
-    btn.textContent = originalText;
-    console.error('Error:', error);
-    alert('❌ Error: ' + error.message);
-  });
-}
-
-function updateTaxMode() {
-  const taxMode = document.getElementById('taxMode').value;
-  document.getElementById('manualTaxDiv').style.display = taxMode === 'manual' ? 'block' : 'none';
-}
-
-// Initialize tax mode change listener
-setInterval(() => {
-  const taxSelect = document.getElementById('taxMode');
-  if (taxSelect && !taxSelect.hasAttribute('data-listener')) {
-    taxSelect.setAttribute('data-listener', 'true');
-    taxSelect.addEventListener('change', updateTaxMode);
-  }
-}, 500);
 
 function exportData() {
   const dataStr = JSON.stringify(appState, (key, value) => value instanceof Set ? Array.from(value) : value);
