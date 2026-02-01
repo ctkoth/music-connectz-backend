@@ -553,8 +553,10 @@
             <div id="pubPic" style="width: 60px; height: 60px; border-radius: 50%; background: var(--primary); color: white; display: flex; align-items: center; justify-content: center; font-size: 28px; overflow: hidden;">👤</div>
             <div id="pubRatingBadge" class="rating-badge">⭐ N/A</div>
           </div>
+          <div id="userLevelBadge" style="margin-bottom: 8px;"></div>
           <div id="pubUsername" style="font-weight: 700; font-size: 14px;">Not Set</div>
           <div id="pubInfo" style="font-size: 11px; color: var(--text-light);"></div>
+          <div id="userLevelDisplay" style="font-size: 10px; color: var(--text-light); margin-top: 6px;"></div>
         </div>
         <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 11px;"><div style="color: var(--text-light); margin-bottom: 4px; font-weight: 600;">📝 Bio:</div><div id="pubBio">No bio</div></div>
         <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 11px;"><div style="color: var(--text-light); margin-bottom: 4px; font-weight: 600;">📧 Email:</div><div id="pubEmail" style="display: flex; gap: 6px; align-items: center;"><span id="pubEmailText">No email</span><button class="btn btn-small btn-secondary" onclick="copyEmail()" id="copyEmailBtn">📋 Copy</button></div></div>
@@ -564,11 +566,12 @@
 
     <div id="money" class="tab">
       <div class="card">
-        <div class="card-header">💰 Wallet</div>
+        <div class="card-header">💰 Wallet & Level</div>
         <div class="grid-2">
           <div style="background: var(--bg); padding: 12px; border-radius: 8px; text-align: center;"><div style="font-size: 11px; color: var(--text-light); margin-bottom: 4px;">💵 Balance</div><div style="font-size: 16px; font-weight: 700;" id="walletBalance">$0.00</div></div>
           <div style="background: var(--bg); padding: 12px; border-radius: 8px; text-align: center;"><div style="font-size: 11px; color: var(--text-light); margin-bottom: 4px;">💸 Total Earned</div><div style="font-size: 16px; font-weight: 700;" id="walletEarned">$0.00</div></div>
         </div>
+        <div style="background: var(--bg); padding: 12px; border-radius: 8px; text-align: center; margin-top: 12px;"><div style="font-size: 11px; color: var(--text-light); margin-bottom: 6px;">🎖️ Membership Level</div><div id="walletLevelDisplay" style="font-size: 12px; font-weight: 600; margin-bottom: 6px;"></div></div>
       </div>
       <div class="card">
         <div class="card-header">💳 Accept Payments with Stripe (Tax Included)</div>
@@ -599,11 +602,34 @@
       </div>
       <div class="card">
         <div class="card-header">➕ Add Income Manually</div>
+        <div style="background: var(--bg); padding: 10px; border-radius: 6px; margin-bottom: 12px; font-size: 10px; border-left: 3px solid var(--accent);">
+          <strong id="levelTaxRateInfo">Your Tax Rate: 5.0%</strong> (Based on your membership level)
+        </div>
         <div class="grid-2">
           <div class="form-group"><label>💵 Amount ($)</label><input type="number" id="incomeAmt" min="0" step="1" /></div>
-          <div class="form-group"><label>🧾 Tax % (deducted)</label><input type="number" id="incomeTaxRate" min="0" max="100" step="0.1" value="5" /></div>
         </div>
         <button class="btn btn-success" onclick="addIncome()" style="width: 100%;">✓ Add</button>
+      </div>
+      <div class="card">
+        <div class="card-header">🎖️ Membership Tax Rates</div>
+        <div style="background: var(--bg); padding: 12px; border-radius: 8px; font-size: 10px; line-height: 1.8;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border);">
+            <span>🌟 Bronze (Under $50):</span>
+            <strong>5.0%</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border);">
+            <span>⭐ Silver ($50+):</span>
+            <strong style="color: #c0c0c0;">4.8%</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border);">
+            <span>🏆 Gold ($100+):</span>
+            <strong style="color: #ffd700;">4.5%</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>💎 Platinum ($1000+):</span>
+            <strong style="color: #e5d4f0;">4.2%</strong>
+          </div>
+        </div>
       </div>
       <div class="card">
         <div class="card-header">📊 Tax Collection Summary</div>
@@ -979,6 +1005,9 @@ function loadAppState() {
     };
   }
   if (appState.user.rating === undefined) { appState.user.rating = null; }
+  
+  // Initialize user level based on current earnings
+  appState.user.level = getUserLevel();
   
   // Apply device theme or saved theme
   if (appState.settings.deviceThemeMatch) {
@@ -2058,9 +2087,9 @@ function resetFilters() {
 
 function addIncome() {
   const amt = parseFloat(document.getElementById('incomeAmt').value);
-  const taxRate = parseFloat(document.getElementById('incomeTaxRate').value) || 5;
+  const levelTaxRate = getTaxRateByLevel();
   if (!amt || amt <= 0) { alert('❌ Please enter a valid amount'); return; }
-  const taxAmount = amt * (taxRate / 100);
+  const taxAmount = amt * (levelTaxRate / 100);
   const afterTax = amt - taxAmount;
   appState.wallet.balance += afterTax;
   appState.wallet.earned += amt;
@@ -2069,7 +2098,7 @@ function addIncome() {
   document.getElementById('incomeAmt').value = '';
   updateWalletDisplay();
   saveAppState();
-  alert(`✓ Added $${amt.toFixed(2)} (tax: $${taxAmount.toFixed(2)}, net: $${afterTax.toFixed(2)})`);
+  alert(`✓ Added $${amt.toFixed(2)} (${levelTaxRate}% tax: $${taxAmount.toFixed(2)}, net: $${afterTax.toFixed(2)})`);
 }
 
 function safeSetText(id, text) {
@@ -2082,10 +2111,74 @@ function safeSetValue(id, value) {
   if (el) { el.value = value; }
 }
 
+function getUserLevel() {
+  const earned = appState.wallet.earned || 0;
+  if (earned >= 1000) return { name: 'Platinum', icon: '💎', color: '#e5d4f0', threshold: 1000 };
+  if (earned >= 100) return { name: 'Gold', icon: '🏆', color: '#ffd700', threshold: 100 };
+  if (earned >= 50) return { name: 'Silver', icon: '⭐', color: '#c0c0c0', threshold: 50 };
+  return { name: 'Bronze', icon: '🌟', color: '#cd7f32', threshold: 0 };
+}
+
+function getTaxRateByLevel() {
+  const level = appState.user.level || getUserLevel();
+  if (level.name === 'Platinum') return 4.2;
+  if (level.name === 'Gold') return 4.5;
+  if (level.name === 'Silver') return 4.8;
+  return 5.0; // Default for Bronze
+}
+
+function updateUserLevel() {
+  const level = getUserLevel();
+  appState.user.level = level;
+  updateLevelDisplay();
+}
+
+function updateLevelDisplay() {
+  const level = appState.user.level || getUserLevel();
+  const taxRate = getTaxRateByLevel();
+  
+  const levelBadge = document.getElementById('userLevelBadge');
+  if (levelBadge) {
+    levelBadge.innerHTML = `<span style="font-size: 14px; font-weight: 700; color: #333; background: ${level.color}; padding: 6px 12px; border-radius: 20px; display: inline-block; border: 2px solid #333;">${level.icon} ${level.name}</span>`;
+  }
+  
+  const levelDisplay = document.getElementById('userLevelDisplay');
+  if (levelDisplay) {
+    const earned = appState.wallet.earned || 0;
+    let progressMsg = '';
+    if (level.name === 'Bronze') {
+      progressMsg = `Earn $${(50 - earned).toFixed(2)} more for Silver • Tax Rate: 5.0%`;
+    } else if (level.name === 'Silver') {
+      progressMsg = `Earn $${(100 - earned).toFixed(2)} more for Gold • Tax Rate: 4.8%`;
+    } else if (level.name === 'Gold') {
+      progressMsg = `Earn $${(1000 - earned).toFixed(2)} more for Platinum • Tax Rate: 4.5%`;
+    } else {
+      progressMsg = 'Maximum level reached! • Tax Rate: 4.2%';
+    }
+    levelDisplay.textContent = progressMsg;
+  }
+  
+  // Update wallet level display
+  const walletLevelDisplay = document.getElementById('walletLevelDisplay');
+  if (walletLevelDisplay) {
+    const earned = appState.wallet.earned || 0;
+    walletLevelDisplay.innerHTML = `<div style="margin-bottom: 8px;">${level.icon} <strong>${level.name}</strong> Member</div><div style="font-size: 10px; color: var(--text-light); margin-bottom: 4px;">Total Earned: $${earned.toFixed(2)}</div><div style="font-size: 10px; background: rgba(0,0,0,0.05); padding: 6px 8px; border-radius: 4px; color: var(--primary); font-weight: 600;">Tax Rate: ${taxRate}%</div>`;
+  }
+  
+  // Update tax rate info in income section
+  const levelTaxRateInfo = document.getElementById('levelTaxRateInfo');
+  if (levelTaxRateInfo) {
+    levelTaxRateInfo.innerHTML = `Your Tax Rate: <strong>${taxRate}%</strong> (${level.name} Member)`;
+  }
+}
+
 function updateWalletDisplay() {
   safeSetText('walletBalance', appState.wallet.balance.toFixed(2));
   safeSetText('walletEarned', appState.wallet.earned.toFixed(2));
   safeSetText('balanceAmount', appState.wallet.balance.toFixed(2));
+  
+  // Update user level
+  updateUserLevel();
   
   // Update tax summary
   const taxCollected = appState.wallet.taxCollected || 0;
