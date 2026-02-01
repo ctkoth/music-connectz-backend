@@ -2441,13 +2441,6 @@ window.addEventListener('beforeunload', () => { saveAppState(); });
 
 console.log('=== PAGE LOADED - SCHEDULING INITIALIZATION ===');
 
-// Force hide auth overlay immediately if in guest mode
-const authOverlay = document.getElementById('authOverlay');
-if (authOverlay) {
-  authOverlay.classList.remove('active');
-  authOverlay.style.display = 'none';
-}
-
 // Schedule initialization to happen asynchronously
 setTimeout(() => {
   try {
