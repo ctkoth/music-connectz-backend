@@ -615,10 +615,19 @@ app.get('/cancel', (req, res) => {
 });
 
 // OAuth Routes
-app.get('/api/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+app.get('/api/auth/google', (req, res, next) => {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    return res.status(501).json({ error: 'Google login is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.' });
+  }
+  return passport.authenticate('google', { scope: ['profile', 'email'] })(req, res, next);
+});
 
-app.get('/api/auth/google/callback', 
-  passport.authenticate('google', { failureRedirect: '/login' }),
+app.get('/api/auth/google/callback', (req, res, next) => {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    return res.status(501).send('Google login is not configured.');
+  }
+  return passport.authenticate('google', { failureRedirect: '/login' })(req, res, next);
+},
   (req, res) => {
     // Successful authentication
     const userData = {
