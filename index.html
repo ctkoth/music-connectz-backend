@@ -379,6 +379,13 @@
     <div class="header-right"><button class="btn btn-small" id="headerLoginBtn" onclick="openLoginOverlay()">🔓 Login</button><div class="balance" onclick="switchTab('money')">💰 $<span id="balanceAmount">0.00</span></div><div class="profile-pic" onclick="switchTab('profile')" id="headerPic">👤</div></div>
   </div>
 
+  <div id="guestLoginBanner" style="display: none; background: #fff3cd; color: #856404; padding: 10px 12px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid #ffc107; font-size: 11px;">
+    <div style="display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+      <span>🔓 You’re in guest mode. Log in to access all features.</span>
+      <button class="btn btn-small" onclick="openLoginOverlay()">Login</button>
+    </div>
+  </div>
+
   <div class="tabs">
     <button class="tab-btn active" onclick="switchTab('setup')">⚙️ Setup</button>
     <button class="tab-btn" onclick="switchTab('personas')">🎭 Personas</button>
@@ -2669,6 +2676,7 @@ function updateAuthDisplay() {
   const loginBtn = document.getElementById('loginBtn');
   const logoutBtn = document.getElementById('logoutBtn');
   const headerLoginBtn = document.getElementById('headerLoginBtn');
+  const guestLoginBanner = document.getElementById('guestLoginBanner');
 
   if (!emailInput || !passwordInput || !usernameInput || !registerBtn || !loginBtn || !logoutBtn) return;
 
@@ -2692,6 +2700,7 @@ function updateAuthDisplay() {
   loginBtn.style.display = loggedIn ? 'none' : 'inline-flex';
   logoutBtn.style.display = loggedIn ? 'inline-flex' : 'none';
   if (headerLoginBtn) { headerLoginBtn.style.display = loggedIn ? 'none' : 'inline-flex'; }
+  if (guestLoginBanner) { guestLoginBanner.style.display = loggedIn ? 'none' : 'block'; }
 
   if (loggedIn && user && user.email) {
     setAuthStatus(`Logged in as ${user.email}`);
