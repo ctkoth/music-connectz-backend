@@ -2147,6 +2147,8 @@ async function completePasswordReset() {
     setAuthStatus('Reset error. Check server.', true);
   }
 }
+
+function socialLogin(provider) {
   // Open OAuth flow in popup window
   const width = 600;
   const height = 700;
