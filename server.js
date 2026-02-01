@@ -204,7 +204,7 @@ io.on('connection', (socket) => {
   // Handle new message
   socket.on('send-message', async (data, callback) => {
     try {
-      const { userId, username, message, conversationWith } = data;
+      const { userId, username, message, conversationWith, file } = data;
       
       if (!userId || !message || !conversationWith) {
         return callback({ error: 'Missing required fields' });
@@ -218,17 +218,105 @@ io.on('connection', (socket) => {
         recipientId: conversationWith,
         text: message,
         timestamp: new Date().toISOString(),
-        read: false
+        read: false,
+        file: file ? {
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          // Store file data as base64 string if provided
+          data: file.data ? (typeof file.data === 'string' ? file.data : Buffer.from(file.data).toString('base64')) : null
+        } : null
       };
 
       messages.push(newMessage);
       await writeMessages(messages);
 
-      // Emit to all users
+      // Emit to all users (file data included)
       io.emit('new-message', newMessage);
       callback({ ok: true, message: newMessage });
     } catch (error) {
       console.error('Message error:', error);
+      callback({ error: error.message });
+    }
+  });
+
+  // Edit message (within 15 minutes)
+  socket.on('edit-message', async (data, callback) => {
+    try {
+      const { messageId, conversationWith, newText } = data;
+      const messages = await readMessages();
+      const msg = messages.find(m => m.id === messageId);
+      
+      if (!msg) {
+        return callback({ error: 'Message not found' });
+      }
+      
+      // Check if user is sender
+      if (msg.senderId !== socket.handshake.auth.userId) {
+        return callback({ error: 'Not authorized to edit this message' });
+      }
+      
+      // Check if within 15 minutes
+      const timePassed = (Date.now() - new Date(msg.timestamp).getTime()) / 1000 / 60;
+      if (timePassed > 15) {
+        return callback({ error: 'Cannot edit message after 15 minutes' });
+      }
+      
+      msg.text = newText;
+      msg.editedAt = new Date().toISOString();
+      await writeMessages(messages);
+      
+      // Broadcast edit to both users
+      io.emit('message-edited', {
+        messageId,
+        newText,
+        editedAt: msg.editedAt,
+        senderId: msg.senderId,
+        conversationWith
+      });
+      callback({ ok: true });
+    } catch (error) {
+      console.error('Edit message error:', error);
+      callback({ error: error.message });
+    }
+  });
+
+  // Delete message (within 15 minutes)
+  socket.on('delete-message', async (data, callback) => {
+    try {
+      const { messageId, conversationWith } = data;
+      const messages = await readMessages();
+      const msgIdx = messages.findIndex(m => m.id === messageId);
+      
+      if (msgIdx === -1) {
+        return callback({ error: 'Message not found' });
+      }
+      
+      const msg = messages[msgIdx];
+      
+      // Check if user is sender
+      if (msg.senderId !== socket.handshake.auth.userId) {
+        return callback({ error: 'Not authorized to delete this message' });
+      }
+      
+      // Check if within 15 minutes
+      const timePassed = (Date.now() - new Date(msg.timestamp).getTime()) / 1000 / 60;
+      if (timePassed > 15) {
+        return callback({ error: 'Cannot delete message after 15 minutes' });
+      }
+      
+      messages.splice(msgIdx, 1);
+      await writeMessages(messages);
+      
+      // Broadcast deletion to both users
+      io.emit('message-deleted', {
+        messageId,
+        senderId: msg.senderId,
+        conversationWith
+      });
+      callback({ ok: true });
+    } catch (error) {
+      console.error('Delete message error:', error);
       callback({ error: error.message });
     }
   });
