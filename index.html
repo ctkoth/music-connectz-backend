@@ -228,21 +228,139 @@
     .auth-subtitle { font-size: 11px; color: var(--text-light); margin-bottom: 14px; }
     .auth-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
     .auth-status { margin-top: 10px; font-size: 11px; color: var(--text-light); }
+    .btn-social { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border); background: white; color: #333; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; width: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .btn-social:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .btn-social svg { flex-shrink: 0; }
+    .btn-google { background: white; color: #3c4043; }
+    .btn-google:hover { background: #f8f9fa; border-color: #dadce0; }
+    .btn-apple { background: white; color: #000000; }
+    .btn-apple:hover { background: #f5f5f7; border-color: #000000; }
+    .btn-microsoft { background: white; color: #5E5E5E; }
+    .btn-microsoft:hover { background: #f3f2f1; border-color: #8c8c8c; }
+    .btn-facebook { background: white; color: #1877f2; }
+    .btn-facebook:hover { background: #f0f2f5; border-color: #1877f2; }
+    .btn-twitter { background: white; color: #000000; }
+    .btn-twitter:hover { background: #f7f9f9; border-color: #000000; }
+    .btn-linkedin { background: white; color: #0A66C2; }
+    .btn-linkedin:hover { background: #f3f6f8; border-color: #0A66C2; }
+    .btn-github { background: white; color: #24292e; }
+    .btn-github:hover { background: #f6f8fa; border-color: #24292e; }
+    [data-theme="dark"] .btn-social { background: var(--surface); color: var(--text); border-color: var(--border); }
+    [data-theme="dark"] .btn-social:hover { background: var(--border); }
   </style>
 </head>
 <body>
 <div id="authOverlay" class="auth-overlay">
   <div class="auth-card">
-    <div class="auth-title">🔐 Login Required</div>
-    <div class="auth-subtitle">Create an account or sign in to use Music ConnectZ.</div>
-    <div class="form-group"><label>Username</label><input type="text" id="authOverlayUsername" placeholder="Optional display name" /></div>
-    <div class="form-group"><label>Email *</label><input type="email" id="authOverlayEmail" placeholder="you@email.com" /></div>
-    <div class="form-group"><label>Password *</label><input type="password" id="authOverlayPassword" placeholder="At least 8 characters" /></div>
-    <div class="auth-actions">
-      <button class="btn btn-success" onclick="registerUser(true)">📝 Register</button>
-      <button class="btn" onclick="loginUser(true)">🔓 Login</button>
+    <div id="authMainView">
+      <div class="auth-title">🔐 Login Required</div>
+      <div class="auth-subtitle">Create an account or sign in to use Music ConnectZ.</div>
+      
+      <div class="social-login-section" style="margin-bottom: 15px;">
+        <div style="text-align: center; margin-bottom: 10px; color: var(--text-light); font-size: 14px;">Continue with:</div>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <button class="btn-social btn-google" onclick="socialLogin('google')" title="Login with Google">
+            <svg width="20" height="20" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+            </svg>
+            <span style="flex: 1; text-align: left;">Continue with Google</span>
+          </button>
+          <button class="btn-social btn-apple" onclick="socialLogin('apple')" title="Login with Apple">
+            <svg width="20" height="20" viewBox="0 0 24 24">
+              <path fill="#000000" d="M17.05 20.28c-.98.95-2.05.88-3.08.4-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.4C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09l.01-.01M12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/>
+            </svg>
+            <span style="flex: 1; text-align: left;">Continue with Apple</span>
+          </button>
+          <button class="btn-social btn-microsoft" onclick="socialLogin('microsoft')" title="Login with Microsoft">
+            <svg width="20" height="20" viewBox="0 0 24 24">
+              <path fill="#F25022" d="M11.4 11.4H2V2h9.4v9.4z"/>
+              <path fill="#00A4EF" d="M22 11.4h-9.4V2H22v9.4z"/>
+              <path fill="#7FBA00" d="M11.4 22H2v-9.4h9.4V22z"/>
+              <path fill="#FFB900" d="M22 22h-9.4v-9.4H22V22z"/>
+            </svg>
+            <span style="flex: 1; text-align: left;">Continue with Microsoft</span>
+          </button>
+          <button class="btn-social btn-facebook" onclick="socialLogin('facebook')" title="Login with Facebook">
+            <svg width="20" height="20" viewBox="0 0 24 24">
+              <path fill="#1877F2" d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+            </svg>
+            <span style="flex: 1; text-align: left;">Continue with Facebook</span>
+          </button>
+          <button class="btn-social btn-twitter" onclick="socialLogin('twitter')" title="Login with X (Twitter)">
+            <svg width="20" height="20" viewBox="0 0 24 24">
+              <path fill="#000000" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+            </svg>
+            <span style="flex: 1; text-align: left;">Continue with X</span>
+          </button>
+          <button class="btn-social btn-linkedin" onclick="socialLogin('linkedin')" title="Login with LinkedIn">
+            <svg width="20" height="20" viewBox="0 0 24 24">
+              <path fill="#0A66C2" d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+            </svg>
+            <span style="flex: 1; text-align: left;">Continue with LinkedIn</span>
+          </button>
+          <button class="btn-social btn-github" onclick="socialLogin('github')" title="Login with GitHub">
+            <svg width="20" height="20" viewBox="0 0 24 24">
+              <path fill="#181717" d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+            </svg>
+            <span style="flex: 1; text-align: left;">Continue with GitHub</span>
+          </button>
+        </div>
+        <div style="text-align: center; margin: 15px 0; color: var(--text-light); font-size: 14px;">
+          <span style="background: var(--background); padding: 0 10px; position: relative; z-index: 1;">or use email</span>
+          <div style="height: 1px; background: var(--border); margin-top: -10px;"></div>
+        </div>
+      </div>
+      
+      <div class="form-group"><label>Username</label><input type="text" id="authOverlayUsername" placeholder="Optional display name" /></div>
+      <div class="form-group"><label>Email *</label><input type="email" id="authOverlayEmail" placeholder="you@email.com" /></div>
+      <div class="form-group"><label>Phone</label><input type="tel" id="authOverlayPhone" placeholder="+1234567890 (optional)" /></div>
+      <div class="form-group"><label>Password *</label><input type="password" id="authOverlayPassword" placeholder="At least 8 characters" /></div>
+      <div class="auth-actions">
+        <button class="btn btn-success" onclick="registerUser(true)">📝 Register</button>
+        <button class="btn" onclick="loginUser(true)">🔓 Login</button>
+      </div>
+      <div style="display: flex; gap: 10px; margin-top: 10px;">
+        <button class="btn btn-secondary" onclick="showPhoneLogin()" style="flex: 1;">📱 Phone Login</button>
+        <button class="btn btn-secondary" onclick="showForgotPassword()" style="flex: 1;">🔑 Forgot Password</button>
+      </div>
+      <button class="btn btn-secondary" onclick="continueAsGuest()" style="width: 100%; margin-top: 10px;">👀 Continue as Guest</button>
     </div>
-    <button class="btn btn-secondary" onclick="continueAsGuest()" style="width: 100%; margin-top: 10px;">👀 Continue as Guest</button>
+    
+    <div id="authPhoneView" style="display: none;">
+      <div class="auth-title">📱 Phone Login</div>
+      <div class="auth-subtitle">Sign in with your phone number.</div>
+      <div class="form-group"><label>Phone *</label><input type="tel" id="authPhoneNumber" placeholder="+1234567890" /></div>
+      <div class="form-group"><label>Password *</label><input type="password" id="authPhonePassword" placeholder="Password" /></div>
+      <div class="auth-actions">
+        <button class="btn btn-success" onclick="loginWithPhone()">🔓 Login with Phone</button>
+        <button class="btn btn-secondary" onclick="backToMainAuth()">⬅️ Back</button>
+      </div>
+    </div>
+    
+    <div id="authForgotView" style="display: none;">
+      <div class="auth-title">🔑 Reset Password</div>
+      <div class="auth-subtitle">We'll send you a 6-digit reset code.</div>
+      <div class="form-group"><label>Email *</label><input type="email" id="authForgotEmail" placeholder="you@email.com" /></div>
+      <div class="auth-actions">
+        <button class="btn btn-success" onclick="requestPasswordReset()">📧 Send Reset Code</button>
+        <button class="btn btn-secondary" onclick="backToMainAuth()">⬅️ Back</button>
+      </div>
+    </div>
+    
+    <div id="authResetView" style="display: none;">
+      <div class="auth-title">🔐 Enter Reset Code</div>
+      <div class="auth-subtitle">Check your email for the 6-digit code.</div>
+      <div class="form-group"><label>6-Digit Code *</label><input type="text" id="authResetCode" placeholder="123456" maxlength="6" /></div>
+      <div class="form-group"><label>New Password *</label><input type="password" id="authResetPassword" placeholder="At least 8 characters" /></div>
+      <div class="auth-actions">
+        <button class="btn btn-success" onclick="completePasswordReset()">✅ Reset Password</button>
+        <button class="btn btn-secondary" onclick="backToMainAuth()">⬅️ Back</button>
+      </div>
+    </div>
+    
     <div class="auth-status" id="authOverlayStatus">Not logged in</div>
   </div>
 </div>
@@ -717,7 +835,7 @@ const instrumentDatabase = {
 
 let appState = {
   user: {name: '', email: '', phone: '', birthday: '', gender: '', location: '', bio: '', profilePic: null, lat: null, lng: null, rating: null},
-  auth: {loggedIn: false, user: null, guest: false},
+  auth: {loggedIn: false, user: null, guest: true},
   personas: [],
   examples: [],
   collabs: [],
@@ -747,19 +865,37 @@ const apiBase = (() => {
   return 'http://localhost:3000';
 })();
 
+// Storage helpers to avoid crashes when storage is blocked
+const _memoryStorage = {};
+function safeStorageSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (e) {
+    _memoryStorage[key] = value;
+  }
+}
+
+function safeStorageGet(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch (e) {
+    return _memoryStorage[key] || null;
+  }
+}
+
 function saveAppState() {
   const stateToSave = JSON.parse(JSON.stringify(appState));
   stateToSave.selectedSkillsInModal = Array.from(appState.selectedSkillsInModal);
-  localStorage.setItem('musicConnectZState', JSON.stringify(stateToSave));
+  safeStorageSet('musicConnectZState', JSON.stringify(stateToSave));
 }
 
 function loadAppState() {
-  const saved = localStorage.getItem('musicConnectZState');
+  const saved = safeStorageGet('musicConnectZState');
   if (saved) {
     const loaded = JSON.parse(saved);
     appState = {
       user: loaded.user || appState.user,
-      auth: loaded.auth || {loggedIn: false, user: null, guest: false},
+      auth: loaded.auth || {loggedIn: false, user: null, guest: true},
       personas: loaded.personas || [],
       examples: loaded.examples || [],
       collabs: loaded.collabs || [],
@@ -1564,20 +1700,26 @@ function addIncome() {
   alert(`✓ Added $${amt.toFixed(2)} (tax: $${taxAmount.toFixed(2)}, net: $${afterTax.toFixed(2)})`);
 }
 
+function safeSetText(id, text) {
+  const el = document.getElementById(id);
+  if (el) { el.textContent = text; }
+}
+
+function safeSetValue(id, value) {
+  const el = document.getElementById(id);
+  if (el) { el.value = value; }
+}
+
 function updateWalletDisplay() {
-  document.getElementById('walletBalance').textContent = appState.wallet.balance.toFixed(2);
-  document.getElementById('walletEarned').textContent = appState.wallet.earned.toFixed(2);
-  document.getElementById('balanceAmount').textContent = appState.wallet.balance.toFixed(2);
+  safeSetText('walletBalance', appState.wallet.balance.toFixed(2));
+  safeSetText('walletEarned', appState.wallet.earned.toFixed(2));
+  safeSetText('balanceAmount', appState.wallet.balance.toFixed(2));
   
   // Update tax summary
   const taxCollected = appState.wallet.taxCollected || 0;
   const netIncome = appState.wallet.balance || 0;
-  if (document.getElementById('totalTaxCollected')) {
-    document.getElementById('totalTaxCollected').textContent = '$' + taxCollected.toFixed(2);
-  }
-  if (document.getElementById('netIncome')) {
-    document.getElementById('netIncome').textContent = '$' + netIncome.toFixed(2);
-  }
+  safeSetText('totalTaxCollected', '$' + taxCollected.toFixed(2));
+  safeSetText('netIncome', '$' + netIncome.toFixed(2));
 }
 
 function updateAllDisplays() {
@@ -1587,13 +1729,13 @@ function updateAllDisplays() {
   updateCollabPersonaOptions();
   renderCollabFeed();
   updateProfileDisplay();
-  document.getElementById('username').value = appState.user.name;
-  document.getElementById('email').value = appState.user.email;
-  document.getElementById('phone').value = appState.user.phone;
-  document.getElementById('birthday').value = appState.user.birthday;
-  document.getElementById('gender').value = appState.user.gender;
-  document.getElementById('location').value = appState.user.location;
-  document.getElementById('bio').value = appState.user.bio;
+  safeSetValue('username', appState.user.name);
+  safeSetValue('email', appState.user.email);
+  safeSetValue('phone', appState.user.phone);
+  safeSetValue('birthday', appState.user.birthday);
+  safeSetValue('gender', appState.user.gender);
+  safeSetValue('location', appState.user.location);
+  safeSetValue('bio', appState.user.bio);
   updateAuthDisplay();
 }
 
@@ -1602,7 +1744,7 @@ function toggleTheme() {
   const currentTheme = html.getAttribute('data-theme');
   const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
   html.setAttribute('data-theme', newTheme);
-  localStorage.setItem('theme', newTheme);
+  safeStorageSet('theme', newTheme);
   updateThemeButton(newTheme);
 }
 
@@ -1708,6 +1850,7 @@ async function registerUser(fromOverlay = false) {
   const email = (document.getElementById(fromOverlay ? 'authOverlayEmail' : 'authEmail').value || '').trim();
   const password = (document.getElementById(fromOverlay ? 'authOverlayPassword' : 'authPassword').value || '').trim();
   const username = (document.getElementById(fromOverlay ? 'authOverlayUsername' : 'authUsername').value || '').trim();
+  const phone = fromOverlay ? (document.getElementById('authOverlayPhone').value || '').trim() : '';
 
   if (!email || !password) { setAuthStatus('Email and password required.', true); return; }
   if (password.length < 8) { setAuthStatus('Password must be at least 8 characters.', true); return; }
@@ -1717,7 +1860,7 @@ async function registerUser(fromOverlay = false) {
     const res = await fetch(`${apiBase}/api/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, username })
+      body: JSON.stringify({ email, password, username, phone })
     });
 
     const data = await res.json().catch(() => ({}));
@@ -1781,6 +1924,182 @@ function continueAsGuest() {
   updateAuthDisplay();
   setAuthStatus('Guest mode enabled.');
 }
+
+function showPhoneLogin() {
+  document.getElementById('authMainView').style.display = 'none';
+  document.getElementById('authPhoneView').style.display = 'block';
+  document.getElementById('authForgotView').style.display = 'none';
+  document.getElementById('authResetView').style.display = 'none';
+  setAuthStatus('Enter your phone number and password.');
+}
+
+function showForgotPassword() {
+  document.getElementById('authMainView').style.display = 'none';
+  document.getElementById('authPhoneView').style.display = 'none';
+  document.getElementById('authForgotView').style.display = 'block';
+  document.getElementById('authResetView').style.display = 'none';
+  setAuthStatus('Enter your email to receive a reset code.');
+}
+
+function backToMainAuth() {
+  document.getElementById('authMainView').style.display = 'block';
+  document.getElementById('authPhoneView').style.display = 'none';
+  document.getElementById('authForgotView').style.display = 'none';
+  document.getElementById('authResetView').style.display = 'none';
+  setAuthStatus('Not logged in');
+}
+
+async function loginWithPhone() {
+  const phone = (document.getElementById('authPhoneNumber').value || '').trim();
+  const password = (document.getElementById('authPhonePassword').value || '').trim();
+
+  if (!phone || !password) { setAuthStatus('Phone and password required.', true); return; }
+
+  try {
+    setAuthStatus('Logging in...');
+    const res = await fetch(`${apiBase}/api/login-phone`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, password })
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setAuthStatus(data.error || 'Login failed.', true);
+      return;
+    }
+
+    appState.auth = { loggedIn: true, user: data.user };
+    saveAppState();
+    updateAuthDisplay();
+    setAuthStatus(`Logged in via phone as ${data.user.email}`);
+    backToMainAuth();
+  } catch (e) {
+    console.error('loginWithPhone error:', e);
+    setAuthStatus('Login error. Check server.', true);
+  }
+}
+
+async function requestPasswordReset() {
+  const email = (document.getElementById('authForgotEmail').value || '').trim();
+
+  if (!email) { setAuthStatus('Email required.', true); return; }
+
+  try {
+    setAuthStatus('Sending reset code...');
+    const res = await fetch(`${apiBase}/api/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setAuthStatus(data.error || 'Reset request failed.', true);
+      return;
+    }
+
+    // Store email for reset completion
+    window.resetEmail = email;
+    
+    // Show reset code (for development - remove in production)
+    if (data.resetCode) {
+      setAuthStatus(`Reset code: ${data.resetCode} (check console for production)`);
+    } else {
+      setAuthStatus('Reset code sent to your email.');
+    }
+    
+    // Switch to reset view
+    document.getElementById('authForgotView').style.display = 'none';
+    document.getElementById('authResetView').style.display = 'block';
+  } catch (e) {
+    console.error('requestPasswordReset error:', e);
+    setAuthStatus('Reset request error. Check server.', true);
+  }
+}
+
+async function completePasswordReset() {
+  const code = (document.getElementById('authResetCode').value || '').trim();
+  const newPassword = (document.getElementById('authResetPassword').value || '').trim();
+  const email = window.resetEmail;
+
+  if (!email || !code || !newPassword) { 
+    setAuthStatus('All fields required.', true); 
+    return; 
+  }
+  if (newPassword.length < 8) { 
+    setAuthStatus('Password must be at least 8 characters.', true); 
+    return; 
+  }
+
+  try {
+    setAuthStatus('Resetting password...');
+    const res = await fetch(`${apiBase}/api/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, code, newPassword })
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setAuthStatus(data.error || 'Reset failed.', true);
+      return;
+    }
+
+    setAuthStatus('Password reset successful! You can now login.');
+    delete window.resetEmail;
+    
+    // Clear fields and go back to main view after 2 seconds
+    setTimeout(() => {
+      document.getElementById('authResetCode').value = '';
+      document.getElementById('authResetPassword').value = '';
+      document.getElementById('authForgotEmail').value = '';
+      backToMainAuth();
+    }, 2000);
+  } catch (e) {
+    console.error('completePasswordReset error:', e);
+    setAuthStatus('Reset error. Check server.', true);
+  }
+}
+  // Open OAuth flow in popup window
+  const width = 600;
+  const height = 700;
+  const left = (window.screen.width - width) / 2;
+  const top = (window.screen.height - height) / 2;
+  
+  const popup = window.open(
+    `${apiBase}/api/auth/${provider}`,
+    `${provider}Login`,
+    `width=${width},height=${height},left=${left},top=${top}`
+  );
+  
+  if (!popup) {
+    setAuthStatus('Please allow popups for social login.', true);
+    return;
+  }
+  
+  setAuthStatus(`Connecting to ${provider}...`);
+}
+
+// Listen for social login callback
+window.addEventListener('load', () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('social_login') === 'success') {
+    try {
+      const userData = JSON.parse(decodeURIComponent(urlParams.get('user')));
+      appState.auth = { loggedIn: true, user: userData };
+      saveAppState();
+      updateAuthDisplay();
+      setAuthStatus(`Logged in as ${userData.email}`);
+      
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } catch (e) {
+      console.error('Social login callback error:', e);
+      setAuthStatus('Social login error.', true);
+    }
+  }
+});
 
 function updateAuthDisplay() {
   const overlay = document.getElementById('authOverlay');
@@ -1931,6 +2250,27 @@ function refreshNotificationToggles() {
   // Push notifications do not require verification
   document.getElementById('pushNotifToggle').classList.toggle('on', appState.settings.pushNotifications);
 }
+
+// Surface runtime errors on-screen to diagnose unresponsive UI
+let _errorBannerShown = false;
+window.addEventListener('error', (event) => {
+  if (_errorBannerShown) return;
+  _errorBannerShown = true;
+  const banner = document.createElement('div');
+  banner.style.position = 'fixed';
+  banner.style.left = '12px';
+  banner.style.right = '12px';
+  banner.style.bottom = '12px';
+  banner.style.zIndex = '9999';
+  banner.style.background = '#B00020';
+  banner.style.color = 'white';
+  banner.style.padding = '10px 12px';
+  banner.style.borderRadius = '8px';
+  banner.style.fontSize = '12px';
+  banner.style.boxShadow = '0 6px 18px rgba(0,0,0,0.3)';
+  banner.textContent = `Runtime error: ${event.message || 'Unknown error'} (see console for details)`;
+  document.body.appendChild(banner);
+});
 
 function exportData() {
   const dataStr = JSON.stringify(appState, (key, value) => value instanceof Set ? Array.from(value) : value);
