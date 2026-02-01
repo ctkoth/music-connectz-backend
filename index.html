@@ -929,6 +929,7 @@ function loadAppState() {
 
 function switchTab(tabName) {
   try {
+    console.log('switchTab called:', tabName);
     const tabEl = document.getElementById(tabName);
     if (!tabEl) { console.warn('Tab not found:', tabName); return; }
     
@@ -945,14 +946,19 @@ function switchTab(tabName) {
     }
     
     appState.currentTab = tabName;
-    saveAppState();
+    safeStorageSet('musicConnectZState', JSON.stringify(appState));
     
-    if (tabName === 'collaborate') { 
-      updateCollabPersonaOptions(); 
-      renderCollabFeed();
-      setTimeout(() => initMap(), 300);
+    try {
+      if (tabName === 'collaborate') { 
+        updateCollabPersonaOptions(); 
+        renderCollabFeed();
+        setTimeout(() => initMap(), 300);
+      }
+      if (tabName === 'profile') { updateProfileDisplay(); }
+    } catch (e) {
+      console.error('Tab render error:', e);
     }
-    if (tabName === 'profile') { updateProfileDisplay(); }
+    console.log('switchTab completed:', tabName);
   } catch (e) { console.error('switchTab error:', e); }
 }
 
@@ -1253,27 +1259,46 @@ function addSkills() {
 }
 
 function renderPersonasDisplay() {
-  const display = document.getElementById('personasDisplay');
-  if (appState.personas.length === 0) { display.innerHTML = 'No personas yet'; return; }
-  display.innerHTML = '';
-  appState.personas.forEach((persona, idx) => {
-    const card = document.createElement('div');
-    card.className = 'persona-card';
-    card.innerHTML = `<div class="persona-header"><div class="persona-name">${persona.name}</div><button class="btn btn-danger btn-small" onclick="removePersona(${idx})">Remove</button></div><div style="font-size: 11px;"><div style="font-weight: 600; margin-bottom: 6px;">Skills:</div><div id="personaSkills${idx}"></div></div>`;
-    display.appendChild(card);
-    const skillsDiv = document.getElementById(`personaSkills${idx}`);
-    persona.skills.forEach((skill, sIdx) => {
-      const skillItem = document.createElement('div');
-      skillItem.className = 'skill-item';
-      const priceInfo = [];
-      if (skill.pricePerWork) priceInfo.push(`$${skill.pricePerWork}/work`);
-      if (skill.pricePerHour) priceInfo.push(`$${skill.pricePerHour}/hr`);
-      const priceDisplay = priceInfo.length > 0 ? ` • ${priceInfo.join(', ')}` : '';
-      skillItem.innerHTML = `<span class="skill-item-name">${skill.name}</span><span class="skill-item-exp">${skill.startDate}${priceDisplay}</span><div class="skill-item-actions"><button class="btn btn-primary btn-small" onclick="openEditSkillModal(${idx}, ${sIdx})" style="font-size: 10px;">✏️</button><button class="btn btn-danger btn-small" onclick="removePersonaSkill(${idx}, ${sIdx})">✕</button></div>`;
-      skillsDiv.appendChild(skillItem);
+  try {
+    const display = document.getElementById('personasDisplay');
+    if (!display) return;
+    if (appState.personas.length === 0) { display.innerHTML = 'No personas yet'; return; }
+    display.innerHTML = '';
+    appState.personas.forEach((persona, idx) => {
+      try {
+        const card = document.createElement('div');
+        card.className = 'persona-card';
+        card.innerHTML = `<div class="persona-header"><div class="persona-name">${persona.name}</div><button class="btn btn-danger btn-small" onclick="removePersona(${idx})">Remove</button></div><div style="font-size: 11px;"><div style="font-weight: 600; margin-bottom: 6px;">Skills:</div><div id="personaSkills${idx}"></div></div>`;
+        display.appendChild(card);
+        const skillsDiv = document.getElementById(`personaSkills${idx}`);
+        if (persona.skills && Array.isArray(persona.skills)) {
+          persona.skills.forEach((skill, sIdx) => {
+            try {
+              const skillItem = document.createElement('div');
+              skillItem.className = 'skill-item';
+              const priceInfo = [];
+              if (skill.pricePerWork) priceInfo.push(`$${skill.pricePerWork}/work`);
+              if (skill.pricePerHour) priceInfo.push(`$${skill.pricePerHour}/hr`);
+              const priceDisplay = priceInfo.length > 0 ? ` • ${priceInfo.join(', ')}` : '';
+              skillItem.innerHTML = `<span class="skill-item-name">${skill.name}</span><span class="skill-item-exp">${skill.startDate}${priceDisplay}</span><div class="skill-item-actions"><button class="btn btn-primary btn-small" onclick="openEditSkillModal(${idx}, ${sIdx})" style="font-size: 10px;">✏️</button><button class="btn btn-danger btn-small" onclick="removePersonaSkill(${idx}, ${sIdx})">✕</button></div>`;
+              skillsDiv.appendChild(skillItem);
+            } catch (e) {
+              console.error('Error rendering skill:', e);
+            }
+          });
+        }
+      } catch (e) {
+        console.error('Error rendering persona:', e);
+      }
     });
-  });
-  updateProfileDisplay();
+    try {
+      updateProfileDisplay();
+    } catch (e) {
+      console.error('Error in updateProfileDisplay:', e);
+    }
+  } catch (e) {
+    console.error('renderPersonasDisplay error:', e);
+  }
 }
 
 function removePersona(idx) { if (confirm('Remove this persona and all its skills?')) { appState.personas.splice(idx, 1); renderPersonasDisplay(); saveAppState(); } }
@@ -1541,15 +1566,24 @@ function finalizeExample(example) {
 }
 
 function renderExamplesDisplay() {
-  const display = document.getElementById('examplesDisplay');
-  if (appState.examples.length === 0) { display.innerHTML = 'No examples yet'; return; }
-  display.innerHTML = '';
-  appState.examples.forEach((example, idx) => {
-    const card = document.createElement('div');
-    card.className = 'post-card';
-    card.innerHTML = `<div class="post-header"><div class="post-avatar" ${example.userPic ? `style="background-image: url('${example.userPic}'); background-size: cover; background-position: center;"` : ''}>${!example.userPic ? '🎵' : ''}</div><div class="post-info" style="flex: 1;"><div class="post-user">${example.userName}</div><div class="post-meta">${example.timestamp} • ${example.privacy === 'public' ? '🌐 Public' : '🔒 Private'}</div><div class="post-meta">📍 ${example.userLocation}</div></div><button class="btn btn-danger btn-small" onclick="removeExample(${idx})">Delete</button></div><div style="margin-bottom: 8px;"><div style="font-weight: 700; font-size: 12px; margin-bottom: 4px;">🎯 ${example.title}</div><div style="font-size: 11px; color: var(--text-light); margin-bottom: 6px;">${example.desc}</div><div style="font-size: 10px; margin-bottom: 6px;"><span style="background: var(--bg); padding: 2px 6px; border-radius: 4px; margin-right: 4px;">🎵 ${example.genre}</span>${example.skills.map(s => `<span style="background: var(--accent); color: white; padding: 2px 6px; border-radius: 4px; margin-right: 2px; display: inline-block;">${s}</span>`).join('')}</div>${example.image ? `<div style="margin: 8px 0; position: relative; display: inline-block; width: 100%;"><img src="${example.image}" style="max-width: 100%; height: auto; border-radius: 6px;"/><button class="btn btn-success" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 32px; padding: 12px 16px; border-radius: 50%; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; background: rgba(76, 175, 80, 0.9);" onclick="playMedia(${idx})" title="Play">▶️</button></div>` : `<div style="background: var(--bg); padding: 20px; border-radius: 6px; text-align: center; margin: 8px 0;"><button class="btn btn-success" onclick="playMedia(${idx})" style="font-size: 24px;">▶️ Play Media</button></div>`}</div><div class="post-actions"><button class="btn btn-secondary btn-small" onclick="editExample(${idx})">✏️ Edit</button></div>`;
-    display.appendChild(card);
-  });
+  try {
+    const display = document.getElementById('examplesDisplay');
+    if (!display) return;
+    if (appState.examples.length === 0) { display.innerHTML = 'No examples yet'; return; }
+    display.innerHTML = '';
+    appState.examples.forEach((example, idx) => {
+      try {
+        const card = document.createElement('div');
+        card.className = 'post-card';
+        card.innerHTML = `<div class="post-header"><div class="post-avatar" ${example.userPic ? `style="background-image: url('${example.userPic}'); background-size: cover; background-position: center;"` : ''}>${!example.userPic ? '🎵' : ''}</div><div class="post-info" style="flex: 1;"><div class="post-user">${example.userName}</div><div class="post-meta">${example.timestamp} • ${example.privacy === 'public' ? '🌐 Public' : '🔒 Private'}</div><div class="post-meta">📍 ${example.userLocation}</div></div><button class="btn btn-danger btn-small" onclick="removeExample(${idx})">Delete</button></div><div style="margin-bottom: 8px;"><div style="font-weight: 700; font-size: 12px; margin-bottom: 4px;">🎯 ${example.title}</div><div style="font-size: 11px; color: var(--text-light); margin-bottom: 6px;">${example.desc}</div><div style="font-size: 10px; margin-bottom: 6px;"><span style="background: var(--bg); padding: 2px 6px; border-radius: 4px; margin-right: 4px;">🎵 ${example.genre}</span>${example.skills.map(s => `<span style="background: var(--accent); color: white; padding: 2px 6px; border-radius: 4px; margin-right: 2px; display: inline-block;">${s}</span>`).join('')}</div>${example.image ? `<div style="margin: 8px 0; position: relative; display: inline-block; width: 100%;"><img src="${example.image}" style="max-width: 100%; height: auto; border-radius: 6px;"/><button class="btn btn-success" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 32px; padding: 12px 16px; border-radius: 50%; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; background: rgba(76, 175, 80, 0.9);" onclick="playMedia(${idx})" title="Play">▶️</button></div>` : `<div style="background: var(--bg); padding: 20px; border-radius: 6px; text-align: center; margin: 8px 0;"><button class="btn btn-success" onclick="playMedia(${idx})" style="font-size: 24px;">▶️ Play Media</button></div>`}</div><div class="post-actions"><button class="btn btn-secondary btn-small" onclick="editExample(${idx})">✏️ Edit</button></div>`;
+        display.appendChild(card);
+      } catch (e) {
+        console.error('Error rendering example:', e);
+      }
+    });
+  } catch (e) {
+    console.error('renderExamplesDisplay error:', e);
+  }
 }
 
 function editExample(idx) {
@@ -1654,22 +1688,34 @@ function formatBudgetRange(budgetRange) {
 }
 
 function renderCollabFeed() {
-  const feed = document.getElementById('collabFeed');
-  appState.filteredCollabs = [...appState.collabs];
-  const filterPersona = document.getElementById('filterPersona').value;
-  const filterLocation = document.getElementById('filterLocation').value;
-  if (filterPersona) appState.filteredCollabs = appState.filteredCollabs.filter(c => c.personaName === filterPersona);
-  if (filterLocation) appState.filteredCollabs = appState.filteredCollabs.filter(c => c.userLocation.toLowerCase().includes(filterLocation.toLowerCase()));
-  document.getElementById('feedCount').textContent = appState.filteredCollabs.length;
-  if (appState.filteredCollabs.length === 0) { feed.innerHTML = 'No collaboration requests matching your filters'; return; }
-  feed.innerHTML = '';
-  appState.filteredCollabs.forEach((collab, idx) => {
-    const originalIdx = appState.collabs.findIndex(c => c.id === collab.id);
-    const card = document.createElement('div');
-    card.className = 'post-card';
-    card.innerHTML = `<div class="post-header"><div class="post-avatar" ${collab.userPic ? `style="background-image: url('${collab.userPic}'); background-size: cover; background-position: center;"` : ''}>${!collab.userPic ? '🎤' : ''}</div><div class="post-info" style="flex: 1;"><div class="post-user">${collab.personaName}</div><div class="post-meta">by ${collab.userName}</div><div class="post-meta">📍 ${collab.userLocation}</div><div class="post-meta">${collab.timestamp}</div></div></div><div style="margin-bottom: 10px;"><div style="font-size: 11px; margin-bottom: 6px; font-weight: 600;">Work: ${collab.exampleTitle}</div><div style="font-size: 12px;">${collab.description}</div></div><div class="post-actions"><button class="btn btn-secondary btn-small" onclick="editCollab(${originalIdx})">✏️ Edit</button><button class="btn btn-danger btn-small" onclick="removeCollab(${originalIdx})">🗑️ Delete</button></div>`;
-    feed.appendChild(card);
-  });
+  try {
+    const feed = document.getElementById('collabFeed');
+    if (!feed) return;
+    appState.filteredCollabs = [...appState.collabs];
+    const filterPersona = document.getElementById('filterPersona');
+    const filterPersonaVal = filterPersona ? filterPersona.value : '';
+    const filterLocation = document.getElementById('filterLocation');
+    const filterLocationVal = filterLocation ? filterLocation.value : '';
+    if (filterPersonaVal) appState.filteredCollabs = appState.filteredCollabs.filter(c => c.personaName === filterPersonaVal);
+    if (filterLocationVal) appState.filteredCollabs = appState.filteredCollabs.filter(c => c.userLocation.toLowerCase().includes(filterLocationVal.toLowerCase()));
+    const feedCount = document.getElementById('feedCount');
+    if (feedCount) feedCount.textContent = appState.filteredCollabs.length;
+    if (appState.filteredCollabs.length === 0) { feed.innerHTML = 'No collaboration requests matching your filters'; return; }
+    feed.innerHTML = '';
+    appState.filteredCollabs.forEach((collab, idx) => {
+      try {
+        const originalIdx = appState.collabs.findIndex(c => c.id === collab.id);
+        const card = document.createElement('div');
+        card.className = 'post-card';
+        card.innerHTML = `<div class="post-header"><div class="post-avatar" ${collab.userPic ? `style="background-image: url('${collab.userPic}'); background-size: cover; background-position: center;"` : ''}>${!collab.userPic ? '🎤' : ''}</div><div class="post-info" style="flex: 1;"><div class="post-user">${collab.personaName}</div><div class="post-meta">by ${collab.userName}</div><div class="post-meta">📍 ${collab.userLocation}</div><div class="post-meta">${collab.timestamp}</div></div></div><div style="margin-bottom: 10px;"><div style="font-size: 11px; margin-bottom: 6px; font-weight: 600;">Work: ${collab.exampleTitle}</div><div style="font-size: 12px;">${collab.description}</div></div><div class="post-actions"><button class="btn btn-secondary btn-small" onclick="editCollab(${originalIdx})">✏️ Edit</button><button class="btn btn-danger btn-small" onclick="removeCollab(${originalIdx})">🗑️ Delete</button></div>`;
+        feed.appendChild(card);
+      } catch (e) {
+        console.error('Error rendering collab card:', e);
+      }
+    });
+  } catch (e) {
+    console.error('renderCollabFeed error:', e);
+  }
 }
 
 function editCollab(idx) {
