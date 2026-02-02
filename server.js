@@ -72,8 +72,21 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
           email,
           username: profile.displayName || '',
           googleId: profile.id,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          // Membership tier fields
+          membershipTier: 'free',
+          collaborationRequestsUsed: 0,
+          collaborationRequestsLimit: 3,
+          subscriptionId: null,
+          subscriptionStatus: null,
+          subscriptionExpiry: null,
+          inAppPurchases: [],
+          profileBoostExpiry: null,
+          featuredArtistStatus: false,
+          premiumBadge: false,
+          customTheme: null
         };
+        applyPremiumForBypass(user);
         users.push(user);
         await writeUsers(users);
       } else if (!user.googleId) {
@@ -106,8 +119,21 @@ if (process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET) {
           email,
           username: `${profile.name?.givenName || ''} ${profile.name?.familyName || ''}`.trim(),
           facebookId: profile.id,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          // Membership tier fields
+          membershipTier: 'free',
+          collaborationRequestsUsed: 0,
+          collaborationRequestsLimit: 3,
+          subscriptionId: null,
+          subscriptionStatus: null,
+          subscriptionExpiry: null,
+          inAppPurchases: [],
+          profileBoostExpiry: null,
+          featuredArtistStatus: false,
+          premiumBadge: false,
+          customTheme: null
         };
+        applyPremiumForBypass(user);
         users.push(user);
         await writeUsers(users);
       } else if (!user.facebookId) {
@@ -139,8 +165,21 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
           email,
           username: profile.username || profile.displayName || '',
           githubId: profile.id,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          // Membership tier fields
+          membershipTier: 'free',
+          collaborationRequestsUsed: 0,
+          collaborationRequestsLimit: 3,
+          subscriptionId: null,
+          subscriptionStatus: null,
+          subscriptionExpiry: null,
+          inAppPurchases: [],
+          profileBoostExpiry: null,
+          featuredArtistStatus: false,
+          premiumBadge: false,
+          customTheme: null
         };
+        applyPremiumForBypass(user);
         users.push(user);
         await writeUsers(users);
       } else if (!user.githubId) {
@@ -191,6 +230,17 @@ const writeMessages = async (messages) => {
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 
+const premiumBypassEmails = [normalizeEmail('ctkoth@gmail.com')];
+const isBypassEmail = (email) => premiumBypassEmails.includes(normalizeEmail(email));
+const isPremiumUser = (user) => !!user && (user.membershipTier === 'premium' || isBypassEmail(user.email));
+const applyPremiumForBypass = (user) => {
+  if (!user || !isBypassEmail(user.email)) return;
+  user.membershipTier = 'premium';
+  user.subscriptionStatus = 'active';
+  user.collaborationRequestsLimit = 999999;
+  user.featuredArtistStatus = true;
+};
+
 // Socket.io message handling
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
@@ -208,6 +258,15 @@ io.on('connection', (socket) => {
       
       if (!userId || !message || !conversationWith) {
         return callback({ error: 'Missing required fields' });
+      }
+
+      const users = await readUsers();
+      const sender = users.find(u => u.id === userId);
+      if (!sender) {
+        return callback({ error: 'User not found' });
+      }
+      if (!isPremiumUser(sender)) {
+        return callback({ error: 'Premium required for direct messaging' });
       }
 
       const messages = await readMessages();
@@ -372,7 +431,8 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    res.json({ ok: true, user: { id: user.id, email: user.email, username: user.username } });
+    applyPremiumForBypass(user);
+    res.json({ ok: true, user: { id: user.id, email: user.email, username: user.username, membershipTier: isPremiumUser(user) ? 'premium' : (user.membershipTier || 'free'), featuredArtistStatus: !!user.featuredArtistStatus, premiumBadge: !!user.premiumBadge, profileBoostExpiry: user.profileBoostExpiry || null, customTheme: user.customTheme || null } });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -400,7 +460,8 @@ app.post('/api/login-phone', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    res.json({ ok: true, user: { id: user.id, email: user.email, username: user.username, phone: user.phone } });
+    applyPremiumForBypass(user);
+    res.json({ ok: true, user: { id: user.id, email: user.email, username: user.username, phone: user.phone, membershipTier: isPremiumUser(user) ? 'premium' : (user.membershipTier || 'free'), featuredArtistStatus: !!user.featuredArtistStatus, premiumBadge: !!user.premiumBadge, profileBoostExpiry: user.profileBoostExpiry || null, customTheme: user.customTheme || null } });
   } catch (error) {
     console.error('Phone login error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -512,12 +573,25 @@ app.post('/api/register', async (req, res) => {
       phone: phone ? String(phone).trim() : '',
       passwordHash,
       createdAt: new Date().toISOString(),
+      // Membership tier fields
+      membershipTier: 'free', // 'free' or 'premium'
+      collaborationRequestsUsed: 0,
+      collaborationRequestsLimit: 3, // Free tier limit
+      subscriptionId: null,
+      subscriptionStatus: null,
+      subscriptionExpiry: null,
+      inAppPurchases: [], // Array of purchased items
+      profileBoostExpiry: null,
+      featuredArtistStatus: false,
+      premiumBadge: false,
+      customTheme: null
     };
 
+    applyPremiumForBypass(newUser);
     users.push(newUser);
     await writeUsers(users);
 
-    res.status(201).json({ ok: true, user: { id: newUser.id, email: newUser.email, username: newUser.username, phone: newUser.phone } });
+    res.status(201).json({ ok: true, user: { id: newUser.id, email: newUser.email, username: newUser.username, phone: newUser.phone, membershipTier: isPremiumUser(newUser) ? 'premium' : (newUser.membershipTier || 'free'), featuredArtistStatus: !!newUser.featuredArtistStatus, premiumBadge: !!newUser.premiumBadge, profileBoostExpiry: newUser.profileBoostExpiry || null, customTheme: newUser.customTheme || null } });
   } catch (error) {
     console.error('Register error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -605,6 +679,316 @@ app.post('/api/create-checkout', async (req, res) => {
   }
 });
 
+// Create subscription checkout for Premium tier
+app.post('/api/create-subscription-checkout', async (req, res) => {
+  if (!stripe) {
+    return res.status(503).json({ error: 'Stripe is not configured' });
+  }
+
+  try {
+    const { userId, priceId, billingPeriod } = req.body || {};
+
+    if (!userId || !priceId) {
+      return res.status(400).json({ error: 'User ID and price ID required' });
+    }
+
+    const users = await readUsers();
+    const user = users.find(u => u.id === userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Create or retrieve Stripe customer
+    let customerId = user.stripeCustomerId;
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: user.email,
+        metadata: { userId: user.id }
+      });
+      customerId = customer.id;
+      user.stripeCustomerId = customerId;
+      await writeUsers(users);
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      customer: customerId,
+      line_items: [{ price: priceId, quantity: 1 }],
+      mode: 'subscription',
+      success_url: `${domain}/?subscription=success`,
+      cancel_url: `${domain}/?subscription=cancel`,
+      metadata: {
+        userId: user.id,
+        billingPeriod: billingPeriod || 'monthly'
+      }
+    });
+
+    res.json({ url: session.url, sessionId: session.id });
+  } catch (error) {
+    console.error('Subscription error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// Create one-time purchase checkout (in-app purchases)
+app.post('/api/create-purchase-checkout', async (req, res) => {
+  if (!stripe) {
+    return res.status(503).json({ error: 'Stripe is not configured' });
+  }
+
+  try {
+    const { userId, purchaseType, amount, description } = req.body || {};
+
+    if (!userId || !purchaseType || !amount) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const users = await readUsers();
+    const user = users.find(u => u.id === userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      customer_email: user.email,
+      line_items: [{
+        price_data: {
+          currency: 'usd',
+          product_data: { name: description || purchaseType },
+          unit_amount: Math.round(Number(amount) * 100),
+        },
+        quantity: 1,
+      }],
+      mode: 'payment',
+      success_url: `${domain}/?purchase=success&type=${purchaseType}`,
+      cancel_url: `${domain}/?purchase=cancel`,
+      metadata: {
+        userId: user.id,
+        purchaseType: purchaseType
+      }
+    });
+
+    res.json({ url: session.url, sessionId: session.id });
+  } catch (error) {
+    console.error('Purchase error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// Stripe webhook handler
+app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  if (!stripe) {
+    return res.status(503).send('Stripe not configured');
+  }
+
+  const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  let event;
+
+  try {
+    if (webhookSecret) {
+      event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+    } else {
+      event = JSON.parse(req.body.toString());
+    }
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  try {
+    const users = await readUsers();
+
+    switch (event.type) {
+      case 'checkout.session.completed':
+        const session = event.data.object;
+        const userId = session.metadata?.userId;
+        
+        if (!userId) break;
+
+        const user = users.find(u => u.id === userId);
+        if (!user) break;
+
+        // Handle subscription
+        if (session.mode === 'subscription') {
+          user.membershipTier = 'premium';
+          user.subscriptionId = session.subscription;
+          user.subscriptionStatus = 'active';
+          user.collaborationRequestsLimit = 999999; // Unlimited
+          user.featuredArtistStatus = true;
+        }
+        
+        // Handle one-time purchase
+        if (session.mode === 'payment' && session.metadata?.purchaseType) {
+          const purchaseType = session.metadata.purchaseType;
+          const purchase = {
+            id: crypto.randomUUID(),
+            type: purchaseType,
+            purchaseDate: new Date().toISOString(),
+            amount: session.amount_total / 100
+          };
+          
+          if (!user.inAppPurchases) user.inAppPurchases = [];
+          user.inAppPurchases.push(purchase);
+
+          // Apply purchase benefits
+          if (purchaseType === 'profile-boost') {
+            user.profileBoostExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+          } else if (purchaseType === 'collab-unlock') {
+            const currentLimit = Number.isFinite(user.collaborationRequestsLimit) ? user.collaborationRequestsLimit : 3;
+            user.collaborationRequestsLimit = currentLimit + 1;
+          } else if (purchaseType === 'premium-badge') {
+            user.premiumBadge = true;
+          } else if (purchaseType === 'custom-theme') {
+            user.customTheme = 'premium';
+          }
+        }
+
+        await writeUsers(users);
+        break;
+
+      case 'customer.subscription.updated':
+      case 'customer.subscription.deleted':
+        const subscription = event.data.object;
+        const subUser = users.find(u => u.subscriptionId === subscription.id);
+        
+        if (subUser) {
+          if (subscription.status === 'active') {
+            subUser.membershipTier = 'premium';
+            subUser.subscriptionStatus = 'active';
+            subUser.collaborationRequestsLimit = 999999;
+            subUser.featuredArtistStatus = true;
+          } else {
+            subUser.membershipTier = 'free';
+            subUser.subscriptionStatus = subscription.status;
+            subUser.collaborationRequestsLimit = 3;
+            subUser.featuredArtistStatus = false;
+          }
+          await writeUsers(users);
+        }
+        break;
+    }
+
+    res.json({ received: true });
+  } catch (error) {
+    console.error('Webhook handler error:', error);
+    res.status(500).json({ error: 'Webhook handler failed' });
+  }
+});
+
+// Get user membership details
+app.get('/api/membership/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const users = await readUsers();
+    const user = users.find(u => u.id === userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    applyPremiumForBypass(user);
+    const membershipData = {
+      tier: isPremiumUser(user) ? 'premium' : (user.membershipTier || 'free'),
+      collaborationRequestsUsed: user.collaborationRequestsUsed || 0,
+      collaborationRequestsLimit: isPremiumUser(user) ? 999999 : (user.collaborationRequestsLimit || 3),
+      subscriptionStatus: isPremiumUser(user) ? 'active' : (user.subscriptionStatus || null),
+      subscriptionExpiry: user.subscriptionExpiry || null,
+      inAppPurchases: user.inAppPurchases || [],
+      profileBoostExpiry: user.profileBoostExpiry || null,
+      featuredArtistStatus: isPremiumUser(user) ? true : (user.featuredArtistStatus || false),
+      premiumBadge: user.premiumBadge || false,
+      customTheme: user.customTheme || null
+    };
+
+    res.json(membershipData);
+  } catch (error) {
+    console.error('Get membership error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Cancel subscription
+app.post('/api/cancel-subscription', async (req, res) => {
+  if (!stripe) {
+    return res.status(503).json({ error: 'Stripe is not configured' });
+  }
+
+  try {
+    const { userId } = req.body || {};
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID required' });
+    }
+
+    const users = await readUsers();
+    const user = users.find(u => u.id === userId);
+    
+    if (!user || !user.subscriptionId) {
+      return res.status(404).json({ error: 'No active subscription found' });
+    }
+
+    await stripe.subscriptions.cancel(user.subscriptionId);
+
+    user.membershipTier = 'free';
+    user.subscriptionStatus = 'canceled';
+    user.collaborationRequestsLimit = 3;
+    user.featuredArtistStatus = false;
+    
+    await writeUsers(users);
+
+    res.json({ ok: true, message: 'Subscription canceled' });
+  } catch (error) {
+    console.error('Cancel subscription error:', error);
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  }
+});
+
+// Increment collaboration request count
+app.post('/api/use-collaboration-request', async (req, res) => {
+  try {
+    const { userId } = req.body || {};
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID required' });
+    }
+
+    const users = await readUsers();
+    const user = users.find(u => u.id === userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check if user has exceeded limit
+    const usedRequests = user.collaborationRequestsUsed || 0;
+    const limit = isPremiumUser(user) ? 999999 : (user.collaborationRequestsLimit || 3);
+
+    if (usedRequests >= limit && !isPremiumUser(user)) {
+      return res.status(403).json({ 
+        error: 'Collaboration request limit reached',
+        upgrade: true,
+        message: 'Upgrade to Premium for unlimited collaboration requests'
+      });
+    }
+
+    user.collaborationRequestsUsed = usedRequests + 1;
+    await writeUsers(users);
+
+    res.json({ 
+      ok: true, 
+      used: user.collaborationRequestsUsed,
+      limit: limit,
+      remaining: limit - user.collaborationRequestsUsed
+    });
+  } catch (error) {
+    console.error('Use collaboration request error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Basic success/cancel placeholders
 app.get('/success', (req, res) => {
   res.send('<h2>Payment successful 🎉</h2>');
@@ -644,10 +1028,19 @@ app.get('/api/auth/google/callback', (req, res, next) => {
   }
 );
 
-app.get('/api/auth/facebook', passport.authenticate('facebook', { scope: ['email'] }));
+app.get('/api/auth/facebook', (req, res, next) => {
+  if (!process.env.FACEBOOK_APP_ID || !process.env.FACEBOOK_APP_SECRET) {
+    return res.status(501).json({ error: 'Facebook login is not configured. Set FACEBOOK_APP_ID and FACEBOOK_APP_SECRET.' });
+  }
+  return passport.authenticate('facebook', { scope: ['email'] })(req, res, next);
+});
 
-app.get('/api/auth/facebook/callback',
-  passport.authenticate('facebook', { failureRedirect: '/login' }),
+app.get('/api/auth/facebook/callback', (req, res, next) => {
+  if (!process.env.FACEBOOK_APP_ID || !process.env.FACEBOOK_APP_SECRET) {
+    return res.status(501).send('Facebook login is not configured.');
+  }
+  return passport.authenticate('facebook', { failureRedirect: '/login' })(req, res, next);
+},
   (req, res) => {
     const userData = {
       id: req.user.id,
@@ -658,10 +1051,19 @@ app.get('/api/auth/facebook/callback',
   }
 );
 
-app.get('/api/auth/github', passport.authenticate('github', { scope: ['user:email'] }));
+app.get('/api/auth/github', (req, res, next) => {
+  if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET) {
+    return res.status(501).json({ error: 'GitHub login is not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.' });
+  }
+  return passport.authenticate('github', { scope: ['user:email'] })(req, res, next);
+});
 
-app.get('/api/auth/github/callback',
-  passport.authenticate('github', { failureRedirect: '/login' }),
+app.get('/api/auth/github/callback', (req, res, next) => {
+  if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET) {
+    return res.status(501).send('GitHub login is not configured.');
+  }
+  return passport.authenticate('github', { failureRedirect: '/login' })(req, res, next);
+},
   (req, res) => {
     const userData = {
       id: req.user.id,

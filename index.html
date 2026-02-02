@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Music ConnectZ v6.5 bi K-Oth</title>
+  <title>Music ConnectZ v7 bi K-Oth</title>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
   <script src="https://js.stripe.com/v3/"></script>
   <script src="stripe-config.js"></script>
@@ -91,16 +91,21 @@
     .post-content { font-size: 12px; margin-bottom: 10px; line-height: 1.4; }
     .post-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
     .skill-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .skill-btn { padding: 8px 10px; border: 1px solid var(--border); background: var(--bg); border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 11px; text-align: center; position: relative; }
+    .skill-btn { padding: 8px 10px; border: 1px solid var(--border); background: var(--bg); border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 11px; text-align: center; position: relative; display: inline-flex; align-items: center; gap: 6px; justify-content: center; }
     .skill-btn:hover { border-color: var(--primary); }
     .skill-btn.sel { background: linear-gradient(135deg, #2196F3 0%, #1565C0 100%) !important; color: white !important; border: 3px solid #1565C0 !important; box-shadow: 0 0 12px rgba(33, 150, 243, 0.6) !important; transform: scale(1.08) !important; font-weight: 700 !important; }
     .skill-btn.any-skill { background: var(--accent); color: white; border-color: var(--accent); }
     .skill-btn.any-skill::after { content: '🔄'; position: absolute; top: 2px; right: 4px; font-size: 9px; }
     .skill-btn.any-skill.sel { background: linear-gradient(135deg, #FF9800 0%, #E65100 100%) !important; border: 3px solid #E65100 !important; box-shadow: 0 0 12px rgba(255, 152, 0, 0.6) !important; transform: scale(1.08) !important; }
     .skill-item { background: var(--bg); padding: 10px; border-radius: 6px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text); }
-    .skill-item-name { font-weight: 600; flex: 1; color: var(--text); }
-    .skill-item-exp { color: var(--text-light); font-size: 10px; margin-right: 8px; }
-    .skill-item-actions { display: flex; gap: 4px; }
+    .skill-icon { width: 18px; height: 18px; border-radius: 50%; flex: 0 0 auto; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+    .skill-tag { display: inline-flex; align-items: center; gap: 6px; }
+    .skill-image-preview { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; border: 1px solid var(--border); background: var(--bg); }
+    .premium-lock { background: rgba(255, 193, 7, 0.12); border: 1px solid rgba(255, 193, 7, 0.5); color: #7a5b00; padding: 10px 12px; border-radius: 8px; font-size: 11px; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .premium-lock strong { color: #8a6d00; }
+    .premium-badge { display: inline-flex; align-items: center; gap: 4px; background: #FFD700; color: #2b2b2b; padding: 2px 6px; border-radius: 999px; font-size: 10px; font-weight: 800; }
+    .premium-only[disabled] { opacity: 0.6; cursor: not-allowed !important; }
+    .custom-theme-only[disabled] { opacity: 0.6; cursor: not-allowed !important; }
     .toggle-btn { display: inline-block; padding: 6px 12px; border-radius: 6px; border: 2px solid var(--border); background: var(--bg); cursor: pointer; font-weight: 600; font-size: 11px; margin: 4px; }
     .toggle-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
     .filter-panel { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
@@ -375,7 +380,7 @@
 <div class="container">
   <div class="header">
     <div class="nav-wrapper"><button class="nav-btn" onclick="prevTab()">←</button><button class="nav-btn" onclick="nextTab()">→</button><button class="theme-toggle" onclick="toggleTheme()">🌙</button></div>
-    <div class="header-center"><div class="header-title">🎵 Music ConnectZ v6.5 bi K-Oth</div><div class="header-subtitle">Location-Based Collaboration • 2/1/2026</div></div>
+    <div class="header-center"><div class="header-title">🎵 Music ConnectZ v7 bi K-Oth</div><div class="header-subtitle">Location-Based Collaboration • 2/1/2026</div></div>
     <div class="header-right"><button class="btn btn-small" id="headerLoginBtn" onclick="openLoginOverlay()">🔓 Login</button><div class="balance" onclick="switchTab('money')">💰 $<span id="balanceAmount">0.00</span></div><div class="profile-pic" onclick="switchTab('profile')" id="headerPic">👤</div></div>
   </div>
 
@@ -403,6 +408,7 @@
     <button class="tab-btn" onclick="switchTab('examples')">🎵 Work</button>
     <button class="tab-btn" onclick="switchTab('collaborate')">🤝 Collab</button>
     <button class="tab-btn" onclick="switchTab('messages')">💬 Messages</button>
+    <button class="tab-btn" onclick="switchTab('membership')">⭐ Membership</button>
     <button class="tab-btn" onclick="switchTab('profile')">👤 Profile</button>
     <button class="tab-btn" onclick="switchTab('money')">💰 Money</button>
     <button class="tab-btn" onclick="switchTab('settings')">⚙️ Settings</button>
@@ -449,19 +455,23 @@
     <div id="examples" class="tab">
       <div class="card">
         <div class="card-header">🎵 Upload Work Example</div>
+        <div id="portfolioPremiumGate" class="premium-lock" style="display: none;">
+          <div><strong>Premium Feature:</strong> Portfolio showcase with audio uploads is Premium-only.</div>
+          <button class="btn btn-small" onclick="switchTab('membership')">Upgrade</button>
+        </div>
         <input type="hidden" id="editingExampleIdx" value="" />
         <div class="form-group"><label>🎯 Title *</label><input type="text" id="exampleTitle" placeholder="e.g., My Latest Beat" /></div>
         <div class="form-group"><label>📝 Description *</label><textarea id="exampleDesc" placeholder="Tell us about this work..." style="height: 50px;"></textarea></div>
         <div class="form-group"><label>🎵 Genre/Style *</label><button class="btn" onclick="openGenreModal()" style="width: 100%; margin-bottom: 8px;">🎵 Select Genre</button><div id="exampleGenreDisplay" style="border: 1px solid var(--border); padding: 10px; border-radius: 6px; background: var(--bg); font-size: 11px;">Click "Select Genre"</div></div>
-        <div class="form-group"><label>🎧 Audio/Video File *</label><input type="file" id="exampleMedia" accept="audio/*,video/*" /><div id="currentMediaDisplay" style="margin-top: 6px; font-size: 10px; color: var(--text-light);"></div></div>
-        <div class="form-group"><label>🖼️ Thumbnail Image</label><input type="file" id="exampleImage" accept="image/*" /></div>
+        <div class="form-group"><label>🎧 Audio/Video File *</label><input type="file" id="exampleMedia" data-premium-only="true" class="premium-only" accept="audio/*,video/*" /><div id="currentMediaDisplay" style="margin-top: 6px; font-size: 10px; color: var(--text-light);"></div></div>
+        <div class="form-group"><label>🖼️ Thumbnail Image</label><input type="file" id="exampleImage" data-premium-only="true" class="premium-only" accept="image/*" /></div>
         <div class="form-group">
           <label>🎯 Skills Used * (Required)</label>
           <div id="skillsUsedDisplay" style="border: 1px solid var(--border); padding: 10px; border-radius: 6px; background: var(--bg); font-size: 11px; max-height: 150px; overflow-y: auto; margin-bottom: 8px;" onclick="openSkillsUsedModal()">Click to select skills used</div>
           <button class="btn" onclick="openSkillsUsedModal()" style="width: 100%;">📋 Select Skills Used</button>
         </div>
         <div class="form-group"><label>🔒 Privacy</label><div style="display: flex; gap: 8px; margin-top: 8px;"><button class="toggle-btn active" onclick="setExamplePrivacy('private')">🔒 Private</button><button class="toggle-btn" onclick="setExamplePrivacy('public')">🌐 Public</button></div></div>
-        <button class="btn btn-success" onclick="uploadExample()" style="width: 100%;" id="exampleSubmitBtn">📤 Upload</button>
+        <button class="btn btn-success premium-only" data-premium-only="true" onclick="uploadExample()" style="width: 100%;" id="exampleSubmitBtn">📤 Upload</button>
         <button class="btn btn-secondary" onclick="cancelEditExample()" style="width: 100%; margin-top: 8px; display: none;" id="exampleCancelBtn">❌ Cancel Edit</button>
       </div>
       <div class="card">
@@ -521,6 +531,42 @@
             <label style="font-weight: 600; font-size: 11px; min-width: 80px;">📍 Location:</label>
             <input type="text" id="filterLocation" placeholder="City/State" oninput="applyFilters()" style="flex: 1; padding: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font-size: 11px;" />
           </div>
+          <div id="premiumFilterNotice" class="premium-lock" style="display: none; margin-top: 8px;">
+            <div><strong>Premium Filters:</strong> Unlock advanced filters (genre, skill level, distance).</div>
+            <button class="btn btn-small" onclick="switchTab('membership')">Upgrade</button>
+          </div>
+          <div class="filter-row">
+            <label style="font-weight: 600; font-size: 11px; min-width: 80px;">🎵 Genre:</label>
+            <select id="filterGenre" data-premium-only="true" class="premium-only" onchange="applyFilters()" style="flex: 1; padding: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font-size: 11px;">
+              <option value="">All Genres</option>
+              <option value="Hip Hop">Hip Hop</option>
+              <option value="R&B">R&B</option>
+              <option value="Pop">Pop</option>
+              <option value="Rock">Rock</option>
+              <option value="EDM">EDM</option>
+              <option value="Country">Country</option>
+              <option value="Jazz">Jazz</option>
+              <option value="Classical">Classical</option>
+              <option value="Gospel">Gospel</option>
+              <option value="Latin">Latin</option>
+              <option value="Afrobeats">Afrobeats</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="filter-row">
+            <label style="font-weight: 600; font-size: 11px; min-width: 80px;">⭐ Skill:</label>
+            <select id="filterSkillLevel" data-premium-only="true" class="premium-only" onchange="applyFilters()" style="flex: 1; padding: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font-size: 11px;">
+              <option value="">Any Level</option>
+              <option value="beginner">Beginner (0+ yrs)</option>
+              <option value="intermediate">Intermediate (1+ yrs)</option>
+              <option value="advanced">Advanced (3+ yrs)</option>
+              <option value="pro">Pro (5+ yrs)</option>
+            </select>
+          </div>
+          <div class="filter-row">
+            <label style="font-weight: 600; font-size: 11px; min-width: 80px;">📏 Distance:</label>
+            <input type="number" id="filterDistance" data-premium-only="true" class="premium-only" placeholder="Max miles" oninput="applyFilters()" style="flex: 1; padding: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font-size: 11px;" />
+          </div>
         </div>
       </div>
       
@@ -547,6 +593,10 @@
     <div id="messages" class="tab">
       <div class="card">
         <div class="card-header">💬 Messages</div>
+        <div id="messagesPremiumGate" class="premium-lock" style="display: none;">
+          <div><strong>Premium Feature:</strong> Direct messaging is available on Premium.</div>
+          <button class="btn btn-small" onclick="switchTab('membership')">Upgrade</button>
+        </div>
         <div style="display: flex; gap: 12px; height: 400px; margin-bottom: 12px;">
           <div style="flex: 0 0 150px; border: 1px solid var(--border); border-radius: 8px; overflow-y: auto; background: var(--surface);">
             <div id="conversationList" style="padding: 8px;"></div>
@@ -555,10 +605,10 @@
             <div id="messageDisplay" style="flex: 1; overflow-y: auto; padding: 12px; background: var(--bg); font-size: 12px;"></div>
             <div style="padding: 8px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px;">
               <div style="display: flex; gap: 6px; flex-wrap: nowrap;">
-                <input type="text" id="messageInput" placeholder="Type a message..." style="flex: 1; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px;" />
-                <input type="file" id="messageFile" style="display: none;" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt" />
-                <button onclick="document.getElementById('messageFile').click()" style="padding: 6px 10px; background: var(--accent); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 11px; white-space: nowrap;">📎 Attach</button>
-                <button onclick="sendMessage()" style="padding: 6px 12px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 11px; white-space: nowrap;">Send</button>
+                <input type="text" id="messageInput" data-premium-only="true" class="premium-only" placeholder="Type a message..." style="flex: 1; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px;" />
+                <input type="file" id="messageFile" data-premium-only="true" class="premium-only" style="display: none;" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt" />
+                <button data-premium-only="true" class="premium-only" onclick="document.getElementById('messageFile').click()" style="padding: 6px 10px; background: var(--accent); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 11px; white-space: nowrap;">📎 Attach</button>
+                <button data-premium-only="true" class="premium-only" onclick="sendMessage()" style="padding: 6px 12px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 11px; white-space: nowrap;">Send</button>
               </div>
               <div id="filePreview" style="display: none; padding: 4px 8px; background: var(--border); border-radius: 4px; font-size: 10px; display: flex; justify-content: space-between; align-items: center;"></div>
             </div>
@@ -583,6 +633,152 @@
         <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 11px;"><div style="color: var(--text-light); margin-bottom: 4px; font-weight: 600;">📝 Bio:</div><div id="pubBio">No bio</div></div>
         <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 11px;"><div style="color: var(--text-light); margin-bottom: 4px; font-weight: 600;">📧 Email:</div><div id="pubEmail" style="display: flex; gap: 6px; align-items: center;"><span id="pubEmailText">No email</span><button class="btn btn-small btn-secondary" onclick="copyEmail()" id="copyEmailBtn">📋 Copy</button></div></div>
         <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 11px;"><div style="color: var(--text-light); margin-bottom: 4px; font-weight: 600;">🎯 Skills (with experience):</div><div id="pubSkills">No skills</div></div>
+      </div>
+
+      <!-- Membership Upgrade Card -->
+      <div class="card" id="membershipCard">
+        <div class="card-header">⭐ Upgrade Your Membership</div>
+        <div id="membershipDisplay"></div>
+      </div>
+    </div>
+
+    <!-- Membership Tab -->
+    <div id="membership" class="tab">
+      <!-- Current Membership Status -->
+      <div class="card">
+        <div class="card-header">⭐ Your Membership Status</div>
+        <div id="currentMembershipStatus" style="background: var(--bg); padding: 14px; border-radius: 8px; margin-bottom: 12px;">
+          <div style="font-size: 16px; font-weight: 700; margin-bottom: 8px;" id="tierName">FREE TIER</div>
+          <div style="font-size: 12px; color: var(--text-light); margin-bottom: 8px;">
+            <div style="margin-bottom: 4px;">📊 Collaboration Requests: <span id="collabUsed">0</span>/<span id="collabLimit">3</span> used this month</div>
+            <div id="subscriptionInfo"></div>
+          </div>
+          <div id="activePurchases"></div>
+        </div>
+      </div>
+
+      <!-- Analytics Dashboard (Premium) -->
+      <div class="card">
+        <div class="card-header">📈 Analytics Dashboard (Premium)</div>
+        <div id="analyticsPremiumGate" class="premium-lock" style="display: none;">
+          <div><strong>Premium Feature:</strong> View profile analytics and engagement.</div>
+          <button class="btn btn-small" onclick="switchTab('membership')">Upgrade</button>
+        </div>
+        <div id="analyticsDashboard" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div style="background: var(--bg); padding: 12px; border-radius: 8px; text-align: center;">
+            <div style="font-size: 11px; color: var(--text-light);">Profile Views</div>
+            <div style="font-size: 18px; font-weight: 800;" id="analyticsViews">0</div>
+          </div>
+          <div style="background: var(--bg); padding: 12px; border-radius: 8px; text-align: center;">
+            <div style="font-size: 11px; color: var(--text-light);">Engagement</div>
+            <div style="font-size: 18px; font-weight: 800;" id="analyticsEngagement">0</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FREE Tier -->
+      <div class="card" style="border: 2px solid var(--border);">
+        <div class="card-header" style="background: linear-gradient(135deg, #9E9E9E 0%, #616161 100%); color: white; margin: -16px -16px 16px; padding: 12px 16px; border-radius: 8px 8px 0 0;">
+          🆓 FREE TIER - Build Your Base
+        </div>
+        <div style="margin-bottom: 12px;">
+          <div style="font-size: 12px; margin-bottom: 8px; padding-left: 18px; position: relative;">
+            <span style="position: absolute; left: 0;">✓</span> Basic artist profiles
+          </div>
+          <div style="font-size: 12px; margin-bottom: 8px; padding-left: 18px; position: relative;">
+            <span style="position: absolute; left: 0;">✓</span> Limited collaboration requests (3/month)
+          </div>
+          <div style="font-size: 12px; margin-bottom: 8px; padding-left: 18px; position: relative;">
+            <span style="position: absolute; left: 0;">✓</span> Standard search features
+          </div>
+          <div style="font-size: 12px; margin-bottom: 8px; padding-left: 18px; position: relative;">
+            <span style="position: absolute; left: 0;">✓</span> View local musicians (GPS-based)
+          </div>
+        </div>
+        <button class="btn btn-secondary" style="width: 100%;" disabled>Current Plan</button>
+      </div>
+
+      <!-- PREMIUM Tier -->
+      <div class="card" style="border: 3px solid #FFD700; background: linear-gradient(135deg, rgba(255,215,0,0.05) 0%, rgba(255,193,7,0.05) 100%);">
+        <div class="card-header" style="background: linear-gradient(135deg, #FFD700 0%, #FFA000 100%); color: #333; margin: -16px -16px 16px; padding: 12px 16px; border-radius: 8px 8px 0 0; font-weight: 800;">
+          ⭐ PREMIUM TIER - Unlimited Access
+        </div>
+        <div style="margin-bottom: 12px;">
+          <div style="font-size: 12px; font-weight: 700; margin-bottom: 8px; padding-left: 18px; position: relative; color: var(--primary);">
+            <span style="position: absolute; left: 0;">✓</span> Unlimited collaboration requests
+          </div>
+          <div style="font-size: 12px; font-weight: 700; margin-bottom: 8px; padding-left: 18px; position: relative; color: var(--primary);">
+            <span style="position: absolute; left: 0;">✓</span> Advanced search filters (genre, skill, distance)
+          </div>
+          <div style="font-size: 12px; font-weight: 700; margin-bottom: 8px; padding-left: 18px; position: relative; color: var(--primary);">
+            <span style="position: absolute; left: 0;">✓</span> Direct messaging
+          </div>
+          <div style="font-size: 12px; font-weight: 700; margin-bottom: 8px; padding-left: 18px; position: relative; color: var(--primary);">
+            <span style="position: absolute; left: 0;">✓</span> Portfolio showcase with audio uploads
+          </div>
+          <div style="font-size: 12px; font-weight: 700; margin-bottom: 8px; padding-left: 18px; position: relative; color: var(--primary);">
+            <span style="position: absolute; left: 0;">✓</span> "Featured Artist" status in searches
+          </div>
+          <div style="font-size: 12px; font-weight: 700; margin-bottom: 12px; padding-left: 18px; position: relative; color: var(--primary);">
+            <span style="position: absolute; left: 0;">✓</span> Analytics dashboard (profile views, engagement)
+          </div>
+        </div>
+        <div style="text-align: center; margin-bottom: 12px;">
+          <div style="font-size: 20px; font-weight: 800; color: var(--primary); margin-bottom: 4px;">$4.99/month</div>
+          <div style="font-size: 12px; color: var(--text-light);">or $39.99/year (save 33%)</div>
+        </div>
+        <div class="grid-2" style="gap: 8px;">
+          <button class="btn btn-success" onclick="subscribePremium('monthly')" style="width: 100%;">Subscribe Monthly</button>
+          <button class="btn btn-success" onclick="subscribePremium('yearly')" style="width: 100%;">Subscribe Yearly</button>
+        </div>
+        <div id="premiumCancel" style="text-align: center; margin-top: 12px; display: none;">
+          <button class="btn btn-danger btn-small" onclick="cancelSubscription()">Cancel Subscription</button>
+        </div>
+      </div>
+
+      <!-- In-App Purchases -->
+      <div class="card">
+        <div class="card-header">🛒 In-App Purchases (One-Time)</div>
+        
+        <!-- Profile Boost -->
+        <div class="card" style="margin-bottom: 12px; background: var(--bg);">
+          <div style="font-weight: 700; font-size: 13px; margin-bottom: 6px;">🚀 Boost Profile Visibility</div>
+          <div style="font-size: 11px; color: var(--text-light); margin-bottom: 8px;">Get featured at the top of search results for 7 days</div>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 16px; font-weight: 700; color: var(--primary);">$2.99</span>
+            <button class="btn btn-small" onclick="purchaseItem('profile-boost', 2.99, 'Boost Profile Visibility - 7 Days')">Buy Now</button>
+          </div>
+        </div>
+
+        <!-- Unlock Collaboration -->
+        <div class="card" style="margin-bottom: 12px; background: var(--bg);">
+          <div style="font-weight: 700; font-size: 13px; margin-bottom: 6px;">🔓 Unlock Collaboration Slot</div>
+          <div style="font-size: 11px; color: var(--text-light); margin-bottom: 8px;">Add one more collaboration request this month</div>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 16px; font-weight: 700; color: var(--primary);">$0.99</span>
+            <button class="btn btn-small" onclick="purchaseItem('collab-unlock', 0.99, 'Unlock Collaboration Slot')">Buy Now</button>
+          </div>
+        </div>
+
+        <!-- Premium Badge -->
+        <div class="card" style="margin-bottom: 12px; background: var(--bg);">
+          <div style="font-weight: 700; font-size: 13px; margin-bottom: 6px;">✅ Premium Badge/Verification</div>
+          <div style="font-size: 11px; color: var(--text-light); margin-bottom: 8px;">Get a verified badge on your profile (permanent)</div>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 16px; font-weight: 700; color: var(--primary);">$4.99</span>
+            <button class="btn btn-small" onclick="purchaseItem('premium-badge', 4.99, 'Premium Badge Verification')">Buy Now</button>
+          </div>
+        </div>
+
+        <!-- Custom Theme -->
+        <div class="card" style="margin-bottom: 12px; background: var(--bg);">
+          <div style="font-weight: 700; font-size: 13px; margin-bottom: 6px;">🎨 Custom Branding/Themes</div>
+          <div style="font-size: 11px; color: var(--text-light); margin-bottom: 8px;">Unlock premium themes and profile customization</div>
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 16px; font-weight: 700; color: var(--primary);">$1.99</span>
+            <button class="btn btn-small" onclick="purchaseItem('custom-theme', 1.99, 'Custom Branding & Themes')">Buy Now</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -701,16 +897,20 @@
 
       <div class="card">
         <div class="card-header">🎨 Theme Colors</div>
+        <div id="customThemeGate" class="premium-lock" style="display: none;">
+          <div><strong>Custom Theme:</strong> Unlock premium themes with the Custom Branding/Themes purchase.</div>
+          <button class="btn btn-small" onclick="switchTab('membership')">Unlock</button>
+        </div>
         <div class="theme-selector">
           <button class="theme-color-btn" style="background: #2196F3;" onclick="applyTheme('blue', '#2196F3', '#1565C0')" title="Blue">💙 Blue</button>
           <button class="theme-color-btn" style="background: #FF6B35;" onclick="applyTheme('orange', '#FF6B35', '#E55100')" title="Orange">🧡 Orange</button>
           <button class="theme-color-btn" style="background: #764BA2;" onclick="applyTheme('purple', '#764BA2', '#5E35B1')" title="Purple">💜 Purple</button>
           <button class="theme-color-btn" style="background: #F44336;" onclick="applyTheme('red', '#F44336', '#D32F2F')" title="Red">❤️ Red</button>
           <button class="theme-color-btn" style="background: #00BCD4;" onclick="applyTheme('cyan', '#00BCD4', '#0097A7')" title="Cyan">💎 Cyan</button>
-          <button class="theme-color-btn" style="background: #E91E63;" onclick="applyTheme('pink', '#E91E63', '#C2185B')" title="Pink">💖 Pink</button>
+          <button class="theme-color-btn custom-theme-only" data-custom-theme-only="true" style="background: #E91E63;" onclick="applyTheme('pink', '#E91E63', '#C2185B')" title="Pink">💖 Pink</button>
           <button class="theme-color-btn" style="background: #4CAF50;" onclick="applyTheme('green', '#4CAF50', '#2E7D32')" title="Green">💚 Green</button>
-          <button class="theme-color-btn" style="background: #FF9800;" onclick="applyTheme('amber', '#FF9800', '#F57C00')" title="Amber">🧨 Amber</button>
-          <button class="theme-color-btn" style="background: #9C27B0;" onclick="applyTheme('deep-purple', '#9C27B0', '#7B1FA2')" title="Deep Purple">☂️ Deep Purple</button>
+          <button class="theme-color-btn custom-theme-only" data-custom-theme-only="true" style="background: #FF9800;" onclick="applyTheme('amber', '#FF9800', '#F57C00')" title="Amber">🧨 Amber</button>
+          <button class="theme-color-btn custom-theme-only" data-custom-theme-only="true" style="background: #9C27B0;" onclick="applyTheme('deep-purple', '#9C27B0', '#7B1FA2')" title="Deep Purple">☂️ Deep Purple</button>
         </div>
       </div>
 
@@ -838,6 +1038,20 @@
     <div class="form-group"><label>📅 Start Date *</label><div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;"><select id="editSkillMo"></select><select id="editSkillDay"></select><select id="editSkillYr"></select></div></div>
     <div class="form-group"><label>💰 Price Per Work ($)</label><input type="number" id="editSkillPricePerWork" min="0" step="0.01" placeholder="e.g., 50" /></div>
     <div class="form-group"><label>⏰ Price Per Hour ($)</label><input type="number" id="editSkillPricePerHour" min="0" step="0.01" placeholder="e.g., 25" /></div>
+    <div id="editSkillImageGate" class="premium-lock" style="display: none;">
+      <div><strong>Premium Feature:</strong> Add custom images to skills.</div>
+      <button class="btn btn-small" onclick="switchTab('membership')">Upgrade</button>
+    </div>
+    <div class="form-group">
+      <label>🖼️ Custom Skill Image (Premium)</label>
+      <div style="display: flex; gap: 10px; align-items: center;">
+        <img id="editSkillImagePreview" class="skill-image-preview" alt="" />
+        <div style="display: flex; gap: 8px;">
+          <input type="file" id="editSkillImage" data-premium-only="true" class="premium-only" accept="image/*" onchange="handleEditSkillImageChange(event)" />
+          <button class="btn btn-secondary btn-small premium-only" data-premium-only="true" onclick="clearEditSkillImage()" type="button">Remove</button>
+        </div>
+      </div>
+    </div>
     <div style="display: flex; gap: 10px;"><button class="btn btn-secondary" onclick="closeEditSkillModal()" style="flex: 1;">Cancel</button><button class="btn btn-success" onclick="updatePersonaSkill()" style="flex: 1;">✓ Save Changes</button></div>
   </div>
 </div>
@@ -873,7 +1087,10 @@
     const mediaMetadata = document.getElementById('mediaMetadata');
     
     mediaTitle.textContent = ' ' + example.title;
-    mediaMetadata.innerHTML = `<strong>Genre:</strong> ${example.genre || 'N/A'}<br><strong>Skills:</strong> ${(example.skills || []).join(', ') || 'N/A'}<br><strong>Uploaded by:</strong> ${example.userName || 'Unknown'} (${example.userLocation || 'Unknown'})`;
+    const skillsHtml = (example.skills || []).length > 0
+      ? (example.skills || []).map(s => `<span class="tag skill-tag" style="margin-right: 4px;"><img class="skill-icon" src="${getSkillIconDataUrl(s)}" alt="" /><span>${s}</span></span>`).join('')
+      : 'N/A';
+    mediaMetadata.innerHTML = `<strong>Genre:</strong> ${example.genre || 'N/A'}<br><strong>Skills:</strong> ${skillsHtml}<br><strong>Uploaded by:</strong> ${example.userName || 'Unknown'} (${example.userLocation || 'Unknown'})`;
     
     // Determine if audio or video
     const isAudio = example.mediaType.startsWith('audio/');
@@ -950,7 +1167,7 @@ const instrumentDatabase = {
 };
 
 let appState = {
-  user: {name: '', email: '', phone: '', birthday: '', gender: '', location: '', bio: '', profilePic: null, lat: null, lng: null, rating: null},
+  user: {id: null, name: '', username: '', email: '', phone: '', birthday: '', gender: '', location: '', bio: '', profilePic: null, lat: null, lng: null, rating: null, membershipTier: 'free', featuredArtistStatus: false, premiumBadge: false, profileBoostExpiry: null, customTheme: null},
   auth: {loggedIn: false, user: null, guest: true},
   personas: [],
   examples: [],
@@ -964,6 +1181,17 @@ let appState = {
   filteredCollabs: [],
   map: null,
   userMarkers: [],
+  membership: {
+    tier: 'free',           // 'free', 'premium'
+    collabsThisMonth: 0,
+    collabLimit: 3,
+    activeConversations: 0
+  },
+  skillIcons: {},
+  analytics: {
+    profileViews: 0,
+    engagement: 0
+  },
   settings: {
     theme: 'blue',
     darkMode: false,
@@ -1024,6 +1252,9 @@ function loadAppState() {
       filteredCollabs: loaded.filteredCollabs || [],
       map: null,
       userMarkers: [],
+      membership: loaded.membership || appState.membership,
+      skillIcons: loaded.skillIcons || appState.skillIcons,
+      analytics: loaded.analytics || appState.analytics,
       settings: loaded.settings || {
         theme: 'blue',
         darkMode: false,
@@ -1038,6 +1269,9 @@ function loadAppState() {
     };
   }
   if (appState.user.rating === undefined) { appState.user.rating = null; }
+  if (appState.user.membershipTier === undefined) { appState.user.membershipTier = 'free'; }
+  if (appState.user.featuredArtistStatus === undefined) { appState.user.featuredArtistStatus = false; }
+  if (appState.user.premiumBadge === undefined) { appState.user.premiumBadge = false; }
   
   // Initialize user level based on current earnings
   appState.user.level = getUserLevel();
@@ -1088,14 +1322,14 @@ function switchTab(tabName) {
 }
 
 function prevTab() {
-  const tabs = ['setup', 'personas', 'examples', 'collaborate', 'profile', 'money', 'settings'];
+  const tabs = ['setup', 'personas', 'examples', 'collaborate', 'messages', 'membership', 'profile', 'money', 'settings'];
   const currentIdx = tabs.indexOf(appState.currentTab);
   const newIdx = currentIdx === 0 ? tabs.length - 1 : currentIdx - 1;
   switchTab(tabs[newIdx]);
 }
 
 function nextTab() {
-  const tabs = ['setup', 'personas', 'examples', 'collaborate', 'profile', 'money', 'settings'];
+  const tabs = ['setup', 'personas', 'examples', 'collaborate', 'messages', 'membership', 'profile', 'money', 'settings'];
   const currentIdx = tabs.indexOf(appState.currentTab);
   const newIdx = (currentIdx + 1) % tabs.length;
   switchTab(tabs[newIdx]);
@@ -1306,7 +1540,21 @@ function updateProfileDisplay() {
   const avgRating = computeUserRating();
   document.getElementById('pubRatingBadge').textContent = avgRating !== null ? `⭐ ${avgRating}` : '⭐ N/A';
   const skillsList = appState.personas.map(p => p.skills.map(s => ({ name: s.name, startDate: s.startDate })) ).flat();
-  document.getElementById('pubSkills').innerHTML = skillsList.length > 0 ? skillsList.map(s => `<span class="tag">${s.name} • ${calculateExperienceYears(s.startDate)}</span>`).join('') : 'No skills';
+  document.getElementById('pubSkills').innerHTML = skillsList.length > 0 ? skillsList.map(s => `<span class="tag skill-tag"><img class="skill-icon" src="${getSkillIconDataUrl(s.name)}" alt="" /><span>${s.name} • ${calculateExperienceYears(s.startDate)}</span></span>`).join('') : 'No skills';
+}
+
+function getSkillIconDataUrl(skillName) {
+  const name = String(skillName || '').trim();
+  if (appState.skillIcons && appState.skillIcons[name]) {
+    return appState.skillIcons[name];
+  }
+  const palette = ['#2196F3', '#FF9800', '#4CAF50', '#9C27B0', '#E91E63', '#00BCD4', '#FFC107', '#FF5722', '#3F51B5'];
+  const letter = name ? name[0].toUpperCase() : 'S';
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) { hash = ((hash << 5) - hash) + name.charCodeAt(i); hash |= 0; }
+  const color = palette[Math.abs(hash) % palette.length];
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><circle cx='16' cy='16' r='16' fill='${color}'/><text x='16' y='21' text-anchor='middle' font-family='Arial, sans-serif' font-size='14' fill='white' font-weight='700'>${letter}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
 function openSkillModal(personaKey, personaName) {
@@ -1348,7 +1596,8 @@ function renderSkillModal(personaKey) {
       const isAny = skillKey.toLowerCase().includes('any');
       const btn = document.createElement('button');
       btn.className = `skill-btn ${isAny ? 'any-skill' : ''}`;
-      btn.textContent = skillName;
+      btn.dataset.skillName = skillName;
+      btn.innerHTML = `<img class="skill-icon" src="${getSkillIconDataUrl(skillName)}" alt="" /><span>${skillName}</span>`;
       btn.onclick = (e) => { e.preventDefault(); btn.classList.toggle('sel'); if (btn.classList.contains('sel')) { appState.selectedSkillsInModal.add(skillName); } else { appState.selectedSkillsInModal.delete(skillName); } };
       catDiv.querySelector('.skill-grid').appendChild(btn);
     }
@@ -1405,7 +1654,7 @@ function renderPersonasDisplay() {
               if (skill.pricePerWork) priceInfo.push(`$${skill.pricePerWork}/work`);
               if (skill.pricePerHour) priceInfo.push(`$${skill.pricePerHour}/hr`);
               const priceDisplay = priceInfo.length > 0 ? ` • ${priceInfo.join(', ')}` : '';
-              skillItem.innerHTML = `<span class="skill-item-name">${skill.name}</span><span class="skill-item-exp">${skill.startDate}${priceDisplay}</span><div class="skill-item-actions"><button class="btn btn-primary btn-small" onclick="openEditSkillModal(${idx}, ${sIdx})" style="font-size: 10px;">✏️</button><button class="btn btn-danger btn-small" onclick="removePersonaSkill(${idx}, ${sIdx})">✕</button></div>`;
+              skillItem.innerHTML = `<span class="skill-item-name skill-tag"><img class="skill-icon" src="${getSkillIconDataUrl(skill.name)}" alt="" /><span>${skill.name}</span></span><span class="skill-item-exp">${skill.startDate}${priceDisplay}</span><div class="skill-item-actions"><button class="btn btn-primary btn-small" onclick="openEditSkillModal(${idx}, ${sIdx})" style="font-size: 10px;">✏️</button><button class="btn btn-danger btn-small" onclick="removePersonaSkill(${idx}, ${sIdx})">✕</button></div>`;
               skillsDiv.appendChild(skillItem);
             } catch (e) {
               console.error('Error rendering skill:', e);
@@ -1453,6 +1702,13 @@ function openEditSkillModal(personaIdx, skillIdx) {
     document.getElementById('editSkillYr').value = year;
     document.getElementById('editSkillPricePerWork').value = skill.pricePerWork || '';
     document.getElementById('editSkillPricePerHour').value = skill.pricePerHour || '';
+    const preview = document.getElementById('editSkillImagePreview');
+    const imageUrl = skill.icon || (appState.skillIcons && appState.skillIcons[skill.name]) || getSkillIconDataUrl(skill.name);
+    if (preview) { preview.src = imageUrl; }
+    const fileInput = document.getElementById('editSkillImage');
+    if (fileInput) { fileInput.value = ''; }
+    const gate = document.getElementById('editSkillImageGate');
+    if (gate) { gate.style.display = isPremiumUser() ? 'none' : 'flex'; }
     
     // Populate date select options
     populateEditDateSelects();
@@ -1460,6 +1716,42 @@ function openEditSkillModal(personaIdx, skillIdx) {
   } catch (e) {
     console.error('openEditSkillModal error:', e);
   }
+}
+
+let editSkillImageData = null;
+
+function handleEditSkillImageChange(event) {
+  if (!isPremiumUser()) {
+    alert('⭐ Premium required: Custom skill images are available on Premium.');
+    const input = event.target;
+    if (input) input.value = '';
+    switchTab('membership');
+    return;
+  }
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    editSkillImageData = e.target.result;
+    const preview = document.getElementById('editSkillImagePreview');
+    if (preview) preview.src = editSkillImageData;
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearEditSkillImage() {
+  if (!isPremiumUser()) {
+    alert('⭐ Premium required: Custom skill images are available on Premium.');
+    switchTab('membership');
+    return;
+  }
+  editSkillImageData = '';
+  const preview = document.getElementById('editSkillImagePreview');
+  const nameEl = document.getElementById('editSkillName');
+  const fallback = nameEl ? getSkillIconDataUrl(nameEl.value) : getSkillIconDataUrl('');
+  if (preview) preview.src = fallback;
+  const input = document.getElementById('editSkillImage');
+  if (input) input.value = '';
 }
 
 function populateEditDateSelects() {
@@ -1488,6 +1780,17 @@ function updatePersonaSkill() {
   skill.startDate = `${mo}/${day}/${yr}`;
   skill.pricePerWork = parseFloat(document.getElementById('editSkillPricePerWork').value) || null;
   skill.pricePerHour = parseFloat(document.getElementById('editSkillPricePerHour').value) || null;
+  if (isPremiumUser() && editSkillImageData !== null) {
+    if (editSkillImageData === '') {
+      delete skill.icon;
+      if (appState.skillIcons) delete appState.skillIcons[skill.name];
+    } else {
+      skill.icon = editSkillImageData;
+      if (!appState.skillIcons) appState.skillIcons = {};
+      appState.skillIcons[skill.name] = editSkillImageData;
+    }
+  }
+  editSkillImageData = null;
   
   renderPersonasDisplay();
   closeEditSkillModal();
@@ -1538,7 +1841,7 @@ function openSpecificSkillsFromAny(personaKey, anySkillName) {
     const selectedDisplay = document.createElement('div');
     selectedDisplay.id = 'realtimeSkillsDisplay';
     selectedDisplay.style.cssText = 'background: var(--success); color: white; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 11px; font-weight: 600; min-height: 40px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px;';
-    selectedDisplay.innerHTML = appState.skillsUsed.length > 0 ? appState.skillsUsed.map(s => `<span style="background: rgba(255,255,255,0.3); padding: 4px 8px; border-radius: 4px;">${s} <button onclick="removeSkillFromUsed('${s.replace(/'/g, "\\'")}'); return false;" style="background: none; border: none; color: white; cursor: pointer; margin-left: 4px; font-weight: bold;">✕</button></span>`).join('') : '✨ Select skills below...';
+    selectedDisplay.innerHTML = appState.skillsUsed.length > 0 ? appState.skillsUsed.map(s => `<span style="background: rgba(255,255,255,0.3); padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 6px;">${`<img class=\"skill-icon\" src=\"${getSkillIconDataUrl(s)}\" alt=\"\" />`}<span>${s}</span> <button onclick="removeSkillFromUsed('${s.replace(/'/g, "\\'")}'); return false;" style="background: none; border: none; color: white; cursor: pointer; margin-left: 2px; font-weight: bold;">✕</button></span>`).join('') : '✨ Select skills below...';
     skillsUsedCats.appendChild(selectedDisplay);
   
   const catDiv = document.createElement('div');
@@ -1548,7 +1851,8 @@ function openSpecificSkillsFromAny(personaKey, anySkillName) {
     if (skillKey.toLowerCase().includes('any')) return;
     const btn = document.createElement('button');
     btn.className = `skill-btn ${appState.skillsUsed.includes(skillLabel) ? 'sel' : ''}`;
-    btn.textContent = skillLabel;
+    btn.dataset.skillName = skillLabel;
+    btn.innerHTML = `<img class="skill-icon" src="${getSkillIconDataUrl(skillLabel)}" alt="" /><span>${skillLabel}</span>`;
     btn.onclick = (e) => {
       e.preventDefault();
       if (!appState.skillsUsed.includes(skillLabel)) {
@@ -1577,7 +1881,7 @@ function openSkillsUsedModal() {
   const selectedDisplay = document.createElement('div');
   selectedDisplay.id = 'realtimeSkillsDisplay';
   selectedDisplay.style.cssText = 'background: var(--success); color: white; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 11px; font-weight: 600; min-height: 40px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px;';
-  selectedDisplay.innerHTML = appState.skillsUsed.length > 0 ? appState.skillsUsed.map(s => `<span style="background: rgba(255,255,255,0.3); padding: 4px 8px; border-radius: 4px;">${s} <button onclick="removeSkillFromUsed('${s.replace(/'/g, "\\'")}'); return false;" style="background: none; border: none; color: white; cursor: pointer; margin-left: 4px; font-weight: bold;">✕</button></span>`).join('') : '✨ Select skills below...';
+  selectedDisplay.innerHTML = appState.skillsUsed.length > 0 ? appState.skillsUsed.map(s => `<span style="background: rgba(255,255,255,0.3); padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 6px;">${`<img class=\"skill-icon\" src=\"${getSkillIconDataUrl(s)}\" alt=\"\" />`}<span>${s}</span> <button onclick="removeSkillFromUsed('${s.replace(/'/g, "\\'")}'); return false;" style="background: none; border: none; color: white; cursor: pointer; margin-left: 2px; font-weight: bold;">✕</button></span>`).join('') : '✨ Select skills below...';
   skillsUsedCats.appendChild(selectedDisplay);
   
   appState.personas.forEach(persona => {
@@ -1588,7 +1892,8 @@ function openSkillsUsedModal() {
       const isAny = skill.name.toLowerCase().includes('any');
       const btn = document.createElement('button');
       btn.className = `skill-btn ${isAny ? 'any-skill' : ''} ${appState.skillsUsed.includes(skill.name) ? 'sel' : ''}`;
-      btn.textContent = skill.name;
+      btn.dataset.skillName = skill.name;
+      btn.innerHTML = `<img class="skill-icon" src="${getSkillIconDataUrl(skill.name)}" alt="" /><span>${skill.name}</span>`;
       btn.onclick = (e) => {
         e.preventDefault();
         if (isAny) { openSpecificSkillsFromAny(persona.key, skill.name); } else {
@@ -1612,13 +1917,13 @@ function openSkillsUsedModal() {
 
 function updateSkillsUsedDisplay() {
   const display = document.getElementById('skillsUsedDisplay');
-  if (appState.skillsUsed.length === 0) { display.textContent = 'Click to select skills used'; } else { display.innerHTML = appState.skillsUsed.map(s => `<span class="tag">${s}</span>`).join(''); }
+  if (appState.skillsUsed.length === 0) { display.textContent = 'Click to select skills used'; } else { display.innerHTML = appState.skillsUsed.map(s => `<span class="tag skill-tag"><img class="skill-icon" src="${getSkillIconDataUrl(s)}" alt="" /><span>${s}</span></span>`).join(''); }
 }
 
 function updateRealtimeSkillsDisplay() {
   const realtimeDisplay = document.getElementById('realtimeSkillsDisplay');
   if (realtimeDisplay) {
-    realtimeDisplay.innerHTML = appState.skillsUsed.length > 0 ? appState.skillsUsed.map(s => `<span style="background: rgba(255,255,255,0.3); padding: 4px 8px; border-radius: 4px;">${s} <button onclick="removeSkillFromUsed('${s.replace(/'/g, "\\'")}'); return false;" style="background: none; border: none; color: white; cursor: pointer; margin-left: 4px; font-weight: bold;">✕</button></span>`).join('') : '✨ Select skills below...';
+    realtimeDisplay.innerHTML = appState.skillsUsed.length > 0 ? appState.skillsUsed.map(s => `<span style="background: rgba(255,255,255,0.3); padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 6px;">${`<img class=\"skill-icon\" src=\"${getSkillIconDataUrl(s)}\" alt=\"\" />`}<span>${s}</span> <button onclick="removeSkillFromUsed('${s.replace(/'/g, "\\'")}'); return false;" style="background: none; border: none; color: white; cursor: pointer; margin-left: 2px; font-weight: bold;">✕</button></span>`).join('') : '✨ Select skills below...';
   }
   updateSkillsUsedDisplay();
 }
@@ -1629,7 +1934,7 @@ function removeSkillFromUsed(skillName) {
   saveAppState();
   // Update button states in the modal
   document.querySelectorAll('#skillsUsedCats .skill-btn').forEach(btn => {
-    if (btn.textContent.trim() === skillName.trim()) btn.classList.remove('sel');
+    if ((btn.dataset.skillName || btn.textContent).trim() === skillName.trim()) btn.classList.remove('sel');
   });
 }
 
@@ -1646,6 +1951,11 @@ function setExamplePrivacy(privacy) {
 }
 
 function uploadExample() {
+  if (!isPremiumUser()) {
+    alert('⭐ Premium required: Portfolio audio/video uploads are available on Premium.');
+    switchTab('membership');
+    return;
+  }
   const title = document.getElementById('exampleTitle').value.trim();
   const desc = document.getElementById('exampleDesc').value.trim();
   const mediaFile = document.getElementById('exampleMedia').files[0];
@@ -1728,7 +2038,8 @@ function renderExamplesDisplay() {
       try {
         const card = document.createElement('div');
         card.className = 'post-card';
-        card.innerHTML = `<div class="post-header"><div class="post-avatar" ${example.userPic ? `style="background-image: url('${example.userPic}'); background-size: cover; background-position: center;"` : ''}>${!example.userPic ? '🎵' : ''}</div><div class="post-info" style="flex: 1;"><div class="post-user">${example.userName}</div><div class="post-meta">${example.timestamp} • ${example.privacy === 'public' ? '🌐 Public' : '🔒 Private'}</div><div class="post-meta">📍 ${example.userLocation}</div></div><button class="btn btn-danger btn-small" onclick="removeExample(${idx})">Delete</button></div><div style="margin-bottom: 8px;"><div style="font-weight: 700; font-size: 12px; margin-bottom: 4px;">🎯 ${example.title}</div><div style="font-size: 11px; color: var(--text-light); margin-bottom: 6px;">${example.desc}</div><div style="font-size: 10px; margin-bottom: 6px;"><span style="background: var(--bg); padding: 2px 6px; border-radius: 4px; margin-right: 4px;">🎵 ${example.genre}</span>${example.skills.map(s => `<span style="background: var(--accent); color: white; padding: 2px 6px; border-radius: 4px; margin-right: 2px; display: inline-block;">${s}</span>`).join('')}</div>${example.image ? `<div style="margin: 8px 0; position: relative; display: inline-block; width: 100%;"><img src="${example.image}" style="max-width: 100%; height: auto; border-radius: 6px;"/><button class="btn btn-success" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 32px; padding: 12px 16px; border-radius: 50%; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; background: rgba(76, 175, 80, 0.9);" onclick="playMedia(${idx})" title="Play">▶️</button></div>` : `<div style="background: var(--bg); padding: 20px; border-radius: 6px; text-align: center; margin: 8px 0;"><button class="btn btn-success" onclick="playMedia(${idx})" style="font-size: 24px;">▶️ Play Media</button></div>`}</div><div class="post-actions"><button class="btn btn-secondary btn-small" onclick="editExample(${idx})">✏️ Edit</button></div>`;
+        const skillsHtml = (example.skills || []).map(s => `<span class="tag skill-tag" style="background: var(--accent); color: white; margin-right: 2px;"><img class="skill-icon" src="${getSkillIconDataUrl(s)}" alt="" /><span>${s}</span></span>`).join('');
+        card.innerHTML = `<div class="post-header"><div class="post-avatar" ${example.userPic ? `style="background-image: url('${example.userPic}'); background-size: cover; background-position: center;"` : ''}>${!example.userPic ? '🎵' : ''}</div><div class="post-info" style="flex: 1;"><div class="post-user">${example.userName}</div><div class="post-meta">${example.timestamp} • ${example.privacy === 'public' ? '🌐 Public' : '🔒 Private'}</div><div class="post-meta">📍 ${example.userLocation}</div></div><button class="btn btn-danger btn-small" onclick="removeExample(${idx})">Delete</button></div><div style="margin-bottom: 8px;"><div style="font-weight: 700; font-size: 12px; margin-bottom: 4px;">🎯 ${example.title}</div><div style="font-size: 11px; color: var(--text-light); margin-bottom: 6px;">${example.desc}</div><div style="font-size: 10px; margin-bottom: 6px;"><span style="background: var(--bg); padding: 2px 6px; border-radius: 4px; margin-right: 4px;">🎵 ${example.genre}</span>${skillsHtml}</div>${example.image ? `<div style="margin: 8px 0; position: relative; display: inline-block; width: 100%;"><img src="${example.image}" style="max-width: 100%; height: auto; border-radius: 6px;"/><button class="btn btn-success" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 32px; padding: 12px 16px; border-radius: 50%; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; background: rgba(76, 175, 80, 0.9);" onclick="playMedia(${idx})" title="Play">▶️</button></div>` : `<div style="background: var(--bg); padding: 20px; border-radius: 6px; text-align: center; margin: 8px 0;"><button class="btn btn-success" onclick="playMedia(${idx})" style="font-size: 24px;">▶️ Play Media</button></div>`}</div><div class="post-actions"><button class="btn btn-secondary btn-small" onclick="editExample(${idx})">✏️ Edit</button></div>`;
         display.appendChild(card);
       } catch (e) {
         console.error('Error rendering example:', e);
@@ -1807,7 +2118,7 @@ function updateSkillRates() {
   // Create rate input fields for each skill
   container.innerHTML = example.skills.map((skill, idx) => `
     <div style="border: 1px solid var(--border); padding: 10px; border-radius: 6px; background: var(--input-bg);">
-      <div style="font-weight: 600; font-size: 11px; margin-bottom: 8px;">🎯 ${skill}</div>
+      <div style="font-weight: 600; font-size: 11px; margin-bottom: 8px; display: inline-flex; align-items: center; gap: 6px;"><img class="skill-icon" src="${getSkillIconDataUrl(skill)}" alt="" />🎯 ${skill}</div>
       <div class="grid-2">
         <div class="form-group">
           <label style="font-size: 10px;">💵 Per Hour ($)</label>
@@ -1822,7 +2133,13 @@ function updateSkillRates() {
   `).join('');
 }
 
-function postCollabRequest() {
+async function postCollabRequest() {
+  // Check membership limits
+  const canPost = await checkCollaborationLimit();
+  if (!canPost) {
+    return;
+  }
+  
   const personaIdx = document.getElementById('collabPersona').value;
   const exampleIdx = document.getElementById('collabPublicExample').value;
   const desc = document.getElementById('collabPostDesc').value.trim();
@@ -1867,11 +2184,14 @@ function postCollabRequest() {
   const royaltyPercent = parseFloat(document.getElementById('collabRoyaltyPercent').value) || 10;
   
   const budgetRange = (budgetMin !== null || budgetMax !== null) ? { min: budgetMin, max: budgetMax } : null;
+  const isPremiumTier = isPremiumUser();
+  const isBoosted = appState.user.profileBoostExpiry && new Date(appState.user.profileBoostExpiry) > new Date();
   const collab = { 
     id: Date.now(), 
     personaIdx: parseInt(personaIdx), 
     personaName: appState.personas[parseInt(personaIdx)].name, 
     exampleTitle: appState.examples[parseInt(exampleIdx)].title, 
+    exampleGenre: appState.examples[parseInt(exampleIdx)].genre || '',
     description: desc, 
     userName: appState.user.name || 'Anonymous', 
     userLocation: appState.user.location || 'Unknown', 
@@ -1882,6 +2202,8 @@ function postCollabRequest() {
     rate: { type: rateType, amount: rateAmount },
     skillRates: skillRates,
     royaltyPercent: royaltyPercent,
+    featuredArtist: isPremiumTier,
+    boosted: isBoosted,
     requirements: { ageRange: {min: minAge, max: maxAge}, maxDistance: maxDist, budgetRange: budgetRange, minExperience: minExp, minProfileRating: minProfileRating, minPictureRating: minPictureRating, preferredGender: prefGender }, 
     ratings: [], 
     comments: [] 
@@ -2022,6 +2344,44 @@ function renderCollabFeed() {
     const filterLocationVal = filterLocation ? filterLocation.value : '';
     if (filterPersonaVal) appState.filteredCollabs = appState.filteredCollabs.filter(c => c.personaName === filterPersonaVal);
     if (filterLocationVal) appState.filteredCollabs = appState.filteredCollabs.filter(c => c.userLocation.toLowerCase().includes(filterLocationVal.toLowerCase()));
+    if (isPremiumUser()) {
+      const filterGenre = document.getElementById('filterGenre');
+      const filterGenreVal = filterGenre ? filterGenre.value : '';
+      const filterSkillLevel = document.getElementById('filterSkillLevel');
+      const filterSkillVal = filterSkillLevel ? filterSkillLevel.value : '';
+      const filterDistance = document.getElementById('filterDistance');
+      const filterDistanceVal = filterDistance ? parseFloat(filterDistance.value) : null;
+
+      if (filterGenreVal) {
+        appState.filteredCollabs = appState.filteredCollabs.filter(c => (c.exampleGenre || '').toLowerCase() === filterGenreVal.toLowerCase());
+      }
+
+      if (filterSkillVal) {
+        const minExpReq = { beginner: 0, intermediate: 1, advanced: 3, pro: 5 };
+        const threshold = minExpReq[filterSkillVal] ?? 0;
+        appState.filteredCollabs = appState.filteredCollabs.filter(c => {
+          const req = c.requirements || {};
+          const minExp = Number.isFinite(req.minExperience) ? req.minExperience : 0;
+          return minExp >= threshold;
+        });
+      }
+
+      if (Number.isFinite(filterDistanceVal) && filterDistanceVal > 0 && appState.user.lat && appState.user.lng) {
+        appState.filteredCollabs = appState.filteredCollabs.filter(c => {
+          if (!c.userLat || !c.userLng) return false;
+          const distance = calculateDistance(appState.user.lat, appState.user.lng, c.userLat, c.userLng);
+          return distance <= filterDistanceVal;
+        });
+      }
+    }
+    appState.filteredCollabs.sort((a, b) => {
+      const boostA = a.boosted ? 1 : 0;
+      const boostB = b.boosted ? 1 : 0;
+      if (boostA !== boostB) return boostB - boostA;
+      const featuredA = a.featuredArtist ? 1 : 0;
+      const featuredB = b.featuredArtist ? 1 : 0;
+      return featuredB - featuredA;
+    });
     const feedCount = document.getElementById('feedCount');
     if (feedCount) feedCount.textContent = appState.filteredCollabs.length;
     if (appState.filteredCollabs.length === 0) { feed.innerHTML = 'No collaboration requests matching your filters'; return; }
@@ -2043,7 +2403,7 @@ function renderCollabFeed() {
           const skillRatesHTML = Object.entries(collab.skillRates).map(([skill, rates]) => {
             const perHourStr = rates.perHour ? `${rates.perHour}/hr` : '—';
             const perWorkStr = rates.perWork ? `${rates.perWork}/work` : '—';
-            return `<div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border);"><span style="font-weight: 600;">🎯 ${skill}:</span><span>💵 $${perHourStr} | 📦 $${perWorkStr}</span></div>`;
+            return `<div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border);"><span style="font-weight: 600; display: inline-flex; align-items: center; gap: 6px;"><img class="skill-icon" src="${getSkillIconDataUrl(skill)}" alt="" />🎯 ${skill}:</span><span>💵 $${perHourStr} | 📦 $${perWorkStr}</span></div>`;
           }).join('');
           skillRatesDisplay = `<div style="background: var(--bg); padding: 8px; border-radius: 4px; font-size: 10px; margin-bottom: 8px; border-left: 3px solid var(--accent);">${skillRatesHTML}</div>`;
         }
@@ -2060,7 +2420,9 @@ function renderCollabFeed() {
         
         const alreadyAcceptedMsg = alreadyAccepted ? `<div style="background: #cfe2ff; color: #084298; padding: 8px; border-radius: 4px; font-size: 11px; margin-bottom: 8px;">✔️ You already accepted this collaboration</div>` : '';
         
-        card.innerHTML = `<div class="post-header"><div class="post-avatar" ${collab.userPic ? `style="background-image: url('${collab.userPic}'); background-size: cover; background-position: center;"` : ''}>${!collab.userPic ? '🎤' : ''}</div><div class="post-info" style="flex: 1;"><div class="post-user">${collab.personaName}</div><div class="post-meta">by ${collab.userName}</div><div class="post-meta">📍 ${collab.userLocation}</div><div class="post-meta">${collab.timestamp}</div></div></div><div style="margin-bottom: 10px;">${rateInfo}${royaltyInfo}${skillRatesDisplay}${acceptanceInfo}${alreadyAcceptedMsg}<div style="font-size: 11px; margin-bottom: 6px; font-weight: 600;">Work: ${collab.exampleTitle}</div><div style="font-size: 12px;">${collab.description}</div></div><div class="post-actions" style="display: flex; gap: 6px; flex-wrap: wrap;">${acceptBtn}<button class="btn btn-secondary btn-small" onclick="editCollab(${originalIdx})" ${!isMyCollab ? 'style="display:none;"' : ''}>✏️ Edit</button><button class="btn btn-danger btn-small" onclick="removeCollab(${originalIdx})" ${!isMyCollab ? 'style="display:none;"' : ''}>🗑️ Delete</button></div>`;
+        const featuredBadge = collab.featuredArtist ? '<span class="premium-badge">⭐ Featured</span>' : '';
+        const boostBadge = collab.boosted ? '<span class="premium-badge">🚀 Boosted</span>' : '';
+        card.innerHTML = `<div class="post-header"><div class="post-avatar" ${collab.userPic ? `style="background-image: url('${collab.userPic}'); background-size: cover; background-position: center;"` : ''}>${!collab.userPic ? '🎤' : ''}</div><div class="post-info" style="flex: 1;"><div class="post-user">${collab.personaName} ${featuredBadge} ${boostBadge}</div><div class="post-meta">by ${collab.userName}</div><div class="post-meta">📍 ${collab.userLocation}</div><div class="post-meta">${collab.timestamp}</div></div></div><div style="margin-bottom: 10px;">${rateInfo}${royaltyInfo}${skillRatesDisplay}${acceptanceInfo}${alreadyAcceptedMsg}<div style="font-size: 11px; margin-bottom: 6px; font-weight: 600;">Work: ${collab.exampleTitle}</div><div style="font-size: 12px;">${collab.description}</div></div><div class="post-actions" style="display: flex; gap: 6px; flex-wrap: wrap;">${acceptBtn}<button class="btn btn-secondary btn-small" onclick="editCollab(${originalIdx})" ${!isMyCollab ? 'style="display:none;"' : ''}>✏️ Edit</button><button class="btn btn-danger btn-small" onclick="removeCollab(${originalIdx})" ${!isMyCollab ? 'style="display:none;"' : ''}>🗑️ Delete</button></div>`;
         feed.appendChild(card);
       } catch (e) {
         console.error('Error rendering collab card:', e);
@@ -2132,6 +2494,12 @@ function applyFilters() { renderCollabFeed(); }
 function resetFilters() {
   document.getElementById('filterPersona').value = '';
   document.getElementById('filterLocation').value = '';
+  const filterGenre = document.getElementById('filterGenre');
+  const filterSkillLevel = document.getElementById('filterSkillLevel');
+  const filterDistance = document.getElementById('filterDistance');
+  if (filterGenre) filterGenre.value = '';
+  if (filterSkillLevel) filterSkillLevel.value = '';
+  if (filterDistance) filterDistance.value = '';
   renderCollabFeed();
 }
 
@@ -2179,47 +2547,96 @@ function getTaxRateByLevel() {
 
 function updateUserLevel() {
   const level = getUserLevel();
-  appState.user.level = level;
-  updateLevelDisplay();
-}
-
-function updateLevelDisplay() {
-  const level = appState.user.level || getUserLevel();
   const taxRate = getTaxRateByLevel();
-  
-  const levelBadge = document.getElementById('userLevelBadge');
-  if (levelBadge) {
-    levelBadge.innerHTML = `<span style="font-size: 14px; font-weight: 700; color: #333; background: ${level.color}; padding: 6px 12px; border-radius: 20px; display: inline-block; border: 2px solid #333;">${level.icon} ${level.name}</span>`;
-  }
-  
+  const earned = appState.wallet.earned || 0;
+
   const levelDisplay = document.getElementById('userLevelDisplay');
   if (levelDisplay) {
-    const earned = appState.wallet.earned || 0;
     let progressMsg = '';
     if (level.name === 'Bronze') {
-      progressMsg = `Earn $${(50 - earned).toFixed(2)} more for Silver • Tax Rate: 5.0%`;
+      progressMsg = `Earn $${(50 - earned).toFixed(2)} more for Silver • Tax Rate: 4.8%`;
     } else if (level.name === 'Silver') {
-      progressMsg = `Earn $${(100 - earned).toFixed(2)} more for Gold • Tax Rate: 4.8%`;
+      progressMsg = `Earn $${(100 - earned).toFixed(2)} more for Gold • Tax Rate: 4.5%`;
     } else if (level.name === 'Gold') {
-      progressMsg = `Earn $${(1000 - earned).toFixed(2)} more for Platinum • Tax Rate: 4.5%`;
+      progressMsg = `Earn $${(1000 - earned).toFixed(2)} more for Platinum • Tax Rate: 4.2%`;
     } else {
       progressMsg = 'Maximum level reached! • Tax Rate: 4.2%';
     }
     levelDisplay.textContent = progressMsg;
   }
-  
-  // Update wallet level display
+
   const walletLevelDisplay = document.getElementById('walletLevelDisplay');
   if (walletLevelDisplay) {
-    const earned = appState.wallet.earned || 0;
     walletLevelDisplay.innerHTML = `<div style="margin-bottom: 8px;">${level.icon} <strong>${level.name}</strong> Member</div><div style="font-size: 10px; color: var(--text-light); margin-bottom: 4px;">Total Earned: $${earned.toFixed(2)}</div><div style="font-size: 10px; background: rgba(0,0,0,0.05); padding: 6px 8px; border-radius: 4px; color: var(--primary); font-weight: 600;">Tax Rate: ${taxRate}%</div>`;
   }
-  
-  // Update tax rate info in income section
+
   const levelTaxRateInfo = document.getElementById('levelTaxRateInfo');
   if (levelTaxRateInfo) {
     levelTaxRateInfo.innerHTML = `Your Tax Rate: <strong>${taxRate}%</strong> (${level.name} Member)`;
   }
+
+  updateMembershipDisplay();
+}
+
+function updateMembershipDisplay() {
+  const membershipDisplay = document.getElementById('membershipDisplay');
+  if (!membershipDisplay) return;
+
+  const tier = getMembershipTier();
+  const collabsUsed = appState.membership.collabsThisMonth || 0;
+  const collabLimit = appState.membership.collabLimit || 3;
+
+  if (tier === 'premium') {
+    membershipDisplay.innerHTML = `
+      <div style="background: linear-gradient(135deg, #FFD700 0%, #FFA000 100%); padding: 16px; border-radius: 8px; color: #333; text-align: center;">
+        <div style="font-size: 20px; margin-bottom: 8px;">⭐</div>
+        <div style="font-size: 14px; font-weight: 800;">You're Premium</div>
+        <div style="font-size: 11px; margin-top: 4px; opacity: 0.9;">Unlimited collaboration requests</div>
+      </div>
+    `;
+  } else {
+    membershipDisplay.innerHTML = `
+      <div style="background: #fff3cd; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 11px; border-left: 3px solid #ffc107;">
+        <strong>FREE TIER</strong><br>
+        Collabs this month: ${collabsUsed}/${collabLimit}
+      </div>
+      <div style="background: linear-gradient(135deg, #FFD700 0%, #FFA000 100%); padding: 16px; border-radius: 8px; color: #333;">
+        <div style="font-size: 13px; font-weight: 800; margin-bottom: 8px;">⭐ PREMIUM TIER</div>
+        <div style="font-size: 11px; margin-bottom: 12px;">
+          ✅ Unlimited collaborations<br>
+          ✅ Advanced search filters<br>
+          ✅ Direct messaging<br>
+          ✅ Portfolio audio uploads<br>
+          ✅ Featured artist placement<br>
+          ✅ Analytics dashboard
+        </div>
+        <button class="btn btn-success" onclick="switchTab('membership')" style="width: 100%;">Upgrade to Premium</button>
+      </div>
+    `;
+  }
+}
+
+function upgradeMembership(tier) {
+  switchTab('membership');
+  alert('⭐ Premium upgrades are available in the Membership tab.');
+}
+
+function processUpgrade(tier, billing) {
+  switchTab('membership');
+}
+
+function checkMembershipLimit(action) {
+  const tier = getMembershipTier();
+  if (action === 'collab' && tier !== 'premium') {
+    const collabsUsed = appState.membership.collabsThisMonth || 0;
+    const collabLimit = appState.membership.collabLimit || 3;
+    if (collabsUsed >= collabLimit) {
+      alert('⚠️ Free tier limit reached. Upgrade to Premium for unlimited collaboration requests.');
+      switchTab('membership');
+      return false;
+    }
+  }
+  return true;
 }
 
 function updateWalletDisplay() {
@@ -2645,22 +3062,38 @@ async function completePasswordReset() {
   }
 }
 
-async function socialLogin(provider) {
-  // Check availability for Google login
-  if (provider === 'google') {
-    try {
-      const res = await fetch(`${apiBase}/api/auth/google/available`);
-      const data = await res.json().catch(() => ({}));
-      if (!data.enabled) {
-        setAuthStatus('Google login is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the server.', true);
-        return;
-      }
-    } catch (e) {
-      setAuthStatus('Google login check failed. Check server.', true);
-      return;
-    }
+function socialLogin(provider) {
+  // List of supported providers
+  const supportedProviders = ['google', 'facebook', 'github'];
+  
+  // Check if provider is supported
+  if (!supportedProviders.includes(provider)) {
+    setAuthStatus(`${provider.charAt(0).toUpperCase() + provider.slice(1)} login is not yet configured on this server.`, true);
+    return;
   }
+  
+  // Check availability for Google, Facebook, and GitHub
+  const checkUrl = provider === 'google' ? `${apiBase}/api/auth/google/available` : null;
+  
+  if (checkUrl) {
+    fetch(checkUrl)
+      .then(res => res.json().catch(() => ({})))
+      .then(data => {
+        if (!data.enabled) {
+          setAuthStatus(`${provider.charAt(0).toUpperCase() + provider.slice(1)} login is not configured on the server.`, true);
+          return;
+        }
+        _openSocialLoginPopup(provider);
+      })
+      .catch(e => {
+        setAuthStatus(`${provider.charAt(0).toUpperCase() + provider.slice(1)} login check failed. Check server.`, true);
+      });
+  } else {
+    _openSocialLoginPopup(provider);
+  }
+}
 
+function _openSocialLoginPopup(provider) {
   // Open OAuth flow in popup window
   const width = 600;
   const height = 700;
@@ -2721,6 +3154,17 @@ function updateAuthDisplay() {
   const isGuest = !!(appState.auth && appState.auth.guest);
   const user = appState.auth ? appState.auth.user : null;
 
+  if (loggedIn && user) {
+    if (user.id) { appState.user.id = user.id; }
+    if (user.email) { appState.user.email = user.email; }
+    if (user.username) { appState.user.username = user.username; }
+    if (!appState.user.name && user.username) { appState.user.name = user.username; }
+    if (user.membershipTier) {
+      appState.user.membershipTier = user.membershipTier;
+      appState.membership.tier = user.membershipTier;
+    }
+  }
+
   if (user && user.email) { emailInput.value = user.email; }
   if (user && user.username) { usernameInput.value = user.username; }
   if (overlayEmail && user && user.email) { overlayEmail.value = user.email; }
@@ -2746,6 +3190,12 @@ function updateAuthDisplay() {
   } else if (!loggedIn) {
     setAuthStatus('Not logged in');
   }
+
+  if (loggedIn && getCurrentUserId()) {
+    loadMembershipStatus();
+  }
+  applyPremiumGates();
+  updateMembershipDisplay();
 
   if (overlay) {
     overlay.classList.toggle('active', !loggedIn && !isGuest);
@@ -3194,9 +3644,15 @@ function deleteMessage(messageId) {
 }
 
 function sendMessage() {
+  if (!isPremiumUser()) {
+    alert('⭐ Premium required: Direct messaging is available on Premium.');
+    switchTab('membership');
+    return;
+  }
+  const userId = getCurrentUserId();
   const input = document.getElementById('messageInput');
   const fileInput = document.getElementById('messageFile');
-  if (!input || (!input.value.trim() && !fileInput.files.length) || !currentChatUser || !appState.user || !socket) return;
+  if (!userId || !input || (!input.value.trim() && !fileInput.files.length) || !currentChatUser || !appState.user || !socket) return;
   
   const message = input.value.trim();
   const file = fileInput.files.length > 0 ? fileInput.files[0] : null;
@@ -3206,8 +3662,8 @@ function sendMessage() {
     const reader = new FileReader();
     reader.onload = (e) => {
       socket.emit('send-message', {
-        userId: appState.user.id,
-        username: appState.user.username,
+        userId: userId,
+        username: appState.user.username || appState.user.name || 'Anonymous',
         message: message || `📎 ${file.name}`,
         conversationWith: currentChatUser,
         file: {
@@ -3228,8 +3684,8 @@ function sendMessage() {
   } else {
     // Text only message
     socket.emit('send-message', {
-      userId: appState.user.id,
-      username: appState.user.username,
+      userId: userId,
+      username: appState.user.username || appState.user.name || 'Anonymous',
       message,
       conversationWith: currentChatUser
     }, (response) => {
@@ -3259,11 +3715,319 @@ document.addEventListener('DOMContentLoaded', () => {
 // Initialize socket when user is logged in
 const originalSwitchTab = switchTab;
 switchTab = function(tabName) {
+  if (tabName === 'messages' && !isPremiumUser()) {
+    alert('⭐ Premium required: Direct messaging is available on Premium.');
+    originalSwitchTab.call(this, 'membership');
+    return;
+  }
   originalSwitchTab.call(this, tabName);
   if (tabName === 'messages' && appState.user && !socket) {
     initSocket();
   }
+  if (tabName === 'membership' && appState.user && (appState.user.id || (appState.auth && appState.auth.user && appState.auth.user.id))) {
+    loadMembershipStatus();
+  }
+  applyPremiumGates();
 };
+
+// ==================== MEMBERSHIP FUNCTIONS ====================
+
+function getCurrentUserId() {
+  return (appState.user && appState.user.id) || (appState.auth && appState.auth.user && appState.auth.user.id) || null;
+}
+
+function getMembershipTier() {
+  return (appState.user && appState.user.membershipTier) || (appState.membership && appState.membership.tier) || 'free';
+}
+
+function isPremiumUser() {
+  return getMembershipTier() === 'premium';
+}
+
+function hasCustomTheme() {
+  return !!(appState.user && appState.user.customTheme);
+}
+
+function applyPremiumGates() {
+  const premium = isPremiumUser();
+  const customTheme = hasCustomTheme();
+  document.querySelectorAll('[data-premium-only="true"]').forEach((el) => {
+    if (premium) {
+      el.removeAttribute('disabled');
+    } else {
+      el.setAttribute('disabled', 'disabled');
+    }
+  });
+
+  document.querySelectorAll('[data-custom-theme-only="true"]').forEach((el) => {
+    if (customTheme) {
+      el.removeAttribute('disabled');
+    } else {
+      el.setAttribute('disabled', 'disabled');
+    }
+  });
+
+  const messagesGate = document.getElementById('messagesPremiumGate');
+  if (messagesGate) messagesGate.style.display = premium ? 'none' : 'flex';
+
+  const portfolioGate = document.getElementById('portfolioPremiumGate');
+  if (portfolioGate) portfolioGate.style.display = premium ? 'none' : 'flex';
+
+  const premiumFilterNotice = document.getElementById('premiumFilterNotice');
+  if (premiumFilterNotice) premiumFilterNotice.style.display = premium ? 'none' : 'flex';
+
+  const analyticsGate = document.getElementById('analyticsPremiumGate');
+  if (analyticsGate) analyticsGate.style.display = premium ? 'none' : 'flex';
+
+  const analyticsDashboard = document.getElementById('analyticsDashboard');
+  if (analyticsDashboard) analyticsDashboard.style.display = premium ? 'grid' : 'none';
+
+  const customThemeGate = document.getElementById('customThemeGate');
+  if (customThemeGate) customThemeGate.style.display = customTheme ? 'none' : 'flex';
+
+  const editSkillImageGate = document.getElementById('editSkillImageGate');
+  if (editSkillImageGate) editSkillImageGate.style.display = premium ? 'none' : 'flex';
+}
+
+function updateAnalyticsDisplay() {
+  const views = document.getElementById('analyticsViews');
+  const engagement = document.getElementById('analyticsEngagement');
+  if (!views || !engagement) return;
+
+  if (!isPremiumUser()) {
+    views.textContent = '—';
+    engagement.textContent = '—';
+    return;
+  }
+
+  const profileViews = appState.analytics.profileViews || 0;
+  const engagementScore = appState.analytics.engagement || 0;
+  views.textContent = profileViews;
+  engagement.textContent = engagementScore;
+}
+
+async function loadMembershipStatus() {
+  const userId = getCurrentUserId();
+  if (!userId) return;
+  
+  try {
+    const response = await fetch(`${apiBase}/api/membership/${userId}`);
+    const data = await response.json();
+
+    appState.user.membershipTier = data.tier || 'free';
+    appState.membership.tier = data.tier || 'free';
+    appState.membership.collabsThisMonth = data.collaborationRequestsUsed || 0;
+    appState.membership.collabLimit = data.tier === 'premium' ? 999999 : (data.collaborationRequestsLimit || 3);
+    appState.user.profileBoostExpiry = data.profileBoostExpiry || null;
+    appState.user.featuredArtistStatus = !!data.featuredArtistStatus;
+    appState.user.premiumBadge = !!data.premiumBadge;
+    appState.user.customTheme = data.customTheme || null;
+    
+    // Update UI
+    document.getElementById('tierName').textContent = data.tier === 'premium' ? '⭐ PREMIUM TIER' : '🆓 FREE TIER';
+    document.getElementById('collabUsed').textContent = data.collaborationRequestsUsed || 0;
+    document.getElementById('collabLimit').textContent = data.tier === 'premium' ? '∞' : data.collaborationRequestsLimit || 3;
+    
+    // Show subscription info
+    const subInfo = document.getElementById('subscriptionInfo');
+    if (data.tier === 'premium' && data.subscriptionStatus === 'active') {
+      subInfo.innerHTML = '<div style="color: var(--success); font-weight: 600;">✓ Active Premium Subscription</div>';
+      document.getElementById('premiumCancel').style.display = 'block';
+    } else {
+      subInfo.innerHTML = '';
+      document.getElementById('premiumCancel').style.display = 'none';
+    }
+    
+    // Show active purchases
+    const activePurchases = document.getElementById('activePurchases');
+    let purchasesHtml = '';
+    
+    if (data.profileBoostExpiry && new Date(data.profileBoostExpiry) > new Date()) {
+      const daysLeft = Math.ceil((new Date(data.profileBoostExpiry) - new Date()) / (1000 * 60 * 60 * 24));
+      purchasesHtml += `<div style="background: rgba(76, 175, 80, 0.1); padding: 8px; border-radius: 6px; font-size: 11px; margin-top: 8px;">🚀 Profile Boost active (${daysLeft} days left)</div>`;
+    }
+    
+    if (data.premiumBadge) {
+      purchasesHtml += '<div style="background: rgba(33, 150, 243, 0.1); padding: 8px; border-radius: 6px; font-size: 11px; margin-top: 8px;">✅ Premium Badge active</div>';
+    }
+    
+    if (data.customTheme) {
+      purchasesHtml += '<div style="background: rgba(255, 152, 0, 0.1); padding: 8px; border-radius: 6px; font-size: 11px; margin-top: 8px;">🎨 Custom Themes unlocked</div>';
+    }
+
+    if (Array.isArray(data.inAppPurchases)) {
+      const unlocks = data.inAppPurchases.filter(p => p.type === 'collab-unlock').length;
+      if (unlocks > 0) {
+        purchasesHtml += `<div style="background: rgba(156, 39, 176, 0.1); padding: 8px; border-radius: 6px; font-size: 11px; margin-top: 8px;">🔓 Collaboration unlocks: ${unlocks} extra slot(s)</div>`;
+      }
+    }
+    
+    activePurchases.innerHTML = purchasesHtml;
+
+    updateMembershipDisplay();
+    updateAnalyticsDisplay();
+    applyPremiumGates();
+    
+  } catch (error) {
+    console.error('Failed to load membership status:', error);
+  }
+}
+
+async function subscribePremium(billingPeriod) {
+  const userId = getCurrentUserId();
+  if (!userId) {
+    alert('Please log in first');
+    return;
+  }
+  
+  // In production, use actual Stripe Price IDs
+  const priceIds = {
+    monthly: 'price_premium_monthly', // Replace with actual Stripe Price ID
+    yearly: 'price_premium_yearly'    // Replace with actual Stripe Price ID
+  };
+  
+  const priceId = priceIds[billingPeriod];
+  
+  try {
+    const response = await fetch(`${apiBase}/api/create-subscription-checkout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: userId,
+        priceId: priceId,
+        billingPeriod: billingPeriod
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.url) {
+      // Redirect to Stripe Checkout
+      window.location.href = data.url;
+    } else {
+      alert('Failed to create checkout session');
+    }
+  } catch (error) {
+    console.error('Subscription error:', error);
+    alert('Failed to start subscription process');
+  }
+}
+
+async function cancelSubscription() {
+  if (!confirm('Are you sure you want to cancel your Premium subscription? You will lose access to Premium features.')) {
+    return;
+  }
+  const userId = getCurrentUserId();
+  if (!userId) return;
+  
+  try {
+    const response = await fetch(`${apiBase}/api/cancel-subscription`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId })
+    });
+    
+    const data = await response.json();
+    
+    if (data.ok) {
+      alert('✓ Subscription canceled successfully');
+      loadMembershipStatus();
+    } else {
+      alert('Failed to cancel subscription: ' + (data.error || 'Unknown error'));
+    }
+  } catch (error) {
+    console.error('Cancel subscription error:', error);
+    alert('Failed to cancel subscription');
+  }
+}
+
+async function purchaseItem(purchaseType, amount, description) {
+  const userId = getCurrentUserId();
+  if (!userId) {
+    alert('Please log in first');
+    return;
+  }
+  
+  try {
+    const response = await fetch(`${apiBase}/api/create-purchase-checkout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: userId,
+        purchaseType: purchaseType,
+        amount: amount,
+        description: description
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.url) {
+      // Redirect to Stripe Checkout
+      window.location.href = data.url;
+    } else {
+      alert('Failed to create checkout session');
+    }
+  } catch (error) {
+    console.error('Purchase error:', error);
+    alert('Failed to start purchase process');
+  }
+}
+
+async function checkCollaborationLimit() {
+  const userId = getCurrentUserId();
+  if (!userId) return false;
+  
+  try {
+    const response = await fetch(`${apiBase}/api/use-collaboration-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId })
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok) {
+      appState.membership.collabsThisMonth = data.used || appState.membership.collabsThisMonth;
+      appState.membership.collabLimit = data.limit || appState.membership.collabLimit;
+      return true; // Can proceed with collaboration request
+    } else if (data.upgrade) {
+      // User has hit limit, show upgrade prompt
+      if (confirm(data.message + '\n\nWould you like to upgrade to Premium now?')) {
+        switchTab('membership');
+      }
+      return false;
+    } else {
+      alert(data.error || 'Failed to check collaboration limit');
+      return false;
+    }
+  } catch (error) {
+    console.error('Check collaboration limit error:', error);
+    return false;
+  }
+}
+
+// Handle successful purchase/subscription redirects
+window.addEventListener('load', () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  
+  if (urlParams.get('subscription') === 'success') {
+    alert('🎉 Welcome to Premium! Your subscription is now active.');
+    window.history.replaceState({}, document.title, window.location.pathname);
+    switchTab('membership');
+  } else if (urlParams.get('purchase') === 'success') {
+    const purchaseType = urlParams.get('type');
+    alert('✓ Purchase successful! Your ' + purchaseType + ' is now active.');
+    window.history.replaceState({}, document.title, window.location.pathname);
+    switchTab('membership');
+  }
+
+  applyPremiumGates();
+  updateAnalyticsDisplay();
+  if (getCurrentUserId()) {
+    loadMembershipStatus();
+  }
+});
 
 </script>
 </body>
