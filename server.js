@@ -13,6 +13,12 @@ import { Strategy as FacebookStrategy } from 'passport-facebook';
 import { Strategy as GitHubStrategy } from 'passport-github2';
 import { Server as SocketIOServer } from 'socket.io';
 import http from 'http';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+// Get __dirname equivalent in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Load environment variables
 dotenv.config();
@@ -1073,6 +1079,18 @@ app.get('/api/auth/github/callback', (req, res, next) => {
     res.redirect(`http://localhost:8000?social_login=success&user=${encodeURIComponent(JSON.stringify(userData))}`);
   }
 );
+
+// Serve static files and index.html
+app.use(express.static('.'));
+
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/index.html');
+});
+
+// Catch-all route for client-side routing
+app.get('*', (req, res) => {
+  res.sendFile(__dirname + '/index.html');
+});
 
 httpServer.listen(port, () => {
   console.log(`✅ Server running at ${domain}`);
