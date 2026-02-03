@@ -1080,17 +1080,7 @@ app.get('/api/auth/github/callback', (req, res, next) => {
   }
 );
 
-// Serve static files and index.html
-app.use(express.static('.'));
 
-app.get('/', (req, res) => {
-  res.sendFile(__dirname + '/index.html');
-});
-
-// Catch-all route for client-side routing
-app.get('*', (req, res) => {
-  res.sendFile(__dirname + '/index.html');
-});
 
 // Export for Vercel serverless
 export default app;
