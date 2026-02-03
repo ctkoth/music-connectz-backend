@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import Stripe from 'stripe';
@@ -37,7 +37,7 @@ const messagesFile = path.join(process.cwd(), 'messages.json');
 const stripe = stripeSecret ? new Stripe(stripeSecret) : null;
 
 if (!stripe) {
-  console.warn('⚠️ STRIPE_SECRET_KEY is missing. Stripe checkout will be disabled.');
+  console.warn('âš ï¸ STRIPE_SECRET_KEY is missing. Stripe checkout will be disabled.');
 }
 
 // Middleware
@@ -997,7 +997,7 @@ app.post('/api/use-collaboration-request', async (req, res) => {
 
 // Basic success/cancel placeholders
 app.get('/success', (req, res) => {
-  res.send('<h2>Payment successful 🎉</h2>');
+  res.send('<h2>Payment successful ðŸŽ‰</h2>');
 });
 
 app.get('/cancel', (req, res) => {
@@ -1093,5 +1093,5 @@ app.get('*', (req, res) => {
 });
 
 httpServer.listen(port, () => {
-  console.log(`✅ Server running at ${domain}`);
+  console.log(`âœ… Server running at ${domain}`);
 });
