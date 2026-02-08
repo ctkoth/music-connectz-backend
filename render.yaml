@@ -2,6 +2,7 @@ services:
   - type: web
     name: music-connectz-v7-bi-k-oth
     runtime: node
+    nodeVersion: 22
     plan: starter
     region: oregon
     buildCommand: npm install
