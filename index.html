@@ -1205,11 +1205,7 @@ let appState = {
 };
 
 const apiBase = (() => {
-  // Auto-detect API base: localhost for dev, Render backend for production
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    return 'http://localhost:3000';
-  }
-  // Production: use Render backend URL
+  // Always use Render backend URL for API calls
   return 'https://music-connectz-backend.onrender.com';
 })();
 
