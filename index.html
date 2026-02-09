@@ -380,7 +380,7 @@
 <div class="container">
   <div class="header">
     <div class="nav-wrapper"><button class="nav-btn" onclick="prevTab()">←</button><button class="nav-btn" onclick="nextTab()">→</button><button class="theme-toggle" onclick="toggleTheme()">🌙</button></div>
-    <div class="header-center"><div class="header-title">🎵 Music ConnectZ v7 bi K-Oth</div><div class="header-subtitle">Location-Based Collaboration • 2/1/2026</div></div>
+    <div class="header-center"><div class="header-title">🎸 Music ConnectZ v8 bi K-Oth</div><div class="header-subtitle">Location-Based Collaboration • 2/1/2026</div></div>
     <div class="header-right"><button class="btn btn-small" id="headerLoginBtn" onclick="openLoginOverlay()">🔓 Login</button><div class="balance" onclick="switchTab('money')">💰 $<span id="balanceAmount">0.00</span></div><div class="profile-pic" onclick="switchTab('profile')" id="headerPic">👤</div></div>
   </div>
 
@@ -1205,12 +1205,12 @@ let appState = {
 };
 
 const apiBase = (() => {
-  // Auto-detect API base: localhost for dev, production URL for Render
+  // Auto-detect API base: localhost for dev, Render backend for production
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     return 'http://localhost:3000';
   }
-  // Production: use current origin (will work on Render)
-  return window.location.origin;
+  // Production: use Render backend URL
+  return 'https://music-connectz-backend.onrender.com';
 })();
 
 // Storage helpers to avoid crashes when storage is blocked
