@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import session from 'express-session';
+import MongoStore from 'connect-mongo';
 import passport from 'passport';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Strategy as FacebookStrategy } from 'passport-facebook';
@@ -45,9 +46,10 @@ app.use(cors({ origin: '*', credentials: true }));
 app.use(express.json());
 app.use(session({
   secret: process.env.SESSION_SECRET || 'music-connectz-secret-key-change-in-production',
+  store: MongoStore.create({ mongoUrl: process.env.MONGODB_URI }),
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 } // 24 hours
+  cookie: { maxAge: 1000 * 60 * 60 * 24 * 30 }, // 30 days
 }));
 app.use(passport.initialize());
 app.use(passport.session());
