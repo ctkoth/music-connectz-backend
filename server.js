@@ -554,6 +554,30 @@ app.post('/api/reset-password', async (req, res) => {
   }
 });
 
+// Set password directly (admin/user-initiated)
+app.post('/api/set-password', async (req, res) => {
+  try {
+    const { userId, password } = req.body || {};
+    if (!userId || !password) {
+      return res.status(400).json({ error: 'userId and password required' });
+    }
+    if (String(password).length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+    const users = await readUsers();
+    const user = users.find((u) => u.id === userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    user.passwordHash = await bcrypt.hash(String(password), 12);
+    await writeUsers(users);
+    res.json({ ok: true, message: 'Password set successfully' });
+  } catch (error) {
+    console.error('Set password error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Update register to include phone
 app.post('/api/register', async (req, res) => {
   try {
