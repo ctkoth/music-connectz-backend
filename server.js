@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import session from 'express-session';
+import MongoStore from 'connect-mongo';
 import passport from 'passport';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Strategy as FacebookStrategy } from 'passport-facebook';
@@ -45,9 +46,10 @@ app.use(cors({ origin: '*', credentials: true }));
 app.use(express.json());
 app.use(session({
   secret: process.env.SESSION_SECRET || 'music-connectz-secret-key-change-in-production',
+  store: MongoStore.create({ mongoUrl: process.env.MONGODB_URI }),
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 } // 24 hours
+  cookie: { maxAge: 1000 * 60 * 60 * 24 * 30 }, // 30 days
 }));
 app.use(passport.initialize());
 app.use(passport.session());
@@ -65,7 +67,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
   passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: `${domain}/api/auth/google/callback`
+    callbackURL: "https://musicconnectz.net/auth/google/callback"
   }, async (accessToken, refreshToken, profile, done) => {
     try {
       const users = await readUsers();
@@ -548,6 +550,30 @@ app.post('/api/reset-password', async (req, res) => {
     res.json({ ok: true, message: 'Password reset successful' });
   } catch (error) {
     console.error('Reset password error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Set password directly (admin/user-initiated)
+app.post('/api/set-password', async (req, res) => {
+  try {
+    const { userId, password } = req.body || {};
+    if (!userId || !password) {
+      return res.status(400).json({ error: 'userId and password required' });
+    }
+    if (String(password).length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+    const users = await readUsers();
+    const user = users.find((u) => u.id === userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    user.passwordHash = await bcrypt.hash(String(password), 12);
+    await writeUsers(users);
+    res.json({ ok: true, message: 'Password set successfully' });
+  } catch (error) {
+    console.error('Set password error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

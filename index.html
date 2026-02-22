@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -380,7 +380,7 @@
 <div class="container">
   <div class="header">
     <div class="nav-wrapper"><button class="nav-btn" onclick="prevTab()">←</button><button class="nav-btn" onclick="nextTab()">→</button><button class="theme-toggle" onclick="toggleTheme()">🌙</button></div>
-    <div class="header-center"><div class="header-title">🎵 Music ConnectZ v7 bi K-Oth</div><div class="header-subtitle">Location-Based Collaboration • 2/1/2026</div></div>
+    <div class="header-center"><div class="header-title">🎸 Music ConnectZ v8 bi K-Oth</div><div class="header-subtitle">Location-Based Collaboration • 2/1/2026</div></div>
     <div class="header-right"><button class="btn btn-small" id="headerLoginBtn" onclick="openLoginOverlay()">🔓 Login</button><div class="balance" onclick="switchTab('money')">💰 $<span id="balanceAmount">0.00</span></div><div class="profile-pic" onclick="switchTab('profile')" id="headerPic">👤</div></div>
   </div>
 
@@ -1169,7 +1169,74 @@ const instrumentDatabase = {
 let appState = {
   user: {id: null, name: '', username: '', email: '', phone: '', birthday: '', gender: '', location: '', bio: '', profilePic: null, lat: null, lng: null, rating: null, membershipTier: 'free', featuredArtistStatus: false, premiumBadge: false, profileBoostExpiry: null, customTheme: null},
   auth: {loggedIn: false, user: null, guest: true},
-  personas: [],
+  personas: [
+    {
+      key: 'ghostwriter',
+      name: '👻 Ghostwriter',
+      bio: 'An experienced and versatile ghostwriter, specializing in crafting lyrics and melodies across genres. Discreet, creative, and dedicated to bringing your musical vision to life.',
+      avatar: 'ghostwriter.png',
+      skills: [
+        { name: 'Songwriting', startDate: '01/01/2020', pricePerWork: 200, pricePerHour: 50 },
+        { name: 'Lyric Editing', startDate: '01/01/2020', pricePerWork: 100, pricePerHour: 40 },
+        { name: 'Genre Versatility', startDate: '01/01/2020', pricePerWork: null, pricePerHour: null },
+        { name: 'Melody Composition', startDate: '01/01/2020', pricePerWork: 150, pricePerHour: 45 },
+        { name: 'Confidentiality', startDate: '01/01/2020', pricePerWork: null, pricePerHour: null },
+        { name: 'Collaboration', startDate: '01/01/2020', pricePerWork: null, pricePerHour: null },
+        { name: 'Storytelling', startDate: '01/01/2020', pricePerWork: null, pricePerHour: null },
+        { name: 'Vocal Arrangement', startDate: '01/01/2020', pricePerWork: 120, pricePerHour: 40 },
+        { name: 'Music Theory', startDate: '01/01/2020', pricePerWork: null, pricePerHour: null },
+        { name: 'Quick Turnaround', startDate: '01/01/2020', pricePerWork: null, pricePerHour: null }
+      ]
+    },
+    {
+      key: 'designer',
+      name: '🎨 Designer',
+      avatar: 'designer.png',
+      skills: []
+    },
+    {
+      key: 'videographer',
+      name: '🎬 Videographer',
+      avatar: 'videographer.png',
+      skills: []
+    },
+    {
+      key: 'producer',
+      name: '🎚️ Beat Producer',
+      avatar: 'producer.png',
+      skills: []
+    },
+    {
+      key: 'artist',
+      name: '🎤 Indie Artist',
+      avatar: 'artist.png',
+      skills: []
+    },
+    {
+      key: 'engineer',
+      name: '🎛️ Mix Engineer',
+      avatar: 'engineer.png',
+      skills: []
+    },
+    {
+      key: 'business-manager',
+      name: '💼 Business Manager',
+      avatar: 'business-manager.png',
+      bio: 'A skilled business manager specializing in music industry operations, contracts, marketing, and financial management. Ensures your creative work is protected and promoted.',
+      skills: [
+        { name: 'Contract Negotiation', startDate: '01/01/2020', pricePerWork: 250, pricePerHour: 60 },
+        { name: 'Marketing Strategy', startDate: '01/01/2020', pricePerWork: 200, pricePerHour: 55 },
+        { name: 'Copyright Management', startDate: '01/01/2020', pricePerWork: 180, pricePerHour: 50 },
+        { name: 'Financial Planning', startDate: '01/01/2020', pricePerWork: 220, pricePerHour: 60 },
+        { name: 'Brand Development', startDate: '01/01/2020', pricePerWork: 210, pricePerHour: 55 },
+        { name: 'Project Management', startDate: '01/01/2020', pricePerWork: 200, pricePerHour: 50 },
+        { name: 'Networking', startDate: '01/01/2020', pricePerWork: null, pricePerHour: null },
+        { name: 'Promotion', startDate: '01/01/2020', pricePerWork: 190, pricePerHour: 50 },
+        { name: 'Legal Compliance', startDate: '01/01/2020', pricePerWork: 230, pricePerHour: 60 },
+        { name: 'Team Leadership', startDate: '01/01/2020', pricePerWork: null, pricePerHour: null }
+      ]
+    }
+  ],
   examples: [],
   collabs: [],
   skillsUsed: [],
@@ -1205,12 +1272,8 @@ let appState = {
 };
 
 const apiBase = (() => {
-  // Auto-detect API base: localhost for dev, production URL for Render
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    return 'http://localhost:3000';
-  }
-  // Production: use current origin (will work on Render)
-  return window.location.origin;
+  // Always use Render backend URL for API calls
+  return 'https://music-connectz-backend-2.onrender.com';
 })();
 
 // Storage helpers to avoid crashes when storage is blocked
@@ -1646,7 +1709,17 @@ function renderPersonasDisplay() {
       try {
         const card = document.createElement('div');
         card.className = 'persona-card';
-        card.innerHTML = `<div class="persona-header"><div class="persona-name">${persona.name}</div><button class="btn btn-danger btn-small" onclick="removePersona(${idx})">Remove</button></div><div style="font-size: 11px;"><div style="font-weight: 600; margin-bottom: 6px;">Skills:</div><div id="personaSkills${idx}"></div></div>`;
+        card.innerHTML = `<div class="persona-header">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            ${persona.avatar ? `<img src="${persona.avatar}" alt="${persona.name} avatar" style="width:48px;height:48px;border-radius:10px;object-fit:cover;box-shadow:0 2px 8px rgba(0,0,0,0.10);">` : ''}
+            <div class="persona-name">${persona.name}</div>
+          </div>
+          <button class="btn btn-danger btn-small" onclick="removePersona(${idx})">Remove</button>
+        </div>
+        <div style="font-size: 11px;">
+          <div style="font-weight: 600; margin-bottom: 6px;">Skills:</div>
+          <div id="personaSkills${idx}"></div>
+        </div>`;
         display.appendChild(card);
         const skillsDiv = document.getElementById(`personaSkills${idx}`);
         if (persona.skills && Array.isArray(persona.skills)) {
