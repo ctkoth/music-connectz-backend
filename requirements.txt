@@ -3,3 +3,4 @@
 Django
 gunicorn
 django-allauth
+requests
