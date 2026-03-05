@@ -4,3 +4,8 @@ Django
 gunicorn
 django-allauth
 requests
+PyJWT
+oauthlib
+requests-oauthlib
+python3-openid
+cryptography
