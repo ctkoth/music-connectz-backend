@@ -1,9 +1,4 @@
 
-Flask
-Flask-PyMongo
-Flask-Dance
+
+Django
 gunicorn
-python-dotenv
-stripe
-Werkzeug
-Flask-CORS

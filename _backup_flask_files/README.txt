@@ -1,0 +1,1 @@
+This folder contains backups of Flask-related files (app.py, db.py, models.py) removed for Django-only setup.
