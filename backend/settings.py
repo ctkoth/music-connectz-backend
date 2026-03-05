@@ -25,7 +25,11 @@ SECRET_KEY = 'django-insecure-#2yk%)k4t(bt83ch263hn*b_5uvi=8)qi@jn+$nyeqv7!_@=@&
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    "music-connectz-backend-1.onrender.com",
+    "localhost",
+    "127.0.0.1"
+]
 
 
 # Application definition
@@ -136,7 +140,14 @@ USE_I18N = True
 USE_TZ = True
 
 
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/6.0/howto/static-files/
+
+# Email backend configuration for Gmail SMTP
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'ctkotth@gmail.com'
+EMAIL_HOST_PASSWORD = 'wrtf lxtk ppoy crhq'  # Your Gmail app password
+DEFAULT_FROM_EMAIL = 'ctkotth@gmail.com'
 
 STATIC_URL = 'static/'
