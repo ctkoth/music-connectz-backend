@@ -19,8 +19,24 @@
 </head>
 <body>
   <div class="auth-form" id="authForm">
-    <h2>Sign Up / Sign In</h2>
-    <p>
+    <h2>Sign Up</h2>
+    <form id="signupForm">
+      <input type="email" id="signupEmail" placeholder="Email" required />
+      <input type="password" id="signupPassword1" placeholder="Password" required />
+      <input type="password" id="signupPassword2" placeholder="Confirm Password" required />
+      <div style="margin-bottom:10px;">
+        <small id="password-help" style="color: #555;">
+          Password must be at least 8 characters, contain a number, a lowercase and an uppercase letter.
+        </small>
+      </div>
+      <div>
+        <input type="checkbox" id="show-passwords" style="margin-right:5px;">
+        <label for="show-passwords">Show Passwords</label>
+      </div>
+      <button type="submit">Sign Up</button>
+      <div id="signup-error" style="color:red; margin-top:10px;"></div>
+    </form>
+    <p style="margin-top:18px;">
       <a href="http://127.0.0.1:8000/accounts/login/">Login or Register with Email or Social Account</a>
     </p>
     <p id="edit-date" style="font-size:13px; color:#888; margin-top:18px;"></p>
@@ -30,6 +46,37 @@
     const editDate = new Date();
     const options = { year: 'numeric', month: 'long', day: 'numeric' };
     document.getElementById('edit-date').innerText = 'Released: ' + editDate.toLocaleDateString(undefined, options);
+
+    // Show/hide password toggle
+    document.getElementById('show-passwords').addEventListener('change', function() {
+      const pw1 = document.getElementById('signupPassword1');
+      const pw2 = document.getElementById('signupPassword2');
+      const type = this.checked ? 'text' : 'password';
+      pw1.type = type;
+      pw2.type = type;
+    });
+
+    // Password validation and match check
+    document.getElementById('signupForm').onsubmit = function(e) {
+      const email = document.getElementById('signupEmail').value;
+      const pw1 = document.getElementById('signupPassword1').value;
+      const pw2 = document.getElementById('signupPassword2').value;
+      let errorMsg = '';
+      if (pw1 !== pw2) {
+        errorMsg = 'Passwords do not match.';
+      } else if (!/^.*(?=.{8,})(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).*$/.test(pw1)) {
+        errorMsg = 'Password does not meet requirements.';
+      }
+      if (errorMsg) {
+        document.getElementById('signup-error').innerText = errorMsg;
+        e.preventDefault();
+      } else {
+        document.getElementById('signup-error').innerText = '';
+        // TODO: Submit to backend or handle registration here
+        e.preventDefault();
+        alert('Sign-up form validated! (Implement backend call here)');
+      }
+    };
   </script>
   </div>
 
