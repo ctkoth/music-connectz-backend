@@ -19,36 +19,12 @@
 </head>
 <body>
   <div class="auth-form" id="authForm">
-    <h2 id="formTitle">Sign Up</h2>
-    <input type="email" id="email" placeholder="Email" required />
-    <div style="position:relative;">
-      <input type="password" id="password" placeholder="Password" required style="padding-right:32px;" />
-      <button type="button" onclick="togglePassword('password')" style="position:absolute; right:6px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; font-size:18px; color:#888;">
-        <span id="passwordEye">👁️</span>
-      </button>
-    </div>
-    <button onclick="handleAuth()" id="authBtn">Sign Up</button>
-    <button class="switch" onclick="switchAuth()" id="switchBtn">Already have an account? Sign In</button>
-    <button onclick="signOut()" style="margin-top:10px; background:#F44336;">Sign Out</button>
+    <h2>Sign Up / Sign In</h2>
+    <p>
+      <a href="http://127.0.0.1:8000/accounts/login/">Login or Register with Email or Social Account</a>
+    </p>
   </div>
-  <script>
-    let isSignUp = true;
-    function handleAuth() {
-      const email = document.getElementById('email').value;
-      const password = document.getElementById('password').value;
-      if (isSignUp) {
-        signUp(email, password);
-      } else {
-        signIn(email, password);
-      }
-    }
-    function switchAuth() {
-      isSignUp = !isSignUp;
-      document.getElementById('formTitle').innerText = isSignUp ? 'Sign Up' : 'Sign In';
-      document.getElementById('authBtn').innerText = isSignUp ? 'Sign Up' : 'Sign In';
-      document.getElementById('switchBtn').innerText = isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up";
-    }
-  </script>
+
   <style>
     :root {
       --primary: #2196F3;
@@ -412,6 +388,14 @@
           </button>
         </div>
       </div>
+        <div class="form-group"><label>Confirm Password *</label>
+          <div style="position:relative;">
+            <input type="password" id="authPhoneConfirmPassword" placeholder="Re-enter password" style="padding-right:32px;" />
+            <button type="button" onclick="togglePassword('authPhoneConfirmPassword')" style="position:absolute; right:6px; top:50%; transform:translateY(-50%); background:none; border:none; cursor:pointer; font-size:18px; color:#888;">
+              <span id="authPhoneConfirmPasswordEye">👁️</span>
+            </button>
+          </div>
+        </div>
       <div class="auth-actions">
         <button class="btn btn-success" onclick="loginWithPhone()">🔓 Login with Phone</button>
         <button class="btn btn-secondary" onclick="backToMainAuth()">⬅️ Back</button>
