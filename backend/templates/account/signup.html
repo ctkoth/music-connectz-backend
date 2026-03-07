@@ -15,6 +15,15 @@
         <div>
             <input type="password" name="password2" id="password2" placeholder="Confirm Password" required>
         </div>
+            <div style="margin-bottom:10px;">
+                <small id="password-help" style="color: #555;">
+                    Password must be at least 8 characters, contain a number, a lowercase and an uppercase letter.
+                </small>
+            </div>
+            <div>
+                <input type="checkbox" id="show-passwords" style="margin-right:5px;">
+                <label for="show-passwords">Show Passwords</label>
+            </div>
         <div>
             <button type="submit">Sign Up</button>
         </div>
@@ -26,10 +35,24 @@
     document.getElementById('signup_form').onsubmit = function(e) {
         var pw1 = document.getElementById('password1').value;
         var pw2 = document.getElementById('password2').value;
+        var errorMsg = '';
         if (pw1 !== pw2) {
-            document.getElementById('error-message').innerText = 'Passwords do not match.';
+            errorMsg = 'Passwords do not match.';
+        } else if (!/^.*(?=.{8,})(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).*$/.test(pw1)) {
+            errorMsg = 'Password does not meet requirements.';
+        }
+        if (errorMsg) {
+            document.getElementById('error-message').innerText = errorMsg;
             e.preventDefault();
         }
     };
+
+    document.getElementById('show-passwords').addEventListener('change', function() {
+        var pw1 = document.getElementById('password1');
+        var pw2 = document.getElementById('password2');
+        var type = this.checked ? 'text' : 'password';
+        pw1.type = type;
+        pw2.type = type;
+    });
 </script>
 {% endblock %}
