@@ -50,6 +50,9 @@ INSTALLED_APPS = [
     'allauth.socialaccount.providers.github',
     'allauth.socialaccount.providers.twitter',
     'allauth.socialaccount.providers.discord',
+    'allauth.socialaccount.providers.apple',
+    'allauth.socialaccount.providers.microsoft',
+    'allauth.socialaccount.providers.soundcloud',
 ]
 # Add site id for django.contrib.sites
 SITE_ID = 1
@@ -60,10 +63,9 @@ AUTHENTICATION_BACKENDS = [
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
-# allauth settings (customize as needed)
-ACCOUNT_EMAIL_REQUIRED = True
-ACCOUNT_USERNAME_REQUIRED = False
-ACCOUNT_AUTHENTICATION_METHOD = 'email'
+# Allauth registration: new settings for account fields and login methods
+ACCOUNT_SIGNUP_FIELDS = ['email*', 'password1*', 'password2*']
+ACCOUNT_LOGIN_METHODS = {'email', 'username'}  # or {'email'} if you want email only
 ACCOUNT_EMAIL_VERIFICATION = 'optional'
 
 
