@@ -23,4 +23,5 @@ urlpatterns = [
     path('', views.home, name='home'),
     path('admin/', admin.site.urls),
     path('accounts/', include('allauth.urls')),
+    path('upload/', views.upload_work, name='upload_work'),
 ]

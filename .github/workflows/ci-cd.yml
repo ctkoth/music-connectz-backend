@@ -1,0 +1,39 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install backend dependencies
+        run: |
+          cd 'c:/Users/ctkot/OneDrive/Documents/music-connectz-backend django'
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run backend tests (if any)
+        run: |
+          cd 'c:/Users/ctkot/OneDrive/Documents/music-connectz-backend django'
+          # python manage.py test
+
+      - name: Install frontend dependencies (if any)
+        run: |
+          cd 'c:/Users/ctkot/OneDrive/Documents/music-connectz-frontend'
+          # npm ci or pip install -r requirements.txt if needed
+
+      - name: Deploy (if using Render, Vercel, etc.)
+        run: |
+          echo "Add your deployment command here (e.g., vercel --prod, render deploy, etc.)"
