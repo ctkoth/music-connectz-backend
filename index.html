@@ -23,6 +23,14 @@
     <p>
       <a href="http://127.0.0.1:8000/accounts/login/">Login or Register with Email or Social Account</a>
     </p>
+    <p id="edit-date" style="font-size:13px; color:#888; margin-top:18px;"></p>
+  </div>
+  <script>
+    // Set the 'Edited on' date to today
+    const editDate = new Date();
+    const options = { year: 'numeric', month: 'long', day: 'numeric' };
+    document.getElementById('edit-date').innerText = 'Released: ' + editDate.toLocaleDateString(undefined, options);
+  </script>
   </div>
 
   <style>
