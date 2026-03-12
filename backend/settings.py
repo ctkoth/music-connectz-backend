@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     'allauth.socialaccount.providers.apple',
     'allauth.socialaccount.providers.microsoft',
     'allauth.socialaccount.providers.soundcloud',
+    'rest_framework',
 ]
 # Add site id for django.contrib.sites
 SITE_ID = 1

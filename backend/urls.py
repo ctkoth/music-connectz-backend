@@ -24,4 +24,6 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('accounts/', include('allauth.urls')),
     path('upload/', views.upload_work, name='upload_work'),
+    path('api/auth/google/available', views.google_available),
+    path('api/auth/register/', views.api_register, name='api_register'),
 ]
