@@ -1,5 +1,3 @@
-
-
 Django
 gunicorn
 django-allauth
@@ -9,3 +7,4 @@ oauthlib
 requests-oauthlib
 python3-openid
 cryptography
+djangorestframework
