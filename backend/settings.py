@@ -27,6 +27,7 @@ DEBUG = True
 
 ALLOWED_HOSTS = [
     "music-connectz-backend-1.onrender.com",
+    "music-connectz-backend-2.onrender.com",
     "localhost",
     "127.0.0.1"
 ]
