@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Music ConnectZ v7 bi K-Oth</title>
+  <title>Music ConnectZ v8.1 bi K-Oth</title>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
   <script src="https://js.stripe.com/v3/"></script>
   <script src="stripe-config.js"></script>
@@ -37,6 +37,10 @@
 </head>
 <body>
   <div class="auth-form" id="authForm">
+    <div style="text-align:center; margin-bottom:10px;">
+      <span style="font-weight:bold; font-size:1.2em;">Music ConnectZ v8.1</span>
+      <span id="header-date" style="font-size:0.95em; color:#888; margin-left:8px;"></span>
+    </div>
     <h2>Sign Up</h2>
     <form id="signupForm">
       <input type="email" id="signupEmail" placeholder="Email" required />
@@ -60,7 +64,13 @@
     <p id="edit-date" style="font-size:13px; color:#888; margin-top:18px;"></p>
   </div>
   <script>
-    // Set the 'Edited on' date to today
+
+    // Set the header date to today
+    const headerDate = new Date();
+    const headerOptions = { year: 'numeric', month: 'long', day: 'numeric' };
+    document.getElementById('header-date').innerText = headerDate.toLocaleDateString(undefined, headerOptions);
+
+    // Set the 'Edited on' date to today (keep for footer)
     const editDate = new Date();
     const options = { year: 'numeric', month: 'long', day: 'numeric' };
     document.getElementById('edit-date').innerText = 'Released: ' + editDate.toLocaleDateString(undefined, options);
