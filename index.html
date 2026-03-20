@@ -102,7 +102,7 @@
         document.getElementById('signup-error').innerText = '';
         e.preventDefault();
         // Submit to Django backend registration API
-        fetch('https://musicconnectz.net/api/auth/register/', {
+        fetch('https://music-connectz-backend-2.onrender.com/api/auth/register/', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
