@@ -5,7 +5,7 @@
   <title>Music ConnectZ v8.3 bi K-Oth</title>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
   <script src="https://js.stripe.com/v3/"></script>
-  <script src="stripe-config.js"></script>
+  <script src="/stripe-config.js"></script>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 
   <style>
@@ -37,43 +37,43 @@
 </head>
 <body>
   <div style="text-align:center; margin-top:24px;">
-    <img src="music-connectz-logo.png" alt="Music ConnectZ Logo" style="width:120px; max-width:90vw; height:auto; border-radius:24px; box-shadow:0 2px 12px rgba(0,0,0,0.13); background:#fff; margin-bottom:12px;" />
+    <img src="/music-connectz-logo.png" alt="Music ConnectZ Logo" style="width:120px; max-width:90vw; height:auto; border-radius:24px; box-shadow:0 2px 12px rgba(0,0,0,0.13); background:#fff; margin-bottom:12px;" />
   </div>
   <div class="auth-form" id="authForm">
     <div style="text-align:center; margin-bottom:10px;">
       <div style="display:flex; justify-content:center; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:10px;">
         <div style="display:flex; flex-direction:column; align-items:center; width:64px;">
-          <img src="artist.png" alt="Artist" title="Artist" style="width:48px; height:48px; border-radius:12px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.08);" />
+          <img src="/artist.png" alt="Artist" title="Artist" style="width:48px; height:48px; border-radius:12px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.08);" />
           <span style="font-size:13px; margin-top:4px; color:#333;">Artist</span>
         </div>
         <div style="display:flex; flex-direction:column; align-items:center; width:64px;">
-          <img src="designer.png" alt="Designer" title="Designer" style="width:48px; height:48px; border-radius:12px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.08);" />
+          <img src="/designer.png" alt="Designer" title="Designer" style="width:48px; height:48px; border-radius:12px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.08);" />
           <span style="font-size:13px; margin-top:4px; color:#333;">Designer</span>
         </div>
         <div style="display:flex; flex-direction:column; align-items:center; width:64px;">
-          <img src="engineer.png" alt="Engineer" title="Engineer" style="width:48px; height:48px; border-radius:12px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.08);" />
+          <img src="/engineer.png" alt="Engineer" title="Engineer" style="width:48px; height:48px; border-radius:12px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.08);" />
           <span style="font-size:13px; margin-top:4px; color:#333;">Engineer</span>
         </div>
         <div style="display:flex; flex-direction:column; align-items:center; width:64px;">
-          <img src="ghostwriter.png" alt="Ghostwriter" title="Ghostwriter" style="width:48px; height:48px; border-radius:12px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.08);" />
+          <img src="/ghostwriter.png" alt="Ghostwriter" title="Ghostwriter" style="width:48px; height:48px; border-radius:12px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.08);" />
           <span style="font-size:13px; margin-top:4px; color:#333;">Ghostwriter</span>
         </div>
         <div style="display:flex; flex-direction:column; align-items:center; width:72px;">
-          <img src="manager-logo.png" alt="Manager" title="Manager" style="width:64px; height:64px; border-radius:16px; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.10); border:2px solid #ffa726;" />
+          <img src="/manager-logo.png" alt="Manager" title="Manager" style="width:64px; height:64px; border-radius:16px; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.10); border:2px solid #ffa726;" />
           <span style="font-size:14px; margin-top:4px; color:#e65100; font-weight:bold;">Manager</span>
         </div>
         <div style="display:flex; flex-direction:column; align-items:center; width:64px;">
-          <img src="producer.png" alt="Producer" title="Producer" style="width:48px; height:48px; border-radius:12px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.08);" />
+          <img src="/producer.png" alt="Producer" title="Producer" style="width:48px; height:48px; border-radius:12px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.08);" />
           <span style="font-size:13px; margin-top:4px; color:#333;">Producer</span>
         </div>
         <div style="display:flex; flex-direction:column; align-items:center; width:64px;">
-          <img src="videographer.png" alt="Videographer" title="Videographer" style="width:48px; height:48px; border-radius:12px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.08);" />
+          <img src="/videographer.png" alt="Videographer" title="Videographer" style="width:48px; height:48px; border-radius:12px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.08);" />
           <span style="font-size:13px; margin-top:4px; color:#333;">Videographer</span>
         </div>
       </div>
       <div id="business-manager-persona" style="margin: 24px auto 0 auto; max-width: 400px; background: #fffbe7; border-radius: 12px; box-shadow: 0 2px 8px rgba(255,167,38,0.10); padding: 18px 20px 14px 20px; border: 1.5px solid #ffa726;">
         <div style="display: flex; align-items: center; gap: 16px;">
-          <img src="manager-logo.png" alt="Business Manager" style="width:56px; height:56px; border-radius:14px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.08); border:2px solid #ffa726;" />
+          <img src="/manager-logo.png" alt="Business Manager" style="width:56px; height:56px; border-radius:14px; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.08); border:2px solid #ffa726;" />
           <div>
             <div style="font-size:1.15em; font-weight:bold; color:#e65100;">Business Manager</div>
             <div style="font-size:0.98em; color:#555; margin-top:2px;">Key Skills:</div>
