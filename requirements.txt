@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 Django
 gunicorn
 django-allauth
@@ -8,3 +9,7 @@ requests-oauthlib
 python3-openid
 cryptography
 djangorestframework
+=======
+flask
+flask-cors
+>>>>>>> 50bcc7f (Initial Flask backend: add simple_server.py and requirements.txt)
