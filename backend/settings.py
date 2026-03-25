@@ -48,7 +48,15 @@ INSTALLED_APPS = [
     'allauth',
     'allauth.account',
     'allauth.socialaccount',
+    'allauth.socialaccount.providers.apple',
+    'allauth.socialaccount.providers.microsoft',
+    'allauth.socialaccount.providers.facebook',
+    'allauth.socialaccount.providers.twitter_oauth2',
+    'allauth.socialaccount.providers.linkedin_oauth2',
+    'allauth.socialaccount.providers.github',
     'allauth.socialaccount.providers.google',
+    'allauth.socialaccount.providers.spotify',
+    'allauth.socialaccount.providers.soundcloud',
     'rest_framework',
     'corsheaders',
 ]
@@ -74,10 +82,35 @@ SOCIALACCOUNT_LOGIN_ON_GET = True
 SOCIALACCOUNT_STORE_TOKENS = True
 SOCIALACCOUNT_ADAPTER = 'backend.adapters.SafeSocialAccountAdapter'
 SOCIALACCOUNT_PROVIDERS = {
+    'apple': {
+        'SCOPE': ['name', 'email'],
+    },
+    'microsoft': {
+        'SCOPE': ['openid', 'profile', 'email'],
+    },
+    'facebook': {
+        'SCOPE': ['email', 'public_profile'],
+        'AUTH_PARAMS': {'auth_type': 'rerequest'},
+    },
+    'twitter_oauth2': {
+        'SCOPE': ['users.read', 'tweet.read', 'offline.access'],
+    },
+    'linkedin_oauth2': {
+        'SCOPE': ['openid', 'profile', 'email'],
+    },
+    'github': {
+        'SCOPE': ['read:user', 'user:email'],
+    },
     'google': {
         'SCOPE': ['profile', 'email'],
         'AUTH_PARAMS': {'prompt': 'select_account'},
-    }
+    },
+    'spotify': {
+        'SCOPE': ['user-read-email'],
+    },
+    'soundcloud': {
+        'SCOPE': ['non-expiring'],
+    },
 }
 LOGIN_REDIRECT_URL = 'https://musicconnectz.net/'
 LOGOUT_REDIRECT_URL = 'https://musicconnectz.net/'
