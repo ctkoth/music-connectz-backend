@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -77,6 +78,14 @@ SOCIALACCOUNT_PROVIDERS = {
         'AUTH_PARAMS': {'prompt': 'select_account'},
     }
 }
+google_client_id = os.getenv('GOOGLE_CLIENT_ID')
+google_client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
+if google_client_id and google_client_secret:
+    SOCIALACCOUNT_PROVIDERS['google']['APP'] = {
+        'client_id': google_client_id,
+        'secret': google_client_secret,
+        'key': '',
+    }
 LOGIN_REDIRECT_URL = 'https://musicconnectz.net/'
 LOGOUT_REDIRECT_URL = 'https://musicconnectz.net/'
 
