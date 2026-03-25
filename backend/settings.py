@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     'allauth.socialaccount.providers.microsoft',
     'allauth.socialaccount.providers.soundcloud',
     'rest_framework',
+    'corsheaders',
 ]
 # Add site id for django.contrib.sites
 SITE_ID = 1
@@ -73,6 +74,7 @@ ACCOUNT_EMAIL_VERIFICATION = 'optional'
 
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -156,3 +158,9 @@ EMAIL_HOST_PASSWORD = 'wrtf lxtk ppoy crhq'  # Your Gmail app password
 DEFAULT_FROM_EMAIL = 'ctkotth@gmail.com'
 
 STATIC_URL = 'static/'
+
+# CORS settings for frontend
+CORS_ALLOWED_ORIGINS = [
+    "https://musicconnectz.net",
+    "https://www.musicconnectz.net",
+]
