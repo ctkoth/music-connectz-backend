@@ -78,14 +78,6 @@ SOCIALACCOUNT_PROVIDERS = {
         'AUTH_PARAMS': {'prompt': 'select_account'},
     }
 }
-google_client_id = os.getenv('GOOGLE_CLIENT_ID')
-google_client_secret = os.getenv('GOOGLE_CLIENT_SECRET')
-if google_client_id and google_client_secret:
-    SOCIALACCOUNT_PROVIDERS['google']['APP'] = {
-        'client_id': google_client_id,
-        'secret': google_client_secret,
-        'key': '',
-    }
 LOGIN_REDIRECT_URL = 'https://musicconnectz.net/'
 LOGOUT_REDIRECT_URL = 'https://musicconnectz.net/'
 
