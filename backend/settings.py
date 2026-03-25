@@ -77,8 +77,8 @@ SOCIALACCOUNT_PROVIDERS = {
         'AUTH_PARAMS': {'prompt': 'select_account'},
     }
 }
-LOGIN_REDIRECT_URL = '/'
-LOGOUT_REDIRECT_URL = '/'
+LOGIN_REDIRECT_URL = 'https://musicconnectz.net/'
+LOGOUT_REDIRECT_URL = 'https://musicconnectz.net/'
 
 
 MIDDLEWARE = [
