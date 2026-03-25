@@ -249,12 +249,13 @@
 
       const authEntryLink = document.getElementById('auth-entry-link');
       const secureAuthLink = document.getElementById('secure-auth-link');
-      const googleLoginUrl = `${window.MCZ_CONFIG.backendUrl}/accounts/google/login/?process=login&next=${encodeURIComponent(location.href)}`;
+      const authPath = window.MCZ_CONFIG.authEntryPath || '/accounts/login/';
+      const authEntryUrl = `${window.MCZ_CONFIG.backendUrl}${authPath}?next=${encodeURIComponent(location.href)}`;
       if (authEntryLink) {
-        authEntryLink.href = googleLoginUrl;
+        authEntryLink.href = authEntryUrl;
       }
       if (secureAuthLink) {
-        secureAuthLink.href = googleLoginUrl;
+        secureAuthLink.href = authEntryUrl;
       }
     });
 
@@ -319,7 +320,8 @@
           document.getElementById('signup-error').innerText = 'Redirecting to secure server registration...';
           setTimeout(() => {
             const nextUrl = encodeURIComponent(location.href);
-            window.location.href = `${window.MCZ_CONFIG.backendUrl}/accounts/google/login/?process=login&next=${nextUrl}`;
+            const authPath = window.MCZ_CONFIG.authEntryPath || '/accounts/login/';
+            window.location.href = `${window.MCZ_CONFIG.backendUrl}${authPath}?next=${nextUrl}`;
           }, 300);
           return;
         }
@@ -3352,13 +3354,14 @@ function corsBlockedMessage(actionLabel) {
   return `${actionLabel} blocked by server CORS policy. Allow origin: ${location.origin}`;
 }
 
-function getGoogleLoginUrl() {
+function getBackendAuthUrl() {
   const nextUrl = encodeURIComponent(location.href);
-  return `${apiBase}/accounts/google/login/?process=login&next=${nextUrl}`;
+  const authPath = (window.MCZ_CONFIG && window.MCZ_CONFIG.authEntryPath) || '/accounts/login/';
+  return `${apiBase}${authPath}?next=${nextUrl}`;
 }
 
 function openBackendAuthPage() {
-  window.location.href = getGoogleLoginUrl();
+  window.location.href = getBackendAuthUrl();
 }
 
 async function registerUser(fromOverlay = false) {
@@ -3654,8 +3657,8 @@ async function completePasswordReset() {
 
 function socialLogin(provider) {
   if ((window.MCZ_CONFIG && window.MCZ_CONFIG.forceBackendAuth) && provider === 'google') {
-    setAuthStatus('Redirecting to Google sign in...');
-    window.location.href = getGoogleLoginUrl();
+    setAuthStatus('Redirecting to secure server login...');
+    openBackendAuthPage();
     return;
   }
 
