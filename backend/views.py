@@ -32,6 +32,30 @@ def google_available(request):
         "db_socialapp_set": db_socialapp_set,
     })
 
+
+def oauth_providers_status(request):
+    provider_map = {
+        'apple': 'apple',
+        'microsoft': 'microsoft',
+        'facebook': 'facebook',
+        'twitter': 'twitter_oauth2',
+        'linkedin': 'linkedin_oauth2',
+        'github': 'github',
+        'google': 'google',
+        'spotify': 'spotify',
+        'soundcloud': 'soundcloud',
+    }
+
+    providers = {}
+    for frontend_provider, allauth_provider in provider_map.items():
+        app = SocialApp.objects.filter(provider=allauth_provider).order_by('id').first()
+        providers[frontend_provider] = bool(app and app.client_id and app.secret)
+
+    return JsonResponse({
+        'providers': providers,
+        'any_available': any(providers.values()),
+    })
+
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from .forms import WorkForm
