@@ -1211,11 +1211,11 @@
         </div>
         <div id="analyticsDashboard" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
           <div style="background: var(--bg); padding: 12px; border-radius: 8px; text-align: center;">
-            <div style="font-size: 11px; color: var(--text-light);">Profile Views</div>
+            <div style="font-size: 11px; color: var(--text-light);">Live Visits</div>
             <div style="font-size: 18px; font-weight: 800;" id="analyticsViews">0</div>
           </div>
           <div style="background: var(--bg); padding: 12px; border-radius: 8px; text-align: center;">
-            <div style="font-size: 11px; color: var(--text-light);">Engagement</div>
+            <div style="font-size: 11px; color: var(--text-light);">Unique Visitors</div>
             <div style="font-size: 18px; font-weight: 800;" id="analyticsEngagement">0</div>
           </div>
         </div>
@@ -5329,6 +5329,32 @@ function updateAnalyticsDisplay() {
   engagement.textContent = engagementScore;
 }
 
+function getVisitorKey() {
+  const storageKey = 'mczVisitorKey';
+  let visitorKey = localStorage.getItem(storageKey);
+  if (visitorKey) return visitorKey;
+
+  visitorKey = `visitor_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+  localStorage.setItem(storageKey, visitorKey);
+  return visitorKey;
+}
+
+async function loadLiveAnalytics() {
+  try {
+    const visitorKey = encodeURIComponent(getVisitorKey());
+    const response = await fetch(`${apiBase}/api/analytics/site/?visitor_key=${visitorKey}`);
+    if (!response.ok) return;
+
+    const data = await response.json();
+    appState.analytics.profileViews = data.totalVisits || 0;
+    appState.analytics.engagement = data.uniqueVisitors || 0;
+    saveAppState();
+    updateAnalyticsDisplay();
+  } catch (error) {
+    console.warn('Live analytics unavailable:', error);
+  }
+}
+
 async function loadMembershipStatus() {
   const userId = getCurrentUserId();
   if (!userId) return;
@@ -5566,6 +5592,7 @@ window.addEventListener('load', () => {
   }
 
   applyPremiumGates();
+  loadLiveAnalytics();
   updateAnalyticsDisplay();
   if (getCurrentUserId()) {
     loadMembershipStatus();
