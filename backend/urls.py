@@ -42,6 +42,7 @@ urlpatterns = [
     path('api/auth/providers/status/', views.oauth_providers_status, name='oauth_providers_status'),
     path('api/auth/me/', views.api_auth_me, name='api_auth_me'),
     path('api/auth/register/', views.api_register, name='api_register'),
+    path('api/analytics/site/', views.site_analytics, name='site_analytics'),
     path('api/create-subscription-checkout', views.create_subscription_checkout, name='create_subscription_checkout'),
     path('api/create-purchase-checkout', views.create_purchase_checkout, name='create_purchase_checkout'),
     path('api/cancel-subscription', views.cancel_subscription, name='cancel_subscription'),

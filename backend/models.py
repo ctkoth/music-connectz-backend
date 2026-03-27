@@ -26,3 +26,23 @@ class Work(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class SiteAnalytics(models.Model):
+    key = models.CharField(max_length=32, unique=True, default='global')
+    total_visits = models.PositiveIntegerField(default=0)
+    unique_visitors = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.key}: {self.total_visits} visits"
+
+
+class VisitorRecord(models.Model):
+    visitor_key = models.CharField(max_length=128, unique=True)
+    visit_count = models.PositiveIntegerField(default=1)
+    first_seen_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.visitor_key
