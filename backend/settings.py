@@ -114,6 +114,7 @@ SOCIALACCOUNT_PROVIDERS = {
 }
 LOGIN_REDIRECT_URL = 'https://musicconnectz.net/'
 LOGOUT_REDIRECT_URL = 'https://musicconnectz.net/'
+SOCIALACCOUNT_ERROR_URL = 'https://musicconnectz.net/?login_error=1'
 
 
 MIDDLEWARE = [

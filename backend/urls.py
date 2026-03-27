@@ -17,11 +17,19 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import path, include
+from django.views.generic import RedirectView
 from . import views
+
+_FRONTEND_ERROR_URL = 'https://musicconnectz.net/?login_error=1'
 
 urlpatterns = [
     path('', views.home, name='home'),
     path('admin/', admin.site.urls),
+    path(
+        'accounts/social/login/error/',
+        RedirectView.as_view(url=_FRONTEND_ERROR_URL, permanent=False),
+        name='socialaccount_login_error',
+    ),
     path('accounts/', include('allauth.urls')),
     path('upload/', views.upload_work, name='upload_work'),
     path('api/auth/google/available', views.google_available),
