@@ -20,6 +20,15 @@ class BackendConfig(AppConfig):
     name = 'backend'
 
     def ready(self):
+        # Fix SoundCloud provider: API may return 'id' instead of 'urn'
+        try:
+            from allauth.socialaccount.providers.soundcloud.provider import SoundCloudProvider
+            def _patched_extract_uid(self, data):
+                return str(data.get('urn') or data.get('id') or data.get('permalink'))
+            SoundCloudProvider.extract_uid = _patched_extract_uid
+        except Exception:
+            pass
+
         try:
             from allauth.socialaccount.models import SocialApp
             from django.contrib.sites.models import Site

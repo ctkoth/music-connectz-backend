@@ -21,10 +21,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-#2yk%)k4t(bt83ch263hn*b_5uvi=8)qi@jn+$nyeqv7!_@=@&'
+SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-#2yk%)k4t(bt83ch263hn*b_5uvi=8)qi@jn+$nyeqv7!_@=@&')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
 ALLOWED_HOSTS = [
     "music-connectz-backend-1.onrender.com",
