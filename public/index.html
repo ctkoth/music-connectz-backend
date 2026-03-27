@@ -3857,6 +3857,28 @@ function openBackendAuthPage() {
   window.location.href = getBackendAuthUrl();
 }
 
+async function syncAuthFromBackendSession() {
+  try {
+    const res = await fetch(`${apiBase}/api/auth/me/`, {
+      method: 'GET',
+      credentials: 'include'
+    });
+    if (!res.ok) return;
+    const data = await res.json().catch(() => null);
+    if (!data || !data.authenticated || !data.user) return;
+
+    appState.auth = { loggedIn: true, user: data.user, guest: false };
+    saveAppState();
+    updateAuthDisplay();
+    if (data.user.email) {
+      setAuthStatus(`Logged in as ${data.user.email}`);
+    }
+  } catch (e) {
+    // Silent fallback: users can still log in manually if sync check fails.
+    console.warn('Auth session sync skipped:', e);
+  }
+}
+
 async function registerUser(fromOverlay = false) {
   const email = (document.getElementById(fromOverlay ? 'authOverlayEmail' : 'authEmail').value || '').trim();
   const password = (document.getElementById(fromOverlay ? 'authOverlayPassword' : 'authPassword').value || '').trim();
@@ -4410,6 +4432,7 @@ function _openSocialLogin(providerConfig) {
 // Listen for social login callback
 window.addEventListener('load', () => {
   updateOAuthButtonVisibility();
+  syncAuthFromBackendSession();
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('social_login') === 'success') {
     try {
