@@ -1,4 +1,4 @@
-// Music ConnectZ v9.11 - Global i18n Configuration with Geo-Relevant Content & Referral System
+// Music ConnectZ v9.2 - Global i18n Configuration with Geo-Relevant Content & Referral System
 window.I18N_CONFIG = {
   defaultLang: 'en-US',
   currentLang: localStorage.getItem('mcz_lang') || 'en-US',
@@ -18,7 +18,7 @@ window.I18N_CONFIG = {
 
   translations: {
     'en-US': {
-      app_title: 'Music ConnectZ v9.11',
+      app_title: 'Music ConnectZ v9.2',
       app_subtitle: 'Find Local Collaborators Fast • Verified Profiles • Skill-Based Matching',
       auth_subtitle: 'Sign in fast with verified social accounts and start matching with local collaborators.',
       guest_banner: 'Log in to unlock matching, messaging, and verified collaborations.',
@@ -89,8 +89,8 @@ window.I18N_CONFIG = {
       genres_jazz: 'Jazz',
       genres_gospel: 'Gospel',
       
-      // v9.11 Updates
-      updates_title: 'v9.11 Updates',
+      // v9.2 Updates
+      updates_title: 'v9.2 Updates',
       updates_subtitle: 'Now available in 10 languages with geo-relevant content',
       updates_i18n: 'Complete internationalization with local genre & skill recommendations',
       updates_referral: 'Tiered referral rewards system - earn credits and premium access',
@@ -99,7 +99,7 @@ window.I18N_CONFIG = {
     },
 
     'en-GB': {
-      app_title: 'Music ConnectZ v9.11',
+      app_title: 'Music ConnectZ v9.2',
       app_subtitle: 'Find Local Collaborators Fast • Verified Profiles • Skill-Based Matching',
       auth_subtitle: 'Sign in quickly with verified social accounts and begin matching with local musicians.',
       guest_banner: 'Log in to unlock matching, messaging, and verified collaborations.',
@@ -165,7 +165,7 @@ window.I18N_CONFIG = {
       genres_jazz: 'Jazz/Funk',
       genres_gospel: 'Gospel/Choir',
       
-      updates_title: 'v9.11 Updates',
+      updates_title: 'v9.2 Updates',
       updates_subtitle: 'Now available in 10 languages with geo-relevant content',
       updates_i18n: 'Complete internationalization with local genre & skill recommendations',
       updates_referral: 'Tiered referral rewards system - earn credits and premium access',
@@ -174,7 +174,7 @@ window.I18N_CONFIG = {
     },
 
     'pt-BR': {
-      app_title: 'Music ConnectZ v9.11',
+      app_title: 'Music ConnectZ v9.2',
       app_subtitle: 'Encontre Colaboradores Locais Rápido • Perfis Verificados • Matching por Habilidades',
       auth_subtitle: 'Conecte-se rápido com contas sociais verificadas e comece a combinar com colaboradores locais.',
       guest_banner: 'Faça login para desbloquear matching, mensagens e colaborações verificadas.',
@@ -240,7 +240,7 @@ window.I18N_CONFIG = {
       genres_jazz: 'Jazz/Bossa Nova',
       genres_gospel: 'Gospel/Louvação',
       
-      updates_title: 'Atualizações v9.11',
+      updates_title: 'Atualizações v9.2',
       updates_subtitle: 'Agora disponível em 10 idiomas com conteúdo localizado',
       updates_i18n: 'Internacionalização completa com recomendações de gênero e habilidade locais',
       updates_referral: 'Sistema de recompensas de indicação escalonado - ganhe créditos e acesso premium',
@@ -249,7 +249,7 @@ window.I18N_CONFIG = {
     },
 
     'pt-PT': {
-      app_title: 'Music ConnectZ v9.11',
+      app_title: 'Music ConnectZ v9.2',
       app_subtitle: 'Encontre Colaboradores Locais Rápido • Perfis Verificados • Matching por Competências',
       auth_subtitle: 'Conecte-se rapidamente com contas sociais verificadas e comece a colaborar com músicos locais.',
       guest_banner: 'Inicie sessão para desbloquear matching, mensagens e colaborações verificadas.',
@@ -315,7 +315,7 @@ window.I18N_CONFIG = {
       genres_jazz: 'Jazz/Bossa Nova',
       genres_gospel: 'Gospel/Cânticos',
       
-      updates_title: 'Actualizações v9.11',
+      updates_title: 'Actualizações v9.2',
       updates_subtitle: 'Agora disponível em 10 idiomas com conteúdo localizado',
       updates_i18n: 'Internacionalização completa com recomendações de género e competências locais',
       updates_referral: 'Sistema de prémios de recomendação escalonado - ganhe créditos e acesso premium',
@@ -324,7 +324,7 @@ window.I18N_CONFIG = {
     },
 
     'ko-KR': {
-      app_title: 'Music ConnectZ v9.11',
+      app_title: 'Music ConnectZ v9.2',
       app_subtitle: '빠르게 지역 협력자 찾기 • 검증된 프로필 • 스킬 기반 매칭',
       auth_subtitle: '검증된 소셜 계정으로 빠르게 로그인하고 지역 협력자와의 매칭을 시작하세요.',
       guest_banner: '로그인하여 매칭, 메시징, 검증된 협업을 잠금 해제하세요.',
@@ -390,7 +390,7 @@ window.I18N_CONFIG = {
       genres_jazz: '재즈/보사노바',
       genres_gospel: '캐롤/속가요',
       
-      updates_title: 'v9.11 업데이트',
+      updates_title: 'v9.2 업데이트',
       updates_subtitle: '이제 10개 언어로 지역화된 콘텐츠와 함께 제공됩니다',
       updates_i18n: '로컬 장르 및 스킬 추천이 있는 완전한 국제화',
       updates_referral: '계층화된 추천 보상 시스템 - 크레딧 및 프리미엄 액세스 획득',
@@ -399,7 +399,7 @@ window.I18N_CONFIG = {
     },
 
     'zh-CN': {
-      app_title: 'Music ConnectZ v9.11',
+      app_title: 'Music ConnectZ v9.2',
       app_subtitle: '快速寻找本地合作者 • 已验证的个人资料 • 基于技能的匹配',
       auth_subtitle: '使用经过验证的社交账户快速登录，开始与本地合作者匹配。',
       guest_banner: '登录以解锁匹配、消息传递和经过验证的协作。',
@@ -465,7 +465,7 @@ window.I18N_CONFIG = {
       genres_jazz: '爵士/波萨诺瓦',
       genres_gospel: '福音/唱诗班',
       
-      updates_title: 'v9.11 更新',
+      updates_title: 'v9.2 更新',
       updates_subtitle: '现在提供10种语言的本地化内容',
       updates_i18n: '完整的国际化，包括本地流派和技能推荐',
       updates_referral: '分级推荐奖励系统 - 赚取积分和高级访问权限',
@@ -474,7 +474,7 @@ window.I18N_CONFIG = {
     },
 
     'zh-TW': {
-      app_title: 'Music ConnectZ v9.11',
+      app_title: 'Music ConnectZ v9.2',
       app_subtitle: '快速尋找本地合作者 • 已驗證的個人資料 • 基於技能的配對',
       auth_subtitle: '使用經過驗證的社交帳戶快速登入，開始與本地合作者配對。',
       guest_banner: '登入以解鎖配對、通訊和經過驗證的協作。',
@@ -540,7 +540,7 @@ window.I18N_CONFIG = {
       genres_jazz: '爵士/波薩諾瓦',
       genres_gospel: '福音/聖詩',
       
-      updates_title: 'v9.11 更新',
+      updates_title: 'v9.2 更新',
       updates_subtitle: '現在提供10種語言的本地化內容',
       updates_i18n: '完整的國際化，包括本地音樂類型和技能推薦',
       updates_referral: '分級推薦獎勵系統 - 賺取積點和高級存取權限',
@@ -549,7 +549,7 @@ window.I18N_CONFIG = {
     },
 
     'ja-JP': {
-      app_title: 'Music ConnectZ v9.11',
+      app_title: 'Music ConnectZ v9.2',
       app_subtitle: '地元のコラボレーターを素早く見つける • 検証済みプロフィール • スキルベースのマッチング',
       auth_subtitle: '検証済みのソーシャルアカウントで素早くサインインし、地元のコラボレーターとのマッチングを開始してください。',
       guest_banner: 'ログインしてマッチング、メッセージング、検証済みの協業をアンロックしてください。',
@@ -615,7 +615,7 @@ window.I18N_CONFIG = {
       genres_jazz: 'ジャズ/ボサノバ',
       genres_gospel: 'ゴスペル/合唱',
       
-      updates_title: 'v9.11アップデート',
+      updates_title: 'v9.2アップデート',
       updates_subtitle: '10言語のローカライズされたコンテンツで利用可能',
       updates_i18n: 'ローカルジャンルとスキルのレコメンデーション付きの完全な国際化',
       updates_referral: '階層化された紹介報酬システム - クレジットとプレミアムアクセス獲得',
@@ -624,7 +624,7 @@ window.I18N_CONFIG = {
     },
 
     'ar-SA': {
-      app_title: 'Music ConnectZ v9.11',
+      app_title: 'Music ConnectZ v9.2',
       app_subtitle: 'ابحث عن متعاونين محليين بسرعة • ملفات شخصية موثقة • مطابقة قائمة على المهارات',
       auth_subtitle: 'قم بتسجيل الدخول بسرعة باستخدام حسابات اجتماعية موثقة وابدأ المطابقة مع المتعاونين المحليين.',
       guest_banner: 'قم بتسجيل الدخول لفتح المطابقة والرسائل والتعاون الموثق.',
@@ -690,7 +690,7 @@ window.I18N_CONFIG = {
       genres_jazz: 'جاز/بوسانوفا',
       genres_gospel: 'إنجيل/قرآن',
       
-      updates_title: 'تحديثات v9.11',
+      updates_title: 'تحديثات v9.2',
       updates_subtitle: 'متاح الآن بـ 10 لغات مع محتوى محلي',
       updates_i18n: 'عولمة كاملة مع توصيات الأنواع والمهارات المحلية',
       updates_referral: 'نظام مكافآت إحالة متدرج - اكسب الرصيد والوصول المميز',
@@ -699,7 +699,7 @@ window.I18N_CONFIG = {
     },
 
     'hi-IN': {
-      app_title: 'Music ConnectZ v9.11',
+      app_title: 'Music ConnectZ v9.2',
       app_subtitle: 'स्थानीय सहयोगियों को तेजी से खोजें • सत्यापित प्रोफाइलें • कौशल-आधारित मिलान',
       auth_subtitle: 'सत्यापित सोशल खातों के साथ तेजी से साइन इन करें और स्थानीय सहयोगियों के साथ मिलान शुरू करें।',
       guest_banner: 'मिलान, संदेशन और सत्यापित सहयोग को अनलॉक करने के लिए लॉगिन करें।',
@@ -765,7 +765,7 @@ window.I18N_CONFIG = {
       genres_jazz: 'जैज/बोसा नोवा',
       genres_gospel: 'गॉस्पेल/भजन',
       
-      updates_title: 'v9.11 अपडेट',
+      updates_title: 'v9.2 अपडेट',
       updates_subtitle: '10 भाषाओं में स्थानीयकृत सामग्री के साथ अब उपलब्ध',
       updates_i18n: 'स्थानीय शैली और कौशल सुझाव के साथ पूर्ण अंतर्राष्ट्रीयकरण',
       updates_referral: 'स्तरीय रेफरल पुरस्कार प्रणाली - क्रेडिट और प्रीमियम एक्सेस अर्जित करें',

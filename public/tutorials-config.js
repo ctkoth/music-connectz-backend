@@ -1,4 +1,4 @@
-// Music ConnectZ v9.11 - Multi-Language Tutorials Configuration
+// Music ConnectZ v9.2 - Multi-Language Tutorials Configuration
 window.TUTORIALS_CONFIG = {
   tutorials: {
     'en-US': [
