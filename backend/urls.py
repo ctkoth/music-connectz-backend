@@ -26,6 +26,11 @@ urlpatterns = [
     path('', views.home, name='home'),
     path('admin/', admin.site.urls),
     path(
+        'accounts/3rdparty/login/error/',
+        RedirectView.as_view(url=_FRONTEND_ERROR_URL, permanent=False),
+        name='thirdparty_login_error',
+    ),
+    path(
         'accounts/social/login/error/',
         RedirectView.as_view(url=_FRONTEND_ERROR_URL, permanent=False),
         name='socialaccount_login_error',
