@@ -10,7 +10,8 @@ FRONTEND_URL = "https://musicconnectz.net"
 
 
 class SafeSocialAccountAdapter(DefaultSocialAccountAdapter):
-    def authentication_error(self, request, provider_id, error=None, exception=None, extra_context=None):
+    def on_authentication_error(self, request, provider, error=None, exception=None, extra_context=None):
+        provider_id = provider.id if hasattr(provider, "id") else str(provider)
         logger.error(
             "OAuth login failure: provider=%s error=%s exception=%s",
             provider_id,
@@ -19,6 +20,15 @@ class SafeSocialAccountAdapter(DefaultSocialAccountAdapter):
             exc_info=exception is not None,
         )
         return redirect(f"{FRONTEND_URL}/?login_error=1&provider={provider_id}")
+
+    def authentication_error(self, request, provider_id, error=None, exception=None, extra_context=None):
+        return self.on_authentication_error(
+            request,
+            provider_id,
+            error=error,
+            exception=exception,
+            extra_context=extra_context,
+        )
 
     def get_app(self, request, provider, client_id=None):
         try:
