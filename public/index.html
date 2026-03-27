@@ -1039,9 +1039,9 @@
         <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 10px; font-size: 10px; color: var(--text-light);">
           Free: <strong>2 posts/day</strong> • Premium: <strong>unlimited + boost placement</strong>
         </div>
-        <div class="form-group"><label>Title *</label><input type="text" id="boardTitle" maxlength="80" placeholder="Post title" /></div>
-        <div class="form-group"><label>Category</label><input type="text" id="boardTag" maxlength="32" placeholder="e.g. Production, Collab, Events" /></div>
-        <div class="form-group"><label>Message *</label><textarea id="boardBody" maxlength="500" placeholder="Share your update, question, or opportunity..." style="height: 90px;"></textarea></div>
+        <div class="form-group"><label>Title *</label><input type="text" id="boardTitle" maxlength="80" placeholder="Headline your post ✨" /></div>
+        <div class="form-group"><label>Subject</label><input type="text" id="boardTag" maxlength="32" placeholder="🎛️ Production, 🤝 Collab, 🎤 Vocalist, 🎫 Events" /></div>
+        <div class="form-group"><label>Message *</label><textarea id="boardBody" maxlength="500" placeholder="Drop your update, question, or opportunity 🚀" style="height: 90px;"></textarea></div>
         <button class="btn btn-success" onclick="createMessageBoardPost()" style="width: 100%;">📤 Post to Board</button>
       </div>
       <div class="card">
@@ -1577,6 +1577,52 @@
         </div>
       </div>
 
+      <div class="card" id="parentalControlsCard">
+        <div class="card-header">👨‍👩‍👧 Family &amp; Safety</div>
+        <div style="font-size: 11px; color: var(--text-light); margin-bottom: 12px;">Protect younger members. Enable parental controls to restrict messaging, purchases, and more. Set a 4-digit PIN so only a parent or guardian can change these settings.</div>
+        <div class="toggle-setting">
+          <div>
+            <div style="font-weight: 700;">🛡️ Enable Parental Controls</div>
+            <div style="font-size: 11px; color: var(--text-light); margin-top: 2px;">Auto-enabled for accounts under 13</div>
+          </div>
+          <div class="toggle-switch" onclick="toggleParentalControls()" id="parentalControlsToggle">
+            <div class="toggle-slider"></div>
+          </div>
+        </div>
+        <div id="parentalControlsBody" style="margin-top: 14px; display: none;">
+          <div class="form-group">
+            <label>👨‍👩‍👧 Parent / Guardian Email</label>
+            <input type="email" id="parentEmailInput" placeholder="parent@email.com" />
+          </div>
+          <div class="form-group">
+            <label>🔑 Security PIN (4 digits) — required to change these settings</label>
+            <input type="password" id="parentPinInput" maxlength="4" pattern="[0-9]{4}" inputmode="numeric" placeholder="Leave blank to keep current PIN" />
+          </div>
+          <div style="font-weight: 700; font-size: 12px; margin: 10px 0 8px;">🚫 Restrictions</div>
+          <div class="toggle-setting" style="margin-bottom: 10px;">
+            <div><div style="font-weight: 600; font-size: 12px;">💬 Block direct messaging</div></div>
+            <div class="toggle-switch" onclick="toggleParentalRestriction('messaging')" id="restrictMessagingToggle"><div class="toggle-slider"></div></div>
+          </div>
+          <div class="toggle-setting" style="margin-bottom: 10px;">
+            <div><div style="font-weight: 600; font-size: 12px;">💳 Block in-app purchases &amp; subscriptions</div></div>
+            <div class="toggle-switch" onclick="toggleParentalRestriction('payments')" id="restrictPaymentsToggle"><div class="toggle-slider"></div></div>
+          </div>
+          <div class="toggle-setting" style="margin-bottom: 10px;">
+            <div><div style="font-weight: 600; font-size: 12px;">🤝 Restrict collaboration posting</div></div>
+            <div class="toggle-switch" onclick="toggleParentalRestriction('collabs')" id="restrictCollabsToggle"><div class="toggle-slider"></div></div>
+          </div>
+          <div class="toggle-setting" style="margin-bottom: 10px;">
+            <div><div style="font-weight: 600; font-size: 12px;">🗺️ Hide from collaborators map</div></div>
+            <div class="toggle-switch" onclick="toggleParentalRestriction('map')" id="restrictMapToggle"><div class="toggle-slider"></div></div>
+          </div>
+          <div class="toggle-setting" style="margin-bottom: 14px;">
+            <div><div style="font-weight: 600; font-size: 12px;">📌 Restrict board posting</div></div>
+            <div class="toggle-switch" onclick="toggleParentalRestriction('boards')" id="restrictBoardsToggle"><div class="toggle-slider"></div></div>
+          </div>
+          <button class="btn btn-success" onclick="saveParentalControls()" style="width: 100%;">💾 Save Family &amp; Safety Settings</button>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-header">💾 Data Management</div>
         <div style="display: flex; gap: 10px; flex-wrap: wrap;">
@@ -1850,6 +1896,18 @@ let appState = {
     phoneNotifications: false,
     emailVerified: false,
     phoneVerified: false
+  },
+  parentalControls: {
+    enabled: false,
+    parentEmail: '',
+    pin: '',
+    restrictions: {
+      messaging: true,
+      payments: true,
+      collabs: true,
+      boards: false,
+      map: true
+    }
   }
 };
 
@@ -1913,7 +1971,8 @@ function loadAppState() {
         phoneNotifications: false,
         emailVerified: false,
         phoneVerified: false
-      }
+      },
+      parentalControls: loaded.parentalControls || appState.parentalControls
     };
   }
   if (appState.user.rating === undefined) { appState.user.rating = null; }
@@ -1944,6 +2003,7 @@ function loadAppState() {
   initLanguageSelector();
   
   updateAllDisplays();
+  updateParentalControlsUI();
 }
 
 function switchTab(tabName) {
@@ -2080,6 +2140,10 @@ function createMessageBoardPost() {
     alert('❌ Please add both a title and message.');
     return;
   }
+  if (isParentalBlock('boards')) {
+    alert('🔒 Board posting is restricted by parental controls. A parent or guardian can update this in Settings → Family & Safety.');
+    return;
+  }
 
   const authorName = getCurrentBoardAuthor();
   if (!isPremiumUser()) {
@@ -2143,12 +2207,11 @@ function renderMessageBoards() {
   });
 
   const postingMeta = !isPremiumUser()
-    ? `<div style="font-size: 10px; color: var(--text-light); margin-bottom: 10px;">Posts used in last 24h: <strong>${getBoardPostsInLast24HoursByAuthor(currentAuthor)}/${FREE_BOARD_POST_LIMIT_PER_DAY}</strong></div>`
-    : '<div style="font-size: 10px; color: var(--text-light); margin-bottom: 10px;">⭐ Premium active: unlimited posting + boost placement</div>';
+    ? `<div style="font-size: 10px; color: var(--text-light); margin-bottom: 10px;">📝 Posts used in last 24h: <strong>${getBoardPostsInLast24HoursByAuthor(currentAuthor)}/${FREE_BOARD_POST_LIMIT_PER_DAY}</strong></div>`
+    : '<div style="font-size: 10px; color: var(--text-light); margin-bottom: 10px;">⭐ Premium active: unlimited posting + boost placement 🚀</div>';
 
   if (posts.length === 0) {
-    feed.innerHTML = `${postingMeta}<div style="color: var(--text-light); text-align: center; padding: 20px;">No board posts yet</div>`;
-    return;
+    feed.innerHTML = `${postingMeta}<div style="color: var(--text-light); text-align: center; padding: 20px;">No board posts yet. Start a thread 🎯</div>`;
   }
 
   feed.innerHTML = postingMeta + postsSorted.map((post) => {
@@ -2225,6 +2288,15 @@ function saveProfile() {
   appState.user.phone = phoneInput;
   appState.user.birthday = document.getElementById('birthday').value;
   appState.user.gender = document.getElementById('gender').value;
+  // Auto-enable parental controls for child accounts (under 13)
+  const detectedAge = getUserAge();
+  if (detectedAge !== null && detectedAge < 13) {
+    if (!appState.parentalControls) appState.parentalControls = {};
+    if (!appState.parentalControls.enabled) {
+      appState.parentalControls.enabled = true;
+      appState.parentalControls.restrictions = { messaging: true, payments: true, collabs: true, boards: false, map: true };
+    }
+  }
   appState.user.location = locationInput;
   appState.user.bio = bioInput;
   appState.user.experienceSources = {
@@ -3040,6 +3112,10 @@ function updateSkillRates() {
 }
 
 async function postCollabRequest() {
+  if (isParentalBlock('collabs')) {
+    alert('🔒 Posting collaborations is restricted by parental controls. A parent or guardian can update this in Settings → Family & Safety.');
+    return;
+  }
   // Check membership limits
   const canPost = await checkCollaborationLimit();
   if (!canPost) {
@@ -4887,6 +4963,10 @@ function deleteMessage(messageId) {
 }
 
 function sendMessage() {
+  if (isParentalBlock('messaging')) {
+    alert('🔒 Direct messaging is restricted by parental controls. A parent or guardian can update this in Settings → Family & Safety.');
+    return;
+  }
   if (!isPremiumUser()) {
     alert('⭐ Premium required: Direct messaging is available on Premium.');
     switchTab('membership');
@@ -4988,9 +5068,101 @@ function isPremiumUser() {
   return getMembershipTier() === 'premium';
 }
 
+// ── Age & Parental Control Helpers ───────────────────────────────────────────
+function getUserAge() {
+  const bday = appState.user && appState.user.birthday;
+  if (!bday) return null;
+  const dob = new Date(bday);
+  if (isNaN(dob.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const m = today.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
+  return age;
+}
+
+function isChildAccount() {
+  const age = getUserAge();
+  return age !== null && age < 13;
+}
+
+function isTeenAccount() {
+  const age = getUserAge();
+  return age !== null && age >= 13 && age < 18;
+}
+
+function isParentalBlock(feature) {
+  if (!appState.parentalControls || !appState.parentalControls.enabled) return false;
+  return !!(appState.parentalControls.restrictions && appState.parentalControls.restrictions[feature]);
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function hasCustomTheme() {
   return !!(appState.user && appState.user.customTheme);
 }
+
+// ── Parental Controls UI Functions ─────────────────────────────────────────
+function toggleParentalControls() {
+  if (!appState.parentalControls) appState.parentalControls = {};
+  const pin = appState.parentalControls.pin;
+  // Require PIN to disable controls if one is set
+  if (appState.parentalControls.enabled && pin) {
+    const entered = prompt('🔑 Enter your parental controls PIN to disable:');
+    if (entered === null) return;
+    if (entered !== pin) { alert('❌ Incorrect PIN.'); return; }
+  }
+  appState.parentalControls.enabled = !appState.parentalControls.enabled;
+  saveAppState();
+  updateParentalControlsUI();
+}
+
+function toggleParentalRestriction(key) {
+  if (!appState.parentalControls) appState.parentalControls = {};
+  if (!appState.parentalControls.restrictions) appState.parentalControls.restrictions = {};
+  appState.parentalControls.restrictions[key] = !appState.parentalControls.restrictions[key];
+  const capKey = key.charAt(0).toUpperCase() + key.slice(1);
+  const tog = document.getElementById('restrict' + capKey + 'Toggle');
+  if (tog) tog.classList.toggle('active', !!appState.parentalControls.restrictions[key]);
+}
+
+function saveParentalControls() {
+  if (!appState.parentalControls) appState.parentalControls = {};
+  const pin = appState.parentalControls.pin;
+  // Require existing PIN to save changes
+  if (pin) {
+    const entered = prompt('🔑 Enter your current PIN to save changes:');
+    if (entered === null) return;
+    if (entered !== pin) { alert('❌ Incorrect PIN. Changes not saved.'); return; }
+  }
+  const emailEl = document.getElementById('parentEmailInput');
+  const pinEl = document.getElementById('parentPinInput');
+  if (emailEl) appState.parentalControls.parentEmail = emailEl.value.trim();
+  if (pinEl && pinEl.value.trim()) {
+    const newPin = pinEl.value.trim();
+    if (!/^\d{4}$/.test(newPin)) { alert('⚠️ PIN must be exactly 4 digits (numbers only).'); return; }
+    appState.parentalControls.pin = newPin;
+    pinEl.value = '';
+  }
+  saveAppState();
+  alert('✅ Family & Safety settings saved!');
+}
+
+function updateParentalControlsUI() {
+  const tog = document.getElementById('parentalControlsToggle');
+  const body = document.getElementById('parentalControlsBody');
+  const pc = appState.parentalControls || {};
+  if (tog) tog.classList.toggle('active', !!pc.enabled);
+  if (body) body.style.display = pc.enabled ? '' : 'none';
+  const emailEl = document.getElementById('parentEmailInput');
+  if (emailEl) emailEl.value = pc.parentEmail || '';
+  const r = pc.restrictions || {};
+  ['messaging', 'payments', 'collabs', 'map', 'boards'].forEach(function(k) {
+    const capKey = k.charAt(0).toUpperCase() + k.slice(1);
+    const t = document.getElementById('restrict' + capKey + 'Toggle');
+    if (t) t.classList.toggle('active', !!r[k]);
+  });
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 const LIMITED_DEALS = {
   endsAt: '2026-04-30T23:59:59Z',
@@ -5184,6 +5356,10 @@ async function subscribePremium(billingPeriod) {
     alert('Please log in first');
     return;
   }
+  if (isParentalBlock('payments')) {
+    alert('🔒 Subscriptions are restricted by parental controls. A parent or guardian must update Settings → Family & Safety to allow this.');
+    return;
+  }
   
   // In production, use actual Stripe Price IDs
   const priceIds = {
@@ -5250,6 +5426,10 @@ async function purchaseItem(purchaseType, amount, description) {
   const userId = getCurrentUserId();
   if (!userId) {
     alert('Please log in first');
+    return;
+  }
+  if (isParentalBlock('payments')) {
+    alert('🔒 Purchases are restricted by parental controls. A parent or guardian must update Settings → Family & Safety to allow this.');
     return;
   }
   

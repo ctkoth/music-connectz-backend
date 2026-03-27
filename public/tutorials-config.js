@@ -4,7 +4,7 @@ window.TUTORIALS_CONFIG = {
     'en-US': [
       {
         id: 'getting-started',
-        title: '🚀 Getting Started',
+        title: '🚀 Launch Your Music Journey',
         duration: '5 mins',
         sections: [
           { step: 1, heading: '👤 Create Your Profile', content: '✏️ Add your name, location, and bio. This helps other musicians find you and understand your expertise.' },
@@ -15,7 +15,7 @@ window.TUTORIALS_CONFIG = {
       },
       {
         id: 'monetization',
-        title: '💰 Earning Money',
+        title: '💰 Turn Skills Into Income',
         duration: '8 mins',
         sections: [
           { step: 1, heading: '💵 Set Your Rates', content: '💳 Define hourly or per-project rates for your services. Premium members get more visibility.' },
@@ -26,7 +26,7 @@ window.TUTORIALS_CONFIG = {
       },
       {
         id: 'referral',
-        title: '🎁 Referral Program',
+        title: '🎁 Invite Friends, Unlock Rewards',
         duration: '4 mins',
         sections: [
           { step: 1, heading: '🔗 Get Your Referral Link', content: '📋 Find your unique referral link in your Profile tab. Share it with musician friends.' },
@@ -37,7 +37,7 @@ window.TUTORIALS_CONFIG = {
       },
       {
         id: 'premiumbenefits',
-        title: '⭐ Premium Benefits',
+        title: '⭐ Go Premium, Move Faster',
         duration: '6 mins',
         sections: [
           { step: 1, heading: '♾️ Unlimited Collaborations', content: '✨ Free tier: 3/month. Premium: Unlimited posts and visibility.' },
@@ -51,7 +51,7 @@ window.TUTORIALS_CONFIG = {
     'pt-BR': [
       {
         id: 'getting-started',
-        title: '🚀 Começando',
+        title: '🚀 Comece Sua Jornada Musical',
         duration: '5 minutos',
         sections: [
           { step: 1, heading: '👤 Crie Seu Perfil', content: '✏️ Adicione seu nome, local e bio. Isso ajuda outros músicos a encontrá-lo e entender sua experiência.' },
@@ -62,7 +62,7 @@ window.TUTORIALS_CONFIG = {
       },
       {
         id: 'monetization',
-        title: '💰 Ganhando Dinheiro',
+        title: '💰 Transforme Talento em Renda',
         duration: '8 minutos',
         sections: [
           { step: 1, heading: '💵 Defina Suas Taxas', content: '💳 Defina suas taxas horárias ou por projeto. Membros premium ganham mais visibilidade.' },
@@ -73,7 +73,7 @@ window.TUTORIALS_CONFIG = {
       },
       {
         id: 'referral',
-        title: '🎁 Programa de Indicação',
+        title: '🎁 Convide Amigos e Ganhe Mais',
         duration: '4 minutos',
         sections: [
           { step: 1, heading: '🔗 Obtenha Seu Link de Indicação', content: '📋 Encontre seu link de indicação único na aba Perfil. Compartilhe com amigos músicos.' },
@@ -84,7 +84,7 @@ window.TUTORIALS_CONFIG = {
       },
       {
         id: 'premiumbenefits',
-        title: '⭐ Benefícios Premium',
+        title: '⭐ Premium para Acelerar Sua Carreira',
         duration: '6 minutos',
         sections: [
           { step: 1, heading: '♾️ Colaborações Ilimitadas', content: '✨ Tier gratuito: 3/mês. Premium: Postagens sem limite e visibilidade.' },
@@ -98,7 +98,7 @@ window.TUTORIALS_CONFIG = {
     'zh-CN': [
       {
         id: 'getting-started',
-        title: '🚀 开始使用',
+        title: '🚀 开启你的音乐旅程',
         duration: '5 分钟',
         sections: [
           { step: 1, heading: '👤 创建您的档案', content: '✏️ 添加您的名字、位置和简介。这可以帮助其他音乐人找到您并了解您的专业知识。' },
@@ -109,7 +109,7 @@ window.TUTORIALS_CONFIG = {
       },
       {
         id: 'monetization',
-        title: '💰 赚取金钱',
+        title: '💰 把技能变成收入',
         duration: '8 分钟',
         sections: [
           { step: 1, heading: '💵 设置您的费率', content: '💳 确定您服务的小时费率或按项目费率。高级会员获得更多曝光。' },
@@ -120,7 +120,7 @@ window.TUTORIALS_CONFIG = {
       },
       {
         id: 'referral',
-        title: '🎁 推荐计划',
+        title: '🎁 邀请好友一起赚奖励',
         duration: '4 分钟',
         sections: [
           { step: 1, heading: '🔗 获取您的推荐链接', content: '📋 在"档案"选项卡中找到您唯一的推荐链接。与音乐朋友分享。' },
@@ -131,7 +131,7 @@ window.TUTORIALS_CONFIG = {
       },
       {
         id: 'premiumbenefits',
-        title: '⭐ 高级权益',
+        title: '⭐ 升级高级，创作更快',
         duration: '6 分钟',
         sections: [
           { step: 1, heading: '♾️ 无限协作', content: '✨ 免费等级：3/月。高级：无限发布和可见性。' },
@@ -145,7 +145,7 @@ window.TUTORIALS_CONFIG = {
     'ja-JP': [
       {
         id: 'getting-started',
-        title: '🚀 始めましょう',
+        title: '🚀 音楽活動をスタート',
         duration: '5 分',
         sections: [
           { step: 1, heading: '👤 プロフィールを作成', content: '✏️ お名前、位置情報、自己紹介を追加してください。これにより、他のミュージシャンがあなたを見つけ、あなたの専門知識を理解するのに役立ちます。' },
@@ -156,7 +156,7 @@ window.TUTORIALS_CONFIG = {
       },
       {
         id: 'monetization',
-        title: '💰 お金を稼ぐ',
+        title: '💰 スキルを収益化する',
         duration: '8 分',
         sections: [
           { step: 1, heading: '💵 あなたのレートを設定', content: '💳 サービスの時間単価またはプロジェクト単価を定義してください。プレミアムメンバーはより多くの可視性を得ます。' },
@@ -167,7 +167,7 @@ window.TUTORIALS_CONFIG = {
       },
       {
         id: 'referral',
-        title: '🎁 紹介プログラム',
+        title: '🎁 友だち招待で特典ゲット',
         duration: '4 分',
         sections: [
           { step: 1, heading: '🔗 あなたの紹介リンクを取得', content: '📋 プロフィールタブであなたのユニークな紹介リンクを見つけてください。友人のミュージシャンと共有してください。' },
@@ -178,7 +178,7 @@ window.TUTORIALS_CONFIG = {
       },
       {
         id: 'premiumbenefits',
-        title: '⭐ プレミアム特典',
+        title: '⭐ プレミアムで一気に加速',
         duration: '6 分',
         sections: [
           { step: 1, heading: '♾️ コラボレーション無制限', content: '✨ フリー層：3/月。プレミアム：無制限の投稿と可視性。' },
