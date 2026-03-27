@@ -19,6 +19,20 @@ def api_register(request):
 from django.http import JsonResponse
 
 
+def api_auth_me(request):
+    user = getattr(request, 'user', None)
+    if user and user.is_authenticated:
+        return JsonResponse({
+            'authenticated': True,
+            'user': {
+                'id': user.id,
+                'email': getattr(user, 'email', '') or '',
+                'username': getattr(user, 'username', '') or '',
+            }
+        })
+    return JsonResponse({'authenticated': False}, status=401)
+
+
 def google_available(request):
     env_client_id_set = bool(os.getenv('GOOGLE_CLIENT_ID'))
     env_client_secret_set = bool(os.getenv('GOOGLE_CLIENT_SECRET'))

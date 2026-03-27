@@ -208,3 +208,10 @@ CORS_ALLOWED_ORIGINS = [
     "https://musicconnectz.net",
     "https://www.musicconnectz.net",
 ]
+CORS_ALLOW_CREDENTIALS = True
+
+# Allow cross-site session cookies for frontend auth-state sync checks.
+SESSION_COOKIE_SAMESITE = 'None'
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SAMESITE = 'None'
+CSRF_COOKIE_SECURE = True
