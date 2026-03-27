@@ -92,8 +92,7 @@
         <!-- Persona Details Area -->
         <div id="persona-details" style="margin: 18px auto 0 auto; max-width: 400px; background: #f7f7f7; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 18px 20px 14px 20px; border: 1.5px solid #bbb; display: none;"></div>
       </div>
-      <span style="font-weight:bold; font-size:1.2em;">Music ConnectZ v9.11</span>
-      <span id="header-date" style="font-size:0.95em; color:#888; margin-left:8px;"></span>
+      <span style="font-weight:bold; font-size:1.2em;">Music ConnectZ v9.11 bi K-Oth</span><span id="header-date" style="font-size:0.95em; color:#888; margin-left:6px;"></span>
     </div>
     <h2>Sign Up</h2>
     <form id="signupForm">
@@ -270,9 +269,12 @@
       }
     }
 
-    // Show the date the live commit was created (March 27, 2026)
+    // Show the live commit date and time in the header
+    const commitDate = new Date('2026-03-27T15:11:45-04:00');
     const headerOptions = { year: 'numeric', month: 'long', day: 'numeric' };
-    document.getElementById('header-date').innerText = new Date('2026-03-27').toLocaleDateString(undefined, headerOptions);
+    const commitDateStr = commitDate.toLocaleDateString(undefined, headerOptions);
+    const commitTimeStr = commitDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    document.getElementById('header-date').innerText = `on ${commitDateStr} @ ${commitTimeStr}`;
 
     // Set the 'Edited on' date to today (keep for footer)
 
