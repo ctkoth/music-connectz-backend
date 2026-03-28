@@ -212,8 +212,6 @@ def create_subscription_checkout(request):
         'automatic_tax[enabled]': 'true',
         'billing_address_collection': 'required',
         'tax_id_collection[enabled]': 'true',
-        'automatic_payment_methods[enabled]': 'true',
-        'automatic_payment_methods[allow_redirects]': 'always',
         'client_reference_id': str(payload.get('userId', '')),
         'metadata[userId]': str(payload.get('userId', '')),
         'metadata[billingPeriod]': str(billing_period),
@@ -267,13 +265,13 @@ def create_purchase_checkout(request):
     stripe_res, data = _create_stripe_checkout_session(checkout_payload)
     if stripe_res.status_code >= 400:
         # Fallback: if the account does not support one of the configured methods,
-        # retry with Stripe auto-selection.
+        # retry with universally-supported methods.
         checkout_payload = dict(checkout_payload)
         keys_to_remove = [k for k in checkout_payload.keys() if k.startswith('payment_method_types[')]
         for key in keys_to_remove:
             checkout_payload.pop(key, None)
-        checkout_payload['automatic_payment_methods[enabled]'] = 'true'
-        checkout_payload['automatic_payment_methods[allow_redirects]'] = 'always'
+        checkout_payload['payment_method_types[0]'] = 'card'
+        checkout_payload['payment_method_types[1]'] = 'link'
         stripe_res, data = _create_stripe_checkout_session(checkout_payload)
 
     if stripe_res.status_code >= 400:
