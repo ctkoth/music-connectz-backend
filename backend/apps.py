@@ -29,6 +29,12 @@ class BackendConfig(AppConfig):
         except Exception:
             pass
 
+        # Import signals to ensure UserProfile is created on signup
+        try:
+            import backend.signals
+        except Exception:
+            pass
+
         try:
             from allauth.socialaccount.models import SocialApp
             from django.contrib.sites.models import Site

@@ -3,6 +3,46 @@ from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from rest_framework.validators import UniqueValidator
 
+
+from .models import UserProfile, Referral, AgreementTemplate, CollabRoyaltyAgreement, AgreementChangeLog, CollabRoyaltySplit
+class AgreementTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AgreementTemplate
+        fields = '__all__'
+
+
+class CollabRoyaltyAgreementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CollabRoyaltyAgreement
+        fields = '__all__'
+
+
+class AgreementChangeLogSerializer(serializers.ModelSerializer):
+    changed_by = serializers.StringRelatedField()
+    class Meta:
+        model = AgreementChangeLog
+        fields = '__all__'
+
+
+class CollabRoyaltySplitSerializer(serializers.ModelSerializer):
+    participant = serializers.StringRelatedField()
+    class Meta:
+        model = CollabRoyaltySplit
+        fields = '__all__'
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    user = serializers.StringRelatedField()
+    class Meta:
+        model = UserProfile
+        fields = ('user', 'referral_code', 'referred_by')
+
+class ReferralSerializer(serializers.ModelSerializer):
+    referrer = serializers.StringRelatedField()
+    referred = serializers.StringRelatedField()
+    class Meta:
+        model = Referral
+        fields = ('referrer', 'referred', 'created_at', 'reward_granted')
+
 class RegisterSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(
         required=True,

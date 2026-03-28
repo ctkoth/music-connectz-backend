@@ -1,3 +1,172 @@
+from .serializers import AgreementTemplateSerializer, CollabRoyaltyAgreementSerializer, AgreementChangeLogSerializer, CollabRoyaltySplitSerializer
+from rest_framework.parsers import JSONParser
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.core import serializers as dj_serializers
+import csv
+import json
+
+# --- Agreement Template Endpoints ---
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def list_agreement_templates(request):
+    templates = AgreementTemplate.objects.all()
+    serializer = AgreementTemplateSerializer(templates, many=True)
+    return Response(serializer.data)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_agreement_template(request):
+    serializer = AgreementTemplateSerializer(data=request.data)
+    if serializer.is_valid():
+        serializer.save(created_by=request.user)
+        return Response(serializer.data, status=201)
+    return Response(serializer.errors, status=400)
+
+# --- Agreement Versioning ---
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_agreement_version(request, agreement_id):
+    try:
+        agreement = CollabRoyaltyAgreement.objects.get(id=agreement_id)
+    except CollabRoyaltyAgreement.DoesNotExist:
+        return Response({'error': 'Agreement not found.'}, status=404)
+    data = request.data.copy()
+    data['previous_version'] = agreement.id
+    data['version'] = agreement.version + 1
+    serializer = CollabRoyaltyAgreementSerializer(data=data)
+    if serializer.is_valid():
+        new_agreement = serializer.save(created_by=request.user)
+        AgreementChangeLog.objects.create(
+            agreement=new_agreement,
+            changed_by=request.user,
+            change_summary='New version created',
+            old_text=agreement.agreement_text,
+            new_text=new_agreement.agreement_text,
+        )
+        return Response(CollabRoyaltyAgreementSerializer(new_agreement).data, status=201)
+    return Response(serializer.errors, status=400)
+
+# --- E-signature/Acceptance ---
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def sign_royalty_split(request, split_id):
+    try:
+        split = CollabRoyaltySplit.objects.get(id=split_id, participant=request.user)
+    except CollabRoyaltySplit.DoesNotExist:
+        return Response({'error': 'Split not found or not authorized.'}, status=404)
+    split.accepted = True
+    split.e_signature = request.data.get('e_signature', 'signed')
+    split.accepted_at = timezone.now()
+    split.save()
+    return Response({'success': 'Agreement signed.'})
+
+# --- Change History ---
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def agreement_change_history(request, agreement_id):
+    logs = AgreementChangeLog.objects.filter(agreement_id=agreement_id).order_by('-change_time')
+    serializer = AgreementChangeLogSerializer(logs, many=True)
+    return Response(serializer.data)
+
+# --- Export Endpoints ---
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def export_agreement_json(request, agreement_id):
+    try:
+        agreement = CollabRoyaltyAgreement.objects.get(id=agreement_id)
+    except CollabRoyaltyAgreement.DoesNotExist:
+        return Response({'error': 'Agreement not found.'}, status=404)
+    serializer = CollabRoyaltyAgreementSerializer(agreement)
+    return Response(serializer.data)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def export_agreement_csv(request, agreement_id):
+    try:
+        agreement = CollabRoyaltyAgreement.objects.get(id=agreement_id)
+    except CollabRoyaltyAgreement.DoesNotExist:
+        return Response({'error': 'Agreement not found.'}, status=404)
+    splits = CollabRoyaltySplit.objects.filter(agreement=agreement)
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename="royalty_agreement_{agreement.id}.csv"'
+    writer = csv.writer(response)
+    writer.writerow(['Participant', 'Percentage', 'Accepted', 'Accepted At', 'E-signature'])
+    for split in splits:
+        writer.writerow([split.participant.username, split.percentage, split.accepted, split.accepted_at, split.e_signature])
+    return response
+
+# --- Notification/Reminder Stub ---
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def send_agreement_reminder(request, agreement_id):
+    # Stub: In production, send email notifications to unsigned participants
+    return Response({'success': 'Reminder sent (stub).'}, status=200)
+from django.http import HttpResponse, Http404
+from .models import CollabRoyaltyAgreement, CollabRoyaltySplit, AgreementTemplate, AgreementChangeLog
+from django.utils import timezone
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from io import BytesIO
+# --- Royalty Agreement PDF Download Endpoint ---
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def download_royalty_agreement_pdf(request, agreement_id):
+    try:
+        agreement = CollabRoyaltyAgreement.objects.get(id=agreement_id)
+    except CollabRoyaltyAgreement.DoesNotExist:
+        raise Http404("Agreement not found")
+    if not agreement.is_finalized:
+        return Response({'error': 'Agreement not finalized.'}, status=400)
+    # Only participants or creator can download
+    user = request.user
+    is_participant = CollabRoyaltySplit.objects.filter(agreement=agreement, participant=user).exists()
+    if not (is_participant or agreement.created_by == user):
+        return Response({'error': 'Not authorized.'}, status=403)
+    # Generate PDF
+    buffer = BytesIO()
+    p = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+    y = height - 40
+    p.setFont("Helvetica-Bold", 16)
+    p.drawString(40, y, f"Royalty Agreement: {agreement.title}")
+    y -= 30
+    p.setFont("Helvetica", 12)
+    p.drawString(40, y, f"Created by: {agreement.created_by.username}  |  Date: {agreement.created_at.strftime('%Y-%m-%d')}")
+    y -= 30
+    p.setFont("Helvetica", 11)
+    p.drawString(40, y, "Description:")
+    y -= 18
+    for line in agreement.description.splitlines():
+        p.drawString(60, y, line)
+        y -= 15
+    y -= 10
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(40, y, "Royalty Splits:")
+    y -= 20
+    splits = CollabRoyaltySplit.objects.filter(agreement=agreement)
+    for split in splits:
+        status = "Accepted" if split.accepted else "Pending"
+        p.setFont("Helvetica", 11)
+        p.drawString(60, y, f"{split.participant.username}: {split.percentage}%  ({status})")
+        y -= 15
+    y -= 10
+    p.setFont("Helvetica-Bold", 12)
+    p.drawString(40, y, "Agreement Text:")
+    y -= 18
+    p.setFont("Helvetica", 10)
+    for line in agreement.agreement_text.splitlines():
+        p.drawString(60, y, line)
+        y -= 13
+        if y < 60:
+            p.showPage()
+            y = height - 40
+    p.showPage()
+    p.save()
+    buffer.seek(0)
+    response = HttpResponse(buffer, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="royalty_agreement_{agreement.id}.pdf"'
+    return response
 import os
 import requests
 
@@ -7,8 +176,45 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from .models import SiteAnalytics, VisitorRecord
-from .serializers import RegisterSerializer
+from .models import SiteAnalytics, VisitorRecord, UserProfile, Referral
+from .serializers import RegisterSerializer, UserProfileSerializer, ReferralSerializer
+# --- Referral System API Endpoints ---
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def referral_stats(request):
+    user = request.user
+    try:
+        profile = user.profile
+    except UserProfile.DoesNotExist:
+        return Response({'error': 'Profile not found.'}, status=404)
+    referrals = Referral.objects.filter(referrer=user)
+    serializer = ReferralSerializer(referrals, many=True)
+    return Response({
+        'referral_code': profile.referral_code,
+        'referral_count': referrals.count(),
+        'referrals': serializer.data,
+    })
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_with_referral(request):
+    referral_code = request.data.get('referral_code')
+    serializer = RegisterSerializer(data=request.data)
+    if serializer.is_valid():
+        user = serializer.save()
+        if referral_code:
+            try:
+                referrer_profile = UserProfile.objects.get(referral_code=referral_code)
+                Referral.objects.create(referrer=referrer_profile.user, referred=user)
+                user.profile.referred_by = referrer_profile
+                user.profile.save()
+            except UserProfile.DoesNotExist:
+                pass  # Invalid code, ignore
+        return Response({"success": "User registered successfully."}, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # API endpoint for user registration
 @api_view(['POST'])

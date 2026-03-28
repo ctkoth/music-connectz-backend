@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% load static %}
+{% block content %}
+<div class="auth-form" style="max-width:350px;margin:40px auto;padding:24px;background:#fff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+  <h2>Login</h2>
+  <form method="post" action="{% url 'account_login' %}">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <div style="margin-bottom:12px;">
+      {{ form.login.label_tag }}
+      {{ form.login }}
+      {% for error in form.login.errors %}<div style="color:red;">{{ error }}</div>{% endfor %}
+    </div>
+    <div style="margin-bottom:12px;">
+      {{ form.password.label_tag }}
+      <input type="password" id="loginPassword" name="password" placeholder="Password" required style="width:100%;margin-bottom:4px;padding:10px;border-radius:4px;border:1px solid #ccc;">
+      {% for error in form.password.errors %}<div style="color:red;">{{ error }}</div>{% endfor %}
+    </div>
+    <div style="margin-bottom:10px;">
+      <input type="checkbox" id="show-login-password" style="margin-right:5px;">
+      <label for="show-login-password">Show Password</label>
+    </div>
+    <button type="submit" style="width:100%;padding:10px;background:#2196F3;color:#fff;border:none;border-radius:4px;font-weight:bold;cursor:pointer;">Login</button>
+    {% if form.errors %}
+      <div style="color:red;margin-top:10px;">Invalid login. Please try again.</div>
+    {% endif %}
+  </form>
+</div>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    var showPw = document.getElementById('show-login-password');
+    var pwField = document.getElementById('loginPassword');
+    if (showPw && pwField) {
+      showPw.addEventListener('change', function() {
+        pwField.type = this.checked ? 'text' : 'password';
+      });
+    }
+  });
+</script>
+{% endblock %}
