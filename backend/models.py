@@ -2,6 +2,21 @@
 from django.db import models
 from django.contrib.auth.models import User
 
+# --- Editable Reviews by Collaborators, Shareable as Posts ---
+class CollabReview(models.Model):
+    agreement = models.ForeignKey('CollabRoyaltyAgreement', on_delete=models.CASCADE, related_name='reviews')
+    reviewer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='given_collab_reviews')
+    reviewee = models.ForeignKey(User, on_delete=models.CASCADE, related_name='received_collab_reviews')
+    text = models.TextField(blank=True)
+    is_shared = models.BooleanField(default=False)  # If true, show on reviewee's public profile
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('agreement', 'reviewer', 'reviewee')
+
+    def __str__(self):
+        return f"Review by {self.reviewer.username} for {self.reviewee.username} (Collab {self.agreement.id})"
+
 class AgreementTemplate(models.Model):
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
@@ -40,6 +55,7 @@ class AgreementChangeLog(models.Model):
     def __str__(self):
         return f"Change by {self.changed_by} at {self.change_time}"
 
+
 class CollabRoyaltySplit(models.Model):
     agreement = models.ForeignKey(CollabRoyaltyAgreement, on_delete=models.CASCADE, related_name='splits')
     participant = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -50,9 +66,21 @@ class CollabRoyaltySplit(models.Model):
 
     def __str__(self):
         return f"{self.participant.username}: {self.percentage}% ({'Accepted' if self.accepted else 'Pending'})"
-from django.db import models
 
-from django.contrib.auth.models import User
+# --- Reliability Rating: Editable by collaborators after collab begins ---
+class CollabReliabilityRating(models.Model):
+    agreement = models.ForeignKey(CollabRoyaltyAgreement, on_delete=models.CASCADE, related_name='reliability_ratings')
+    rater = models.ForeignKey(User, on_delete=models.CASCADE, related_name='given_reliability_ratings')
+    ratee = models.ForeignKey(User, on_delete=models.CASCADE, related_name='received_reliability_ratings')
+    score = models.PositiveSmallIntegerField(default=0)  # 0-10 scale
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('agreement', 'rater', 'ratee')
+
+    def __str__(self):
+        return f"Reliability {self.score}/10: {self.rater.username}  {self.ratee.username} (Collab {self.agreement.id})"
+
 import secrets
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
@@ -121,4 +149,3 @@ class VisitorRecord(models.Model):
 
     def __str__(self):
         return self.visitor_key
-from django.db import models
