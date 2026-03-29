@@ -1,4 +1,7 @@
 
+from django.db import models
+from django.contrib.auth.models import User
+
 class AgreementTemplate(models.Model):
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
@@ -118,3 +121,4 @@ class VisitorRecord(models.Model):
 
     def __str__(self):
         return self.visitor_key
+from django.db import models
