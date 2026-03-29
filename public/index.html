@@ -67,7 +67,7 @@
 <head>
     <link rel="icon" type="image/png" href="/music-connectz-logo.png" />
   <meta charset="UTF-8" />
-  <title>Music ConnectZ v9.4 bi K-Oth</title>
+  <title>Music ConnectZ v9.5 bi K-Oth</title>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
   <script src="/app-config.js"></script>
   <script src="/i18n-config.js"></script>
@@ -75,6 +75,61 @@
   <script src="https://js.stripe.com/v3/"></script>
   <script src="/stripe-config.js"></script>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script>
+    // --- Money Emoji by Language/Region ---
+    function getMoneyEmojiByLang(lang) {
+      // Map language/region to currency emoji
+      const map = {
+        'en-US': '💵', // US Dollar
+        'en-GB': '💷', // British Pound
+        'ja-JP': '💴', // Yen
+        'zh-CN': '💴', // Yuan (Yen emoji)
+        'zh-TW': '💴',
+        'ko-KR': '💶', // Won (Euro emoji as closest)
+        'pt-BR': '💵', // Real (Dollar emoji)
+        'pt-PT': '💶', // Euro
+        'es-ES': '💶', // Euro
+        'fr-FR': '💶', // Euro
+        'de-DE': '💶', // Euro
+        'it-IT': '💶', // Euro
+        'ar-SA': '💰', // General money bag
+        'hi-IN': '💵', // Rupee (Dollar emoji)
+        'th-TH': '💵',
+        'id-ID': '💵',
+        'fil-PH': '💵',
+        'default': '💰'
+      };
+      return map[lang] || map[lang.split('-')[0]] || map['default'];
+    }
+    // Set money emoji in header and money tab
+    function setMoneyEmojis() {
+      const lang = (window.I18N_CONFIG && window.I18N_CONFIG.currentLang) || 'en-US';
+      const emoji = getMoneyEmojiByLang(lang);
+      // Header balance
+      const balanceDiv = document.querySelector('.balance');
+      if (balanceDiv) {
+        balanceDiv.innerHTML = `${emoji} $<span id="balanceAmount">0.00</span>`;
+      }
+      // Money tab button
+      const moneyTabBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.textContent.trim().endsWith('Money'));
+      if (moneyTabBtn) {
+        moneyTabBtn.innerHTML = `${emoji} Money`;
+      }
+      // Money tab card header
+      const moneyTabHeader = document.querySelector('#money .card-header');
+      if (moneyTabHeader) {
+        moneyTabHeader.innerHTML = `${emoji} Wallet & Level`;
+      }
+    }
+    document.addEventListener('DOMContentLoaded', setMoneyEmojis);
+    // Also update on language change
+    window.I18N_CONFIG = window.I18N_CONFIG || {};
+    const origSetLanguage = window.I18N_CONFIG.setLanguage;
+    window.I18N_CONFIG.setLanguage = function(langCode) {
+      if (origSetLanguage) origSetLanguage.call(window.I18N_CONFIG, langCode);
+      setTimeout(setMoneyEmojis, 100); // Wait for reload
+    };
+  </script>
   <script>
     window.MCZ_CONFIG = window.MCZ_CONFIG || {};
     const MCZ_BACKEND_PROD = 'https://music-connectz-backend-2.onrender.com';
@@ -208,7 +263,99 @@
         <!-- Persona Details Area -->
         <div id="persona-details" style="margin: 18px auto 0 auto; max-width: 400px; background: #f7f7f7; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 18px 20px 14px 20px; border: 1.5px solid #bbb; display: none;"></div>
       </div>
-      <span style="font-weight:bold; font-size:1.2em;">Music ConnectZ v9.4 bi K-Oth</span><span id="header-date" style="font-size:0.95em; color:#888; margin-left:6px;"></span>
+      <span id="mcz-title" style="font-weight:bold; font-size:1.2em; cursor:pointer; text-decoration:underline;">🎵 Music ConnectZ v9.4 bi K-Oth</span><span id="header-date" style="font-size:0.95em; color:#888; margin-left:6px;"></span>
+      <div id="version-log-modal" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.45); z-index:3000; align-items:center; justify-content:center;">
+        <div style="background:#fff; border-radius:16px; max-width:95vw; width:420px; margin:auto; box-shadow:0 4px 24px rgba(0,0,0,0.18); padding:32px 24px 24px 24px; position:relative;">
+          <div style="font-size:1.3em; font-weight:700; margin-bottom:10px; text-align:center;">📝 Version History</div>
+          <div id="version-log-content" style="font-size:1em; color:#444; margin-bottom:18px; max-height:60vh; overflow-y:auto; text-align:left;"></div>
+          <div style="text-align:center;"><button id="close-version-log" style="background:#fff; color:#2196F3; border:1px solid #2196F3; border-radius:6px; padding:6px 18px; font-weight:600;">Close</button></div>
+        </div>
+      </div>
+      <script>
+        // Version log modal logic
+        const mczTitle = document.getElementById('mcz-title');
+        const versionLogModal = document.getElementById('version-log-modal');
+        const versionLogContent = document.getElementById('version-log-content');
+        const closeVersionLog = document.getElementById('close-version-log');
+
+        // Version history data (descending order, with emojis)
+        const versionHistory = [
+          { v: 'v9.5', text: 'bi K-Oth on (March 29, 2026)@14:45', emoji: '🚀' },
+          { v: 'v9.5', text: 'bi K-Oth', emoji: '👤' },
+          { v: 'v0.5', text: 'Introduced “ww levels” feature', emoji: '🆕' },
+          { v: 'v9.4', text: 'Pushed new version 9.4', emoji: '⬆️' },
+          { v: 'v9.3', text: 'Login: 1 password field, registration: 2', emoji: '🔑' },
+          { v: 'v9.2', text: 'Registration: 2 password fields, show/hide toggle; CORS fixes for Vercel/Render; Version labeling in UI', emoji: '🛡️', region: '🌍', details: 'Added/updated genres & skills for: 🇺🇸 US (🎸🎤), 🇬🇧 UK (🎸🎹), 🇧🇷 Brazil (🎤🥁), 🇵🇹 Portugal (🎻🎶), 🇰🇷 Korea (🎧🎤), 🇨🇳 China (🎼🥁), 🇯🇵 Japan (🎷🎤), 🇸🇦 Arabia (🪕🎤), 🇮🇳 India (🎹🎤)' },
+          { v: 'v9.1', text: 'Bug fixes, improved error handling, more robust CORS and backend integration', emoji: '🐞' },
+          { v: 'v9.0', text: 'UI overhaul, mobile optimization, social account linking', emoji: '📱' },
+          { v: 'v8.0', text: 'Enhanced security (password requirements, CORS), password reset and phone login', emoji: '🔒' },
+          { v: 'v7.0', text: 'Payment integration (Stripe, PayPal), referral rewards system', emoji: '💳' },
+          { v: 'v6.0', text: 'Internationalization (multi-language support), geo-location onboarding', emoji: '🌐', region: '🌎', details: 'Initial launch of region/language genres & skills: 🇺🇸 US (🎸🎤), 🇬🇧 UK (🎸🎹), 🇧🇷 Brazil (🎤🥁), 🇵🇹 Portugal (🎻🎶), 🇰🇷 Korea (🎧🎤), 🇨🇳 China (🎼🥁), 🇯🇵 Japan (🎷🎤), 🇸🇦 Arabia (🪕🎤), 🇮🇳 India (🎹🎤)' },
+          { v: 'v5.0', text: 'Portfolio uploads (audio/video), premium membership system', emoji: '🎵' },
+          { v: 'v4.0', text: 'Skill-based matching, genres and roles selection', emoji: '🎯' },
+          { v: 'v3.0', text: 'Messaging and collaboration requests, profile picture upload', emoji: '💬' },
+          { v: 'v2.0', text: 'Added social login (Google, Facebook), improved onboarding flow', emoji: '🔗' },
+          { v: 'v1.1', text: 'Bug fixes and minor UI improvements', emoji: '🛠️' },
+          { v: 'v1.0', text: 'Initial release (user registration, login, basic profile)', emoji: '✨' }
+        ];
+
+        // Translations for "Version History" title (add more as needed)
+        const versionLogTitles = {
+          'en-US': '📝 Version History',
+          'en-GB': '📝 Version History',
+          'pt-BR': '📝 Histórico de Versões',
+          'pt-PT': '📝 Histórico de Versões',
+          'es-ES': '📝 Historial de Versiones',
+          'es-MX': '📝 Historial de Versiones',
+          'fr-FR': '📝 Historique des Versions',
+          'de-DE': '📝 Versionsverlauf',
+          'it-IT': '📝 Cronologia delle Versioni',
+          'ja-JP': '📝 バージョン履歴',
+          'zh-CN': '📝 版本历史',
+          'zh-TW': '📝 版本歷史',
+          'ko-KR': '📝 버전 기록',
+          'ar-SA': '📝 سجل الإصدارات',
+          'hi-IN': '📝 संस्करण इतिहास',
+          'ru-RU': '📝 История версий',
+          'tr-TR': '📝 Sürüm Geçmişi',
+          'pl-PL': '📝 Historia Wersji',
+          'nl-NL': '📝 Versiegeschiedenis',
+          'sv-SE': '📝 Versionshistorik',
+          'fi-FI': '📝 Versiohistoria',
+          'no-NO': '📝 Versjonshistorikk',
+          'da-DK': '📝 Versionshistorik',
+          'cs-CZ': '📝 Historie Verzí',
+          'sk-SK': '📝 História Verzií',
+          'uk-UA': '📝 Історія версій',
+          'el-GR': '📝 Ιστορικό Εκδόσεων',
+          'th-TH': '📝 ประวัติเวอร์ชัน',
+          'vi-VN': '📝 Lịch Sử Phiên Bản',
+          'id-ID': '📝 Riwayat Versi',
+          'ms-MY': '📝 Sejarah Versi',
+          'default': '📝 Version History'
+        };
+
+        mczTitle.onclick = function() {
+          // Get user language
+          const lang = (window.I18N_CONFIG && window.I18N_CONFIG.currentLang) || 'en-US';
+          // Set modal title
+          versionLogModal.querySelector('div[style*="font-size:1.3em"]')
+            .innerText = versionLogTitles[lang] || versionLogTitles['default'];
+          // Build version log HTML
+          let html = '<ul style="padding-left:18px;">';
+          versionHistory.forEach(v => {
+            html += `<li style="margin-bottom:7px; font-size:1.05em;">${v.emoji} <b>${v.v}</b>: ${v.text}`;
+            if (v.region && v.details) {
+              html += `<br><span style='font-size:0.97em; color:#555;'>${v.region} <i>${v.details}</i></span>`;
+            }
+            html += `</li>`;
+          });
+          html += '</ul>';
+          versionLogContent.innerHTML = html;
+          versionLogModal.style.display = 'flex';
+        };
+        closeVersionLog.onclick = function() { versionLogModal.style.display = 'none'; };
+      </script>
     </div>
     <h2>Sign Up</h2>
     <form id="signupForm">
@@ -300,18 +447,57 @@
         ]
       },
       manager: {
-        title: "Business Manager",
-        text: "Leads career operations, partnerships, and long-term strategy for artists and teams.",
+        title: "Business Manager (Marketing BSA)",
+        text: "Leads career operations, partnerships, and long-term strategy for artists and teams.\n\n\ud83d\udce3 Marketing BSA: Unlocks advanced marketing, promotion, and strategic tools. Business Managers help artists and teams grow their audience, maximize revenue, and secure more opportunities.\n\n\ud83d\udcb0 Benefits: Access to premium analytics, campaign tools, exclusive industry contacts, and the ability to launch limited-time offers.",
         skills: [
           "Team Leadership & Coordination",
           "Financial Planning & Budgeting",
           "Contract Negotiation",
-          "Marketing & Promotion",
+          "Marketing & Promotion (BSA)",
           "Networking & Partnerships",
           "Project Management",
           "Strategic Decision Making"
         ]
       },
+        <!-- Weekly Premium Sale Banner (Marketing BSA) -->
+        <div id="weeklySaleBanner" style="display:none; background:linear-gradient(90deg,#FFD700,#FF9800);color:#222;padding:14px 18px;border-radius:10px;margin:18px auto 0 auto;max-width:420px;box-shadow:0 2px 8px rgba(255,152,0,0.12);font-size:1.08em;position:relative;z-index:10;">
+          <span id="weeklySaleText"></span>
+          <button onclick="document.getElementById('weeklySaleBanner').style.display='none'" style="position:absolute;top:6px;right:10px;background:none;border:none;font-size:18px;color:#e65100;cursor:pointer;">&times;</button>
+        </div>
+        <script>
+          // --- Weekly Premium Sale Logic ---
+          const saleOffers = [
+            {
+              title: '🎉 Limited-Time Premium Sale!',
+              desc: 'Upgrade to Premium this week and get 30% off + exclusive access to Marketing BSA tools! \ud83d\udce3\n\n\ud83d\udcb0 Benefits: Advanced analytics, campaign tools, industry contacts, and more.',
+              cta: 'Upgrade Now',
+              url: '#membership'
+            },
+            {
+              title: '🔥 Flash Deal: Premium Access',
+              desc: 'Unlock all premium features, including Marketing BSA, for 25% off! Offer ends soon.\n\n\ud83d\udcb0 Benefits: Priority support, analytics, and marketing tools.',
+              cta: 'Claim Offer',
+              url: '#membership'
+            },
+            {
+              title: '⭐ Premium Perks Week',
+              desc: 'Enjoy a free 7-day trial of Premium, including Marketing BSA, for new upgrades this week only!\n\n\ud83d\udcb0 Benefits: Analytics, campaign tools, and more.',
+              cta: 'Start Free Trial',
+              url: '#membership'
+            }
+          ];
+          function showWeeklySaleBanner() {
+            // Use week number to randomize but keep consistent for the week
+            const now = new Date();
+            const week = Math.floor((now - new Date(now.getFullYear(),0,1)) / (7*24*60*60*1000));
+            const offer = saleOffers[week % saleOffers.length];
+            const banner = document.getElementById('weeklySaleBanner');
+            const text = `<b>${offer.title}</b><br>${offer.desc}<br><a href='${offer.url}' class='btn btn-success btn-small' style='margin-top:8px;'>${offer.cta}</a>`;
+            document.getElementById('weeklySaleText').innerHTML = text;
+            banner.style.display = 'block';
+          }
+          document.addEventListener('DOMContentLoaded', showWeeklySaleBanner);
+        </script>
       producer: {
         title: "Producer",
         text: "Shapes the sound, arrangement, and creative execution of tracks from idea to release.",
@@ -792,6 +978,15 @@
       <div class="auth-subtitle">Sign in fast with verified social accounts and start matching with local collaborators.</div>
       
       <div class="social-login-section" style="margin-bottom: 15px;">
+              <script>
+              // Social login handler: redirects to backend Allauth provider
+              function socialLogin(provider) {
+                const nextUrl = encodeURIComponent(window.location.href);
+                const backendUrl = window.MCZ_CONFIG.backendUrl || '';
+                const path = `/accounts/${provider}/login/?next=${nextUrl}`;
+                window.location.href = backendUrl + path;
+              }
+              </script>
         <div style="text-align: center; margin-bottom: 10px; color: var(--text-light); font-size: 10px;">Continue with:</div>
         <div style="display: flex; flex-direction: column; gap: 10px;">
           <button class="btn-social btn-microsoft" data-provider="microsoft" onclick="socialLogin('microsoft')" title="Login with Microsoft">
@@ -4022,9 +4217,13 @@ function corsBlockedMessage(actionLabel) {
 }
 
 function getBackendAuthUrl() {
-  const nextUrl = encodeURIComponent(location.href);
+  // Always redirect to dashboard, not login page
+  let nextUrl = window.location.origin + window.location.pathname;
+  if (window.appState && window.appState.currentTab) {
+    nextUrl += `#${window.appState.currentTab}`;
+  }
   const authPath = (window.MCZ_CONFIG && window.MCZ_CONFIG.authEntryPath) || '/accounts/login/';
-  return `${apiBase}${authPath}?next=${nextUrl}`;
+  return `${apiBase}${authPath}?next=${encodeURIComponent(nextUrl)}`;
 }
 
 function openBackendAuthPage() {

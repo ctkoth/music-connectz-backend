@@ -39,5 +39,14 @@ v9.2 - Registration: 2 password fields, show/hide toggle
 
 v9.3 - Login: 1 password field, registration: 2
 v9.4 - Pushed new version 9.4
-- Overlay auth form refactor
-- Version label updated to v9.3
+v9.5 - bi K-Oth on (March 29, 2026)@14:45
+v9.5 - bi K-Oth
+March 29, 2026 — v0.5 (ww levels)
+- Introduced 'ww levels' feature
+
+v9.6 - bi K-Oth
+March 29, 2026 — v9.6
+- Premium benefit explanations and CTAs added near rating fields and premium features
+- Randomized weekly premium sale banners
+- UI/UX improvements for premium upsell and contextual marketing
+

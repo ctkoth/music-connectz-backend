@@ -4,16 +4,87 @@ window.I18N_CONFIG = {
   currentLang: localStorage.getItem('mcz_lang') || 'en-US',
   
   languages: {
-    'en-US': { name: '🇺🇸 English (US)', nativeName: 'English' },
-    'en-GB': { name: '🇬🇧 English (UK)', nativeName: 'English' },
+    // English
+    'en-US': { name: '🇺🇸 English (United States)', nativeName: 'English' },
+    'en-GB': { name: '🇬🇧 English (United Kingdom)', nativeName: 'English' },
+    'en-CA': { name: '🇨🇦 English (Canada)', nativeName: 'English' },
+    'en-AU': { name: '🇦🇺 English (Australia)', nativeName: 'English' },
+    'en-NZ': { name: '🇳🇿 English (New Zealand)', nativeName: 'English' },
+    'en-ZA': { name: '🇿🇦 English (South Africa)', nativeName: 'English' },
+    // Spanish
+    'es-ES': { name: '🇪🇸 Español (España)', nativeName: 'Español' },
+    'es-MX': { name: '🇲🇽 Español (México)', nativeName: 'Español' },
+    'es-AR': { name: '🇦🇷 Español (Argentina)', nativeName: 'Español' },
+    'es-CO': { name: '🇨🇴 Español (Colombia)', nativeName: 'Español' },
+    'es-CL': { name: '🇨🇱 Español (Chile)', nativeName: 'Español' },
+    'es-PE': { name: '🇵🇪 Español (Perú)', nativeName: 'Español' },
+    // Portuguese
     'pt-BR': { name: '🇧🇷 Português (Brasil)', nativeName: 'Português' },
     'pt-PT': { name: '🇵🇹 Português (Portugal)', nativeName: 'Português' },
-    'ko-KR': { name: '🇰🇷 한국어 (Korean)', nativeName: '한국어' },
-    'zh-CN': { name: '🇨🇳 中文 (Simplified)', nativeName: '中文' },
-    'zh-TW': { name: '🇹🇼 中文 (Traditional)', nativeName: '中文' },
-    'ja-JP': { name: '🇯🇵 日本語 (Japanese)', nativeName: '日本語' },
-    'ar-SA': { name: '🇸🇦 العربية (Arabic)', nativeName: 'العربية' },
-    'hi-IN': { name: '🇮🇳 हिंदी (Hindi)', nativeName: 'हिंदी' }
+    // French
+    'fr-FR': { name: '🇫🇷 Français (France)', nativeName: 'Français' },
+    'fr-CA': { name: '🇨🇦 Français (Canada)', nativeName: 'Français' },
+    // German
+    'de-DE': { name: '🇩🇪 Deutsch (Deutschland)', nativeName: 'Deutsch' },
+    // Italian
+    'it-IT': { name: '🇮🇹 Italiano (Italia)', nativeName: 'Italiano' },
+    // Dutch
+    'nl-NL': { name: '🇳🇱 Nederlands (Nederland)', nativeName: 'Nederlands' },
+    'nl-BE': { name: '🇧🇪 Nederlands (België)', nativeName: 'Nederlands' },
+    // Russian
+    'ru-RU': { name: '🇷🇺 Русский (Россия)', nativeName: 'Русский' },
+    // Chinese
+    'zh-CN': { name: '🇨🇳 中文(中国)', nativeName: '中文' },
+    'zh-TW': { name: '🇹🇼 中文(台灣)', nativeName: '中文' },
+    'zh-HK': { name: '🇭🇰 中文(香港)', nativeName: '中文' },
+    // Japanese
+    'ja-JP': { name: '🇯🇵 日本語 (日本)', nativeName: '日本語' },
+    // Korean
+    'ko-KR': { name: '🇰🇷 한국어 (대한민국)', nativeName: '한국어' },
+    // Hindi
+    'hi-IN': { name: '🇮🇳 हिंदी (भारत)', nativeName: 'हिंदी' },
+    // Arabic
+    'ar-SA': { name: '🇸🇦 العربية (السعودية)', nativeName: 'العربية' },
+    'ar-EG': { name: '🇪🇬 العربية (مصر)', nativeName: 'العربية' },
+    // Turkish
+    'tr-TR': { name: '🇹🇷 Türkçe (Türkiye)', nativeName: 'Türkçe' },
+    // Polish
+    'pl-PL': { name: '🇵🇱 Polski (Polska)', nativeName: 'Polski' },
+    // Swedish
+    'sv-SE': { name: '🇸🇪 Svenska (Sverige)', nativeName: 'Svenska' },
+    // Finnish
+    'fi-FI': { name: '🇫🇮 Suomi (Suomi)', nativeName: 'Suomi' },
+    // Norwegian
+    'no-NO': { name: '🇳🇴 Norsk (Norge)', nativeName: 'Norsk' },
+    // Danish
+    'da-DK': { name: '🇩🇰 Dansk (Danmark)', nativeName: 'Dansk' },
+    // Czech
+    'cs-CZ': { name: '🇨🇿 Čeština (Česko)', nativeName: 'Čeština' },
+    // Slovak
+    'sk-SK': { name: '🇸🇰 Slovenčina (Slovensko)', nativeName: 'Slovenčina' },
+    // Ukrainian
+    'uk-UA': { name: '🇺🇦 Українська (Україна)', nativeName: 'Українська' },
+    // Greek
+    'el-GR': { name: '🇬🇷 Ελληνικά (Ελλάδα)', nativeName: 'Ελληνικά' },
+    // Thai
+    'th-TH': { name: '🇹🇭 ไทย (ประเทศไทย)', nativeName: 'ไทย' },
+    // Indonesian
+    'id-ID': { name: '🇮🇩 Bahasa Indonesia (Indonesia)', nativeName: 'Bahasa Indonesia' },
+    // Filipino
+    'fil-PH': { name: '🇵🇭 Filipino (Pilipinas)', nativeName: 'Filipino' },
+    // Malay
+    'ms-MY': { name: '🇲🇾 Bahasa Melayu (Malaysia)', nativeName: 'Bahasa Melayu' },
+    // Vietnamese
+    'vi-VN': { name: '🇻🇳 Tiếng Việt (Việt Nam)', nativeName: 'Tiếng Việt' },
+    // Hungarian
+    'hu-HU': { name: '🇭🇺 Magyar (Magyarország)', nativeName: 'Magyar' },
+    // Hebrew
+    'he-IL': { name: '🇮🇱 עברית (ישראל)', nativeName: 'עברית' },
+    // Bengali
+    'bn-BD': { name: '🇧🇩 বাংলা (বাংলাদেশ)', nativeName: 'বাংলা' },
+    // Swahili
+    'sw-KE': { name: '🇰🇪 Kiswahili (Kenya)', nativeName: 'Kiswahili' },
+    // More can be added as needed
   },
 
   translations: {

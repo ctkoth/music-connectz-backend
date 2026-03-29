@@ -5,23 +5,28 @@
 
 const BACKEND_URL = 'https://music-connectz-backend-2.onrender.com';
 
-// Sign up using backend
+// Sign up using backend (Django API)
 function signUp(email, password, name) {
-  return fetch(`${BACKEND_URL}/auth/signup`, {
+  return fetch(`${BACKEND_URL}/api/auth/register/`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ email, password, name }),
+    body: JSON.stringify({
+      username: name,
+      email: email,
+      password1: password,
+      password2: password
+    }),
   })
     .then(async (response) => {
+      const data = await response.json();
       if (!response.ok) {
-        const error = await response.json();
-        alert(error.error || 'Sign up failed');
-        throw new Error(error.error || 'Sign up failed');
+        alert((data && (data.error || data.detail || JSON.stringify(data))) || 'Sign up failed');
+        throw new Error((data && (data.error || data.detail || JSON.stringify(data))) || 'Sign up failed');
       }
       alert('Sign up successful!');
-      return response.json();
+      return data;
     });
 }
 

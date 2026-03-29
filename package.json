@@ -1,0 +1,12 @@
+{
+  "name": "music-connectz-frontend",
+  "version": "1.0.0",
+  "description": "Frontend for Music Connectz",
+  "main": "firebase-auth.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0"
+  }
+}
