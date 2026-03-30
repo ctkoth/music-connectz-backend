@@ -17,7 +17,9 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import path, include
-from django.views.generic import RedirectView
+from django.views.generic import RedirectView, TemplateView
+from django.views.static import serve
+from django.conf import settings
 from . import views
 
 _FRONTEND_ERROR_URL = 'https://musicconnectz.net/?login_error=1'
@@ -25,6 +27,8 @@ _FRONTEND_ERROR_URL = 'https://musicconnectz.net/?login_error=1'
 urlpatterns = [
     path('', views.home, name='home'),
     path('admin/', admin.site.urls),
+    path('google70f5d8bcf10dfb1c.html', serve, {'path': 'google70f5d8bcf10dfb1c.html', 'document_root': settings.STATIC_ROOT}),
+    path('api/openai-chat', views.openai_chat, name='openai_chat'),
     path(
         'accounts/3rdparty/login/error/',
         RedirectView.as_view(url=_FRONTEND_ERROR_URL, permanent=False),

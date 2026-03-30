@@ -1,3 +1,5 @@
+djangorestframework
+openai
 Django
 gunicorn
 django-allauth

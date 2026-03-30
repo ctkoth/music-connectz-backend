@@ -1,3 +1,32 @@
+import os
+import openai
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+
+# --- OpenAI Chat API Endpoint ---
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def openai_chat(request):
+    """
+    Proxy endpoint for OpenAI ChatCompletion API.
+    POST body: {"message": "your question"}
+    """
+    data = request.data
+    user_message = data.get('message', '')
+    api_key = os.environ.get('OPENAI_API_KEY')
+    if not api_key:
+        return JsonResponse({'error': 'OpenAI API key not set.'}, status=500)
+    try:
+        openai.api_key = api_key
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": user_message}]
+        )
+        reply = response['choices'][0]['message']['content']
+        return JsonResponse({'reply': reply})
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
 from .models import CollabReliabilityRating, CollabReview
 from .serializers import CollabReliabilityRatingSerializer, CollabReviewSerializer
 # --- Reliability Rating API ---
