@@ -1,3 +1,4 @@
+from rest_framework import serializers
 from .models import CollabReliabilityRating, CollabReview
 # --- Reliability Rating Serializer ---
 class CollabReliabilityRatingSerializer(serializers.ModelSerializer):
