@@ -1,3 +1,118 @@
+from .models import CollabReliabilityRating, CollabReview
+from .serializers import CollabReliabilityRatingSerializer, CollabReviewSerializer
+# --- Reliability Rating API ---
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.decorators import api_view, permission_classes
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def set_reliability_rating(request, agreement_id, ratee_id):
+    """
+    Set or update reliability rating for a collaborator in an agreement.
+    Only participants can rate each other.
+    """
+    user = request.user
+    try:
+        agreement = CollabRoyaltyAgreement.objects.get(id=agreement_id)
+        ratee = User.objects.get(id=ratee_id)
+    except (CollabRoyaltyAgreement.DoesNotExist, User.DoesNotExist):
+        return Response({'error': 'Agreement or user not found.'}, status=404)
+    # Must be a participant
+    if not CollabRoyaltySplit.objects.filter(agreement=agreement, participant=user).exists() or not CollabRoyaltySplit.objects.filter(agreement=agreement, participant=ratee).exists():
+        return Response({'error': 'Not authorized.'}, status=403)
+    score = int(request.data.get('score', 0))
+    if score < 0 or score > 10:
+        return Response({'error': 'Score must be 0-10.'}, status=400)
+    obj, _ = CollabReliabilityRating.objects.update_or_create(
+        agreement=agreement, rater=user, ratee=ratee,
+        defaults={'score': score}
+    )
+    return Response(CollabReliabilityRatingSerializer(obj).data)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_reliability_ratings(request, agreement_id):
+    """
+    Get all reliability ratings for an agreement.
+    """
+    ratings = CollabReliabilityRating.objects.filter(agreement_id=agreement_id)
+    return Response(CollabReliabilityRatingSerializer(ratings, many=True).data)
+
+# --- Collab Review API ---
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def set_collab_review(request, agreement_id, reviewee_id):
+    """
+    Set or update a review for a collaborator in an agreement.
+    Only participants can review each other.
+    """
+    user = request.user
+    try:
+        agreement = CollabRoyaltyAgreement.objects.get(id=agreement_id)
+        reviewee = User.objects.get(id=reviewee_id)
+    except (CollabRoyaltyAgreement.DoesNotExist, User.DoesNotExist):
+        return Response({'error': 'Agreement or user not found.'}, status=404)
+    if not CollabRoyaltySplit.objects.filter(agreement=agreement, participant=user).exists() or not CollabRoyaltySplit.objects.filter(agreement=agreement, participant=reviewee).exists():
+        return Response({'error': 'Not authorized.'}, status=403)
+    text = request.data.get('text', '')
+    is_shared = bool(request.data.get('is_shared', False))
+    obj, _ = CollabReview.objects.update_or_create(
+        agreement=agreement, reviewer=user, reviewee=reviewee,
+        defaults={'text': text, 'is_shared': is_shared}
+    )
+    return Response(CollabReviewSerializer(obj).data)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_collab_reviews(request, agreement_id):
+    """
+    Get all reviews for an agreement.
+    """
+    reviews = CollabReview.objects.filter(agreement_id=agreement_id)
+    return Response(CollabReviewSerializer(reviews, many=True).data)
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_shared_reviews_for_user(request, user_id):
+    """
+    Get all shared reviews for a user (for profile display).
+    """
+    reviews = CollabReview.objects.filter(reviewee_id=user_id, is_shared=True)
+    return Response(CollabReviewSerializer(reviews, many=True).data)
+import requests
+
+# --- LibreTranslate API Integration ---
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def translate_text(request):
+    """
+    Translate text using the LibreTranslate public API.
+    POST body: {"q": "text", "source": "en", "target": "es"}
+    """
+    data = request.data
+    q = data.get('q', '')
+    source = data.get('source', 'auto')
+    target = data.get('target', 'en')
+    if not q or not target:
+        return JsonResponse({'error': 'Missing text or target language.'}, status=400)
+    try:
+        resp = requests.post(
+            'https://libretranslate.com/translate',
+            data={
+                'q': q,
+                'source': source,
+                'target': target,
+                'format': 'text'
+            },
+            timeout=10
+        )
+        resp.raise_for_status()
+        translated = resp.json().get('translatedText', '')
+        return JsonResponse({'translated': translated})
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
 from .serializers import AgreementTemplateSerializer, CollabRoyaltyAgreementSerializer, AgreementChangeLogSerializer, CollabRoyaltySplitSerializer
 from rest_framework.parsers import JSONParser
 from django.http import JsonResponse

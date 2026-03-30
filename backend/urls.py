@@ -58,4 +58,11 @@ urlpatterns = [
     path('api/create-purchase-checkout', views.create_purchase_checkout, name='create_purchase_checkout'),
     path('api/cancel-subscription', views.cancel_subscription, name='cancel_subscription'),
     path('api/use-collaboration-request', views.use_collaboration_request, name='use_collaboration_request'),
+
+    # --- Reliability Rating & Review APIs ---
+    path('api/collab/<int:agreement_id>/reliability/<int:ratee_id>/', views.set_reliability_rating, name='set_reliability_rating'),
+    path('api/collab/<int:agreement_id>/reliability/', views.get_reliability_ratings, name='get_reliability_ratings'),
+    path('api/collab/<int:agreement_id>/review/<int:reviewee_id>/', views.set_collab_review, name='set_collab_review'),
+    path('api/collab/<int:agreement_id>/reviews/', views.get_collab_reviews, name='get_collab_reviews'),
+    path('api/user/<int:user_id>/shared-reviews/', views.get_shared_reviews_for_user, name='get_shared_reviews_for_user'),
 ]

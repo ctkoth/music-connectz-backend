@@ -1,3 +1,19 @@
+from .models import CollabReliabilityRating, CollabReview
+# --- Reliability Rating Serializer ---
+class CollabReliabilityRatingSerializer(serializers.ModelSerializer):
+    rater = serializers.StringRelatedField(read_only=True)
+    ratee = serializers.StringRelatedField(read_only=True)
+    class Meta:
+        model = CollabReliabilityRating
+        fields = '__all__'
+
+# --- Collab Review Serializer ---
+class CollabReviewSerializer(serializers.ModelSerializer):
+    reviewer = serializers.StringRelatedField(read_only=True)
+    reviewee = serializers.StringRelatedField(read_only=True)
+    class Meta:
+        model = CollabReview
+        fields = '__all__'
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
