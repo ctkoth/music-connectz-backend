@@ -1,0 +1,12 @@
+# Final backend migration steps after activating venv and installing openai
+
+# 1. Make migrations for the backend app:
+python manage.py makemigrations backend
+
+# 2. Apply migrations:
+python manage.py migrate
+
+# 3. (Optional) Start the server:
+python manage.py runserver
+
+# If you see any errors, copy the error message and ask for help.

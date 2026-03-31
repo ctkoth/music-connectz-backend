@@ -1,0 +1,18 @@
+# Fix broken Django migrations (NodeNotFoundError)
+
+# 1. Go to the backend app migrations folder:
+cd backend/migrations
+
+# 2. Delete all migration files EXCEPT __init__.py:
+del 000*.py
+
+# 3. Go back to the main backend project folder:
+cd ../..
+
+# 4. Make new initial migration:
+python manage.py makemigrations backend
+
+# 5. Apply migrations:
+python manage.py migrate
+
+# If you see any errors, copy the error message and ask for help.

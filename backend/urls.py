@@ -40,7 +40,6 @@ urlpatterns = [
         name='socialaccount_login_error',
     ),
     path('accounts/', include('allauth.urls')),
-    path('upload/', views.upload_work, name='upload_work'),
     path('api/auth/google/available', views.google_available),
     path('api/auth/google/config-status/', views.google_available, name='google_config_status'),
     path('api/auth/providers/status/', views.oauth_providers_status, name='oauth_providers_status'),

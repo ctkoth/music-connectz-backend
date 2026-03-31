@@ -1,0 +1,25 @@
+# Fix Python/Django Environment Issues for Music ConnectZ Backend
+
+# 1. Change to your backend project root (where manage.py and .venv are):
+cd "C:\Users\ctkot\OneDrive\Documents\music-connectz-backend"
+
+# 2. Activate your virtual environment (PowerShell):
+.venv\Scripts\Activate.ps1
+
+# 3. Ensure pip is available (should work after activation):
+pip --version
+
+# 4. Install openai in the virtual environment:
+pip install openai
+
+# 5. Run Django migrations:
+python manage.py makemigrations
+python manage.py migrate
+
+# 6. (Optional) Run the development server:
+python manage.py runserver
+
+# Notes:
+# - If you see '(.venv)' at the start of your prompt, the environment is active.
+# - If pip is still not found, try: python -m pip install openai
+# - Always run Django commands from the directory with manage.py.

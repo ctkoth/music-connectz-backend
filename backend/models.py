@@ -1,3 +1,65 @@
+from django.db import models
+from django.contrib.auth.models import User
+# --- Unified Post Model for v9.8 Paradigm ---
+class Post(models.Model):
+    POST_TYPE_CHOICES = [
+        ('work', 'Work'),
+        ('testimonial', 'Testimonial'),
+        ('discussion', 'Discussion'),
+        ('announcement', 'Announcement'),
+        ('other', 'Other'),
+    ]
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='posts')
+    post_type = models.CharField(max_length=24, choices=POST_TYPE_CHOICES, default='other')
+    title = models.CharField(max_length=200, blank=True)
+    content = models.TextField(blank=True)
+    work = models.ForeignKey('Work', null=True, blank=True, on_delete=models.SET_NULL, related_name='as_post')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_pinned = models.BooleanField(default=False)
+    is_featured = models.BooleanField(default=False)
+    is_public = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.get_post_type_display()} by {self.author.username}: {self.title or self.content[:30]}"
+
+# --- Comment Model for Posts ---
+class PostComment(models.Model):
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='comments')
+    author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='post_comments')
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Comment by {self.author.username} on Post {self.post.id}"
+
+# --- Rating Model for Posts and Comments ---
+class PostRating(models.Model):
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='ratings')
+    rater = models.ForeignKey(User, on_delete=models.CASCADE, related_name='post_ratings')
+    value = models.PositiveSmallIntegerField(default=0)  # 0-10 scale
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('post', 'rater')
+
+    def __str__(self):
+        return f"Rating {self.value}/10 by {self.rater.username} on Post {self.post.id}"
+
+class CommentRating(models.Model):
+    comment = models.ForeignKey(PostComment, on_delete=models.CASCADE, related_name='ratings')
+    rater = models.ForeignKey(User, on_delete=models.CASCADE, related_name='comment_ratings')
+    value = models.PositiveSmallIntegerField(default=0)  # 0-10 scale
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('comment', 'rater')
+
+    def __str__(self):
+        return f"Rating {self.value}/10 by {self.rater.username} on Comment {self.comment.id}"
 
 from django.db import models
 from django.contrib.auth.models import User

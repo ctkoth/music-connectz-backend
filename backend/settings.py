@@ -70,7 +70,11 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 # Allauth registration: new settings for account fields and login methods
-ACCOUNT_SIGNUP_FIELDS = ['email*', 'password1*', 'password2*']
+ACCOUNT_AUTHENTICATION_METHOD = "username_email"  # Allow login with username OR email
+ACCOUNT_USERNAME_REQUIRED = False                  # Username is optional
+ACCOUNT_EMAIL_REQUIRED = False                     # Email is optional
+ACCOUNT_USER_MODEL_USERNAME_FIELD = "username"
+ACCOUNT_SIGNUP_FIELDS = ["username", "email", "password1", "password2"]
 ACCOUNT_LOGIN_METHODS = {'email'}
 ACCOUNT_EMAIL_VERIFICATION = 'optional'
 ACCOUNT_DEFAULT_HTTP_PROTOCOL = 'https'

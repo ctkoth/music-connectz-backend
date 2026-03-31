@@ -1,0 +1,17 @@
+# Commands to fix backend and run migrations (v9.8 social paradigm)
+
+# 1. Activate your virtual environment (if not already active)
+.\.venv\Scripts\Activate.ps1
+
+# 2. Fix missing import in backend/views.py
+#    Add this line at the top of backend/views.py:
+#    from rest_framework.decorators import api_view
+
+# 3. Run Django migrations
+python manage.py makemigrations
+python manage.py migrate
+
+# 4. (Optional) Run server to verify
+python manage.py runserver
+
+# If you see any errors, copy the error message and ask for help.

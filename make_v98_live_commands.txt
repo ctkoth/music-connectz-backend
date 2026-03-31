@@ -1,0 +1,13 @@
+# After removing upload_work, run these commands to make v9.8 live
+
+# 1. If you are in the backend folder, go up one level:
+cd ..
+
+# 2. Run migrations from the music-connectz-backend directory:
+python manage.py makemigrations
+python manage.py migrate
+
+# 3. (Optional) Start the server:
+python manage.py runserver
+
+# If you see any errors, copy the error message and ask for help.

@@ -1,0 +1,16 @@
+# Fix for 'No module named openai' and migration errors
+
+# 1. Activate your virtual environment (if not already active):
+.\.venv\Scripts\Activate.ps1
+
+# 2. Install the openai package:
+pip install openai
+
+# 3. Run migrations from the main backend directory:
+python manage.py makemigrations backend
+python manage.py migrate
+
+# 4. (Optional) Start the server:
+python manage.py runserver
+
+# If you see any errors, copy the error message and ask for help.

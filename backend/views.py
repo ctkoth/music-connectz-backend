@@ -1,7 +1,14 @@
+from django.shortcuts import render
 import os
 import openai
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+
+# Add missing User import
+from django.contrib.auth.models import User
 
 # --- OpenAI Chat API Endpoint ---
 @csrf_exempt
@@ -646,22 +653,9 @@ def use_collaboration_request(request):
 
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
-from .forms import WorkForm
 from .models import Work
 
 def home(request):
     return render(request, "home.html")
 
 
-@login_required
-def upload_work(request):
-    if request.method == 'POST':
-        form = WorkForm(request.POST, request.FILES)
-        if form.is_valid():
-            work = form.save(commit=False)
-            work.uploaded_by = request.user
-            work.save()
-            return redirect('home')
-    else:
-        form = WorkForm()
-    return render(request, 'upload_work.html', {'form': form})
