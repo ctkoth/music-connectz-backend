@@ -36,7 +36,7 @@
           html += `<div><b>Description:</b> ${data.description || ''}</div>`;
           html += `<div><b>Version:</b> ${data.version || 1}</div>`;
           html += `<div><b>Finalized:</b> ${data.is_finalized ? 'Yes' : 'No'}</div>`;
-          html += `<div style='margin:10px 0;'><b>Agreement Text:</b><br><pre style='background:#f7f7f7;padding:8px;border-radius:6px;'>${data.agreement_text || ''}</pre></div>`;
+            html += `<div style='margin:10px 0;'><b>Agreement Text:</b><br><span style='background:#f7f7f7;padding:8px;border-radius:6px;display:inline-block;'>${data.agreement_text || ''}</span></div>`;
           html += `<button onclick="downloadAgreementPDF(${data.id})" style='background:#1565C0;color:#fff;border:none;border-radius:6px;padding:6px 12px;font-weight:600;margin-right:6px;'>Download PDF</button>`;
           html += `<button onclick="downloadAgreementCSV(${data.id})" style='background:#1565C0;color:#fff;border:none;border-radius:6px;padding:6px 12px;font-weight:600;margin-right:6px;'>Export CSV</button>`;
           html += `<button onclick="sendAgreementReminder(${data.id})" style='background:#ffa726;color:#fff;border:none;border-radius:6px;padding:6px 12px;font-weight:600;'>Send Reminder</button>`;
@@ -67,7 +67,12 @@
 <head>
     <link rel="icon" type="image/png" href="/music-connectz-logo.png" />
   <meta charset="UTF-8" />
-  <title>Music ConnectZ v9.5 bi K-Oth</title>
+  <title>Music ConnectZ v9.9 bi K-Oth</title>
+  <meta name="description" content="Music ConnectZ v9.9 - Safe, secure, and ad-free music collaboration platform. No popups, no misleading ads, privacy-first.">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta http-equiv="X-Frame-Options" content="DENY">
+  <meta http-equiv="X-XSS-Protection" content="1; mode=block">
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
   <script src="/app-config.js"></script>
   <script src="/i18n-config.js"></script>
