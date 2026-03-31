@@ -4,7 +4,8 @@
   "description": "Frontend for Music Connectz",
   "main": "firebase-auth.js",
   "scripts": {
-    "test": "jest"
+     "test": "jest",
+     "build": "echo 'No build step needed for static site'"
   },
   "devDependencies": {
     "jest": "^29.0.0"

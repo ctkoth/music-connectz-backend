@@ -50,3 +50,9 @@ March 29, 2026 — v9.6
 - Randomized weekly premium sale banners
 - UI/UX improvements for premium upsell and contextual marketing
 
+v9.7 - Unified Social Paradigm
+- New Royalties Agreement system (message board style)
+- Floating 💰 button and modal for agreements
+- Download PDF, export CSV, send reminders
+- All data powered by v9.8 backend
+

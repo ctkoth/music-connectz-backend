@@ -142,3 +142,10 @@ Created by ctkoth
 
 - **Backend Repo:** https://github.com/ctkoth/music-connectz-backend
 - **Stripe Dashboard:** https://dashboard.stripe.com/
+
+## v9.8 Social Paradigm
+- Unified Royalties Agreement system (message board style)
+- Floating 💰 button for instant access
+- Modal displays agreement details, version, and status
+- Download PDF, export CSV, and send reminders
+- All data fetched live from the v9.8 backend

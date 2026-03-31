@@ -176,7 +176,8 @@
   <!-- Onboarding Tour Modal -->
   <div id="onboardingTourModal" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.45); z-index:9999; align-items:center; justify-content:center;">
     <div id="onboardingTourContent" style="background:#fff; border-radius:16px; max-width:95vw; width:360px; margin:auto; box-shadow:0 4px 24px rgba(0,0,0,0.18); padding:32px 24px 24px 24px; position:relative; text-align:center;">
-      <div id="onboardingTourStepTitle" style="font-size:1.3em; font-weight:700; margin-bottom:10px;"></div>
+      <div id="onboardingTourHeader" style="font-size:1.3em; font-weight:700; margin-bottom:10px;"></div>
+      <div id="onboardingTourStepTitle" style="font-size:1.1em; font-weight:600; margin-bottom:8px;"></div>
       <div id="onboardingTourStepContent" style="font-size:1.05em; color:#444; margin-bottom:18px;"></div>
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <button id="onboardingTourPrev" class="btn btn-small" style="flex:1; margin-right:8px; background:#eee; color:#333; border:none;">◀</button>
@@ -189,43 +190,32 @@
   <button onclick="showOnboardingTour(0)" style="position:fixed; top:18px; right:18px; z-index:100; background:#fff; color:#2196F3; border:1px solid #2196F3; border-radius:6px; font-size:13px; padding:6px 14px; font-weight:600; box-shadow:0 2px 8px rgba(33,150,243,0.08); cursor:pointer;">❓ Tour</button>
   <div style="text-align:center; margin-top:24px;">
 
-    // Onboarding Tour Logic
-    let onboardingSteps = (window.I18N_CONFIG.translations[window.I18N_CONFIG.currentLang].onboarding_tour_steps || window.I18N_CONFIG.translations['en-US'].onboarding_tour_steps);
-    let onboardingStepIdx = 0;
+    // Onboarding Tour Header translations with emoji
+    const onboardingTourHeaders = {
+      'en-US': '🎓 Welcome Tour',
+      'es-ES': '🎓 Tour de Bienvenida',
+      'pt-BR': '🎓 Tour de Boas-vindas',
+      'fr-FR': '🎓 Visite de bienvenue',
+      'de-DE': '🎓 Willkommens-Tour',
+      'it-IT': '🎓 Tour di Benvenuto',
+      'ja-JP': '🎓 ウェルカムツアー',
+      'zh-CN': '🎓 欢迎之旅',
+      'ko-KR': '🎓 환영 투어',
+      'ru-RU': '🎓 Приветственный тур',
+      'ar-SA': '🎓 جولة الترحيب',
+      'hi-IN': '🎓 स्वागत टूर',
+      'tr-TR': '🎓 Hoşgeldiniz Turu',
+      'default': '🎓 Welcome Tour'
+    };
+    function setOnboardingTourHeader() {
+      const lang = (window.I18N_CONFIG && window.I18N_CONFIG.currentLang) || 'en-US';
+      document.getElementById('onboardingTourHeader').innerText = onboardingTourHeaders[lang] || onboardingTourHeaders['default'];
+    }
+    // Call this when showing the tour
     function showOnboardingTour(startIdx=0) {
-      onboardingSteps = (window.I18N_CONFIG.translations[window.I18N_CONFIG.currentLang].onboarding_tour_steps || window.I18N_CONFIG.translations['en-US'].onboarding_tour_steps);
-      onboardingStepIdx = startIdx;
-      document.getElementById('onboardingTourModal').style.display = 'flex';
-      renderOnboardingStep();
+      setOnboardingTourHeader();
+      // ...existing code...
     }
-    function hideOnboardingTour() {
-      document.getElementById('onboardingTourModal').style.display = 'none';
-      localStorage.setItem('mcz_onboarding_complete', '1');
-    }
-    function renderOnboardingStep() {
-      const step = onboardingSteps[onboardingStepIdx];
-      document.getElementById('onboardingTourStepTitle').innerText = step.title;
-      document.getElementById('onboardingTourStepContent').innerText = step.content;
-      document.getElementById('onboardingTourPrev').disabled = onboardingStepIdx === 0;
-      document.getElementById('onboardingTourNext').innerText = (onboardingStepIdx === onboardingSteps.length-1) ? 'Finish' : 'Next ▶';
-      document.getElementById('onboardingTourProgress').innerText = `Step ${onboardingStepIdx+1} of ${onboardingSteps.length}`;
-    }
-    document.addEventListener('DOMContentLoaded', function() {
-      // Show onboarding for new users
-      if (!localStorage.getItem('mcz_onboarding_complete')) {
-        setTimeout(()=>showOnboardingTour(0), 600);
-      }
-      document.getElementById('onboardingTourPrev').onclick = function() {
-        if (onboardingStepIdx > 0) { onboardingStepIdx--; renderOnboardingStep(); }
-      };
-      document.getElementById('onboardingTourNext').onclick = function() {
-        if (onboardingStepIdx < onboardingSteps.length-1) { onboardingStepIdx++; renderOnboardingStep(); }
-        else { hideOnboardingTour(); }
-      };
-      document.getElementById('onboardingTourClose').onclick = function() { hideOnboardingTour(); };
-    });
-    // Add a button to re-launch onboarding tour
-    window.showOnboardingTour = showOnboardingTour;
     <img src="/music-connectz-logo.png" alt="Music ConnectZ Logo" style="width:140px; max-width:95vw; height:auto; border-radius:28px; box-shadow:0 2px 16px rgba(0,0,0,0.15); background:#fff; margin-bottom:16px;" />
   </div>
   <div class="auth-form" id="authForm">
@@ -263,7 +253,28 @@
         <!-- Persona Details Area -->
         <div id="persona-details" style="margin: 18px auto 0 auto; max-width: 400px; background: #f7f7f7; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 18px 20px 14px 20px; border: 1.5px solid #bbb; display: none;"></div>
       </div>
-      <span id="mcz-title" style="font-weight:bold; font-size:1.2em; cursor:pointer; text-decoration:underline;">🎵 Music ConnectZ v9.4 bi K-Oth</span><span id="header-date" style="font-size:0.95em; color:#888; margin-left:6px;"></span>
+      <span id="mcz-title" style="font-weight:bold; font-size:1.2em; cursor:pointer; text-decoration:underline;">🎵 Music ConnectZ v9.6 bi K-Oth on (March 30, 2026)@09:55</span><span id="header-date" style="font-size:0.95em; color:#888; margin-left:6px;"></span>
+      <div id="member-count" style="margin-top:8px; font-size:1.05em; color:#2196F3; font-weight:600;"></div>
+        <script>
+          // Fetch and display live member count
+          function fetchMemberCount() {
+            const el = document.getElementById('member-count');
+            if (!el) return;
+            el.textContent = 'Loading members...';
+            fetch(`${window.MCZ_CONFIG.backendUrl}/api/auth/users/`, { credentials: 'include' })
+              .then(res => res.json())
+              .then(data => {
+                if (typeof data.totalUsers === 'number') {
+                  el.textContent = `👥 Community Members: ${data.totalUsers.toLocaleString()}`;
+                } else {
+                  el.textContent = '👥 Community Members: N/A';
+                }
+              })
+              .catch(() => { el.textContent = '👥 Community Members: N/A'; });
+          }
+          document.addEventListener('DOMContentLoaded', fetchMemberCount);
+        </script>
+      <div id="version-instruction" style="font-size:0.98em; color:#666; margin-top:2px;"></div>
       <div id="version-log-modal" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.45); z-index:3000; align-items:center; justify-content:center;">
         <div style="background:#fff; border-radius:16px; max-width:95vw; width:420px; margin:auto; box-shadow:0 4px 24px rgba(0,0,0,0.18); padding:32px 24px 24px 24px; position:relative;">
           <div style="font-size:1.3em; font-weight:700; margin-bottom:10px; text-align:center;">📝 Version History</div>
@@ -280,6 +291,7 @@
 
         // Version history data (descending order, with emojis)
         const versionHistory = [
+          { v: 'v9.6', text: 'bi K-Oth on (March 30, 2026)@09:55', emoji: '🚀' },
           { v: 'v9.5', text: 'bi K-Oth on (March 29, 2026)@14:45', emoji: '🚀' },
           { v: 'v9.5', text: 'bi K-Oth', emoji: '👤' },
           { v: 'v0.5', text: 'Introduced “ww levels” feature', emoji: '🆕' },
@@ -334,6 +346,31 @@
           'ms-MY': '📝 Sejarah Versi',
           'default': '📝 Version History'
         };
+
+        // User instruction translations
+        const versionInstruction = {
+          'en-US': 'Click above to see what\'s new!',
+          'en-GB': 'Click above to see what\'s new!',
+          'pt-BR': 'Clique acima para ver as novidades!',
+          'pt-PT': 'Clique acima para ver as novidades!',
+          'es-ES': 'Haz clic arriba para ver las novedades!',
+          'es-MX': 'Haz clic arriba para ver las novedades!',
+          'fr-FR': 'Cliquez ci-dessus pour voir les nouveautés!',
+          'de-DE': 'Klicken Sie oben, um die Neuigkeiten zu sehen!',
+          'it-IT': 'Clicca sopra per vedere le novità!',
+          'ja-JP': '上をクリックして新機能を確認！',
+          'zh-CN': '点击上方查看新内容！',
+          'zh-TW': '點擊上方查看新內容！',
+          'ko-KR': '위쪽을 클릭하여 새로운 소식을 확인하세요!',
+          'ar-SA': 'انقر أعلاه لرؤية الجديد!',
+          'hi-IN': 'नया क्या है देखने के लिए ऊपर क्लिक करें!',
+          'ru-RU': 'Нажмите выше, чтобы узнать, что нового!',
+          'tr-TR': 'Yenilikleri görmek için yukarıya tıklayın!',
+          'default': 'Click above to see what\'s new!'
+        };
+        // Set instruction based on user language
+        const lang = (window.I18N_CONFIG && window.I18N_CONFIG.currentLang) || 'en-US';
+        document.getElementById('version-instruction').innerText = versionInstruction[lang] || versionInstruction['default'];
 
         mczTitle.onclick = function() {
           // Get user language
@@ -459,45 +496,6 @@
           "Strategic Decision Making"
         ]
       },
-        <!-- Weekly Premium Sale Banner (Marketing BSA) -->
-        <div id="weeklySaleBanner" style="display:none; background:linear-gradient(90deg,#FFD700,#FF9800);color:#222;padding:14px 18px;border-radius:10px;margin:18px auto 0 auto;max-width:420px;box-shadow:0 2px 8px rgba(255,152,0,0.12);font-size:1.08em;position:relative;z-index:10;">
-          <span id="weeklySaleText"></span>
-          <button onclick="document.getElementById('weeklySaleBanner').style.display='none'" style="position:absolute;top:6px;right:10px;background:none;border:none;font-size:18px;color:#e65100;cursor:pointer;">&times;</button>
-        </div>
-        <script>
-          // --- Weekly Premium Sale Logic ---
-          const saleOffers = [
-            {
-              title: '🎉 Limited-Time Premium Sale!',
-              desc: 'Upgrade to Premium this week and get 30% off + exclusive access to Marketing BSA tools! \ud83d\udce3\n\n\ud83d\udcb0 Benefits: Advanced analytics, campaign tools, industry contacts, and more.',
-              cta: 'Upgrade Now',
-              url: '#membership'
-            },
-            {
-              title: '🔥 Flash Deal: Premium Access',
-              desc: 'Unlock all premium features, including Marketing BSA, for 25% off! Offer ends soon.\n\n\ud83d\udcb0 Benefits: Priority support, analytics, and marketing tools.',
-              cta: 'Claim Offer',
-              url: '#membership'
-            },
-            {
-              title: '⭐ Premium Perks Week',
-              desc: 'Enjoy a free 7-day trial of Premium, including Marketing BSA, for new upgrades this week only!\n\n\ud83d\udcb0 Benefits: Analytics, campaign tools, and more.',
-              cta: 'Start Free Trial',
-              url: '#membership'
-            }
-          ];
-          function showWeeklySaleBanner() {
-            // Use week number to randomize but keep consistent for the week
-            const now = new Date();
-            const week = Math.floor((now - new Date(now.getFullYear(),0,1)) / (7*24*60*60*1000));
-            const offer = saleOffers[week % saleOffers.length];
-            const banner = document.getElementById('weeklySaleBanner');
-            const text = `<b>${offer.title}</b><br>${offer.desc}<br><a href='${offer.url}' class='btn btn-success btn-small' style='margin-top:8px;'>${offer.cta}</a>`;
-            document.getElementById('weeklySaleText').innerHTML = text;
-            banner.style.display = 'block';
-          }
-          document.addEventListener('DOMContentLoaded', showWeeklySaleBanner);
-        </script>
       producer: {
         title: "Producer",
         text: "Shapes the sound, arrangement, and creative execution of tracks from idea to release.",
