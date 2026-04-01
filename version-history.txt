@@ -64,3 +64,14 @@ v9.9 - Unified Registration/Login
 v10.1 - Version Label Update
 - Updated frontend version labels to v10.1 across title, header, and metadata
 
+v10.2 - Emoji Personas & Short Name Refinements
+- Added emoji to all persona titles and description sentences in personaDetails
+- Profile cards: Producer and Engineer display without emoji for cleaner look
+- Short names updated: Ghostwriter → Writer, Videographer → Video on cards
+
+v10.3 - 🤖 GenAI Logic Upgrade
+- 🤖 GenAI assistant upgraded with deeper, more self-contained responses
+- 🎯 Answers now explain the "what" and "why" — no surface-level one-liners
+- ✍️ Voice skill added: GenAI can respond in user's personal writing style
+- 💬 Concise but complete: responses cut follow-up questions before they happen
+
