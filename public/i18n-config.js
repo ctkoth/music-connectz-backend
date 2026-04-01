@@ -133,11 +133,11 @@ window.I18N_CONFIG = {
       
       // Personas (US/English focus on commercial music)
       persona_artist: 'Independent Artist',
-      persona_designer: 'Designer',
-      persona_engineer: 'Engineer',
+      persona_designer: 'Visual Designer',
+      persona_engineer: 'Mix Engineer',
       persona_ghostwriter: 'Ghostwriter',
       persona_manager: 'Business Manager',
-      persona_producer: 'Producer',
+      persona_producer: 'Beat Producer',
       persona_videographer: 'Videographer',
       
       persona_artist_desc: 'Creates and performs original music, shaping the creative direction and identity of a project.',
@@ -210,11 +210,11 @@ window.I18N_CONFIG = {
       continue_auth: 'Continue Auth on Secure Server',
       
       persona_artist: 'Independent Artist',
-      persona_designer: 'Designer',
-      persona_engineer: 'Engineer',
+      persona_designer: 'Visual Designer',
+      persona_engineer: 'Mix Engineer',
       persona_ghostwriter: 'Ghostwriter',
       persona_manager: 'Business Manager',
-      persona_producer: 'Producer',
+      persona_producer: 'Beat Producer',
       persona_videographer: 'Videographer',
       
       persona_artist_desc: 'Creates and performs original music, shaping the creative direction and identity of a project.',
@@ -293,8 +293,8 @@ window.I18N_CONFIG = {
       continue_auth: 'Continuar Autenticação no Servidor Seguro',
       
       persona_artist: 'Artista Independente',
-      persona_designer: 'Designer',
-      persona_engineer: 'Engenheiro de Som',
+      persona_designer: 'Designer Visual',
+      persona_engineer: 'Engenheiro de Mixagem',
       // Onboarding Tour Steps
       onboarding_tour_steps: [
         { title: '👋 Bem-vindo ao Music ConnectZ!', content: 'Encontre colaboradores, expanda sua rede e ganhe recompensas. Vamos começar!' },
@@ -321,7 +321,7 @@ window.I18N_CONFIG = {
         { title: '🎁 보상 받기', content: '추천 링크로 친구를 초대해 크레딧과 프리미엄 기능을 잠금 해제하세요.' },
         { title: '🌐 글로벌 경험', content: '언어를 언제든지 변경해 현지화된 경험을 즐기세요. 전 세계 음악 협업을 경험하세요!' }
       ],
-      persona_producer: 'Produtor',
+      persona_producer: 'Produtor de Beats',
       // Onboarding Tour Steps
       onboarding_tour_steps: [
         { title: '👋 欢迎来到 Music ConnectZ！', content: '寻找合作者，拓展人脉，赢取奖励。让我们开始吧！' },
@@ -432,11 +432,11 @@ window.I18N_CONFIG = {
       continue_auth: 'Continuar Autenticação no Servidor Seguro',
       
       persona_artist: 'Artista Independente',
-      persona_designer: 'Designer',
-      persona_engineer: 'Engenheiro de Som',
+      persona_designer: 'Designer Visual',
+      persona_engineer: 'Engenheiro de Mistura',
       persona_ghostwriter: 'Compositor Fantasma',
       persona_manager: 'Gestor de Negócios',
-      persona_producer: 'Produtor',
+      persona_producer: 'Produtor de Beats',
       persona_videographer: 'Videógrafo',
       
       persona_artist_desc: 'Cria e interpreta música original, moldando a direcção criativa e identidade do projecto.',
@@ -507,11 +507,11 @@ window.I18N_CONFIG = {
       continue_auth: '보안 서버에서 인증 계속',
       
       persona_artist: '독립 아티스트',
-      persona_designer: '디자이너',
-      persona_engineer: '사운드 엔지니어',
-      persona_ghostwriter: '유령 작곡가',
+      persona_designer: '비주얼 디자이너',
+      persona_engineer: '믹스 엔지니어',
+      persona_ghostwriter: '고스트라이터',
       persona_manager: '비즈니스 매니저',
-      persona_producer: '프로듀서',
+      persona_producer: '비트 프로듀서',
       persona_videographer: '비디오그래퍼',
       
       persona_artist_desc: '원곡을 제작하고 공연하며 프로젝트의 창의적 방향과 정체성을 형성합니다.',
@@ -582,11 +582,11 @@ window.I18N_CONFIG = {
       continue_auth: '在安全服务器上继续身份验证',
       
       persona_artist: '独立音乐人',
-      persona_designer: '设计师',
-      persona_engineer: '音频工程师',
+      persona_designer: '视觉设计师',
+      persona_engineer: '混音工程师',
       persona_ghostwriter: '幽灵写手',
       persona_manager: '业务经理',
-      persona_producer: '制作人',
+      persona_producer: '节拍制作人',
       persona_videographer: '摄像师',
       
       persona_artist_desc: '创作和表演原创音乐，塑造项目的创意方向和身份。',
@@ -657,11 +657,11 @@ window.I18N_CONFIG = {
       continue_auth: '在安全伺服器上繼續身份驗證',
       
       persona_artist: '獨立音樂人',
-      persona_designer: '設計師',
-      persona_engineer: '音訊工程師',
+      persona_designer: '視覺設計師',
+      persona_engineer: '混音工程師',
       persona_ghostwriter: '幽靈寫手',
       persona_manager: '業務經理',
-      persona_producer: '製作人',
+      persona_producer: '節拍製作人',
       persona_videographer: '攝影師',
       
       persona_artist_desc: '創作和表演原創音樂，塑造專案的創意方向和身份。',
@@ -732,11 +732,11 @@ window.I18N_CONFIG = {
       continue_auth: 'セキュアサーバーで認証を続行',
       
       persona_artist: 'インディーアーティスト',
-      persona_designer: 'デザイナー',
-      persona_engineer: 'サウンドエンジニア',
+      persona_designer: 'ビジュアルデザイナー',
+      persona_engineer: 'ミックスエンジニア',
       persona_ghostwriter: 'ゴーストライター',
       persona_manager: 'ビジネスマネージャー',
-      persona_producer: 'プロデューサー',
+      persona_producer: 'ビートプロデューサー',
       persona_videographer: 'ビデオグラファー',
       
       persona_artist_desc: 'オリジナル音楽を制作・演奏し、プロジェクトの創作方向とアイデンティティを形成します。',
@@ -807,11 +807,11 @@ window.I18N_CONFIG = {
       continue_auth: 'متابعة المصادقة على الخادم الآمن',
       
       persona_artist: 'فنان مستقل',
-      persona_designer: 'مصمم',
-      persona_engineer: 'مهندس صوت',
-      persona_ghostwriter: 'كاتب شبح',
+      persona_designer: 'مصمم بصري',
+      persona_engineer: 'مهندس ميكس',
+      persona_ghostwriter: 'كاتب خفي',
       persona_manager: 'مدير العمل',
-      persona_producer: 'منتج',
+      persona_producer: 'منتج إيقاعات',
       persona_videographer: 'مصور فيديو',
       
       persona_artist_desc: 'ينتج ويؤدي الموسيقى الأصلية، ويشكل الاتجاه الإبداعي وهوية المشروع.',
@@ -882,11 +882,11 @@ window.I18N_CONFIG = {
       continue_auth: 'सुरक्षित सर्वर पर प्रमाणीकरण जारी रखें',
       
       persona_artist: 'स्वतंत्र कलाकार',
-      persona_designer: 'डिजाइनर',
-      persona_engineer: 'ध्वनि इंजीनियर',
-      persona_ghostwriter: 'गोस्ट राइटर',
+      persona_designer: 'विजुअल डिज़ाइनर',
+      persona_engineer: 'मिक्स इंजीनियर',
+      persona_ghostwriter: 'घोस्टराइटर',
       persona_manager: 'व्यावसायिक प्रबंधक',
-      persona_producer: 'निर्माता',
+      persona_producer: 'बीट प्रोड्यूसर',
       persona_videographer: 'वीडियोग्राफर',
       
       persona_artist_desc: 'मूल संगीत बनाता है और प्रदर्शन करता है, परियोजना की रचनात्मक दिशा और पहचान को आकार देता है।',
