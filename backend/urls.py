@@ -44,6 +44,7 @@ urlpatterns = [
     path('api/auth/google/config-status/', views.google_available, name='google_config_status'),
     path('api/auth/providers/status/', views.oauth_providers_status, name='oauth_providers_status'),
     path('api/auth/me/', views.api_auth_me, name='api_auth_me'),
+    path('api/auth/complete-profile/', views.complete_oauth_profile, name='complete_oauth_profile'),
     path('api/auth/register/', views.api_register, name='api_register'),
     path('api/referral/stats/', views.referral_stats, name='referral_stats'),
     path('api/auth/register-with-referral/', views.register_with_referral, name='register_with_referral'),

@@ -147,6 +147,7 @@ import secrets
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     referral_code = models.CharField(max_length=16, unique=True, blank=True)
+    phone_number = models.CharField(max_length=32, blank=True, default='')
     referred_by = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='referrals')
 
     def save(self, *args, **kwargs):

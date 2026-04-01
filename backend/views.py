@@ -382,15 +382,57 @@ from django.http import JsonResponse
 def api_auth_me(request):
     user = getattr(request, 'user', None)
     if user and user.is_authenticated:
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        phone_number = (profile.phone_number or '').strip()
+        profile_completed = bool((user.username or '').strip() and (user.email or '').strip() and phone_number)
         return JsonResponse({
             'authenticated': True,
             'user': {
                 'id': user.id,
                 'email': getattr(user, 'email', '') or '',
                 'username': getattr(user, 'username', '') or '',
+                'phone_number': phone_number,
+                'profile_completed': profile_completed,
             }
         })
     return JsonResponse({'authenticated': False}, status=401)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def complete_oauth_profile(request):
+    user = request.user
+    username = (request.data.get('username') or '').strip()
+    email = (request.data.get('email') or '').strip()
+    phone_number = (request.data.get('phone_number') or '').strip()
+
+    if not username or not email or not phone_number:
+        return Response({'error': 'username, email, and phone_number are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if User.objects.exclude(pk=user.pk).filter(username__iexact=username).exists():
+        return Response({'error': 'Username already taken.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if User.objects.exclude(pk=user.pk).filter(email__iexact=email).exists():
+        return Response({'error': 'Email already taken.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user.username = username
+    user.email = email
+    user.save(update_fields=['username', 'email'])
+
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+    profile.phone_number = phone_number
+    profile.save(update_fields=['phone_number'])
+
+    return Response({
+        'success': 'Profile completed.',
+        'user': {
+            'id': user.id,
+            'email': user.email,
+            'username': user.username,
+            'phone_number': profile.phone_number,
+            'profile_completed': True,
+        }
+    }, status=status.HTTP_200_OK)
 
 
 def google_available(request):
