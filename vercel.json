@@ -1,4 +1,22 @@
 {
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "has": [
+        { "type": "host", "value": "musicconnectz.net" }
+      ],
+      "destination": "https://musicconnectz.com/$1",
+      "permanent": true
+    },
+    {
+      "source": "/(.*)",
+      "has": [
+        { "type": "host", "value": "www.musicconnectz.net" }
+      ],
+      "destination": "https://musicconnectz.com/$1",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "https://music-connectz-backend-2.onrender.com/api/$1" }
   ]
