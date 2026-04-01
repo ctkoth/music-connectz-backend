@@ -20,11 +20,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-#2yk%)k4t(bt83ch263hn*b_5uvi=8)qi@jn+$nyeqv7!_@=@&')
-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
+
+# SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = 'dev-only-insecure-key-change-me'
+    else:
+        raise ValueError('SECRET_KEY environment variable is required when DEBUG=False')
 
 ALLOWED_HOSTS = [
     "music-connectz-backend-1.onrender.com",
@@ -116,9 +121,9 @@ SOCIALACCOUNT_PROVIDERS = {
         'SCOPE': ['non-expiring'],
     },
 }
-LOGIN_REDIRECT_URL = 'https://musicconnectz.net/'
-LOGOUT_REDIRECT_URL = 'https://musicconnectz.net/'
-SOCIALACCOUNT_ERROR_URL = 'https://musicconnectz.net/?login_error=1'
+LOGIN_REDIRECT_URL = 'https://musicconnectz.com/'
+LOGOUT_REDIRECT_URL = 'https://musicconnectz.com/'
+SOCIALACCOUNT_ERROR_URL = 'https://musicconnectz.com/?login_error=1'
 
 
 MIDDLEWARE = [
@@ -201,21 +206,54 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'ctkotth@gmail.com'
-EMAIL_HOST_PASSWORD = 'wrtf lxtk ppoy crhq'  # Your Gmail app password
-DEFAULT_FROM_EMAIL = 'ctkotth@gmail.com'
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER or 'noreply@musicconnectz.com')
 
 STATIC_URL = 'static/'
 
 # CORS settings for frontend
 CORS_ALLOWED_ORIGINS = [
+    "https://musicconnectz.com",
+    "https://www.musicconnectz.com",
     "https://musicconnectz.net",
     "https://www.musicconnectz.net",
+    "https://music-connectz-frontend.vercel.app",
+    "https://music-connectz-backend-2.onrender.com"
+]
+CSRF_TRUSTED_ORIGINS = [
+    "https://musicconnectz.com",
+    "https://www.musicconnectz.com",
+    "https://musicconnectz.net",
+    "https://www.musicconnectz.net",
+    "https://music-connectz-frontend.vercel.app",
 ]
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+]
 
-# Allow cross-site session cookies for frontend auth-state sync checks.
-SESSION_COOKIE_SAMESITE = 'None'
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SAMESITE = 'None'
+# --- Security Headers for Safer Site ---
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'DENY'
+SECURE_SSL_REDIRECT = not DEBUG
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 CSRF_COOKIE_SECURE = True
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SECURE = True
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
+SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+SECURE_HSTS_PRELOAD = True
