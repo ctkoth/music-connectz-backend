@@ -203,6 +203,25 @@
     </div>
   </div>
   <button onclick="showOnboardingTour(0)" style="position:fixed; top:18px; right:18px; z-index:100; background:#fff; color:#2196F3; border:1px solid #2196F3; border-radius:6px; font-size:13px; padding:6px 14px; font-weight:600; box-shadow:0 2px 8px rgba(33,150,243,0.08); cursor:pointer;">❓ Tour</button>
+  <div id="quickAccessDock" style="position:fixed; left:18px; bottom:18px; z-index:1200; display:flex; flex-direction:column; gap:8px;">
+    <button id="quickLoginBtn" onclick="openLoginOverlay()" style="background:#1565C0; color:#fff; border:0; border-radius:999px; padding:10px 14px; font-size:12px; font-weight:700; box-shadow:0 6px 18px rgba(21,101,192,0.25); cursor:pointer;">🔓 Login</button>
+    <button id="quickAIHelpBtn" onclick="openAIHelpPopup()" style="background:#0f766e; color:#fff; border:0; border-radius:999px; padding:10px 14px; font-size:12px; font-weight:700; box-shadow:0 6px 18px rgba(15,118,110,0.25); cursor:pointer;">🤖 AI Help</button>
+  </div>
+
+  <div id="aiHelpPopup" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:6500; align-items:center; justify-content:center; padding:20px;">
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:14px; width:100%; max-width:420px; box-shadow:0 14px 40px rgba(0,0,0,0.35); padding:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <div style="font-weight:800; color:var(--primary);">🤖 AI Help Window</div>
+        <button onclick="closeAIHelpPopup()" style="border:1px solid var(--border); background:var(--bg); border-radius:8px; padding:4px 8px; cursor:pointer;">✕</button>
+      </div>
+      <div style="font-size:12px; color:var(--text-light); margin-bottom:8px;">Describe the issue and we will create an AI-assisted ticket for human support.</div>
+      <textarea id="aiHelpIssueInput" rows="4" placeholder="Example: Login button is not visible on my device and OAuth keeps failing." style="width:100%;"></textarea>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn btn-success" style="flex:1;" onclick="submitAIHelpPopup()">Create Ticket</button>
+        <button class="btn btn-secondary" style="flex:1;" onclick="closeAIHelpPopup()">Close</button>
+      </div>
+    </div>
+  </div>
   <div style="text-align:center; margin-top:24px;">
     <!-- Removed code fragment that was being displayed to users -->
     <img src="/music-connectz-logo.png" alt="Music ConnectZ Logo" style="width:140px; max-width:95vw; height:auto; border-radius:28px; box-shadow:0 2px 16px rgba(0,0,0,0.15); background:#fff; margin-bottom:16px;" />
@@ -4753,11 +4772,50 @@ function shareReferral(platform) {
 }
 
 function openLoginOverlay() {
+  const overlay = document.getElementById('authOverlay');
+  const mainView = document.getElementById('authMainView');
+  const phoneView = document.getElementById('authPhoneView');
+  const forgotView = document.getElementById('authForgotView');
+  const resetView = document.getElementById('authResetView');
+  if (overlay) overlay.classList.add('active');
+  if (mainView) mainView.style.display = 'block';
+  if (phoneView) phoneView.style.display = 'none';
+  if (forgotView) forgotView.style.display = 'none';
+  if (resetView) resetView.style.display = 'none';
   appState.auth = { loggedIn: false, user: null, guest: false };
   saveAppState();
   updateAuthDisplay();
   updateOAuthButtonVisibility();
   setAuthStatus('Enter your email and password to login.');
+}
+
+function closeLoginOverlay() {
+  const overlay = document.getElementById('authOverlay');
+  if (overlay) overlay.classList.remove('active');
+}
+
+function openAIHelpPopup() {
+  const popup = document.getElementById('aiHelpPopup');
+  if (!popup) return;
+  popup.style.display = 'flex';
+}
+
+function closeAIHelpPopup() {
+  const popup = document.getElementById('aiHelpPopup');
+  if (!popup) return;
+  popup.style.display = 'none';
+}
+
+async function submitAIHelpPopup() {
+  const input = document.getElementById('aiHelpIssueInput');
+  const issue = (input && input.value ? input.value : '').trim();
+  if (!issue) {
+    alert('Please describe the issue first.');
+    return;
+  }
+  await createSupportTicketFromAI(issue);
+  if (input) input.value = '';
+  closeAIHelpPopup();
 }
 
 function showPhoneLogin() {
@@ -5517,9 +5575,9 @@ function renderPostLists() {
   if (tabContainer) tabContainer.innerHTML = html;
 }
 
-async function createSupportTicketFromAI() {
+async function createSupportTicketFromAI(issueTextOverride) {
   const issueInput = document.getElementById('supportIssueInput');
-  const rawIssue = (issueInput && issueInput.value ? issueInput.value : '').trim();
+  const rawIssue = (typeof issueTextOverride === 'string' ? issueTextOverride : (issueInput && issueInput.value ? issueInput.value : '')).trim();
   if (!rawIssue) {
     alert('Please describe the issue first.');
     return;
@@ -5554,7 +5612,7 @@ async function createSupportTicketFromAI() {
   appState.supportTickets.unshift(ticket);
   saveAppState();
 
-  if (issueInput) issueInput.value = '';
+  if (!issueTextOverride && issueInput) issueInput.value = '';
   renderSupportTickets();
   alert('✅ Ticket created and queued for human support follow-up.');
 }
@@ -5837,6 +5895,16 @@ function initializeSettings() {
   });
 }
 
+function maybeShowAccessPopups() {
+  const isGuest = !!(appState && appState.auth && appState.auth.guest);
+  const hasPrompted = safeStorageGet('mcz_access_popup_seen') === '1';
+  if (!isGuest || hasPrompted) return;
+  safeStorageSet('mcz_access_popup_seen', '1');
+  setTimeout(() => {
+    openLoginOverlay();
+  }, 250);
+}
+
 window.addEventListener('beforeunload', () => { saveAppState(); });
 
 console.log('=== PAGE LOADED - SCHEDULING INITIALIZATION ===');
@@ -5852,6 +5920,7 @@ setTimeout(() => {
     updateAuthDisplay();
     console.log('updateAuthDisplay complete');
     maybeShowWeeklyPromoPopup();
+    maybeShowAccessPopups();
     
     // Show the setup tab by default
     const setupTab = document.getElementById('setup');
