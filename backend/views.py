@@ -460,6 +460,7 @@ def oauth_providers_status(request):
         'google': 'google',
         'spotify': 'spotify',
         'soundcloud': 'soundcloud',
+        'tiktok': 'tiktok',
     }
 
     providers = {}

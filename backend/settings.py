@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     'allauth.socialaccount.providers.google',
     'allauth.socialaccount.providers.spotify',
     'allauth.socialaccount.providers.soundcloud',
+    'allauth.socialaccount.providers.tiktok',
     'rest_framework',
     'corsheaders',
 ]
@@ -119,6 +120,9 @@ SOCIALACCOUNT_PROVIDERS = {
     },
     'soundcloud': {
         'SCOPE': ['non-expiring'],
+    },
+    'tiktok': {
+        'SCOPE': ['user.info.basic', 'user.info.profile'],
     },
 }
 LOGIN_REDIRECT_URL = 'https://musicconnectz.com/'
