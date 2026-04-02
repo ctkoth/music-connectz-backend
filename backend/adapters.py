@@ -29,7 +29,10 @@ class SafeSocialAccountAdapter(DefaultSocialAccountAdapter):
 
         from django.conf import settings
 
-        visible_apps = [app for app in apps if not app.settings.get("hidden")]
+        visible_apps = [
+            app for app in apps
+            if not ((getattr(app, "settings", None) or {}).get("hidden"))
+        ]
         candidates = visible_apps or apps
 
         # If env APP config exists, prefer the app matching that client_id.
