@@ -11,3 +11,4 @@ oauthlib
 requests-oauthlib
 python3-openid
 cryptography
+reportlab
