@@ -1,0 +1,9 @@
+Yes, wishlists can be either private or public as a post. Here’s how it will work:
+
+- When a user adds an item to their wishlist, they can choose to keep it private (only visible to them) or make it public (visible to others as a post in the feed or on their profile).
+- Public wishlists will appear as posts, allowing others to see what users are looking for, potentially leading to offers or connections.
+- Private wishlists remain hidden from other users.
+
+This will be implemented for both the marketplace and lessons features. Each wishlist entry will have a visibility setting (private/public), and public wishlists will be posted to the appropriate feed.
+
+This feature will be included in the v10.1 implementation plan.
