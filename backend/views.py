@@ -1,4 +1,5 @@
 from django.shortcuts import render
+from django.conf import settings
 import os
 import openai
 from django.views.decorators.csrf import csrf_exempt
@@ -463,10 +464,14 @@ def oauth_providers_status(request):
         'tiktok': 'tiktok',
     }
 
+    socialaccount_settings = getattr(settings, 'SOCIALACCOUNT_PROVIDERS', {})
     providers = {}
     for frontend_provider, allauth_provider in provider_map.items():
         app = SocialApp.objects.filter(provider=allauth_provider).order_by('id').first()
-        providers[frontend_provider] = bool(app and app.client_id and app.secret)
+        db_configured = bool(app and app.client_id and app.secret)
+        env_app = socialaccount_settings.get(allauth_provider, {}).get('APP', {})
+        env_configured = bool(env_app.get('client_id') and env_app.get('secret'))
+        providers[frontend_provider] = db_configured or env_configured
 
     return JsonResponse({
         'providers': providers,
