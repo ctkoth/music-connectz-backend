@@ -1243,6 +1243,7 @@
     <button class="tab-btn active" onclick="switchTab('setup')">⚙️ Setup</button>
     <button class="tab-btn" onclick="switchTab('personas')">🎭 Personas</button>
     <button class="tab-btn" onclick="switchTab('examples')">🎵 Work</button>
+    <button class="tab-btn" onclick="switchTab('daw')">🎛️ DAW</button>
     <button class="tab-btn" onclick="switchTab('collaborate')">🤝 Collab</button>
     <button class="tab-btn" onclick="switchTab('messages')">💬 Messages</button>
     <button class="tab-btn" onclick="switchTab('boards')">📌 Boards</button>
@@ -1306,8 +1307,10 @@
         <div class="form-group"><label>🎯 Title *</label><input type="text" id="exampleTitle" placeholder="e.g., My Latest Beat" /></div>
         <div class="form-group"><label>📝 Description *</label><textarea id="exampleDesc" placeholder="Tell us about this work..." style="height: 50px;"></textarea></div>
         <div class="form-group"><label>🎵 Genre/Style *</label><button class="btn" onclick="openGenreModal()" style="width: 100%; margin-bottom: 8px;">🎵 Select Genre</button><div id="exampleGenreDisplay" style="border: 1px solid var(--border); padding: 10px; border-radius: 6px; background: var(--bg); font-size: 11px;">Click "Select Genre"</div></div>
-        <div class="form-group"><label>🎧 Audio/Video File *</label><input type="file" id="exampleMedia" data-premium-only="true" class="premium-only" accept="audio/*,video/*" /><div id="currentMediaDisplay" style="margin-top: 6px; font-size: 10px; color: var(--text-light);"></div></div>
+        <div class="form-group"><label>🎧 Audio/Video File <span style="font-weight:400;font-size:10px;">(optional if document attached)</span></label><input type="file" id="exampleMedia" data-premium-only="true" class="premium-only" accept="audio/*,video/*" /><div id="currentMediaDisplay" style="margin-top: 6px; font-size: 10px; color: var(--text-light);"></div></div>
         <div class="form-group"><label>🖼️ Thumbnail Image</label><input type="file" id="exampleImage" data-premium-only="true" class="premium-only" accept="image/*" /></div>
+        <div class="form-group"><label>📄 Documents <span style="font-weight:400;font-size:10px;">(Lyrics, Contracts, Notes — PDF/DOC/TXT)</span></label><input type="file" id="exampleDocs" multiple accept=".pdf,.doc,.docx,.txt,.md,.pages,application/pdf,application/msword,text/plain" /><div id="currentDocsDisplay" style="margin-top:4px; font-size:10px; color:var(--text-light);"></div></div>
+        <div class="form-group"><label>🔗 Attach Other Posts <span style="font-weight:400;font-size:10px;">(e.g. attach lyrics to a song)</span></label><select id="exampleAttachPosts" multiple style="width:100%; min-height:60px; font-size:11px;"><option disabled>— no posts yet —</option></select></div>
         <div class="form-group">
           <label>🎯 Skills Used * (Required)</label>
           <div id="skillsUsedDisplay" style="border: 1px solid var(--border); padding: 10px; border-radius: 6px; background: var(--bg); font-size: 11px; max-height: 150px; overflow-y: auto; margin-bottom: 8px;" onclick="openSkillsUsedModal()">Click to select skills used</div>
@@ -1321,6 +1324,43 @@
       <div class="card">
         <div class="card-header">🎵 Your Work Examples</div>
         <div id="examplesDisplay">No examples yet</div>
+      </div>
+    </div>
+
+    <div id="daw" class="tab">
+      <div class="card">
+        <div class="card-header">🎛️ DAW Studio</div>
+        <div style="font-size:11px; color:var(--text-light); margin-bottom:10px;">Two workflows: Pro Tools-style multitrack timeline and FL-style beat sequencer.</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+          <button id="dawModeProBtn" class="btn" onclick="setDawMode('protools')">🎚️ Pro Tools Style</button>
+          <button id="dawModeFlBtn" class="btn btn-secondary" onclick="setDawMode('fl')">🥁 FL Style</button>
+          <div style="display:flex; align-items:center; gap:6px; margin-left:auto;">
+            <span style="font-size:11px; color:var(--text-light);">BPM</span>
+            <input id="dawBpmInput" type="number" min="60" max="220" value="120" style="width:80px;" onchange="setDawBpm(this.value)" />
+          </div>
+        </div>
+
+        <div id="dawProToolsPanel" style="display:block;">
+          <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+            <button class="btn btn-secondary btn-small" onclick="addDawTrack()">➕ Add Track</button>
+            <button class="btn btn-secondary btn-small" onclick="addClipToSelectedTrack()">🧩 Add Clip</button>
+            <button class="btn btn-secondary btn-small" onclick="toggleDawPlayhead()" id="dawTransportBtn">▶️ Play</button>
+            <button class="btn btn-secondary btn-small" onclick="stopDawPlayhead()">⏹ Stop</button>
+            <label style="font-size:11px; color:var(--text-light); display:flex; align-items:center; gap:6px;">Zoom <input type="range" min="0.6" max="2.2" step="0.1" value="1" onchange="setDawZoom(this.value)" /></label>
+          </div>
+          <div id="dawTrackList" style="display:flex; flex-direction:column; gap:8px;"></div>
+        </div>
+
+        <div id="dawFlPanel" style="display:none;">
+          <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+            <button class="btn btn-secondary btn-small" onclick="playStepSequencer()">▶️ Play Pattern</button>
+            <button class="btn btn-secondary btn-small" onclick="stopStepSequencer()">⏹ Stop</button>
+            <button class="btn btn-secondary btn-small" onclick="clearStepPattern()">🧹 Clear</button>
+            <button class="btn btn-secondary btn-small" onclick="randomizeStepPattern()">🎲 Randomize</button>
+          </div>
+          <div id="stepSequencerGrid" style="overflow-x:auto;"></div>
+          <div style="margin-top:10px; font-size:11px; color:var(--text-light);">Tip: click cells to build kicks, snares, hats, and claps. This mimics a classic FL channel rack workflow.</div>
+        </div>
       </div>
     </div>
 
@@ -2419,6 +2459,26 @@ let appState = {
       boards: false,
       map: true
     }
+  },
+  daw: {
+    mode: 'protools',
+    bpm: 120,
+    zoom: 1,
+    tracks: [
+      { id: 1, name: 'Drums', volume: 0.9, pan: 0, mute: false, solo: false, clips: [{ name: 'Intro Groove', start: 0, len: 4, color: '#0ea5e9' }] },
+      { id: 2, name: 'Bass', volume: 0.85, pan: 0, mute: false, solo: false, clips: [{ name: 'Bassline A', start: 2, len: 4, color: '#22c55e' }] },
+      { id: 3, name: 'Vox', volume: 0.8, pan: 0, mute: false, solo: false, clips: [{ name: 'Hook Stem', start: 4, len: 2, color: '#f97316' }] }
+    ],
+    sequencer: {
+      steps: 16,
+      currentStep: -1,
+      patterns: {
+        kick: [true,false,false,false,true,false,false,false,true,false,false,false,true,false,false,false],
+        snare: [false,false,true,false,false,false,true,false,false,false,true,false,false,false,true,false],
+        hat: [true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true],
+        clap: [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false]
+      }
+    }
   }
 };
 
@@ -2496,6 +2556,8 @@ function loadAppState() {
         lastWeeklyPromoAt: ''
       },
       parentalControls: loaded.parentalControls || appState.parentalControls
+      ,
+      daw: loaded.daw || appState.daw
     };
   }
   if (typeof appState.settings.marketingNotifications !== 'boolean') {
@@ -2562,7 +2624,7 @@ function switchTab(tabName) {
     tabEl.classList.add('active');
     
     const allButtons = document.querySelectorAll('.tab-btn');
-    const tabNames = ['setup', 'personas', 'examples', 'collaborate', 'messages', 'boards', 'membership', 'profile', 'money', 'settings'];
+    const tabNames = ['setup', 'personas', 'examples', 'daw', 'collaborate', 'messages', 'boards', 'membership', 'profile', 'money', 'settings'];
     const tabIdx = tabNames.indexOf(tabName);
     if (tabIdx >= 0 && tabIdx < allButtons.length) {
       allButtons[tabIdx].classList.add('active');
@@ -2579,6 +2641,8 @@ function switchTab(tabName) {
       }
       if (tabName === 'boards') { renderMessageBoards(); }
       if (tabName === 'profile') { updateProfileDisplay(); loadConnectedAccounts(); }
+      if (tabName === 'examples') { populateAttachPostsSelect(); }
+      if (tabName === 'daw') { initDawStudio(); }
       if (tabName === 'settings') {
         initializeSettings();
         renderPostLists();
@@ -2592,14 +2656,14 @@ function switchTab(tabName) {
 }
 
 function prevTab() {
-  const tabs = ['setup', 'personas', 'examples', 'collaborate', 'messages', 'boards', 'membership', 'profile', 'money', 'settings'];
+  const tabs = ['setup', 'personas', 'examples', 'daw', 'collaborate', 'messages', 'boards', 'membership', 'profile', 'money', 'settings'];
   const currentIdx = tabs.indexOf(appState.currentTab);
   const newIdx = currentIdx === 0 ? tabs.length - 1 : currentIdx - 1;
   switchTab(tabs[newIdx]);
 }
 
 function nextTab() {
-  const tabs = ['setup', 'personas', 'examples', 'collaborate', 'messages', 'boards', 'membership', 'profile', 'money', 'settings'];
+  const tabs = ['setup', 'personas', 'examples', 'daw', 'collaborate', 'messages', 'boards', 'membership', 'profile', 'money', 'settings'];
   const currentIdx = tabs.indexOf(appState.currentTab);
   const newIdx = (currentIdx + 1) % tabs.length;
   switchTab(tabs[newIdx]);
@@ -3554,58 +3618,82 @@ function uploadExample() {
   const title = document.getElementById('exampleTitle').value.trim();
   const desc = document.getElementById('exampleDesc').value.trim();
   const mediaFile = document.getElementById('exampleMedia').files[0];
-  if (!title || !desc || !appState.selectedGenre || !mediaFile || appState.skillsUsed.length === 0) { 
+  const docFiles = Array.from(document.getElementById('exampleDocs').files || []);
+  const attachSelect = document.getElementById('exampleAttachPosts');
+  const attachedPostIds = attachSelect ? Array.from(attachSelect.selectedOptions).map(o => parseInt(o.value)).filter(v => !isNaN(v)) : [];
+  const hasMedia = !!mediaFile;
+  const hasDocs = docFiles.length > 0;
+  if (!title || !desc || !appState.selectedGenre || (!hasMedia && !hasDocs) || appState.skillsUsed.length === 0) {
     let msg = '❌ VALIDATION ERROR: Fill all required fields:\n';
     if (!title) msg += '- Title\n';
     if (!desc) msg += '- Description\n';
     if (!appState.selectedGenre) msg += '- Genre\n';
-    if (!mediaFile) msg += '- Media File\n';
+    if (!hasMedia && !hasDocs) msg += '- Audio/Video file OR at least one Document\n';
     if (appState.skillsUsed.length === 0) msg += '- At least one skill (click "📋 Select Skills Used" button)\n\nDid you add personas and skills in the PERSONAS tab?';
     alert(msg);
     return;
   }
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    // Calculate skill prices (get prices from personas skills)
-    const skillPrices = {};
-    appState.skillsUsed.forEach(skill => {
-      const persona = appState.personas.find(p => p.skills && p.skills.some(s => s.name === skill));
-      if (persona && persona.skills) {
-        const skillObj = persona.skills.find(s => s.name === skill);
-        if (skillObj && skillObj.price) {
-          skillPrices[skill] = parseFloat(skillObj.price);
-        }
-      }
-    });
-    
-    const example = { 
-      id: Date.now(), 
-      title: title, 
-      desc: desc, 
-      genre: appState.selectedGenre, 
-      media: e.target.result, 
-      mediaName: mediaFile.name, 
-      mediaType: mediaFile.type, 
-      skills: [...appState.skillsUsed],
-      skillPrices: skillPrices, // Store skill prices
-      privacy: appState.examplePrivacy,
-      post_type: (document.getElementById('examplePostType') ? document.getElementById('examplePostType').value : 'work'),
-      image: null, 
-      timestamp: new Date().toLocaleString(), 
-      userName: appState.user.name || 'Anonymous', 
-      userPic: appState.user.profilePic || null, 
-      userLocation: appState.user.location || 'Unknown' 
-    };
+  // Calculate skill prices
+  const skillPrices = {};
+  appState.skillsUsed.forEach(skill => {
+    const persona = appState.personas.find(p => p.skills && p.skills.some(s => s.name === skill));
+    if (persona && persona.skills) {
+      const skillObj = persona.skills.find(s => s.name === skill);
+      if (skillObj && skillObj.price) { skillPrices[skill] = parseFloat(skillObj.price); }
+    }
+  });
+
+  const example = {
+    id: Date.now(),
+    title: title,
+    desc: desc,
+    genre: appState.selectedGenre,
+    media: null,
+    mediaName: mediaFile ? mediaFile.name : null,
+    mediaType: mediaFile ? mediaFile.type : null,
+    skills: [...appState.skillsUsed],
+    skillPrices: skillPrices,
+    privacy: appState.examplePrivacy,
+    post_type: (document.getElementById('examplePostType') ? document.getElementById('examplePostType').value : 'work'),
+    image: null,
+    documents: [],
+    attachedPostIds: attachedPostIds,
+    timestamp: new Date().toLocaleString(),
+    userName: appState.user.name || 'Anonymous',
+    userPic: appState.user.profilePic || null,
+    userLocation: appState.user.location || 'Unknown'
+  };
+
+  // Chain: read media → read image → read docs → finalize
+  function readImage(afterFn) {
     const imageFile = document.getElementById('exampleImage').files[0];
     if (imageFile) {
-      const imgReader = new FileReader();
-      imgReader.onload = (imgE) => { example.image = imgE.target.result; finalizeExample(example); };
-      imgReader.readAsDataURL(imageFile);
-    } else {
-      finalizeExample(example);
-    }
-  };
-  reader.readAsDataURL(mediaFile);
+      const r = new FileReader();
+      r.onload = ev => { example.image = ev.target.result; afterFn(); };
+      r.readAsDataURL(imageFile);
+    } else { afterFn(); }
+  }
+  function readDocs(afterFn) {
+    if (!docFiles.length) { afterFn(); return; }
+    let remaining = docFiles.length;
+    docFiles.forEach(f => {
+      const r = new FileReader();
+      r.onload = ev => {
+        example.documents.push({ name: f.name, type: f.type, data: ev.target.result });
+        if (--remaining === 0) afterFn();
+      };
+      r.readAsDataURL(f);
+    });
+  }
+  function done() { readImage(() => readDocs(() => finalizeExample(example))); }
+
+  if (mediaFile) {
+    const reader = new FileReader();
+    reader.onload = e => { example.media = e.target.result; done(); };
+    reader.readAsDataURL(mediaFile);
+  } else {
+    done();
+  }
 }
 
 function finalizeExample(example) {
@@ -3617,6 +3705,10 @@ function finalizeExample(example) {
   document.getElementById('exampleDesc').value = '';
   document.getElementById('exampleMedia').value = '';
   document.getElementById('exampleImage').value = '';
+  document.getElementById('exampleDocs').value = '';
+  document.getElementById('currentDocsDisplay').textContent = '';
+  const attachSel = document.getElementById('exampleAttachPosts');
+  if (attachSel) Array.from(attachSel.options).forEach(o => o.selected = false);
   document.getElementById('exampleGenreDisplay').textContent = 'Click "Select Genre"';
   updateSkillsUsedDisplay();
   cancelEditExample();
@@ -3635,7 +3727,9 @@ function renderExamplesDisplay() {
         const card = document.createElement('div');
         card.className = 'post-card';
         const skillsHtml = (example.skills || []).map(s => `<span class="tag skill-tag" style="background: var(--accent); color: white; margin-right: 2px;"><img class="skill-icon" src="${getSkillIconDataUrl(s)}" alt="" /><span>${s}</span></span>`).join('');
-        card.innerHTML = `<div class="post-header"><div class="post-avatar" ${example.userPic ? `style="background-image: url('${example.userPic}'); background-size: cover; background-position: center;"` : ''}>${!example.userPic ? '🎵' : ''}</div><div class="post-info" style="flex: 1;"><div class="post-user">${example.userName}</div><div class="post-meta">${example.timestamp} • ${example.privacy === 'public' ? '🌐 Public' : '🔒 Private'}</div><div class="post-meta">📍 ${example.userLocation}</div></div><button class="btn btn-danger btn-small" onclick="removeExample(${idx})">Delete</button></div><div style="margin-bottom: 8px;"><div style="font-weight: 700; font-size: 12px; margin-bottom: 4px;">🎯 ${example.title}</div><div style="font-size: 11px; color: var(--text-light); margin-bottom: 6px;">${example.desc}</div><div style="font-size: 10px; margin-bottom: 6px;"><span style="background: var(--bg); padding: 2px 6px; border-radius: 4px; margin-right: 4px;">🎵 ${example.genre}</span>${skillsHtml}</div>${example.image ? `<div style="margin: 8px 0; position: relative; display: inline-block; width: 100%;"><img src="${example.image}" style="max-width: 100%; height: auto; border-radius: 6px;"/><button class="btn btn-success" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 32px; padding: 12px 16px; border-radius: 50%; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; background: rgba(76, 175, 80, 0.9);" onclick="playMedia(${idx})" title="Play">▶️</button></div>` : `<div style="background: var(--bg); padding: 20px; border-radius: 6px; text-align: center; margin: 8px 0;"><button class="btn btn-success" onclick="playMedia(${idx})" style="font-size: 24px;">▶️ Play Media</button></div>`}</div><div class="post-actions"><button class="btn btn-secondary btn-small" onclick="editExample(${idx})">✏️ Edit</button></div>`;
+        const docsHtml = (example.documents && example.documents.length) ? `<div style="margin:6px 0; display:flex; flex-wrap:wrap; gap:4px;">${example.documents.map((d,di) => { const icon = d.type && d.type.includes('pdf') ? '📕' : d.name.endsWith('.txt') || d.name.endsWith('.md') ? '📃' : '📄'; return `<a href="${d.data}" download="${escapeHtml(d.name)}" style="display:inline-flex; align-items:center; gap:3px; padding:2px 8px; background:var(--bg); border:1px solid var(--border); border-radius:12px; font-size:10px; text-decoration:none; color:var(--text);">${icon} ${escapeHtml(d.name)}</a>`; }).join('')}</div>` : '';
+        const attachedHtml = (example.attachedPostIds && example.attachedPostIds.length) ? `<div style="margin:6px 0;"><div style="font-size:10px; color:var(--text-light); margin-bottom:3px;">🔗 Attached:</div><div style="display:flex; flex-wrap:wrap; gap:4px;">${example.attachedPostIds.map(pid => { const ap = (appState.examples||[]).find(x=>x.id===pid); if(!ap) return ''; const apType = {work:'🎵',testimonial:'💬',discussion:'🗣️',announcement:'📢',other:'🔹'}[ap.post_type||'work']||'🔹'; return `<span style="padding:2px 8px; background:var(--bg); border:1px solid var(--border); border-radius:12px; font-size:10px; cursor:pointer;" onclick="editExample(${(appState.examples||[]).indexOf(ap)})">${apType} ${escapeHtml(ap.title)}</span>`; }).join('')}</div></div>` : '';
+        card.innerHTML = `<div class="post-header"><div class="post-avatar" ${example.userPic ? `style="background-image: url('${example.userPic}'); background-size: cover; background-position: center;"` : ''}>${!example.userPic ? '🎵' : ''}</div><div class="post-info" style="flex: 1;"><div class="post-user">${example.userName}</div><div class="post-meta">${example.timestamp} • ${example.privacy === 'public' ? '🌐 Public' : '🔒 Private'}</div><div class="post-meta">📍 ${example.userLocation}</div></div><button class="btn btn-danger btn-small" onclick="removeExample(${idx})">Delete</button></div><div style="margin-bottom: 8px;"><div style="font-weight: 700; font-size: 12px; margin-bottom: 4px;">🎯 ${example.title}</div><div style="font-size: 11px; color: var(--text-light); margin-bottom: 6px;">${example.desc}</div><div style="font-size: 10px; margin-bottom: 6px;"><span style="background: var(--bg); padding: 2px 6px; border-radius: 4px; margin-right: 4px;">🎵 ${example.genre}</span>${skillsHtml}</div>${example.image ? `<div style="margin: 8px 0; position: relative; display: inline-block; width: 100%;"><img src="${example.image}" style="max-width: 100%; height: auto; border-radius: 6px;"/>${example.media ? `<button class="btn btn-success" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 32px; padding: 12px 16px; border-radius: 50%; width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; background: rgba(76, 175, 80, 0.9);" onclick="playMedia(${idx})" title="Play">▶️</button>` : ''}</div>` : example.media ? `<div style="background: var(--bg); padding: 20px; border-radius: 6px; text-align: center; margin: 8px 0;"><button class="btn btn-success" onclick="playMedia(${idx})" style="font-size: 24px;">▶️ Play Media</button></div>` : ''}${docsHtml}${attachedHtml}</div><div class="post-actions"><button class="btn btn-secondary btn-small" onclick="editExample(${idx})">✏️ Edit</button></div>`;
         display.appendChild(card);
       } catch (e) {
         console.error('Error rendering example:', e);
@@ -5094,6 +5188,423 @@ const PROVIDER_META = [
   { key: 'soundcloud',  id: 'soundcloud',       label: 'SoundCloud',emoji: '☁️' },
   { key: 'tiktok',      id: 'tiktok',           label: 'TikTok',    emoji: '🎬' },
 ];
+
+const DAW_RUNTIME = {
+  audioCtx: null,
+  stepTimer: null,
+  proTimer: null,
+  proTick: 0,
+  selectedTrackId: null,
+};
+
+function ensureDawState() {
+  if (!appState.daw) {
+    appState.daw = {
+      mode: 'protools',
+      bpm: 120,
+      zoom: 1,
+      tracks: [],
+      sequencer: {
+        steps: 16,
+        currentStep: -1,
+        patterns: { kick: [], snare: [], hat: [], clap: [] }
+      }
+    };
+  }
+  if (!Array.isArray(appState.daw.tracks)) appState.daw.tracks = [];
+  if (!appState.daw.sequencer) {
+    appState.daw.sequencer = {
+      steps: 16,
+      currentStep: -1,
+      patterns: { kick: [], snare: [], hat: [], clap: [] }
+    };
+  }
+  const steps = appState.daw.sequencer.steps || 16;
+  ['kick', 'snare', 'hat', 'clap'].forEach((k) => {
+    if (!Array.isArray(appState.daw.sequencer.patterns[k]) || appState.daw.sequencer.patterns[k].length !== steps) {
+      appState.daw.sequencer.patterns[k] = Array.from({ length: steps }, () => false);
+    }
+  });
+  if (!DAW_RUNTIME.selectedTrackId && appState.daw.tracks[0]) {
+    DAW_RUNTIME.selectedTrackId = appState.daw.tracks[0].id;
+  }
+}
+
+function getDawAudioContext() {
+  if (!DAW_RUNTIME.audioCtx) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) {
+      alert('Web Audio is not supported in this browser.');
+      return null;
+    }
+    DAW_RUNTIME.audioCtx = new Ctx();
+  }
+  if (DAW_RUNTIME.audioCtx.state === 'suspended') {
+    DAW_RUNTIME.audioCtx.resume();
+  }
+  return DAW_RUNTIME.audioCtx;
+}
+
+function initDawStudio() {
+  ensureDawState();
+  const bpmInput = document.getElementById('dawBpmInput');
+  if (bpmInput) bpmInput.value = String(appState.daw.bpm || 120);
+  const zoomSlider = document.querySelector('#dawProToolsPanel input[type="range"]');
+  if (zoomSlider) zoomSlider.value = String(appState.daw.zoom || 1);
+  setDawMode(appState.daw.mode || 'protools');
+  renderDawTrackLanes();
+  renderStepSequencer();
+}
+
+function setDawMode(mode) {
+  ensureDawState();
+  appState.daw.mode = mode === 'fl' ? 'fl' : 'protools';
+  const pro = document.getElementById('dawProToolsPanel');
+  const fl = document.getElementById('dawFlPanel');
+  const proBtn = document.getElementById('dawModeProBtn');
+  const flBtn = document.getElementById('dawModeFlBtn');
+  if (pro) pro.style.display = appState.daw.mode === 'protools' ? 'block' : 'none';
+  if (fl) fl.style.display = appState.daw.mode === 'fl' ? 'block' : 'none';
+  if (proBtn) proBtn.className = appState.daw.mode === 'protools' ? 'btn' : 'btn btn-secondary';
+  if (flBtn) flBtn.className = appState.daw.mode === 'fl' ? 'btn' : 'btn btn-secondary';
+  saveAppState();
+}
+
+function setDawBpm(raw) {
+  ensureDawState();
+  const bpm = Math.max(60, Math.min(220, parseInt(raw, 10) || 120));
+  appState.daw.bpm = bpm;
+  saveAppState();
+}
+
+function setDawZoom(raw) {
+  ensureDawState();
+  appState.daw.zoom = Math.max(0.6, Math.min(2.2, parseFloat(raw) || 1));
+  renderDawTrackLanes();
+  saveAppState();
+}
+
+function addDawTrack() {
+  ensureDawState();
+  const name = (prompt('Track name:', `Track ${appState.daw.tracks.length + 1}`) || '').trim();
+  if (!name) return;
+  const id = Date.now();
+  appState.daw.tracks.push({ id, name, volume: 0.85, pan: 0, mute: false, solo: false, clips: [] });
+  DAW_RUNTIME.selectedTrackId = id;
+  renderDawTrackLanes();
+  saveAppState();
+}
+
+function selectDawTrack(trackId) {
+  DAW_RUNTIME.selectedTrackId = trackId;
+  renderDawTrackLanes();
+}
+
+function removeDawTrack(trackId) {
+  ensureDawState();
+  appState.daw.tracks = appState.daw.tracks.filter((t) => t.id !== trackId);
+  if (DAW_RUNTIME.selectedTrackId === trackId) {
+    DAW_RUNTIME.selectedTrackId = appState.daw.tracks[0] ? appState.daw.tracks[0].id : null;
+  }
+  renderDawTrackLanes();
+  saveAppState();
+}
+
+function updateTrackMix(trackId, key, value) {
+  const track = (appState.daw.tracks || []).find((t) => t.id === trackId);
+  if (!track) return;
+  track[key] = key === 'pan' || key === 'volume' ? parseFloat(value) : !!value;
+  saveAppState();
+}
+
+function addClipToSelectedTrack() {
+  ensureDawState();
+  const track = (appState.daw.tracks || []).find((t) => t.id === DAW_RUNTIME.selectedTrackId) || appState.daw.tracks[0];
+  if (!track) {
+    alert('Add a track first.');
+    return;
+  }
+  const name = (prompt('Clip name:', 'New Clip') || '').trim();
+  if (!name) return;
+  const start = parseFloat(prompt('Start beat (e.g. 0, 2, 4):', '0'));
+  const len = parseFloat(prompt('Length in beats:', '4'));
+  const safeStart = Number.isFinite(start) ? Math.max(0, start) : 0;
+  const safeLen = Number.isFinite(len) ? Math.max(0.5, len) : 4;
+  const palette = ['#0ea5e9', '#22c55e', '#f59e0b', '#f43f5e', '#8b5cf6', '#14b8a6'];
+  track.clips.push({ name, start: safeStart, len: safeLen, color: palette[Math.floor(Math.random() * palette.length)] });
+  renderDawTrackLanes();
+  saveAppState();
+}
+
+function removeClip(trackId, clipIndex) {
+  const track = (appState.daw.tracks || []).find((t) => t.id === trackId);
+  if (!track) return;
+  track.clips.splice(clipIndex, 1);
+  renderDawTrackLanes();
+  saveAppState();
+}
+
+function renderDawTrackLanes() {
+  ensureDawState();
+  const host = document.getElementById('dawTrackList');
+  if (!host) return;
+  const zoom = appState.daw.zoom || 1;
+  const beatPx = 48 * zoom;
+  const timelineBeats = 32;
+
+  const rulerTicks = Array.from({ length: timelineBeats }, (_, i) => {
+    const strong = i % 4 === 0;
+    return `<div style="position:absolute; left:${i * beatPx}px; top:0; bottom:0; border-left:1px solid ${strong ? '#94a3b8' : '#cbd5e1'}; font-size:9px; color:#64748b; padding-left:2px;">${strong ? i : ''}</div>`;
+  }).join('');
+
+  host.innerHTML = (appState.daw.tracks || []).map((track) => {
+    const selected = track.id === DAW_RUNTIME.selectedTrackId;
+    const clips = (track.clips || []).map((clip, clipIndex) => {
+      const left = clip.start * beatPx;
+      const width = Math.max(24, clip.len * beatPx);
+      return `<div title="${escapeHtml(clip.name)}" style="position:absolute; left:${left}px; top:6px; width:${width}px; height:30px; border-radius:6px; background:${clip.color}; color:white; padding:4px 6px; font-size:10px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; box-shadow:0 2px 6px rgba(0,0,0,.18);">${escapeHtml(clip.name)} <button style="float:right; border:none; background:transparent; color:white; cursor:pointer;" onclick="removeClip(${track.id}, ${clipIndex})">✕</button></div>`;
+    }).join('');
+
+    return `<div style="border:1px solid var(--border); border-radius:10px; overflow:hidden; background:${selected ? '#f8fbff' : 'white'};">
+      <div style="display:flex; gap:8px; align-items:center; padding:8px; border-bottom:1px solid var(--border);">
+        <button class="btn btn-small ${selected ? '' : 'btn-secondary'}" onclick="selectDawTrack(${track.id})">${escapeHtml(track.name)}</button>
+        <label style="font-size:10px;">Vol <input type="range" min="0" max="1" step="0.01" value="${track.volume}" oninput="updateTrackMix(${track.id}, 'volume', this.value)" /></label>
+        <label style="font-size:10px;">Pan <input type="range" min="-1" max="1" step="0.01" value="${track.pan}" oninput="updateTrackMix(${track.id}, 'pan', this.value)" /></label>
+        <label style="font-size:10px;"><input type="checkbox" ${track.mute ? 'checked' : ''} onchange="updateTrackMix(${track.id}, 'mute', this.checked)" /> M</label>
+        <label style="font-size:10px;"><input type="checkbox" ${track.solo ? 'checked' : ''} onchange="updateTrackMix(${track.id}, 'solo', this.checked)" /> S</label>
+        <button class="btn btn-danger btn-small" style="margin-left:auto;" onclick="removeDawTrack(${track.id})">Delete</button>
+      </div>
+      <div style="position:relative; height:42px; min-width:${timelineBeats * beatPx}px; overflow-x:auto; background:linear-gradient(180deg,#f8fafc,#eef2f7);">
+        ${rulerTicks}
+        ${clips}
+        <div id="dawPlayhead-${track.id}" style="position:absolute; left:0; top:0; bottom:0; width:2px; background:#ef4444; opacity:0;"></div>
+      </div>
+    </div>`;
+  }).join('') || '<div style="font-size:11px; color:var(--text-light);">No tracks yet. Add one to start arranging.</div>';
+}
+
+function _movePlayhead(px) {
+  (appState.daw.tracks || []).forEach((track) => {
+    const el = document.getElementById(`dawPlayhead-${track.id}`);
+    if (!el) return;
+    el.style.opacity = '1';
+    el.style.left = `${px}px`;
+  });
+}
+
+function toggleDawPlayhead() {
+  if (DAW_RUNTIME.proTimer) {
+    stopDawPlayhead();
+    return;
+  }
+  const ctx = getDawAudioContext();
+  if (!ctx) return;
+  const btn = document.getElementById('dawTransportBtn');
+  if (btn) btn.textContent = '⏸ Pause';
+  const beatMs = 60000 / (appState.daw.bpm || 120);
+  DAW_RUNTIME.proTick = 0;
+  DAW_RUNTIME.proTimer = setInterval(() => {
+    const zoom = appState.daw.zoom || 1;
+    const beatPx = 48 * zoom;
+    const beat = DAW_RUNTIME.proTick % 32;
+    _movePlayhead(beat * beatPx);
+    _tickMetronome(beat % 4 === 0 ? 1200 : 900, 0.02);
+    DAW_RUNTIME.proTick += 1;
+  }, beatMs);
+}
+
+function stopDawPlayhead() {
+  if (DAW_RUNTIME.proTimer) clearInterval(DAW_RUNTIME.proTimer);
+  DAW_RUNTIME.proTimer = null;
+  const btn = document.getElementById('dawTransportBtn');
+  if (btn) btn.textContent = '▶️ Play';
+  (appState.daw.tracks || []).forEach((track) => {
+    const el = document.getElementById(`dawPlayhead-${track.id}`);
+    if (el) {
+      el.style.left = '0px';
+      el.style.opacity = '0';
+    }
+  });
+}
+
+function _tickMetronome(freq, dur) {
+  const ctx = getDawAudioContext();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'square';
+  osc.frequency.value = freq;
+  gain.gain.value = 0.0001;
+  osc.connect(gain).connect(ctx.destination);
+  const t0 = ctx.currentTime;
+  gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.005);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.01);
+}
+
+function renderStepSequencer() {
+  ensureDawState();
+  const host = document.getElementById('stepSequencerGrid');
+  if (!host) return;
+  const seq = appState.daw.sequencer;
+  const rows = ['kick', 'snare', 'hat', 'clap'];
+  const labels = { kick: '🥁 Kick', snare: '🪘 Snare', hat: '🔔 Hat', clap: '👏 Clap' };
+  const html = rows.map((row) => {
+    const cells = Array.from({ length: seq.steps }, (_, step) => {
+      const on = !!seq.patterns[row][step];
+      const active = seq.currentStep === step;
+      const strong = step % 4 === 0;
+      return `<button onclick="toggleSequencerStep('${row}', ${step})" style="width:28px; height:28px; border-radius:6px; border:1px solid ${active ? '#ef4444' : strong ? '#94a3b8' : '#cbd5e1'}; background:${on ? '#22c55e' : '#f8fafc'}; cursor:pointer;"></button>`;
+    }).join('');
+    return `<div style="display:grid; grid-template-columns:100px repeat(${seq.steps}, 28px); gap:4px; align-items:center; margin-bottom:6px;"><div style="font-size:11px; color:var(--text-light);">${labels[row]}</div>${cells}</div>`;
+  }).join('');
+  host.innerHTML = html;
+}
+
+function toggleSequencerStep(row, step) {
+  ensureDawState();
+  appState.daw.sequencer.patterns[row][step] = !appState.daw.sequencer.patterns[row][step];
+  renderStepSequencer();
+  saveAppState();
+}
+
+function playStepSequencer() {
+  const ctx = getDawAudioContext();
+  if (!ctx) return;
+  stopStepSequencer();
+  ensureDawState();
+  const seq = appState.daw.sequencer;
+  const stepMs = 60000 / (appState.daw.bpm || 120) / 4;
+  let step = 0;
+  DAW_RUNTIME.stepTimer = setInterval(() => {
+    seq.currentStep = step;
+    if (seq.patterns.kick[step]) playKick();
+    if (seq.patterns.snare[step]) playSnare();
+    if (seq.patterns.hat[step]) playHat();
+    if (seq.patterns.clap[step]) playClap();
+    renderStepSequencer();
+    step = (step + 1) % seq.steps;
+  }, stepMs);
+}
+
+function stopStepSequencer() {
+  if (DAW_RUNTIME.stepTimer) clearInterval(DAW_RUNTIME.stepTimer);
+  DAW_RUNTIME.stepTimer = null;
+  if (appState.daw && appState.daw.sequencer) {
+    appState.daw.sequencer.currentStep = -1;
+  }
+  renderStepSequencer();
+}
+
+function clearStepPattern() {
+  ensureDawState();
+  ['kick', 'snare', 'hat', 'clap'].forEach((r) => {
+    appState.daw.sequencer.patterns[r] = Array.from({ length: appState.daw.sequencer.steps }, () => false);
+  });
+  renderStepSequencer();
+  saveAppState();
+}
+
+function randomizeStepPattern() {
+  ensureDawState();
+  const steps = appState.daw.sequencer.steps;
+  appState.daw.sequencer.patterns.kick = Array.from({ length: steps }, (_, i) => i % 4 === 0 || Math.random() < 0.08);
+  appState.daw.sequencer.patterns.snare = Array.from({ length: steps }, (_, i) => i % 8 === 4 || Math.random() < 0.05);
+  appState.daw.sequencer.patterns.hat = Array.from({ length: steps }, () => Math.random() < 0.65);
+  appState.daw.sequencer.patterns.clap = Array.from({ length: steps }, (_, i) => i % 8 === 4 ? Math.random() < 0.5 : Math.random() < 0.06);
+  renderStepSequencer();
+  saveAppState();
+}
+
+function playKick() {
+  const ctx = getDawAudioContext();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  const t = ctx.currentTime;
+  osc.frequency.setValueAtTime(150, t);
+  osc.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.exponentialRampToValueAtTime(0.9, t + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(t);
+  osc.stop(t + 0.18);
+}
+
+function _noiseBuffer() {
+  const ctx = getDawAudioContext();
+  if (!ctx) return null;
+  const buffer = ctx.createBuffer(1, ctx.sampleRate * 0.2, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i += 1) data[i] = Math.random() * 2 - 1;
+  return buffer;
+}
+
+function playSnare() {
+  const ctx = getDawAudioContext();
+  if (!ctx) return;
+  const src = ctx.createBufferSource();
+  src.buffer = _noiseBuffer();
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 1400;
+  const gain = ctx.createGain();
+  const t = ctx.currentTime;
+  gain.gain.setValueAtTime(0.45, t);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+  src.connect(hp).connect(gain).connect(ctx.destination);
+  src.start(t);
+  src.stop(t + 0.14);
+}
+
+function playHat() {
+  const ctx = getDawAudioContext();
+  if (!ctx) return;
+  const src = ctx.createBufferSource();
+  src.buffer = _noiseBuffer();
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 7000;
+  const gain = ctx.createGain();
+  const t = ctx.currentTime;
+  gain.gain.setValueAtTime(0.18, t);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+  src.connect(hp).connect(gain).connect(ctx.destination);
+  src.start(t);
+  src.stop(t + 0.05);
+}
+
+function playClap() {
+  const ctx = getDawAudioContext();
+  if (!ctx) return;
+  const src = ctx.createBufferSource();
+  src.buffer = _noiseBuffer();
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 1800;
+  const gain = ctx.createGain();
+  const t = ctx.currentTime;
+  gain.gain.setValueAtTime(0.3, t);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.11);
+  src.connect(bp).connect(gain).connect(ctx.destination);
+  src.start(t);
+  src.stop(t + 0.12);
+}
+
+function populateAttachPostsSelect() {
+  const sel = document.getElementById('exampleAttachPosts');
+  if (!sel) return;
+  const editingIdx = parseInt(document.getElementById('editingExampleIdx').value);
+  const examples = appState.examples || [];
+  const typeLabel = { work:'🎵', testimonial:'💬', discussion:'🗣️', announcement:'📢', other:'🔹' };
+  sel.innerHTML = examples.length === 0 ? '<option disabled>— no posts yet —</option>'
+    : examples.map((ex, i) => i === editingIdx ? '' :
+        `<option value="${ex.id}">${typeLabel[ex.post_type||'work']||'🔹'} ${escapeHtml(ex.title)}</option>`
+      ).join('');
+}
 
 const GALLERY_CATEGORIES = [
   { id: 'all', label: '🔍 All' },
