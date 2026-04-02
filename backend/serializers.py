@@ -51,7 +51,11 @@ class UserProfileSerializer(serializers.ModelSerializer):
     user = serializers.StringRelatedField()
     class Meta:
         model = UserProfile
-        fields = ('user', 'referral_code', 'phone_number', 'referred_by')
+        fields = (
+            'user', 'referral_code', 'phone_number', 'referred_by',
+            'email_verified', 'phone_verified',
+            'email_notifications', 'push_notifications', 'phone_notifications', 'marketing_notifications',
+        )
 
 class ReferralSerializer(serializers.ModelSerializer):
     referrer = serializers.StringRelatedField()

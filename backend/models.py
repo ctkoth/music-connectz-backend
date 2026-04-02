@@ -151,6 +151,16 @@ class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     referral_code = models.CharField(max_length=16, unique=True, blank=True)
     phone_number = models.CharField(max_length=32, blank=True, default='')
+    email_verified = models.BooleanField(default=False)
+    phone_verified = models.BooleanField(default=False)
+    email_verification_code = models.CharField(max_length=8, blank=True, default='')
+    phone_verification_code = models.CharField(max_length=8, blank=True, default='')
+    email_verification_expires = models.DateTimeField(null=True, blank=True)
+    phone_verification_expires = models.DateTimeField(null=True, blank=True)
+    email_notifications = models.BooleanField(default=True)
+    push_notifications = models.BooleanField(default=True)
+    phone_notifications = models.BooleanField(default=False)
+    marketing_notifications = models.BooleanField(default=False)
     referred_by = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='referrals')
 
     def save(self, *args, **kwargs):

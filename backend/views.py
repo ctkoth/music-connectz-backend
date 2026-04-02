@@ -323,9 +323,12 @@ def download_royalty_agreement_pdf(request, agreement_id):
     return response
 import os
 import requests
+import random
+from datetime import timedelta
 
 from allauth.socialaccount.models import SocialApp
 from django.db import transaction
+from django.core.mail import send_mail
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
@@ -426,6 +429,144 @@ def api_login(request):
     })
 
 
+def _generate_verification_code():
+    return f"{random.randint(0, 999999):06d}"
+
+
+def _notification_settings_payload(profile):
+    return {
+        'email_notifications': bool(profile.email_notifications),
+        'push_notifications': bool(profile.push_notifications),
+        'phone_notifications': bool(profile.phone_notifications),
+        'marketing_notifications': bool(profile.marketing_notifications),
+    }
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def send_email_verification_code(request):
+    user = request.user
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+    email = (user.email or '').strip()
+    if not email:
+        return Response({'error': 'Set an email on your account first.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    code = _generate_verification_code()
+    profile.email_verification_code = code
+    profile.email_verification_expires = timezone.now() + timedelta(minutes=10)
+    profile.save(update_fields=['email_verification_code', 'email_verification_expires'])
+
+    try:
+        send_mail(
+            subject='Music ConnectZ Email Verification Code',
+            message=f'Your verification code is: {code}. It expires in 10 minutes.',
+            from_email=None,
+            recipient_list=[email],
+            fail_silently=False,
+        )
+    except Exception:
+        return Response({'error': 'Unable to send verification email right now.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response({'success': True, 'message': 'Verification code sent to your email.'})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def verify_email_code(request):
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    code = (request.data.get('code') or '').strip()
+    if not code:
+        return Response({'error': 'Verification code is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not profile.email_verification_code or not profile.email_verification_expires:
+        return Response({'error': 'No active verification code. Request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
+    if timezone.now() > profile.email_verification_expires:
+        return Response({'error': 'Verification code expired. Request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
+    if code != profile.email_verification_code:
+        return Response({'error': 'Invalid verification code.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    profile.email_verified = True
+    profile.email_verification_code = ''
+    profile.email_verification_expires = None
+    profile.save(update_fields=['email_verified', 'email_verification_code', 'email_verification_expires'])
+    return Response({'success': True, 'email_verified': True})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def send_phone_verification_code(request):
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    phone = (profile.phone_number or '').strip()
+    if not phone:
+        return Response({'error': 'Set a phone number on your account first.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    code = _generate_verification_code()
+    profile.phone_verification_code = code
+    profile.phone_verification_expires = timezone.now() + timedelta(minutes=10)
+    profile.save(update_fields=['phone_verification_code', 'phone_verification_expires'])
+
+    # SMS provider integration can be added later (Twilio, Vonage, etc.).
+    print(f"[PHONE_VERIFICATION] user={request.user.id} phone={phone} code={code}")
+
+    return Response({'success': True, 'message': 'Verification code generated for your phone.'})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def verify_phone_code(request):
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    code = (request.data.get('code') or '').strip()
+    if not code:
+        return Response({'error': 'Verification code is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not profile.phone_verification_code or not profile.phone_verification_expires:
+        return Response({'error': 'No active verification code. Request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
+    if timezone.now() > profile.phone_verification_expires:
+        return Response({'error': 'Verification code expired. Request a new one.'}, status=status.HTTP_400_BAD_REQUEST)
+    if code != profile.phone_verification_code:
+        return Response({'error': 'Invalid verification code.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    profile.phone_verified = True
+    profile.phone_verification_code = ''
+    profile.phone_verification_expires = None
+    profile.save(update_fields=['phone_verified', 'phone_verification_code', 'phone_verification_expires'])
+    return Response({'success': True, 'phone_verified': True})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_notification_settings(request):
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    return Response({
+        'settings': _notification_settings_payload(profile),
+        'email_verified': bool(profile.email_verified),
+        'phone_verified': bool(profile.phone_verified),
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def update_notification_settings(request):
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    payload = request.data if isinstance(request.data, dict) else {}
+
+    email_notifications = bool(payload.get('email_notifications', profile.email_notifications))
+    push_notifications = bool(payload.get('push_notifications', profile.push_notifications))
+    phone_notifications = bool(payload.get('phone_notifications', profile.phone_notifications))
+    marketing_notifications = bool(payload.get('marketing_notifications', profile.marketing_notifications))
+
+    if email_notifications and not profile.email_verified:
+        return Response({'error': 'Verify email before enabling email notifications.'}, status=status.HTTP_400_BAD_REQUEST)
+    if phone_notifications and not profile.phone_verified:
+        return Response({'error': 'Verify phone before enabling SMS notifications.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    profile.email_notifications = email_notifications
+    profile.push_notifications = push_notifications
+    profile.phone_notifications = phone_notifications
+    profile.marketing_notifications = marketing_notifications
+    profile.save(update_fields=['email_notifications', 'push_notifications', 'phone_notifications', 'marketing_notifications'])
+
+    return Response({'success': True, 'settings': _notification_settings_payload(profile)})
+
+
 from django.http import JsonResponse
 
 
@@ -443,6 +584,9 @@ def api_auth_me(request):
                 'username': getattr(user, 'username', '') or '',
                 'phone_number': phone_number,
                 'profile_completed': profile_completed,
+                'email_verified': bool(profile.email_verified),
+                'phone_verified': bool(profile.phone_verified),
+                'notification_settings': _notification_settings_payload(profile),
             }
         })
     return JsonResponse({'authenticated': False}, status=401)
