@@ -129,6 +129,32 @@ SOCIALACCOUNT_PROVIDERS = {
         'SCOPE': ['user.info.basic', 'user.info.profile'],
     },
 }
+
+
+def _set_social_app_from_env(provider_key, client_id_env, client_secret_env, key_env=None, id_fallback_env=None):
+    client_id = (os.environ.get(client_id_env) or '').strip()
+    if not client_id and id_fallback_env:
+        client_id = (os.environ.get(id_fallback_env) or '').strip()
+    client_secret = (os.environ.get(client_secret_env) or '').strip()
+    provider_key_value = (os.environ.get(key_env) or '').strip() if key_env else ''
+    if client_id and client_secret:
+        SOCIALACCOUNT_PROVIDERS.setdefault(provider_key, {})['APP'] = {
+            'client_id': client_id,
+            'secret': client_secret,
+            'key': provider_key_value,
+        }
+
+
+_set_social_app_from_env('facebook', 'FACEBOOK_CLIENT_ID', 'FACEBOOK_CLIENT_SECRET')
+_set_social_app_from_env('github', 'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET')
+_set_social_app_from_env('google', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET')
+_set_social_app_from_env('linkedin_oauth2', 'LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET')
+_set_social_app_from_env('microsoft', 'MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET')
+_set_social_app_from_env('spotify', 'SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET')
+_set_social_app_from_env('soundcloud', 'SOUNDCLOUD_CLIENT_ID', 'SOUNDCLOUD_CLIENT_SECRET')
+_set_social_app_from_env('twitter_oauth2', 'TWITTER_CLIENT_ID', 'TWITTER_CLIENT_SECRET')
+_set_social_app_from_env('tiktok', 'TIKTOK_CLIENT_ID', 'TIKTOK_CLIENT_SECRET', id_fallback_env='TIKTOK_CLIENT_KEY')
+
 LOGIN_REDIRECT_URL = 'https://musicconnectz.com/'
 LOGOUT_REDIRECT_URL = 'https://musicconnectz.com/'
 SOCIALACCOUNT_ERROR_URL = 'https://musicconnectz.com/?login_error=1'
