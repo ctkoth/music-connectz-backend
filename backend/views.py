@@ -330,14 +330,20 @@ from allauth.socialaccount.models import SocialApp
 from django.db import transaction
 from django.core.mail import send_mail
 from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.authentication import SessionAuthentication
 from .models import SiteAnalytics, VisitorRecord, UserProfile, Referral
 from .serializers import RegisterSerializer, UserProfileSerializer, ReferralSerializer
 # --- Referral System API Endpoints ---
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
+
+
+class CsrfExemptSessionAuthentication(SessionAuthentication):
+    def enforce_csrf(self, request):
+        return
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -592,8 +598,15 @@ def api_auth_me(request):
     return JsonResponse({'authenticated': False}, status=401)
 
 
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def api_auth_users(request):
+    return Response({'totalUsers': User.objects.count()})
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@authentication_classes([CsrfExemptSessionAuthentication])
 def complete_oauth_profile(request):
     user = request.user
     username = (request.data.get('username') or '').strip()
@@ -676,33 +689,39 @@ def oauth_providers_status(request):
 @permission_classes([AllowAny])
 def site_analytics(request):
     visitor_key = (request.GET.get('visitor_key') or '').strip()[:128]
-
-    with transaction.atomic():
-        analytics, _ = SiteAnalytics.objects.select_for_update().get_or_create(
-            key='global',
-            defaults={'total_visits': 0, 'unique_visitors': 0},
-        )
-
-        is_new_visitor = False
-        if visitor_key:
-            visitor, created = VisitorRecord.objects.get_or_create(
-                visitor_key=visitor_key,
-                defaults={'visit_count': 1},
+    try:
+        with transaction.atomic():
+            analytics, _ = SiteAnalytics.objects.select_for_update().get_or_create(
+                key='global',
+                defaults={'total_visits': 0, 'unique_visitors': 0},
             )
-            is_new_visitor = created
-            if not created:
-                visitor.visit_count += 1
-                visitor.save(update_fields=['visit_count', 'last_seen_at'])
 
-        analytics.total_visits += 1
-        if is_new_visitor:
-            analytics.unique_visitors += 1
-        analytics.save(update_fields=['total_visits', 'unique_visitors', 'updated_at'])
+            is_new_visitor = False
+            if visitor_key:
+                visitor, created = VisitorRecord.objects.get_or_create(
+                    visitor_key=visitor_key,
+                    defaults={'visit_count': 1},
+                )
+                is_new_visitor = created
+                if not created:
+                    visitor.visit_count += 1
+                    visitor.save(update_fields=['visit_count', 'last_seen_at'])
 
-    return Response({
-        'totalVisits': analytics.total_visits,
-        'uniqueVisitors': analytics.unique_visitors,
-    })
+            analytics.total_visits += 1
+            if is_new_visitor:
+                analytics.unique_visitors += 1
+            analytics.save(update_fields=['total_visits', 'unique_visitors', 'updated_at'])
+
+        return Response({
+            'totalVisits': analytics.total_visits,
+            'uniqueVisitors': analytics.unique_visitors,
+        })
+    except Exception:
+        analytics = SiteAnalytics.objects.filter(key='global').first()
+        return Response({
+            'totalVisits': int(getattr(analytics, 'total_visits', 0) or 0),
+            'uniqueVisitors': int(getattr(analytics, 'unique_visitors', 0) or 0),
+        })
 
 
 def _frontend_url():

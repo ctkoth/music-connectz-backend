@@ -43,6 +43,7 @@ urlpatterns = [
     path('api/auth/google/available', views.google_available),
     path('api/auth/google/config-status/', views.google_available, name='google_config_status'),
     path('api/auth/providers/status/', views.oauth_providers_status, name='oauth_providers_status'),
+    path('api/auth/users/', views.api_auth_users, name='api_auth_users'),
     path('api/auth/me/', views.api_auth_me, name='api_auth_me'),
     path('api/auth/email/send-code/', views.send_email_verification_code, name='send_email_verification_code'),
     path('api/auth/email/verify/', views.verify_email_code, name='verify_email_code'),
