@@ -27,8 +27,26 @@ class SafeSocialAccountAdapter(DefaultSocialAccountAdapter):
         if len(apps) == 1:
             return apps[0]
 
+        from django.conf import settings
+
         visible_apps = [app for app in apps if not app.settings.get("hidden")]
         candidates = visible_apps or apps
+
+        # If env APP config exists, prefer the app matching that client_id.
+        # This avoids stale DB SocialApp rows causing provider redirect_uri mismatches.
+        env_app = getattr(settings, "SOCIALACCOUNT_PROVIDERS", {}).get(provider, {}).get("APP", {})
+        env_client_id = (env_app.get("client_id") or "").strip()
+        if env_client_id:
+            env_matches = [app for app in candidates if (app.client_id or "").strip() == env_client_id]
+            if env_matches:
+                ranked_env = sorted(
+                    env_matches,
+                    key=lambda app: (
+                        0 if not getattr(app, "pk", None) else 1,
+                        getattr(app, "pk", 0) or 0,
+                    ),
+                )
+                return ranked_env[0]
 
         # Prefer DB-backed SocialApp objects (have a primary key) over env-only APP config.
         db_candidates = [app for app in candidates if getattr(app, "pk", None)]
