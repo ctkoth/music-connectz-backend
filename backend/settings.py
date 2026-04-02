@@ -155,9 +155,9 @@ _set_social_app_from_env('soundcloud', 'SOUNDCLOUD_CLIENT_ID', 'SOUNDCLOUD_CLIEN
 _set_social_app_from_env('twitter_oauth2', 'TWITTER_CLIENT_ID', 'TWITTER_CLIENT_SECRET')
 _set_social_app_from_env('tiktok', 'TIKTOK_CLIENT_ID', 'TIKTOK_CLIENT_SECRET', id_fallback_env='TIKTOK_CLIENT_KEY')
 
-LOGIN_REDIRECT_URL = 'https://musicconnectz.com/'
-LOGOUT_REDIRECT_URL = 'https://musicconnectz.com/'
-SOCIALACCOUNT_ERROR_URL = 'https://musicconnectz.com/?login_error=1'
+LOGIN_REDIRECT_URL = 'https://musicconnectz.net/'
+LOGOUT_REDIRECT_URL = 'https://musicconnectz.net/'
+SOCIALACCOUNT_ERROR_URL = 'https://musicconnectz.net/?login_error=1'
 
 
 MIDDLEWARE = [
