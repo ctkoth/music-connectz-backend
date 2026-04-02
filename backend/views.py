@@ -579,8 +579,24 @@ from django.http import JsonResponse
 def api_auth_me(request):
     user = getattr(request, 'user', None)
     if user and user.is_authenticated:
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        phone_number = (profile.phone_number or '').strip()
+        try:
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            phone_number = (getattr(profile, 'phone_number', '') or '').strip()
+            email_verified = bool(getattr(profile, 'email_verified', False))
+            phone_verified = bool(getattr(profile, 'phone_verified', False))
+            notification_settings = _notification_settings_payload(profile)
+        except Exception:
+            profile = None
+            phone_number = ''
+            email_verified = False
+            phone_verified = False
+            notification_settings = {
+                'email_notifications': True,
+                'push_notifications': True,
+                'phone_notifications': False,
+                'marketing_notifications': False,
+            }
+
         profile_completed = bool((user.username or '').strip() and (user.email or '').strip() and phone_number)
         return JsonResponse({
             'authenticated': True,
@@ -590,9 +606,9 @@ def api_auth_me(request):
                 'username': getattr(user, 'username', '') or '',
                 'phone_number': phone_number,
                 'profile_completed': profile_completed,
-                'email_verified': bool(profile.email_verified),
-                'phone_verified': bool(profile.phone_verified),
-                'notification_settings': _notification_settings_payload(profile),
+                'email_verified': email_verified,
+                'phone_verified': phone_verified,
+                'notification_settings': notification_settings,
             }
         })
     return JsonResponse({'authenticated': False}, status=401)
@@ -717,11 +733,14 @@ def site_analytics(request):
             'uniqueVisitors': analytics.unique_visitors,
         })
     except Exception:
-        analytics = SiteAnalytics.objects.filter(key='global').first()
-        return Response({
-            'totalVisits': int(getattr(analytics, 'total_visits', 0) or 0),
-            'uniqueVisitors': int(getattr(analytics, 'unique_visitors', 0) or 0),
-        })
+        try:
+            analytics = SiteAnalytics.objects.filter(key='global').first()
+            return Response({
+                'totalVisits': int(getattr(analytics, 'total_visits', 0) or 0),
+                'uniqueVisitors': int(getattr(analytics, 'unique_visitors', 0) or 0),
+            })
+        except Exception:
+            return Response({'totalVisits': 0, 'uniqueVisitors': 0})
 
 
 def _frontend_url():
