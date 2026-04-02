@@ -34,6 +34,10 @@ if not SECRET_KEY:
 ALLOWED_HOSTS = [
     "music-connectz-backend-1.onrender.com",
     "music-connectz-backend-2.onrender.com",
+    "backend.musicconnectz.net",
+    "admin.musicconnectz.net",
+    "backend.musicconnectz.com",
+    "admin.musicconnectz.com",
     "localhost",
     "127.0.0.1"
 ]
@@ -222,6 +226,10 @@ CORS_ALLOWED_ORIGINS = [
     "https://www.musicconnectz.com",
     "https://musicconnectz.net",
     "https://www.musicconnectz.net",
+    "https://backend.musicconnectz.net",
+    "https://admin.musicconnectz.net",
+    "https://backend.musicconnectz.com",
+    "https://admin.musicconnectz.com",
     "https://music-connectz-frontend.vercel.app",
     "https://music-connectz-backend-2.onrender.com"
 ]
@@ -230,6 +238,10 @@ CSRF_TRUSTED_ORIGINS = [
     "https://www.musicconnectz.com",
     "https://musicconnectz.net",
     "https://www.musicconnectz.net",
+    "https://backend.musicconnectz.net",
+    "https://admin.musicconnectz.net",
+    "https://backend.musicconnectz.com",
+    "https://admin.musicconnectz.com",
     "https://music-connectz-frontend.vercel.app",
 ]
 CORS_ALLOW_CREDENTIALS = True
