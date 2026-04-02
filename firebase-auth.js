@@ -3,7 +3,7 @@
 // Requires firebase-app.js, firebase-auth.js, firebase-config.js, and firebase-init.js to be loaded first
 
 
-const BACKEND_URL = 'https://music-connectz-backend-2.onrender.com';
+const BACKEND_URL = 'https://admin.musicconnectz.net';
 
 // Sign up using backend (Django API)
 function signUp(email, password, name) {

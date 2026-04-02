@@ -147,7 +147,7 @@
   </script>
   <script>
     window.MCZ_CONFIG = window.MCZ_CONFIG || {};
-    const MCZ_BACKEND_PROD = 'https://backend.musicconnectz.net';
+    const MCZ_BACKEND_PROD = 'https://admin.musicconnectz.net';
     const configuredBackend = window.MCZ_CONFIG.backendUrl || '';
     const shouldForceProdBackend = location.hostname === 'musicconnectz.net' || location.hostname === 'www.musicconnectz.net' || location.hostname === 'musicconnectz.com' || location.hostname === 'www.musicconnectz.com';
     window.MCZ_CONFIG.backendUrl = (shouldForceProdBackend ? MCZ_BACKEND_PROD : (configuredBackend || MCZ_BACKEND_PROD)).replace(/\/+$/, '');
