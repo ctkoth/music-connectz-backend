@@ -1313,7 +1313,8 @@
           <div id="skillsUsedDisplay" style="border: 1px solid var(--border); padding: 10px; border-radius: 6px; background: var(--bg); font-size: 11px; max-height: 150px; overflow-y: auto; margin-bottom: 8px;" onclick="openSkillsUsedModal()">Click to select skills used</div>
           <button class="btn" onclick="openSkillsUsedModal()" style="width: 100%;">📋 Select Skills Used</button>
         </div>
-        <div class="form-group"><label>🔒 Privacy</label><div style="display: flex; gap: 8px; margin-top: 8px;"><button class="toggle-btn active" onclick="setExamplePrivacy('private')">🔒 Private</button><button class="toggle-btn" onclick="setExamplePrivacy('public')">🌐 Public</button></div></div>
+        <div class="form-group"><label>�️ Category / Post Type *</label><select id="examplePostType" style="width:100%;"><option value="work">🎵 Work</option><option value="testimonial">💬 Testimonial</option><option value="discussion">🗣️ Discussion</option><option value="announcement">📢 Announcement</option><option value="other">🔹 Other</option></select></div>
+        <div class="form-group"><label>�🔒 Privacy</label><div style="display: flex; gap: 8px; margin-top: 8px;"><button class="toggle-btn active" onclick="setExamplePrivacy('private')">🔒 Private</button><button class="toggle-btn" onclick="setExamplePrivacy('public')">🌐 Public</button></div></div>
         <button class="btn btn-success premium-only" data-premium-only="true" onclick="uploadExample()" style="width: 100%;" id="exampleSubmitBtn">📤 Upload</button>
         <button class="btn btn-secondary" onclick="cancelEditExample()" style="width: 100%; margin-top: 8px; display: none;" id="exampleCancelBtn">❌ Cancel Edit</button>
       </div>
@@ -1495,6 +1496,14 @@
         <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 11px;"><div style="color: var(--text-light); margin-bottom: 4px; font-weight: 600;">📧 Email:</div><div id="pubEmail" style="display: flex; gap: 6px; align-items: center;"><span id="pubEmailText">No email</span><button class="btn btn-small btn-secondary" onclick="copyEmail()" id="copyEmailBtn">📋 Copy</button></div></div>
         <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 11px;"><div style="color: var(--text-light); margin-bottom: 4px; font-weight: 600;">🎯 Skills (with experience):</div><div id="pubSkills">No skills</div></div>
         <div style="background: var(--bg); padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 11px;"><div style="color: var(--text-light); margin-bottom: 4px; font-weight: 600;">📚 Experience Sources</div><div id="pubExperienceSources">No experience sources added</div></div>
+      </div>
+
+      <!-- Gallery Card -->
+      <div class="card" id="profileGalleryCard">
+        <div class="card-header">📸 Gallery</div>
+        <div id="galleryCategories" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;"></div>
+        <div id="galleryGrid" style="display:grid; grid-template-columns:repeat(3,1fr); gap:6px;"></div>
+        <div id="galleryEmpty" style="font-size:11px; color:var(--text-light); display:none;">No items in this category yet.</div>
       </div>
 
       <!-- Connected Accounts Card -->
@@ -3075,6 +3084,7 @@ function updateProfileDisplay() {
       ? sourceRows.join('<div style="height: 6px;"></div>')
       : 'No experience sources added';
   }
+  renderProfileGallery('all');
 
   const preview = document.getElementById('profilePreviewCard');
   if (preview) {
@@ -3578,7 +3588,8 @@ function uploadExample() {
       mediaType: mediaFile.type, 
       skills: [...appState.skillsUsed],
       skillPrices: skillPrices, // Store skill prices
-      privacy: appState.examplePrivacy, 
+      privacy: appState.examplePrivacy,
+      post_type: (document.getElementById('examplePostType') ? document.getElementById('examplePostType').value : 'work'),
       image: null, 
       timestamp: new Date().toLocaleString(), 
       userName: appState.user.name || 'Anonymous', 
@@ -5083,6 +5094,59 @@ const PROVIDER_META = [
   { key: 'soundcloud',  id: 'soundcloud',       label: 'SoundCloud',emoji: '☁️' },
   { key: 'tiktok',      id: 'tiktok',           label: 'TikTok',    emoji: '🎬' },
 ];
+
+const GALLERY_CATEGORIES = [
+  { id: 'all', label: '🔍 All' },
+  { id: 'work', label: '🎵 Work' },
+  { id: 'testimonial', label: '💬 Testimonial' },
+  { id: 'discussion', label: '🗣️ Discussion' },
+  { id: 'announcement', label: '📢 Announcement' },
+  { id: 'other', label: '🔹 Other' },
+];
+
+function renderProfileGallery(activeCategory) {
+  const catBar = document.getElementById('galleryCategories');
+  const grid = document.getElementById('galleryGrid');
+  const empty = document.getElementById('galleryEmpty');
+  if (!catBar || !grid || !empty) return;
+
+  // Build category tab buttons
+  catBar.innerHTML = GALLERY_CATEGORIES.map(c => {
+    const active = c.id === activeCategory;
+    return `<button onclick="renderProfileGallery('${c.id}')" style="padding:4px 10px; border-radius:999px; border:1px solid var(--border); background:${active ? 'var(--primary)' : 'var(--bg)'}; color:${active ? 'white' : 'var(--text)'}; font-size:11px; cursor:pointer; font-weight:${active ? '700' : '400'};">${escapeHtml(c.label)}</button>`;
+  }).join('');
+
+  const items = (appState.examples || []).filter(ex => {
+    if (activeCategory !== 'all' && (ex.post_type || 'work') !== activeCategory) return false;
+    return true;
+  });
+
+  if (items.length === 0) {
+    grid.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+
+  const typeEmoji = { work:'🎵', testimonial:'💬', discussion:'🗣️', announcement:'📢', other:'🔹' };
+  grid.innerHTML = items.map((ex, i) => {
+    const originalIdx = (appState.examples || []).indexOf(ex);
+    const thumb = ex.image || null;
+    const isAudio = ex.mediaType && ex.mediaType.startsWith('audio/');
+    const isVideo = ex.mediaType && ex.mediaType.startsWith('video/');
+    const typeIcon = typeEmoji[ex.post_type || 'work'] || '🔹';
+    const bg = thumb
+      ? `background-image:url('${thumb}'); background-size:cover; background-position:center;`
+      : `background:var(--bg);`;
+    const inner = thumb
+      ? `<div style="position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,.45); color:white; font-size:9px; padding:3px 5px; border-radius:0 0 8px 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(ex.title)}</div>`
+      : `<div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:2px;"><span style="font-size:24px;">${isAudio ? '🎵' : isVideo ? '🎬' : typeIcon}</span><span style="font-size:9px; color:var(--text-light); text-align:center; padding:2px;">${escapeHtml(ex.title)}</span></div>`;
+    return `<div onclick="playMedia(${originalIdx})" title="${escapeHtml(ex.title)}" style="position:relative; aspect-ratio:1; border-radius:8px; overflow:hidden; border:1px solid var(--border); cursor:pointer; ${bg}">
+      ${inner}
+      <span style="position:absolute; top:4px; right:4px; font-size:10px; background:rgba(255,255,255,.85); border-radius:4px; padding:1px 4px;">${typeIcon}</span>
+    </div>`;
+  }).join('');
+}
 
 async function loadConnectedAccounts() {
   const card = document.getElementById('connectedAccountsCard');
