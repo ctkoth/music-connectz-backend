@@ -20,7 +20,6 @@ class SafeSocialAccountAdapter(DefaultSocialAccountAdapter):
         for the same provider by preferring the DB-backed app where possible.
         """
         from allauth.socialaccount.models import SocialApp
-        from django.core.exceptions import MultipleObjectsReturned
 
         apps = self.list_apps(request, provider=provider, client_id=client_id)
         if len(apps) == 0:
@@ -51,4 +50,13 @@ class SafeSocialAccountAdapter(DefaultSocialAccountAdapter):
         if len(resolved) == 1:
             return resolved[0]
 
-        raise MultipleObjectsReturned
+        # Final safety net: pick deterministic app instead of raising 500.
+        ranked = sorted(
+            resolved,
+            key=lambda app: (
+                0 if getattr(app, "pk", None) else 1,
+                getattr(app, "pk", 0) or 0,
+                app.client_id or "",
+            ),
+        )
+        return ranked[0]
