@@ -147,9 +147,9 @@
   </script>
   <script>
     window.MCZ_CONFIG = window.MCZ_CONFIG || {};
-    const MCZ_BACKEND_PROD = 'https://music-connectz-backend-2.onrender.com';
+    const MCZ_BACKEND_PROD = 'https://backend.musicconnectz.net';
     const configuredBackend = window.MCZ_CONFIG.backendUrl || '';
-    const shouldForceProdBackend = location.hostname === 'musicconnectz.net' || location.hostname === 'www.musicconnectz.net';
+    const shouldForceProdBackend = location.hostname === 'musicconnectz.net' || location.hostname === 'www.musicconnectz.net' || location.hostname === 'musicconnectz.com' || location.hostname === 'www.musicconnectz.com';
     window.MCZ_CONFIG.backendUrl = (shouldForceProdBackend ? MCZ_BACKEND_PROD : (configuredBackend || MCZ_BACKEND_PROD)).replace(/\/+$/, '');
   </script>
 
@@ -386,7 +386,7 @@
     </div>
     <h2>Sign Up</h2>
     <form id="signupForm">
-      <input type="email" id="signupEmail" placeholder="Email" required />
+      <input type="text" id="signupEmail" placeholder="Email, Username, or Phone" required autocomplete="username" />
       <input type="password" id="signupPassword1" placeholder="Password" required />
       <input type="password" id="signupPassword2" placeholder="Confirm Password" required />
       <input type="text" id="signupReferralCode" placeholder="Referral Code (optional)" style="margin-bottom:10px;" />
@@ -586,12 +586,21 @@
     });
 
     // Password validation and match check
+    function _mczIdentifierPayload(val) {
+      val = (val || '').trim();
+      if (val.includes('@')) return { email: val, username: '', phone_number: '' };
+      if (/^\+?\d[\d\s\-().]{5,}$/.test(val)) return { email: '', username: '', phone_number: val };
+      return { email: '', username: val, phone_number: '' };
+    }
+
     document.getElementById('signupForm').onsubmit = function(e) {
-      const email = document.getElementById('signupEmail').value;
+      const identifier = document.getElementById('signupEmail').value.trim();
       const pw1 = document.getElementById('signupPassword1').value;
       const pw2 = document.getElementById('signupPassword2').value;
       let errorMsg = '';
-      if (pw1 !== pw2) {
+      if (!identifier) {
+        errorMsg = 'Email, username, or phone number is required.';
+      } else if (pw1 !== pw2) {
         errorMsg = 'Passwords do not match.';
       } else if (!/^.*(?=.{8,})(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).*$/.test(pw1)) {
         errorMsg = 'Password does not meet requirements.';
@@ -619,13 +628,11 @@
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            username: email.split('@')[0],
-            email: email,
+          body: JSON.stringify(Object.assign(_mczIdentifierPayload(identifier), {
             password1: pw1,
             password2: pw2,
             referral_code: referralCode || undefined
-          })
+          }))
         })
         .then(res => res.json().then(data => ({ status: res.status, body: data })))
         .then(({ status, body }) => {
@@ -635,7 +642,7 @@
             document.getElementById('signupForm').reset();
           } else {
             document.getElementById('signup-error').style.color = 'red';
-            document.getElementById('signup-error').innerText = body.email || body.password || body.non_field_errors || 'Registration failed.';
+            document.getElementById('signup-error').innerText = body.identifier || body.email || body.username || body.phone_number || body.password || body.non_field_errors || 'Registration failed.';
           }
         })
         .catch((err) => {
@@ -1055,9 +1062,8 @@
         <button class="btn btn-success" style="width:100%;" onclick="completeOAuthProfile()">✅ Save Profile Details</button>
       </div>
       
-      <div class="form-group"><label>Username</label><input type="text" id="authOverlayUsername" placeholder="Optional display name" /></div>
-      <div class="form-group"><label>Email *</label><input type="email" id="authOverlayEmail" placeholder="you@email.com" /></div>
-      <div class="form-group"><label>Phone</label><input type="tel" id="authOverlayPhone" placeholder="+1234567890 (optional)" /></div>
+      <div class="form-group"><label>Email, Username, or Phone *</label><input type="text" id="authOverlayEmail" placeholder="Email, username, or phone" autocomplete="username" /></div>
+      <div class="form-group" id="authOverlayUsernameGroup" style="display:none;"><label>Display Name (optional)</label><input type="text" id="authOverlayUsername" placeholder="Optional display name" /></div>
       <div class="form-group"><label>Password *</label>
         <div style="position:relative;">
           <input type="password" id="authOverlayPassword" placeholder="At least 8 characters" style="padding-right:32px;" />
@@ -1083,14 +1089,22 @@
       function showRegisterFields() {
         const overlayConfirm = document.getElementById('authOverlayConfirmPasswordGroup');
         const settingsConfirm = document.getElementById('authConfirmPasswordGroup');
+        const overlayUsername = document.getElementById('authOverlayUsernameGroup');
+        const settingsUsername = document.getElementById('authUsernameGroup');
         if (overlayConfirm) overlayConfirm.style.display = '';
         if (settingsConfirm) settingsConfirm.style.display = '';
+        if (overlayUsername) overlayUsername.style.display = '';
+        if (settingsUsername) settingsUsername.style.display = '';
       }
       function showLoginFields() {
         const overlayConfirm = document.getElementById('authOverlayConfirmPasswordGroup');
         const settingsConfirm = document.getElementById('authConfirmPasswordGroup');
+        const overlayUsername = document.getElementById('authOverlayUsernameGroup');
+        const settingsUsername = document.getElementById('authUsernameGroup');
         if (overlayConfirm) overlayConfirm.style.display = 'none';
         if (settingsConfirm) settingsConfirm.style.display = 'none';
+        if (overlayUsername) overlayUsername.style.display = 'none';
+        if (settingsUsername) settingsUsername.style.display = 'none';
       }
       // On load, default to login (hide confirm password)
       document.addEventListener('DOMContentLoaded', function() {
@@ -1806,8 +1820,8 @@
     <div id="settings" class="tab">
       <div class="card">
         <div class="card-header">🔐 Account (Password Login)</div>
-        <div class="form-group"><label>Username</label><input type="text" id="authUsername" placeholder="Optional display name" /></div>
-        <div class="form-group"><label>Email *</label><input type="email" id="authEmail" placeholder="you@email.com" /></div>
+        <div class="form-group"><label>Email, Username, or Phone *</label><input type="text" id="authEmail" placeholder="Email, username, or phone" autocomplete="username" /></div>
+        <div class="form-group" id="authUsernameGroup" style="display:none;"><label>Display Name (optional)</label><input type="text" id="authUsername" placeholder="Optional display name" /></div>
         <div class="form-group"><label>Password *</label>
           <div style="position:relative;">
             <input type="password" id="authPassword" placeholder="At least 8 characters" style="padding-right:32px;" />
@@ -2319,6 +2333,13 @@ let appState = {
 };
 
 const apiBase = window.MCZ_CONFIG.backendUrl;
+
+function _mczIdentifierPayload(val) {
+  val = (val || '').trim();
+  if (val.includes('@')) return { email: val, username: '', phone_number: '' };
+  if (/^\+?\d[\d\s\-(). ]{5,}$/.test(val)) return { email: '', username: '', phone_number: val };
+  return { email: '', username: val, phone_number: '' };
+}
 
 // Storage helpers to avoid crashes when storage is blocked
 const _memoryStorage = {};
@@ -4378,15 +4399,15 @@ async function completeOAuthProfile() {
 }
 
 async function registerUser(fromOverlay = false) {
-  const email = (document.getElementById(fromOverlay ? 'authOverlayEmail' : 'authEmail').value || '').trim();
+  const identifier = (document.getElementById(fromOverlay ? 'authOverlayEmail' : 'authEmail').value || '').trim();
   const password = (document.getElementById(fromOverlay ? 'authOverlayPassword' : 'authPassword').value || '').trim();
   const confirmPassword = fromOverlay
     ? (document.getElementById('authOverlayConfirmPassword').value || '').trim()
     : (document.getElementById('authConfirmPassword').value || '').trim();
-  const username = (document.getElementById(fromOverlay ? 'authOverlayUsername' : 'authUsername').value || '').trim();
-  const phone = fromOverlay ? (document.getElementById('authOverlayPhone').value || '').trim() : '';
+  const displayName = (document.getElementById(fromOverlay ? 'authOverlayUsername' : 'authUsername') || {}).value || '';
 
-  if (!email || !password) { setAuthStatus('Email and password required.', true); return; }
+  if (!identifier) { setAuthStatus('Email, username, or phone number is required.', true); return; }
+  if (!password) { setAuthStatus('Password is required.', true); return; }
   if (password.length < 8) { setAuthStatus('Password must be at least 8 characters.', true); return; }
   if (!confirmPassword) { setAuthStatus('Confirm password is required for registration.', true); return; }
   if (password !== confirmPassword) { setAuthStatus('Passwords do not match.', true); return; }
@@ -4396,28 +4417,28 @@ async function registerUser(fromOverlay = false) {
     return;
   }
 
+  const idPayload = _mczIdentifierPayload(identifier);
+  if (displayName && !idPayload.username) idPayload.username = displayName;
+
   try {
     setAuthStatus('Registering...');
     const res = await fetch(`${apiBase}/api/auth/register/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: username || email.split('@')[0],
-        email: email,
+      body: JSON.stringify(Object.assign(idPayload, {
         password1: password,
         password2: confirmPassword,
-        phone_number: phone,
-      })
+      }))
     });
 
     const data = await res.json().catch(() => ({}));
     if (res.status === 201) {
-      appState.auth = { loggedIn: true, user: data.user || { email } };
+      appState.auth = { loggedIn: true, user: data.user || { email: idPayload.email || identifier } };
       saveAppState();
       updateAuthDisplay();
-      setAuthStatus('Registered & logged in as ' + email);
+      setAuthStatus('Registered! You can now log in.');
     } else {
-      setAuthStatus(data.email || data.password1 || data.password2 || data.non_field_errors || 'Registration failed.', true);
+      setAuthStatus(data.identifier || data.email || data.username || data.phone_number || data.password1 || data.password2 || data.non_field_errors || 'Registration failed.', true);
     }
   } catch (e) {
     console.error('registerUser error:', e);
@@ -4438,10 +4459,10 @@ async function registerUser(fromOverlay = false) {
 }
 
 async function loginUser(fromOverlay = false) {
-  const email = (document.getElementById(fromOverlay ? 'authOverlayEmail' : 'authEmail').value || '').trim();
+  const identifier = (document.getElementById(fromOverlay ? 'authOverlayEmail' : 'authEmail').value || '').trim();
   const password = (document.getElementById(fromOverlay ? 'authOverlayPassword' : 'authPassword').value || '').trim();
 
-  if (!email || !password) { setAuthStatus('Email and password required.', true); return; }
+  if (!identifier || !password) { setAuthStatus('Identifier and password are required.', true); return; }
   if (window.MCZ_CONFIG && window.MCZ_CONFIG.forceBackendAuth) {
     setAuthStatus('Redirecting to secure server login...');
     openBackendAuthPage();
@@ -4450,10 +4471,11 @@ async function loginUser(fromOverlay = false) {
 
   try {
     setAuthStatus('Logging in...');
-    const res = await fetch(`${apiBase}/api/login`, {
+    const res = await fetch(`${apiBase}/api/login/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
+      credentials: 'include',
+      body: JSON.stringify({ identifier, password })
     });
 
     const data = await res.json().catch(() => ({}));
