@@ -539,7 +539,7 @@
       const authEntryLink = document.getElementById('auth-entry-link');
       const secureAuthLink = document.getElementById('secure-auth-link');
       const authPath = window.MCZ_CONFIG.authEntryPath || '/accounts/login/';
-      const authEntryUrl = `${window.MCZ_CONFIG.backendUrl}${authPath}?next=${encodeURIComponent(location.href)}`;
+      const authEntryUrl = `${oauthBase}${authPath}?next=${encodeURIComponent(location.href)}`;
       if (authEntryLink) {
         authEntryLink.href = authEntryUrl;
       }
@@ -620,7 +620,7 @@
           setTimeout(() => {
             const nextUrl = encodeURIComponent(location.href);
             const authPath = window.MCZ_CONFIG.authEntryPath || '/accounts/login/';
-            window.location.href = `${window.MCZ_CONFIG.backendUrl}${authPath}?next=${nextUrl}`;
+            window.location.href = `${oauthBase}${authPath}?next=${nextUrl}`;
           }, 300);
           return;
         }
@@ -661,7 +661,7 @@
           if (likelyCors && shouldRedirectToBackendAuth) {
             setTimeout(() => {
               const nextUrl = encodeURIComponent(location.href);
-              window.location.href = `${window.MCZ_CONFIG.backendUrl}/accounts/login/?next=${nextUrl}`;
+              window.location.href = `${oauthBase}/accounts/login/?next=${nextUrl}`;
             }, 600);
           }
         });
@@ -2389,6 +2389,7 @@ let appState = {
 };
 
 const apiBase = window.MCZ_CONFIG.backendUrl;
+const oauthBase = (window.MCZ_CONFIG && window.MCZ_CONFIG.oauthBaseUrl) || apiBase;
 
 function _mczIdentifierPayload(val) {
   val = (val || '').trim();
@@ -4432,7 +4433,7 @@ function getBackendAuthUrl() {
     nextUrl += `#${window.appState.currentTab}`;
   }
   const authPath = (window.MCZ_CONFIG && window.MCZ_CONFIG.authEntryPath) || '/accounts/login/';
-  return `${apiBase}${authPath}?next=${encodeURIComponent(nextUrl)}`;
+  return `${oauthBase}${authPath}?next=${encodeURIComponent(nextUrl)}`;
 }
 
 function openBackendAuthPage() {
@@ -5030,7 +5031,7 @@ async function loadConnectedAccounts() {
         <span>${p.emoji} ${p.label}</span>
         <span style="display:flex;align-items:center;gap:8px;">
           <span style="color:#4caf50;font-weight:600;">✓ Connected</span>
-          <a href="${apiBase}/accounts/social/connections/" style="font-size:11px;color:#999;text-decoration:underline;" target="_blank">Manage</a>
+          <a href="${oauthBase}/accounts/social/connections/" style="font-size:11px;color:#999;text-decoration:underline;" target="_blank">Manage</a>
         </span>`;
     } else {
       row.innerHTML = `
@@ -5042,11 +5043,11 @@ async function loadConnectedAccounts() {
 }
 
 function connectProvider(providerId, returnUrl) {
-  window.location.href = `${apiBase}/accounts/${providerId}/login/?process=connect&next=${returnUrl}`;
+  window.location.href = `${oauthBase}/accounts/${providerId}/login/?process=connect&next=${returnUrl}`;
 }
 
 function _openSocialLogin(providerConfig) {
-  const loginUrl = `${apiBase}/accounts/${providerConfig.id}/login/`;
+  const loginUrl = `${oauthBase}/accounts/${providerConfig.id}/login/`;
   const mobileBrowser = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(navigator.userAgent);
 
   // Mobile browsers frequently block popup OAuth windows, so use full redirect.
