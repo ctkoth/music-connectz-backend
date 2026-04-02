@@ -60,28 +60,69 @@ class ReferralSerializer(serializers.ModelSerializer):
         model = Referral
         fields = ('referrer', 'referred', 'created_at', 'reward_granted')
 
-class RegisterSerializer(serializers.ModelSerializer):
-    email = serializers.EmailField(
-        required=True,
-        validators=[UniqueValidator(queryset=User.objects.all())]
-    )
+class RegisterSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=False, allow_blank=True, default='')
+    username = serializers.CharField(required=False, allow_blank=True, max_length=150, default='')
+    phone_number = serializers.CharField(required=False, allow_blank=True, max_length=30, default='')
     password1 = serializers.CharField(write_only=True, required=True, validators=[validate_password])
     password2 = serializers.CharField(write_only=True, required=True)
 
-    class Meta:
-        model = User
-        fields = ('username', 'email', 'password1', 'password2')
+    def validate_email(self, value):
+        value = (value or '').strip()
+        if value and User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError("This email is already registered.")
+        return value
+
+    def validate_username(self, value):
+        value = (value or '').strip()
+        if value and User.objects.filter(username__iexact=value).exists():
+            raise serializers.ValidationError("This username is already taken.")
+        return value
+
+    def validate_phone_number(self, value):
+        value = (value or '').strip()
+        if value and UserProfile.objects.filter(phone_number=value).exists():
+            raise serializers.ValidationError("This phone number is already registered.")
+        return value
 
     def validate(self, attrs):
+        email = (attrs.get('email') or '').strip()
+        username = (attrs.get('username') or '').strip()
+        phone_number = (attrs.get('phone_number') or '').strip()
+        if not email and not username and not phone_number:
+            raise serializers.ValidationError({"identifier": "Provide an email, username, or phone number."})
         if attrs['password1'] != attrs['password2']:
             raise serializers.ValidationError({"password": "Passwords do not match."})
         return attrs
 
     def create(self, validated_data):
-        user = User.objects.create(
-            username=validated_data['username'],
-            email=validated_data['email']
-        )
-        user.set_password(validated_data['password1'])
+        import re as _re
+        email = (validated_data.get('email') or '').strip()
+        username = (validated_data.get('username') or '').strip()
+        phone_number = (validated_data.get('phone_number') or '').strip()
+        password = validated_data['password1']
+
+        if not username:
+            if email:
+                base = email.split('@')[0]
+            elif phone_number:
+                base = 'user' + _re.sub(r'\D', '', phone_number)[-6:]
+            else:
+                base = 'user'
+            candidate = base
+            counter = 1
+            while User.objects.filter(username__iexact=candidate).exists():
+                candidate = f"{base}{counter}"
+                counter += 1
+            username = candidate
+
+        user = User.objects.create(username=username, email=email or '')
+        user.set_password(password)
         user.save()
+
+        if phone_number:
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            profile.phone_number = phone_number
+            profile.save(update_fields=['phone_number'])
+
         return user

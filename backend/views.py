@@ -1,6 +1,8 @@
 from django.shortcuts import render
 from django.conf import settings
+from django.contrib.auth import authenticate, login as auth_login
 import os
+import re as _re
 import openai
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
@@ -377,6 +379,53 @@ def api_register(request):
         serializer.save()
         return Response({"success": "User registered successfully."}, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def api_login(request):
+    identifier = (request.data.get('identifier') or request.data.get('email') or '').strip()
+    password = (request.data.get('password') or '').strip()
+
+    if not identifier or not password:
+        return Response({'error': 'Identifier and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = None
+    # Try email lookup
+    if '@' in identifier:
+        try:
+            u = User.objects.get(email__iexact=identifier)
+            user = authenticate(request, username=u.username, password=password)
+        except User.DoesNotExist:
+            pass
+    # Try phone lookup
+    if user is None and _re.match(r'^\+?\d[\d\s\-(). ]{5,}$', identifier):
+        try:
+            prof = UserProfile.objects.get(phone_number=identifier)
+            user = authenticate(request, username=prof.user.username, password=password)
+        except UserProfile.DoesNotExist:
+            pass
+    # Try username lookup
+    if user is None:
+        user = authenticate(request, username=identifier, password=password)
+
+    if user is None:
+        return Response({'error': 'Invalid credentials.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    auth_login(request, user)
+    profile = UserProfile.objects.filter(user=user).first()
+    phone_number = (profile.phone_number or '') if profile else ''
+    return Response({
+        'success': True,
+        'user': {
+            'id': user.id,
+            'email': user.email,
+            'username': user.username,
+            'phone_number': phone_number,
+        }
+    })
+
+
 from django.http import JsonResponse
 
 
