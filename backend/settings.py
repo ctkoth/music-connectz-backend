@@ -95,6 +95,9 @@ SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
 SOCIALACCOUNT_LOGIN_ON_GET = True
 SOCIALACCOUNT_STORE_TOKENS = True
 SOCIALACCOUNT_ADAPTER = 'backend.adapters.SafeSocialAccountAdapter'
+OAUTH_CANONICAL_HOST = (os.environ.get('OAUTH_CANONICAL_HOST') or 'admin.musicconnectz.net').strip().lower()
+OAUTH_CANONICAL_SCHEME = (os.environ.get('OAUTH_CANONICAL_SCHEME') or 'https').strip().lower()
+OAUTH_CANONICAL_ENFORCE = (os.environ.get('OAUTH_CANONICAL_ENFORCE') or ('0' if DEBUG else '1')) == '1'
 SOCIALACCOUNT_PROVIDERS = {
     'apple': {
         'SCOPE': ['name', 'email'],
@@ -163,6 +166,7 @@ SOCIALACCOUNT_ERROR_URL = 'https://musicconnectz.net/?login_error=1'
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'backend.middleware.CanonicalOAuthHostMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
