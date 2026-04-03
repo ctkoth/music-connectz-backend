@@ -45,6 +45,7 @@ urlpatterns = [
     path('api/auth/providers/status/', views.oauth_providers_status, name='oauth_providers_status'),
     path('api/auth/users/', views.api_auth_users, name='api_auth_users'),
     path('api/auth/me/', views.api_auth_me, name='api_auth_me'),
+    path('api/auth/connected-accounts/', views.api_connected_accounts, name='api_connected_accounts'),
     path('api/auth/email/send-code/', views.send_email_verification_code, name='send_email_verification_code'),
     path('api/auth/email/verify/', views.verify_email_code, name='verify_email_code'),
     path('api/auth/phone/send-code/', views.send_phone_verification_code, name='send_phone_verification_code'),

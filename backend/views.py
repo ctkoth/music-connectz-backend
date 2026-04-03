@@ -327,6 +327,7 @@ import random
 from datetime import timedelta
 
 from allauth.socialaccount.models import SocialApp
+from allauth.socialaccount.models import SocialAccount
 from django.db import transaction
 from django.core.mail import send_mail
 from rest_framework import status
@@ -334,7 +335,7 @@ from rest_framework.decorators import api_view, permission_classes, authenticati
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.authentication import SessionAuthentication
-from .models import SiteAnalytics, VisitorRecord, UserProfile, Referral
+from .models import AuthAuditLog, SiteAnalytics, VisitorRecord, UserProfile, Referral
 from .serializers import RegisterSerializer, UserProfileSerializer, ReferralSerializer
 # --- Referral System API Endpoints ---
 from rest_framework.permissions import IsAuthenticated
@@ -344,6 +345,28 @@ from rest_framework.views import APIView
 class CsrfExemptSessionAuthentication(SessionAuthentication):
     def enforce_csrf(self, request):
         return
+
+
+def _request_ip(request):
+    forwarded_for = (request.META.get('HTTP_X_FORWARDED_FOR') or '').split(',')[0].strip()
+    return forwarded_for or (request.META.get('REMOTE_ADDR') or '')
+
+
+def _record_auth_event(request, *, event, outcome, user=None, identifier='', provider='', details=None):
+    safe_details = details if isinstance(details, dict) else {}
+    try:
+        AuthAuditLog.objects.create(
+            user=user if getattr(user, 'pk', None) else None,
+            event=event,
+            outcome=outcome,
+            provider=(provider or '')[:32],
+            identifier=(identifier or '')[:255],
+            ip_address=_request_ip(request)[:64],
+            user_agent=(request.META.get('HTTP_USER_AGENT') or '')[:512],
+            details=safe_details,
+        )
+    except Exception:
+        pass
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -376,7 +399,22 @@ def register_with_referral(request):
                 user.profile.save()
             except UserProfile.DoesNotExist:
                 pass  # Invalid code, ignore
+        _record_auth_event(
+            request,
+            event='register',
+            outcome='success',
+            user=user,
+            identifier=user.email or user.username,
+            details={'referral_code_used': bool(referral_code)},
+        )
         return Response({"success": "User registered successfully."}, status=status.HTTP_201_CREATED)
+    _record_auth_event(
+        request,
+        event='register',
+        outcome='failure',
+        identifier=(request.data.get('email') or request.data.get('username') or request.data.get('phone_number') or '')[:255],
+        details={'errors': serializer.errors},
+    )
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # API endpoint for user registration
@@ -385,8 +423,29 @@ def register_with_referral(request):
 def api_register(request):
     serializer = RegisterSerializer(data=request.data)
     if serializer.is_valid():
-        serializer.save()
-        return Response({"success": "User registered successfully."}, status=status.HTTP_201_CREATED)
+        user = serializer.save()
+        _record_auth_event(
+            request,
+            event='register',
+            outcome='success',
+            user=user,
+            identifier=user.email or user.username,
+        )
+        return Response({
+            "success": "User registered successfully.",
+            "user": {
+                'id': user.id,
+                'email': user.email,
+                'username': user.username,
+            }
+        }, status=status.HTTP_201_CREATED)
+    _record_auth_event(
+        request,
+        event='register',
+        outcome='failure',
+        identifier=(request.data.get('email') or request.data.get('username') or request.data.get('phone_number') or '')[:255],
+        details={'errors': serializer.errors},
+    )
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -397,6 +456,13 @@ def api_login(request):
     password = (request.data.get('password') or '').strip()
 
     if not identifier or not password:
+        _record_auth_event(
+            request,
+            event='login',
+            outcome='failure',
+            identifier=identifier,
+            details={'reason': 'missing_credentials'},
+        )
         return Response({'error': 'Identifier and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
     user = None
@@ -419,11 +485,25 @@ def api_login(request):
         user = authenticate(request, username=identifier, password=password)
 
     if user is None:
+        _record_auth_event(
+            request,
+            event='login',
+            outcome='failure',
+            identifier=identifier,
+            details={'reason': 'invalid_credentials'},
+        )
         return Response({'error': 'Invalid credentials.'}, status=status.HTTP_401_UNAUTHORIZED)
 
     auth_login(request, user)
     profile = UserProfile.objects.filter(user=user).first()
     phone_number = (profile.phone_number or '') if profile else ''
+    _record_auth_event(
+        request,
+        event='login',
+        outcome='success',
+        user=user,
+        identifier=identifier or user.email or user.username,
+    )
     return Response({
         'success': True,
         'user': {
@@ -620,6 +700,17 @@ def api_auth_users(request):
     return Response({'totalUsers': User.objects.count()})
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def api_connected_accounts(request):
+    connected = list(
+        SocialAccount.objects.filter(user=request.user)
+        .order_by('provider')
+        .values_list('provider', flat=True)
+    )
+    return Response({'connected': connected})
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 @authentication_classes([CsrfExemptSessionAuthentication])
@@ -630,12 +721,36 @@ def complete_oauth_profile(request):
     phone_number = (request.data.get('phone_number') or '').strip()
 
     if not username or not email or not phone_number:
+        _record_auth_event(
+            request,
+            event='oauth_profile_complete',
+            outcome='failure',
+            user=user,
+            identifier=email or username,
+            details={'reason': 'missing_required_fields'},
+        )
         return Response({'error': 'username, email, and phone_number are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
     if User.objects.exclude(pk=user.pk).filter(username__iexact=username).exists():
+        _record_auth_event(
+            request,
+            event='oauth_profile_complete',
+            outcome='failure',
+            user=user,
+            identifier=email or username,
+            details={'reason': 'username_taken'},
+        )
         return Response({'error': 'Username already taken.'}, status=status.HTTP_400_BAD_REQUEST)
 
     if User.objects.exclude(pk=user.pk).filter(email__iexact=email).exists():
+        _record_auth_event(
+            request,
+            event='oauth_profile_complete',
+            outcome='failure',
+            user=user,
+            identifier=email,
+            details={'reason': 'email_taken'},
+        )
         return Response({'error': 'Email already taken.'}, status=status.HTTP_400_BAD_REQUEST)
 
     user.username = username
@@ -645,6 +760,22 @@ def complete_oauth_profile(request):
     profile, _ = UserProfile.objects.get_or_create(user=user)
     profile.phone_number = phone_number
     profile.save(update_fields=['phone_number'])
+
+    provider = (
+        SocialAccount.objects.filter(user=user)
+        .order_by('id')
+        .values_list('provider', flat=True)
+        .first()
+        or ''
+    )
+    _record_auth_event(
+        request,
+        event='oauth_profile_complete',
+        outcome='success',
+        user=user,
+        identifier=email or username,
+        provider=provider,
+    )
 
     return Response({
         'success': 'Profile completed.',

@@ -162,6 +162,12 @@ class UserProfile(models.Model):
     phone_notifications = models.BooleanField(default=False)
     marketing_notifications = models.BooleanField(default=False)
     referred_by = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='referrals')
+    location = models.CharField(max_length=128, blank=True, default='')
+    first_name = models.CharField(max_length=64, blank=True, default='')
+    last_name = models.CharField(max_length=64, blank=True, default='')
+    gender = models.CharField(max_length=32, blank=True, default='')
+    birthday = models.DateField(null=True, blank=True)
+    avatar_url = models.URLField(max_length=512, blank=True, default='')
 
     def save(self, *args, **kwargs):
         if not self.referral_code:
@@ -170,6 +176,36 @@ class UserProfile(models.Model):
 
     def __str__(self):
         return f"Profile for {self.user.username}"
+
+
+class AuthAuditLog(models.Model):
+    EVENT_CHOICES = [
+        ('register', 'Register'),
+        ('login', 'Login'),
+        ('oauth_profile_complete', 'OAuth Profile Complete'),
+        ('oauth_account_connect', 'OAuth Account Connect'),
+    ]
+    OUTCOME_CHOICES = [
+        ('success', 'Success'),
+        ('failure', 'Failure'),
+    ]
+
+    user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='auth_audit_logs')
+    event = models.CharField(max_length=32, choices=EVENT_CHOICES)
+    outcome = models.CharField(max_length=16, choices=OUTCOME_CHOICES)
+    provider = models.CharField(max_length=32, blank=True, default='')
+    identifier = models.CharField(max_length=255, blank=True, default='')
+    ip_address = models.CharField(max_length=64, blank=True, default='')
+    user_agent = models.CharField(max_length=512, blank=True, default='')
+    details = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        label = self.identifier or (self.user.username if self.user else 'unknown')
+        return f"{self.event}:{self.outcome} for {label}"
 
 class Referral(models.Model):
     referrer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_referrals')
