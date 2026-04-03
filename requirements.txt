@@ -1,0 +1,14 @@
+djangorestframework
+openai
+Django
+gunicorn
+django-allauth
+djangorestframework
+django-cors-headers
+requests
+PyJWT
+oauthlib
+requests-oauthlib
+python3-openid
+cryptography
+reportlab

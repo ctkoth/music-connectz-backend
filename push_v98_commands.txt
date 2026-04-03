@@ -1,0 +1,17 @@
+# Git commands to push v9.8 update for both frontend and backend
+
+# 1. Stage all changes in both projects:
+git add .
+
+# 2. Commit with a clear message:
+git commit -m "Upgrade to v9.8 unified social paradigm (backend & frontend)"
+
+# 3. Tag the release:
+git tag v9.8
+
+# 4. Push code and tags to remote:
+git push
+# (If you have both frontend and backend in one repo, this is enough. If separate, repeat in each folder.)
+git push --tags
+
+# If you see any errors, copy the error message and ask for help.

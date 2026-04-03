@@ -1,0 +1,22 @@
+# How to activate your backend virtual environment and fix missing pip/openai
+
+# 1. Check if your backend virtual environment exists:
+dir .venv\Scripts\Activate.ps1
+
+# 2. If the file exists, activate the environment:
+.venv\Scripts\Activate.ps1
+
+# 3. If you get 'File Not Found', create the virtual environment:
+python -m venv .venv
+
+# 4. Then activate it:
+.venv\Scripts\Activate.ps1
+
+# 5. Once activated, install openai:
+pip install openai
+
+# 6. Then run migrations:
+python manage.py makemigrations backend
+python manage.py migrate
+
+# If you see any errors, copy the error message and ask for help.
