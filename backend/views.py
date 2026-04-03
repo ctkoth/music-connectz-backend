@@ -808,6 +808,7 @@ def oauth_providers_status(request):
         'apple': 'apple',
         'microsoft': 'microsoft',
         'facebook': 'facebook',
+        'instagram': 'instagram',
         'twitter': 'twitter_oauth2',
         'linkedin': 'linkedin_oauth2',
         'github': 'github',

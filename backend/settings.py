@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     'allauth.socialaccount.providers.apple',
     'allauth.socialaccount.providers.microsoft',
     'allauth.socialaccount.providers.facebook',
+    'allauth.socialaccount.providers.instagram',
     'allauth.socialaccount.providers.twitter_oauth2',
     'allauth.socialaccount.providers.linkedin_oauth2',
     'allauth.socialaccount.providers.github',
@@ -109,6 +110,7 @@ SOCIALACCOUNT_PROVIDERS = {
         'SCOPE': ['email', 'public_profile'],
         'AUTH_PARAMS': {'auth_type': 'rerequest'},
     },
+    'instagram': {},
     'twitter_oauth2': {
         'SCOPE': ['users.read', 'tweet.read', 'offline.access'],
     },
@@ -149,6 +151,7 @@ def _set_social_app_from_env(provider_key, client_id_env, client_secret_env, key
 
 
 _set_social_app_from_env('facebook', 'FACEBOOK_CLIENT_ID', 'FACEBOOK_CLIENT_SECRET')
+_set_social_app_from_env('instagram', 'INSTAGRAM_CLIENT_ID', 'INSTAGRAM_CLIENT_SECRET', id_fallback_env='INSTAGRAM_APP_ID')
 _set_social_app_from_env('github', 'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET')
 _set_social_app_from_env('google', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET')
 _set_social_app_from_env('linkedin_oauth2', 'LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET')
