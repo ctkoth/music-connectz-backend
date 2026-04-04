@@ -380,6 +380,15 @@ def _record_auth_event(request, *, event, outcome, user=None, identifier='', pro
     except Exception:
         pass
 
+
+def _safe_auth_login(request, user):
+    """Best-effort session login. Registration must not fail if session write fails."""
+    try:
+        auth_login(request, user)
+        return True
+    except Exception:
+        return False
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def referral_stats(request):
@@ -404,7 +413,7 @@ def register_with_referral(request):
     serializer = RegisterSerializer(data=request.data)
     if serializer.is_valid():
         user = serializer.save()
-        auth_login(request, user)
+        _safe_auth_login(request, user)
         if referral_code:
             try:
                 referrer_profile = UserProfile.objects.get(referral_code=referral_code)
@@ -439,7 +448,7 @@ def api_register(request):
     serializer = RegisterSerializer(data=request.data)
     if serializer.is_valid():
         user = serializer.save()
-        auth_login(request, user)
+        _safe_auth_login(request, user)
         _record_auth_event(
             request,
             event='register',
