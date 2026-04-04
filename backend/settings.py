@@ -76,7 +76,6 @@ INSTALLED_APPS = [
     'allauth.socialaccount.providers.spotify',
     'allauth.socialaccount.providers.soundcloud',
     'allauth.socialaccount.providers.tiktok',
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
     'rest_framework',
     'corsheaders',
 ]
@@ -89,20 +88,12 @@ AUTHENTICATION_BACKENDS = [
     'allauth.account.auth_backends.AuthenticationBackend',
 ]
 
-<<<<<<< HEAD
-# Allauth registration/login settings
-ACCOUNT_USER_MODEL_USERNAME_FIELD = "username"
-ACCOUNT_SIGNUP_FIELDS = ["username", "email*", "password1", "password2"]
-ACCOUNT_LOGIN_METHODS = {'email', 'username'}
-=======
-# Allauth registration: new settings for account fields and login methods
 ACCOUNT_AUTHENTICATION_METHOD = "username_email"  # Allow login with username OR email
 ACCOUNT_USERNAME_REQUIRED = False                  # Username is optional
 ACCOUNT_EMAIL_REQUIRED = False                     # Email is optional
 ACCOUNT_USER_MODEL_USERNAME_FIELD = "username"
 ACCOUNT_SIGNUP_FIELDS = ["username", "email", "password1", "password2"]
 ACCOUNT_LOGIN_METHODS = {'email'}
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
 ACCOUNT_EMAIL_VERIFICATION = 'optional'
 ACCOUNT_DEFAULT_HTTP_PROTOCOL = 'https'
 ACCOUNT_UNIQUE_EMAIL = True
@@ -140,7 +131,6 @@ SOCIALACCOUNT_PROVIDERS = {
         'SCOPE': ['profile', 'email'],
         'AUTH_PARAMS': {'prompt': 'select_account'},
     },
-<<<<<<< HEAD
     'amazon': {
         'SCOPE': ['profile'],
     },
@@ -150,7 +140,6 @@ SOCIALACCOUNT_PROVIDERS = {
     'patreon': {
         'SCOPE': ['identity'],
     },
-=======
 >>>>>>> dec631da98253f85bff28b8e054535819adb2224
     'spotify': {
         'SCOPE': ['user-read-email'],
@@ -161,12 +150,9 @@ SOCIALACCOUNT_PROVIDERS = {
     'tiktok': {
         'SCOPE': ['user.info.basic', 'user.info.profile'],
     },
-<<<<<<< HEAD
     'twitch': {
         'SCOPE': ['user:read:email'],
     },
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
 }
 
 
@@ -188,16 +174,16 @@ _set_social_app_from_env('facebook', 'FACEBOOK_CLIENT_ID', 'FACEBOOK_CLIENT_SECR
 _set_social_app_from_env('instagram', 'INSTAGRAM_CLIENT_ID', 'INSTAGRAM_CLIENT_SECRET', id_fallback_env='INSTAGRAM_APP_ID')
 _set_social_app_from_env('github', 'GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET')
 _set_social_app_from_env('google', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET')
-<<<<<<< HEAD
 _set_social_app_from_env('amazon', 'AMAZON_CLIENT_ID', 'AMAZON_CLIENT_SECRET')
 _set_social_app_from_env('discogs', 'DISCOGS_CLIENT_ID', 'DISCOGS_CLIENT_SECRET')
 _set_social_app_from_env('linkedin_oauth2', 'LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET')
 _set_social_app_from_env('microsoft', 'MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET')
 _set_social_app_from_env('patreon', 'PATREON_CLIENT_ID', 'PATREON_CLIENT_SECRET')
-=======
+_set_social_app_from_env('amazon', 'AMAZON_CLIENT_ID', 'AMAZON_CLIENT_SECRET')
+_set_social_app_from_env('discogs', 'DISCOGS_CLIENT_ID', 'DISCOGS_CLIENT_SECRET')
 _set_social_app_from_env('linkedin_oauth2', 'LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET')
 _set_social_app_from_env('microsoft', 'MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET')
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
+_set_social_app_from_env('patreon', 'PATREON_CLIENT_ID', 'PATREON_CLIENT_SECRET')
 _set_social_app_from_env('spotify', 'SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET')
 _set_social_app_from_env('soundcloud', 'SOUNDCLOUD_CLIENT_ID', 'SOUNDCLOUD_CLIENT_SECRET')
 _set_social_app_from_env('twitter_oauth2', 'TWITTER_CLIENT_ID', 'TWITTER_CLIENT_SECRET')
