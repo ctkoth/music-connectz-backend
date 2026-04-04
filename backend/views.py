@@ -1208,6 +1208,69 @@ def _release_validation_errors(release):
     return errors
 
 
+def _parse_webhook_event_time(raw_value):
+    from django.utils.dateparse import parse_datetime
+
+    value = str(raw_value or '').strip()
+    if not value:
+        return timezone.now()
+    parsed = parse_datetime(value)
+    if parsed is None:
+        return timezone.now()
+    if timezone.is_naive(parsed):
+        try:
+            return timezone.make_aware(parsed)
+        except Exception:
+            return timezone.now()
+    return parsed
+
+
+def _normalize_release_status_from_event(event_type, provider_status):
+    et = str(event_type or '').strip().lower()
+    ps = str(provider_status or '').strip().lower()
+    source = f"{et} {ps}".strip()
+
+    if any(token in source for token in ['failed', 'rejected', 'error', 'declined']):
+        return 'failed'
+    if any(token in source for token in ['delivered', 'live', 'published', 'active']):
+        return 'delivered'
+    if any(token in source for token in ['processing', 'queued', 'ingest', 'pending', 'review']):
+        return 'processing'
+    if any(token in source for token in ['submitted', 'received']):
+        return 'submitted'
+    return ''
+
+
+def _normalize_release_submission_field_payload(payload):
+    editable_fields = {
+        'title',
+        'version_title',
+        'primary_artist',
+        'release_type',
+        'genre',
+        'language',
+        'explicit',
+        'upc',
+        'planned_release_date',
+        'original_release_date',
+    }
+
+    cleaned = {}
+    for key in editable_fields:
+        if key not in payload:
+            continue
+        value = payload.get(key)
+        if key in {'title', 'version_title', 'primary_artist', 'genre', 'upc'}:
+            cleaned[key] = str(value or '').strip()
+        elif key == 'language':
+            cleaned[key] = str(value or '').strip().lower()[:32]
+        elif key == 'release_type':
+            cleaned[key] = str(value or '').strip().lower()
+        else:
+            cleaned[key] = value
+    return cleaned
+
+
 def _env_flag(name, default=False):
     raw = os.environ.get(name)
     if raw is None:
@@ -1471,6 +1534,79 @@ def distribution_release_detail(request, release_id):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def distribution_release_submission_fields(request, release_id):
+    from .models import Release, DistributionJob
+    from .serializers import ReleaseSerializer
+
+    release = Release.objects.filter(id=release_id, user=request.user).first()
+    if not release:
+        return Response({'error': 'Release not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        return Response(
+            {
+                'release_id': release.id,
+                'editable_fields': [
+                    'title',
+                    'version_title',
+                    'primary_artist',
+                    'release_type',
+                    'genre',
+                    'language',
+                    'explicit',
+                    'upc',
+                    'planned_release_date',
+                    'original_release_date',
+                ],
+                'submission': {
+                    'title': release.title,
+                    'version_title': release.version_title,
+                    'primary_artist': release.primary_artist,
+                    'release_type': release.release_type,
+                    'genre': release.genre,
+                    'language': release.language,
+                    'explicit': release.explicit,
+                    'upc': release.upc,
+                    'planned_release_date': release.planned_release_date,
+                    'original_release_date': release.original_release_date,
+                },
+            }
+        )
+
+    pending_statuses = ['submitted', 'processing', 'delivered']
+    if release.status in pending_statuses and not _user_has_distribution_premium(request.user):
+        return Response(
+            {
+                'error': 'Cannot edit submitted release fields without premium access.',
+                'requires_premium': True,
+                'release_status': release.status,
+            },
+            status=status.HTTP_402_PAYMENT_REQUIRED,
+        )
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    cleaned_payload = _normalize_release_submission_field_payload(payload)
+    if not cleaned_payload:
+        return Response({'error': 'No editable submission fields were provided.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer = ReleaseSerializer(release, data=cleaned_payload, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer.save()
+    DistributionJob.objects.create(
+        release=release,
+        provider=release.provider or 'generic_partner',
+        operation='update_release_fields',
+        request_payload_json=cleaned_payload,
+        response_payload_json={'release_status': release.status},
+        status='succeeded',
+    )
+    return Response({'success': True, 'release': ReleaseSerializer(release).data})
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def distribution_release_tracks(request, release_id):
@@ -1663,6 +1799,127 @@ def distribution_release_status(request, release_id):
         'validation_errors': release.validation_errors_json,
         'updated_at': release.updated_at,
     })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def distribution_provider_webhook(request, provider):
+    import hashlib
+    import hmac
+
+    from .models import DistributionEvent, DistributionJob, Release
+
+    provider_key = str(provider or '').strip().lower()
+    if provider_key not in {'ditto', 'generic_partner'}:
+        return Response({'error': 'Unsupported distribution provider.'}, status=status.HTTP_404_NOT_FOUND)
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    if not payload:
+        try:
+            payload = json.loads((request.body or b'{}').decode('utf-8'))
+        except Exception:
+            payload = {}
+
+    if provider_key == 'ditto':
+        signature = (
+            request.headers.get('X-Ditto-Signature')
+            or request.headers.get('X-DITTO-SIGNATURE')
+            or request.META.get('HTTP_X_DITTO_SIGNATURE')
+            or ''
+        ).strip()
+        secret = str(os.environ.get('DITTO_WEBHOOK_SECRET', '')).strip()
+        allow_unsigned = _env_flag('DITTO_WEBHOOK_ALLOW_UNSIGNED', default=False)
+
+        signature_valid = False
+        if secret and signature:
+            digest = hmac.new(secret.encode('utf-8'), request.body or b'', hashlib.sha256).hexdigest()
+            signature_valid = hmac.compare_digest(digest.lower(), signature.lower())
+        elif allow_unsigned:
+            signature_valid = True
+
+        if not signature_valid:
+            return Response({'error': 'Invalid webhook signature.'}, status=status.HTTP_401_UNAUTHORIZED)
+    else:
+        signature_valid = True
+
+    provider_release_id = str(
+        payload.get('provider_release_id')
+        or payload.get('release_id')
+        or payload.get('external_release_id')
+        or (payload.get('data') or {}).get('provider_release_id')
+        or (payload.get('data') or {}).get('release_id')
+        or ''
+    ).strip()
+
+    release = None
+    if provider_release_id:
+        release = Release.objects.filter(provider=provider_key, provider_release_id=provider_release_id).order_by('-id').first()
+
+    if release is None:
+        local_release_id = payload.get('local_release_id') or (payload.get('data') or {}).get('local_release_id')
+        if local_release_id:
+            release = Release.objects.filter(id=local_release_id).order_by('-id').first()
+
+    if release is None:
+        return Response({'error': 'Release not found for webhook payload.'}, status=status.HTTP_404_NOT_FOUND)
+
+    event_type = str(payload.get('event_type') or payload.get('type') or payload.get('event') or 'status_update').strip()[:64]
+    provider_status = str(payload.get('status') or (payload.get('data') or {}).get('status') or '').strip()
+    event_time = _parse_webhook_event_time(
+        payload.get('event_time')
+        or payload.get('occurred_at')
+        or payload.get('timestamp')
+        or (payload.get('data') or {}).get('event_time')
+    )
+
+    existing_event = DistributionEvent.objects.filter(
+        release=release,
+        provider=provider_key,
+        event_type=event_type,
+        event_time=event_time,
+    ).order_by('-id').first()
+    if existing_event and existing_event.payload_json == payload:
+        return Response({'success': True, 'duplicate': True, 'release_status': release.status})
+
+    event = DistributionEvent.objects.create(
+        release=release,
+        provider=provider_key,
+        event_type=event_type,
+        event_time=event_time,
+        payload_json=payload,
+        signature_valid=signature_valid,
+        processed=False,
+    )
+
+    normalized_status = _normalize_release_status_from_event(event_type, provider_status)
+    if normalized_status and normalized_status != release.status:
+        release.status = normalized_status
+        release.save(update_fields=['status', 'updated_at'])
+
+    event.processed = True
+    event.save(update_fields=['processed'])
+
+    DistributionJob.objects.create(
+        release=release,
+        provider=provider_key,
+        operation='webhook_event',
+        request_payload_json=payload,
+        response_payload_json={
+            'event_id': event.id,
+            'normalized_status': normalized_status or release.status,
+            'signature_valid': signature_valid,
+        },
+        status='succeeded',
+    )
+
+    return Response(
+        {
+            'success': True,
+            'event_id': event.id,
+            'release_id': release.id,
+            'release_status': release.status,
+        }
+    )
 
 
 @api_view(['GET', 'POST'])

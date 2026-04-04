@@ -80,6 +80,7 @@ urlpatterns = [
     path('api/distribution/accounts/<int:account_id>/', views.delete_distribution_account, name='delete_distribution_account'),
     path('api/distribution/releases/', views.distribution_releases, name='distribution_releases'),
     path('api/distribution/releases/<int:release_id>/', views.distribution_release_detail, name='distribution_release_detail'),
+    path('api/distribution/releases/<int:release_id>/submission-fields/', views.distribution_release_submission_fields, name='distribution_release_submission_fields'),
     path('api/distribution/releases/<int:release_id>/tracks/', views.distribution_release_tracks, name='distribution_release_tracks'),
     path('api/distribution/releases/<int:release_id>/tracks/<int:track_id>/', views.distribution_release_track_detail, name='distribution_release_track_detail'),
     path('api/distribution/releases/<int:release_id>/validate/', views.validate_distribution_release, name='validate_distribution_release'),
@@ -87,6 +88,7 @@ urlpatterns = [
     path('api/distribution/releases/<int:release_id>/status/', views.distribution_release_status, name='distribution_release_status'),
     path('api/distribution/releases/<int:release_id>/contributors/', views.distribution_release_contributors, name='distribution_release_contributors'),
     path('api/distribution/releases/<int:release_id>/contributors/<int:contributor_id>/', views.distribution_release_contributor_detail, name='distribution_release_contributor_detail'),
+    path('api/distribution/webhooks/<str:provider>/', views.distribution_provider_webhook, name='distribution_provider_webhook'),
 
     # --- Distribution Analytics APIs ---
     path('api/distribution/releases/<int:release_id>/analytics/', views.release_analytics, name='release_analytics'),
