@@ -3,7 +3,6 @@ openai
 Django
 gunicorn
 django-allauth
-djangorestframework
 django-cors-headers
 requests
 PyJWT

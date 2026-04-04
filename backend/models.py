@@ -261,6 +261,7 @@ class VisitorRecord(models.Model):
 
     def __str__(self):
         return self.visitor_key
+<<<<<<< HEAD
 
 
 class DistributionProvider(models.TextChoices):
@@ -716,3 +717,6 @@ class UserWeeklyPromotion(models.Model):
 
     def __str__(self):
         return f"{self.user.username} {self.promo_code} ({self.discount_percent}%)"
+=======
+from django.db import models
+>>>>>>> dec631da98253f85bff28b8e054535819adb2224

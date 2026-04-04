@@ -130,72 +130,9 @@ class RegisterSerializer(serializers.Serializer):
             profile.save(update_fields=['phone_number'])
 
         return user
+<<<<<<< HEAD
 
-
-from .models import DistributionAccount, Release, Track, DistributionJob, DistributionEvent, ReleaseRoyaltySplit, ReleaseContributor, ReleaseAnalytics, TrackAnalytics, StreamEvent, ContributorEarnings, PremiumFeature, UserPremiumFeature, PremiumBundle, UserInterest, WeeklyPromotionTemplate, UserWeeklyPromotion
-
-
-class DistributionAccountSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = DistributionAccount
-        fields = (
-            'id', 'provider', 'external_account_id', 'status', 'scopes_granted',
-            'token_expires_at', 'created_at', 'updated_at',
-        )
-        read_only_fields = ('id', 'created_at', 'updated_at')
-
-
-class TrackSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Track
-        fields = '__all__'
-        read_only_fields = ('id', 'release', 'created_at', 'updated_at')
-
-
-class ReleaseRoyaltySplitSerializer(serializers.ModelSerializer):
-    participant_username = serializers.CharField(source='participant.username', read_only=True)
-
-    class Meta:
-        model = ReleaseRoyaltySplit
-        fields = (
-            'id', 'release', 'participant', 'participant_username', 'percentage',
-            'source', 'agreement_split', 'created_at', 'updated_at',
-        )
-        read_only_fields = ('id', 'created_at', 'updated_at', 'source', 'agreement_split')
-
-
-class ReleaseContributorSerializer(serializers.ModelSerializer):
-    participant_username = serializers.CharField(source='participant.username', read_only=True)
-    role_display = serializers.CharField(source='get_role_display', read_only=True)
-
-    class Meta:
-        model = ReleaseContributor
-        fields = (
-            'id', 'release', 'participant', 'participant_username', 'role', 'role_display',
-            'percentage', 'source', 'agreement_split', 'notes', 'created_at', 'updated_at',
-        )
-        read_only_fields = ('id', 'created_at', 'updated_at', 'source', 'agreement_split')
-
-
-class ReleaseSerializer(serializers.ModelSerializer):
-    tracks = TrackSerializer(many=True, read_only=True)
-    royalty_splits = ReleaseRoyaltySplitSerializer(many=True, read_only=True)
-    contributors = ReleaseContributorSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = Release
-        fields = '__all__'
-        read_only_fields = (
-            'id', 'user', 'provider_release_id', 'validation_errors_json',
-            'created_at', 'updated_at', 'tracks', 'royalty_splits', 'contributors',
-        )
-
-
-class DistributionJobSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = DistributionJob
-        fields = '__all__'
-
+# ...existing code...
 
 class DistributionEventSerializer(serializers.ModelSerializer):
     class Meta:
@@ -326,3 +263,5 @@ class UserWeeklyPromotionSerializer(serializers.ModelSerializer):
             'claimed', 'expires_at', 'created_at', 'updated_at',
         )
         read_only_fields = ('id', 'user', 'template', 'created_at', 'updated_at')
+=======
+>>>>>>> dec631da98253f85bff28b8e054535819adb2224

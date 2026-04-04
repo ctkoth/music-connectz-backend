@@ -74,6 +74,7 @@ urlpatterns = [
     path('api/cancel-subscription', views.cancel_subscription, name='cancel_subscription'),
     path('api/use-collaboration-request', views.use_collaboration_request, name='use_collaboration_request'),
 
+<<<<<<< HEAD
     # --- Distribution MVP APIs ---
     path('api/distribution/accounts/', views.list_distribution_accounts, name='list_distribution_accounts'),
     path('api/distribution/accounts/connect/', views.connect_distribution_account, name='connect_distribution_account'),
@@ -110,6 +111,8 @@ urlpatterns = [
     path('api/marketing/weekly/<int:promotion_id>/claim/', views.claim_weekly_promotion, name='claim_weekly_promotion'),
     path('api/marketing/in-app-ads/', views.in_app_feature_ads, name='in_app_feature_ads'),
 
+=======
+>>>>>>> dec631da98253f85bff28b8e054535819adb2224
     # --- Reliability Rating & Review APIs ---
     path('api/collab/<int:agreement_id>/reliability/<int:ratee_id>/', views.set_reliability_rating, name='set_reliability_rating'),
     path('api/collab/<int:agreement_id>/reliability/', views.get_reliability_ratings, name='get_reliability_ratings'),
