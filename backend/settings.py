@@ -188,10 +188,8 @@ _set_social_app_from_env('spotify', 'SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET'
 _set_social_app_from_env('soundcloud', 'SOUNDCLOUD_CLIENT_ID', 'SOUNDCLOUD_CLIENT_SECRET')
 _set_social_app_from_env('twitter_oauth2', 'TWITTER_CLIENT_ID', 'TWITTER_CLIENT_SECRET')
 _set_social_app_from_env('tiktok', 'TIKTOK_CLIENT_ID', 'TIKTOK_CLIENT_SECRET', id_fallback_env='TIKTOK_CLIENT_KEY')
-<<<<<<< HEAD
 _set_social_app_from_env('twitch', 'TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET')
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
+_set_social_app_from_env('twitch', 'TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET')
 
 LOGIN_REDIRECT_URL = 'https://musicconnectz.net/'
 LOGOUT_REDIRECT_URL = 'https://musicconnectz.net/'
