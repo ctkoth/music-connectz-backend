@@ -199,10 +199,7 @@ SOCIALACCOUNT_ERROR_URL = 'https://musicconnectz.net/?login_error=1'
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
-<<<<<<< HEAD
     'backend.middleware.OAuthRouteFailSafeMiddleware',
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
     'backend.middleware.CanonicalOAuthHostMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
