@@ -284,6 +284,11 @@ CORS_ALLOWED_ORIGINS = [
     "https://music-connectz-backend-2.onrender.com"
 ]
 
+# Allow all Vercel preview deployment URLs (*.vercel.app)
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r'^https://[\w-]+\.vercel\.app$',
+]
+
 # --- Distribution Premium Features ---
 # Set to False in dev/testing to grant all users premium features
 DISTRIBUTION_PREMIUM_ENFORCED = (os.environ.get('DISTRIBUTION_PREMIUM_ENFORCED', '0' if DEBUG else '1').lower() not in {'0', 'false', 'no'})

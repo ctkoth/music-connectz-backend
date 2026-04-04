@@ -942,7 +942,27 @@ def _stripe_checkout_base_payload():
     return {
         'success_url': success_url,
         'cancel_url': cancel_url,
+        # Let users enter coupon/promo codes directly in Stripe Checkout.
+        'allow_promotion_codes': 'true',
     }
+
+
+def _apply_checkout_discounts(checkout_payload, payload):
+    """
+    Optionally apply explicit Stripe discount IDs when provided by frontend.
+    Frontend can send either:
+    - promotion_code_id / stripe_promotion_code_id
+    - coupon_id / stripe_coupon_id
+    """
+    promo_id = _payload_first(payload, 'promotion_code_id', 'stripe_promotion_code_id')
+    coupon_id = _payload_first(payload, 'coupon_id', 'stripe_coupon_id')
+
+    if promo_id:
+        checkout_payload['discounts[0][promotion_code]'] = str(promo_id)
+    elif coupon_id:
+        checkout_payload['discounts[0][coupon]'] = str(coupon_id)
+
+    return bool(promo_id or coupon_id)
 
 
 def _default_payment_method_types():
@@ -994,15 +1014,40 @@ def _create_stripe_checkout_session(checkout_payload):
     return stripe_res, data
 
 
-def _resolve_subscription_price_id(requested_price_id, billing_period):
-    # Frontend currently sends placeholders; allow backend env vars to override.
-    if requested_price_id and not requested_price_id.startswith('price_premium_'):
+def _normalize_plan_type(value):
+    plan_type = str(value or 'premium').strip().lower()
+    if plan_type in ('stats', 'analytics', 'stats_connectz'):
+        return 'stats'
+    if plan_type in ('bundle', 'premium_plus_stats', 'premium-stats'):
+        return 'bundle'
+    return 'premium'
+
+
+def _resolve_subscription_price_id(requested_price_id, billing_period, plan_type):
+    # Frontend sends placeholders in dev; prefer backend env vars when placeholders are used.
+    placeholders = {
+        'price_premium_monthly',
+        'price_premium_yearly',
+        'price_stats_monthly',
+        'price_stats_yearly',
+        'price_bundle_monthly',
+        'price_bundle_yearly',
+    }
+    if requested_price_id and requested_price_id not in placeholders:
         return requested_price_id
 
     period = (billing_period or '').lower()
-    if period == 'yearly':
-        return os.environ.get('STRIPE_PREMIUM_YEARLY_PRICE_ID', '').strip()
-    return os.environ.get('STRIPE_PREMIUM_MONTHLY_PRICE_ID', '').strip()
+    plan = _normalize_plan_type(plan_type)
+    env_map = {
+        ('premium', 'monthly'): 'STRIPE_PREMIUM_MONTHLY_PRICE_ID',
+        ('premium', 'yearly'): 'STRIPE_PREMIUM_YEARLY_PRICE_ID',
+        ('stats', 'monthly'): 'STRIPE_STATS_MONTHLY_PRICE_ID',
+        ('stats', 'yearly'): 'STRIPE_STATS_YEARLY_PRICE_ID',
+        ('bundle', 'monthly'): 'STRIPE_BUNDLE_MONTHLY_PRICE_ID',
+        ('bundle', 'yearly'): 'STRIPE_BUNDLE_YEARLY_PRICE_ID',
+    }
+    env_key = env_map.get((plan, period), 'STRIPE_PREMIUM_MONTHLY_PRICE_ID')
+    return os.environ.get(env_key, '').strip()
 
 
 def _payload_first(payload, *keys, default=None):
@@ -1029,10 +1074,11 @@ def create_subscription_checkout(request):
     billing_period = _normalize_billing_period(
         _payload_first(payload, 'billingPeriod', 'billing_period', 'period', default='monthly')
     )
+    plan_type = _normalize_plan_type(_payload_first(payload, 'planType', 'plan_type', 'plan', default='premium'))
     requested_price_id = _payload_first(payload, 'priceId', 'price_id')
     user_id = _payload_first(payload, 'userId', 'user_id', 'uid', default='')
 
-    price_id = _resolve_subscription_price_id(requested_price_id, billing_period)
+    price_id = _resolve_subscription_price_id(requested_price_id, billing_period, plan_type)
     if not price_id:
         return Response({'error': 'Missing Stripe subscription price ID.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1047,13 +1093,21 @@ def create_subscription_checkout(request):
         'client_reference_id': str(user_id),
         'metadata[userId]': str(user_id),
         'metadata[billingPeriod]': str(billing_period),
+        'metadata[planType]': str(plan_type),
     })
+
+    explicit_discount_applied = _apply_checkout_discounts(checkout_payload, payload)
 
     stripe_res, data = _create_stripe_checkout_session(checkout_payload)
     if stripe_res.status_code >= 400:
         return Response({'error': data.get('error', {}).get('message', 'Stripe checkout creation failed.')}, status=stripe_res.status_code)
 
-    return Response({'url': data.get('url'), 'id': data.get('id')})
+    return Response({
+        'url': data.get('url'),
+        'id': data.get('id'),
+        'promotion_codes_enabled': True,
+        'explicit_discount_applied': explicit_discount_applied,
+    })
 
 
 @api_view(['POST'])
@@ -1093,6 +1147,8 @@ def create_purchase_checkout(request):
         'metadata[purchaseType]': purchase_type,
     })
 
+    explicit_discount_applied = _apply_checkout_discounts(checkout_payload, payload)
+
     _add_payment_method_types(checkout_payload, _stripe_payment_method_types())
 
     stripe_res, data = _create_stripe_checkout_session(checkout_payload)
@@ -1110,7 +1166,12 @@ def create_purchase_checkout(request):
     if stripe_res.status_code >= 400:
         return Response({'error': data.get('error', {}).get('message', 'Stripe checkout creation failed.')}, status=stripe_res.status_code)
 
-    return Response({'url': data.get('url'), 'id': data.get('id')})
+    return Response({
+        'url': data.get('url'),
+        'id': data.get('id'),
+        'promotion_codes_enabled': True,
+        'explicit_discount_applied': explicit_discount_applied,
+    })
 
 
 @api_view(['POST'])
@@ -1118,7 +1179,7 @@ def create_purchase_checkout(request):
 def cancel_subscription(request):
     # Frontend expects an OK response. Full Stripe subscription cancellation
     # requires persisted subscription IDs, which are not yet stored.
-    return Response({'ok': True, 'message': 'Cancellation request acknowledged.'})
+    return Response({'oClipZk': True, 'message': 'Cancellation request acknowledged.'})
 
 
 @api_view(['POST'])
