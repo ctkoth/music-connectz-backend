@@ -140,7 +140,6 @@ SOCIALACCOUNT_PROVIDERS = {
     'patreon': {
         'SCOPE': ['identity'],
     },
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
     'spotify': {
         'SCOPE': ['user-read-email'],
     },
