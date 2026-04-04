@@ -266,6 +266,23 @@ CORS_ALLOWED_ORIGINS = [
     "https://music-connectz-frontend.vercel.app",
     "https://music-connectz-backend-2.onrender.com"
 ]
+
+# Allow all Vercel preview deployment URLs (*.vercel.app)
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r'^https://[\w-]+\.vercel\.app$',
+]
+
+# --- Distribution Premium Features ---
+# Set to False in dev/testing to grant all users premium features
+DISTRIBUTION_PREMIUM_ENFORCED = (os.environ.get('DISTRIBUTION_PREMIUM_ENFORCED', '0' if DEBUG else '1').lower() not in {'0', 'false', 'no'})
+# Set to False in dev/testing to bypass feature checkout/payment enforcement.
+FEATURE_PAYMENTS_ENFORCED = (os.environ.get('FEATURE_PAYMENTS_ENFORCED', '0' if DEBUG else '1').lower() not in {'0', 'false', 'no'})
+
+# Analytics features
+ANALYTICS_ENABLED = True
+STREAM_EVENT_TRACKING_ENABLED = (os.environ.get('STREAM_EVENT_TRACKING_ENABLED', 'true').lower() != 'false')
+CONTRIBUTOR_EARNINGS_TRACKING_ENABLED = True
+
 CSRF_TRUSTED_ORIGINS = [
     "https://musicconnectz.com",
     "https://www.musicconnectz.com",
