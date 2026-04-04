@@ -3,7 +3,6 @@ from django.conf import settings
 from django.contrib.auth import authenticate, login as auth_login
 import os
 import re as _re
-import openai
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.http import JsonResponse
 
@@ -28,6 +27,7 @@ def openai_chat(request):
     if not api_key:
         return JsonResponse({'error': 'OpenAI API key not set.'}, status=500)
     try:
+        import openai
         openai.api_key = api_key
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -404,6 +404,7 @@ def register_with_referral(request):
     serializer = RegisterSerializer(data=request.data)
     if serializer.is_valid():
         user = serializer.save()
+        auth_login(request, user)
         if referral_code:
             try:
                 referrer_profile = UserProfile.objects.get(referral_code=referral_code)
@@ -438,6 +439,7 @@ def api_register(request):
     serializer = RegisterSerializer(data=request.data)
     if serializer.is_valid():
         user = serializer.save()
+        auth_login(request, user)
         _record_auth_event(
             request,
             event='register',

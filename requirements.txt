@@ -12,3 +12,4 @@ requests-oauthlib
 python3-openid
 cryptography
 reportlab
+psycopg2-binary
