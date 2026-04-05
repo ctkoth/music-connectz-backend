@@ -1,7 +1,18 @@
+
+## v12.5 Corey-Voice Onboarding & Premium App Tours
+
+- Every main tab and premium app now gets a real-talk, Corey-voice tour step. No more generic intros—every section tells you what it’s for, why it matters, and how to flex it. Onboarding is now pure you, front to back.
+---
+## v12.4 Add 'Sensory Preservation ConnectZ 👁️' (Premium In-Browser Editor)
+
+- **Sensory Preservation ConnectZ 👁️**
+	“Code, create, and preserve your sensory genius! Sensory Preservation ConnectZ is a premium in-browser editor for music, art, and creative projects. Save your scripts, lyrics, notes, and code in one place. Premium users get advanced features: syntax highlighting, live preview, and cloud sync. Protect your creative senses—never lose a vibe, a verse, or a vision.”
+	<!-- DEV NOTE: Inspired by Visual Studio Code. For internal/dev clarity only; do not use VS Code name or logo in public-facing materials. -->
+
 ## v12.3 Add 'ParcelPrimate 🦍' as a Mailchimp knockoff to Premium Apps
 
 - **ParcelPrimate 🦍**
-	“Go bananas with your email campaigns! ParcelPrimate is the Corey-voice remix of Mailchimp—build, blast, and track your newsletters, drops, and fan updates. Drag, drop, and deliver your message with style. No monkey business, just pure engagement. Premium users get advanced analytics, automation, and the wildest templates in the jungle.”
+  “Go bananas with your email campaigns! ParcelPrimate is the Corey-voice remix of Mailchimp—build, blast, and track your newsletters, drops, and fan updates. Drag, drop, and deliver your message with style. No monkey business, just pure engagement. Premium users get advanced analytics, automation, and the wildest templates in the jungle.”
 
 # Music Distribution MVP Plan (Ditto/Other Distributors)
 
