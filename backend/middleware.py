@@ -1,8 +1,6 @@
 from django.conf import settings
 from django.http import HttpResponseRedirect
 
-
-<<<<<<< HEAD
 class OAuthRouteFailSafeMiddleware:
     """
     Ensure OAuth/account routes never surface raw 500s to users.
@@ -25,10 +23,6 @@ class OAuthRouteFailSafeMiddleware:
                 )
                 return HttpResponseRedirect(error_url)
             raise
-
-
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
 class CanonicalOAuthHostMiddleware:
     """
     Force OAuth/account routes onto a single canonical host.
