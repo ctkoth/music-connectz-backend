@@ -1,3 +1,21 @@
+# --- Payment Log for Auditing ---
+class PaymentLog(models.Model):
+    PROVIDER_CHOICES = [
+        ('paypal', 'PayPal'),
+        ('stripe', 'Stripe'),
+        ('other', 'Other'),
+    ]
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payment_logs')
+    provider = models.CharField(max_length=16, choices=PROVIDER_CHOICES)
+    order_id = models.CharField(max_length=128)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=8, default='USD')
+    status = models.CharField(max_length=32)
+    raw_data = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.provider} {self.order_id} {self.user.username} {self.amount} {self.status}"
 from django.db import models
 from django.contrib.auth.models import User
 # --- Unified Post Model for v9.8 Paradigm ---
@@ -716,6 +734,3 @@ class UserWeeklyPromotion(models.Model):
 
     def __str__(self):
         return f"{self.user.username} {self.promo_code} ({self.discount_percent}%)"
-=======
-from django.db import models
->>>>>>> dec631da98253f85bff28b8e054535819adb2224

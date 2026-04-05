@@ -1,3 +1,20 @@
+# --- User Personas API ---
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def user_personas(request):
+    """
+    List all personas for the authenticated user, including their skills.
+    """
+    from .models import Persona
+    personas = Persona.objects.filter(user=request.user).prefetch_related('skills')
+    data = []
+    for persona in personas:
+        data.append({
+            'id': persona.id,
+            'name': persona.name,
+            'skills': [s.name for s in persona.skills.all()],
+        })
+    return Response(data)
 from django.db.models import Avg, Count
 # --- AI Price Suggestion API ---
 @api_view(['GET'])

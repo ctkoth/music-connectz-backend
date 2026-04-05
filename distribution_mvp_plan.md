@@ -229,3 +229,38 @@ Implement first adapter in backend/adapters_distribution/<provider>.py.
 	- Set collection variables before use: `base_url`, `release_id`, `provider_release_id`, `ditto_webhook_secret`
 - Postman environment: `postman/music-connectz-distribution-v11.3.postman_environment.json`
 	- Includes local + production URLs and `auth_cookie` for authenticated distribution endpoints.
+
+---
+
+## v11.5 Plan: Corey Voice ConnectZ Tab & Export
+
+- Add a new tab in the UI: “Corey Voice ConnectZ”
+  - Access chat, image, and file generation features
+  - Only available to premium users (with upgrade prompt for others)
+- Allow users to export generated files (text, images) directly to their posts
+  - After generating, show “Export to Post” and “Download” buttons
+  - Pre-fill post creation form with generated content or trigger file download (txt, png, etc.)
+- Version bump: v11.5
+  - Update version labels and changelog
+
+---
+
+## v11.6 Features: Automated Collab Royalty Agreements
+
+- Auto-suggest royalty splits for collaborations based on each collaborator’s skill prices and actual skills used on the work.
+- Editable royalty agreement draft: all collaborators can propose changes to splits/terms before finalization.
+- Approval workflow: all collaborators must explicitly approve the final agreement before it is locked.
+- Audit trail: all changes and approvals are logged for transparency.
+- API endpoints for:
+  - Generating and retrieving draft/final agreements
+  - Editing and approving agreements
+  - Viewing audit/change history
+- Frontend UI for:
+  - Displaying suggested splits and agreement text
+  - Allowing edits and showing real-time updates
+  - Requiring all approvals before finalization
+  - Displaying audit trail of changes/approvals
+
+---
+
+Let me know if you want backend or frontend code samples for any of these steps!
