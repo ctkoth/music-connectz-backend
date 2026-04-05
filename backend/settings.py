@@ -73,9 +73,6 @@ INSTALLED_APPS = [
     'allauth.socialaccount.providers.soundcloud',
     'allauth.socialaccount.providers.tiktok',
     'allauth.socialaccount.providers.twitch',
-    'allauth.socialaccount.providers.spotify',
-    'allauth.socialaccount.providers.soundcloud',
-    'allauth.socialaccount.providers.tiktok',
     'rest_framework',
     'corsheaders',
 ]
