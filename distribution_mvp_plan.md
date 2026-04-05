@@ -263,4 +263,37 @@ Implement first adapter in backend/adapters_distribution/<provider>.py.
 
 ---
 
+## v11.7 Add 'ScoreZ 🔟' as a new app for user attractiveness ratings, with Corey-voice description, to the MVP plan.
+
+- **ScoreZ 🔟**
+  “Let the people decide! ScoreZ lets users rate each other’s attractiveness on a scale of 1 to 10—no filters, no cap, just real feedback. Flex your confidence, see where you stand, and maybe find your next crush or collab. It’s all love, all vibes, all ScoreZ.”
+
+---
+
+## UGC Sharing for All Apps 🌐
+- “Every app, every vibe—now shareable on musicconnectz.net and beyond! All user-generated content (UGC) can be posted, linked, and flexed online. Drop your beats, scores, collabs, and even your ScoreZ ratings for the world to see. Go viral, get feedback, and let your creativity travel. If you made it, you can share it—no gatekeeping, just pure expression.”
+
+---
+
+## v11.8 Add 'ScoreZ Visibility Controls 👁️'
+
+- **ScoreZ Visibility Controls 👁️**
+  “You call the shots! On ScoreZ, users can set their attractiveness score visibility to public (anyone can see), private (only you), or restricted (friends/collabs only). Flex your confidence, keep it low-key, or share with your inner circle—your score, your rules, your vibe.”
+
+---
+
+## v11.9 Add 'Easter ✝️' as a backup app knockoff with Corey-voice description to the MVP plan.
+
+- **Easter ✝️**
+  “Resurrect your files, never lose a vibe. Easter is your backup miracle—auto-save, one-click restore, and cloud peace of mind. Keep your tracks, projects, and collabs safe, share with your crew, or keep ‘em locked down. Your music, your moves, your backup—blessed and protected.”
+
+---
+
 Let me know if you want backend or frontend code samples for any of these steps!
+
+- **Monday.com** → “Sturday 🪩” (weekly goals, music drops, progress bars)
+- **Sonday** → “Sonday 👦🏾” (rest day, chill collab, share your wins, and recharge with the crew)
+- **Liliths 💃🏾**  
+  “Unleash your wild side. Liliths is for the creators who move different—bold, intuitive, and always in their own rhythm. Drop your ideas, remix your reality, and dance like nobody’s watching. This is goddess mode, activated.")
+- **Infeno 🔥**
+  “Swipe, match, and spark something wild. Infeno is the Corey-voice remix of Tinder—where the heat is real, the vibes are bold, and every match could be your next collab, crush, or creative partner. Shoot your shot, drop a beat, or just set the chat on fire. No games, just flames.”

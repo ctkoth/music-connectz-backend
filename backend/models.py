@@ -1,3 +1,56 @@
+# --- Messaging Model for Pro WhatsApp-Style Chat ---
+from django.utils import timezone
+from datetime import timedelta
+
+class ChatThread(models.Model):
+    participants = models.ManyToManyField(User, related_name='chat_threads')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Thread: {', '.join([u.username for u in self.participants.all()])}"
+
+
+# --- Chat Message with Unlimited Edits and Edit Log ---
+class ChatMessage(models.Model):
+    thread = models.ForeignKey(ChatThread, on_delete=models.CASCADE, related_name='messages')
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_messages')
+    content = models.TextField(blank=True)
+    attachment = models.FileField(upload_to='chat_attachments/', blank=True, null=True)
+    message_type = models.CharField(max_length=16, default='text', choices=[
+        ('text', 'Text'),
+        ('image', 'Image'),
+        ('video', 'Video'),
+        ('audio', 'Audio'),
+        ('file', 'File'),
+        ('call', 'Call'),
+    ])
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    last_edited_at = models.DateTimeField(null=True, blank=True)
+
+    def log_edit(self, old_content, editor):
+        ChatMessageEditLog.objects.create(
+            message=self,
+            old_content=old_content,
+            edited_by=editor,
+        )
+
+    def get_edit_history(self):
+        return self.edit_logs.order_by('edited_at')
+
+    def __str__(self):
+        return f"Msg from {self.sender.username} in Thread {self.thread.id}"
+
+# --- Edit Log for Chat Messages ---
+class ChatMessageEditLog(models.Model):
+    message = models.ForeignKey(ChatMessage, on_delete=models.CASCADE, related_name='edit_logs')
+    old_content = models.TextField()
+    edited_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='edited_messages')
+    edited_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Edit by {self.edited_by.username} at {self.edited_at} for Msg {self.message.id}"
 # --- Imports ---
 from django.db import models
 from django.contrib.auth.models import User
