@@ -262,7 +262,10 @@ class UserProfile(models.Model):
     last_name = models.CharField(max_length=64, blank=True, default='')
     gender = models.CharField(max_length=32, blank=True, default='')
     birthday = models.DateField(null=True, blank=True)
-    avatar_url = models.URLField(max_length=512, blank=True, default='')
+	avatar_url = models.URLField(max_length=512, blank=True, default='')
+
+    # DJ points system: Spina
+    spina = models.PositiveIntegerField(default=0, help_text='DJ points (Spina) earned by the user')
 
     def save(self, *args, **kwargs):
         if not self.referral_code:

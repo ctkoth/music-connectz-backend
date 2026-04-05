@@ -1,0 +1,21 @@
+# Corey-Voice Toggles: Vernacular, Emoji, and Curses (Django Template Example)
+# Add this block to your Django template where you want the toggles to appear
+
+<form method="post" action="">{% csrf_token %}
+  <label style="font-weight:600; margin-right:16px;">
+    <input type="checkbox" name="corey_vernacular" {% if corey_vernacular %}checked{% endif %} />
+    Use Corey-voice (vernacular)
+  </label>
+  <label style="font-weight:600; margin-right:16px;">
+    <input type="checkbox" name="corey_emoji" {% if corey_emoji %}checked{% endif %} />
+    Show emojis in Corey-voice
+  </label>
+  <label style="font-weight:600;">
+    <input type="checkbox" name="corey_explicit" {% if corey_explicit %}checked{% endif %} />
+    Allow explicit language in Corey-voice
+  </label>
+  <button type="submit">Save Preferences</button>
+</form>
+
+# In your Django view, handle POST to save these preferences in the session or user profile.
+# When rendering Corey-voice content, check these flags to control vernacular, emoji, and cursing.
