@@ -255,10 +255,6 @@ _database_from_url = _database_config_from_url(_database_url) if _database_url e
 
 DATABASES = {
     'default': _database_from_url or {
-=======
-DATABASES = {
-    'default': {
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
     }
