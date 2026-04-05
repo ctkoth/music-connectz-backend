@@ -1,3 +1,8 @@
+    # --- Post APIs ---
+    path('api/posts/create-or-update/', views.create_or_update_post, name='create_or_update_post'),
+    path('api/posts/<int:post_id>/toggle-sharing/', views.toggle_post_sharing, name='toggle_post_sharing'),
+    path('api/posts/<int:post_id>/export/', views.export_post, name='export_post'),
+    path('api/posts/<int:post_id>/download/', views.download_post, name='download_post'),
 """
 URL configuration for backend project.
 

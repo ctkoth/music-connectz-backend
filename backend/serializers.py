@@ -1,5 +1,11 @@
 from rest_framework import serializers
-from .models import CollabReliabilityRating, CollabReview
+from .models import CollabReliabilityRating, CollabReview, Post
+# --- Post Serializer ---
+class PostSerializer(serializers.ModelSerializer):
+    author = serializers.StringRelatedField(read_only=True)
+    class Meta:
+        model = Post
+        fields = '__all__'
 # --- Reliability Rating Serializer ---
 class CollabReliabilityRatingSerializer(serializers.ModelSerializer):
     rater = serializers.StringRelatedField(read_only=True)

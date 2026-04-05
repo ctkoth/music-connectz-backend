@@ -45,8 +45,87 @@ def openai_chat(request):
         return JsonResponse({'reply': reply})
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
-from .models import CollabReliabilityRating, CollabReview
-from .serializers import CollabReliabilityRatingSerializer, CollabReviewSerializer
+from .models import CollabReliabilityRating, CollabReview, Post
+from .serializers import CollabReliabilityRatingSerializer, CollabReviewSerializer, PostSerializer
+# --- Post API Endpoints ---
+from rest_framework.permissions import IsAuthenticated
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_or_update_post(request):
+    """
+    Create a new post or update an existing one (if id is provided and user is author).
+    POST body: {"id": optional, "title": ..., "content": ..., "post_type": ..., "is_public": ...}
+    """
+    data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+    # Only allow certain fields to be set by user
+    allowed_fields = {'id', 'title', 'content', 'post_type', 'is_public'}
+    sanitized = {k: v for k, v in data.items() if k in allowed_fields}
+    post_id = sanitized.get('id')
+    if post_id:
+        try:
+            post = Post.objects.get(id=post_id)
+        except Post.DoesNotExist:
+            return JsonResponse({'error': 'Post not found.'}, status=404)
+        if post.author != request.user:
+            return JsonResponse({'error': 'Not authorized.'}, status=403)
+        serializer = PostSerializer(post, data=sanitized, partial=True)
+    else:
+        serializer = PostSerializer(data={**sanitized, 'author': request.user.id})
+    if serializer.is_valid():
+        post = serializer.save(author=request.user)
+        return JsonResponse(PostSerializer(post).data, status=201)
+    return JsonResponse(serializer.errors, status=400)
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def toggle_post_sharing(request, post_id):
+    """
+    Toggle the is_public (shareable) status of a post.
+    PATCH body: {"is_public": true/false}
+    """
+    try:
+        post = Post.objects.get(id=post_id, author=request.user)
+    except Post.DoesNotExist:
+        return JsonResponse({'error': 'Post not found or not authorized.'}, status=404)
+    is_public = request.data.get('is_public')
+    if is_public is None:
+        return JsonResponse({'error': 'is_public required.'}, status=400)
+    post.is_public = bool(is_public)
+    post.save(update_fields=['is_public'])
+    return JsonResponse({'id': post.id, 'is_public': post.is_public})
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def export_post(request, post_id):
+    """
+    Export a post as JSON (public posts only, or if user is author).
+    """
+    try:
+        post = Post.objects.get(id=post_id)
+    except Post.DoesNotExist:
+        return JsonResponse({'error': 'Post not found.'}, status=404)
+    if not post.is_public and (not request.user.is_authenticated or post.author != request.user):
+        return JsonResponse({'error': 'Not authorized.'}, status=403)
+    return JsonResponse(PostSerializer(post).data)
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def download_post(request, post_id):
+    """
+    Download a post as a text file (public posts only, or if user is author).
+    """
+    try:
+        post = Post.objects.get(id=post_id)
+    except Post.DoesNotExist:
+        return JsonResponse({'error': 'Post not found.'}, status=404)
+    if not post.is_public and (not request.user.is_authenticated or post.author != request.user):
+        return JsonResponse({'error': 'Not authorized.'}, status=403)
+    content = f"Title: {post.title}\nType: {post.post_type}\nAuthor: {post.author.username}\n\n{post.content}"
+    from django.http import HttpResponse
+    response = HttpResponse(content, content_type='text/plain')
+    response['Content-Disposition'] = f'attachment; filename=post_{post.id}.txt'
+    return response
 # --- Reliability Rating API ---
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
