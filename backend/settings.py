@@ -232,7 +232,6 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-<<<<<<< HEAD
 def _database_config_from_url(url):
     parsed = urlparse(url)
     scheme = (parsed.scheme or '').lower()
@@ -250,7 +249,6 @@ def _database_config_from_url(url):
             },
         }
     return None
-
 
 _database_url = (os.environ.get('DATABASE_URL') or '').strip()
 _database_from_url = _database_config_from_url(_database_url) if _database_url else None
