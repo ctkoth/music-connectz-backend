@@ -1,0 +1,28 @@
+How to Push Your Code to GitHub (Corey Voice)
+=============================================
+
+1. Open your terminal and make sure you’re in your project folder.
+
+2. Stage your changes:
+   git add .
+   (That’s right, dot means “all the things.”)
+
+3. Commit your changes with a message:
+   git commit -m "Describe what you did, but make it spicy!"
+   (No boring messages. Tell your future self what’s up.)
+
+4. Push it to GitHub:
+   git push
+   (Send it to the cloud. Let the world see your genius.)
+
+5. If you’re on a new branch:
+   git push --set-upstream origin your-branch-name
+   (Claim your territory. Make it official.)
+
+6. Done! Go flex. Your code is live, your vibe is legendary.
+
+---
+
+If you see errors, read them like a prophecy. Google is your oracle. If you get stuck, ask for help—no shame in the game!
+
+#PushLikeAPro #CoreyVoice #NoStuntin

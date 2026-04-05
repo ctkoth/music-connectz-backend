@@ -1,3 +1,28 @@
+# --- ParcelPrimate Campaign Model (Mailchimp Knockoff) ---
+class ParcelPrimateCampaign(models.Model):
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('scheduled', 'Scheduled'),
+        ('sending', 'Sending'),
+        ('sent', 'Sent'),
+        ('failed', 'Failed'),
+    ]
+    subject = models.CharField(max_length=255)
+    content_html = models.TextField()
+    content_text = models.TextField(blank=True)
+    audience_filter = models.CharField(max_length=255, blank=True, help_text='Query or tag for audience selection')
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='draft')
+    scheduled_time = models.DateTimeField(null=True, blank=True)
+    sent_time = models.DateTimeField(null=True, blank=True)
+    total_sent = models.PositiveIntegerField(default=0)
+    total_opens = models.PositiveIntegerField(default=0)
+    total_clicks = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='parcelprimate_campaigns')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"ParcelPrimate: {self.subject} ({self.status})"
 # --- Messaging Model for Pro WhatsApp-Style Chat ---
 from django.utils import timezone
 from datetime import timedelta
