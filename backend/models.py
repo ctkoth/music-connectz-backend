@@ -261,7 +261,6 @@ class VisitorRecord(models.Model):
 
     def __str__(self):
         return self.visitor_key
-<<<<<<< HEAD
 
 
 class DistributionProvider(models.TextChoices):
