@@ -1,3 +1,4 @@
+# --- Imports ---
 from django.db import models
 from django.contrib.auth.models import User
 # --- Payment Log for Auditing ---
@@ -79,8 +80,7 @@ class CommentRating(models.Model):
     def __str__(self):
         return f"Rating {self.value}/10 by {self.rater.username} on Comment {self.comment.id}"
 
-from django.db import models
-from django.contrib.auth.models import User
+
 
 # --- Editable Reviews by Collaborators, Shareable as Posts ---
 class CollabReview(models.Model):
@@ -97,8 +97,7 @@ class CollabReview(models.Model):
     def __str__(self):
         return f"Review by {self.reviewer.username} for {self.reviewee.username} (Collab {self.agreement.id})"
 
-from django.db import models
-from django.contrib.auth.models import User
+
 
 class AgreementTemplate(models.Model):
     name = models.CharField(max_length=200)
