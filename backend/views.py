@@ -1,3 +1,152 @@
+from django.db.models import Avg, Count
+# --- AI Price Suggestion API ---
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def ai_suggest_skill_prices(request):
+    """
+    Suggest skill prices for the authenticated user based on their ratings, reviews, and demand.
+    """
+    from .models import Skill, Persona, CollabReliabilityRating
+    user = request.user
+    # For each skill the user has, calculate average reliability rating and demand (number of collabs)
+    personas = Persona.objects.filter(user=user).prefetch_related('skills')
+    skill_suggestions = []
+    for persona in personas:
+        for skill in persona.skills.all():
+            # Get average reliability rating for this skill (across all collabs where user used this skill)
+            avg_rating = CollabReliabilityRating.objects.filter(ratee=user).aggregate(avg=Avg('score'))['avg'] or 0
+            # Demand: number of works/collabs using this skill
+            demand = persona.skills.filter(id=skill.id).count()
+            # Current price (if set)
+            current_price = getattr(persona, 'price', None)
+            # Simple AI logic: if rating > 8, suggest +10%; if < 6, suggest -10%; else keep
+            if avg_rating > 8:
+                suggestion = (current_price or 10) * 1.10
+                reason = f"High reliability rating ({avg_rating:.1f}/10). Consider raising your price."
+            elif avg_rating < 6:
+                suggestion = (current_price or 10) * 0.90
+                reason = f"Low reliability rating ({avg_rating:.1f}/10). Consider lowering your price."
+            else:
+                suggestion = current_price or 10
+                reason = f"Average reliability rating ({avg_rating:.1f}/10). Price is reasonable."
+            skill_suggestions.append({
+                'persona': persona.name,
+                'skill': skill.name,
+                'current_price': float(current_price) if current_price else None,
+                'suggested_price': round(float(suggestion), 2),
+                'reason': reason,
+                'demand': demand,
+            })
+    return Response({'suggestions': skill_suggestions})
+
+# --- User Contributor Earnings API ---
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def user_contributor_earnings(request):
+    """
+    List all ContributorEarnings records for the authenticated user (as participant).
+    """
+    from .models import ContributorEarnings
+    from .serializers import ContributorEarningsSerializer
+    earnings = ContributorEarnings.objects.filter(participant=request.user).order_by('-created_at')
+    serializer = ContributorEarningsSerializer(earnings, many=True)
+    return Response(serializer.data)
+from .paymentlog_serializer import PaymentLogSerializer
+
+# --- User Payment Log API ---
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def user_payment_logs(request):
+    """
+    List all payment transactions for the authenticated user.
+    """
+    from .models import PaymentLog
+    logs = PaymentLog.objects.filter(user=request.user).order_by('-created_at')
+    serializer = PaymentLogSerializer(logs, many=True)
+    return Response(serializer.data)
+import json
+import requests
+# --- PayPal Webhook Endpoint ---
+from django.views.decorators.csrf import csrf_exempt
+
+@csrf_exempt
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def paypal_webhook(request):
+    """
+    PayPal webhook endpoint to securely verify payment events.
+    Only grant premium after verifying payment with PayPal API.
+    """
+    # Parse webhook event
+    try:
+        event = json.loads(request.body.decode('utf-8'))
+    except Exception:
+        return JsonResponse({'error': 'Invalid payload'}, status=400)
+
+    # Example: handle completed payment event
+    if event.get('event_type') == 'CHECKOUT.ORDER.APPROVED':
+        order_id = event['resource']['id']
+        # Verify order with PayPal API
+        access_token = get_paypal_access_token()
+        order_info = get_paypal_order_info(order_id, access_token)
+        if not order_info or order_info.get('status') != 'COMPLETED':
+            return JsonResponse({'error': 'Order not completed'}, status=400)
+        # Lookup user by custom_id (set in PayPal order creation)
+        try:
+            custom_id = order_info['purchase_units'][0].get('custom_id')
+            if not custom_id:
+                return JsonResponse({'error': 'No custom_id in order'}, status=400)
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            user = User.objects.get(id=custom_id)
+        except Exception:
+            return JsonResponse({'error': 'User not found for custom_id'}, status=404)
+        # Activate premium for user (example: set is_premium True)
+        userprofile = getattr(user, 'userprofile', None)
+        if userprofile:
+            userprofile.is_premium = True
+            userprofile.save(update_fields=['is_premium'])
+        # Log transaction for auditing
+        from .models import PaymentLog
+        try:
+            PaymentLog.objects.create(
+                user=user,
+                provider='paypal',
+                order_id=order_id,
+                amount=order_info['purchase_units'][0]['amount']['value'],
+                currency=order_info['purchase_units'][0]['amount'].get('currency_code', 'USD'),
+                status=order_info.get('status', ''),
+                raw_data=order_info,
+            )
+        except Exception as e:
+            # Log error or ignore if logging fails
+            pass
+        return JsonResponse({'success': True, 'user_id': user.id})
+    # Add more event types as needed
+    return JsonResponse({'ok': True})
+
+def get_paypal_access_token():
+    """Obtain OAuth2 access token from PayPal."""
+    client_id = os.environ.get('PAYPAL_CLIENT_ID')
+    secret = os.environ.get('PAYPAL_SECRET')
+    url = 'https://api-m.paypal.com/v1/oauth2/token'
+    resp = requests.post(url, auth=(client_id, secret), data={'grant_type': 'client_credentials'})
+    if resp.status_code == 200:
+        return resp.json()['access_token']
+    return None
+
+def get_paypal_order_info(order_id, access_token):
+    """Fetch order details from PayPal to verify payment status."""
+    url = f'https://api-m.paypal.com/v2/checkout/orders/{order_id}'
+    headers = {'Authorization': f'Bearer {access_token}'}
+    resp = requests.get(url, headers=headers)
+    if resp.status_code == 200:
+        return resp.json()
+    return None
 from django.shortcuts import render
 from django.conf import settings
 from django.contrib.auth import authenticate, login as auth_login
