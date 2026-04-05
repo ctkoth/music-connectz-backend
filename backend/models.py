@@ -1,3 +1,5 @@
+from django.db import models
+from django.contrib.auth.models import User
 # --- Payment Log for Auditing ---
 class PaymentLog(models.Model):
     PROVIDER_CHOICES = [
@@ -16,8 +18,6 @@ class PaymentLog(models.Model):
 
     def __str__(self):
         return f"{self.provider} {self.order_id} {self.user.username} {self.amount} {self.status}"
-from django.db import models
-from django.contrib.auth.models import User
 # --- Unified Post Model for v9.8 Paradigm ---
 class Post(models.Model):
     POST_TYPE_CHOICES = [
