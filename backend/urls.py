@@ -1,16 +1,5 @@
 
-# --- User/AI/Payment APIs ---
-path('api/user/personas/', views.user_personas, name='user_personas'),
-path('api/ai/suggest-skill-prices/', views.ai_suggest_skill_prices, name='ai_suggest_skill_prices'),
-path('api/user/contributor-earnings/', views.user_contributor_earnings, name='user_contributor_earnings'),
-path('api/user/payment-logs/', views.user_payment_logs, name='user_payment_logs'),
-# --- PayPal Webhook ---
-path('api/paypal/webhook/', views.paypal_webhook, name='paypal_webhook'),
-# --- Post APIs ---
-path('api/posts/create-or-update/', views.create_or_update_post, name='create_or_update_post'),
-path('api/posts/<int:post_id>/toggle-sharing/', views.toggle_post_sharing, name='toggle_post_sharing'),
-path('api/posts/<int:post_id>/export/', views.export_post, name='export_post'),
-path('api/posts/<int:post_id>/download/', views.download_post, name='download_post'),
+
 """
 URL configuration for backend project.
 
