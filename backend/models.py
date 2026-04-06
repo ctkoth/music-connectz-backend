@@ -199,10 +199,15 @@ class AgreementTemplate(models.Model):
 
 
 class CollabRoyaltyAgreement(models.Model):
-        minimum_aesthetic_rating = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True, help_text='Minimum average aesthetic rating required to join this collab')
+    minimum_aesthetic_rating = models.DecimalField(
+        max_digits=4, decimal_places=2, null=True, blank=True,
+        help_text='Minimum average aesthetic rating required to join this collab'
+    )
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
-    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_royalty_agreements')
+    created_by = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='created_royalty_agreements'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     agreement_text = models.TextField(default="This agreement outlines the royalty splits for this collaboration.")
