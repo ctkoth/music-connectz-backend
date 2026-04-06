@@ -1,3 +1,6 @@
+# Ensure models and User are imported for all Django model classes
+from django.db import models
+from django.contrib.auth.models import User
 # --- Aesthetic Rating for User Profile Pics (v14.6) ---
 class AestheticRating(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='aesthetic_ratings_received')
@@ -87,8 +90,7 @@ class ChatMessageEditLog(models.Model):
     def __str__(self):
         return f"Edit by {self.edited_by.username} at {self.edited_at} for Msg {self.message.id}"
 # --- Imports ---
-from django.db import models
-from django.contrib.auth.models import User
+# (imports moved to top)
 # --- Payment Log for Auditing ---
 class PaymentLog(models.Model):
     PROVIDER_CHOICES = [
