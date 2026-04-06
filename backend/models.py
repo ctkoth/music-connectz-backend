@@ -259,7 +259,7 @@ class CollabReliabilityRating(models.Model):
 
 import secrets
 class UserProfile(models.Model):
-        is_teacher = models.BooleanField(default=False, help_text='Is this user a teacher/mentor?')
+    is_teacher = models.BooleanField(default=False, help_text='Is this user a teacher/mentor?')
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     referral_code = models.CharField(max_length=16, unique=True, blank=True)
     phone_number = models.CharField(max_length=32, blank=True, default='')
@@ -279,7 +279,7 @@ class UserProfile(models.Model):
     last_name = models.CharField(max_length=64, blank=True, default='')
     gender = models.CharField(max_length=32, blank=True, default='')
     birthday = models.DateField(null=True, blank=True)
-	avatar_url = models.URLField(max_length=512, blank=True, default='')
+    avatar_url = models.URLField(max_length=512, blank=True, default='')
 
     # DJ points system: Spina
     spina = models.PositiveIntegerField(default=0, help_text='DJ points (Spina) earned by the user')
