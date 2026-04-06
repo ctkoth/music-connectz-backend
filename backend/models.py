@@ -1,3 +1,13 @@
+# --- Aesthetic Rating for User Profile Pics (v14.6) ---
+class AestheticRating(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='aesthetic_ratings_received')
+    rater = models.ForeignKey(User, on_delete=models.CASCADE, related_name='aesthetic_ratings_given')
+    score = models.PositiveSmallIntegerField(default=0)  # 0-10 scale
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        unique_together = ('user', 'rater')
+    def __str__(self):
+        return f"Aesthetic {self.score}/10: {self.rater.username} → {self.user.username}"
 # --- ParcelPrimate Campaign Model (Mailchimp Knockoff) ---
 class ParcelPrimateCampaign(models.Model):
     STATUS_CHOICES = [
@@ -189,6 +199,7 @@ class AgreementTemplate(models.Model):
 
 
 class CollabRoyaltyAgreement(models.Model):
+        minimum_aesthetic_rating = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True, help_text='Minimum average aesthetic rating required to join this collab')
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_royalty_agreements')
@@ -243,6 +254,7 @@ class CollabReliabilityRating(models.Model):
 
 import secrets
 class UserProfile(models.Model):
+        is_teacher = models.BooleanField(default=False, help_text='Is this user a teacher/mentor?')
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     referral_code = models.CharField(max_length=16, unique=True, blank=True)
     phone_number = models.CharField(max_length=32, blank=True, default='')

@@ -1,3 +1,100 @@
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from django.db.models import Avg, Count
+
+# --- Corey Quantifiable Feedback & Suggestions API (v14.5) ---
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def corey_feedback_and_suggestions(request):
+    """
+    Returns quantifiable Corey feedback, improvement suggestions, and teacher/mentor recommendations.
+    For high-rated users, recommends becoming a teacher and provides instructions.
+    """
+    user = request.user
+    from .models import CollabReliabilityRating, UserProfile
+    avg_rating = CollabReliabilityRating.objects.filter(ratee=user).aggregate(avg=Avg('score'))['avg'] or 0
+    feedback = f"Your average rating is {avg_rating:.2f} out of 10."
+    suggestions = []
+    teacher_recommendations = []
+    become_teacher = None
+    user_profile = getattr(user, 'profile', None)
+    location = user_profile.location if user_profile else ''
+    if avg_rating < 5:
+        suggestions.append("Consider taking a lesson or collaborating with a top-rated mentor in your area to boost your skills.")
+        # Recommend top-rated teachers in user location
+        top_teachers = UserProfile.objects.filter(location=location).annotate(rating=Avg('user__received_reliability_ratings__score')).filter(rating__gte=7).order_by('-rating')[:3]
+        for t in top_teachers:
+            teacher_recommendations.append({
+                'username': t.user.username,
+                'rating': round(t.rating or 0, 2),
+                'location': t.location,
+            })
+    elif avg_rating < 6:
+        suggestions.append("Your rating has dropped below 6. Focus on learning, collaborating, and seeking feedback to improve. Consider lessons with top-rated teachers in your area for a boost!")
+        top_teachers = UserProfile.objects.filter(location=location).annotate(rating=Avg('user__received_reliability_ratings__score')).filter(rating__gte=7).order_by('-rating')[:3]
+        for t in top_teachers:
+            teacher_recommendations.append({
+                'username': t.user.username,
+                'rating': round(t.rating or 0, 2),
+                'location': t.location,
+            })
+    elif avg_rating < 8:
+        suggestions.append("You’re getting close! Keep learning and collaborating—at 8 or higher, you’ll be ready to teach others!")
+        top_teachers = UserProfile.objects.filter(location=location).annotate(rating=Avg('user__received_reliability_ratings__score')).filter(rating__gte=8).order_by('-rating')[:2]
+        for t in top_teachers:
+            teacher_recommendations.append({
+                'username': t.user.username,
+                'rating': round(t.rating or 0, 2),
+                'location': t.location,
+            })
+    if avg_rating >= 8:
+        become_teacher = {
+            'message': "You’re almost ready to teach! Your high rating means you could inspire others. Consider becoming a teacher or mentor on Music ConnectZ.",
+            'how_to': "Go to your profile settings and click 'Become a Teacher' to start sharing your skills and earning SpinaZ!"
+        }
+    elif avg_rating >= 6:
+        become_teacher = {
+            'message': "If you want to be a teacher, keep working hard to be a great role model! Offer more, help others, and you’ll be ready to teach soon.",
+            'how_to': "Focus on building your skills and supporting your peers—when your rating hits 8, you’ll unlock the teacher path!"
+        }
+    else:
+        if user_profile and getattr(user_profile, 'is_teacher', False):
+            become_teacher = {
+                'message': "Your rating has dropped below 6. To regain your teacher status, focus on improving your skills, collaborating, and learning from top mentors. You can earn your way back—Music ConnectZ believes in comebacks!",
+                'how_to': "Once your rating is 6 or higher again, you’ll be eligible to teach and inspire others!"
+            }
+        else:
+            become_teacher = {
+                'message': "Improve your skills and confidence before teaching others. Take lessons, collaborate, and learn from top mentors to get ready!",
+                'how_to': "Once your rating is 6 or higher, you’ll unlock the path to becoming a teacher."
+            }
+    return Response({
+        'feedback': feedback,
+        'suggestions': suggestions,
+        'teacher_recommendations': teacher_recommendations,
+        'become_teacher': become_teacher,
+    })
+from django.contrib.auth import get_user_model
+
+# --- Corey Voice Utility ---
+def get_corey_voice_for_user(user):
+    """
+    Returns Corey-voice style: playful/flirtatious if avg rating >=5, else normal Corey-voice.
+    """
+    from .models import CollabReliabilityRating
+    avg_rating = CollabReliabilityRating.objects.filter(ratee=user).aggregate(avg=Avg('score'))['avg'] or 0
+    if avg_rating >= 5:
+        # Flirty/playful Corey-voice
+        return {
+            'tone': 'playful/flirtatious',
+            'message': "Ooo, look at you racking up those stars! 🌟 You keep this up and I might just have to write you a love song. 😉 Keep shining, superstar!"
+        }
+    else:
+        # Standard Corey-voice
+        return {
+            'tone': 'corey-voice',
+            'message': "Yo! 🎤 Keep grinding, your next big moment is just around the corner. I’m here if you need a boost! 🤙"
+        }
 # --- User Personas API ---
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
