@@ -47,9 +47,22 @@ export default function AuthScreen({ isSignup = false }) {
       background: '#fff',
       padding: 24,
     }}>
-      <h1 style={{ marginBottom: 24, fontWeight: 700, fontSize: 28 }}>
+      <h1 style={{ marginBottom: 12, fontWeight: 700, fontSize: 28 }}>
         MusicConnectZ Web App <span style={{fontSize:18, fontWeight:400, color:'#888'}}>(v15.8)</span>
       </h1>
+      <div style={{
+        marginBottom: 24,
+        background: '#f5f5f5',
+        borderRadius: 8,
+        padding: '12px 18px',
+        maxWidth: 520,
+        fontSize: 16,
+        color: '#333',
+        fontStyle: 'italic',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.04)'
+      }}>
+        <span role="img" aria-label="Corey">🤖</span> Corey says: "You can tell me your tasks in order—just list what you want done, and I’ll manage and track them for you!"
+      </div>
       <div style={{
         display: 'flex',
         flexWrap: 'wrap',
