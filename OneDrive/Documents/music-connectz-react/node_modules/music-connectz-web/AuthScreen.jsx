@@ -91,7 +91,7 @@ export default function AuthScreen({ isSignup = false }) {
         fontStyle: 'italic',
         boxShadow: '0 1px 4px rgba(0,0,0,0.04)'
       }}>
-        <span role="img" aria-label="Corey">🤖</span> Corey tip: Just tell me what you want to get done—one thing at a time or a whole list. I’ll remember, organize, and keep you on track. Ask for help anytime by clicking the <b>?</b>!
+        <span role="img" aria-label="Corey">🤖</span> Corey tip: Just let me know what you want to get done—one thing at a time or a whole list. I’ll remember, organize, and keep you on track. Ask for help anytime by clicking the <b>?</b>!
       </div>
       <div style={{
         width: '100%',
@@ -117,7 +117,12 @@ export default function AuthScreen({ isSignup = false }) {
           ))}
         </div>
       </div>
-      <TraditionalAuthFields isSignup={isSignup} />
+      <div style={{ width: '100%', maxWidth: 400, marginTop: 32 }}>
+        <div style={{ textAlign: 'center', color: '#888', marginBottom: 8 }}>
+          or use manual login:
+        </div>
+        <TraditionalAuthFields isSignup={isSignup} />
+      </div>
     </div>
   );
 }

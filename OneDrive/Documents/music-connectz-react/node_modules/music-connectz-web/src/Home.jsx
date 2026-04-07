@@ -1,5 +1,6 @@
 import React from 'react';
 import SocialFeed from './SocialFeed';
+import CollabLocationOptions from './CollabLocationOptions';
 
 export default function Home() {
   return (
@@ -9,6 +10,7 @@ export default function Home() {
       <div style={{ fontSize: 18, color: '#444', marginBottom: 32 }}>
         Discover, collaborate, and compete in music battles. Try the new Battles feature and see what’s trending!
       </div>
+      <CollabLocationOptions />
       {/* ...other homepage content... */}
     </div>
   );
