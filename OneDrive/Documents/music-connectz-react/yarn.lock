@@ -6315,8 +6315,12 @@ multitars@^0.2.3:
   resolved "https://registry.npmjs.org/multitars/-/multitars-0.2.4.tgz"
   integrity sha512-XgLbg1HHchFauMCQPRwMj6MSyDd5koPlTA1hM3rUFkeXzGpjU/I9fP3to7yrObE9jcN8ChIOQGrM0tV0kUZaKg==
 
+"music-connectz-web@file:C:\\Users\\ctkot\\OneDrive\\Documents\\music-connectz-react\\packages\\web":
+  version "15.9"
+  resolved "file:packages/web"
+
 "MusicConnectZ@file:C:\\Users\\ctkot\\OneDrive\\Documents\\music-connectz-react\\packages\\mobile\\MusicConnectZ":
-  version "0.0.1"
+  version "15.9"
   resolved "file:packages/mobile/MusicConnectZ"
   dependencies:
     "@react-native/new-app-screen" "0.84.1"

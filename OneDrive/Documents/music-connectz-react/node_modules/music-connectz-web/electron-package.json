@@ -1,0 +1,14 @@
+{
+  "name": "music-connectz-electron",
+  "version": "1.0.0",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-packager . MusicConnectZ --platform=win32 --arch=x64 --out=dist --overwrite"
+  },
+  "devDependencies": {
+    "electron": "^28.2.3",
+    "electron-packager": "^17.1.1"
+  }
+}
