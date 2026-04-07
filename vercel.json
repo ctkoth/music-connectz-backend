@@ -1,0 +1,69 @@
+{
+  "headers": [
+    {
+      "source": "/favicon.ico",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        }
+      ]
+    },
+    {
+      "source": "/music-connectz-logo.png",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=(self)"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; script-src 'self' 'unsafe-inline' https://js.stripe.com https://cdn.socket.io https://maps.googleapis.com https://maps.gstatic.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'self' https://admin.musicconnectz.net https://musicconnectz.com https://www.musicconnectz.com https://api.stripe.com https://*.stripe.com https://maps.googleapis.com https://maps.gstatic.com wss://*.socket.io; frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://www.google.com; upgrade-insecure-requests"
+        }
+      ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "has": [
+        { "type": "host", "value": "musicconnectz.com" }
+      ],
+      "destination": "https://musicconnectz.net/$1",
+      "permanent": true
+    },
+    {
+      "source": "/(.*)",
+      "has": [
+        { "type": "host", "value": "www.musicconnectz.com" }
+      ],
+      "destination": "https://musicconnectz.net/$1",
+      "permanent": true
+    }
+  ],
+  "rewrites": [
+    { "source": "/favicon.ico", "destination": "/music-connectz-logo.png" },
+    { "source": "/api/(.*)", "destination": "https://admin.musicconnectz.net/api/$1" }
+  ]
+}

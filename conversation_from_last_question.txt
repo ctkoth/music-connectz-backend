@@ -1,0 +1,11 @@
+User: do wats best nds everything possible to fixbefore i see a error
+
+Copilot: (Ran a comprehensive search for all version references and config issues in the frontend and backend, identified outdated version strings and config references, and explained the plan to update all version references to v9.5 everywhere needed.)
+
+User: y
+
+Copilot: (Confirmed readiness to proceed with the fixes.)
+
+User: m ake a txt file with this conersation start from my last question
+
+Copilot: (Creating this file now.)

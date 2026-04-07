@@ -1,0 +1,16 @@
+# How to push your frontend live to Vercel
+
+# 1. Go to your frontend project folder:
+cd C:\Users\ctkot\OneDrive\Documents\music-connectz-frontend
+
+# 2. Stage and commit your changes:
+git add .
+git commit -m "Frontend v9.8: Unified social paradigm and Royalties Agreement UI"
+
+# 3. Push to your remote repository:
+git push
+
+# 4. Wait for Vercel to deploy (it will auto-deploy on push)
+#    - Check your Vercel dashboard or your live site URL after a few minutes.
+
+# If you see any errors, copy the error message and ask for help.

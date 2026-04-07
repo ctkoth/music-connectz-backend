@@ -1,0 +1,30 @@
+<!-- Add this to your HTML where you want the PayPal button to appear -->
+<div id="paypal-button-container"></div>
+<script src="https://www.paypal.com/sdk/js?client-id=K6RKT3GYCP6XU"></script>
+<script>
+  // Replace with your backend API URL
+  const BACKEND_URL = window.MCZ_CONFIG && window.MCZ_CONFIG.backendUrl ? window.MCZ_CONFIG.backendUrl : '';
+  const BASE_PRICE = 100; // Replace with your actual base price
+
+  fetch(`${BACKEND_URL}/api/get-total/?base_price=${BASE_PRICE}`)
+    .then(res => res.json())
+    .then(data => {
+      paypal.Buttons({
+        createOrder: function(data_, actions) {
+          return actions.order.create({
+            purchase_units: [{
+              amount: {
+                value: data.total.toFixed(2) // total includes sales and developer tax
+              },
+              description: `Subtotal: $${data.base_price}\nSales Tax: $${data.sales_tax}\nDeveloper Tax: $${data.developer_tax}`
+            }]
+          });
+        },
+        onApprove: function(data_, actions) {
+          return actions.order.capture().then(function(details) {
+            alert('Transaction completed by ' + details.payer.name.given_name);
+          });
+        }
+      }).render('#paypal-button-container');
+    });
+</script>

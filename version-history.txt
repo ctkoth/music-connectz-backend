@@ -1,0 +1,84 @@
+Music ConnectZ Version History
+=============================
+
+v1.0 - Initial release
+- Core features: user registration, login, basic profile
+
+v1.1 - Bug fixes and minor UI improvements
+
+v2.0 - Added social login (Google, Facebook)
+- Improved onboarding flow
+
+v3.0 - Messaging and collaboration requests
+- Profile picture upload
+
+v4.0 - Skill-based matching
+- Genres and roles selection
+
+v5.0 - Portfolio uploads (audio/video)
+- Premium membership system
+
+v6.0 - Internationalization (multi-language support)
+- Geo-location onboarding
+
+v7.0 - Payment integration (Stripe, PayPal)
+- Referral rewards system
+
+v8.0 - Enhanced security (password requirements, CORS)
+- Password reset and phone login
+
+v9.0 - UI overhaul, mobile optimization
+- Social account linking
+
+v9.1 - Bug fixes, improved error handling
+- More robust CORS and backend integration
+
+v9.2 - Registration: 2 password fields, show/hide toggle
+- CORS fixes for Vercel/Render
+- Version labeling in UI
+
+v9.3 - Login: 1 password field, registration: 2
+v9.4 - Pushed new version 9.4
+v9.5 - bi K-Oth on (March 29, 2026)@14:45
+v9.5 - bi K-Oth
+March 29, 2026 — v0.5 (ww levels)
+- Introduced 'ww levels' feature
+
+v9.6 - bi K-Oth
+March 29, 2026 — v9.6
+- Premium benefit explanations and CTAs added near rating fields and premium features
+- Randomized weekly premium sale banners
+- UI/UX improvements for premium upsell and contextual marketing
+
+v9.7 - Unified Social Paradigm
+- New Royalties Agreement system (message board style)
+- Floating 💰 button and modal for agreements
+- Download PDF, export CSV, send reminders
+- All data powered by v9.8 backend
+
+v9.9 - Unified Registration/Login
+- Users can register with either username or email (only one required)
+- Login accepts either username or email
+- Registration: 2 password fields, Login: 1 password field
+
+v10.1 - Version Label Update
+- Updated frontend version labels to v10.1 across title, header, and metadata
+
+v10.2 - Emoji Personas & Short Name Refinements
+- Added emoji to all persona titles and description sentences in personaDetails
+- Profile cards: Producer and Engineer display without emoji for cleaner look
+- Short names updated: Ghostwriter → Writer, Videographer → Video on cards
+
+v10.3 - 🤖 GenAI Logic Upgrade
+- 🤖 GenAI assistant upgraded with deeper, more self-contained responses
+- 🎯 Answers now explain the "what" and "why" — no surface-level one-liners
+- ✍️ Voice skill added: GenAI can respond in user's personal writing style
+- 💬 Concise but complete: responses cut follow-up questions before they happen
+
+v10.4 - 🚀 OAuth-First Registration & Flexible Auth
+- 🔑 OAuth prioritized: 8 providers (Google, Facebook, Microsoft, LinkedIn, GitHub, X, Spotify, SoundCloud) shown first
+- 📧 Traditional auth: Email/username registration with 2 password fields, login with 1 password field
+- 📱 Phone registration support (backend-ready with phone field visible)
+- ✅ Post-OAuth profile completion: Users can complete username/phone/email after OAuth signup
+- 🎯 Streamlined onboarding: OAuth for speed, traditional auth as fallback
+
