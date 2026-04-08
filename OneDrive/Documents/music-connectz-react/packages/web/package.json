@@ -1,10 +1,27 @@
 {
   "name": "music-connectz-web",
-  "version": "16.0",
+  "version": "16.1",
   "private": true,
-  "description": "MusicConnectZ Web App",
+  "description": "MusicConnectZ Web App with new Venues, Manager, and Contacts features.",
   "main": "index.js",
   "scripts": {
-    "build": "react-scripts build"
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test --env=jsdom"
+  },
+  "dependencies": {
+    "react-scripts": "5.0.1"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
   }
 }

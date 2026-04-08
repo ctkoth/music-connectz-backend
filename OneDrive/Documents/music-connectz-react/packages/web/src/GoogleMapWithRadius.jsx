@@ -22,7 +22,7 @@ export default function GoogleMapWithRadius({ radiusMeters = 1000 }) {
         new window.google.maps.Circle({
           strokeColor: '#4285F4',
           strokeOpacity: 0.8,
-         stance , stat strokeWeight: 2,
+          strokeWeight: 2,
           fillColor: '#4285F4',
           fillOpacity: 0.2,
           map,
@@ -42,11 +42,14 @@ export default function GoogleMapWithRadius({ radiusMeters = 1000 }) {
 
   useEffect(() => {
     if (!window.google || !window.google.maps) {
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.REACT_APP_GOOGLE_MAPS_API_KEY}`;
-      script.async = true;
-      script.onload = () => {};
-      document.body.appendChild(script);
+      // Prevent duplicate script injection
+      if (!document.querySelector('script[src^="https://maps.googleapis.com/maps/api/js"]')) {
+        const script = document.createElement('script');
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.REACT_APP_GOOGLE_MAPS_API_KEY}`;
+        script.async = true;
+        script.onload = () => {};
+        document.body.appendChild(script);
+      }
     }
   }, []);
 
