@@ -22,7 +22,7 @@ export default function GoogleMapWithRadius({ radiusMeters = 1000 }) {
         new window.google.maps.Circle({
           strokeColor: '#4285F4',
           strokeOpacity: 0.8,
-          strokeWeight: 2,
+         stance , stat strokeWeight: 2,
           fillColor: '#4285F4',
           fillOpacity: 0.2,
           map,

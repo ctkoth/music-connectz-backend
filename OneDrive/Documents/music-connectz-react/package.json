@@ -6,7 +6,10 @@
     "packages/shared"
   ],
   "dependencies": {
+    "dotenv": "^17.4.1",
     "expo-auth-session": "^55.0.12",
-    "firebase": "^12.11.0"
+    "express": "^5.2.1",
+    "firebase": "^12.11.0",
+    "stripe": "^22.0.0"
   }
 }
