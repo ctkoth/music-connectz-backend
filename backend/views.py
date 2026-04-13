@@ -1,4 +1,15 @@
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+
+# --- Public API: App Version ---
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def app_version(request):
+    return JsonResponse({
+        "version": "v15.6",
+        "deployed": "2026-04-06"
+    })
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Avg, Count
 
@@ -610,7 +621,6 @@ from django.http import HttpResponse, Http404
 from .models import CollabRoyaltyAgreement, CollabRoyaltySplit, AgreementTemplate, AgreementChangeLog
 from django.utils import timezone
 <<<<<<< HEAD
-=======
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 >>>>>>> dec631da98253f85bff28b8e054535819adb2224
@@ -1549,11 +1559,7 @@ def create_purchase_checkout(request):
         return Response({'error': 'Stripe is not configured on the backend.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     payload = request.data if isinstance(request.data, dict) else {}
-<<<<<<< HEAD
     amount = _payload_first(payload, 'amount', 'price', 'total', 'value')
-=======
-    amount = payload.get('amount')
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
     try:
         amount_cents = int(round(float(amount) * 100))
     except Exception:
@@ -1562,14 +1568,8 @@ def create_purchase_checkout(request):
     if amount_cents <= 0:
         return Response({'error': 'Amount must be greater than zero.'}, status=status.HTTP_400_BAD_REQUEST)
 
-<<<<<<< HEAD
-    description = str(_payload_first(payload, 'description', 'name', 'title', default='Music ConnectZ Purchase'))
-    purchase_type = str(_payload_first(payload, 'purchaseType', 'purchase_type', 'type', default='one_time'))
-    user_id = _payload_first(payload, 'userId', 'user_id', 'uid', default='')
-=======
     description = str(payload.get('description') or 'Music ConnectZ Purchase')
     purchase_type = str(payload.get('purchaseType') or 'one_time')
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
 
     checkout_payload = _stripe_checkout_base_payload()
     checkout_payload.update({
@@ -1583,13 +1583,8 @@ def create_purchase_checkout(request):
         'billing_address_collection': 'required',
         'tax_id_collection[enabled]': 'true',
         'customer_creation': 'always',
-<<<<<<< HEAD
-        'client_reference_id': str(user_id),
-        'metadata[userId]': str(user_id),
-=======
         'client_reference_id': str(payload.get('userId', '')),
         'metadata[userId]': str(payload.get('userId', '')),
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
         'metadata[purchaseType]': purchase_type,
     })
 
@@ -2808,6 +2803,15 @@ def cancel_feature_subscription(request, feature_key):
     return Response({'success': True, 'message': f'Subscription to {subscription.feature.display_name} cancelled.'})
 
 
+# --- Only show promos to active users except for the superuser (you) ---
+# Replace with your actual user ID or email if needed
+EXEMPT_EMAILS = ['ctkoth@gmail.com']
+    if user.email in EXEMPT_EMAILS:
+        # Grant all premium features automatically
+        user.is_premium = True
+        user.has_analytics = True
+        if hasattr(user, 'save'):
+            user.save(update_fields=['is_premium', 'has_analytics'])
 def _week_bounds(today=None):
     current = today or timezone.now().date()
     start = current - timedelta(days=current.weekday())
@@ -3047,13 +3051,91 @@ def in_app_feature_ads(request):
     return Response({'count': len(ads), 'ads': ads})
 
 
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
-from django.shortcuts import render, redirect
-from django.contrib.auth.decorators import login_required
-from .models import Work
+# --- Royalty & Agreement Dashboard API Views ---
+from rest_framework import viewsets, permissions
+from .models import Agreement, AgreementSignature, RoyaltySplit, RoyaltyPayment
+from .serializers import (
+    AgreementSerializer, AgreementSignatureSerializer, RoyaltySplitSerializer, RoyaltyPaymentSerializer
+)
 
-def home(request):
-    return render(request, "home.html")
+# --- Royalty & Agreement Dashboard Permissions ---
+from rest_framework import permissions
+
+class IsAgreementOwnerOrReadOnly(permissions.BasePermission):
+    def has_object_permission(self, request, view, obj):
+        # Read permissions for all involved users, write only for owner
+        if request.method in permissions.SAFE_METHODS:
+            return request.user == obj.owner or obj.royalty_splits.filter(user=request.user).exists()
+        return request.user == obj.owner
+
+class IsSignatureUser(permissions.BasePermission):
+    def has_object_permission(self, request, view, obj):
+        # Only the user themselves can sign
+        return request.user == obj.user
+
+class IsOwnerForSplitOrPayment(permissions.BasePermission):
+    def has_object_permission(self, request, view, obj):
+        # Only agreement owner can add/edit splits/payments
+        return request.user == obj.agreement.owner
+
+class AgreementViewSet(viewsets.ModelViewSet):
+    queryset = Agreement.objects.all()
+    serializer_class = AgreementSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAgreementOwnerOrReadOnly]
+    def perform_create(self, serializer):
+        agreement = serializer.save(owner=self.request.user)
+        notify_agreement_created(agreement)
+
+class AgreementSignatureViewSet(viewsets.ModelViewSet):
+    queryset = AgreementSignature.objects.all()
+    serializer_class = AgreementSignatureSerializer
+    permission_classes = [permissions.IsAuthenticated, IsSignatureUser]
+    def get_queryset(self):
+        # Only show signatures for agreements user is involved in
+        user = self.request.user
+        return AgreementSignature.objects.filter(models.Q(user=user) | models.Q(agreement__owner=user) | models.Q(agreement__royalty_splits__user=user)).distinct()
+
+class RoyaltySplitViewSet(viewsets.ModelViewSet):
+    queryset = RoyaltySplit.objects.all()
+    serializer_class = RoyaltySplitSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOwnerForSplitOrPayment]
+    def get_queryset(self):
+        user = self.request.user
+        return RoyaltySplit.objects.filter(models.Q(user=user) | models.Q(agreement__owner=user)).distinct()
+
+class RoyaltyPaymentViewSet(viewsets.ModelViewSet):
+    queryset = RoyaltyPayment.objects.all()
+    serializer_class = RoyaltyPaymentSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOwnerForSplitOrPayment]
+    def get_queryset(self):
+        user = self.request.user
+        return RoyaltyPayment.objects.filter(models.Q(user=user) | models.Q(agreement__owner=user)).distinct()
+
+# --- Royalty & Agreement Dashboard Notifications (example: email on agreement/signature creation) ---
+from django.core.mail import send_mail
+
+def notify_agreement_created(agreement):
+    # Notify all participants (splits) except owner
+    recipients = [split.user.email for split in agreement.royalty_splits.all() if split.user != agreement.owner and split.user.email]
+    if recipients:
+        send_mail(
+            subject=f"New Agreement: {agreement.title}",
+            message=f"You have been added to a new agreement '{agreement.title}' for project '{agreement.project}'. Log in to review and sign.",
+            from_email=None,
+            recipient_list=recipients,
+            fail_silently=True,
+        )
+
+def notify_signature_signed(signature):
+    # Notify agreement owner when someone signs
+    owner_email = signature.agreement.owner.email
+    if owner_email:
+        send_mail(
+            subject=f"Agreement Signed: {signature.agreement.title}",
+            message=f"{signature.user.username} has signed the agreement '{signature.agreement.title}'.",
+            from_email=None,
+            recipient_list=[owner_email],
+            fail_silently=True,
+        )
 
 

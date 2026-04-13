@@ -200,6 +200,62 @@ class AgreementTemplate(models.Model):
         return f"Template: {self.name}"
 
 
+# --- Royalty & Agreement Dashboard Core Models (vNext) ---
+class Agreement(models.Model):
+    """A legal agreement between collaborators for a music project."""
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    project = models.CharField(max_length=255, blank=True, help_text="Song or project name")
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='owned_agreements')
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"Agreement: {self.title} ({self.project})"
+
+
+class AgreementSignature(models.Model):
+    """Tracks user signatures on agreements."""
+    agreement = models.ForeignKey(Agreement, on_delete=models.CASCADE, related_name='signatures')
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    signed_at = models.DateTimeField(default=timezone.now)
+    accepted = models.BooleanField(default=False)
+    comment = models.TextField(blank=True)
+
+    class Meta:
+        unique_together = ('agreement', 'user')
+
+    def __str__(self):
+        return f"{self.user.username} - {self.agreement.title} ({'Accepted' if self.accepted else 'Pending'})"
+
+
+class RoyaltySplit(models.Model):
+    """Defines royalty splits for a project/agreement."""
+    agreement = models.ForeignKey(Agreement, on_delete=models.CASCADE, related_name='royalty_splits')
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    percentage = models.DecimalField(max_digits=5, decimal_places=2, help_text="Share of royalties (e.g., 25.00 for 25%)")
+    role = models.CharField(max_length=128, blank=True, help_text="e.g., Producer, Writer, Performer")
+
+    class Meta:
+        unique_together = ('agreement', 'user')
+
+    def __str__(self):
+        return f"{self.user.username}: {self.percentage}% ({self.role})"
+
+
+class RoyaltyPayment(models.Model):
+    """Tracks royalty payments made to users for a project/agreement."""
+    agreement = models.ForeignKey(Agreement, on_delete=models.CASCADE, related_name='royalty_payments')
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    paid_at = models.DateTimeField(default=timezone.now)
+    note = models.CharField(max_length=255, blank=True)
+
+    def __str__(self):
+        return f"{self.user.username}: ${self.amount} for {self.agreement.title}"
+
+
 class CollabRoyaltyAgreement(models.Model):
     minimum_aesthetic_rating = models.DecimalField(
         max_digits=4, decimal_places=2, null=True, blank=True,

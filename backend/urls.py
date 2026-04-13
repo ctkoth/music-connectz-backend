@@ -1,5 +1,3 @@
-
-
 """
 URL configuration for backend project.
 
@@ -23,11 +21,16 @@ from django.views.generic import RedirectView, TemplateView
 from django.views.static import serve
 from django.conf import settings
 from . import views
+from rest_framework import routers
+from .views import (
+    AgreementViewSet, AgreementSignatureViewSet, RoyaltySplitViewSet, RoyaltyPaymentViewSet
+)
 
 _FRONTEND_ERROR_URL = 'https://musicconnectz.net/?login_error=1'
 
 urlpatterns = [
     path('', views.home, name='home'),
+    path('api/version/', views.app_version, name='app_version'),
     path('admin/', admin.site.urls),
     path('google70f5d8bcf10dfb1c.html', serve, {'path': 'google70f5d8bcf10dfb1c.html', 'document_root': settings.STATIC_ROOT}),
     path('api/openai-chat', views.openai_chat, name='openai_chat'),
@@ -117,4 +120,8 @@ urlpatterns = [
     path('api/collab/<int:agreement_id>/review/<int:reviewee_id>/', views.set_collab_review, name='set_collab_review'),
     path('api/collab/<int:agreement_id>/reviews/', views.get_collab_reviews, name='get_collab_reviews'),
     path('api/user/<int:user_id>/shared-reviews/', views.get_shared_reviews_for_user, name='get_shared_reviews_for_user'),
+
+    # --- Royalty & Agreement Dashboard API routes ---
+    path('api/', include(router.urls)),
+    path('api/promo-offer/', views.promo_offer_status, name='promo_offer_status'),
 ]

@@ -136,138 +136,33 @@ class RegisterSerializer(serializers.Serializer):
             profile.save(update_fields=['phone_number'])
 
         return user
-<<<<<<< HEAD
 
-# ...existing code...
+# --- Royalty & Agreement Dashboard Serializers ---
+from .models import Agreement, AgreementSignature, RoyaltySplit, RoyaltyPayment
 
-class DistributionEventSerializer(serializers.ModelSerializer):
+class AgreementSerializer(serializers.ModelSerializer):
+    owner = serializers.StringRelatedField(read_only=True)
     class Meta:
-        model = DistributionEvent
+        model = Agreement
         fields = '__all__'
 
-
-class ReleaseAnalyticsSerializer(serializers.ModelSerializer):
+class AgreementSignatureSerializer(serializers.ModelSerializer):
+    user = serializers.StringRelatedField(read_only=True)
+    agreement = serializers.StringRelatedField(read_only=True)
     class Meta:
-        model = ReleaseAnalytics
-        fields = (
-            'id', 'release', 'total_streams', 'total_revenue', 'revenue_currency',
-            'revenue_settled_date', 'unique_listeners', 'total_saves', 'total_skips',
-            'earliest_stream_date', 'latest_stream_date', 'platform_breakdown_json',
-            'last_updated', 'created_at',
-        )
-        read_only_fields = ('id', 'last_updated', 'created_at')
+        model = AgreementSignature
+        fields = '__all__'
 
-
-class TrackAnalyticsSerializer(serializers.ModelSerializer):
+class RoyaltySplitSerializer(serializers.ModelSerializer):
+    user = serializers.StringRelatedField(read_only=True)
+    agreement = serializers.StringRelatedField(read_only=True)
     class Meta:
-        model = TrackAnalytics
-        fields = (
-            'id', 'track', 'streams', 'revenue', 'unique_listeners', 'saves', 'skips',
-            'skip_rate', 'completion_rate', 'average_listen_seconds', 'last_updated', 'created_at',
-        )
-        read_only_fields = ('id', 'last_updated', 'created_at')
+        model = RoyaltySplit
+        fields = '__all__'
 
-
-class StreamEventSerializer(serializers.ModelSerializer):
+class RoyaltyPaymentSerializer(serializers.ModelSerializer):
+    user = serializers.StringRelatedField(read_only=True)
+    agreement = serializers.StringRelatedField(read_only=True)
     class Meta:
-        model = StreamEvent
-        fields = (
-            'id', 'track', 'provider', 'event_type', 'event_date', 'count', 'revenue',
-            'listener_country', 'listener_device_type', 'raw_payload_json', 'created_at',
-        )
-        read_only_fields = ('id', 'created_at')
-
-
-class ContributorEarningsSerializer(serializers.ModelSerializer):
-    participant_username = serializers.CharField(source='participant.username', read_only=True)
-
-    class Meta:
-        model = ContributorEarnings
-        fields = (
-            'id', 'contributor', 'release', 'participant', 'participant_username', 'role',
-            'royalty_percentage', 'total_revenue', 'participant_share', 'currency',
-            'settled_date', 'settled_amount', 'payout_method', 'payout_status',
-            'last_updated', 'created_at',
-        )
-        read_only_fields = (
-            'id', 'total_revenue', 'participant_share', 'settled_date', 'settled_amount',
-            'last_updated', 'created_at',
-        )
-
-
-class PremiumFeatureSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = PremiumFeature
-        fields = (
-            'feature_key', 'feature_type', 'display_name', 'description',
-            'monthly_price', 'yearly_price', 'is_active', 'created_at',
-        )
-        read_only_fields = ('created_at',)
-
-
-class UserPremiumFeatureSerializer(serializers.ModelSerializer):
-    feature = PremiumFeatureSerializer(read_only=True)
-    is_active_now = serializers.SerializerMethodField()
-
-    class Meta:
-        model = UserPremiumFeature
-        fields = (
-            'id', 'user', 'feature', 'status', 'subscription_start', 'subscription_expiry',
-            'billing_cycle', 'auto_renew', 'renewal_date', 'paid_amount', 'last_payment_date',
-            'is_active_now', 'updated_at', 'created_at',
-        )
-        read_only_fields = (
-            'id', 'user', 'subscription_start', 'stripe_subscription_id', 'stripe_customer_id',
-            'last_payment_date', 'updated_at', 'created_at',
-        )
-
-    def get_is_active_now(self, obj):
-        return obj.is_active_now()
-
-
-class PremiumBundleSerializer(serializers.ModelSerializer):
-    features = PremiumFeatureSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = PremiumBundle
-        fields = (
-            'bundle_key', 'bundle_name', 'description', 'features', 'monthly_price',
-            'yearly_price', 'is_active', 'display_order', 'created_at',
-        )
-        read_only_fields = ('created_at',)
-
-
-class UserInterestSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = UserInterest
-        fields = ('id', 'user', 'interest', 'weight', 'is_active', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'user', 'created_at', 'updated_at')
-
-
-class WeeklyPromotionTemplateSerializer(serializers.ModelSerializer):
-    target_feature_name = serializers.CharField(source='target_feature.display_name', read_only=True)
-
-    class Meta:
-        model = WeeklyPromotionTemplate
-        fields = (
-            'id', 'template_key', 'title', 'description', 'target_feature', 'target_feature_name',
-            'interest_tags_json', 'discount_percent', 'is_active', 'created_at', 'updated_at',
-        )
-        read_only_fields = ('id', 'created_at', 'updated_at')
-
-
-class UserWeeklyPromotionSerializer(serializers.ModelSerializer):
-    template_title = serializers.CharField(source='template.title', read_only=True)
-    template_key = serializers.CharField(source='template.template_key', read_only=True)
-    target_feature = serializers.CharField(source='template.target_feature.display_name', read_only=True)
-
-    class Meta:
-        model = UserWeeklyPromotion
-        fields = (
-            'id', 'user', 'template', 'template_title', 'template_key', 'target_feature',
-            'week_start', 'week_end', 'promo_code', 'discount_percent', 'matched_interest',
-            'claimed', 'expires_at', 'created_at', 'updated_at',
-        )
-        read_only_fields = ('id', 'user', 'template', 'created_at', 'updated_at')
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
+        model = RoyaltyPayment
+        fields = '__all__'
