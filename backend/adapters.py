@@ -31,21 +31,11 @@ class SafeSocialAccountAdapter(DefaultSocialAccountAdapter):
 
         apps = self.list_apps(request, provider=provider, client_id=client_id)
         if len(apps) == 0:
-<<<<<<< HEAD
             # Unconfigured providers should fail gracefully as a login error,
             # not as an internal server error.
             raise ImmediateHttpResponse(self._oauth_error_response())
         if len(apps) == 1:
             return apps[0]
-
-=======
-            raise SocialApp.DoesNotExist()
-        if len(apps) == 1:
-            return apps[0]
-
-        from django.conf import settings
-
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
         visible_apps = [
             app for app in apps
             if not ((getattr(app, "settings", None) or {}).get("hidden"))
@@ -88,12 +78,8 @@ class SafeSocialAccountAdapter(DefaultSocialAccountAdapter):
         if len(resolved) == 1:
             return resolved[0]
 
-<<<<<<< HEAD
         if len(resolved) == 0:
             raise ImmediateHttpResponse(self._oauth_error_response())
-
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
         # Final safety net: pick deterministic app instead of raising 500.
         ranked = sorted(
             resolved,
