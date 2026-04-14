@@ -1,3 +1,12 @@
+node_modules/
+packages/web/node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+env/
+ophc/ophc.log
 # Python bytecode and cache
 __pycache__/
 *.py[cod]
