@@ -73,13 +73,11 @@ INSTALLED_APPS = [
     'allauth.socialaccount.providers.twitch',
     'rest_framework',
     'corsheaders',
-MIDDLEWARE = ['corsheaders.middleware.CorsMiddleware'] + [m for m in MIDDLEWARE if m != 'corsheaders.middleware.CorsMiddleware']
 
 # Allow CORS for frontend domains
 CORS_ALLOWED_ORIGINS = [
     "https://musicconnectz.net",
     "https://www.musicconnectz.net",
-]
 ]
 # Add site id for django.contrib.sites
 SITE_ID = 1
