@@ -72,7 +72,8 @@ INSTALLED_APPS = [
     'allauth.socialaccount.providers.tiktok',
     'allauth.socialaccount.providers.twitch',
     'rest_framework',
-    'corsheaders',
+	'corsheaders',
+]
 
 # Allow CORS for frontend domains
 CORS_ALLOWED_ORIGINS = [
