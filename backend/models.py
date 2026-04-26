@@ -91,7 +91,60 @@ class ChatMessageEditLog(models.Model):
         return f"Edit by {self.edited_by.username} at {self.edited_at} for Msg {self.message.id}"
 # --- Imports ---
 # (imports moved to top)
-# --- Payment Log for Auditing ---
+from decimal import Decimal
+# --- Rating Price Logic Utility ---
+import statistics
+def get_adjusted_price(base_price, ratings):
+    """
+    Returns the adjusted price using rating price logic:
+    Price = Base Price + (Median Rating - 5) * 10% of Base Price (if 3+ unique ratings)
+    Ratings must be a list of integers (0-10) from unique users.
+    """
+    if not ratings or len(set(ratings)) < 3:
+        return base_price
+    median_rating = statistics.median(ratings)
+    adjustment = (Decimal(median_rating) - Decimal('5')) * (Decimal('0.10') * base_price)
+    return base_price + adjustment
+
+# --- Character Limit Validation Utility ---
+def validate_character_limit(user, content):
+    """
+    Enforces character limits by user tier.
+    Free: 400, Premium: 4000, StatZ: 40000
+    Raises ValueError if over limit.
+    """
+    from .models import UserPremiumFeature, PremiumFeature
+    statz_feature = PremiumFeature.objects.filter(display_name__iexact='StatZ').first()
+    premium_feature = PremiumFeature.objects.filter(display_name__iexact='Premium').first()
+    if statz_feature and UserPremiumFeature.objects.filter(user=user, feature=statz_feature, status='active').exists():
+        limit = 40000
+    elif premium_feature and UserPremiumFeature.objects.filter(user=user, feature=premium_feature, status='active').exists():
+        limit = 4000
+    else:
+        limit = 400
+    if len(content) > limit:
+        raise ValueError(f'Character limit exceeded: {len(content)}/{limit}. Upgrade for more.')
+    return True
+# --- Developer Tax Utility ---
+def get_developer_tax_rate(user):
+    """
+    Returns the developer tax rate (as a decimal) for a given user based on their account type.
+    Free: 10%, Premium: 5%, StatZ: 3%
+    """
+    from .models import UserPremiumFeature, PremiumFeature
+    # Check for StatZ (StatZ feature key assumed to be 'statz')
+    statz_feature = PremiumFeature.objects.filter(display_name__iexact='StatZ').first()
+    if statz_feature and UserPremiumFeature.objects.filter(user=user, feature=statz_feature, status='active').exists():
+        return Decimal('0.03')
+    # Check for Premium (Premium feature key assumed to be 'Premium')
+    premium_feature = PremiumFeature.objects.filter(display_name__iexact='Premium').first()
+    if premium_feature and UserPremiumFeature.objects.filter(user=user, feature=premium_feature, status='active').exists():
+        return Decimal('0.05')
+    # Default to Free
+    return Decimal('0.10')
+
+# Example usage in payout logic:
+# payout_amount = original_amount * (1 - get_developer_tax_rate(recipient_user))
 class PaymentLog(models.Model):
     PROVIDER_CHOICES = [
         ('paypal', 'PayPal'),
@@ -131,6 +184,15 @@ class Post(models.Model):
 
     def __str__(self):
         return f"{self.get_post_type_display()} by {self.author.username}: {self.title or self.content[:30]}"
+    
+    def get_adjusted_price(self, base_price):
+        """
+        Returns the adjusted price for this post using rating price logic:
+        Price = Base Price + (Median Rating - 5) * 10% of Base Price (if 3+ unique ratings)
+        """
+        ratings = list(self.ratings.values_list('value', flat=True))
+        from .models import get_adjusted_price
+        return get_adjusted_price(base_price, ratings)
 
 # --- Comment Model for Posts ---
 class PostComment(models.Model):
@@ -254,6 +316,20 @@ class RoyaltyPayment(models.Model):
 
     def __str__(self):
         return f"{self.user.username}: ${self.amount} for {self.agreement.title}"
+    
+    def calculate_payout(self, post, base_price):
+        """
+        Calculates the payout for this royalty payment using developer tax and rating price logic.
+        post: Post instance (for ratings)
+        base_price: Decimal
+        """
+        # Apply rating price logic
+        adjusted_price = post.get_adjusted_price(base_price)
+        # Apply developer tax
+        from .models import get_developer_tax_rate
+        tax_rate = get_developer_tax_rate(self.user)
+        payout = adjusted_price * (1 - tax_rate)
+        return payout
 
 
 class CollabRoyaltyAgreement(models.Model):
@@ -338,6 +414,16 @@ class UserProfile(models.Model):
     gender = models.CharField(max_length=32, blank=True, default='')
     birthday = models.DateField(null=True, blank=True)
     avatar_url = models.URLField(max_length=512, blank=True, default='')
+
+
+    # Streaming platform links
+    spotify_url = models.URLField(max_length=512, blank=True, default='', help_text='Link to Spotify artist profile')
+    apple_music_url = models.URLField(max_length=512, blank=True, default='', help_text='Link to Apple Music artist profile')
+    soundcloud_url = models.URLField(max_length=512, blank=True, default='', help_text='Link to SoundCloud artist profile')
+    youtube_url = models.URLField(max_length=512, blank=True, default='', help_text='Link to YouTube artist channel')
+    audiomack_url = models.URLField(max_length=512, blank=True, default='', help_text='Link to Audiomack artist profile')
+    tidal_url = models.URLField(max_length=512, blank=True, default='', help_text='Link to Tidal artist profile')
+    bandcamp_url = models.URLField(max_length=512, blank=True, default='', help_text='Link to Bandcamp artist profile')
 
     # DJ points system: Spina
     spina = models.PositiveIntegerField(default=0, help_text='DJ points (Spina) earned by the user')

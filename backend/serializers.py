@@ -3,6 +3,13 @@ from .models import CollabReliabilityRating, CollabReview, Post
 # --- Post Serializer ---
 class PostSerializer(serializers.ModelSerializer):
     author = serializers.StringRelatedField(read_only=True)
+
+    def validate_content(self, value):
+        user = self.context['request'].user if 'request' in self.context else None
+        if user and user.is_authenticated:
+            from .models import validate_character_limit
+            validate_character_limit(user, value)
+        return value
     class Meta:
         model = Post
         fields = '__all__'
@@ -18,6 +25,13 @@ class CollabReliabilityRatingSerializer(serializers.ModelSerializer):
 class CollabReviewSerializer(serializers.ModelSerializer):
     reviewer = serializers.StringRelatedField(read_only=True)
     reviewee = serializers.StringRelatedField(read_only=True)
+
+    def validate_text(self, value):
+        user = self.context['request'].user if 'request' in self.context else None
+        if user and user.is_authenticated:
+            from .models import validate_character_limit
+            validate_character_limit(user, value)
+        return value
     class Meta:
         model = CollabReview
         fields = '__all__'
