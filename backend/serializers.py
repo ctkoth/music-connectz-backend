@@ -180,3 +180,127 @@ class RoyaltyPaymentSerializer(serializers.ModelSerializer):
     class Meta:
         model = RoyaltyPayment
         fields = '__all__'
+# Add these serializers to your serializers.py file
+
+from rest_framework import serializers
+from .models import (
+    Post, PostRating, PostJoin, OCCLog,
+    UserProfile, Skill, Persona, CollabReliabilityRating,
+    VideoZ, VideoZTrack, BugZ, BugZComment,
+    UserWeeklyPromotion, WeeklyPromotionTemplate
+)
+from django.contrib.auth.models import User
+
+# --- User Serializers ---
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'first_name', 'last_name']
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+    
+    class Meta:
+        model = UserProfile
+        fields = ['id', 'user', 'bio', 'location', 'profile_picture', 'is_teacher', 'is_verified', 'total_earnings', 'created_at', 'updated_at']
+
+# --- Skill Serializers ---
+class SkillSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Skill
+        fields = ['id', 'name', 'category', 'description', 'base_price', 'created_at', 'updated_at']
+
+# --- Persona Serializers ---
+class PersonaSerializer(serializers.ModelSerializer):
+    skills = SkillSerializer(many=True, read_only=True)
+    user = UserSerializer(read_only=True)
+    
+    class Meta:
+        model = Persona
+        fields = ['id', 'user', 'name', 'description', 'skills', 'hourly_rate', 'is_active', 'created_at', 'updated_at']
+
+# --- Rating Serializers ---
+class CollabReliabilityRatingSerializer(serializers.ModelSerializer):
+    rater = UserSerializer(read_only=True)
+    ratee = UserSerializer(read_only=True)
+    
+    class Meta:
+        model = CollabReliabilityRating
+        fields = ['id', 'ratee', 'rater', 'score', 'feedback', 'created_at', 'updated_at']
+
+class PostRatingSerializer(serializers.ModelSerializer):
+    rater = UserSerializer(read_only=True)
+    
+    class Meta:
+        model = PostRating
+        fields = ['id', 'post', 'rater', 'score', 'comment', 'is_helpful', 'helpful_count', 'created_at', 'updated_at']
+
+# --- Post Serializers ---
+class PostJoinSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+    
+    class Meta:
+        model = PostJoin
+        fields = ['id', 'post', 'user', 'status', 'created_at', 'updated_at']
+
+class PostSerializer(serializers.ModelSerializer):
+    author = UserSerializer(read_only=True)
+    ratings = PostRatingSerializer(many=True, read_only=True)
+    joins = PostJoinSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = Post
+        fields = ['id', 'title', 'content', 'author', 'post_type', 'visibility', 'ratings', 'joins', 'created_at', 'updated_at']
+
+# --- OCC Log Serializer ---
+class OCCLogSerializer(serializers.ModelSerializer):
+    editor = UserSerializer(read_only=True)
+    post = PostSerializer(read_only=True)
+    
+    class Meta:
+        model = OCCLog
+        fields = ['id', 'post', 'editor', 'old_title', 'new_title', 'old_content', 'new_content', 'version', 'change_summary', 'created_at']
+
+# --- VideoZ Serializers ---
+class VideoZTrackSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VideoZTrack
+        fields = ['id', 'videoz', 'track_type', 'name', 'order', 'file', 'start_time', 'duration', 'volume', 'is_visible', 'is_locked', 'created_at', 'updated_at']
+
+class VideoZSerializer(serializers.ModelSerializer):
+    owner = UserSerializer(read_only=True)
+    tracks = VideoZTrackSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = VideoZ
+        fields = ['id', 'owner', 'title', 'description', 'duration_seconds', 'fps', 'resolution', 'is_published', 'is_public', 'thumbnail', 'video_file', 'total_collaborators', 'view_count', 'tracks', 'created_at', 'updated_at']
+
+# --- BugZ Serializers ---
+class BugZCommentSerializer(serializers.ModelSerializer):
+    commenter = UserSerializer(read_only=True)
+    
+    class Meta:
+        model = BugZComment
+        fields = ['id', 'bug', 'commenter', 'comment', 'is_solution', 'upvote_count', 'created_at', 'updated_at']
+
+class BugZSerializer(serializers.ModelSerializer):
+    reporter = UserSerializer(read_only=True)
+    assigned_to = UserSerializer(read_only=True)
+    comments = BugZCommentSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = BugZ
+        fields = ['id', 'reporter', 'assigned_to', 'title', 'description', 'screenshot', 'reproduction_steps', 'expected_behavior', 'actual_behavior', 'status', 'priority', 'feature_affected', 'browser', 'os', 'app_version', 'upvote_count', 'resolution_notes', 'resolved_at', 'comments', 'created_at', 'updated_at']
+
+# --- Weekly Promotion Serializers ---
+class WeeklyPromotionTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WeeklyPromotionTemplate
+        fields = ['id', 'template_key', 'title', 'description', 'target_feature', 'interest_tags_json', 'discount_percent', 'is_active', 'created_at', 'updated_at']
+
+class UserWeeklyPromotionSerializer(serializers.ModelSerializer):
+    template = WeeklyPromotionTemplateSerializer(read_only=True)
+    
+    class Meta:
+        model = UserWeeklyPromotion
+        fields = ['id', 'user', 'template', 'week_start', 'week_end', 'promo_code', 'discount_percent', 'matched_interest', 'claimed', 'expires_at', 'created_at', 'updated_at']
