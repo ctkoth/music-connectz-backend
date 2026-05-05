@@ -1091,13 +1091,14 @@ class UserWeeklyPromotion(models.Model):
 
     def __str__(self):
         return f"{self.user.username} {self.promo_code} ({self.discount_percent}%)"
+
+
 # ============================================================================
-# MISSING MODELS - Add these to your models.py
+# MISSING MODELS (NEW - NOT IN ORIGINAL FILE)
 # ============================================================================
 
 # --- User Profile (Extended User Data) ---
 class UserProfile(models.Model):
-    """Extended user profile with location, bio, and teacher status"""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     bio = models.TextField(blank=True, default='')
     location = models.CharField(max_length=255, blank=True, default='')
@@ -1112,12 +1113,11 @@ class UserProfile(models.Model):
         verbose_name_plural = 'User Profiles'
 
     def __str__(self):
-        return f"Profile: {self.user.username}"
+        return f'Profile: {self.user.username}'
 
 
 # --- Skill Model ---
 class Skill(models.Model):
-    """Individual skill that users can have"""
     name = models.CharField(max_length=128, unique=True)
     category = models.CharField(max_length=64, blank=True, default='')
     description = models.TextField(blank=True, default='')
@@ -1129,14 +1129,13 @@ class Skill(models.Model):
         ordering = ['name']
 
     def __str__(self):
-        return f"Skill: {self.name}"
+        return f'Skill: {self.name}'
 
 
-# --- Persona Model (User Skill Combinations) ---
+# --- Persona Model ---
 class Persona(models.Model):
-    """User personas representing different skill combinations"""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='personas')
-    name = models.CharField(max_length=255)  # e.g., "Producer", "Singer", "DJ"
+    name = models.CharField(max_length=255)
     description = models.TextField(blank=True, default='')
     skills = models.ManyToManyField(Skill, related_name='personas', blank=True)
     hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -1149,15 +1148,14 @@ class Persona(models.Model):
         ordering = ['-is_active', 'name']
 
     def __str__(self):
-        return f"{self.user.username} → {self.name}"
+        return f'{self.user.username} → {self.name}'
 
 
 # --- Collaboration Reliability Rating ---
 class CollabReliabilityRating(models.Model):
-    """Rating for user reliability in collaborations"""
     ratee = models.ForeignKey(User, on_delete=models.CASCADE, related_name='received_reliability_ratings')
     rater = models.ForeignKey(User, on_delete=models.CASCADE, related_name='given_reliability_ratings')
-    score = models.PositiveSmallIntegerField(default=5)  # 0-10 scale
+    score = models.PositiveSmallIntegerField(default=5)
     feedback = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1167,15 +1165,14 @@ class CollabReliabilityRating(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        return f"Reliability {self.score}/10: {self.rater.username} → {self.ratee.username}"
+        return f'Reliability {self.score}/10: {self.rater.username} → {self.ratee.username}'
 
 
-# --- Post Rating Model (RateZ) ---
+# --- Post Rating Model ---
 class PostRating(models.Model):
-    """Rating/review for a post"""
     post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='ratings')
     rater = models.ForeignKey(User, on_delete=models.CASCADE, related_name='post_ratings_given')
-    score = models.PositiveSmallIntegerField(default=5)  # 0-10 scale
+    score = models.PositiveSmallIntegerField(default=5)
     comment = models.TextField(blank=True, default='')
     is_helpful = models.BooleanField(default=False)
     helpful_count = models.PositiveIntegerField(default=0)
@@ -1190,12 +1187,11 @@ class PostRating(models.Model):
         ]
 
     def __str__(self):
-        return f"Rating {self.score}/10 on {self.post.title} by {self.rater.username}"
+        return f'Rating {self.score}/10 on {self.post.title} by {self.rater.username}'
 
 
-# --- OCCLog Model (Optimistic Concurrency Control Log) ---
+# --- OCCLog Model ---
 class OCCLog(models.Model):
-    """Log for optimistic concurrency control on post edits"""
     post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='occ_logs')
     editor = models.ForeignKey(User, on_delete=models.CASCADE, related_name='edited_posts_log')
     old_title = models.CharField(max_length=255, blank=True, default='')
@@ -1213,18 +1209,17 @@ class OCCLog(models.Model):
         ]
 
     def __str__(self):
-        return f"OCC Log v{self.version} on {self.post.title} by {self.editor.username}"
+        return f'OCC Log v{self.version} on {self.post.title} by {self.editor.username}'
 
 
-# --- VideoZ Model (Multi-track Video Editor) ---
+# --- VideoZ Model ---
 class VideoZ(models.Model):
-    """Multi-track video editor project"""
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='videoz_projects')
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True, default='')
-    duration_seconds = models.PositiveIntegerField(default=0)  # Total video duration
-    fps = models.PositiveSmallIntegerField(default=30)  # Frames per second
-    resolution = models.CharField(max_length=32, default='1920x1080')  # e.g., "1920x1080"
+    duration_seconds = models.PositiveIntegerField(default=0)
+    fps = models.PositiveSmallIntegerField(default=30)
+    resolution = models.CharField(max_length=32, default='1920x1080')
     is_published = models.BooleanField(default=False)
     is_public = models.BooleanField(default=False)
     thumbnail = models.ImageField(upload_to='videoz_thumbnails/', blank=True, null=True)
@@ -1241,12 +1236,11 @@ class VideoZ(models.Model):
         ]
 
     def __str__(self):
-        return f"VideoZ: {self.title} ({self.duration_seconds}s)"
+        return f'VideoZ: {self.title} ({self.duration_seconds}s)'
 
 
-# --- VideoZ Track (Multi-track support) ---
+# --- VideoZ Track ---
 class VideoZTrack(models.Model):
-    """Individual track in a VideoZ project (video, audio, text, etc.)"""
     TRACK_TYPE_CHOICES = [
         ('video', 'Video'),
         ('audio', 'Audio'),
@@ -1257,12 +1251,12 @@ class VideoZTrack(models.Model):
 
     videoz = models.ForeignKey(VideoZ, on_delete=models.CASCADE, related_name='tracks')
     track_type = models.CharField(max_length=16, choices=TRACK_TYPE_CHOICES)
-    name = models.CharField(max_length=255)  # e.g., "Vocal Track", "Background Music"
-    order = models.PositiveSmallIntegerField(default=0)  # Track order in editor
+    name = models.CharField(max_length=255)
+    order = models.PositiveSmallIntegerField(default=0)
     file = models.FileField(upload_to='videoz_tracks/', blank=True, null=True)
-    start_time = models.PositiveIntegerField(default=0)  # In milliseconds
-    duration = models.PositiveIntegerField(default=0)  # In milliseconds
-    volume = models.DecimalField(max_digits=3, decimal_places=2, default=1.0)  # 0.0 to 1.0
+    start_time = models.PositiveIntegerField(default=0)
+    duration = models.PositiveIntegerField(default=0)
+    volume = models.DecimalField(max_digits=3, decimal_places=2, default=1.0)
     is_visible = models.BooleanField(default=True)
     is_locked = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -1273,12 +1267,11 @@ class VideoZTrack(models.Model):
         ordering = ['order']
 
     def __str__(self):
-        return f"Track: {self.name} ({self.track_type})"
+        return f'Track: {self.name} ({self.track_type})'
 
 
-# --- BugZ Model (Bug Reporting System) ---
+# --- BugZ Model ---
 class BugZ(models.Model):
-    """Bug report for Music ConnectZ platform"""
     STATUS_CHOICES = [
         ('open', 'Open'),
         ('in_progress', 'In Progress'),
@@ -1304,7 +1297,7 @@ class BugZ(models.Model):
     actual_behavior = models.TextField(blank=True, default='')
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='open')
     priority = models.CharField(max_length=16, choices=PRIORITY_CHOICES, default='medium')
-    feature_affected = models.CharField(max_length=255, blank=True, default='')  # e.g., "PostZ", "VideoZ"
+    feature_affected = models.CharField(max_length=255, blank=True, default='')
     browser = models.CharField(max_length=64, blank=True, default='')
     os = models.CharField(max_length=64, blank=True, default='')
     app_version = models.CharField(max_length=32, blank=True, default='')
@@ -1322,16 +1315,15 @@ class BugZ(models.Model):
         ]
 
     def __str__(self):
-        return f"BugZ #{self.id}: {self.title} ({self.status})"
+        return f'BugZ #{self.id}: {self.title} ({self.status})'
 
 
-# --- BugZ Comment (Discussion on bugs) ---
+# --- BugZ Comment ---
 class BugZComment(models.Model):
-    """Comment on a bug report"""
     bug = models.ForeignKey(BugZ, on_delete=models.CASCADE, related_name='comments')
     commenter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='bug_comments')
     comment = models.TextField()
-    is_solution = models.BooleanField(default=False)  # Mark as solution
+    is_solution = models.BooleanField(default=False)
     upvote_count = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1340,34 +1332,5 @@ class BugZComment(models.Model):
         ordering = ['-is_solution', '-upvote_count', '-created_at']
 
     def __str__(self):
-        return f"Comment by {self.commenter.username} on BugZ #{self.bug.id}"
+        return f'Comment by {self.commenter.username} on BugZ #{self.bug.id}'
 
-
-# --- OCC Log (Alternative - Optimistic Concurrency Control) for all models ---
-class OptimisticConcurrencyControl(models.Model):
-    """Generic OCC log for tracking version conflicts"""
-    ENTITY_TYPE_CHOICES = [
-        ('post', 'Post'),
-        ('release', 'Release'),
-        ('track', 'Track'),
-        ('agreement', 'Agreement'),
-        ('videoz', 'VideoZ'),
-    ]
-
-    entity_type = models.CharField(max_length=32, choices=ENTITY_TYPE_CHOICES)
-    entity_id = models.PositiveIntegerField()
-    editor = models.ForeignKey(User, on_delete=models.CASCADE, related_name='occ_edits')
-    version = models.PositiveIntegerField()
-    change_data = models.JSONField(default=dict, blank=True)
-    conflict_detected = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ('entity_type', 'entity_id', 'version')
-        ordering = ['-created_at']
-        indexes = [
-            models.Index(fields=['entity_type', 'entity_id']),
-        ]
-
-    def __str__(self):
-        return f"OCC v{self.version}: {self.entity_type} #{self.entity_id}"
