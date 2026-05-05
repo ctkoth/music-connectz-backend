@@ -1,6 +1,109 @@
+# ============================================================================
+# ORGANIZED IMPORTS - All imports moved to top
+# ============================================================================
+
+# === STANDARD LIBRARY ===
+from allauth.socialaccount.models import SocialAccount
+from allauth.socialaccount.models import SocialApp
+from datetime import timedelta
+from decimal import Decimal
+from io import BytesIO
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+import csv
+import hashlib
+import hmac
+import json
+import openai
+import os
+import random
+import re as _re
+import requests
+
+# === DJANGO ===
+from django.conf import settings
+from django.contrib.auth import authenticate, login as auth_login
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import User
+from django.core import serializers as dj_serializers
+from django.core.mail import send_mail
+from django.db import transaction
+from django.db.models import Avg, Count
+from django.http import HttpResponse
+from django.http import HttpResponse, Http404
+from django.http import JsonResponse
+from django.shortcuts import render
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
+
+# === DJANGO REST FRAMEWORK ===
+from rest_framework import permissions
+from rest_framework import status
 from rest_framework import viewsets, permissions
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, authentication_classes
+from rest_framework.parsers import JSONParser
+from rest_framework.permissions import AllowAny
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+# === LOCAL MODELS & SERIALIZERS ===
+from .models import Agreement, AgreementSignature, RoyaltySplit, RoyaltyPayment
+from .models import AuthAuditLog, SiteAnalytics, VisitorRecord, UserProfile, Referral
+from .models import AuthAuditLog, UserPremiumFeature
+from .models import CollabReliabilityRating
+from .models import CollabReliabilityRating, CollabReview, Post
+from .models import CollabReliabilityRating, UserProfile
+from .models import CollabRoyaltyAgreement, CollabRoyaltySplit
+from .models import CollabRoyaltyAgreement, CollabRoyaltySplit, AgreementTemplate, AgreementChangeLog
+from .models import CollabRoyaltySplit, ReleaseContributor
+from .models import CollabRoyaltySplit, ReleaseRoyaltySplit
+from .models import ContributorEarnings
+from .models import DistributionAccount
+from .models import DistributionEvent, DistributionJob, Release
+from .models import PaymentLog
+from .models import Persona
 from .models import Post, PostRating, PostJoin, OCCLog
+from .models import PremiumBundle
+from .models import PremiumFeature
+from .models import PremiumFeature, UserPremiumFeature
+from .models import PremiumFeature, UserPremiumFeature, UserInterest, UserWeeklyPromotion
+from .models import Release
+from .models import Release, ContributorEarnings
+from .models import Release, DistributionJob
+from .models import Release, ReleaseAnalytics
+from .models import Release, ReleaseContributor
+from .models import Release, Track
+from .models import Release, Track, TrackAnalytics
+from .models import Skill, Persona, CollabReliabilityRating
+from .models import UserInterest
+from .models import UserInterest, UserPremiumFeature, WeeklyPromotionTemplate, UserWeeklyPromotion
+from .models import UserPremiumFeature
+from .models import UserWeeklyPromotion
+from .paymentlog_serializer import PaymentLogSerializer
+from .serializers import (
+from .serializers import AgreementTemplateSerializer, CollabRoyaltyAgreementSerializer, AgreementChangeLogSerializer, CollabRoyaltySplitSerializer
+from .serializers import CollabReliabilityRatingSerializer, CollabReviewSerializer, PostSerializer
+from .serializers import ContributorEarningsSerializer
+from .serializers import DistributionAccountSerializer
 from .serializers import PostSerializer, PostRatingSerializer, PostJoinSerializer, OCCLogSerializer
+from .serializers import PremiumBundleSerializer
+from .serializers import PremiumFeatureSerializer
+from .serializers import RegisterSerializer, UserProfileSerializer, ReferralSerializer
+from .serializers import ReleaseAnalyticsSerializer
+from .serializers import ReleaseContributorSerializer
+from .serializers import ReleaseSerializer
+from .serializers import TrackAnalyticsSerializer
+from .serializers import TrackSerializer
+from .serializers import UserInterestSerializer
+from .serializers import UserPremiumFeatureSerializer
+from .serializers import UserWeeklyPromotionSerializer
+
+# ============================================================================
 
 # PostZ CRUD
 class PostViewSet(viewsets.ModelViewSet):
@@ -25,8 +128,6 @@ class OCCLogViewSet(viewsets.ModelViewSet):
     queryset = OCCLog.objects.all().order_by('-created_at')
     serializer_class = OCCLogSerializer
     permission_classes = [permissions.IsAuthenticated]
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
 
 # --- Public API: App Version ---
 @api_view(['GET'])
@@ -36,9 +137,6 @@ def app_version(request):
         "version": "v15.6",
         "deployed": "2026-04-06"
     })
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from django.db.models import Avg, Count
 
 # --- Corey Quantifiable Feedback & Suggestions API (v14.5) ---
 @api_view(['GET'])
@@ -49,7 +147,6 @@ def corey_feedback_and_suggestions(request):
     For high-rated users, recommends becoming a teacher and provides instructions.
     """
     user = request.user
-    from .models import CollabReliabilityRating, UserProfile
     avg_rating = CollabReliabilityRating.objects.filter(ratee=user).aggregate(avg=Avg('score'))['avg'] or 0
     feedback = f"Your average rating is {avg_rating:.2f} out of 10."
     suggestions = []
@@ -112,14 +209,12 @@ def corey_feedback_and_suggestions(request):
         'teacher_recommendations': teacher_recommendations,
         'become_teacher': become_teacher,
     })
-from django.contrib.auth import get_user_model
 
 # --- Corey Voice Utility ---
 def get_corey_voice_for_user(user):
     """
     Returns Corey-voice style: playful/flirtatious if avg rating >=5, else normal Corey-voice.
     """
-    from .models import CollabReliabilityRating
     avg_rating = CollabReliabilityRating.objects.filter(ratee=user).aggregate(avg=Avg('score'))['avg'] or 0
     if avg_rating >= 5:
         # Flirty/playful Corey-voice
@@ -140,7 +235,6 @@ def user_personas(request):
     """
     List all personas for the authenticated user, including their skills.
     """
-    from .models import Persona
     personas = Persona.objects.filter(user=request.user).prefetch_related('skills')
     data = []
     for persona in personas:
@@ -150,7 +244,6 @@ def user_personas(request):
             'skills': [s.name for s in persona.skills.all()],
         })
     return Response(data)
-from django.db.models import Avg, Count
 # --- AI Price Suggestion API ---
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -158,7 +251,6 @@ def ai_suggest_skill_prices(request):
     """
     Suggest skill prices for the authenticated user based on their ratings, reviews, and demand.
     """
-    from .models import Skill, Persona, CollabReliabilityRating
     user = request.user
     # For each skill the user has, calculate average reliability rating and demand (number of collabs)
     personas = Persona.objects.filter(user=user).prefetch_related('skills')
@@ -198,17 +290,11 @@ def user_contributor_earnings(request):
     """
     List all ContributorEarnings records for the authenticated user (as participant).
     """
-    from .models import ContributorEarnings
-    from .serializers import ContributorEarningsSerializer
     earnings = ContributorEarnings.objects.filter(participant=request.user).order_by('-created_at')
     serializer = ContributorEarningsSerializer(earnings, many=True)
     return Response(serializer.data)
-from .paymentlog_serializer import PaymentLogSerializer
 
 # --- User Payment Log API ---
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -216,14 +302,10 @@ def user_payment_logs(request):
     """
     List all payment transactions for the authenticated user.
     """
-    from .models import PaymentLog
     logs = PaymentLog.objects.filter(user=request.user).order_by('-created_at')
     serializer = PaymentLogSerializer(logs, many=True)
     return Response(serializer.data)
-import json
-import requests
 # --- PayPal Webhook Endpoint ---
-from django.views.decorators.csrf import csrf_exempt
 
 @csrf_exempt
 @api_view(['POST'])
@@ -252,7 +334,6 @@ def paypal_webhook(request):
             custom_id = order_info['purchase_units'][0].get('custom_id')
             if not custom_id:
                 return JsonResponse({'error': 'No custom_id in order'}, status=400)
-            from django.contrib.auth import get_user_model
             User = get_user_model()
             user = User.objects.get(id=custom_id)
         except Exception:
@@ -263,7 +344,6 @@ def paypal_webhook(request):
             userprofile.is_premium = True
             userprofile.save(update_fields=['is_premium'])
         # Log transaction for auditing
-        from .models import PaymentLog
         try:
             PaymentLog.objects.create(
                 user=user,
@@ -299,20 +379,9 @@ def get_paypal_order_info(order_id, access_token):
     if resp.status_code == 200:
         return resp.json()
     return None
-from django.shortcuts import render
-from django.conf import settings
-from django.contrib.auth import authenticate, login as auth_login
-import os
-import re as _re
-import openai
-from django.views.decorators.csrf import csrf_exempt
-from django.http import JsonResponse
 
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
 
 # Add missing User import
-from django.contrib.auth.models import User
 
 # --- OpenAI Chat API Endpoint ---
 @csrf_exempt
@@ -338,10 +407,7 @@ def openai_chat(request):
         return JsonResponse({'reply': reply})
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
-from .models import CollabReliabilityRating, CollabReview, Post
-from .serializers import CollabReliabilityRatingSerializer, CollabReviewSerializer, PostSerializer
 # --- Post API Endpoints ---
-from rest_framework.permissions import IsAuthenticated
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -415,13 +481,10 @@ def download_post(request, post_id):
     if not post.is_public and (not request.user.is_authenticated or post.author != request.user):
         return JsonResponse({'error': 'Not authorized.'}, status=403)
     content = f"Title: {post.title}\nType: {post.post_type}\nAuthor: {post.author.username}\n\n{post.content}"
-    from django.http import HttpResponse
     response = HttpResponse(content, content_type='text/plain')
     response['Content-Disposition'] = f'attachment; filename=post_{post.id}.txt'
     return response
 # --- Reliability Rating API ---
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.decorators import api_view, permission_classes
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -498,11 +561,8 @@ def get_shared_reviews_for_user(request, user_id):
     """
     reviews = CollabReview.objects.filter(reviewee_id=user_id, is_shared=True)
     return Response(CollabReviewSerializer(reviews, many=True).data)
-import requests
 
 # --- LibreTranslate API Integration ---
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def translate_text(request):
@@ -532,13 +592,6 @@ def translate_text(request):
         return JsonResponse({'translated': translated})
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
-from .serializers import AgreementTemplateSerializer, CollabRoyaltyAgreementSerializer, AgreementChangeLogSerializer, CollabRoyaltySplitSerializer
-from rest_framework.parsers import JSONParser
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.core import serializers as dj_serializers
-import csv
-import json
 
 # --- Agreement Template Endpoints ---
 @api_view(['GET'])
@@ -636,14 +689,15 @@ def export_agreement_csv(request, agreement_id):
 def send_agreement_reminder(request, agreement_id):
     # Stub: In production, send email notifications to unsigned participants
     return Response({'success': 'Reminder sent (stub).'}, status=200)
-from django.http import HttpResponse, Http404
-from .models import CollabRoyaltyAgreement, CollabRoyaltySplit, AgreementTemplate, AgreementChangeLog
-from django.utils import timezone
-from io import BytesIO
 # --- Royalty Agreement PDF Download Endpoint ---
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def download_royalty_agreement_pdf(request, agreement_id):
+    # Import PDF dependencies lazily so missing/broken ReportLab does not break app startup.
+    try:
+    except Exception:
+        return Response({'error': 'PDF generation is temporarily unavailable.'}, status=503)
+
     try:
         agreement = CollabRoyaltyAgreement.objects.get(id=agreement_id)
     except CollabRoyaltyAgreement.DoesNotExist:
@@ -699,30 +753,20 @@ def download_royalty_agreement_pdf(request, agreement_id):
     response = HttpResponse(buffer, content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="royalty_agreement_{agreement.id}.pdf"'
     return response
-import os
-import requests
-import random
-from datetime import timedelta
 
-from allauth.socialaccount.models import SocialApp
-from allauth.socialaccount.models import SocialAccount
-from django.db import transaction
-from django.core.mail import send_mail
-from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes, authentication_classes
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-from rest_framework.authentication import SessionAuthentication
-from .models import AuthAuditLog, SiteAnalytics, VisitorRecord, UserProfile, Referral
-from .serializers import RegisterSerializer, UserProfileSerializer, ReferralSerializer
 # --- Referral System API Endpoints ---
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.views import APIView
 
 
 class CsrfExemptSessionAuthentication(SessionAuthentication):
     def enforce_csrf(self, request):
         return
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+@ensure_csrf_cookie
+def auth_csrf(request):
+    return Response({'success': True, 'message': 'CSRF cookie set.'})
 
 
 def _request_ip(request):
@@ -746,6 +790,15 @@ def _record_auth_event(request, *, event, outcome, user=None, identifier='', pro
     except Exception:
         pass
 
+
+def _safe_auth_login(request, user):
+    """Best-effort session login. Registration must not fail if session write fails."""
+    try:
+        auth_login(request, user)
+        return True
+    except Exception:
+        return False
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def referral_stats(request):
@@ -764,11 +817,13 @@ def referral_stats(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@authentication_classes([CsrfExemptSessionAuthentication])
 def register_with_referral(request):
     referral_code = request.data.get('referral_code')
     serializer = RegisterSerializer(data=request.data)
     if serializer.is_valid():
         user = serializer.save()
+        _safe_auth_login(request, user)
         if referral_code:
             try:
                 referrer_profile = UserProfile.objects.get(referral_code=referral_code)
@@ -798,10 +853,12 @@ def register_with_referral(request):
 # API endpoint for user registration
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@authentication_classes([CsrfExemptSessionAuthentication])
 def api_register(request):
     serializer = RegisterSerializer(data=request.data)
     if serializer.is_valid():
         user = serializer.save()
+        _safe_auth_login(request, user)
         _record_auth_event(
             request,
             event='register',
@@ -829,9 +886,11 @@ def api_register(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@authentication_classes([CsrfExemptSessionAuthentication])
 def api_login(request):
     identifier = (request.data.get('identifier') or request.data.get('email') or '').strip()
-    password = (request.data.get('password') or '').strip()
+    # Preserve the exact password value; trimming can break valid credentials.
+    password = request.data.get('password') or ''
 
     if not identifier or not password:
         _record_auth_event(
@@ -844,6 +903,10 @@ def api_login(request):
         return Response({'error': 'Identifier and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
     user = None
+
+    def _normalize_phone(value):
+        return ''.join(ch for ch in str(value or '') if ch.isdigit())
+
     # Try email lookup
     if '@' in identifier:
         try:
@@ -851,16 +914,24 @@ def api_login(request):
             user = authenticate(request, username=u.username, password=password)
         except User.DoesNotExist:
             pass
+
     # Try phone lookup
     if user is None and _re.match(r'^\+?\d[\d\s\-(). ]{5,}$', identifier):
-        try:
-            prof = UserProfile.objects.get(phone_number=identifier)
-            user = authenticate(request, username=prof.user.username, password=password)
-        except UserProfile.DoesNotExist:
-            pass
+        normalized_input = _normalize_phone(identifier)
+        profiles = UserProfile.objects.exclude(phone_number='').select_related('user')
+        for prof in profiles:
+            if _normalize_phone(prof.phone_number) == normalized_input:
+                user = authenticate(request, username=prof.user.username, password=password)
+                if user is not None:
+                    break
+
     # Try username lookup
     if user is None:
         user = authenticate(request, username=identifier, password=password)
+    if user is None:
+        u = User.objects.filter(username__iexact=identifier).first()
+        if u is not None:
+            user = authenticate(request, username=u.username, password=password)
 
     if user is None:
         _record_auth_event(
@@ -871,6 +942,17 @@ def api_login(request):
             details={'reason': 'invalid_credentials'},
         )
         return Response({'error': 'Invalid credentials.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    if not user.is_active:
+        _record_auth_event(
+            request,
+            event='login',
+            outcome='failure',
+            user=user,
+            identifier=identifier,
+            details={'reason': 'inactive_account'},
+        )
+        return Response({'error': 'Account is inactive.'}, status=status.HTTP_403_FORBIDDEN)
 
     auth_login(request, user)
     profile = UserProfile.objects.filter(user=user).first()
@@ -1031,9 +1113,10 @@ def update_notification_settings(request):
     return Response({'success': True, 'settings': _notification_settings_payload(profile)})
 
 
-from django.http import JsonResponse
 
 
+@api_view(['GET'])
+@permission_classes([AllowAny])
 def api_auth_me(request):
     user = getattr(request, 'user', None)
     if user and user.is_authenticated:
@@ -1056,7 +1139,7 @@ def api_auth_me(request):
             }
 
         profile_completed = bool((user.username or '').strip() and (user.email or '').strip() and phone_number)
-        return JsonResponse({
+        return Response({
             'authenticated': True,
             'user': {
                 'id': user.id,
@@ -1069,7 +1152,7 @@ def api_auth_me(request):
                 'notification_settings': notification_settings,
             }
         })
-    return JsonResponse({'authenticated': False}, status=401)
+    return Response({'authenticated': False}, status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])
@@ -1191,9 +1274,13 @@ def oauth_providers_status(request):
         'linkedin': 'linkedin_oauth2',
         'github': 'github',
         'google': 'google',
+        'amazon': 'amazon',
+        'discogs': 'discogs',
+        'patreon': 'patreon',
         'spotify': 'spotify',
         'soundcloud': 'soundcloud',
         'tiktok': 'tiktok',
+        'twitch': 'twitch',
     }
 
     socialaccount_settings = getattr(settings, 'SOCIALACCOUNT_PROVIDERS', {})
@@ -1383,6 +1470,20 @@ def _resolve_subscription_price_id(requested_price_id, billing_period, plan_type
     return os.environ.get(env_key, '').strip()
 
 
+def _payload_first(payload, *keys, default=None):
+    for key in keys:
+        if key in payload and payload.get(key) not in (None, ''):
+            return payload.get(key)
+    return default
+
+
+def _normalize_billing_period(value):
+    period = str(value or 'monthly').strip().lower()
+    if period in ('year', 'annual', 'annually', 'yearly'):
+        return 'yearly'
+    return 'monthly'
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def create_subscription_checkout(request):
@@ -1505,3 +1606,1439 @@ def cancel_subscription(request):
 def use_collaboration_request(request):
     # Temporary permissive implementation until per-user quota persistence is added.
     return Response({'ok': True, 'remaining': -1})
+
+
+def _release_validation_errors(release):
+    errors = {}
+    if not (release.title or '').strip():
+        errors['title'] = 'Release title is required.'
+    if not (release.primary_artist or '').strip():
+        errors['primary_artist'] = 'Primary artist is required.'
+    if not release.cover_art_file:
+        errors['cover_art_file'] = 'Cover art is required.'
+    if release.tracks.count() == 0:
+        errors['tracks'] = 'At least one track is required.'
+    else:
+        for track in release.tracks.all():
+            if not (track.title or '').strip():
+                errors[f'track_{track.id}_title'] = 'Track title is required.'
+            if not track.audio_file:
+                errors[f'track_{track.id}_audio_file'] = 'Track audio file is required.'
+    return errors
+
+
+def _parse_webhook_event_time(raw_value):
+
+    value = str(raw_value or '').strip()
+    if not value:
+        return timezone.now()
+    parsed = parse_datetime(value)
+    if parsed is None:
+        return timezone.now()
+    if timezone.is_naive(parsed):
+        try:
+            return timezone.make_aware(parsed)
+        except Exception:
+            return timezone.now()
+    return parsed
+
+
+def _normalize_release_status_from_event(event_type, provider_status):
+    et = str(event_type or '').strip().lower()
+    ps = str(provider_status or '').strip().lower()
+    source = f"{et} {ps}".strip()
+
+    if any(token in source for token in ['failed', 'rejected', 'error', 'declined']):
+        return 'failed'
+    if any(token in source for token in ['delivered', 'live', 'published', 'active']):
+        return 'delivered'
+    if any(token in source for token in ['processing', 'queued', 'ingest', 'pending', 'review']):
+        return 'processing'
+    if any(token in source for token in ['submitted', 'received']):
+        return 'submitted'
+    return ''
+
+
+def _normalize_release_submission_field_payload(payload):
+    editable_fields = {
+        'title',
+        'version_title',
+        'primary_artist',
+        'release_type',
+        'genre',
+        'language',
+        'explicit',
+        'upc',
+        'planned_release_date',
+        'original_release_date',
+    }
+
+    cleaned = {}
+    for key in editable_fields:
+        if key not in payload:
+            continue
+        value = payload.get(key)
+        if key in {'title', 'version_title', 'primary_artist', 'genre', 'upc'}:
+            cleaned[key] = str(value or '').strip()
+        elif key == 'language':
+            cleaned[key] = str(value or '').strip().lower()[:32]
+        elif key == 'release_type':
+            cleaned[key] = str(value or '').strip().lower()
+        else:
+            cleaned[key] = value
+    return cleaned
+
+
+def _env_flag(name, default=False):
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _user_has_distribution_premium(user):
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_staff or user.is_superuser:
+        return True
+
+    if getattr(settings, 'DISTRIBUTION_PREMIUM_ENFORCED', True) is False:
+        return True
+
+    if _env_flag('DISTRIBUTION_PREMIUM_ENFORCED', True) is False:
+        return True
+
+    allow_usernames = {
+        x.strip().lower()
+        for x in str(os.environ.get('DISTRIBUTION_PREMIUM_ALLOW_USERNAMES', '')).split(',')
+        if x.strip()
+    }
+    allow_user_ids = {
+        x.strip()
+        for x in str(os.environ.get('DISTRIBUTION_PREMIUM_ALLOW_USER_IDS', '')).split(',')
+        if x.strip()
+    }
+
+    if str(user.username).strip().lower() in allow_usernames:
+        return True
+    if str(user.id) in allow_user_ids:
+        return True
+
+    profile = getattr(user, 'userprofile', None)
+    if profile is not None and hasattr(profile, 'is_premium') and bool(profile.is_premium):
+        return True
+
+    return False
+
+
+def _user_has_feature(user, feature_key):
+    """Check if user has access to a specific premium feature."""
+    if not user or not user.is_authenticated:
+        return False
+    
+    # Staff/superuser always have access
+    if user.is_staff or user.is_superuser:
+        return True
+    
+    # Check if full premium is enabled
+    if _user_has_distribution_premium(user):
+        return True
+    
+    # Check for specific feature subscription
+    subscription = UserPremiumFeature.objects.filter(
+        user=user,
+        feature__feature_key=feature_key,
+    ).first()
+    
+    if subscription and subscription.is_active_now():
+        return True
+    
+    return False
+
+
+def _get_user_collab_agreement(user, agreement_id):
+
+    if not agreement_id:
+        return None
+
+    agreement = CollabRoyaltyAgreement.objects.filter(id=agreement_id).first()
+    if not agreement:
+        return None
+
+    is_creator = agreement.created_by_id == user.id
+    is_participant = CollabRoyaltySplit.objects.filter(agreement=agreement, participant=user).exists()
+    if not (is_creator or is_participant):
+        return None
+    return agreement
+
+
+def _apply_collab_royalties_to_release(release):
+
+    if not release.collab_agreement or not release.auto_apply_collab_royalties:
+        return []
+
+    agreement_splits = list(
+        CollabRoyaltySplit.objects.filter(agreement=release.collab_agreement).select_related('participant')
+    )
+    if not agreement_splits:
+        return []
+
+    ReleaseRoyaltySplit.objects.filter(release=release).delete()
+    created = []
+    for split in agreement_splits:
+        created.append(
+            ReleaseRoyaltySplit.objects.create(
+                release=release,
+                participant=split.participant,
+                percentage=split.percentage,
+                source='agreement',
+                agreement_split=split,
+            )
+        )
+    return created
+
+
+def _apply_collab_contributors_to_release(release):
+    """Auto-snapshot collaborators from agreement as contributors with their roles."""
+
+    if not release.collab_agreement or not release.auto_apply_collab_royalties:
+        return []
+
+    agreement_splits = list(
+        CollabRoyaltySplit.objects.filter(agreement=release.collab_agreement).select_related('participant')
+    )
+    if not agreement_splits:
+        return []
+
+    ReleaseContributor.objects.filter(release=release, source='agreement').delete()
+    created = []
+    for split in agreement_splits:
+        default_role = 'performer'
+        role_meta = getattr(split, 'role_metadata_json', {})
+        if isinstance(role_meta, dict):
+            role_meta = split.role_metadata_json if hasattr(split, 'role_metadata_json') else {}
+        role = str(role_meta.get('role')) if isinstance(role_meta, dict) else None
+        if not role or role not in dict(ReleaseContributor.ROLE_CHOICES):
+            role = default_role
+
+        created.append(
+            ReleaseContributor.objects.create(
+                release=release,
+                participant=split.participant,
+                role=role,
+                percentage=split.percentage,
+                source='agreement',
+                agreement_split=split,
+                notes=f'Auto-applied from collaboration agreement {release.collab_agreement_id}',
+            )
+        )
+    return created
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def list_distribution_accounts(request):
+
+    accounts = DistributionAccount.objects.filter(user=request.user).order_by('-updated_at')
+    return Response(DistributionAccountSerializer(accounts, many=True).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def connect_distribution_account(request):
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    provider = str(payload.get('provider') or '').strip()
+    if not provider:
+        return Response({'error': 'provider is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    external_id = str(payload.get('external_account_id') or '').strip()
+    scopes = str(payload.get('scopes_granted') or '').strip()
+    account, _ = DistributionAccount.objects.update_or_create(
+        user=request.user,
+        provider=provider,
+        external_account_id=external_id,
+        defaults={
+            'status': 'active',
+            'scopes_granted': scopes,
+        },
+    )
+    return Response(DistributionAccountSerializer(account).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_distribution_account(request, account_id):
+
+    account = DistributionAccount.objects.filter(id=account_id, user=request.user).first()
+    if not account:
+        return Response({'error': 'Distribution account not found.'}, status=status.HTTP_404_NOT_FOUND)
+    account.delete()
+    return Response({'success': True})
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def distribution_releases(request):
+
+    if request.method == 'GET':
+        releases = Release.objects.filter(user=request.user).order_by('-updated_at')
+        return Response(ReleaseSerializer(releases, many=True).data)
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    collab_agreement_id = payload.get('collab_agreement')
+    if collab_agreement_id:
+        agreement = _get_user_collab_agreement(request.user, collab_agreement_id)
+        if not agreement:
+            return Response({'error': 'Invalid collab agreement for this user.'}, status=status.HTTP_403_FORBIDDEN)
+
+    serializer = ReleaseSerializer(data=payload)
+    if serializer.is_valid():
+        release = serializer.save(user=request.user, status='draft')
+        return Response(ReleaseSerializer(release).data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def distribution_release_detail(request, release_id):
+
+    release = Release.objects.filter(id=release_id, user=request.user).first()
+    if not release:
+        return Response({'error': 'Release not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        return Response(ReleaseSerializer(release).data)
+
+    # For PATCH: Check if release is pending and user is not premium
+    pending_statuses = ['submitted', 'processing', 'delivered']
+    is_pending = release.status in pending_statuses
+    is_premium = _user_has_distribution_premium(request.user)
+
+    if is_pending and not is_premium:
+        return Response(
+            {
+                'error': 'Cannot edit pending releases without premium access.',
+                'requires_premium': True,
+                'release_status': release.status,
+            },
+            status=status.HTTP_402_PAYMENT_REQUIRED,
+        )
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    collab_agreement_id = payload.get('collab_agreement')
+    if collab_agreement_id:
+        agreement = _get_user_collab_agreement(request.user, collab_agreement_id)
+        if not agreement:
+            return Response({'error': 'Invalid collab agreement for this user.'}, status=status.HTTP_403_FORBIDDEN)
+
+    serializer = ReleaseSerializer(release, data=payload, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(ReleaseSerializer(release).data)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def distribution_release_submission_fields(request, release_id):
+
+    release = Release.objects.filter(id=release_id, user=request.user).first()
+    if not release:
+        return Response({'error': 'Release not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        return Response(
+            {
+                'release_id': release.id,
+                'editable_fields': [
+                    'title',
+                    'version_title',
+                    'primary_artist',
+                    'release_type',
+                    'genre',
+                    'language',
+                    'explicit',
+                    'upc',
+                    'planned_release_date',
+                    'original_release_date',
+                ],
+                'submission': {
+                    'title': release.title,
+                    'version_title': release.version_title,
+                    'primary_artist': release.primary_artist,
+                    'release_type': release.release_type,
+                    'genre': release.genre,
+                    'language': release.language,
+                    'explicit': release.explicit,
+                    'upc': release.upc,
+                    'planned_release_date': release.planned_release_date,
+                    'original_release_date': release.original_release_date,
+                },
+            }
+        )
+
+    pending_statuses = ['submitted', 'processing', 'delivered']
+    if release.status in pending_statuses and not _user_has_distribution_premium(request.user):
+        return Response(
+            {
+                'error': 'Cannot edit submitted release fields without premium access.',
+                'requires_premium': True,
+                'release_status': release.status,
+            },
+            status=status.HTTP_402_PAYMENT_REQUIRED,
+        )
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    cleaned_payload = _normalize_release_submission_field_payload(payload)
+    if not cleaned_payload:
+        return Response({'error': 'No editable submission fields were provided.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer = ReleaseSerializer(release, data=cleaned_payload, partial=True)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer.save()
+    DistributionJob.objects.create(
+        release=release,
+        provider=release.provider or 'generic_partner',
+        operation='update_release_fields',
+        request_payload_json=cleaned_payload,
+        response_payload_json={'release_status': release.status},
+        status='succeeded',
+    )
+    return Response({'success': True, 'release': ReleaseSerializer(release).data})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def distribution_release_tracks(request, release_id):
+
+    release = Release.objects.filter(id=release_id, user=request.user).first()
+    if not release:
+        return Response({'error': 'Release not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    pending_statuses = ['submitted', 'processing', 'delivered']
+    is_pending = release.status in pending_statuses
+    is_premium = _user_has_distribution_premium(request.user)
+
+    if is_pending and not is_premium:
+        return Response(
+            {
+                'error': 'Cannot add tracks to pending releases without premium access.',
+                'requires_premium': True,
+                'release_status': release.status,
+            },
+            status=status.HTTP_402_PAYMENT_REQUIRED,
+        )
+
+    serializer = TrackSerializer(data=request.data)
+    if serializer.is_valid():
+        track = serializer.save(release=release)
+        return Response(TrackSerializer(track).data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def distribution_release_track_detail(request, release_id, track_id):
+
+    release = Release.objects.filter(id=release_id, user=request.user).first()
+    if not release:
+        return Response({'error': 'Release not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    track = Track.objects.filter(id=track_id, release=release).first()
+    if not track:
+        return Response({'error': 'Track not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    pending_statuses = ['submitted', 'processing', 'delivered']
+    is_pending = release.status in pending_statuses
+    is_premium = _user_has_distribution_premium(request.user)
+
+    if is_pending and not is_premium:
+        return Response(
+            {
+                'error': 'Cannot edit tracks in pending releases without premium access.',
+                'requires_premium': True,
+                'release_status': release.status,
+            },
+            status=status.HTTP_402_PAYMENT_REQUIRED,
+        )
+
+    serializer = TrackSerializer(track, data=request.data, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(TrackSerializer(track).data)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def validate_distribution_release(request, release_id):
+
+    release = Release.objects.filter(id=release_id, user=request.user).first()
+    if not release:
+        return Response({'error': 'Release not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    errors = _release_validation_errors(release)
+    release.validation_errors_json = errors
+    release.save(update_fields=['validation_errors_json', 'updated_at'])
+    if errors:
+        return Response({'valid': False, 'errors': errors}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({'valid': True, 'errors': {}})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def submit_distribution_release(request, release_id):
+
+    release = Release.objects.filter(id=release_id, user=request.user).first()
+    if not release:
+        return Response({'error': 'Release not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if release.premium_required and not _user_has_distribution_premium(request.user):
+        return Response(
+            {
+                'error': 'Premium distribution is required to submit releases.',
+                'requires_premium': True,
+            },
+            status=status.HTTP_402_PAYMENT_REQUIRED,
+        )
+
+    if release.collab_agreement_id:
+        agreement = _get_user_collab_agreement(request.user, release.collab_agreement_id)
+        if not agreement:
+            return Response({'error': 'Invalid collab agreement for this user.'}, status=status.HTTP_403_FORBIDDEN)
+
+    errors = _release_validation_errors(release)
+    if release.collab_agreement_id and release.auto_apply_collab_royalties:
+        created_splits = _apply_collab_royalties_to_release(release)
+        if not created_splits:
+            errors['royalty_splits'] = 'No royalty splits found on linked collaboration agreement.'
+        created_contributors = _apply_collab_contributors_to_release(release)
+
+    release.validation_errors_json = errors
+    if errors:
+        release.status = 'failed'
+        release.save(update_fields=['validation_errors_json', 'status', 'updated_at'])
+        return Response({'error': 'Release validation failed.', 'validation_errors': errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    provider = str(payload.get('provider') or release.provider or 'generic_partner').strip()
+    provider_release_id = payload.get('provider_release_id') or f"local-{release.id}-{int(timezone.now().timestamp())}"
+
+    release.provider = provider
+    release.provider_release_id = str(provider_release_id)
+    release.status = 'submitted'
+    release.save(update_fields=['provider', 'provider_release_id', 'status', 'validation_errors_json', 'updated_at'])
+
+    contributors_by_role = {}
+    for contrib in release.contributors.select_related('participant').all().order_by('role', '-percentage'):
+        role = contrib.get_role_display()
+        if role not in contributors_by_role:
+            contributors_by_role[role] = []
+        contributors_by_role[role].append({
+            'participant_id': contrib.participant_id,
+            'participant_username': contrib.participant.username,
+            'percentage': str(contrib.percentage),
+            'source': contrib.source,
+        })
+
+    DistributionJob.objects.create(
+        release=release,
+        provider=provider,
+        operation='submit_release',
+        request_payload_json={
+            'release_id': release.id,
+            'collab_agreement_id': release.collab_agreement_id,
+            'royalty_splits': [
+                {
+                    'participant_id': s.participant_id,
+                    'percentage': str(s.percentage),
+                    'source': s.source,
+                }
+                for s in release.royalty_splits.all().order_by('-percentage', 'participant_id')
+            ],
+            'contributors': contributors_by_role,
+        },
+        response_payload_json={'provider_release_id': release.provider_release_id},
+        status='succeeded',
+    )
+
+    return Response({'success': True, 'release': ReleaseSerializer(release).data})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def distribution_release_status(request, release_id):
+
+    release = Release.objects.filter(id=release_id, user=request.user).first()
+    if not release:
+        return Response({'error': 'Release not found.'}, status=status.HTTP_404_NOT_FOUND)
+    return Response({
+        'release_id': release.id,
+        'status': release.status,
+        'provider': release.provider,
+        'provider_release_id': release.provider_release_id,
+        'collab_agreement_id': release.collab_agreement_id,
+        'premium_required': release.premium_required,
+        'royalty_splits': [
+            {
+                'participant_id': split.participant_id,
+                'participant_username': split.participant.username,
+                'percentage': str(split.percentage),
+                'source': split.source,
+            }
+            for split in release.royalty_splits.select_related('participant').all().order_by('-percentage', 'participant_id')
+        ],
+        'validation_errors': release.validation_errors_json,
+        'updated_at': release.updated_at,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def distribution_provider_webhook(request, provider):
+
+
+    provider_key = str(provider or '').strip().lower()
+    if provider_key not in {'ditto', 'generic_partner'}:
+        return Response({'error': 'Unsupported distribution provider.'}, status=status.HTTP_404_NOT_FOUND)
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    if not payload:
+        try:
+            payload = json.loads((request.body or b'{}').decode('utf-8'))
+        except Exception:
+            payload = {}
+
+    if provider_key == 'ditto':
+        signature = (
+            request.headers.get('X-Ditto-Signature')
+            or request.headers.get('X-DITTO-SIGNATURE')
+            or request.META.get('HTTP_X_DITTO_SIGNATURE')
+            or ''
+        ).strip()
+        secret = str(os.environ.get('DITTO_WEBHOOK_SECRET', '')).strip()
+        allow_unsigned = _env_flag('DITTO_WEBHOOK_ALLOW_UNSIGNED', default=False)
+
+        signature_valid = False
+        if secret and signature:
+            digest = hmac.new(secret.encode('utf-8'), request.body or b'', hashlib.sha256).hexdigest()
+            signature_valid = hmac.compare_digest(digest.lower(), signature.lower())
+        elif allow_unsigned:
+            signature_valid = True
+
+        if not signature_valid:
+            return Response({'error': 'Invalid webhook signature.'}, status=status.HTTP_401_UNAUTHORIZED)
+    else:
+        signature_valid = True
+
+    provider_release_id = str(
+        payload.get('provider_release_id')
+        or payload.get('release_id')
+        or payload.get('external_release_id')
+        or (payload.get('data') or {}).get('provider_release_id')
+        or (payload.get('data') or {}).get('release_id')
+        or ''
+    ).strip()
+
+    release = None
+    if provider_release_id:
+        release = Release.objects.filter(provider=provider_key, provider_release_id=provider_release_id).order_by('-id').first()
+
+    if release is None:
+        local_release_id = payload.get('local_release_id') or (payload.get('data') or {}).get('local_release_id')
+        if local_release_id:
+            release = Release.objects.filter(id=local_release_id).order_by('-id').first()
+
+    if release is None:
+        return Response({'error': 'Release not found for webhook payload.'}, status=status.HTTP_404_NOT_FOUND)
+
+    event_type = str(payload.get('event_type') or payload.get('type') or payload.get('event') or 'status_update').strip()[:64]
+    provider_status = str(payload.get('status') or (payload.get('data') or {}).get('status') or '').strip()
+    event_time = _parse_webhook_event_time(
+        payload.get('event_time')
+        or payload.get('occurred_at')
+        or payload.get('timestamp')
+        or (payload.get('data') or {}).get('event_time')
+    )
+
+    existing_event = DistributionEvent.objects.filter(
+        release=release,
+        provider=provider_key,
+        event_type=event_type,
+        event_time=event_time,
+    ).order_by('-id').first()
+    if existing_event and existing_event.payload_json == payload:
+        return Response({'success': True, 'duplicate': True, 'release_status': release.status})
+
+    event = DistributionEvent.objects.create(
+        release=release,
+        provider=provider_key,
+        event_type=event_type,
+        event_time=event_time,
+        payload_json=payload,
+        signature_valid=signature_valid,
+        processed=False,
+    )
+
+    normalized_status = _normalize_release_status_from_event(event_type, provider_status)
+    if normalized_status and normalized_status != release.status:
+        release.status = normalized_status
+        release.save(update_fields=['status', 'updated_at'])
+
+    event.processed = True
+    event.save(update_fields=['processed'])
+
+    DistributionJob.objects.create(
+        release=release,
+        provider=provider_key,
+        operation='webhook_event',
+        request_payload_json=payload,
+        response_payload_json={
+            'event_id': event.id,
+            'normalized_status': normalized_status or release.status,
+            'signature_valid': signature_valid,
+        },
+        status='succeeded',
+    )
+
+    return Response(
+        {
+            'success': True,
+            'event_id': event.id,
+            'release_id': release.id,
+            'release_status': release.status,
+        }
+    )
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def distribution_release_contributors(request, release_id):
+
+    release = Release.objects.filter(id=release_id, user=request.user).first()
+    if not release:
+        return Response({'error': 'Release not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        query = ReleaseContributor.objects.filter(release=release).select_related('participant')
+        role_filter = request.query_params.get('role')
+        if role_filter:
+            query = query.filter(role=role_filter)
+        contributors = query.order_by('role', '-percentage')
+        return Response(ReleaseContributorSerializer(contributors, many=True).data)
+
+    pending_statuses = ['submitted', 'processing', 'delivered']
+    is_pending = release.status in pending_statuses
+    is_premium = _user_has_distribution_premium(request.user)
+
+    if is_pending and not is_premium:
+        return Response(
+            {
+                'error': 'Cannot add contributors to pending releases without premium access.',
+                'requires_premium': True,
+                'release_status': release.status,
+            },
+            status=status.HTTP_402_PAYMENT_REQUIRED,
+        )
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    participant_id = payload.get('participant')
+    role = payload.get('role')
+    percentage = payload.get('percentage')
+
+    if not participant_id or not role or percentage is None:
+        return Response(
+            {'error': 'participant, role, and percentage are required.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        participant = User.objects.get(id=participant_id)
+    except User.DoesNotExist:
+        return Response({'error': 'Participant not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    contributor, created = ReleaseContributor.objects.update_or_create(
+        release=release,
+        participant=participant,
+        role=role,
+        defaults={
+            'percentage': percentage,
+            'source': 'manual',
+            'notes': payload.get('notes', ''),
+        },
+    )
+    status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    return Response(ReleaseContributorSerializer(contributor).data, status=status_code)
+
+
+@api_view(['GET', 'PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def distribution_release_contributor_detail(request, release_id, contributor_id):
+
+    release = Release.objects.filter(id=release_id, user=request.user).first()
+    if not release:
+        return Response({'error': 'Release not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    contributor = ReleaseContributor.objects.filter(id=contributor_id, release=release).first()
+    if not contributor:
+        return Response({'error': 'Contributor not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        return Response(ReleaseContributorSerializer(contributor).data)
+
+    pending_statuses = ['submitted', 'processing', 'delivered']
+    is_pending = release.status in pending_statuses
+    is_premium = _user_has_distribution_premium(request.user)
+
+    if is_pending and not is_premium:
+        return Response(
+            {
+                'error': 'Cannot edit or remove contributors from pending releases without premium access.',
+                'requires_premium': True,
+                'release_status': release.status,
+            },
+            status=status.HTTP_402_PAYMENT_REQUIRED,
+        )
+
+    if request.method == 'DELETE':
+        contributor.delete()
+        return Response({'success': True})
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    serializer = ReleaseContributorSerializer(contributor, data=payload, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(ReleaseContributorSerializer(contributor).data)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def release_analytics(request, release_id):
+
+    release = Release.objects.filter(id=release_id, user=request.user).first()
+    if not release:
+        return Response({'error': 'Release not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    analytics, created = ReleaseAnalytics.objects.get_or_create(release=release)
+    return Response(ReleaseAnalyticsSerializer(analytics).data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def track_analytics(request, release_id, track_id):
+
+    release = Release.objects.filter(id=release_id, user=request.user).first()
+    if not release:
+        return Response({'error': 'Release not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    track = Track.objects.filter(id=track_id, release=release).first()
+    if not track:
+        return Response({'error': 'Track not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    analytics, created = TrackAnalytics.objects.get_or_create(track=track)
+    return Response(TrackAnalyticsSerializer(analytics).data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def contributor_earnings(request, release_id):
+
+    release = Release.objects.filter(id=release_id, user=request.user).first()
+    if not release:
+        return Response({'error': 'Release not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    earnings = ContributorEarnings.objects.filter(release=release).select_related('participant')
+    data = {
+        'release_id': release.id,
+        'release_title': release.title,
+        'total_contributors': earnings.count(),
+        'contributors': ContributorEarningsSerializer(earnings, many=True).data,
+    }
+    return Response(data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def user_total_earnings(request):
+
+    earnings = ContributorEarnings.objects.filter(participant=request.user).select_related('release')
+    total_earned = sum(e.participant_share for e in earnings) or Decimal('0')
+    total_pending = sum(e.participant_share for e in earnings.filter(payout_status='pending')) or Decimal('0')
+    total_paid = sum(e.settled_amount for e in earnings.filter(payout_status='paid')) or Decimal('0')
+
+    return Response({
+        'user_id': request.user.id,
+        'username': request.user.username,
+        'total_earned': str(total_earned),
+        'total_pending': str(total_pending),
+        'total_paid': str(total_paid),
+        'releases_contributed_to': earnings.values('release_id').distinct().count(),
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def oauth_provider_profit_analytics(request):
+    """
+    Revenue attribution by auth provider for product/marketing decisions.
+    Query params:
+    - days: lookback window (default 30, max 365)
+    """
+
+    try:
+        days = int(request.query_params.get('days', 30))
+    except Exception:
+        days = 30
+    if days < 1:
+        days = 1
+    if days > 365:
+        days = 365
+
+    since = timezone.now() - timedelta(days=days)
+
+    # Use the earliest successful provider-tagged auth event as acquisition source.
+    provider_events = (
+        AuthAuditLog.objects
+        .filter(outcome='success', user__isnull=False)
+        .exclude(provider='')
+        .values('user_id', 'provider', 'created_at')
+        .order_by('user_id', 'created_at')
+    )
+
+    user_provider = {}
+    for row in provider_events:
+        uid = row['user_id']
+        if uid not in user_provider:
+            user_provider[uid] = (row['provider'] or 'unknown').strip().lower() or 'unknown'
+
+    # Revenue events in lookback window.
+    payments = UserPremiumFeature.objects.filter(
+        last_payment_date__isnull=False,
+        last_payment_date__gte=since,
+        paid_amount__gt=0,
+    ).select_related('user', 'feature')
+
+    summary = {}
+    total_revenue = Decimal('0')
+    total_payers = set()
+
+    for payment in payments:
+        provider = user_provider.get(payment.user_id, 'unknown')
+        if provider not in summary:
+            summary[provider] = {
+                'provider': provider,
+                'revenue': Decimal('0'),
+                'payments': 0,
+                'payers': set(),
+                'features_sold': {},
+            }
+
+        row = summary[provider]
+        amount = payment.paid_amount or Decimal('0')
+        row['revenue'] += amount
+        row['payments'] += 1
+        row['payers'].add(payment.user_id)
+        feature_key = payment.feature_id
+        row['features_sold'][feature_key] = row['features_sold'].get(feature_key, 0) + 1
+
+        total_revenue += amount
+        total_payers.add(payment.user_id)
+
+    providers = []
+    for provider, row in sorted(summary.items(), key=lambda kv: kv[1]['revenue'], reverse=True):
+        rev = row['revenue']
+        payer_count = len(row['payers'])
+        arppu = (rev / payer_count) if payer_count else Decimal('0')
+        revenue_share_pct = (rev * Decimal('100') / total_revenue) if total_revenue > 0 else Decimal('0')
+        providers.append(
+            {
+                'provider': provider,
+                'revenue': f"{rev:.2f}",
+                'payments': row['payments'],
+                'payers': payer_count,
+                'arppu': f"{arppu:.2f}",
+                'revenue_share_pct': f"{revenue_share_pct:.2f}",
+                'features_sold': row['features_sold'],
+            }
+        )
+
+    return Response(
+        {
+            'lookback_days': days,
+            'since': since,
+            'total_revenue': f"{total_revenue:.2f}",
+            'total_payers': len(total_payers),
+            'providers': providers,
+        }
+    )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def apple_oauth_profit_summary(request):
+
+    try:
+        days = int(request.query_params.get('days', 30))
+    except Exception:
+        days = 30
+    if days < 1:
+        days = 1
+    if days > 365:
+        days = 365
+
+    since = timezone.now() - timedelta(days=days)
+
+    # Users with successful Apple-auth linked events.
+    apple_user_ids = set(
+        AuthAuditLog.objects.filter(
+            outcome='success',
+            provider='apple',
+            user__isnull=False,
+        ).values_list('user_id', flat=True)
+    )
+
+    payments = UserPremiumFeature.objects.filter(
+        user_id__in=apple_user_ids,
+        last_payment_date__isnull=False,
+        last_payment_date__gte=since,
+        paid_amount__gt=0,
+    ).select_related('feature')
+
+    revenue = Decimal('0')
+    payer_ids = set()
+    feature_counts = {}
+    for row in payments:
+        amount = row.paid_amount or Decimal('0')
+        revenue += amount
+        payer_ids.add(row.user_id)
+        feature_counts[row.feature_id] = feature_counts.get(row.feature_id, 0) + 1
+
+    payer_count = len(payer_ids)
+    arppu = (revenue / payer_count) if payer_count else Decimal('0')
+
+    return Response(
+        {
+            'provider': 'apple',
+            'lookback_days': days,
+            'apple_oauth_users': len(apple_user_ids),
+            'payers': payer_count,
+            'revenue': f"{revenue:.2f}",
+            'arppu': f"{arppu:.2f}",
+            'features_sold': feature_counts,
+            'conversion_pct': f"{(Decimal(payer_count) * Decimal('100') / Decimal(len(apple_user_ids)) if apple_user_ids else Decimal('0')):.2f}",
+            'since': since,
+        }
+    )
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def list_premium_features(request):
+
+    features = PremiumFeature.objects.filter(is_active=True).order_by('monthly_price')
+    return Response(PremiumFeatureSerializer(features, many=True).data)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def list_premium_bundles(request):
+
+    bundles = PremiumBundle.objects.filter(is_active=True).order_by('display_order')
+    return Response(PremiumBundleSerializer(bundles, many=True).data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def user_premium_features(request):
+
+    features = UserPremiumFeature.objects.filter(user=request.user).select_related('feature').order_by('-subscription_start')
+    return Response(UserPremiumFeatureSerializer(features, many=True).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def subscribe_to_feature(request, feature_key):
+
+    try:
+        feature = PremiumFeature.objects.get(feature_key=feature_key, is_active=True)
+    except PremiumFeature.DoesNotExist:
+        return Response({'error': 'Feature not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    billing_cycle = payload.get('billing_cycle', 'monthly')
+    
+    if billing_cycle not in ['monthly', 'yearly']:
+        return Response({'error': 'billing_cycle must be monthly or yearly.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Get or create subscription
+    subscription, created = UserPremiumFeature.objects.get_or_create(
+        user=request.user,
+        feature=feature,
+        defaults={
+            'status': 'active',
+            'billing_cycle': billing_cycle,
+            'auto_renew': True,
+            'paid_amount': feature.yearly_price if billing_cycle == 'yearly' else feature.monthly_price,
+            'last_payment_date': timezone.now(),
+            'renewal_date': timezone.now().date() + timedelta(days=365 if billing_cycle == 'yearly' else 30),
+        }
+    )
+
+    if not created:
+        # Reactivate if cancelled
+        subscription.status = 'active'
+        subscription.billing_cycle = billing_cycle
+        subscription.auto_renew = True
+        subscription.last_payment_date = timezone.now()
+        subscription.renewal_date = timezone.now().date() + timedelta(days=365 if billing_cycle == 'yearly' else 30)
+        subscription.save()
+
+    return Response(
+        {
+            'success': True,
+            'subscription': UserPremiumFeatureSerializer(subscription).data,
+            'requires_payment': True,
+            'checkout_url': f'/checkout?feature={feature_key}&cycle={billing_cycle}',
+        },
+        status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+    )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def cancel_feature_subscription(request, feature_key):
+
+    subscription = UserPremiumFeature.objects.filter(
+        user=request.user,
+        feature__feature_key=feature_key,
+    ).first()
+
+    if not subscription:
+        return Response({'error': 'Subscription not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    subscription.status = 'cancelled'
+    subscription.save()
+
+    return Response({'success': True, 'message': f'Subscription to {subscription.feature.display_name} cancelled.'})
+
+
+# --- Only show promos to active users except for the superuser (you) ---
+# Replace with your actual user ID or email if needed
+EXEMPT_EMAILS = ['ctkoth@gmail.com']
+def _week_bounds(today=None):
+    current = today or timezone.now().date()
+    start = current - timedelta(days=current.weekday())
+    end = start + timedelta(days=6)
+    return start, end
+
+
+def _build_promo_code(user_id, template_key):
+    seed = f"{template_key}-{user_id}-{int(timezone.now().timestamp())}"
+    return f"MCZ-{abs(hash(seed)) % 10000000:07d}"
+
+
+def _related_feature_keys(feature_key):
+    mapping = {
+        'distribution': ['advanced_analytics', 'lyrics_management', 'pending_edits'],
+        'advanced_analytics': ['api_access', 'pro_settle_fast'],
+        'unlimited_contributors': ['pending_edits', 'priority_support'],
+        'daw_integration': ['design_tools', 'distribution'],
+        'design_tools': ['custom_branding', 'distribution'],
+        'lyrics_management': ['distribution', 'advanced_analytics'],
+    }
+    return mapping.get(feature_key, [])
+
+
+def _build_in_app_feature_ads(user):
+
+    interests = list(
+        UserInterest.objects.filter(user=user, is_active=True).order_by('-weight').values_list('interest', flat=True)
+    )
+    interest_set = {x.lower() for x in interests}
+
+    active_subscriptions = list(
+        UserPremiumFeature.objects.filter(user=user, status='active').select_related('feature')
+    )
+    owned = {s.feature.feature_key for s in active_subscriptions if s.is_active_now()}
+
+    week_start, _ = _week_bounds()
+    promos = list(
+        UserWeeklyPromotion.objects.filter(user=user, week_start=week_start, claimed=False).select_related('template', 'template__target_feature')
+    )
+    promo_by_feature = {}
+    for p in promos:
+        if p.template and p.template.target_feature_id:
+            promo_by_feature[p.template.target_feature_id] = p
+
+    ads = []
+    candidate_keys = set()
+    for owned_key in owned:
+        for related in _related_feature_keys(owned_key):
+            if related not in owned:
+                candidate_keys.add(related)
+
+    # Fallback for new users with no owned features.
+    if not candidate_keys:
+        candidate_keys = {'distribution', 'advanced_analytics', 'unlimited_contributors'}
+
+    features = PremiumFeature.objects.filter(feature_key__in=candidate_keys, is_active=True).order_by('monthly_price')
+    for feature in features:
+        promo = promo_by_feature.get(feature.feature_key)
+        reason = 'upgrade'
+        if promo and promo.matched_interest:
+            reason = f"interest:{promo.matched_interest}"
+        elif interest_set:
+            text = f"{feature.display_name} {feature.description}".lower()
+            for tag in interest_set:
+                if tag in text:
+                    reason = f"interest:{tag}"
+                    break
+
+        monthly = str(feature.monthly_price)
+        discount_percent = promo.discount_percent if promo else 0
+        discounted_monthly = monthly
+        if discount_percent > 0:
+            discounted_value = feature.monthly_price * (100 - discount_percent) / 100
+            discounted_monthly = f"{discounted_value:.2f}"
+
+        ads.append(
+            {
+                'feature_key': feature.feature_key,
+                'title': feature.display_name,
+                'description': feature.description,
+                'monthly_price': monthly,
+                'discount_percent': discount_percent,
+                'discounted_monthly_price': discounted_monthly,
+                'promo_code': promo.promo_code if promo else '',
+                'reason': reason,
+                'cta': {
+                    'type': 'subscribe_feature',
+                    'url': f"/api/premium/subscribe/{feature.feature_key}/",
+                },
+            }
+        )
+
+    return ads
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def user_interests(request):
+
+    if request.method == 'GET':
+        rows = UserInterest.objects.filter(user=request.user, is_active=True).order_by('-weight', 'interest')
+        return Response(UserInterestSerializer(rows, many=True).data)
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    interest = str(payload.get('interest') or '').strip().lower()
+    if not interest:
+        return Response({'error': 'interest is required.'}, status=status.HTTP_400_BAD_REQUEST)
+    weight = int(payload.get('weight') or 1)
+    if weight < 1:
+        weight = 1
+    if weight > 10:
+        weight = 10
+
+    row, _ = UserInterest.objects.update_or_create(
+        user=request.user,
+        interest=interest,
+        defaults={'weight': weight, 'is_active': bool(payload.get('is_active', True))},
+    )
+    return Response(UserInterestSerializer(row).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_weekly_marketing_promotions(request):
+
+    week_start, week_end = _week_bounds()
+    expires_at = timezone.now() + timedelta(days=7)
+
+    active_subscriptions = UserPremiumFeature.objects.filter(user=request.user, status='active').select_related('feature')
+    feature_keys = {s.feature.feature_key for s in active_subscriptions if s.is_active_now()}
+    if not feature_keys:
+        return Response({'generated': 0, 'promotions': [], 'message': 'No active premium features to target.'})
+
+    interests = list(
+        UserInterest.objects.filter(user=request.user, is_active=True).order_by('-weight').values_list('interest', flat=True)
+    )
+    interest_set = set(interests)
+
+    templates = list(
+        WeeklyPromotionTemplate.objects.filter(is_active=True, target_feature__feature_key__in=feature_keys).select_related('target_feature')
+    )
+
+    # Fallback templates if admin templates are not created yet.
+    if not templates:
+        for feature_key in feature_keys:
+            fallback_key = f"auto-{feature_key}"
+            template, _ = WeeklyPromotionTemplate.objects.get_or_create(
+                template_key=fallback_key,
+                defaults={
+                    'title': f"Weekly deal for {feature_key.replace('_', ' ').title()}",
+                    'description': 'Personalized weekly offer based on your active premium tools.',
+                    'target_feature_id': feature_key,
+                    'interest_tags_json': [],
+                    'discount_percent': 15,
+                    'is_active': True,
+                },
+            )
+            templates.append(template)
+
+    created_rows = []
+    for template in templates:
+        tags = template.interest_tags_json if isinstance(template.interest_tags_json, list) else []
+        matched_interest = ''
+        if tags and interest_set:
+            for tag in tags:
+                tag_norm = str(tag).strip().lower()
+                if tag_norm in interest_set:
+                    matched_interest = tag_norm
+                    break
+
+        promo, created = UserWeeklyPromotion.objects.get_or_create(
+            user=request.user,
+            template=template,
+            week_start=week_start,
+            defaults={
+                'week_end': week_end,
+                'promo_code': _build_promo_code(request.user.id, template.template_key),
+                'discount_percent': template.discount_percent,
+                'matched_interest': matched_interest,
+                'claimed': False,
+                'expires_at': expires_at,
+            },
+        )
+        if created:
+            created_rows.append(promo)
+
+    return Response(
+        {
+            'generated': len(created_rows),
+            'promotions': UserWeeklyPromotionSerializer(created_rows, many=True).data,
+            'week_start': week_start,
+            'week_end': week_end,
+        }
+    )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def my_weekly_promotions(request):
+
+    week_start, _ = _week_bounds()
+    rows = UserWeeklyPromotion.objects.filter(user=request.user, week_start=week_start).select_related('template', 'template__target_feature')
+    return Response(UserWeeklyPromotionSerializer(rows, many=True).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def claim_weekly_promotion(request, promotion_id):
+
+    row = UserWeeklyPromotion.objects.filter(id=promotion_id, user=request.user).select_related('template', 'template__target_feature').first()
+    if not row:
+        return Response({'error': 'Promotion not found.'}, status=status.HTTP_404_NOT_FOUND)
+    if row.claimed:
+        return Response({'error': 'Promotion already claimed.'}, status=status.HTTP_400_BAD_REQUEST)
+    if row.expires_at and row.expires_at < timezone.now():
+        return Response({'error': 'Promotion expired.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    row.claimed = True
+    row.save(update_fields=['claimed', 'updated_at'])
+    return Response({'success': True, 'promotion': UserWeeklyPromotionSerializer(row).data})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def in_app_feature_ads(request):
+    ads = _build_in_app_feature_ads(request.user)
+    return Response({'count': len(ads), 'ads': ads})
+
+
+# --- Royalty & Agreement Dashboard API Views ---
+    AgreementSerializer, AgreementSignatureSerializer, RoyaltySplitSerializer, RoyaltyPaymentSerializer
+)
+
+# --- Royalty & Agreement Dashboard Permissions ---
+
+class IsAgreementOwnerOrReadOnly(permissions.BasePermission):
+    def has_object_permission(self, request, view, obj):
+        # Read permissions for all involved users, write only for owner
+        if request.method in permissions.SAFE_METHODS:
+            return request.user == obj.owner or obj.royalty_splits.filter(user=request.user).exists()
+        return request.user == obj.owner
+
+class IsSignatureUser(permissions.BasePermission):
+    def has_object_permission(self, request, view, obj):
+        # Only the user themselves can sign
+        return request.user == obj.user
+
+class IsOwnerForSplitOrPayment(permissions.BasePermission):
+    def has_object_permission(self, request, view, obj):
+        # Only agreement owner can add/edit splits/payments
+        return request.user == obj.agreement.owner
+
+class AgreementViewSet(viewsets.ModelViewSet):
+    queryset = Agreement.objects.all()
+    serializer_class = AgreementSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAgreementOwnerOrReadOnly]
+    def perform_create(self, serializer):
+        agreement = serializer.save(owner=self.request.user)
+        notify_agreement_created(agreement)
+
+class AgreementSignatureViewSet(viewsets.ModelViewSet):
+    queryset = AgreementSignature.objects.all()
+    serializer_class = AgreementSignatureSerializer
+    permission_classes = [permissions.IsAuthenticated, IsSignatureUser]
+    def get_queryset(self):
+        # Only show signatures for agreements user is involved in
+        user = self.request.user
+        return AgreementSignature.objects.filter(models.Q(user=user) | models.Q(agreement__owner=user) | models.Q(agreement__royalty_splits__user=user)).distinct()
+
+class RoyaltySplitViewSet(viewsets.ModelViewSet):
+    queryset = RoyaltySplit.objects.all()
+    serializer_class = RoyaltySplitSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOwnerForSplitOrPayment]
+    def get_queryset(self):
+        user = self.request.user
+        return RoyaltySplit.objects.filter(models.Q(user=user) | models.Q(agreement__owner=user)).distinct()
+
+class RoyaltyPaymentViewSet(viewsets.ModelViewSet):
+    queryset = RoyaltyPayment.objects.all()
+    serializer_class = RoyaltyPaymentSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOwnerForSplitOrPayment]
+    def get_queryset(self):
+        user = self.request.user
+        return RoyaltyPayment.objects.filter(models.Q(user=user) | models.Q(agreement__owner=user)).distinct()
+
+# --- Royalty & Agreement Dashboard Notifications (example: email on agreement/signature creation) ---
+
+def notify_agreement_created(agreement):
+    # Notify all participants (splits) except owner
+    recipients = [split.user.email for split in agreement.royalty_splits.all() if split.user != agreement.owner and split.user.email]
+    if recipients:
+        send_mail(
+            subject=f"New Agreement: {agreement.title}",
+            message=f"You have been added to a new agreement '{agreement.title}' for project '{agreement.project}'. Log in to review and sign.",
+            from_email=None,
+            recipient_list=recipients,
+            fail_silently=True,
+        )
+
+def notify_signature_signed(signature):
+    # Notify agreement owner when someone signs
+    owner_email = signature.agreement.owner.email
+    if owner_email:
+        send_mail(
+            subject=f"Agreement Signed: {signature.agreement.title}",
+            message=f"{signature.user.username} has signed the agreement '{signature.agreement.title}'.",
+            from_email=None,
+            recipient_list=[owner_email],
+            fail_silently=True,
+        )
+
+
