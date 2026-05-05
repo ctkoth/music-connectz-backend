@@ -1,4 +1,3 @@
-a
 # Ensure models and User are imported for all Django model classes
 from django.db import models
 from django.contrib.auth.models import User
