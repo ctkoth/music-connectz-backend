@@ -1,6 +1,6 @@
 from rest_framework import viewsets, permissions
-from .models import Post, PostRating, PostJoin, OCCLog
-from .serializers import PostSerializer, PostRatingSerializer, PostJoinSerializer, OCCLogSerializer
+from .models import Post, PostRating, OCCLog
+from .serializers import PostSerializer, PostRatingSerializer, OCCLogSerializer
 
 # PostZ CRUD
 class PostViewSet(viewsets.ModelViewSet):
@@ -15,10 +15,6 @@ class PostRatingViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
 # PostZ Joins
-class PostJoinViewSet(viewsets.ModelViewSet):
-    queryset = PostJoin.objects.all()
-    serializer_class = PostJoinSerializer
-    permission_classes = [permissions.IsAuthenticated]
 
 # OCC Log
 class OCCLogViewSet(viewsets.ModelViewSet):
