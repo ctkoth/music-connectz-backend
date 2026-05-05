@@ -1091,3 +1091,18 @@ class UserWeeklyPromotion(models.Model):
 
     def __str__(self):
         return f"{self.user.username} {self.promo_code} ({self.discount_percent}%)"
+Skip to content
+music-connectz-backend
+Repository navigation
+Code
+Issues
+404 - page not found
+The 
+main
+
+ branch of 
+music-connectz-backend
+
+ does not contain the path 
+models.py.
+
