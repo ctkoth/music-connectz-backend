@@ -1,633 +1,3 @@
-from rest_framework import viewsets, permissions
-from .models import Post, PostRating, PostJoin, OCCLog
-from .serializers import PostSerializer, PostRatingSerializer, PostJoinSerializer, OCCLogSerializer
-
-# PostZ CRUD
-class PostViewSet(viewsets.ModelViewSet):
-    queryset = Post.objects.all().order_by('-created_at')
-    serializer_class = PostSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
-
-# PostZ Ratings
-class PostRatingViewSet(viewsets.ModelViewSet):
-    queryset = PostRating.objects.all()
-    serializer_class = PostRatingSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-# PostZ Joins
-class PostJoinViewSet(viewsets.ModelViewSet):
-    queryset = PostJoin.objects.all()
-    serializer_class = PostJoinSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-# OCC Log
-class OCCLogViewSet(viewsets.ModelViewSet):
-    queryset = OCCLog.objects.all().order_by('-created_at')
-    serializer_class = OCCLogSerializer
-    permission_classes = [permissions.IsAuthenticated]
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-
-# --- Public API: App Version ---
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def app_version(request):
-    return JsonResponse({
-        "version": "v15.6",
-        "deployed": "2026-04-06"
-    })
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from django.db.models import Avg, Count
-
-# --- Corey Quantifiable Feedback & Suggestions API (v14.5) ---
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def corey_feedback_and_suggestions(request):
-    """
-    Returns quantifiable Corey feedback, improvement suggestions, and teacher/mentor recommendations.
-    For high-rated users, recommends becoming a teacher and provides instructions.
-    """
-    user = request.user
-    from .models import CollabReliabilityRating, UserProfile
-    avg_rating = CollabReliabilityRating.objects.filter(ratee=user).aggregate(avg=Avg('score'))['avg'] or 0
-    feedback = f"Your average rating is {avg_rating:.2f} out of 10."
-    suggestions = []
-    teacher_recommendations = []
-    become_teacher = None
-    user_profile = getattr(user, 'profile', None)
-    location = user_profile.location if user_profile else ''
-    if avg_rating < 5:
-        suggestions.append("Consider taking a lesson or collaborating with a top-rated mentor in your area to boost your skills.")
-        # Recommend top-rated teachers in user location
-        top_teachers = UserProfile.objects.filter(location=location).annotate(rating=Avg('user__received_reliability_ratings__score')).filter(rating__gte=7).order_by('-rating')[:3]
-        for t in top_teachers:
-            teacher_recommendations.append({
-                'username': t.user.username,
-                'rating': round(t.rating or 0, 2),
-                'location': t.location,
-            })
-    elif avg_rating < 6:
-        suggestions.append("Your rating has dropped below 6. Focus on learning, collaborating, and seeking feedback to improve. Consider lessons with top-rated teachers in your area for a boost!")
-        top_teachers = UserProfile.objects.filter(location=location).annotate(rating=Avg('user__received_reliability_ratings__score')).filter(rating__gte=7).order_by('-rating')[:3]
-        for t in top_teachers:
-            teacher_recommendations.append({
-                'username': t.user.username,
-                'rating': round(t.rating or 0, 2),
-                'location': t.location,
-            })
-    elif avg_rating < 8:
-        suggestions.append("You’re getting close! Keep learning and collaborating—at 8 or higher, you’ll be ready to teach others!")
-        top_teachers = UserProfile.objects.filter(location=location).annotate(rating=Avg('user__received_reliability_ratings__score')).filter(rating__gte=8).order_by('-rating')[:2]
-        for t in top_teachers:
-            teacher_recommendations.append({
-                'username': t.user.username,
-                'rating': round(t.rating or 0, 2),
-                'location': t.location,
-            })
-    if avg_rating >= 8:
-        become_teacher = {
-            'message': "You’re almost ready to teach! Your high rating means you could inspire others. Consider becoming a teacher or mentor on Music ConnectZ.",
-            'how_to': "Go to your profile settings and click 'Become a Teacher' to start sharing your skills and earning SpinaZ!"
-        }
-    elif avg_rating >= 6:
-        become_teacher = {
-            'message': "If you want to be a teacher, keep working hard to be a great role model! Offer more, help others, and you’ll be ready to teach soon.",
-            'how_to': "Focus on building your skills and supporting your peers—when your rating hits 8, you’ll unlock the teacher path!"
-        }
-    else:
-        if user_profile and getattr(user_profile, 'is_teacher', False):
-            become_teacher = {
-                'message': "Your rating has dropped below 6. To regain your teacher status, focus on improving your skills, collaborating, and learning from top mentors. You can earn your way back—Music ConnectZ believes in comebacks!",
-                'how_to': "Once your rating is 6 or higher again, you’ll be eligible to teach and inspire others!"
-            }
-        else:
-            become_teacher = {
-                'message': "Improve your skills and confidence before teaching others. Take lessons, collaborate, and learn from top mentors to get ready!",
-                'how_to': "Once your rating is 6 or higher, you’ll unlock the path to becoming a teacher."
-            }
-    return Response({
-        'feedback': feedback,
-        'suggestions': suggestions,
-        'teacher_recommendations': teacher_recommendations,
-        'become_teacher': become_teacher,
-    })
-from django.contrib.auth import get_user_model
-
-# --- Corey Voice Utility ---
-def get_corey_voice_for_user(user):
-    """
-    Returns Corey-voice style: playful/flirtatious if avg rating >=5, else normal Corey-voice.
-    """
-    from .models import CollabReliabilityRating
-    avg_rating = CollabReliabilityRating.objects.filter(ratee=user).aggregate(avg=Avg('score'))['avg'] or 0
-    if avg_rating >= 5:
-        # Flirty/playful Corey-voice
-        return {
-            'tone': 'playful/flirtatious',
-            'message': "Ooo, look at you racking up those stars! 🌟 You keep this up and I might just have to write you a love song. 😉 Keep shining, superstar!"
-        }
-    else:
-        # Standard Corey-voice
-        return {
-            'tone': 'corey-voice',
-            'message': "Yo! 🎤 Keep grinding, your next big moment is just around the corner. I’m here if you need a boost! 🤙"
-        }
-# --- User Personas API ---
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def user_personas(request):
-    """
-    List all personas for the authenticated user, including their skills.
-    """
-    from .models import Persona
-    personas = Persona.objects.filter(user=request.user).prefetch_related('skills')
-    data = []
-    for persona in personas:
-        data.append({
-            'id': persona.id,
-            'name': persona.name,
-            'skills': [s.name for s in persona.skills.all()],
-        })
-    return Response(data)
-from django.db.models import Avg, Count
-# --- AI Price Suggestion API ---
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def ai_suggest_skill_prices(request):
-    """
-    Suggest skill prices for the authenticated user based on their ratings, reviews, and demand.
-    """
-    from .models import Skill, Persona, CollabReliabilityRating
-    user = request.user
-    # For each skill the user has, calculate average reliability rating and demand (number of collabs)
-    personas = Persona.objects.filter(user=user).prefetch_related('skills')
-    skill_suggestions = []
-    for persona in personas:
-        for skill in persona.skills.all():
-            # Get average reliability rating for this skill (across all collabs where user used this skill)
-            avg_rating = CollabReliabilityRating.objects.filter(ratee=user).aggregate(avg=Avg('score'))['avg'] or 0
-            # Demand: number of works/collabs using this skill
-            demand = persona.skills.filter(id=skill.id).count()
-            # Current price (if set)
-            current_price = getattr(persona, 'price', None)
-            # Simple AI logic: if rating > 8, suggest +10%; if < 6, suggest -10%; else keep
-            if avg_rating > 8:
-                suggestion = (current_price or 10) * 1.10
-                reason = f"High reliability rating ({avg_rating:.1f}/10). Consider raising your price."
-            elif avg_rating < 6:
-                suggestion = (current_price or 10) * 0.90
-                reason = f"Low reliability rating ({avg_rating:.1f}/10). Consider lowering your price."
-            else:
-                suggestion = current_price or 10
-                reason = f"Average reliability rating ({avg_rating:.1f}/10). Price is reasonable."
-            skill_suggestions.append({
-                'persona': persona.name,
-                'skill': skill.name,
-                'current_price': float(current_price) if current_price else None,
-                'suggested_price': round(float(suggestion), 2),
-                'reason': reason,
-                'demand': demand,
-            })
-    return Response({'suggestions': skill_suggestions})
-
-# --- User Contributor Earnings API ---
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def user_contributor_earnings(request):
-    """
-    List all ContributorEarnings records for the authenticated user (as participant).
-    """
-    from .models import ContributorEarnings
-    from .serializers import ContributorEarningsSerializer
-    earnings = ContributorEarnings.objects.filter(participant=request.user).order_by('-created_at')
-    serializer = ContributorEarningsSerializer(earnings, many=True)
-    return Response(serializer.data)
-from .paymentlog_serializer import PaymentLogSerializer
-
-# --- User Payment Log API ---
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def user_payment_logs(request):
-    """
-    List all payment transactions for the authenticated user.
-    """
-    from .models import PaymentLog
-    logs = PaymentLog.objects.filter(user=request.user).order_by('-created_at')
-    serializer = PaymentLogSerializer(logs, many=True)
-    return Response(serializer.data)
-import json
-import requests
-# --- PayPal Webhook Endpoint ---
-from django.views.decorators.csrf import csrf_exempt
-
-@csrf_exempt
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def paypal_webhook(request):
-    """
-    PayPal webhook endpoint to securely verify payment events.
-    Only grant premium after verifying payment with PayPal API.
-    """
-    # Parse webhook event
-    try:
-        event = json.loads(request.body.decode('utf-8'))
-    except Exception:
-        return JsonResponse({'error': 'Invalid payload'}, status=400)
-
-    # Example: handle completed payment event
-    if event.get('event_type') == 'CHECKOUT.ORDER.APPROVED':
-        order_id = event['resource']['id']
-        # Verify order with PayPal API
-        access_token = get_paypal_access_token()
-        order_info = get_paypal_order_info(order_id, access_token)
-        if not order_info or order_info.get('status') != 'COMPLETED':
-            return JsonResponse({'error': 'Order not completed'}, status=400)
-        # Lookup user by custom_id (set in PayPal order creation)
-        try:
-            custom_id = order_info['purchase_units'][0].get('custom_id')
-            if not custom_id:
-                return JsonResponse({'error': 'No custom_id in order'}, status=400)
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
-            user = User.objects.get(id=custom_id)
-        except Exception:
-            return JsonResponse({'error': 'User not found for custom_id'}, status=404)
-        # Activate premium for user (example: set is_premium True)
-        userprofile = getattr(user, 'userprofile', None)
-        if userprofile:
-            userprofile.is_premium = True
-            userprofile.save(update_fields=['is_premium'])
-        # Log transaction for auditing
-        from .models import PaymentLog
-        try:
-            PaymentLog.objects.create(
-                user=user,
-                provider='paypal',
-                order_id=order_id,
-                amount=order_info['purchase_units'][0]['amount']['value'],
-                currency=order_info['purchase_units'][0]['amount'].get('currency_code', 'USD'),
-                status=order_info.get('status', ''),
-                raw_data=order_info,
-            )
-        except Exception as e:
-            # Log error or ignore if logging fails
-            pass
-        return JsonResponse({'success': True, 'user_id': user.id})
-    # Add more event types as needed
-    return JsonResponse({'ok': True})
-
-def get_paypal_access_token():
-    """Obtain OAuth2 access token from PayPal."""
-    client_id = os.environ.get('PAYPAL_CLIENT_ID')
-    secret = os.environ.get('PAYPAL_SECRET')
-    url = 'https://api-m.paypal.com/v1/oauth2/token'
-    resp = requests.post(url, auth=(client_id, secret), data={'grant_type': 'client_credentials'})
-    if resp.status_code == 200:
-        return resp.json()['access_token']
-    return None
-
-def get_paypal_order_info(order_id, access_token):
-    """Fetch order details from PayPal to verify payment status."""
-    url = f'https://api-m.paypal.com/v2/checkout/orders/{order_id}'
-    headers = {'Authorization': f'Bearer {access_token}'}
-    resp = requests.get(url, headers=headers)
-    if resp.status_code == 200:
-        return resp.json()
-    return None
-from django.shortcuts import render
-from django.conf import settings
-from django.contrib.auth import authenticate, login as auth_login
-import os
-import re as _re
-from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
-from django.http import JsonResponse
-
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-
-# Add missing User import
-from django.contrib.auth.models import User
-
-# --- OpenAI Chat API Endpoint ---
-@csrf_exempt
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def openai_chat(request):
-    """
-    Proxy endpoint for OpenAI ChatCompletion API.
-    POST body: {"message": "your question"}
-    """
-    data = request.data
-    user_message = data.get('message', '')
-    api_key = os.environ.get('OPENAI_API_KEY')
-    if not api_key:
-        return JsonResponse({'error': 'OpenAI API key not set.'}, status=500)
-    try:
-        import openai
-        openai.api_key = api_key
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": user_message}]
-        )
-        reply = response['choices'][0]['message']['content']
-        return JsonResponse({'reply': reply})
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
-from .models import CollabReliabilityRating, CollabReview, Post
-from .serializers import CollabReliabilityRatingSerializer, CollabReviewSerializer, PostSerializer
-# --- Post API Endpoints ---
-from rest_framework.permissions import IsAuthenticated
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def create_or_update_post(request):
-    """
-    Create a new post or update an existing one (if id is provided and user is author).
-    POST body: {"id": optional, "title": ..., "content": ..., "post_type": ..., "is_public": ...}
-    """
-    data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
-    # Only allow certain fields to be set by user
-    allowed_fields = {'id', 'title', 'content', 'post_type', 'is_public'}
-    sanitized = {k: v for k, v in data.items() if k in allowed_fields}
-    post_id = sanitized.get('id')
-    if post_id:
-        try:
-            post = Post.objects.get(id=post_id)
-        except Post.DoesNotExist:
-            return JsonResponse({'error': 'Post not found.'}, status=404)
-        if post.author != request.user:
-            return JsonResponse({'error': 'Not authorized.'}, status=403)
-        serializer = PostSerializer(post, data=sanitized, partial=True)
-    else:
-        serializer = PostSerializer(data={**sanitized, 'author': request.user.id})
-    if serializer.is_valid():
-        post = serializer.save(author=request.user)
-        return JsonResponse(PostSerializer(post).data, status=201)
-    return JsonResponse(serializer.errors, status=400)
-
-@api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
-def toggle_post_sharing(request, post_id):
-    """
-    Toggle the is_public (shareable) status of a post.
-    PATCH body: {"is_public": true/false}
-    """
-    try:
-        post = Post.objects.get(id=post_id, author=request.user)
-    except Post.DoesNotExist:
-        return JsonResponse({'error': 'Post not found or not authorized.'}, status=404)
-    is_public = request.data.get('is_public')
-    if is_public is None:
-        return JsonResponse({'error': 'is_public required.'}, status=400)
-    post.is_public = bool(is_public)
-    post.save(update_fields=['is_public'])
-    return JsonResponse({'id': post.id, 'is_public': post.is_public})
-
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def export_post(request, post_id):
-    """
-    Export a post as JSON (public posts only, or if user is author).
-    """
-    try:
-        post = Post.objects.get(id=post_id)
-    except Post.DoesNotExist:
-        return JsonResponse({'error': 'Post not found.'}, status=404)
-    if not post.is_public and (not request.user.is_authenticated or post.author != request.user):
-        return JsonResponse({'error': 'Not authorized.'}, status=403)
-    return JsonResponse(PostSerializer(post).data)
-
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def download_post(request, post_id):
-    """
-    Download a post as a text file (public posts only, or if user is author).
-    """
-    try:
-        post = Post.objects.get(id=post_id)
-    except Post.DoesNotExist:
-        return JsonResponse({'error': 'Post not found.'}, status=404)
-    if not post.is_public and (not request.user.is_authenticated or post.author != request.user):
-        return JsonResponse({'error': 'Not authorized.'}, status=403)
-    content = f"Title: {post.title}\nType: {post.post_type}\nAuthor: {post.author.username}\n\n{post.content}"
-    from django.http import HttpResponse
-    response = HttpResponse(content, content_type='text/plain')
-    response['Content-Disposition'] = f'attachment; filename=post_{post.id}.txt'
-    return response
-# --- Reliability Rating API ---
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.decorators import api_view, permission_classes
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def set_reliability_rating(request, agreement_id, ratee_id):
-    """
-    Set or update reliability rating for a collaborator in an agreement.
-    Only participants can rate each other.
-    """
-    user = request.user
-    try:
-        agreement = CollabRoyaltyAgreement.objects.get(id=agreement_id)
-        ratee = User.objects.get(id=ratee_id)
-    except (CollabRoyaltyAgreement.DoesNotExist, User.DoesNotExist):
-        return Response({'error': 'Agreement or user not found.'}, status=404)
-    # Must be a participant
-    if not CollabRoyaltySplit.objects.filter(agreement=agreement, participant=user).exists() or not CollabRoyaltySplit.objects.filter(agreement=agreement, participant=ratee).exists():
-        return Response({'error': 'Not authorized.'}, status=403)
-    score = int(request.data.get('score', 0))
-    if score < 0 or score > 10:
-        return Response({'error': 'Score must be 0-10.'}, status=400)
-    obj, _ = CollabReliabilityRating.objects.update_or_create(
-        agreement=agreement, rater=user, ratee=ratee,
-        defaults={'score': score}
-    )
-    return Response(CollabReliabilityRatingSerializer(obj).data)
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_reliability_ratings(request, agreement_id):
-    """
-    Get all reliability ratings for an agreement.
-    """
-    ratings = CollabReliabilityRating.objects.filter(agreement_id=agreement_id)
-    return Response(CollabReliabilityRatingSerializer(ratings, many=True).data)
-
-# --- Collab Review API ---
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def set_collab_review(request, agreement_id, reviewee_id):
-    """
-    Set or update a review for a collaborator in an agreement.
-    Only participants can review each other.
-    """
-    user = request.user
-    try:
-        agreement = CollabRoyaltyAgreement.objects.get(id=agreement_id)
-        reviewee = User.objects.get(id=reviewee_id)
-    except (CollabRoyaltyAgreement.DoesNotExist, User.DoesNotExist):
-        return Response({'error': 'Agreement or user not found.'}, status=404)
-    if not CollabRoyaltySplit.objects.filter(agreement=agreement, participant=user).exists() or not CollabRoyaltySplit.objects.filter(agreement=agreement, participant=reviewee).exists():
-        return Response({'error': 'Not authorized.'}, status=403)
-    text = request.data.get('text', '')
-    is_shared = bool(request.data.get('is_shared', False))
-    obj, _ = CollabReview.objects.update_or_create(
-        agreement=agreement, reviewer=user, reviewee=reviewee,
-        defaults={'text': text, 'is_shared': is_shared}
-    )
-    return Response(CollabReviewSerializer(obj).data)
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_collab_reviews(request, agreement_id):
-    """
-    Get all reviews for an agreement.
-    """
-    reviews = CollabReview.objects.filter(agreement_id=agreement_id)
-    return Response(CollabReviewSerializer(reviews, many=True).data)
-
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def get_shared_reviews_for_user(request, user_id):
-    """
-    Get all shared reviews for a user (for profile display).
-    """
-    reviews = CollabReview.objects.filter(reviewee_id=user_id, is_shared=True)
-    return Response(CollabReviewSerializer(reviews, many=True).data)
-import requests
-
-# --- LibreTranslate API Integration ---
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def translate_text(request):
-    """
-    Translate text using the LibreTranslate public API.
-    POST body: {"q": "text", "source": "en", "target": "es"}
-    """
-    data = request.data
-    q = data.get('q', '')
-    source = data.get('source', 'auto')
-    target = data.get('target', 'en')
-    if not q or not target:
-        return JsonResponse({'error': 'Missing text or target language.'}, status=400)
-    try:
-        resp = requests.post(
-            'https://libretranslate.com/translate',
-            data={
-                'q': q,
-                'source': source,
-                'target': target,
-                'format': 'text'
-            },
-            timeout=10
-        )
-        resp.raise_for_status()
-        translated = resp.json().get('translatedText', '')
-        return JsonResponse({'translated': translated})
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
-from .serializers import AgreementTemplateSerializer, CollabRoyaltyAgreementSerializer, AgreementChangeLogSerializer, CollabRoyaltySplitSerializer
-from rest_framework.parsers import JSONParser
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.core import serializers as dj_serializers
-import csv
-import json
-
-# --- Agreement Template Endpoints ---
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def list_agreement_templates(request):
-    templates = AgreementTemplate.objects.all()
-    serializer = AgreementTemplateSerializer(templates, many=True)
-    return Response(serializer.data)
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def create_agreement_template(request):
-    serializer = AgreementTemplateSerializer(data=request.data)
-    if serializer.is_valid():
-        serializer.save(created_by=request.user)
-        return Response(serializer.data, status=201)
-    return Response(serializer.errors, status=400)
-
-# --- Agreement Versioning ---
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def create_agreement_version(request, agreement_id):
-    try:
-        agreement = CollabRoyaltyAgreement.objects.get(id=agreement_id)
-    except CollabRoyaltyAgreement.DoesNotExist:
-        return Response({'error': 'Agreement not found.'}, status=404)
-    data = request.data.copy()
-    data['previous_version'] = agreement.id
-    data['version'] = agreement.version + 1
-    serializer = CollabRoyaltyAgreementSerializer(data=data)
-    if serializer.is_valid():
-        new_agreement = serializer.save(created_by=request.user)
-        AgreementChangeLog.objects.create(
-            agreement=new_agreement,
-            changed_by=request.user,
-            change_summary='New version created',
-            old_text=agreement.agreement_text,
-            new_text=new_agreement.agreement_text,
-        )
-        return Response(CollabRoyaltyAgreementSerializer(new_agreement).data, status=201)
-    return Response(serializer.errors, status=400)
-
-# --- E-signature/Acceptance ---
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def sign_royalty_split(request, split_id):
-    try:
-        split = CollabRoyaltySplit.objects.get(id=split_id, participant=request.user)
-    except CollabRoyaltySplit.DoesNotExist:
-        return Response({'error': 'Split not found or not authorized.'}, status=404)
-    split.accepted = True
-    split.e_signature = request.data.get('e_signature', 'signed')
-    split.accepted_at = timezone.now()
-    split.save()
-    return Response({'success': 'Agreement signed.'})
-
-# --- Change History ---
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def agreement_change_history(request, agreement_id):
-    logs = AgreementChangeLog.objects.filter(agreement_id=agreement_id).order_by('-change_time')
-    serializer = AgreementChangeLogSerializer(logs, many=True)
-    return Response(serializer.data)
-
-# --- Export Endpoints ---
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def export_agreement_json(request, agreement_id):
-    try:
-        agreement = CollabRoyaltyAgreement.objects.get(id=agreement_id)
-    except CollabRoyaltyAgreement.DoesNotExist:
-        return Response({'error': 'Agreement not found.'}, status=404)
-    serializer = CollabRoyaltyAgreementSerializer(agreement)
-    return Response(serializer.data)
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def export_agreement_csv(request, agreement_id):
-    try:
-        agreement = CollabRoyaltyAgreement.objects.get(id=agreement_id)
-    except CollabRoyaltyAgreement.DoesNotExist:
-        return Response({'error': 'Agreement not found.'}, status=404)
-    splits = CollabRoyaltySplit.objects.filter(agreement=agreement)
-    response = HttpResponse(content_type='text/csv')
-    response['Content-Disposition'] = f'attachment; filename="royalty_agreement_{agreement.id}.csv"'
-    writer = csv.writer(response)
-    writer.writerow(['Participant', 'Percentage', 'Accepted', 'Accepted At', 'E-signature'])
-    for split in splits:
-        writer.writerow([split.participant.username, split.percentage, split.accepted, split.accepted_at, split.e_signature])
     return response
 
 # --- Notification/Reminder Stub ---
@@ -638,7 +8,243 @@ def send_agreement_reminder(request, agreement_id):
     return Response({'success': 'Reminder sent (stub).'}, status=200)
 from django.http import HttpResponse, Http404
 from .models import CollabRoyaltyAgreement, CollabRoyaltySplit, AgreementTemplate, AgreementChangeLog
+from django.utils import from rest_framework import viewsets, permissions
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from django.http import JsonResponse
+from rest_framework import status
+from django.db.models import Avg, Count
+from django.contrib.auth import get_user_model
 from django.utils import timezone
+from .models import Post, PostJoin, UserWeeklyPromotion, WeeklyPromotionTemplate
+from .serializers import PostSerializer, PostJoinSerializer, UserWeeklyPromotionSerializer
+
+# ============================================================================
+# WORKING VIEWS - These use models that exist in models.py
+# ============================================================================
+
+# --- PostZ CRUD ---
+class PostViewSet(viewsets.ModelViewSet):
+    queryset = Post.objects.all().order_by('-created_at')
+    serializer_class = PostSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+# --- PostZ Joins ---
+class PostJoinViewSet(viewsets.ModelViewSet):
+    queryset = PostJoin.objects.all()
+    serializer_class = PostJoinSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+# --- Public API: App Version ---
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def app_version(request):
+    return JsonResponse({
+        "version": "v15.6",
+        "deployed": "2026-04-06"
+    })
+
+# --- Weekly Promotions API ---
+def _week_bounds():
+    """Helper: Get start and end dates for current week (Monday-Sunday)"""
+    from datetime import timedelta
+    today = timezone.now().date()
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
+    return week_start, week_end
+
+def _build_promo_code(user_id, template_key):
+    """Helper: Generate promo code"""
+    return f"PROMO_{user_id}_{template_key}".upper()[:40]
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def my_weekly_promotions(request):
+    """Get authenticated user's weekly promotions"""
+    week_start, _ = _week_bounds()
+    rows = UserWeeklyPromotion.objects.filter(
+        user=request.user, 
+        week_start=week_start
+    ).select_related('template', 'template__target_feature')
+    return Response(UserWeeklyPromotionSerializer(rows, many=True).data)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def claim_weekly_promotion(request, promotion_id):
+    """Claim a weekly promotion"""
+    row = UserWeeklyPromotion.objects.filter(
+        id=promotion_id, 
+        user=request.user
+    ).select_related('template', 'template__target_feature').first()
+    
+    if not row:
+        return Response({'error': 'Promotion not found.'}, status=status.HTTP_404_NOT_FOUND)
+    if row.claimed:
+        return Response({'error': 'Promotion already claimed.'}, status=status.HTTP_400_BAD_REQUEST)
+    if row.expires_at and row.expires_at < timezone.now():
+        return Response({'error': 'Promotion expired.'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    row.claimed = True
+    row.save(update_fields=['claimed', 'updated_at'])
+    return Response({'success': True, 'promotion': UserWeeklyPromotionSerializer(row).data})
+
+# ============================================================================
+# MISSING MODELS - These views are commented out until models are created
+# ============================================================================
+
+# TODO: PostRatingViewSet - Requires PostRating model
+# class PostRatingViewSet(viewsets.ModelViewSet):
+#     queryset = PostRating.objects.all()
+#     serializer_class = PostRatingSerializer
+#     permission_classes = [permissions.IsAuthenticated]
+
+# TODO: OCCLogViewSet - Requires OCCLog model
+# class OCCLogViewSet(viewsets.ModelViewSet):
+#     queryset = OCCLog.objects.all().order_by('-created_at')
+#     serializer_class = OCCLogSerializer
+#     permission_classes = [permissions.IsAuthenticated]
+
+# TODO: corey_feedback_and_suggestions - Requires CollabReliabilityRating and UserProfile models
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def corey_feedback_and_suggestions(request):
+#     """
+#     Returns quantifiable Corey feedback, improvement suggestions, and teacher/mentor recommendations.
+#     For high-rated users, recommends becoming a teacher and provides instructions.
+#     """
+#     from .models import CollabReliabilityRating, UserProfile
+#     # ... implementation
+
+# TODO: get_corey_voice_for_user - Requires CollabReliabilityRating model
+# def get_corey_voice_for_user(user):
+#     """
+#     Returns Corey-voice style: playful/flirtatious if avg rating >=5, else normal Corey-voice.
+#     """
+#     from .models import CollabReliabilityRating
+#     # ... implementation
+
+# TODO: user_personas - Requires Persona model
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def user_personas(request):
+#     """
+#     List all personas for the authenticated user, including their skills.
+#     """
+#     from .models import Persona
+#     # ... implementation
+
+# TODO: ai_suggest_skill_prices - Requires Persona, Skill, CollabReliabilityRating models
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def ai_suggest_skill_prices(request):
+#     """
+#     Suggest skill prices for the authenticated user based on their ratings, reviews, and demand.
+#     """
+#     from .models import Skill, Persona, CollabReliabilityRating
+#     # ... implementation
+
+# TODO: generate_weekly_promotions - Requires additional models
+# @api_view(['POST'])
+# @permission_classes([IsAuthenticated])
+# def generate_weekly_promotions(request):
+#     """
+#     Generate personalized weekly promotions for the authenticated user.
+#     """
+#     # ... implementation
+
+# TODO: in_app_feature_ads - Requires additional helper models
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def in_app_feature_ads(request):
+#     """
+#     Get in-app feature ads for the authenticated user.
+#     """
+#     # ... implementation
+
+# TODO: Agreement & Royalty Views - Require Agreement, AgreementSignature, RoyaltySplit, RoyaltyPayment models
+# from rest_framework import viewsets, permissions
+# from .models import Agreement, AgreementSignature, RoyaltySplit, RoyaltyPayment
+# from .serializers import (
+#     AgreementSerializer, AgreementSignatureSerializer, RoyaltySplitSerializer, RoyaltyPaymentSerializer
+# )
+# 
+# class IsAgreementOwnerOrReadOnly(permissions.BasePermission):
+#     def has_object_permission(self, request, view, obj):
+#         if request.method in permissions.SAFE_METHODS:
+#             return request.user == obj.owner or obj.royalty_splits.filter(user=request.user).exists()
+#         return request.user == obj.owner
+#
+# class IsSignatureUser(permissions.BasePermission):
+#     def has_object_permission(self, request, view, obj):
+#         return request.user == obj.user
+#
+# class IsOwnerForSplitOrPayment(permissions.BasePermission):
+#     def has_object_permission(self, request, view, obj):
+#         return request.user == obj.agreement.owner
+#
+# class AgreementViewSet(viewsets.ModelViewSet):
+#     queryset = Agreement.objects.all()
+#     serializer_class = AgreementSerializer
+#     permission_classes = [permissions.IsAuthenticated, IsAgreementOwnerOrReadOnly]
+#     def perform_create(self, serializer):
+#         agreement = serializer.save(owner=self.request.user)
+#         notify_agreement_created(agreement)
+#
+# class AgreementSignatureViewSet(viewsets.ModelViewSet):
+#     queryset = AgreementSignature.objects.all()
+#     serializer_class = AgreementSignatureSerializer
+#     permission_classes = [permissions.IsAuthenticated, IsSignatureUser]
+#     def get_queryset(self):
+#         user = self.request.user
+#         return AgreementSignature.objects.filter(
+#             models.Q(user=user) | models.Q(agreement__owner=user) | models.Q(agreement__royalty_splits__user=user)
+#         ).distinct()
+#
+# class RoyaltySplitViewSet(viewsets.ModelViewSet):
+#     queryset = RoyaltySplit.objects.all()
+#     serializer_class = RoyaltySplitSerializer
+#     permission_classes = [permissions.IsAuthenticated, IsOwnerForSplitOrPayment]
+#     def get_queryset(self):
+#         user = self.request.user
+#         return RoyaltySplit.objects.filter(
+#             models.Q(user=user) | models.Q(agreement__owner=user)
+#         ).distinct()
+#
+# class RoyaltyPaymentViewSet(viewsets.ModelViewSet):
+#     queryset = RoyaltyPayment.objects.all()
+#     serializer_class = RoyaltyPaymentSerializer
+#     permission_classes = [permissions.IsAuthenticated, IsOwnerForSplitOrPayment]
+#     def get_queryset(self):
+#         user = self.request.user
+#         return RoyaltyPayment.objects.filter(
+#             models.Q(user=user) | models.Q(agreement__owner=user)
+#         ).distinct()
+#
+# def notify_agreement_created(agreement):
+#     from django.core.mail import send_mail
+#     recipients = [split.user.email for split in agreement.royalty_splits.all() if split.user != agreement.owner and split.user.email]
+#     if recipients:
+#         send_mail(
+#             subject=f"New Agreement: {agreement.title}",
+#             message=f"You have been added to a new agreement '{agreement.title}' for project '{agreement.project}'. Log in to review and sign.",
+#             from_email=None,
+#             recipient_list=recipients,
+#             fail_silently=True,
+#         )
+#
+# def notify_signature_signed(signature):
+#     from django.core.mail import send_mail
+#     owner_email = signature.agreement.owner.email
+#     if owner_email:
+#         send_mail(
+#             subject=f"Agreement Signed: {signature.agreement.title}",
+#             message=f"{signature.user.username} has signed the agreement '{signature.agreement.title}'.",
+#             from_email=None,
+#             recipient_list=[owner_email],
+#             fail_silently=True,
+#         )
+
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from io import BytesIO
