@@ -304,12 +304,9 @@ from django.conf import settings
 from django.contrib.auth import authenticate, login as auth_login
 import os
 import re as _re
-<<<<<<< HEAD
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
-=======
 import openai
 from django.views.decorators.csrf import csrf_exempt
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
 from django.http import JsonResponse
 
 from rest_framework.decorators import api_view, permission_classes
@@ -333,10 +330,7 @@ def openai_chat(request):
     if not api_key:
         return JsonResponse({'error': 'OpenAI API key not set.'}, status=500)
     try:
-<<<<<<< HEAD
         import openai
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
         openai.api_key = api_key
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -647,16 +641,13 @@ def send_agreement_reminder(request, agreement_id):
 from django.http import HttpResponse, Http404
 from .models import CollabRoyaltyAgreement, CollabRoyaltySplit, AgreementTemplate, AgreementChangeLog
 from django.utils import timezone
-<<<<<<< HEAD
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
 from io import BytesIO
 # --- Royalty Agreement PDF Download Endpoint ---
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def download_royalty_agreement_pdf(request, agreement_id):
-<<<<<<< HEAD
     # Import PDF dependencies lazily so missing/broken ReportLab does not break app startup.
     try:
         from reportlab.lib.pagesizes import letter
@@ -664,8 +655,6 @@ def download_royalty_agreement_pdf(request, agreement_id):
     except Exception:
         return Response({'error': 'PDF generation is temporarily unavailable.'}, status=503)
 
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
     try:
         agreement = CollabRoyaltyAgreement.objects.get(id=agreement_id)
     except CollabRoyaltyAgreement.DoesNotExist:
@@ -747,7 +736,6 @@ class CsrfExemptSessionAuthentication(SessionAuthentication):
         return
 
 
-<<<<<<< HEAD
 @api_view(['GET'])
 @permission_classes([AllowAny])
 @ensure_csrf_cookie
@@ -755,8 +743,6 @@ def auth_csrf(request):
     return Response({'success': True, 'message': 'CSRF cookie set.'})
 
 
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
 def _request_ip(request):
     forwarded_for = (request.META.get('HTTP_X_FORWARDED_FOR') or '').split(',')[0].strip()
     return forwarded_for or (request.META.get('REMOTE_ADDR') or '')
@@ -778,7 +764,6 @@ def _record_auth_event(request, *, event, outcome, user=None, identifier='', pro
     except Exception:
         pass
 
-<<<<<<< HEAD
 
 def _safe_auth_login(request, user):
     """Best-effort session login. Registration must not fail if session write fails."""
@@ -788,8 +773,6 @@ def _safe_auth_login(request, user):
     except Exception:
         return False
 
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def referral_stats(request):
@@ -808,19 +791,13 @@ def referral_stats(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
-<<<<<<< HEAD
 @authentication_classes([CsrfExemptSessionAuthentication])
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
 def register_with_referral(request):
     referral_code = request.data.get('referral_code')
     serializer = RegisterSerializer(data=request.data)
     if serializer.is_valid():
         user = serializer.save()
-<<<<<<< HEAD
         _safe_auth_login(request, user)
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
         if referral_code:
             try:
                 referrer_profile = UserProfile.objects.get(referral_code=referral_code)
@@ -850,18 +827,12 @@ def register_with_referral(request):
 # API endpoint for user registration
 @api_view(['POST'])
 @permission_classes([AllowAny])
-<<<<<<< HEAD
 @authentication_classes([CsrfExemptSessionAuthentication])
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
 def api_register(request):
     serializer = RegisterSerializer(data=request.data)
     if serializer.is_valid():
         user = serializer.save()
-<<<<<<< HEAD
         _safe_auth_login(request, user)
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
         _record_auth_event(
             request,
             event='register',
@@ -889,17 +860,14 @@ def api_register(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
-<<<<<<< HEAD
 @authentication_classes([CsrfExemptSessionAuthentication])
 def api_login(request):
     identifier = (request.data.get('identifier') or request.data.get('email') or '').strip()
     # Preserve the exact password value; trimming can break valid credentials.
     password = request.data.get('password') or ''
-=======
 def api_login(request):
     identifier = (request.data.get('identifier') or request.data.get('email') or '').strip()
     password = (request.data.get('password') or '').strip()
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
 
     if not identifier or not password:
         _record_auth_event(
@@ -912,13 +880,10 @@ def api_login(request):
         return Response({'error': 'Identifier and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
     user = None
-<<<<<<< HEAD
 
     def _normalize_phone(value):
         return ''.join(ch for ch in str(value or '') if ch.isdigit())
 
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
     # Try email lookup
     if '@' in identifier:
         try:
@@ -926,7 +891,6 @@ def api_login(request):
             user = authenticate(request, username=u.username, password=password)
         except User.DoesNotExist:
             pass
-<<<<<<< HEAD
 
     # Try phone lookup
     if user is None and _re.match(r'^\+?\d[\d\s\-(). ]{5,}$', identifier):
@@ -945,7 +909,6 @@ def api_login(request):
         u = User.objects.filter(username__iexact=identifier).first()
         if u is not None:
             user = authenticate(request, username=u.username, password=password)
-=======
     # Try phone lookup
     if user is None and _re.match(r'^\+?\d[\d\s\-(). ]{5,}$', identifier):
         try:
@@ -956,7 +919,6 @@ def api_login(request):
     # Try username lookup
     if user is None:
         user = authenticate(request, username=identifier, password=password)
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
 
     if user is None:
         _record_auth_event(
@@ -968,7 +930,6 @@ def api_login(request):
         )
         return Response({'error': 'Invalid credentials.'}, status=status.HTTP_401_UNAUTHORIZED)
 
-<<<<<<< HEAD
     if not user.is_active:
         _record_auth_event(
             request,
@@ -980,8 +941,6 @@ def api_login(request):
         )
         return Response({'error': 'Account is inactive.'}, status=status.HTTP_403_FORBIDDEN)
 
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
     auth_login(request, user)
     profile = UserProfile.objects.filter(user=user).first()
     phone_number = (profile.phone_number or '') if profile else ''
@@ -1144,11 +1103,8 @@ def update_notification_settings(request):
 from django.http import JsonResponse
 
 
-<<<<<<< HEAD
 @api_view(['GET'])
 @permission_classes([AllowAny])
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
 def api_auth_me(request):
     user = getattr(request, 'user', None)
     if user and user.is_authenticated:
@@ -1171,11 +1127,8 @@ def api_auth_me(request):
             }
 
         profile_completed = bool((user.username or '').strip() and (user.email or '').strip() and phone_number)
-<<<<<<< HEAD
         return Response({
-=======
         return JsonResponse({
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
             'authenticated': True,
             'user': {
                 'id': user.id,
@@ -1188,11 +1141,8 @@ def api_auth_me(request):
                 'notification_settings': notification_settings,
             }
         })
-<<<<<<< HEAD
     return Response({'authenticated': False}, status=status.HTTP_200_OK)
-=======
     return JsonResponse({'authenticated': False}, status=401)
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
 
 
 @api_view(['GET'])
@@ -1314,7 +1264,6 @@ def oauth_providers_status(request):
         'linkedin': 'linkedin_oauth2',
         'github': 'github',
         'google': 'google',
-<<<<<<< HEAD
         'amazon': 'amazon',
         'discogs': 'discogs',
         'patreon': 'patreon',
@@ -1322,11 +1271,9 @@ def oauth_providers_status(request):
         'soundcloud': 'soundcloud',
         'tiktok': 'tiktok',
         'twitch': 'twitch',
-=======
         'spotify': 'spotify',
         'soundcloud': 'soundcloud',
         'tiktok': 'tiktok',
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
     }
 
     socialaccount_settings = getattr(settings, 'SOCIALACCOUNT_PROVIDERS', {})
@@ -1516,7 +1463,6 @@ def _resolve_subscription_price_id(requested_price_id, billing_period, plan_type
     return os.environ.get(env_key, '').strip()
 
 
-<<<<<<< HEAD
 def _payload_first(payload, *keys, default=None):
     for key in keys:
         if key in payload and payload.get(key) not in (None, ''):
@@ -1531,8 +1477,6 @@ def _normalize_billing_period(value):
     return 'monthly'
 
 
-=======
->>>>>>> dec631da98253f85bff28b8e054535819adb2224
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def create_subscription_checkout(request):
@@ -1656,7 +1600,6 @@ def use_collaboration_request(request):
     # Temporary permissive implementation until per-user quota persistence is added.
     return Response({'ok': True, 'remaining': -1})
 
-<<<<<<< HEAD
 
 def _release_validation_errors(release):
     errors = {}
