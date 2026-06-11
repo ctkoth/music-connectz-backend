@@ -14,11 +14,11 @@ urlpatterns = [
     path('admin/', admin.site.urls),
 
     # ── Existing apps (unchanged) ────────────────────────────────────────
-   # path('api/', include('apps.accounts.urls')),
+    path('api/', include('apps.accounts.urls')),
     path('api/', include('apps.ai.urls')),
     path('api/', include('apps.profiles.urls')),
     path('api/', include('apps.personas.urls')),
-    path('api/', include('apps.examples.urls')),
+   # path('api/', include('apps.examples.urls')),
     path('api/', include('apps.collabs.urls')),
     path('api/', include('apps.messages.urls')),
     path('api/', include('apps.tasks.urls')),
