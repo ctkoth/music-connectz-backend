@@ -14,7 +14,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
 
     # ── Existing apps (unchanged) ────────────────────────────────────────
-    path('api/', include('apps.accounts.urls')),
+   # path('api/', include('apps.accounts.urls')),
     path('api/', include('apps.ai.urls')),
     path('api/', include('apps.profiles.urls')),
     path('api/', include('apps.personas.urls')),
