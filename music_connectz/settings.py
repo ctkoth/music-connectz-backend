@@ -22,7 +22,7 @@ INSTALLED_APPS = [
     'apps.ai',
     'apps.analytics',
     'apps.designz',
-    'apps.direct',
+   # 'apps.direct',
     'apps.events',
     'apps.memberships',
     'apps.notifications',
