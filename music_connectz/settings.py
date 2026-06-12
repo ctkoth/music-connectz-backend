@@ -82,3 +82,38 @@ LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
+# Appended missing apps
+INSTALLED_APPS += [
+    'apps.skillz',
+    'apps.shotz',
+    'apps.events',
+    'apps.battles',
+    'apps.collabs',
+    'apps.analytics',
+    'apps.ai',
+    'apps.dawz',
+    'apps.designz',
+    'apps.developz',
+    'apps.direct',
+    'apps.managez',
+    'apps.memberships',
+    'apps.messages',
+    'apps.mixez',
+    'apps.notifications',
+    'apps.payments',
+    'apps.personas',
+    'apps.producez',
+    'apps.profiles',
+    'apps.referrals',
+    'apps.releases',
+    'apps.scoutz',
+    'apps.search',
+    'apps.storage',
+    'apps.subscriptions',
+    'apps.tasks',
+    'apps.transactions',
+    'apps.video',
+    'apps.votes',
+    'apps.writez',
+    'apps.common',
+]
