@@ -21,17 +21,30 @@ INSTALLED_APPS = [
     'apps.accounts',
     'apps.ai',
     'apps.analytics',
+    'apps.battles',
+    'apps.collabs',
+    'apps.common',
+    'apps.dawz',
     'apps.designz',
-   # 'apps.direct',
+    # 'apps.direct',
     'apps.events',
+    'apps.managez',
     'apps.memberships',
+    'apps.messages',
+    'apps.mixez',
     'apps.notifications',
+    'apps.payments',
     'apps.personas',
+    'apps.producez',
     'apps.profiles',
     'apps.referrals',
+    'apps.releases',
+    'apps.scoutz',
     'apps.search',
     'apps.shotz',
+    'apps.skillz',
     'apps.storage',
+    'apps.subscriptions',
     'apps.tasks',
     'apps.transactions',
     'apps.video',
@@ -54,7 +67,19 @@ MIDDLEWARE = [
 ROOT_URLCONF = 'music_connectz.urls'
 WSGI_APPLICATION = 'music_connectz.wsgi.application'
 
-TEMPLATES = [{'BACKEND': 'django.template.backends.django.DjangoTemplates', 'DIRS': [], 'APP_DIRS': True, 'OPTIONS': {'context_processors': ['django.template.context_processors.debug', 'django.template.context_processors.request', 'django.contrib.auth.context_processors.auth', 'django.contrib.messages.context_processors.messages']}}]
+TEMPLATES = [{
+    'BACKEND': 'django.template.backends.django.DjangoTemplates',
+    'DIRS': [],
+    'APP_DIRS': True,
+    'OPTIONS': {
+        'context_processors': [
+            'django.template.context_processors.debug',
+            'django.template.context_processors.request',
+            'django.contrib.auth.context_processors.auth',
+            'django.contrib.messages.context_processors.messages',
+        ]
+    }
+}]
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
 DATABASES = {
@@ -82,3 +107,12 @@ LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
+
+# Email
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'noreply@musicconnectz.com')
