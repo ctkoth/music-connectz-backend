@@ -72,7 +72,42 @@ INSTALLED_APPS = [
     'allauth.socialaccount.providers.tiktok',
     'allauth.socialaccount.providers.twitch',
     'rest_framework',
+    'rest_framework_simplejwt',
     'corsheaders',
+    # Music ConnectZ apps
+    'apps.accounts',
+    'apps.ai',
+    'apps.analytics',
+    'apps.battles',
+    'apps.collabs',
+    'apps.common',
+    'apps.dawz',
+    'apps.designz',
+    'apps.developz',
+    'apps.direct',
+    'apps.events',
+    'apps.managez',
+    'apps.memberships',
+    'apps.messages',
+    'apps.mixez',
+    'apps.notifications',
+    'apps.payments',
+    'apps.personas',
+    'apps.producez',
+    'apps.profiles',
+    'apps.referrals',
+    'apps.releases',
+    'apps.scoutz',
+    'apps.search',
+    'apps.shotz',
+    'apps.skillz',
+    'apps.storage',
+    'apps.subscriptions',
+    'apps.tasks',
+    'apps.transactions',
+    'apps.video',
+    'apps.votes',
+    'apps.writez',
 ]
 
 # Add site id for django.contrib.sites
@@ -85,17 +120,13 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 # --- allauth account configuration (modern API, allauth >= 0.58) ---
-# ACCOUNT_AUTHENTICATION_METHOD is deprecated; use ACCOUNT_LOGIN_METHODS instead.
-ACCOUNT_LOGIN_METHODS = {'email', 'username'}     # Allow login with email OR username
-ACCOUNT_USERNAME_REQUIRED = False                 # Username is optional
-ACCOUNT_EMAIL_REQUIRED = False                    # Email is optional
+ACCOUNT_LOGIN_METHODS = {'email', 'username'}
+ACCOUNT_USERNAME_REQUIRED = False
+ACCOUNT_EMAIL_REQUIRED = False
 ACCOUNT_USER_MODEL_USERNAME_FIELD = "username"
 ACCOUNT_EMAIL_VERIFICATION = 'optional'
 ACCOUNT_DEFAULT_HTTP_PROTOCOL = 'https'
 ACCOUNT_UNIQUE_EMAIL = True
-# NOTE: ACCOUNT_SIGNUP_FIELDS is not a real allauth setting and was being ignored.
-# To require fields at signup, use ACCOUNT_SIGNUP_FORM_CLASS with a custom form,
-# or rely on ACCOUNT_USERNAME_REQUIRED / ACCOUNT_EMAIL_REQUIRED above.
 
 SOCIALACCOUNT_AUTO_SIGNUP = True
 SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
@@ -171,7 +202,7 @@ def _set_social_app_from_env(provider_key, client_id_env, client_secret_env, key
         }
 
 
-# --- Per-provider env credential loading (each provider registered exactly once) ---
+# --- Per-provider env credential loading ---
 _set_social_app_from_env('apple', 'APPLE_CLIENT_ID', 'APPLE_CLIENT_SECRET', key_env='APPLE_KEY_ID')
 _set_social_app_from_env('amazon', 'AMAZON_CLIENT_ID', 'AMAZON_CLIENT_SECRET')
 _set_social_app_from_env('discogs', 'DISCOGS_CLIENT_ID', 'DISCOGS_CLIENT_SECRET')
@@ -230,8 +261,6 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 
 
 # Database
-# https://docs.djangoproject.com/en/6.0/ref/settings/#databases
-
 def _database_config_from_url(url):
     parsed = urlparse(url)
     scheme = (parsed.scheme or '').lower()
@@ -262,8 +291,6 @@ DATABASES = {
 
 
 # Password validation
-# https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
-
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
@@ -271,10 +298,17 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
+# REST Framework
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticatedOrReadOnly',
+    ],
+}
 
 # Internationalization
-# https://docs.djangoproject.com/en/6.0/topics/i18n/
-
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 USE_I18N = True
@@ -291,14 +325,21 @@ EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER or 'noreply@musicconnectz.com')
 
 
-# --- Static files (required for Render + collectstatic) ---
+# Static files
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [BASE_DIR / 'static'] if (BASE_DIR / 'static').exists() else []
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
+# Media files
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
-# --- CORS settings for frontend (single canonical list, no duplicates) ---
+# Default primary key field type
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+# CORS settings
 CORS_ALLOWED_ORIGINS = [
     "https://musicconnectz.com",
     "https://www.musicconnectz.com",
@@ -312,7 +353,6 @@ CORS_ALLOWED_ORIGINS = [
     "https://music-connectz-backend-2.onrender.com",
 ]
 
-# Allow all Vercel preview deployment URLs (*.vercel.app)
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r'^https://[\w-]+\.vercel\.app$',
 ]
@@ -343,19 +383,17 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 
-# --- Distribution Premium Features ---
-# Set to False in dev/testing to grant all users premium features
+# Distribution & Feature Flags
 DISTRIBUTION_PREMIUM_ENFORCED = (os.environ.get('DISTRIBUTION_PREMIUM_ENFORCED', '0' if DEBUG else '1').lower() not in {'0', 'false', 'no'})
-# Set to False in dev/testing to bypass feature checkout/payment enforcement.
 FEATURE_PAYMENTS_ENFORCED = (os.environ.get('FEATURE_PAYMENTS_ENFORCED', '0' if DEBUG else '1').lower() not in {'0', 'false', 'no'})
 
-# Analytics features
+# Analytics
 ANALYTICS_ENABLED = True
 STREAM_EVENT_TRACKING_ENABLED = (os.environ.get('STREAM_EVENT_TRACKING_ENABLED', 'true').lower() != 'false')
 CONTRIBUTOR_EARNINGS_TRACKING_ENABLED = True
 
 
-# --- Security Headers for Safer Site ---
+# Security Headers
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
