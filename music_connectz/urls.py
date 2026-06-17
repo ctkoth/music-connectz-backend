@@ -3,41 +3,56 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 
-def try_include(module):
+
+def try_include(prefix, module):
     try:
-        return include(module)
+        return path(prefix, include(module))
     except ModuleNotFoundError:
         return None
+
 
 urlpatterns = [
     path('admin/', admin.site.urls),
 ]
 
 safe_apps = [
-    'apps.accounts.urls',
-    'apps.ai.urls',
-    'apps.profiles.urls',
-    'apps.personas.urls',
-    'apps.memberships.urls',
-    'apps.referrals.urls',
-    'apps.notifications.urls',
-    'apps.designz.urls',
-    'apps.shotz.urls',
-    'apps.writez.urls',
-    'apps.search.urls',
-    'apps.events.urls',
-    'apps.direct.urls',
-    'apps.video.urls',
-    'apps.storage.urls',
-    'apps.tasks.urls',
-    'apps.transactions.urls',
-    'apps.votes.urls',
-    'apps.analytics.urls',
+    ('api/accounts/',     'apps.accounts.urls'),
+    ('api/ai/',           'apps.ai.urls'),
+    ('api/analytics/',    'apps.analytics.urls'),
+    ('api/battles/',      'apps.battles.urls'),
+    ('api/collabs/',      'apps.collabs.urls'),
+    ('api/common/',       'apps.common.urls'),
+    ('api/dawz/',         'apps.dawz.urls'),
+    ('api/designz/',      'apps.designz.urls'),
+    # ('api/direct/',     'apps.direct.urls'),  # commented out in INSTALLED_APPS
+    ('api/events/',       'apps.events.urls'),
+    ('api/managez/',      'apps.managez.urls'),
+    ('api/memberships/',  'apps.memberships.urls'),
+    ('api/messages/',     'apps.messages.urls'),
+    ('api/mixez/',        'apps.mixez.urls'),
+    ('api/notifications/','apps.notifications.urls'),
+    ('api/payments/',     'apps.payments.urls'),
+    ('api/personas/',     'apps.personas.urls'),
+    ('api/producez/',     'apps.producez.urls'),
+    ('api/profiles/',     'apps.profiles.urls'),
+    ('api/referrals/',    'apps.referrals.urls'),
+    ('api/releases/',     'apps.releases.urls'),
+    ('api/scoutz/',       'apps.scoutz.urls'),
+    ('api/search/',       'apps.search.urls'),
+    ('api/shotz/',        'apps.shotz.urls'),
+    ('api/skillz/',       'apps.skillz.urls'),
+    ('api/storage/',      'apps.storage.urls'),
+    ('api/subscriptions/','apps.subscriptions.urls'),
+    ('api/tasks/',        'apps.tasks.urls'),
+    ('api/transactions/', 'apps.transactions.urls'),
+    ('api/video/',        'apps.video.urls'),
+    ('api/votes/',        'apps.votes.urls'),
+    ('api/writez/',       'apps.writez.urls'),
 ]
 
-for app_urls in safe_apps:
-    result = try_include(app_urls)
+for prefix, module in safe_apps:
+    result = try_include(prefix, module)
     if result:
-        urlpatterns.append(path('api/', result))
+        urlpatterns.append(result)
 
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
