@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# Push the Music ConnectZ BACKEND to GitHub (auto-deploys on Render).
-# This repo is now a COMPLETE, standalone Django project (manage.py + settings +
-# wsgi + all existing apps + working auth) — it boots and deploys on its own.
-# Usage:  bash push_backend.sh ["commit message"]
-set -euo pipefail
-cd "$(dirname "$0")"
-MSG="${1:-Backend: standalone deployable project + JWT/OAuth auth + DesignZ (no DrawZ) + live ScoutZ/ManageZ marketplaces + gamified creator apps + manifest}"
-REMOTE="https://github.com/ctkoth/music-connectz-backend.git"
+# Termux-friendly push for the Music ConnectZ backend (MimeZ + OAuth drop).
+# Run from the root of your local backend repo clone.
+set -e
 
-git rev-parse --is-inside-work-tree >/dev/null 2>&1 || git init
-git remote get-url origin >/dev/null 2>&1 || git remote add origin "$REMOTE"
+echo "==> Music ConnectZ backend push (MimeZ + OAuth)"
 
-# Safety: make sure the project at least imports before pushing.
-python manage.py check || { echo "✗ django check failed — not pushing"; exit 1; }
+# Stage the two new apps + docs (adjust paths if your repo layout differs).
+git add apps/mimez apps/auth_oauth INTEGRATION_MIMEZ.md requirements_additions.txt 2>/dev/null || git add -A
 
-git add -A
-git commit -m "$MSG" || { echo "Nothing to commit."; exit 0; }
-git push -u origin HEAD:main
-echo "✓ Backend pushed → Render will build admin.musicconnectz.net"
-echo "  Render settings to confirm:"
-echo "    Build:      pip install -r requirements.txt && python manage.py collectstatic --noinput"
-echo "    Pre-Deploy: python manage.py migrate && python manage.py seed_skillz && python manage.py seed_dawz"
-echo "    Start:      gunicorn music_connectz.wsgi:application"
+git status --short
+
+MSG="${1:-Add MimeZ persona (teen-safe, SkillZ) + OAuth Google/GitHub/Apple}"
+git commit -m "$MSG" || echo "(nothing to commit)"
+
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+echo "==> Pushing to origin/$BRANCH"
+if ! git push origin "$BRANCH"; then
+  echo "!! Push rejected. Pulling with rebase and retrying..."
+  git pull --rebase origin "$BRANCH"
+  git push origin "$BRANCH"
+fi
+echo "==> Done. Render will auto-deploy. Run migrations on deploy:"
+echo "    python manage.py migrate --no-input"

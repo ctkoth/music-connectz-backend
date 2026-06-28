@@ -1,15 +1,24 @@
 #!/usr/bin/env bash
-# Push the Music ConnectZ FRONTEND to GitHub (auto-deploys on Vercel).
-# Usage:  bash push_frontend.sh ["commit message"]
-set -euo pipefail
-cd "$(dirname "$0")"
-MSG="${1:-Frontend: creator icons + OAuth redirect capture; point API at admin.musicconnectz.net}"
-REMOTE="https://github.com/ctkoth/-music-connectz-frontend-.git"
+# Termux-friendly push for the Music ConnectZ frontend (MimeZ + OAuth drop).
+# Run from the root of your local frontend repo clone.
+set -e
 
-git rev-parse --is-inside-work-tree >/dev/null 2>&1 || git init
-git remote get-url origin >/dev/null 2>&1 || git remote add origin "$REMOTE"
+echo "==> Music ConnectZ frontend push (MimeZ + OAuth)"
 
-git add -A
-git commit -m "$MSG" || { echo "Nothing to commit."; exit 0; }
-git push -u origin HEAD:main
-echo "✓ Frontend pushed → Vercel will build musicconnectz.net"
+git add src/mimez src/auth src/icons/CUSTOM_ICONS_mimez_snippet.js \
+        public/icons/Personaz_Mime.png INTEGRATION_MIMEZ_FRONTEND.md 2>/dev/null || git add -A
+
+git status --short
+
+MSG="${1:-Add MimeZ studio + OAuth buttons (Google/GitHub/Apple)}"
+git commit -m "$MSG" || echo "(nothing to commit)"
+
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+echo "==> Pushing to origin/$BRANCH"
+if ! git push origin "$BRANCH"; then
+  echo "!! Push rejected. Pulling with rebase and retrying..."
+  git pull --rebase origin "$BRANCH"
+  git push origin "$BRANCH"
+fi
+echo "==> Done. Vercel will auto-deploy. Remember to wire the /mime route,"
+echo "    merge MIMEZ_ICONS, add <OAuthButtons/>, and call captureOAuthTokens()."
