@@ -1,24 +1,36 @@
 #!/usr/bin/env bash
-# Termux-friendly push for the Music ConnectZ frontend (MimeZ + OAuth drop).
-# Run from the root of your local frontend repo clone.
+# push_frontend.sh — deploy the Music ConnectZ frontend to Vercel.
+# Run from the ROOT of your frontend repo after copying these files in.
+#
+#   bash push_frontend.sh            # git push (auto-deploys if repo is linked)
+#   bash push_frontend.sh vercel     # direct deploy via Vercel CLI
+#
 set -e
 
-echo "==> Music ConnectZ frontend push (MimeZ + OAuth)"
+MODE="${1:-git}"
+BRANCH="${2:-main}"
 
-git add src/mimez src/auth src/icons/CUSTOM_ICONS_mimez_snippet.js \
-        public/icons/Personaz_Mime.png INTEGRATION_MIMEZ_FRONTEND.md 2>/dev/null || git add -A
+if [ ! -f package.json ]; then
+  echo "!! package.json not found. cd into your frontend repo root first."
+  exit 1
+fi
 
-git status --short
+echo "==> Installing deps + test build"
+npm install --no-audit --no-fund
+npm run build
 
-MSG="${1:-Add MimeZ studio + OAuth buttons (Google/GitHub/Apple)}"
-git commit -m "$MSG" || echo "(nothing to commit)"
-
-BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-echo "==> Pushing to origin/$BRANCH"
-if ! git push origin "$BRANCH"; then
-  echo "!! Push rejected. Pulling with rebase and retrying..."
-  git pull --rebase origin "$BRANCH"
+if [ "$MODE" = "vercel" ]; then
+  echo "==> Deploying with Vercel CLI"
+  npx vercel --prod
+else
+  echo "==> Committing + pushing (Vercel auto-deploys linked repos)"
+  git add -A
+  git commit -m "MimeZ + DirectZ SkillZ UI; OAuth register/login (username/email/phone)" || echo "(nothing to commit)"
   git push origin "$BRANCH"
 fi
-echo "==> Done. Vercel will auto-deploy. Remember to wire the /mime route,"
-echo "    merge MIMEZ_ICONS, add <OAuthButtons/>, and call captureOAuthTokens()."
+
+echo "==> Done."
+echo "   Set these in Vercel → Settings → Environment Variables:"
+echo "     VITE_API_BASE=https://admin.musicconnectz.net"
+echo "     VITE_GOOGLE_CLIENT_ID, VITE_GITHUB_CLIENT_ID, VITE_APPLE_CLIENT_ID"
+echo "     VITE_OAUTH_REDIRECT=https://musicconnectz.net/oauth/callback"
