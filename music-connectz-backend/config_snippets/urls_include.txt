@@ -1,0 +1,27 @@
+# ── Add to your ROOT urls.py (the project-level urlpatterns) ────────────────
+from django.urls import include, path
+
+urlpatterns += [
+    path("api/auth/", include("apps.accounts.urls")),
+    path("api/mimez/", include("apps.mimez.urls")),
+    path("api/directz/", include("apps.directz.urls")),
+]
+
+# Resulting endpoints:
+#   POST /api/auth/register/                 username,email,phone,password -> JWT
+#   POST /api/auth/login/                    identifier,password           -> JWT
+#   GET  /api/auth/me/
+#   POST /api/auth/refresh/
+#   POST /api/auth/oauth/google/             { credential }
+#   POST /api/auth/oauth/github/             { code, redirect_uri }
+#   POST /api/auth/oauth/apple/              { id_token }
+#
+#   GET  /api/mimez/overview/
+#   POST /api/mimez/submit/
+#   GET  /api/mimez/skillz/profile/  drills/  badges/  leaderboard/
+#   POST /api/mimez/skillz/complete/         { drill_key, score }
+#
+#   GET  /api/directz/overview/
+#   POST /api/directz/submit/
+#   GET  /api/directz/skillz/profile/  drills/  badges/  leaderboard/
+#   POST /api/directz/skillz/complete/     { drill_key, score }
