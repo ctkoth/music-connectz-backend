@@ -5,6 +5,8 @@ commentz, versionz, dashboard. Remaining sub-tabs respond via TabView until buil
 """
 from django.urls import path
 
+from apps.skillz.urls import training_urlpatterns
+
 from . import views
 
 app_name = "designz"
@@ -36,4 +38,6 @@ urlpatterns = [
     path("designz/marketplace/", views.TabView.as_view(tab="marketplace"), name="marketplace"),
     path("designz/analytics/", views.TabView.as_view(tab="analytics"), name="analytics"),
     path("designz/settingz/", views.TabView.as_view(tab="settingz"), name="settingz"),
-]
+    path("designz/challenge/submit/", views.SubmitChallengeView.as_view(), name="challenge-submit"),
+    path("designz/challenge/submissionz/", views.SubmissionListView.as_view(), name="challenge-submissionz"),
+] + training_urlpatterns("designz")

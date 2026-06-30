@@ -135,3 +135,70 @@ class TabView(APIView):
 
     def get(self, request):
         return Response({"app": APP_KEY, "tab": self.tab, "status": "scaffold", "items": []})
+
+
+# ── Challenge submission: edit in ImageZ OR import anything → score it ───────
+from rest_framework import status as _status  # noqa: E402
+from apps.skillz.models import Drill  # noqa: E402
+from apps.skillz.scoring import record_attempt  # noqa: E402
+from .models import ChallengeSubmission  # noqa: E402
+from .scoring import score_submission  # noqa: E402
+
+
+class SubmitChallengeView(APIView):
+    """POST a challenge answer made in ImageZ or imported from anywhere.
+
+    Body: { drill, source: "imagez"|"import"|"asset", artifact_url,
+            asset_id?, notes?, score? }
+    - Records a DesignZ ChallengeSubmission (the artifact),
+    - Scores it (client score > AI rating > baseline credit),
+    - Funnels through SkillZ so it earns XP / badges / leaderboard like a drill.
+    """
+    permission_classes = PERMS
+
+    def post(self, request):
+        drill_id = request.data.get("drill")
+        try:
+            drill = Drill.objects.get(id=drill_id, track__app_key=APP_KEY)
+        except Drill.DoesNotExist:
+            return Response({"detail": "challenge not found"}, status=_status.HTTP_404_NOT_FOUND)
+
+        source = request.data.get("source", "imagez")
+        artifact_url = request.data.get("artifact_url", "")
+        notes = request.data.get("notes", "")
+        asset = None
+        asset_id = request.data.get("asset_id")
+        if asset_id:
+            asset = Asset.objects.filter(id=asset_id, owner=request.user).first()
+            if asset and not artifact_url:
+                artifact_url = asset.file_url
+
+        score, basis = score_submission(drill.prompt or drill.title, artifact_url,
+                                        request.data.get("score"))
+        result = record_attempt(request.user, drill, score)
+
+        sub = ChallengeSubmission.objects.create(
+            owner=request.user, drill_id=drill.id, track_key=drill.track.key,
+            source=source, artifact_url=artifact_url, asset=asset, notes=notes,
+            score=score, passed=result["passed"], xp_earned=result["xp_earned"])
+
+        return Response({
+            "submission_id": str(sub.id),
+            "score": score, "score_basis": basis,
+            **result,
+        }, status=_status.HTTP_201_CREATED)
+
+
+class SubmissionListView(generics.ListAPIView):
+    permission_classes = PERMS
+    def get(self, request, *args, **kwargs):
+        rows = ChallengeSubmission.objects.filter(owner=request.user)
+        drill = request.query_params.get("drill")
+        if drill:
+            rows = rows.filter(drill_id=drill)
+        return Response([{
+            "id": str(s.id), "drill": str(s.drill_id), "track_key": s.track_key,
+            "source": s.source, "artifact_url": s.artifact_url, "notes": s.notes,
+            "score": s.score, "passed": s.passed, "xp_earned": s.xp_earned,
+            "created_at": s.created_at,
+        } for s in rows])

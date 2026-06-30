@@ -1,53 +1,50 @@
-"""Music ConnectZ — Main URL configuration (merged).
+"""Music ConnectZ — main URL configuration (deployable, self-contained).
 
-Your existing apps, unchanged, plus the new creator apps, SkillZ training, and
-DawZ voting. Safe to replace your music_connectz/urls.py with this — the first
-block is identical to yours.
+Only wires apps that actually exist in this repo, so the project BOOTS cleanly
+(the previous merged urls.py imported ~17 apps that weren't present — that is an
+ImportError at startup, i.e. the deploy breakage). Add more includes here as you
+bring additional apps into this repo.
 """
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import include, path
 from django.conf import settings
 from django.conf.urls.static import static
+from django.http import JsonResponse
+
+
+def health(_request):
+    return JsonResponse({"service": "music-connectz-backend", "status": "ok"})
 
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    path("", health),                      # so / returns 200 (not a scary 404)
+    path("healthz/", health),
+    path("admin/", admin.site.urls),
 
-    # ── Existing apps (unchanged) ────────────────────────────────────────
-    path('api/', include('apps.accounts.urls')),
-    path('api/', include('apps.ai.urls')),
-    path('api/', include('apps.profiles.urls')),
-    path('api/', include('apps.personas.urls')),
-    path('api/', include('apps.examples.urls')),
-    path('api/', include('apps.collabs.urls')),
-    path('api/', include('apps.messages.urls')),
-    path('api/', include('apps.tasks.urls')),
-    path('api/', include('apps.battles.urls')),
-    path('api/', include('apps.transactions.urls')),
-    path('api/', include('apps.mixes.urls')),
-    path('api/', include('apps.releases.urls')),
-    path('api/', include('apps.memberships.urls')),
-    path('api/', include('apps.storage.urls')),
-    path('api/', include('apps.votes.urls')),
-    path('api/', include('apps.referrals.urls')),
-    path('api/', include('apps.notifications.urls')),
+    # Auth — JWT register/login/refresh/me + OAuth (Google/GitHub)
+    path("api/", include("apps.accounts.urls")),
 
-    # ── New: creator apps ────────────────────────────────────────────────
-    path('api/', include('apps.designz.urls')),        # /designz/...
-    path('api/', include('apps.shotz.urls')),          # /shotz/... (+train)
-    path('api/', include('apps.writez.urls')),         # /writez/... (+train)
-    path('api/', include('apps.managez.urls')),        # /managez/... (18+)
-    path('api/', include('apps.developz.urls')),       # /developz/...
-    path('api/', include('apps.scoutz.urls')),         # /scoutz/... (A&R; 18+; minors excluded)
-    path('api/', include('apps.producez.urls')),       # /producez/train/...
-    path('api/', include('apps.mixez.urls')),          # /mixez/train/...
+    # Core surfaces the frontend hits right after login (tolerant/minimal)
+    path("api/", include("apps.core.urls")),
 
-    # ── New: DawZ voting + SkillZ shared endpoints ───────────────────────
-    path('api/', include('apps.dawz.urls')),           # /dawz/proposals/, /dawz/vote/
-    path('api/', include('apps.skillz.urls')),         # /skillz/progress/<id>/, /skillz/capabilities/
-    path('api/', include('apps.common.urls')),         # /me/age/, /age/verification-webhook/
+    # Age verification + creator manifest + gate utilities
+    path("api/", include("apps.common.urls")),
+
+    # Creator apps (DesignZ kept for visual designers; DrawZ intentionally absent)
+    path("api/", include("apps.designz.urls")),
+    path("api/", include("apps.shotz.urls")),
+    path("api/", include("apps.writez.urls")),
+    path("api/", include("apps.managez.urls")),    # adult: back office + live manager marketplace
+    path("api/", include("apps.developz.urls")),
+    path("api/", include("apps.scoutz.urls")),     # adult+premium: A&R CRM + live A&R marketplace
+    path("api/", include("apps.producez.urls")),   # training only
+    path("api/", include("apps.mixez.urls")),      # training only
+
+    # Shared engines
+    path("api/", include("apps.dawz.urls")),       # DawZ proposals + voting
+    path("api/", include("apps.gamez.urls")),      # GameZ: build games in OCC
+    path("api/", include("apps.skillz.urls")),     # SkillZ progress + capabilities
 ]
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

@@ -88,44 +88,15 @@ class LeaderboardView(_AppScoped):
 class AttemptView(_AppScoped):
     """POST {drill, score} -> record attempt, award XP, update level + streak."""
     def post(self, request):
+        from .scoring import record_attempt
         drill_id = request.data.get("drill")
         score = int(request.data.get("score", 0))
         try:
             drill = Drill.objects.get(id=drill_id, track__app_key=self.app_key)
         except Drill.DoesNotExist:
             return Response({"detail": "drill not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        passed = score >= 60
-        xp = round(drill.xp_reward * (score / 100.0)) if passed else 0
-
-        prog, _ = SkillProgress.objects.get_or_create(user=request.user, track=drill.track)
-        before_level = level_for_xp(prog.total_xp)[0]
-        prog.total_xp += xp
-
-        today = datetime.date.today()
-        if prog.last_practiced == today:
-            pass
-        elif prog.last_practiced == today - datetime.timedelta(days=1):
-            prog.streak_days += 1
-        else:
-            prog.streak_days = 1
-        prog.last_practiced = today
-        prog.save()
-
-        after_level = level_for_xp(prog.total_xp)[0]
-        Attempt.objects.create(user=request.user, drill=drill, score=score,
-                               xp_earned=xp, passed=passed)
-        new_badges = badge_engine.award(request.user, self.app_key, {
-            "score": score, "track_level": after_level,
-            "streak": prog.streak_days, "leveled_up": after_level > before_level,
-        })
-        return Response({
-            "passed": passed, "xp_earned": xp,
-            "total_xp": prog.total_xp, "level": after_level,
-            "leveled_up": after_level > before_level,
-            "streak_days": prog.streak_days,
-            "new_badges": [{"code": c, **badge_engine.BADGE_CATALOG.get(c, {})} for c in new_badges],
-        }, status=status.HTTP_201_CREATED)
+        result = record_attempt(request.user, drill, score)
+        return Response(result, status=status.HTTP_201_CREATED)
 
 
 class BadgesView(_AppScoped):

@@ -1,4 +1,4 @@
-"""DesignZ models — the visual workshop for designers. Youth-safe."""
+"""DesignZ models — the Designer workshop. Youth-safe."""
 import uuid
 
 from django.conf import settings
@@ -116,6 +116,30 @@ class Version(models.Model):
     snapshot = models.JSONField(default=dict, blank=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
                                    null=True, related_name="designz_versionz")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class ChallengeSubmission(models.Model):
+    """A designer's answer to a SkillZ challenge — produced IN-APP via ImageZ or
+    IMPORTED from anything (use whatever tool you like). Stored, scored, and fed
+    into the SkillZ engine so it earns XP/badges like any other attempt."""
+    SOURCES = [("imagez", "Edited in ImageZ"), ("import", "Imported file"), ("asset", "From DesignZ asset")]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="designz_submissionz")
+    drill_id = models.UUIDField(db_index=True)              # the SkillZ challenge/drill
+    track_key = models.CharField(max_length=64, blank=True, default="")
+    source = models.CharField(max_length=8, choices=SOURCES, default="imagez")
+    artifact_url = models.URLField(blank=True, default="")  # ImageZ export / imported file / asset url
+    asset = models.ForeignKey(Asset, on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name="submissionz")
+    notes = models.TextField(blank=True, default="")
+    score = models.PositiveSmallIntegerField(default=0)
+    passed = models.BooleanField(default=False)
+    xp_earned = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -88,3 +88,26 @@ class UserAchievement(models.Model):
     class Meta:
         unique_together = ("user", "code", "app_key")
         ordering = ["-earned_at"]
+
+
+class Submission(models.Model):
+    """A challenge answer produced IN-APP (ImageZ/SentenceZ/VideoZ) or IMPORTED
+    from anywhere, scored and funneled through the SkillZ engine. One model serves
+    every creator app via app_key — DesignZ, WriteZ, ShotZ, etc."""
+    SOURCES = [("editor", "Edited in-app"), ("import", "Imported"), ("asset", "From asset")]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="skillz_submissionz")
+    app_key = models.CharField(max_length=32, db_index=True)
+    drill = models.ForeignKey(Drill, on_delete=models.CASCADE, related_name="submissionz")
+    source = models.CharField(max_length=8, choices=SOURCES, default="editor")
+    artifact_url = models.URLField(blank=True, default="")
+    content = models.TextField(blank=True, default="")     # for text work (WriteZ)
+    notes = models.TextField(blank=True, default="")
+    score = models.PositiveSmallIntegerField(default=0)
+    passed = models.BooleanField(default=False)
+    xp_earned = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]

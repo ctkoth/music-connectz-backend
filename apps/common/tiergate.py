@@ -36,6 +36,9 @@ def _membership(user):
 def tier_of(user):
     if not user or not getattr(user, "is_authenticated", False):
         return TIER_FREE
+    # Platform owner (staff/superuser) gets the top tier.
+    if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+        return TIER_STATZ
     m = _membership(user)
     return getattr(m, "tier", None) or TIER_FREE
 

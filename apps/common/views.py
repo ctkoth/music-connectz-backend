@@ -175,3 +175,19 @@ class StripeIdentityWebhookView(APIView):
                 f.recompute()
                 f.save()
         return Response({"received": True})
+
+
+# ── Creator-app manifest (drives the frontend creator tabs) ─────────────────
+from rest_framework.permissions import AllowAny  # noqa: E402
+from .creator_manifest import manifest_for  # noqa: E402
+
+
+class CreatorManifestView(APIView):
+    """GET /api/creator-manifest/ — the registry of creator apps the frontend
+    renders (icons, SkillZ keys, PostZ types, persona roles, live-marketplace flags).
+    Public/read-only; per-endpoint gating still enforced server-side."""
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        user = request.user if getattr(request.user, "is_authenticated", False) else None
+        return Response(manifest_for(user))

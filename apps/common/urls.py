@@ -10,4 +10,5 @@ urlpatterns = [
     path("me/age/verify-adult/", views.VerifyAdultView.as_view(), name="age-verify-adult"),
     path("me/age/stripe-identity/start/", views.StripeIdentityStartView.as_view(), name="stripe-identity-start"),
     path("webhooks/stripe-identity/", views.StripeIdentityWebhookView.as_view(), name="stripe-identity-webhook"),
+    path("creator-manifest/", views.CreatorManifestView.as_view(), name="creator-manifest"),
 ]

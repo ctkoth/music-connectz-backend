@@ -18,3 +18,12 @@ DealSerializer = _ser(Deal, ["id", "title", "stage", "value", "created_at"])
 InvoiceSerializer = _ser(Invoice, ["id", "client", "amount", "status", "due_date", "created_at"])
 PayoutSerializer = _ser(Payout, ["id", "payee", "amount", "status", "note", "created_at"])
 TaskSerializer = _ser(Task, ["id", "title", "done", "due", "created_at"])
+
+
+from .models import ManagementOffer, ManagementSeeking, ManagerOpening  # noqa: E402
+
+ManagementSeekingSerializer = _ser(ManagementSeeking, ["id","stage_name","genre","pitch","needs",
+                                                       "links","post_ref","open","created_at","updated_at"])
+ManagerOpeningSerializer = _ser(ManagerOpening, ["id","company","title","specialties","roster_size",
+                                                 "body","open","created_at"])
+ManagementOfferSerializer = _ser(ManagementOffer, ["id","seeking","message","status","created_at"])

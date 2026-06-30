@@ -114,3 +114,58 @@ class Task(models.Model):
 
     class Meta:
         ordering = ["done", "-created_at"]
+
+
+# ── LIVE MANAGER MARKETPLACE ────────────────────────────────────────────────
+# "See real managers through ManageZ." Adult-gated both sides (ManageZ is already
+# adult-only). owner_adult_verified snapshotted at create; browse fails closed.
+
+class ManagementSeeking(models.Model):
+    """An adult artist lists that they're looking for real management."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(**_own("managez_seekingz"))
+    stage_name = models.CharField(max_length=160)
+    genre = models.CharField(max_length=64, blank=True, default="")
+    pitch = models.TextField(blank=True, default="")
+    needs = models.CharField(max_length=200, blank=True, default="")  # touring, deals, day-to-day
+    links = models.JSONField(default=list, blank=True)
+    post_ref = models.CharField(max_length=64, blank=True, default="")
+    open = models.BooleanField(default=True)
+    owner_adult_verified = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+
+class ManagerOpening(models.Model):
+    """A real manager posts that they're taking on clients. Adults only."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(**_own("managez_openingz"))
+    company = models.CharField(max_length=160, blank=True, default="")
+    title = models.CharField(max_length=200)
+    specialties = models.CharField(max_length=200, blank=True, default="")
+    roster_size = models.PositiveIntegerField(default=0)
+    body = models.TextField(blank=True, default="")
+    open = models.BooleanField(default=True)
+    owner_adult_verified = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class ManagementOffer(models.Model):
+    """A manager reaches out to a seeking artist (or vice versa). Gated messaging follows."""
+    STATUS = [("new", "New"), ("talking", "In Talks"), ("signed", "Signed"), ("passed", "Passed")]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(**_own("managez_offerz"))
+    seeking = models.ForeignKey(ManagementSeeking, on_delete=models.CASCADE, related_name="offerz")
+    message = models.TextField(blank=True, default="")
+    status = models.CharField(max_length=8, choices=STATUS, default="new")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        unique_together = ("owner", "seeking")

@@ -106,6 +106,90 @@ DATA = {
             ]),
         ],
     },
+    "designz": {
+        "color": "#f59e0b", "emoji": "🖌️",
+        "tracks": [
+            ("layout", "Layout & Hierarchy", "📐", "Grids, balance, focal points.", [
+                ("Lay out a release announcement", "practice", 2, 30),
+                ("Rework a busy poster for clarity", "challenge", 3, 45),
+            ]),
+            ("typography", "Typography", "🔤", "Pairing, spacing, rhythm.", [
+                ("Pair a display + body font", "practice", 1, 20),
+                ("Set a lyric sheet with rhythm", "practice", 3, 40),
+            ]),
+            ("branding", "Branding", "🏷️", "A consistent artist identity.", [
+                ("Define a 3-piece brand kit", "practice", 2, 35),
+                ("Apply the kit across 3 mockups", "challenge", 3, 50),
+            ]),
+        ],
+    },
+    "developz": {
+        "color": "#3b82f6", "emoji": "💻",
+        "tracks": [
+            ("frontend", "Frontend", "🖼️", "React, state, components.", [
+                ("Build a controlled form component", "practice", 2, 30),
+                ("Refactor a component into hooks", "challenge", 3, 45),
+            ]),
+            ("apis", "APIs & Data", "🔌", "REST, auth, fetching.", [
+                ("Wire a fetch with JWT auth", "practice", 2, 35),
+                ("Handle loading + error states", "practice", 2, 30),
+            ]),
+            ("debugging", "Debugging", "🐞", "Read errors, isolate, fix.", [
+                ("Trace an ImportError to its source", "practice", 2, 30),
+                ("Fix a failing deploy build", "challenge", 4, 60),
+            ]),
+        ],
+    },
+    "scoutz": {
+        "color": "#06b6d4", "emoji": "🔎",
+        "tracks": [
+            ("ear", "Talent Evaluation", "👂", "Hear what's special — and what's missing.", [
+                ("Score a track on talent/marketability/fit", "practice", 2, 30),
+                ("Write a 1-paragraph A&R verdict", "challenge", 3, 45),
+            ]),
+            ("pipeline", "Building a Pipeline", "🪣", "Find, track, and move prospects.", [
+                ("Source 5 prospects + log them", "practice", 1, 20),
+                ("Move a prospect through 3 stages", "practice", 2, 30),
+            ]),
+            ("deals", "Deal Basics", "🤝", "Terms, splits, expectations.", [
+                ("Outline a fair single-deal term sheet", "challenge", 3, 50),
+            ]),
+        ],
+    },
+    "managez": {
+        "color": "#f97316", "emoji": "📋",
+        "tracks": [
+            ("dayone", "Day-to-Day", "📆", "Calendars, comms, momentum.", [
+                ("Build a 1-week artist schedule", "practice", 1, 20),
+                ("Triage an overloaded inbox", "practice", 2, 30),
+            ]),
+            ("business", "The Business", "💼", "Contracts, invoices, payouts.", [
+                ("Draft a simple booking contract", "practice", 2, 35),
+                ("Reconcile invoices to payouts", "challenge", 3, 50),
+            ]),
+            ("growth", "Career Growth", "📈", "Roadmaps, deals, leverage.", [
+                ("Write a 6-month artist roadmap", "challenge", 3, 50),
+            ]),
+        ],
+    },
+    "gamez": {
+        "color": "#a855f7", "emoji": "\U0001F3AE",
+        "tracks": [
+            ("loops", "Game Loops", "\U0001F501", "Core loop, state, win/lose.", [
+                ("Build a click-to-score loop", "practice", 1, 20),
+                ("Add win + lose states", "practice", 2, 30),
+                ("Add a difficulty ramp", "challenge", 3, 45),
+            ]),
+            ("genre", "Genre Craft", "\U0001F3AF", "Make a genre feel right.", [
+                ("Prototype your picked genre's core verb", "practice", 2, 30),
+                ("Tune game feel (juice, feedback)", "challenge", 3, 50),
+            ]),
+            ("ship", "Ship It", "\U0001F680", "Package and publish.", [
+                ("Playtest + fix 3 bugs", "practice", 2, 35),
+                ("Publish a playable build", "challenge", 4, 60),
+            ]),
+        ],
+    },
 }
 
 
