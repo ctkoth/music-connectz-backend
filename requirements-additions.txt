@@ -1,0 +1,5 @@
+# Append to requirements.txt (skip any you already have)
+djangorestframework-simplejwt>=5.3.0
+requests>=2.31.0
+PyJWT[crypto]>=2.8.0        # Apple Sign-In token verification
+django-cors-headers>=4.3.0  # if not already installed
