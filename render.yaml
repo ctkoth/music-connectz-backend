@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: music-connectz-backend
+    runtime: python
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn music_connectz.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120"
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "0"
+      - key: DATABASE_URL
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GITHUB_OAUTH_CLIENT_ID
+        sync: false
+      - key: GITHUB_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: APPLE_OAUTH_CLIENT_ID
+        sync: false
