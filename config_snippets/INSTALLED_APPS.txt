@@ -1,8 +1,0 @@
-# ── Add to INSTALLED_APPS in settings.py ───────────────────────────────────
-# Order: skillz before mimez/directz so its models migrate first.
-
-    "rest_framework_simplejwt",   # if not already present
-    "apps.skillz",
-    "apps.accounts",
-    "apps.mimez",
-    "apps.directz",

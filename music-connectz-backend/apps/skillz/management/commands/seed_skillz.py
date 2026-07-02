@@ -10,7 +10,7 @@ from importlib import import_module
 from django.core.management.base import BaseCommand
 
 # Apps that ship a `seed()` callable in apps.<app>.seed
-SEEDABLE_APPS = ["mimez", "directz"]
+SEEDABLE_APPS = ["mimez", "directz", "lessonz"]
 
 
 class Command(BaseCommand):
