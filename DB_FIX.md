@@ -24,7 +24,20 @@ The new code and the old database schema are incompatible. Pick ONE fix:
 
 The old database is untouched (you can still recover anything from it later).
 
-## Option B — wipe the old database schema (DESTROYS old data)
+## Option B — one env var, no psql needed (DESTROYS old data)
+
+If you can't or don't want to create a new database, wipe the polluted schema
+right from Render:
+
+1. Service → Environment → add `RESET_DB=1` → Save → Manual Deploy.
+   start.sh detects it, runs `reset_schema --force` (drops + recreates the
+   `public` schema), then migrate rebuilds everything and seeds SkillZ.
+2. VERIFY login works, then REMOVE `RESET_DB` from the environment so it can
+   never wipe again on a future deploy.
+
+This erases everything in that database — old platform rows included.
+
+## Option C — manual psql (same result as B)
 
 Only if you don't need anything in the old DB. In Render → your Postgres →
 Connect → external psql command, then:
