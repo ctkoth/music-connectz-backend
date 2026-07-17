@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     # local — skillz first so its tables migrate before the apps that use it
     "apps.skillz",
     "apps.accounts",
+    "apps.economy",
     "apps.mimez",
     "apps.directz",
     "apps.lessonz",
