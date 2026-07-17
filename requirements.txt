@@ -11,3 +11,7 @@ python-dotenv>=1.0
 Pillow>=10.0
 requests>=2.31
 PyJWT[crypto]>=2.8
+# Object storage for user uploads (S3 / Cloudflare R2). Active only when
+# S3_BUCKET_NAME is set; otherwise the local filesystem backend is used.
+django-storages>=1.14
+boto3>=1.34
