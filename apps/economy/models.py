@@ -124,6 +124,42 @@ class RoyaltyEntry(models.Model):
         ordering = ["-created_at"]
 
 
+class PaymentIntent(models.Model):
+    """A wallet-funding attempt via an external provider (Stripe / PayPal).
+
+    Created pending when checkout starts and marked completed exactly once when
+    the provider confirms payment (Stripe webhook / PayPal capture). The unique
+    provider_ref makes crediting idempotent — a replayed webhook or double
+    capture can't credit the wallet twice.
+    """
+
+    PROVIDER_STRIPE = "stripe"
+    PROVIDER_PAYPAL = "paypal"
+    PROVIDER_CHOICES = [(PROVIDER_STRIPE, "Stripe"), (PROVIDER_PAYPAL, "PayPal")]
+
+    STATUS_PENDING = "pending"
+    STATUS_COMPLETED = "completed"
+    STATUS_CHOICES = [(STATUS_PENDING, "Pending"), (STATUS_COMPLETED, "Completed")]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="payment_intents"
+    )
+    provider = models.CharField(max_length=12, choices=PROVIDER_CHOICES)
+    provider_ref = models.CharField(max_length=255, unique=True)
+    amount_cents = models.PositiveIntegerField(help_text="Gross charged to the card/PayPal")
+    net_cents = models.PositiveIntegerField(default=0)
+    dev_tax_cents = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.provider} {self.amount_cents}c {self.status} <{self.user}>"
+
+
 def upload_path(instance, filename):
     """Namespace uploaded files per user so quotas and cleanup stay isolated."""
     return f"uploads/{instance.user_id}/{filename}"
@@ -160,3 +196,19 @@ def wallet_for(user):
 
 def membership_for(user):
     return Membership.objects.get_or_create(user=user)[0]
+
+
+def credit_funds(user, amount_cents, note="Add funds"):
+    """Credit a gross funding amount to a user's wallet, applying the developer
+    tax server-side. Shared by manual add-funds and card/PayPal checkout so the
+    tax is enforced identically everywhere. Returns (dev_cents, net_cents)."""
+    m = membership_for(user)
+    w = wallet_for(user)
+    dev, net = split_cents(amount_cents, m.dev_tax_rate)
+    w.money_cents += net
+    w.save(update_fields=["money_cents", "updated_at"])
+    Transaction.objects.create(
+        user=user, kind=Transaction.KIND_ADD, amount_cents=net,
+        dev_tax_cents=dev, note=note[:200],
+    )
+    return dev, net

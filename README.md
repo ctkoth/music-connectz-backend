@@ -57,6 +57,24 @@ By default uploads are served with short-lived signed URLs
 (`S3_URL_EXPIRE` seconds, default 3600). Set `S3_CUSTOM_DOMAIN` to serve them
 publicly through a CDN/custom domain instead.
 
+### Wallet funding (Stripe / PayPal)
+
+Users fund their wallet via Stripe Checkout or PayPal. Each provider is optional
+— set its keys to enable it; the client hides the button when a provider is off.
+Crediting applies the developer tax server-side and is idempotent.
+```
+FRONTEND_URL=https://musicconnectz.net      # for checkout return URLs
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_PUBLISHABLE_KEY=pk_live_...           # returned to the client
+STRIPE_WEBHOOK_SECRET=whsec_...              # verifies webhook calls
+PAYPAL_CLIENT_ID=...
+PAYPAL_SECRET=...
+PAYPAL_MODE=live                             # or "sandbox" (default)
+```
+Point the Stripe webhook at `/api/economy/webhooks/stripe/` for the
+`checkout.session.completed` event — that's what credits the wallet after a card
+payment. PayPal credits on capture at `/api/economy/checkout/paypal/capture/`.
+
 ## Verify after deploy
 ```bash
 curl https://admin.musicconnectz.net/                       # {"status":"ok",...}
