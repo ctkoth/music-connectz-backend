@@ -39,6 +39,24 @@ git push -u origin main --force     # overwrites the broken main
 
 OAuth provider setup is in `APPLE_OAUTH.md` (covers Apple, Google, and GitHub).
 
+### Persistent uploads (S3 / Cloudflare R2)
+
+Render's web filesystem is ephemeral, so FileZ uploads are lost on redeploy
+unless you point storage at S3-compatible object storage. Set these env vars to
+switch the media backend from the local filesystem to S3/R2 (leave them unset
+for local dev — quota enforcement works either way):
+```
+S3_BUCKET_NAME=your-bucket
+S3_ACCESS_KEY_ID=...
+S3_SECRET_ACCESS_KEY=...
+S3_ENDPOINT_URL=https://<account>.r2.cloudflarestorage.com   # Cloudflare R2 only
+S3_REGION=auto            # "auto" for R2; e.g. "us-east-1" for AWS S3
+S3_CUSTOM_DOMAIN=cdn.example.com   # optional: serve via public CDN (no signed URLs)
+```
+By default uploads are served with short-lived signed URLs
+(`S3_URL_EXPIRE` seconds, default 3600). Set `S3_CUSTOM_DOMAIN` to serve them
+publicly through a CDN/custom domain instead.
+
 ## Verify after deploy
 ```bash
 curl https://admin.musicconnectz.net/                       # {"status":"ok",...}

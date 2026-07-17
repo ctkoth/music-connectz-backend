@@ -115,17 +115,44 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-# User uploads. NOTE: Render's web filesystem is ephemeral — swap the default
-# storage for S3/R2 (django-storages) in production so files survive deploys.
-# Quota enforcement (per-tier upload/storage caps) is storage-backend agnostic.
+# User uploads. Render's web filesystem is ephemeral, so in production point
+# storage at S3-compatible object storage (AWS S3 or Cloudflare R2) by setting
+# S3_BUCKET_NAME + credentials — files then survive deploys. Without those env
+# vars we fall back to the local filesystem for dev/tests. Per-tier quota
+# enforcement is storage-backend agnostic either way.
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
-STORAGES = {
-    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"
-    },
-}
+
+_static_storage = {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"}
+
+if os.environ.get("S3_BUCKET_NAME"):
+    _s3_options = {
+        "bucket_name": os.environ["S3_BUCKET_NAME"],
+        "access_key": os.environ.get("S3_ACCESS_KEY_ID"),
+        "secret_key": os.environ.get("S3_SECRET_ACCESS_KEY"),
+        "region_name": os.environ.get("S3_REGION", "auto"),
+        "file_overwrite": False,          # keep distinct uploads distinct
+        "default_acl": None,              # R2 rejects ACLs; S3 buckets can be private
+        "signature_version": "s3v4",
+        "querystring_auth": _env_bool("S3_QUERYSTRING_AUTH", "1"),
+        "querystring_expire": int(os.environ.get("S3_URL_EXPIRE", "3600")),
+    }
+    # Cloudflare R2 (or any non-AWS S3) needs an explicit endpoint.
+    if os.environ.get("S3_ENDPOINT_URL"):
+        _s3_options["endpoint_url"] = os.environ["S3_ENDPOINT_URL"]
+    # Serve via a public CDN/custom domain instead of signed URLs when set.
+    if os.environ.get("S3_CUSTOM_DOMAIN"):
+        _s3_options["custom_domain"] = os.environ["S3_CUSTOM_DOMAIN"]
+        _s3_options["querystring_auth"] = False
+    STORAGES = {
+        "default": {"BACKEND": "storages.backends.s3boto3.S3Boto3Storage", "OPTIONS": _s3_options},
+        "staticfiles": _static_storage,
+    }
+else:
+    STORAGES = {
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": _static_storage,
+    }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
