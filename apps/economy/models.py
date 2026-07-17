@@ -45,6 +45,7 @@ class Wallet(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="wallet"
     )
     money_cents = models.PositiveIntegerField(default=0)
+    royalties_cents = models.PositiveIntegerField(default=0)
     energy = models.IntegerField(default=0)
     spinaz = models.IntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
@@ -52,6 +53,10 @@ class Wallet(models.Model):
     @property
     def money(self):
         return round(self.money_cents / 100, 2)
+
+    @property
+    def royalties(self):
+        return round(self.royalties_cents / 100, 2)
 
     def __str__(self):
         return f"Wallet<{self.user}> ${self.money}"
@@ -85,6 +90,38 @@ class Transaction(models.Model):
 
     def __str__(self):
         return f"{self.kind} {self.amount_cents}c ({self.user})"
+
+
+class SpecZPurchase(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="specz_purchases"
+    )
+    item_id = models.CharField(max_length=64)
+    price_cents = models.PositiveIntegerField()
+    dev_tax_cents = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "item_id")
+        ordering = ["-created_at"]
+
+
+class RoyaltyEntry(models.Model):
+    KIND_ACCRUAL = "accrual"
+    KIND_CASHOUT = "cashout"
+    KIND_CHOICES = [(KIND_ACCRUAL, "Accrual"), (KIND_CASHOUT, "Cashout")]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="royalty_entries"
+    )
+    kind = models.CharField(max_length=12, choices=KIND_CHOICES)
+    amount_cents = models.IntegerField(help_text="Signed: + accrual, - cashout")
+    tax_cents = models.PositiveIntegerField(default=0)
+    source = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
 
 
 # ---- helpers ----
