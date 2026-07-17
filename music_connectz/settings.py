@@ -114,6 +114,12 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# User uploads. NOTE: Render's web filesystem is ephemeral — swap the default
+# storage for S3/R2 (django-storages) in production so files survive deploys.
+# Quota enforcement (per-tier upload/storage caps) is storage-backend agnostic.
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {

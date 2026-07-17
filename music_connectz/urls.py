@@ -1,3 +1,5 @@
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.http import JsonResponse
 from django.urls import include, path
@@ -32,3 +34,8 @@ urlpatterns = [
     path("api/directz/", include("apps.directz.urls")),
     path("api/lessonz/", include("apps.lessonz.urls")),
 ]
+
+# Serve user uploads in local dev. In production, point MEDIA at S3/R2 via
+# django-storages so files survive Render's ephemeral filesystem.
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

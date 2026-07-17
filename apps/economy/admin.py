@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Membership, Transaction, Wallet
+from .models import Membership, Transaction, Upload, Wallet
 
 
 @admin.register(Membership)
@@ -21,3 +21,9 @@ class TransactionAdmin(admin.ModelAdmin):
     list_display = ("user", "kind", "amount_cents", "dev_tax_cents", "note", "created_at")
     list_filter = ("kind",)
     search_fields = ("user__username", "note")
+
+
+@admin.register(Upload)
+class UploadAdmin(admin.ModelAdmin):
+    list_display = ("user", "name", "size_bytes", "content_type", "created_at")
+    search_fields = ("user__username", "name")

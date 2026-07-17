@@ -124,7 +124,36 @@ class RoyaltyEntry(models.Model):
         ordering = ["-created_at"]
 
 
+def upload_path(instance, filename):
+    """Namespace uploaded files per user so quotas and cleanup stay isolated."""
+    return f"uploads/{instance.user_id}/{filename}"
+
+
+class Upload(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="uploads"
+    )
+    file = models.FileField(upload_to=upload_path)
+    name = models.CharField(max_length=255)
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    content_type = models.CharField(max_length=120, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.size_bytes}B) <{self.user}>"
+
+
 # ---- helpers ----
+MB = 1024 * 1024
+
+
+def storage_used_bytes(user):
+    return Upload.objects.filter(user=user).aggregate(t=models.Sum("size_bytes"))["t"] or 0
+
+
 def wallet_for(user):
     return Wallet.objects.get_or_create(user=user)[0]
 

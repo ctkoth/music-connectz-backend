@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from rest_framework import status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -7,13 +8,16 @@ from rest_framework.views import APIView
 from .catalog import SPECZ_CATALOG, cashout_rate, limits_for
 from .models import (
     DEV_TAX,
+    MB,
     TIER_CHOICES,
     TIER_STATZ,
     RoyaltyEntry,
     SpecZPurchase,
     Transaction,
+    Upload,
     membership_for,
     split_cents,
+    storage_used_bytes,
     wallet_for,
 )
 from .serializers import TransactionSerializer, WalletSerializer
@@ -112,7 +116,7 @@ class LimitsView(APIView):
         lim = dict(limits_for(m.tier))
         lim["tier"] = m.tier
         lim["dev_tax_rate"] = m.dev_tax_rate
-        lim["storage_used_mb"] = 0  # real usage tracking arrives with the upload pipeline
+        lim["storage_used_mb"] = round(storage_used_bytes(request.user) / MB, 2)
         return Response(lim)
 
 
@@ -216,3 +220,87 @@ class RoyaltyCashoutView(APIView):
         RoyaltyEntry.objects.create(user=request.user, kind=RoyaltyEntry.KIND_CASHOUT, amount_cents=-gross, tax_cents=tax, source=f"{plan} cashout")
         Transaction.objects.create(user=request.user, kind=Transaction.KIND_ROYALTY, amount_cents=net, dev_tax_cents=tax, note=f"Royalty cashout ({plan})")
         return Response({"wallet": WalletSerializer(w).data, "breakdown": {"gross_cents": gross, "tax_cents": tax, "net_cents": net, "rate": rate, "plan": plan}})
+
+
+def _upload_dict(u, request):
+    return {
+        "id": u.id,
+        "name": u.name,
+        "size_bytes": u.size_bytes,
+        "size_mb": round(u.size_bytes / MB, 2),
+        "content_type": u.content_type,
+        "url": request.build_absolute_uri(u.file.url) if u.file else None,
+        "created_at": u.created_at,
+    }
+
+
+def _storage_summary(user, tier):
+    lim = limits_for(tier)
+    used = storage_used_bytes(user)
+    cap = lim["storage_mb"] * MB
+    return {
+        "storage_used_mb": round(used / MB, 2),
+        "storage_mb": lim["storage_mb"],
+        "upload_mb": lim["upload_mb"],
+        "storage_free_mb": round(max(cap - used, 0) / MB, 2),
+    }
+
+
+class UploadsView(APIView):
+    """GET lists the user's uploads + storage summary; POST uploads one file.
+
+    Enforces two per-tier caps: single-file size (upload_mb) and total
+    account storage (storage_mb). Mirrors the client-side checks so the
+    server is the real gate.
+    """
+
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request):
+        m = membership_for(request.user)
+        uploads = [_upload_dict(u, request) for u in request.user.uploads.all()[:200]]
+        return Response({"uploads": uploads, **_storage_summary(request.user, m.tier)})
+
+    def post(self, request):
+        f = request.FILES.get("file")
+        if not f:
+            return Response({"detail": "file (multipart) required"}, status=status.HTTP_400_BAD_REQUEST)
+        m = membership_for(request.user)
+        lim = limits_for(m.tier)
+
+        if f.size > lim["upload_mb"] * MB:
+            return Response(
+                {"detail": f"file exceeds the {lim['upload_mb']}MB per-upload limit for {m.tier}", **_storage_summary(request.user, m.tier)},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+        used = storage_used_bytes(request.user)
+        if used + f.size > lim["storage_mb"] * MB:
+            return Response(
+                {"detail": f"upload would exceed your {lim['storage_mb']}MB storage quota", **_storage_summary(request.user, m.tier)},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        u = Upload.objects.create(
+            user=request.user, file=f, name=f.name[:255], size_bytes=f.size,
+            content_type=getattr(f, "content_type", "")[:120],
+        )
+        return Response(
+            {"upload": _upload_dict(u, request), **_storage_summary(request.user, m.tier)},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class UploadDetailView(APIView):
+    """DELETE removes an upload and frees its storage."""
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pk):
+        u = request.user.uploads.filter(pk=pk).first()
+        if not u:
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        u.file.delete(save=False)  # remove the file from storage
+        u.delete()
+        m = membership_for(request.user)
+        return Response(_storage_summary(request.user, m.tier))
