@@ -204,4 +204,21 @@ GITHUB_OAUTH_CLIENT_ID = os.environ.get("GITHUB_OAUTH_CLIENT_ID", "")
 GITHUB_OAUTH_CLIENT_SECRET = os.environ.get("GITHUB_OAUTH_CLIENT_SECRET", "")
 APPLE_OAUTH_CLIENT_ID = os.environ.get("APPLE_OAUTH_CLIENT_ID", "")
 
+# Payments (wallet funding). Each provider activates only when its keys are set;
+# otherwise the checkout endpoints report it as unavailable and the client hides
+# the button. Where the frontend lives, for building return URLs.
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://musicconnectz.net").rstrip("/")
+
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+
+PAYPAL_CLIENT_ID = os.environ.get("PAYPAL_CLIENT_ID", "")
+PAYPAL_SECRET = os.environ.get("PAYPAL_SECRET", "")
+# "sandbox" or "live"
+PAYPAL_MODE = os.environ.get("PAYPAL_MODE", "sandbox").lower()
+PAYPAL_API_BASE = (
+    "https://api-m.paypal.com" if PAYPAL_MODE == "live" else "https://api-m.sandbox.paypal.com"
+)
+
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

@@ -37,3 +37,20 @@ services:
         sync: false
       - key: S3_CUSTOM_DOMAIN
         sync: false
+      # Where the frontend lives — used to build checkout return URLs.
+      - key: FRONTEND_URL
+        sync: false
+      # Payments — wallet funding. Each provider activates only when its keys
+      # are set; leave unset to hide that button in the client.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_SECRET
+        sync: false
+      - key: PAYPAL_MODE
+        sync: false

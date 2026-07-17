@@ -1,5 +1,12 @@
 from django.urls import path
 
+from .payments import (
+    CheckoutConfigView,
+    PaypalCaptureView,
+    PaypalCreateView,
+    StripeCheckoutView,
+    StripeWebhookView,
+)
 from .views import (
     AddFundsView,
     LimitsView,
@@ -25,4 +32,9 @@ urlpatterns = [
     path("royalties/cashout/", RoyaltyCashoutView.as_view(), name="economy-royalties-cashout"),
     path("uploads/", UploadsView.as_view(), name="economy-uploads"),
     path("uploads/<int:pk>/", UploadDetailView.as_view(), name="economy-upload-detail"),
+    path("checkout/config/", CheckoutConfigView.as_view(), name="economy-checkout-config"),
+    path("checkout/stripe/", StripeCheckoutView.as_view(), name="economy-checkout-stripe"),
+    path("checkout/paypal/", PaypalCreateView.as_view(), name="economy-checkout-paypal"),
+    path("checkout/paypal/capture/", PaypalCaptureView.as_view(), name="economy-checkout-paypal-capture"),
+    path("webhooks/stripe/", StripeWebhookView.as_view(), name="economy-webhook-stripe"),
 ]
