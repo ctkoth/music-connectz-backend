@@ -2,6 +2,9 @@ services:
   - type: web
     name: music-connectz-backend
     runtime: python
+    branch: main
+    autoDeploy: true
+    rootDir: .
     buildCommand: "./build.sh"
     startCommand: "gunicorn music_connectz.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120"
     envVars:
