@@ -8,6 +8,8 @@ from .views import (
     RoyaltyAccrueView,
     RoyaltyCashoutView,
     SpecZView,
+    UploadDetailView,
+    UploadsView,
     WalletView,
 )
 
@@ -21,4 +23,6 @@ urlpatterns = [
     path("royalties/", RoyaltiesView.as_view(), name="economy-royalties"),
     path("royalties/accrue/", RoyaltyAccrueView.as_view(), name="economy-royalties-accrue"),
     path("royalties/cashout/", RoyaltyCashoutView.as_view(), name="economy-royalties-cashout"),
+    path("uploads/", UploadsView.as_view(), name="economy-uploads"),
+    path("uploads/<int:pk>/", UploadDetailView.as_view(), name="economy-upload-detail"),
 ]
