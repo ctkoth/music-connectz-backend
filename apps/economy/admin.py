@@ -3,6 +3,8 @@ from django.contrib import admin
 from .models import (
     Face,
     FaceRating,
+    MerchItem,
+    MerchPurchase,
     Profile,
     AttractivenessRating,
     Membership,
@@ -82,3 +84,15 @@ class ProfileAdmin(admin.ModelAdmin):
     list_display = ("user", "display_name", "gender", "sign", "sober", "updated_at")
     list_filter = ("gender", "sign", "sober")
     search_fields = ("user__username", "display_name")
+
+
+@admin.register(MerchItem)
+class MerchItemAdmin(admin.ModelAdmin):
+    list_display = ("title", "seller", "category", "price_cents", "active", "created_at")
+    list_filter = ("category", "active")
+    search_fields = ("title", "seller__username")
+
+
+@admin.register(MerchPurchase)
+class MerchPurchaseAdmin(admin.ModelAdmin):
+    list_display = ("item", "buyer", "price_cents", "dev_tax_cents", "created_at")

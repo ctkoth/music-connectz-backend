@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .merch import MerchBuyView, MerchDetailView, MerchView
 from .payments import (
     CheckoutConfigView,
     PaypalCaptureView,
@@ -59,4 +60,7 @@ urlpatterns = [
     path("profile/", ProfileView.as_view(), name="economy-profile"),
     path("members/", MembersView.as_view(), name="economy-members"),
     path("members/<str:username>/", MemberProfileView.as_view(), name="economy-member"),
+    path("merch/", MerchView.as_view(), name="economy-merch"),
+    path("merch/<int:pk>/", MerchDetailView.as_view(), name="economy-merch-detail"),
+    path("merch/<int:pk>/buy/", MerchBuyView.as_view(), name="economy-merch-buy"),
 ]
