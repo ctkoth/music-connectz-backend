@@ -278,11 +278,48 @@ class AttractivenessRating(models.Model):
         unique_together = ("rater", "target")
 
 
-def attractiveness_median(user):
-    """Median of a user's attractiveness ratings (1-10), or None if unrated."""
-    scores = sorted(AttractivenessRating.objects.filter(target=user).values_list("score", flat=True))
+def _median(scores):
+    scores = sorted(scores)
     n = len(scores)
     if n == 0:
         return None
     mid = n // 2
     return scores[mid] if n % 2 else round((scores[mid - 1] + scores[mid]) / 2, 1)
+
+
+# ---- FaceZ ----
+def face_path(instance, filename):
+    return f"facez/{instance.owner_id}/{filename}"
+
+
+class Face(models.Model):
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="faces")
+    image = models.ImageField(upload_to=face_path)
+    name = models.CharField(max_length=80, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class FaceRating(models.Model):
+    rater = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="face_ratings")
+    face = models.ForeignKey(Face, on_delete=models.CASCADE, related_name="ratings")
+    score = models.PositiveSmallIntegerField()  # 1-10
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("rater", "face")
+
+
+def face_median(face):
+    return _median(face.ratings.values_list("score", flat=True))
+
+
+def attractiveness_median(user):
+    """A user's community attractiveness median (1-10), combining direct RateZ
+    ratings and every rating their FaceZ faces have received. None if unrated."""
+    scores = list(AttractivenessRating.objects.filter(target=user).values_list("score", flat=True))
+    scores += list(FaceRating.objects.filter(face__owner=user).values_list("score", flat=True))
+    return _median(scores)
