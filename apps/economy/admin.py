@@ -1,6 +1,8 @@
 from django.contrib import admin
 
 from .models import (
+    Face,
+    FaceRating,
     AttractivenessRating,
     Membership,
     PaymentIntent,
@@ -61,3 +63,14 @@ class VenueAttendanceAdmin(admin.ModelAdmin):
 class AttractivenessRatingAdmin(admin.ModelAdmin):
     list_display = ("target", "rater", "score", "updated_at")
     search_fields = ("target__username", "rater__username")
+
+
+@admin.register(Face)
+class FaceAdmin(admin.ModelAdmin):
+    list_display = ("owner", "name", "created_at")
+    search_fields = ("owner__username", "name")
+
+
+@admin.register(FaceRating)
+class FaceRatingAdmin(admin.ModelAdmin):
+    list_display = ("face", "rater", "score", "updated_at")

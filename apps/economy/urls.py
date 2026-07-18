@@ -10,6 +10,9 @@ from .payments import (
 from .social import (
     AttractivenessRateView,
     AttractivenessView,
+    FaceDetailView,
+    FaceRateView,
+    FaceZView,
     VenueJoinView,
     VenuesView,
 )
@@ -47,4 +50,7 @@ urlpatterns = [
     path("venues/<int:pk>/join/", VenueJoinView.as_view(), name="economy-venue-join"),
     path("attractiveness/", AttractivenessView.as_view(), name="economy-attractiveness"),
     path("attractiveness/rate/", AttractivenessRateView.as_view(), name="economy-attractiveness-rate"),
+    path("facez/", FaceZView.as_view(), name="economy-facez"),
+    path("facez/<int:pk>/", FaceDetailView.as_view(), name="economy-face-detail"),
+    path("facez/<int:pk>/rate/", FaceRateView.as_view(), name="economy-face-rate"),
 ]

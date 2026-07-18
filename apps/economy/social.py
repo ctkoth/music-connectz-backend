@@ -7,15 +7,19 @@ that gates venues, mirroring the collab/battle filter.
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
     AttractivenessRating,
+    Face,
+    FaceRating,
     Venue,
     VenueAttendance,
     attractiveness_median,
+    face_median,
     membership_for,
     pay_between,
     wallet_for,
@@ -166,3 +170,73 @@ class AttractivenessRateView(APIView):
             "median": attractiveness_median(target) if m.attractiveness_public else None,
             "public": m.attractiveness_public,
         })
+
+
+# ---- FaceZ (community-rated faces) ----
+def _face_dict(f, request):
+    my = FaceRating.objects.filter(rater=request.user, face=f).values_list("score", flat=True).first()
+    return {
+        "id": f.id,
+        "owner": f.owner.username,
+        "mine": f.owner_id == request.user.id,
+        "name": f.name,
+        "url": request.build_absolute_uri(f.image.url) if f.image else None,
+        "median": face_median(f),
+        "count": f.ratings.count(),
+        "my_rating": my,
+    }
+
+
+class FaceZView(APIView):
+    """GET your faces + a feed of others' faces to rate; POST uploads a face."""
+
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request):
+        mine = [_face_dict(f, request) for f in request.user.faces.all()[:100]]
+        feed = [
+            _face_dict(f, request)
+            for f in Face.objects.exclude(owner=request.user).select_related("owner").order_by("-created_at")[:60]
+        ]
+        return Response({"mine": mine, "feed": feed})
+
+    def post(self, request):
+        img = request.FILES.get("image")
+        if not img:
+            return Response({"detail": "image (multipart) required"}, status=status.HTTP_400_BAD_REQUEST)
+        f = Face.objects.create(owner=request.user, image=img, name=str(request.data.get("name", ""))[:80])
+        return Response({"face": _face_dict(f, request)}, status=status.HTTP_201_CREATED)
+
+
+class FaceDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pk):
+        f = request.user.faces.filter(pk=pk).first()
+        if not f:
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        f.image.delete(save=False)
+        f.delete()
+        return Response({"deleted": pk})
+
+
+class FaceRateView(APIView):
+    """Rate someone else's face 1-10 (one per rater per face, upserted)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        f = Face.objects.filter(pk=pk).first()
+        if not f:
+            return Response({"detail": "face not found"}, status=status.HTTP_404_NOT_FOUND)
+        if f.owner_id == request.user.id:
+            return Response({"detail": "can't rate your own face"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            score = int(request.data.get("score"))
+        except (TypeError, ValueError):
+            return Response({"detail": "score (1-10) required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not (1 <= score <= 10):
+            return Response({"detail": "score must be 1-10"}, status=status.HTTP_400_BAD_REQUEST)
+        FaceRating.objects.update_or_create(rater=request.user, face=f, defaults={"score": score})
+        return Response({"id": f.id, "median": face_median(f), "count": f.ratings.count(), "my_rating": score})
