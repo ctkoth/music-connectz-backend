@@ -350,3 +350,35 @@ class Profile(models.Model):
 
 def profile_for(user):
     return Profile.objects.get_or_create(user=user)[0]
+
+
+# ---- MerchZ (legal goods marketplace) ----
+def merch_path(instance, filename):
+    return f"merch/{instance.seller_id}/{filename}"
+
+
+class MerchItem(models.Model):
+    # Legal goods only — apparel, art, audio, digital. No substances/paraphernalia.
+    CATEGORIES = ["apparel", "art", "beats", "samples", "accessories", "digital"]
+    seller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="merch_items")
+    title = models.CharField(max_length=120)
+    description = models.CharField(max_length=500, blank=True, default="")
+    category = models.CharField(max_length=32, default="apparel")
+    price_cents = models.PositiveIntegerField(default=0)
+    image = models.ImageField(upload_to=merch_path, blank=True, null=True)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class MerchPurchase(models.Model):
+    buyer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="merch_purchases")
+    item = models.ForeignKey(MerchItem, on_delete=models.CASCADE, related_name="purchases")
+    price_cents = models.PositiveIntegerField(default=0)
+    dev_tax_cents = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
