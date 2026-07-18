@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import (
     Face,
     FaceRating,
+    Profile,
     AttractivenessRating,
     Membership,
     PaymentIntent,
@@ -74,3 +75,10 @@ class FaceAdmin(admin.ModelAdmin):
 @admin.register(FaceRating)
 class FaceRatingAdmin(admin.ModelAdmin):
     list_display = ("face", "rater", "score", "updated_at")
+
+
+@admin.register(Profile)
+class ProfileAdmin(admin.ModelAdmin):
+    list_display = ("user", "display_name", "gender", "sign", "sober", "updated_at")
+    list_filter = ("gender", "sign", "sober")
+    search_fields = ("user__username", "display_name")

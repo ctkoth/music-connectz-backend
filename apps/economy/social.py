@@ -16,6 +16,8 @@ from .models import (
     AttractivenessRating,
     Face,
     FaceRating,
+    Profile,
+    profile_for,
     Venue,
     VenueAttendance,
     attractiveness_median,
@@ -240,3 +242,97 @@ class FaceRateView(APIView):
             return Response({"detail": "score must be 1-10"}, status=status.HTTP_400_BAD_REQUEST)
         FaceRating.objects.update_or_create(rater=request.user, face=f, defaults={"score": score})
         return Response({"id": f.id, "median": face_median(f), "count": f.ratings.count(), "my_rating": score})
+
+
+# ---- Cross-user profiles ----
+PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign",
+                  "nationalities", "regions", "substances", "sober",
+                  "attracted_to", "asexual", "traits", "personas")
+
+
+def _profile_card(p):
+    """Compact card for search results."""
+    return {
+        "username": p.user.username,
+        "display_name": p.display_name or p.user.username,
+        "gender": p.gender,
+        "sign": p.sign,
+        "regions": p.regions,
+        "nationalities": p.nationalities,
+        "sober": p.sober,
+        "attracted_to": p.attracted_to,
+        "median": attractiveness_median(p.user),
+    }
+
+
+def _profile_full(p, request):
+    card = _profile_card(p)
+    card.update({
+        "bio": p.bio, "location": p.location, "birthday": p.birthday,
+        "substances": p.substances, "asexual": p.asexual, "traits": p.traits,
+        "personas": p.personas, "mine": p.user_id == request.user.id,
+    })
+    return card
+
+
+class ProfileView(APIView):
+    """GET your profile; POST upserts it (public, searchable by others)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(_profile_full(profile_for(request.user), request))
+
+    def post(self, request):
+        p = profile_for(request.user)
+        d = request.data
+        for f in PROFILE_FIELDS:
+            if f in d:
+                setattr(p, f, d[f])
+        p.save()
+        return Response(_profile_full(p, request))
+
+
+class MemberProfileView(APIView):
+    """View any member's public profile by username."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, username):
+        p = Profile.objects.filter(user__username=username).select_related("user").first()
+        if not p:
+            return Response({"detail": "profile not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response(_profile_full(p, request))
+
+
+class MembersView(APIView):
+    """Search members by multi-select metrics: regions, genders, signs, sober.
+
+    OR within a metric, AND across metrics — mirrors the client filter.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        def multi(key):
+            raw = request.query_params.get(key, "")
+            return [x for x in raw.split(",") if x]
+
+        regions = multi("regions")
+        genders = multi("genders")
+        signs = multi("signs")
+        sober_only = request.query_params.get("sober") in ("1", "true", "True")
+
+        results = []
+        qs = Profile.objects.exclude(user=request.user).select_related("user")[:500]
+        for p in qs:
+            if regions and not (set(regions) & set(p.regions or [])):
+                continue
+            if genders and p.gender not in genders:
+                continue
+            if signs and p.sign not in signs:
+                continue
+            if sober_only and not p.sober:
+                continue
+            results.append(_profile_card(p))
+        return Response({"members": results[:100]})
