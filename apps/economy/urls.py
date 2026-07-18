@@ -7,6 +7,12 @@ from .payments import (
     StripeCheckoutView,
     StripeWebhookView,
 )
+from .social import (
+    AttractivenessRateView,
+    AttractivenessView,
+    VenueJoinView,
+    VenuesView,
+)
 from .views import (
     AddFundsView,
     LimitsView,
@@ -37,4 +43,8 @@ urlpatterns = [
     path("checkout/paypal/", PaypalCreateView.as_view(), name="economy-checkout-paypal"),
     path("checkout/paypal/capture/", PaypalCaptureView.as_view(), name="economy-checkout-paypal-capture"),
     path("webhooks/stripe/", StripeWebhookView.as_view(), name="economy-webhook-stripe"),
+    path("venues/", VenuesView.as_view(), name="economy-venues"),
+    path("venues/<int:pk>/join/", VenueJoinView.as_view(), name="economy-venue-join"),
+    path("attractiveness/", AttractivenessView.as_view(), name="economy-attractiveness"),
+    path("attractiveness/rate/", AttractivenessRateView.as_view(), name="economy-attractiveness-rate"),
 ]

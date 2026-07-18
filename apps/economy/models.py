@@ -29,6 +29,9 @@ class Membership(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="membership"
     )
     tier = models.CharField(max_length=16, choices=TIER_CHOICES, default=TIER_FREE)
+    # Opt-in: when True, RateZ attractiveness ratings move the user's median and
+    # it's public (usable as a filter on CollabZ / BattleZ / VenueZ).
+    attractiveness_public = models.BooleanField(default=True)
     since = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -212,3 +215,74 @@ def credit_funds(user, amount_cents, note="Add funds"):
         dev_tax_cents=dev, note=note[:200],
     )
     return dev, net
+
+
+def pay_between(payer, payee, amount_cents, note=""):
+    """Move money payer -> payee, applying the payer's developer tax. The payee
+    receives the net; the platform keeps the tax. Caller must ensure the payer
+    has the balance and wrap in a transaction. Returns (dev_cents, net_cents)."""
+    m = membership_for(payer)
+    pw = wallet_for(payer)
+    rw = wallet_for(payee)
+    dev, net = split_cents(amount_cents, m.dev_tax_rate)
+    pw.money_cents -= amount_cents
+    rw.money_cents += net
+    pw.save(update_fields=["money_cents", "updated_at"])
+    rw.save(update_fields=["money_cents", "updated_at"])
+    Transaction.objects.create(user=payer, kind=Transaction.KIND_SPEND, amount_cents=-amount_cents, dev_tax_cents=dev, note=note[:200])
+    Transaction.objects.create(user=payee, kind=Transaction.KIND_REWARD, amount_cents=net, dev_tax_cents=dev, note=note[:200])
+    return dev, net
+
+
+# ---- VenueZ ----
+class Venue(models.Model):
+    MODE_COLLAB = "collaborative"
+    MODE_PERF = "performance"
+    MODE_CHOICES = [(MODE_COLLAB, "Collaborative"), (MODE_PERF, "Performance")]
+
+    host = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="venues")
+    title = models.CharField(max_length=120)
+    mode = models.CharField(max_length=16, choices=MODE_CHOICES, default=MODE_COLLAB)
+    vtype = models.CharField(max_length=24, default="party")  # party/openmic/theater/show/custom
+    custom_name = models.CharField(max_length=60, blank=True, default="")
+    host_price_cents = models.PositiveIntegerField(default=0)
+    visitor_pay_cents = models.PositiveIntegerField(default=0)
+    min_attract = models.PositiveSmallIntegerField(default=0)  # 0-10
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class VenueAttendance(models.Model):
+    venue = models.ForeignKey(Venue, on_delete=models.CASCADE, related_name="attendances")
+    visitor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="venue_attendances")
+    paid_cents = models.PositiveIntegerField(default=0)
+    earned_cents = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("venue", "visitor")
+        ordering = ["-created_at"]
+
+
+# ---- Attractiveness (RateZ) ----
+class AttractivenessRating(models.Model):
+    rater = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="attractiveness_given")
+    target = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="attractiveness_received")
+    score = models.PositiveSmallIntegerField()  # 1-10
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("rater", "target")
+
+
+def attractiveness_median(user):
+    """Median of a user's attractiveness ratings (1-10), or None if unrated."""
+    scores = sorted(AttractivenessRating.objects.filter(target=user).values_list("score", flat=True))
+    n = len(scores)
+    if n == 0:
+        return None
+    mid = n // 2
+    return scores[mid] if n % 2 else round((scores[mid - 1] + scores[mid]) / 2, 1)
