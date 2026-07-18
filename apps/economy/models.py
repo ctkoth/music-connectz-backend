@@ -14,7 +14,7 @@ TIER_STATZ = "statz"
 TIER_CHOICES = [(TIER_FREE, "Free"), (TIER_PREMIUM, "Premium"), (TIER_STATZ, "StatZ")]
 
 # Developer tax (platform cut) per tier, as a fraction of the transaction.
-DEV_TAX = {TIER_FREE: 0.05, TIER_PREMIUM: 0.03, TIER_STATZ: 0.02}
+DEV_TAX = {TIER_FREE: 0.10, TIER_PREMIUM: 0.05, TIER_STATZ: 0.02}
 
 
 def split_cents(amount_cents, rate):
