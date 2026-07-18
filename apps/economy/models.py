@@ -323,3 +323,30 @@ def attractiveness_median(user):
     scores = list(AttractivenessRating.objects.filter(target=user).values_list("score", flat=True))
     scores += list(FaceRating.objects.filter(face__owner=user).values_list("score", flat=True))
     return _median(scores)
+
+
+# ---- Cross-user Profile ----
+class Profile(models.Model):
+    """A member's public, searchable profile. Denormalized filter fields
+    (sign, regions, gender, sober, attracted_to) let search match on metrics;
+    the JSON fields carry the full display data."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="mcz_profile")
+    display_name = models.CharField(max_length=80, blank=True, default="")
+    bio = models.CharField(max_length=500, blank=True, default="")
+    location = models.CharField(max_length=120, blank=True, default="")
+    gender = models.CharField(max_length=24, blank=True, default="")
+    birthday = models.CharField(max_length=10, blank=True, default="")  # YYYY-MM-DD
+    sign = models.CharField(max_length=16, blank=True, default="")
+    nationalities = models.JSONField(default=list, blank=True)
+    regions = models.JSONField(default=list, blank=True)          # for filtering
+    substances = models.JSONField(default=dict, blank=True)
+    sober = models.BooleanField(default=False)
+    attracted_to = models.JSONField(default=list, blank=True)     # partnerGenders
+    asexual = models.BooleanField(default=False)
+    traits = models.JSONField(default=list, blank=True)
+    personas = models.JSONField(default=list, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+def profile_for(user):
+    return Profile.objects.get_or_create(user=user)[0]

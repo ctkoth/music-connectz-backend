@@ -8,6 +8,9 @@ from .payments import (
     StripeWebhookView,
 )
 from .social import (
+    MemberProfileView,
+    MembersView,
+    ProfileView,
     AttractivenessRateView,
     AttractivenessView,
     FaceDetailView,
@@ -53,4 +56,7 @@ urlpatterns = [
     path("facez/", FaceZView.as_view(), name="economy-facez"),
     path("facez/<int:pk>/", FaceDetailView.as_view(), name="economy-face-detail"),
     path("facez/<int:pk>/rate/", FaceRateView.as_view(), name="economy-face-rate"),
+    path("profile/", ProfileView.as_view(), name="economy-profile"),
+    path("members/", MembersView.as_view(), name="economy-members"),
+    path("members/<str:username>/", MemberProfileView.as_view(), name="economy-member"),
 ]
