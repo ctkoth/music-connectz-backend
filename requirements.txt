@@ -18,3 +18,6 @@ boto3>=1.34
 # Payments — Stripe SDK (PayPal uses the REST API via requests). Only exercised
 # when the provider keys are configured.
 stripe>=8.0
+# OCC's real LLM backend (Corey GPT). Active only when ANTHROPIC_API_KEY is set;
+# otherwise OCC falls back to its built-in templated replies.
+anthropic>=0.40
