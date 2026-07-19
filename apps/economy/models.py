@@ -41,6 +41,8 @@ class Membership(models.Model):
     attractiveness_public = models.BooleanField(default=True)
     since = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # Presence: touched on every stats poll; powers the header "online now" count.
+    last_seen = models.DateTimeField(null=True, blank=True, db_index=True)
 
     @property
     def dev_tax_rate(self):

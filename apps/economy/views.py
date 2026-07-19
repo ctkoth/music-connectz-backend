@@ -1,4 +1,7 @@
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -12,6 +15,7 @@ from .models import (
     TIER_CHOICES,
     TIER_DEBUG,
     TIER_STATZ,
+    Membership,
     RoyaltyEntry,
     SpecZPurchase,
     Transaction,
@@ -43,11 +47,20 @@ class StatsView(APIView):
     def get(self, request):
         w = wallet_for(request.user)
         m = membership_for(request.user)
+        # Presence: mark this member seen now, then count everyone seen recently.
+        now = timezone.now()
+        Membership.objects.filter(pk=m.pk).update(last_seen=now)
+        online_cutoff = now - timedelta(minutes=5)
+        online_qs = Membership.objects.filter(last_seen__gte=online_cutoff)
+        online_now = online_qs.count() or 1
+        online_members = list(
+            online_qs.exclude(user=request.user).values_list("user__username", flat=True)[:50]
+        )
         return Response(
             {
                 "total_members": User.objects.count(),
-                "online_now": 1,  # last-seen presence tracking is a later addition
-                "online_members": [request.user.username],
+                "online_now": online_now,
+                "online_members": [request.user.username] + online_members,
                 "is_owner": is_owner(request.user),
                 "my_tier": m.tier,
                 "my_money": w.money,
