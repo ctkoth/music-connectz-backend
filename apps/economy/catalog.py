@@ -28,12 +28,12 @@ def limits_for(tier):
 
 
 # Royalty cashout tax by plan. Weekly is its own per-tier schedule
-# (Free 10% / Premium 5% / StatZ 2%) — deliberately NOT the dev-tax rate,
-# which differs for StatZ (3%). The others are flat.
+# (Free 10% / Premium 5% / StatZ 3%) — matches the StatZ developer-tax rate.
+# The others are flat.
 CASHOUT_INSTANT = 0.15
 CASHOUT_MONTHLY = 0.01
 CASHOUT_QUARTERLY = 0.0
-CASHOUT_WEEKLY = {TIER_FREE: 0.10, TIER_PREMIUM: 0.05, TIER_STATZ: 0.02, TIER_DEBUG: 0.0}
+CASHOUT_WEEKLY = {TIER_FREE: 0.10, TIER_PREMIUM: 0.05, TIER_STATZ: 0.03, TIER_DEBUG: 0.0}
 
 
 def cashout_rate(plan, tier):

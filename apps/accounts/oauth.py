@@ -29,6 +29,10 @@ def verify_google(credential: str):
     if not credential:
         raise OAuthError("Missing Google credential.")
     client_id = _env("GOOGLE_OAUTH_CLIENT_ID")
+    if not client_id:
+        # Fail closed: without our client-ID we cannot verify the token was
+        # issued for THIS app, so any valid Google token would be accepted.
+        raise OAuthError("Google sign-in is not configured on the server.")
     try:
         resp = requests.get(
             "https://oauth2.googleapis.com/tokeninfo",
@@ -40,8 +44,10 @@ def verify_google(credential: str):
     if resp.status_code != 200:
         raise OAuthError("Google rejected that sign-in token.")
     data = resp.json()
-    if client_id and data.get("aud") != client_id:
+    if data.get("aud") != client_id:
         raise OAuthError("Google token audience mismatch.")
+    if data.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
+        raise OAuthError("Google token issuer mismatch.")
     if data.get("email_verified") in ("false", False):
         raise OAuthError("Google email is not verified.")
     return {
@@ -116,6 +122,10 @@ def verify_apple(id_token: str):
         raise OAuthError("Apple sign-in requires PyJWT on the server.")
 
     client_id = _env("APPLE_OAUTH_CLIENT_ID")
+    if not client_id:
+        # Fail closed: without our audience we can't confirm the token was
+        # minted for THIS app.
+        raise OAuthError("Apple sign-in is not configured on the server.")
     try:
         jwk_client = PyJWKClient("https://appleid.apple.com/auth/keys")
         signing_key = jwk_client.get_signing_key_from_jwt(id_token)
@@ -123,9 +133,9 @@ def verify_apple(id_token: str):
             id_token,
             signing_key.key,
             algorithms=["RS256"],
-            audience=client_id or None,
+            audience=client_id,
             issuer="https://appleid.apple.com",
-            options={"verify_aud": bool(client_id)},
+            options={"verify_aud": True},
         )
     except Exception:
         raise OAuthError("Apple rejected that sign-in token.")
