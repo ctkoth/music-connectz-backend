@@ -45,6 +45,9 @@ class Membership(models.Model):
     last_seen = models.DateTimeField(null=True, blank=True, db_index=True)
     # Founding lifetime membership: tier never expires and never re-bills.
     lifetime = models.BooleanField(default=False, db_index=True)
+    # Stripe customer id for founding StatZ subscriptions (year/month), so a
+    # cancellation webhook can find and downgrade the right member.
+    stripe_customer_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
 
     @property
     def dev_tax_rate(self):
@@ -216,8 +219,12 @@ def membership_for(user):
 
 
 def founding_status():
-    """How many founding lifetime seats are claimed / remaining."""
-    from .catalog import FOUNDING_LIMIT, FOUNDING_PRICE_CENTS, LIFETIME_PRICE_CENTS, FOUNDING_TIER
+    """How many founding lifetime seats are claimed / remaining, plus the
+    founding StatZ prices (lifetime one-time, and grandfathered year/month)."""
+    from .catalog import (
+        FOUNDING_LIMIT, FOUNDING_PRICE_CENTS, LIFETIME_PRICE_CENTS, FOUNDING_TIER,
+        FOUNDING_YEAR_CENTS, FOUNDING_MONTH_CENTS,
+    )
     claimed = Membership.objects.filter(lifetime=True).count()
     return {
         "claimed": claimed,
@@ -227,6 +234,8 @@ def founding_status():
         "tier": FOUNDING_TIER,
         "price_cents": FOUNDING_PRICE_CENTS,
         "full_price_cents": LIFETIME_PRICE_CENTS,
+        "year_cents": FOUNDING_YEAR_CENTS,
+        "month_cents": FOUNDING_MONTH_CENTS,
     }
 
 
