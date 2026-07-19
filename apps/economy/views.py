@@ -249,7 +249,7 @@ class RoyaltyAccrueView(APIView):
 class RoyaltyCashoutView(APIView):
     """Cash out royalties into the wallet, applying the plan's tax.
 
-    Plans: instant (15%), weekly (dev-tax rate), monthly (1%), quarterly (0%).
+    Plans: instant (15%), weekly (per-tier 10/5/2), monthly (1%), quarterly (0%).
     """
 
     permission_classes = [IsAuthenticated]
@@ -257,7 +257,7 @@ class RoyaltyCashoutView(APIView):
     def post(self, request):
         plan = str(request.data.get("plan", "")).lower()
         m = membership_for(request.user)
-        rate = cashout_rate(plan, m.dev_tax_rate)
+        rate = cashout_rate(plan, m.tier)
         if rate is None:
             return Response({"detail": "plan must be instant|weekly|monthly|quarterly"}, status=status.HTTP_400_BAD_REQUEST)
         w = wallet_for(request.user)
