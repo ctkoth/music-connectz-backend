@@ -10,6 +10,7 @@ from .payments import (
     FoundingView,
     PaypalCaptureView,
     PaypalCreateView,
+    PaypalWebhookView,
     StripeCheckoutView,
     StripeWebhookView,
 )
@@ -62,6 +63,7 @@ urlpatterns = [
     path("checkout/paypal/", PaypalCreateView.as_view(), name="economy-checkout-paypal"),
     path("checkout/paypal/capture/", PaypalCaptureView.as_view(), name="economy-checkout-paypal-capture"),
     path("webhooks/stripe/", StripeWebhookView.as_view(), name="economy-webhook-stripe"),
+    path("webhooks/paypal/", PaypalWebhookView.as_view(), name="economy-webhook-paypal"),
     path("founding/", FoundingView.as_view(), name="economy-founding"),
     path("founding/claim/", FoundingClaimView.as_view(), name="economy-founding-claim"),
     path("founding/checkout/", FoundingCheckoutView.as_view(), name="economy-founding-checkout"),

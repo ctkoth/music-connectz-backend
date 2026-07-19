@@ -36,6 +36,18 @@ def _amount_or_error(request):
     return amount_cents, None
 
 
+def _downgrade_by_customer(cust):
+    """Drop a founding subscriber back to Free when their sub ends/fails
+    (never touches lifetime members)."""
+    if not cust:
+        return
+    from .models import Membership
+    m = Membership.objects.filter(stripe_customer_id=cust, lifetime=False).first()
+    if m and m.tier != "free":
+        m.tier = "free"
+        m.save(update_fields=["tier", "updated_at"])
+
+
 def _complete_intent(intent):
     """Credit the wallet for a confirmed payment, exactly once."""
     with transaction.atomic():
@@ -207,13 +219,14 @@ class StripeWebhookView(APIView):
                     _complete_intent(intent)
         elif etype == "customer.subscription.deleted":
             # Founding StatZ subscription ended — downgrade to Free (unless lifetime).
-            from .models import Membership
-            cust = (event["data"]["object"] or {}).get("customer")
-            if cust:
-                m = Membership.objects.filter(stripe_customer_id=cust, lifetime=False).first()
-                if m:
-                    m.tier = "free"
-                    m.save(update_fields=["tier", "updated_at"])
+            _downgrade_by_customer((event["data"]["object"] or {}).get("customer"))
+        elif etype == "invoice.payment_failed":
+            # Renewal failed. If Stripe has no further retry scheduled
+            # (next_payment_attempt is null), the sub is effectively dead now —
+            # downgrade immediately instead of waiting for the eventual delete.
+            obj = event["data"]["object"] or {}
+            if obj.get("next_payment_attempt") is None:
+                _downgrade_by_customer(obj.get("customer"))
         return Response({"received": True})
 
 
@@ -271,6 +284,34 @@ class PaypalCreateView(APIView):
         return Response({"id": order["id"], "approve_url": approve})
 
 
+def _capture_paypal_order(order_id):
+    """Capture an approved PayPal order and credit the wallet, exactly once.
+    Returns (intent, error_detail). Safe to call from the client view or the
+    webhook — the PaymentIntent status guard keeps crediting idempotent."""
+    intent = PaymentIntent.objects.filter(
+        provider=PaymentIntent.PROVIDER_PAYPAL, provider_ref=order_id
+    ).first()
+    if not intent:
+        return None, "unknown order"
+    if intent.status == PaymentIntent.STATUS_COMPLETED:
+        return intent, None
+    import requests
+    token = _paypal_token()
+    resp = requests.post(
+        f"{settings.PAYPAL_API_BASE}/v2/checkout/orders/{order_id}/capture",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        timeout=20,
+    )
+    data = resp.json() if resp.content else {}
+    # 422 ORDER_ALREADY_CAPTURED means someone (the other path) already captured;
+    # treat it as done and let _complete_intent be the idempotent crediter.
+    already = any(d.get("issue") == "ORDER_ALREADY_CAPTURED" for d in (data.get("details") or []))
+    if not already and (resp.status_code not in (200, 201) or data.get("status") != "COMPLETED"):
+        return None, "capture not completed"
+    _complete_intent(intent)
+    return intent, None
+
+
 class PaypalCaptureView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -278,24 +319,73 @@ class PaypalCaptureView(APIView):
         if not (settings.PAYPAL_CLIENT_ID and settings.PAYPAL_SECRET):
             return Response({"detail": "PayPal is not configured"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         order_id = str(request.data.get("order_id", ""))
-        # Only the user who created the intent can capture it.
-        intent = PaymentIntent.objects.filter(
+        # Ownership check: only the user who created the intent may capture here.
+        owned = PaymentIntent.objects.filter(
             provider=PaymentIntent.PROVIDER_PAYPAL, provider_ref=order_id, user=request.user
-        ).first()
-        if not intent:
+        ).exists()
+        if not owned:
             return Response({"detail": "unknown order"}, status=status.HTTP_404_NOT_FOUND)
-        if intent.status == PaymentIntent.STATUS_COMPLETED:
-            return Response({"wallet": WalletSerializer(wallet_for(request.user)).data, "already": True})
+        intent, err = _capture_paypal_order(order_id)
+        if err == "unknown order":
+            return Response({"detail": err}, status=status.HTTP_404_NOT_FOUND)
+        if err:
+            return Response({"detail": err}, status=status.HTTP_402_PAYMENT_REQUIRED)
+        return Response({"wallet": WalletSerializer(wallet_for(request.user)).data})
 
+
+@method_decorator(csrf_exempt, name="dispatch")
+class PaypalWebhookView(APIView):
+    """PayPal calls this server-to-server. Signature-verified against
+    PAYPAL_WEBHOOK_ID so a stalled browser can't lose a paid order — we capture
+    and credit from the webhook too. No user auth (the signature is the auth)."""
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        if not (settings.PAYPAL_CLIENT_ID and settings.PAYPAL_SECRET and settings.PAYPAL_WEBHOOK_ID):
+            return Response({"detail": "PayPal is not configured"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        import json
         import requests
-        token = _paypal_token()
-        resp = requests.post(
-            f"{settings.PAYPAL_API_BASE}/v2/checkout/orders/{order_id}/capture",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        try:
+            event = json.loads(request.body or b"{}")
+        except ValueError:
+            return Response({"detail": "bad body"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Verify authenticity with PayPal before acting on anything.
+        h = request.META.get
+        verify = requests.post(
+            f"{settings.PAYPAL_API_BASE}/v1/notifications/verify-webhook-signature",
+            headers={"Authorization": f"Bearer {_paypal_token()}", "Content-Type": "application/json"},
+            json={
+                "auth_algo": h("HTTP_PAYPAL_AUTH_ALGO"),
+                "cert_url": h("HTTP_PAYPAL_CERT_URL"),
+                "transmission_id": h("HTTP_PAYPAL_TRANSMISSION_ID"),
+                "transmission_sig": h("HTTP_PAYPAL_TRANSMISSION_SIG"),
+                "transmission_time": h("HTTP_PAYPAL_TRANSMISSION_TIME"),
+                "webhook_id": settings.PAYPAL_WEBHOOK_ID,
+                "webhook_event": event,
+            },
             timeout=20,
         )
-        data = resp.json() if resp.content else {}
-        if resp.status_code not in (200, 201) or data.get("status") != "COMPLETED":
-            return Response({"detail": "capture not completed"}, status=status.HTTP_402_PAYMENT_REQUIRED)
-        _complete_intent(intent)
-        return Response({"wallet": WalletSerializer(wallet_for(request.user)).data})
+        if verify.json().get("verification_status") != "SUCCESS":
+            return Response({"detail": "invalid signature"}, status=status.HTTP_400_BAD_REQUEST)
+
+        etype = event.get("event_type", "")
+        resource = event.get("resource") or {}
+        if etype == "CHECKOUT.ORDER.APPROVED":
+            # Buyer approved — capture server-side so the credit doesn't depend
+            # on the browser calling back.
+            order_id = resource.get("id")
+            if order_id:
+                _capture_paypal_order(order_id)
+        elif etype == "PAYMENT.CAPTURE.COMPLETED":
+            # Capture done elsewhere — complete the matching intent idempotently.
+            order_id = ((resource.get("supplementary_data") or {}).get("related_ids") or {}).get("order_id")
+            if order_id:
+                intent = PaymentIntent.objects.filter(
+                    provider=PaymentIntent.PROVIDER_PAYPAL, provider_ref=order_id
+                ).first()
+                if intent and intent.status != PaymentIntent.STATUS_COMPLETED:
+                    _complete_intent(intent)
+        return Response({"received": True})
