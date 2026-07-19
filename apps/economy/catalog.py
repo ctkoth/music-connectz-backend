@@ -47,12 +47,13 @@ def cashout_rate(plan, dev_tax_rate):
 
 
 # AI model per-message cost in cents — the *minimum* to cover the model run
-# (pass-through, no markup). Corey GPT is the cheapest house model; it's tuned on
-# member input + the built-in curricula so it costs the least to serve.
+# (pass-through, no markup). Corey GPT is priced a touch under the cheapest other
+# voice so it's always the value option; it's tuned on member input + the built-in
+# curricula so it costs the least to serve.
 AI_MODEL_COSTS = {
-    "corey-gpt": 1,
-    "standard": 4,
-    "technical": 4,
+    "corey-gpt": 2,
+    "standard": 3,
+    "technical": 3,
 }
 
 
