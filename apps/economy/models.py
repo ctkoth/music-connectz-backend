@@ -468,6 +468,9 @@ class Profile(models.Model):
     share_location = models.BooleanField(default=False)
     lat = models.FloatField(null=True, blank=True)
     lng = models.FloatField(null=True, blank=True)
+    # Declared external-account followers (sum across connected socials) — feeds
+    # the hourly energy rate alongside Music ConnectZ followers.
+    external_followers = models.PositiveIntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
 
@@ -496,6 +499,57 @@ def haversine_km(lat1, lng1, lat2, lng2):
     dlng = radians(lng2 - lng1)
     a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlng / 2) ** 2
     return round(2 * r * asin(sqrt(a)), 1)
+
+
+# ---- Social graph: follow / friends / fans ----
+class Follow(models.Model):
+    """follower → following. Mutual follows are friends; a one-way follower is
+    a fan of the followed user."""
+    follower = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="following_set")
+    following = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="follower_set")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("follower", "following")
+
+
+def follow_counts(user):
+    """followers / following / friends(mutual) / fans(one-way) for a user, plus
+    any external-account followers they've declared on their profile."""
+    following_ids = set(Follow.objects.filter(follower=user).values_list("following_id", flat=True))
+    follower_ids = set(Follow.objects.filter(following=user).values_list("follower_id", flat=True))
+    friends = following_ids & follower_ids           # mutual
+    fans = follower_ids - following_ids              # follow you, you don't follow back
+    p = getattr(user, "mcz_profile", None)
+    external = int(getattr(p, "external_followers", 0) or 0) if p else 0
+    return {
+        "followers": len(follower_ids),
+        "following": len(following_ids),
+        "friends": len(friends),
+        "fans": len(fans),
+        "external_followers": external,
+        "total_followers": len(follower_ids) + external,
+    }
+
+
+def energy_rate_per_hour(user):
+    """Hourly passive energy by tier, from follower reach (MCZ + external):
+    Free = reach/10, Premium = reach/5, StatZ = reach/1."""
+    reach = follow_counts(user)["total_followers"]
+    m = membership_for(user)
+    divisor = {TIER_FREE: 10, TIER_PREMIUM: 5, TIER_STATZ: 1, TIER_DEBUG: 1}.get(m.tier, 10)
+    return reach // divisor
+
+
+def relationship(me, other):
+    """How `me` relates to `other`: is_following (me→other), follows_me
+    (other→me), and a label (friends | fan | following | none)."""
+    if not me or not other or me.id == other.id:
+        return {"is_following": False, "follows_me": False, "label": "self"}
+    i_follow = Follow.objects.filter(follower=me, following=other).exists()
+    they_follow = Follow.objects.filter(follower=other, following=me).exists()
+    label = "friends" if (i_follow and they_follow) else "fan" if they_follow else "following" if i_follow else "none"
+    return {"is_following": i_follow, "follows_me": they_follow, "label": label}
 
 
 # ---- DirectZ video works (ReelZ / EpisodeZ / MovieZ) ----
