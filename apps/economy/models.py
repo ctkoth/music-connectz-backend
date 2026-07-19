@@ -375,11 +375,35 @@ class Profile(models.Model):
     asexual = models.BooleanField(default=False)
     traits = models.JSONField(default=list, blank=True)
     personas = models.JSONField(default=list, blank=True)
+    links = models.JSONField(default=list, blank=True)  # [{label, url}] public links
     updated_at = models.DateTimeField(auto_now=True)
 
 
 def profile_for(user):
     return Profile.objects.get_or_create(user=user)[0]
+
+
+# ---- Universal social layer (cross-user reactions + comments) ----
+class Reaction(models.Model):
+    """One like (+1) or dislike (-1) per user per item. `item_id` is an opaque
+    client key like 'post:123', 'battle:1v1', 'collab:...'."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="reactions")
+    item_id = models.CharField(max_length=160, db_index=True)
+    value = models.SmallIntegerField(default=0)  # 1 like, -1 dislike
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "item_id")
+
+
+class SocialComment(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="social_comments")
+    item_id = models.CharField(max_length=160, db_index=True)
+    body = models.CharField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
 
 
 # ---- MerchZ (legal goods marketplace) ----

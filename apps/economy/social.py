@@ -17,6 +17,8 @@ from .models import (
     Face,
     FaceRating,
     Profile,
+    Reaction,
+    SocialComment,
     profile_for,
     Venue,
     VenueAttendance,
@@ -247,7 +249,7 @@ class FaceRateView(APIView):
 # ---- Cross-user profiles ----
 PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign",
                   "nationalities", "regions", "substances", "sober",
-                  "attracted_to", "asexual", "traits", "personas")
+                  "attracted_to", "asexual", "traits", "personas", "links")
 
 
 def _profile_card(p):
@@ -270,9 +272,57 @@ def _profile_full(p, request):
     card.update({
         "bio": p.bio, "location": p.location, "birthday": p.birthday,
         "substances": p.substances, "asexual": p.asexual, "traits": p.traits,
-        "personas": p.personas, "mine": p.user_id == request.user.id,
+        "personas": p.personas, "links": p.links, "mine": p.user_id == request.user.id,
     })
     return card
+
+
+class SocialView(APIView):
+    """Cross-user reactions + comments for any item.
+
+    GET  /api/economy/social/?item=<id>            → {up, down, my, comments:[...]}
+    POST /api/economy/social/react/  {item, value} → toggle like(+1)/dislike(-1)/clear(0)
+    POST /api/economy/social/comment/ {item, body} → add a comment
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _payload(self, item, request):
+        ups = Reaction.objects.filter(item_id=item, value=1).count()
+        downs = Reaction.objects.filter(item_id=item, value=-1).count()
+        mine = Reaction.objects.filter(item_id=item, user=request.user).first()
+        comments = [
+            {"id": c.id, "user": c.user.username, "body": c.body, "at": c.created_at.isoformat()}
+            for c in SocialComment.objects.filter(item_id=item).select_related("user")[:100]
+        ]
+        return {"item": item, "up": ups, "down": downs, "my": mine.value if mine else 0, "comments": comments}
+
+    def get(self, request):
+        item = (request.query_params.get("item") or "").strip()
+        if not item:
+            return Response({"detail": "item required"}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self._payload(item, request))
+
+    def post(self, request, action=None):
+        item = str((request.data or {}).get("item", "")).strip()[:160]
+        if not item:
+            return Response({"detail": "item required"}, status=status.HTTP_400_BAD_REQUEST)
+        if action == "react":
+            try:
+                value = int((request.data or {}).get("value", 0))
+            except (TypeError, ValueError):
+                value = 0
+            value = max(-1, min(1, value))
+            if value == 0:
+                Reaction.objects.filter(user=request.user, item_id=item).delete()
+            else:
+                Reaction.objects.update_or_create(user=request.user, item_id=item, defaults={"value": value})
+        elif action == "comment":
+            body = str((request.data or {}).get("body", "")).strip()[:500]
+            if not body:
+                return Response({"detail": "body required"}, status=status.HTTP_400_BAD_REQUEST)
+            SocialComment.objects.create(user=request.user, item_id=item, body=body)
+        return Response(self._payload(item, request))
 
 
 class ProfileView(APIView):
