@@ -19,10 +19,15 @@ class PublicUserSerializer(serializers.ModelSerializer):
     avatar_url = serializers.CharField(
         source="profile.avatar_url", read_only=True, default=""
     )
+    # Owner/staff unlock the debug (god-mode) membership tier in the client.
+    is_owner = serializers.SerializerMethodField()
+
+    def get_is_owner(self, obj):
+        return bool(obj.is_superuser or obj.is_staff)
 
     class Meta:
         model = User
-        fields = ("id", "username", "email", "phone", "avatar_url")
+        fields = ("id", "username", "email", "phone", "avatar_url", "is_owner")
 
 
 class RegisterSerializer(serializers.Serializer):

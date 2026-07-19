@@ -321,6 +321,11 @@ class MembersView(APIView):
         regions = multi("regions")
         genders = multi("genders")
         signs = multi("signs")
+        # SubstanceZ multi-select: substance keys the searcher wants sober-friendly.
+        # A member passes if, on every selected substance, they are NOT active
+        # ("use"/"sometimes"). Undeclared counts as sober-friendly.
+        substances = multi("substances")
+        active_stances = {"use", "sometimes"}
         sober_only = request.query_params.get("sober") in ("1", "true", "True")
 
         results = []
@@ -334,5 +339,9 @@ class MembersView(APIView):
                 continue
             if sober_only and not p.sober:
                 continue
+            if substances:
+                subs = p.substances or {}
+                if any(subs.get(k) in active_stances for k in substances):
+                    continue
             results.append(_profile_card(p))
         return Response({"members": results[:100]})
