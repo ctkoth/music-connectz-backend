@@ -45,6 +45,7 @@ def ensure_owner(user):
     the Free default, set StatZ — then it's freely modifiable afterward."""
     from django.conf import settings
     from .models import TIER_FREE
+    from .models import TIER_FREE, TIER_PREMIUM
     emails = getattr(settings, "OWNER_EMAILS", []) or []
     if not user or not user.email or user.email.lower() not in emails:
         return
@@ -52,10 +53,12 @@ def ensure_owner(user):
         user.is_staff = True
         user.is_superuser = True
         user.save(update_fields=["is_staff", "is_superuser"])
-        m = membership_for(user)
-        if m.tier == TIER_FREE:  # first-time bootstrap; owner can change later
-            m.tier = TIER_STATZ
-            m.save(update_fields=["tier", "updated_at"])
+    # Owner sits at StatZ by default. Bump from Free/Premium; never override a
+    # deliberate switch into Debug (owner god-mode), which is still theirs to pick.
+    m = membership_for(user)
+    if m.tier in (TIER_FREE, TIER_PREMIUM):
+        m.tier = TIER_STATZ
+        m.save(update_fields=["tier", "updated_at"])
 
 
 class StatsView(APIView):
