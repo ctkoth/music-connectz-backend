@@ -45,6 +45,8 @@ class Membership(models.Model):
     last_seen = models.DateTimeField(null=True, blank=True, db_index=True)
     # Founding lifetime membership: tier never expires and never re-bills.
     lifetime = models.BooleanField(default=False, db_index=True)
+    # Founding member: claimed StatZ in the Founding 50 (any plan). Powers the badge.
+    founding = models.BooleanField(default=False, db_index=True)
     # Stripe customer id for founding StatZ subscriptions (year/month), so a
     # cancellation webhook can find and downgrade the right member.
     stripe_customer_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
@@ -253,8 +255,9 @@ def grant_lifetime(user):
         if claimed >= FOUNDING_LIMIT:
             return None
         m.lifetime = True
+        m.founding = True
         m.tier = FOUNDING_TIER
-        m.save(update_fields=["lifetime", "tier", "updated_at"])
+        m.save(update_fields=["lifetime", "founding", "tier", "updated_at"])
     return m
 
 

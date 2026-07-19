@@ -254,6 +254,7 @@ PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign
 
 def _profile_card(p):
     """Compact card for search results."""
+    m = getattr(p.user, "membership", None)
     return {
         "username": p.user.username,
         "display_name": p.display_name or p.user.username,
@@ -264,6 +265,9 @@ def _profile_card(p):
         "sober": p.sober,
         "attracted_to": p.attracted_to,
         "median": attractiveness_median(p.user),
+        "tier": m.tier if m else "free",
+        "founding": bool(m and m.founding),
+        "lifetime": bool(m and m.lifetime),
     }
 
 

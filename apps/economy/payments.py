@@ -194,10 +194,11 @@ class StripeWebhookView(APIView):
                 # Stripe customer so a cancellation can downgrade the right user.
                 m = membership_for(user)
                 m.tier = FOUNDING_TIER
+                m.founding = True
                 cust = obj.get("customer")
                 if cust:
                     m.stripe_customer_id = cust
-                m.save(update_fields=["tier", "stripe_customer_id", "updated_at"])
+                m.save(update_fields=["tier", "founding", "stripe_customer_id", "updated_at"])
             else:
                 intent = PaymentIntent.objects.filter(
                     provider=PaymentIntent.PROVIDER_STRIPE, provider_ref=obj.get("id")
