@@ -4,6 +4,9 @@ from .merch import MerchBuyView, MerchDetailView, MerchView
 from .occ import OccChatView
 from .payments import (
     CheckoutConfigView,
+    FoundingCheckoutView,
+    FoundingClaimView,
+    FoundingView,
     PaypalCaptureView,
     PaypalCreateView,
     StripeCheckoutView,
@@ -55,6 +58,9 @@ urlpatterns = [
     path("checkout/paypal/", PaypalCreateView.as_view(), name="economy-checkout-paypal"),
     path("checkout/paypal/capture/", PaypalCaptureView.as_view(), name="economy-checkout-paypal-capture"),
     path("webhooks/stripe/", StripeWebhookView.as_view(), name="economy-webhook-stripe"),
+    path("founding/", FoundingView.as_view(), name="economy-founding"),
+    path("founding/claim/", FoundingClaimView.as_view(), name="economy-founding-claim"),
+    path("founding/checkout/", FoundingCheckoutView.as_view(), name="economy-founding-checkout"),
     path("venues/", VenuesView.as_view(), name="economy-venues"),
     path("venues/<int:pk>/join/", VenueJoinView.as_view(), name="economy-venue-join"),
     path("attractiveness/", AttractivenessView.as_view(), name="economy-attractiveness"),
