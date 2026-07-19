@@ -59,12 +59,21 @@ AI_MODEL_COSTS = {
 }
 
 
-# Founding lifetime StatZ offer: first 50 members get lifetime StatZ at 50% off.
+# Founding StatZ offer: first 50 members get StatZ at 50% off — as a one-time
+# lifetime seat, or grandfathered founding rates by year / month.
 FOUNDING_TIER = TIER_STATZ
 FOUNDING_LIMIT = 50
-LIFETIME_PRICE_CENTS = 30000          # $300 full lifetime StatZ
 FOUNDING_DISCOUNT = 0.50              # first 50 pay half
-FOUNDING_PRICE_CENTS = int(LIFETIME_PRICE_CENTS * (1 - FOUNDING_DISCOUNT))  # $150
+LIFETIME_PRICE_CENTS = 30000          # $300 full lifetime StatZ
+FOUNDING_PRICE_CENTS = int(LIFETIME_PRICE_CENTS * (1 - FOUNDING_DISCOUNT))  # $150 lifetime
+FOUNDING_YEAR_CENTS = 7500            # $75/yr founding StatZ (full ~$150/yr)
+FOUNDING_MONTH_CENTS = 750            # $7.50/mo founding StatZ (full ~$15/mo)
+# Plan -> (Stripe mode, unit amount cents, recurring interval or None)
+FOUNDING_PLANS = {
+    "lifetime": {"mode": "payment", "cents": FOUNDING_PRICE_CENTS, "interval": None, "kind": "lifetime"},
+    "year": {"mode": "subscription", "cents": FOUNDING_YEAR_CENTS, "interval": "year", "kind": "founding_sub"},
+    "month": {"mode": "subscription", "cents": FOUNDING_MONTH_CENTS, "interval": "month", "kind": "founding_sub"},
+}
 
 
 def ai_cost(model):

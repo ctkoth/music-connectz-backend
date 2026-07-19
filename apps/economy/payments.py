@@ -17,10 +17,10 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import PaymentIntent, credit_funds, grant_lifetime, founding_status
+from .models import PaymentIntent, credit_funds, grant_lifetime, founding_status, membership_for
 from .serializers import WalletSerializer
 from .models import wallet_for
-from .catalog import FOUNDING_PRICE_CENTS
+from .catalog import FOUNDING_PLANS, FOUNDING_TIER
 
 MIN_CENTS = 100          # $1 minimum
 MAX_CENTS = 1_000_000    # $10,000 cap per funding
@@ -126,35 +126,40 @@ class FoundingClaimView(APIView):
 
 
 class FoundingCheckoutView(APIView):
-    """Start a Stripe Checkout for founding lifetime StatZ, tied to this user.
-    On payment, the webhook grants lifetime — no wallet crediting involved."""
+    """Start a Stripe Checkout for founding StatZ, tied to this user.
+    plan = lifetime (one-time, webhook grants lifetime) | year | month
+    (subscription at the founding rate; webhook grants StatZ, cancel downgrades)."""
 
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         if not settings.STRIPE_SECRET_KEY:
             return Response({"detail": "Stripe is not configured"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        plan = str(request.data.get("plan", "lifetime")).lower()
+        cfg = FOUNDING_PLANS.get(plan)
+        if not cfg:
+            return Response({"detail": f"plan must be one of {sorted(FOUNDING_PLANS)}"}, status=status.HTTP_400_BAD_REQUEST)
         st = founding_status()
         if st["sold_out"]:
             return Response({"detail": "Founding offer is sold out.", **st}, status=status.HTTP_409_CONFLICT)
         import stripe
         stripe.api_key = settings.STRIPE_SECRET_KEY
+        price_data = {
+            "currency": "usd",
+            "product_data": {"name": f"Music ConnectZ — Founding StatZ ({plan}, 50% off)"},
+            "unit_amount": cfg["cents"],
+        }
+        if cfg["interval"]:
+            price_data["recurring"] = {"interval": cfg["interval"]}
         session = stripe.checkout.Session.create(
-            mode="payment",
-            line_items=[{
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {"name": "Music ConnectZ — Founding Lifetime StatZ (50% off)"},
-                    "unit_amount": FOUNDING_PRICE_CENTS,
-                },
-                "quantity": 1,
-            }],
-            success_url=f"{settings.FRONTEND_URL}/v2?checkout=success&provider=stripe&kind=lifetime",
-            cancel_url=f"{settings.FRONTEND_URL}/v2?checkout=cancel&provider=stripe&kind=lifetime",
+            mode=cfg["mode"],
+            line_items=[{"price_data": price_data, "quantity": 1}],
+            success_url=f"{settings.FRONTEND_URL}/v2?checkout=success&provider=stripe&kind=founding&plan={plan}",
+            cancel_url=f"{settings.FRONTEND_URL}/v2?checkout=cancel&provider=stripe&kind=founding&plan={plan}",
             client_reference_id=str(request.user.id),
-            metadata={"kind": "lifetime", "user_id": str(request.user.id)},
+            metadata={"kind": cfg["kind"], "user_id": str(request.user.id), "plan": plan},
         )
-        return Response({"url": session.url, "id": session.id})
+        return Response({"url": session.url, "id": session.id, "plan": plan})
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -174,22 +179,40 @@ class StripeWebhookView(APIView):
         except (ValueError, stripe.error.SignatureVerificationError):
             return Response({"detail": "invalid signature"}, status=status.HTTP_400_BAD_REQUEST)
 
-        if event["type"] == "checkout.session.completed":
+        from django.contrib.auth import get_user_model
+        etype = event["type"]
+        if etype == "checkout.session.completed":
             obj = event["data"]["object"]
             meta = obj.get("metadata") or {}
-            if meta.get("kind") == "lifetime":
-                # Founding lifetime StatZ purchase — grant the tier (idempotent).
-                from django.contrib.auth import get_user_model
-                uid = meta.get("user_id") or obj.get("client_reference_id")
-                user = get_user_model().objects.filter(pk=uid).first() if uid else None
-                if user:
-                    grant_lifetime(user)
+            kind = meta.get("kind")
+            uid = meta.get("user_id") or obj.get("client_reference_id")
+            user = get_user_model().objects.filter(pk=uid).first() if uid else None
+            if kind == "lifetime" and user:
+                grant_lifetime(user)  # idempotent
+            elif kind == "founding_sub" and user:
+                # Founding StatZ subscription — grant the tier and remember the
+                # Stripe customer so a cancellation can downgrade the right user.
+                m = membership_for(user)
+                m.tier = FOUNDING_TIER
+                cust = obj.get("customer")
+                if cust:
+                    m.stripe_customer_id = cust
+                m.save(update_fields=["tier", "stripe_customer_id", "updated_at"])
             else:
                 intent = PaymentIntent.objects.filter(
                     provider=PaymentIntent.PROVIDER_STRIPE, provider_ref=obj.get("id")
                 ).first()
                 if intent:
                     _complete_intent(intent)
+        elif etype == "customer.subscription.deleted":
+            # Founding StatZ subscription ended — downgrade to Free (unless lifetime).
+            from .models import Membership
+            cust = (event["data"]["object"] or {}).get("customer")
+            if cust:
+                m = Membership.objects.filter(stripe_customer_id=cust, lifetime=False).first()
+                if m:
+                    m.tier = "free"
+                    m.save(update_fields=["tier", "updated_at"])
         return Response({"received": True})
 
 
