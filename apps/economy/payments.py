@@ -17,7 +17,10 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import PaymentIntent, credit_funds, grant_lifetime, founding_status, membership_for
+from .models import (
+    PaymentIntent, credit_funds, grant_lifetime, founding_status, membership_for,
+    refund_window, REFUND_WINDOW_DAYS,
+)
 from .serializers import WalletSerializer
 from .models import wallet_for
 from .catalog import FOUNDING_PLANS, FOUNDING_TIER
@@ -174,6 +177,70 @@ class FoundingCheckoutView(APIView):
         return Response({"url": session.url, "id": session.id, "plan": plan})
 
 
+class MembershipRefundView(APIView):
+    """Downgrade for a refund within the 10-day window.
+
+    GET  → refund eligibility for the current member.
+    POST → if still inside the window, refund the purchase (Stripe), cancel any
+           subscription, clear founding/lifetime, and drop the tier to Free.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        m = membership_for(request.user)
+        return Response({**refund_window(m), "window_days": REFUND_WINDOW_DAYS})
+
+    def post(self, request):
+        m = membership_for(request.user)
+        rw = refund_window(m)
+        if not rw["eligible"]:
+            return Response(
+                {"detail": f"Outside the {REFUND_WINDOW_DAYS}-day refund window.", **rw},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        refunded = False
+        note = ""
+        ref, kind = m.last_payment_ref, m.last_payment_kind
+        if settings.STRIPE_SECRET_KEY and ref:
+            import stripe
+            stripe.api_key = settings.STRIPE_SECRET_KEY
+            try:
+                if kind == "lifetime":
+                    stripe.Refund.create(payment_intent=ref)
+                    refunded = True
+                else:
+                    # Subscription: cancel future billing + refund the latest charge.
+                    sub = stripe.Subscription.retrieve(ref)
+                    stripe.Subscription.delete(ref)
+                    inv_id = sub.get("latest_invoice")
+                    if inv_id:
+                        inv = stripe.Invoice.retrieve(inv_id)
+                        pi = inv.get("payment_intent")
+                        if pi:
+                            stripe.Refund.create(payment_intent=pi)
+                            refunded = True
+                note = "Refund issued to your original payment method."
+            except Exception:
+                note = "We couldn't auto-process the refund — support will complete it."
+        else:
+            note = "Tier reverted (no live charge on record to refund)."
+
+        # Revert membership regardless, so access matches the refund.
+        m.tier = "free"
+        m.lifetime = False
+        m.founding = False
+        m.last_paid_at = None
+        m.last_payment_ref = ""
+        m.last_payment_kind = ""
+        m.save(update_fields=[
+            "tier", "lifetime", "founding", "last_paid_at", "last_payment_ref",
+            "last_payment_kind", "updated_at",
+        ])
+        return Response({"downgraded": True, "refunded": refunded, "tier": m.tier, "note": note})
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class StripeWebhookView(APIView):
     """Stripe calls this server-to-server; no user auth, signature-verified."""
@@ -201,6 +268,12 @@ class StripeWebhookView(APIView):
             user = get_user_model().objects.filter(pk=uid).first() if uid else None
             if kind == "lifetime" and user:
                 grant_lifetime(user)  # idempotent
+                # Record the purchase for the 10-day refund window.
+                m = membership_for(user)
+                m.last_paid_at = timezone.now()
+                m.last_payment_ref = obj.get("payment_intent") or ""
+                m.last_payment_kind = "lifetime"
+                m.save(update_fields=["last_paid_at", "last_payment_ref", "last_payment_kind", "updated_at"])
             elif kind == "founding_sub" and user:
                 # Founding StatZ subscription — grant the tier and remember the
                 # Stripe customer so a cancellation can downgrade the right user.
@@ -210,7 +283,10 @@ class StripeWebhookView(APIView):
                 cust = obj.get("customer")
                 if cust:
                     m.stripe_customer_id = cust
-                m.save(update_fields=["tier", "founding", "stripe_customer_id", "updated_at"])
+                m.last_paid_at = timezone.now()
+                m.last_payment_ref = obj.get("subscription") or ""
+                m.last_payment_kind = meta.get("plan") or "year"
+                m.save(update_fields=["tier", "founding", "stripe_customer_id", "last_paid_at", "last_payment_ref", "last_payment_kind", "updated_at"])
             else:
                 intent = PaymentIntent.objects.filter(
                     provider=PaymentIntent.PROVIDER_STRIPE, provider_ref=obj.get("id")
