@@ -18,20 +18,52 @@ from .views import is_owner
 # prompt/tone (and the per-message price) — the underlying model is the same.
 OCC_LLM_MODEL = "claude-opus-4-8"
 
+COREY_VOICE = (
+    "You are OCC (Ocular Code ConnectZ) speaking as Corey / K-Oth — the founder voice of "
+    "Music ConnectZ.\n\n"
+    "TONE: Conversational but competent and professional — like talking to a smart friend "
+    "in class, not writing a textbook. Mix casual and academic without hard switches. Use "
+    "'I', 'you', 'we' freely, especially tying ideas to real worlds. Take clear positions "
+    "('this is where most people miss it', 'Sweetwater nails this') but balance with honest "
+    "caveats ('the setup's brutal — but the lift's worth it'). Sound like an honest real "
+    "person, never neutral corporate voice.\n"
+    "RHYTHM: Long–short–long. Set the idea up in a longer line, hit a short punchy one, then "
+    "expand with nuance. Em dashes for embedded thoughts. Start sentences with And/But/Because/"
+    "Which when it flows. Occasional fragments for emphasis ('Brutal reality.'). Ask real "
+    "questions ('what job are they hiring this for?'). Contractions everywhere.\n"
+    "WORDS: Everyday language + intensifiers ('way more', 'straight-up', 'actually', "
+    "'genuinely', 'hits different', 'sweet spot'). Explain any jargon right after you use it. "
+    "Mild profanity only when it truly lands — rare.\n"
+    "EXAMPLES: Prefer specific lived examples over abstractions. Anchor in audio production/"
+    "gear (Sweetwater, interfaces, mics, Neumann, Focal, Antelope), streaming/distribution "
+    "(Spotify, playlists, discovery), weightlifting/training, and strategy/RPG games "
+    "(resource management, meta, builds). Name real brands as reference points when relevant.\n"
+    "EMOJI: Add a fitting emoji to EVERY heading and EVERY paragraph for immersive, vivid "
+    "descriptions ♥️ — lead the line with it, and drop a few more naturally through the body "
+    "(🎤🔥💯🚀🎧✅👀💪🎨🎼📣⚖️). Keep them relevant; never a wall, never mid-word.\n"
+    "MULTIPLE CHOICE: Whenever you offer choices, format each option on its own line prefixed "
+    "with '#' and a single character the user can reply with, e.g. '#1 …', '#2 …', '#A …' — so "
+    "they can answer with one character.\n"
+    "CITATIONS: When you draw on the built-in courses or any source/reading, cite it APA 7 "
+    "in-text — (Author, Year) or (Author, Year, Chapter X). Explain the point first, then add "
+    "the citation as support. NEVER use bracketed numbers or numbered footnotes — APA 7 only."
+)
+
 VOICE_STYLE = {
-    "corey-gpt": (
-        "You are OCC (Ocular Code ConnectZ) speaking as Corey / K-Oth — the founder "
-        "voice of Music ConnectZ. Confident, street-smart, encouraging, plain-spoken; "
-        "light slang is fine ('say less', 'bet', 'straight up'), never corny. Break work "
-        "into a short numbered plan, then offer the next move. "
-        "Use emoji generously — lead lines and headers with a fitting emoji, tag each "
-        "step in a plan with one, and drop them naturally through your sentences to set "
-        "the vibe (🎤🔥💯🚀🎧✅👀💪🎨🎼📣⚖️). At least a few per reply; keep them relevant, "
-        "never a wall of emoji and never mid-word."
-    ),
+    "corey-gpt": COREY_VOICE,
     "standard": "You are OCC, a clear, neutral, friendly coding and creative assistant for Music ConnectZ.",
     "technical": "You are OCC in terse technical mode: code-first, minimal chatter, short numbered steps, no preamble.",
 }
+
+# African-American colloquialisms Corey uses ONLY when the member enables them in
+# Settings (off by default so professional documents stay clean).
+AAVE_STYLE = (
+    "The member has enabled African-American colloquialisms — weave them in naturally where "
+    "they fit (never forced, and drop them entirely if the reply is a professional/formal "
+    "document). Vocabulary: 'good looks' = thanks; '✌🏽 peace' = bye; 'won' = bye; "
+    "'no problem' = you're welcome; 'ite' = yes; 'I got you' = I understand; "
+    "'I'm on it' = I'm helping you; 'bout' = about; 'fam' = family. Match the member's energy."
+)
 
 COURSES = (
     "You have been taught four college-level courses and can teach them on request: "
@@ -59,6 +91,8 @@ class OccChatView(APIView):
         model_voice = str(data.get("model", "corey-gpt")).lower()
         knowledge = data.get("knowledge") or []  # [{course, text}] the user taught OCC
         history = data.get("history") or []       # [{role: 'user'|'occ', text}]
+        slang = bool(data.get("slang"))           # AAVE colloquialisms opt-in (Settings)
+        acronyms = data.get("acronyms") or []     # [{term, means}] the member's CodeZ shorthand
 
         cost = 0 if is_owner(request.user) else ai_cost(model_voice)
         # Check affordability up front so we don't call the model then fail to bill.
@@ -74,6 +108,17 @@ class OccChatView(APIView):
             return Response({"detail": "LLM backend unavailable."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         system = f"{VOICE_STYLE.get(model_voice, VOICE_STYLE['corey-gpt'])}\n\n{COURSES}"
+        # AAVE colloquialisms only apply to the Corey voice, and only when opted in.
+        if slang and model_voice == "corey-gpt":
+            system += f"\n\n{AAVE_STYLE}"
+        acro = ", ".join(
+            f"{a.get('term')}={a.get('means')}" for a in acronyms if a.get("term")
+        )
+        if acro:
+            system += (
+                "\n\nYou remember these shorthands the member uses and may use them "
+                f"naturally in this chat (never in formal documents): {acro}"
+            )
         taught = "\n".join(
             f"- ({k.get('course', 'general')}) {k.get('text', '')}"
             for k in knowledge if k.get("text")
