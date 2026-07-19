@@ -405,12 +405,30 @@ def attractiveness_median(user):
     return _median(scores)
 
 
+class OverallRating(models.Model):
+    """Overall (holistic) rating of a member's profile, 1-10, one per rater."""
+    rater = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="overall_given")
+    target = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="overall_received")
+    score = models.PositiveSmallIntegerField()  # 1-10
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("rater", "target")
+
+
+def overall_median(user):
+    """A member's overall profile rating median (1-10). None if unrated."""
+    return _median(OverallRating.objects.filter(target=user).values_list("score", flat=True))
+
+
 # ---- Cross-user Profile ----
 class Profile(models.Model):
     """A member's public, searchable profile. Denormalized filter fields
     (sign, regions, gender, sober, attracted_to) let search match on metrics;
     the JSON fields carry the full display data."""
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="mcz_profile")
+    avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)  # profile picture
     display_name = models.CharField(max_length=80, blank=True, default="")
     bio = models.CharField(max_length=500, blank=True, default="")
     location = models.CharField(max_length=120, blank=True, default="")
