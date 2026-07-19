@@ -10,6 +10,7 @@ from .models import (
     DEV_TAX,
     MB,
     TIER_CHOICES,
+    TIER_DEBUG,
     TIER_STATZ,
     RoyaltyEntry,
     SpecZPurchase,
@@ -24,6 +25,13 @@ from .serializers import TransactionSerializer, WalletSerializer
 
 User = get_user_model()
 VALID_TIERS = {t[0] for t in TIER_CHOICES}
+# The owner tier ("debug") is god-mode and must never be self-assignable by a
+# normal member — only the platform owner / staff.
+OWNER_ONLY_TIERS = {TIER_DEBUG}
+
+
+def is_owner(user):
+    return bool(user and (user.is_superuser or user.is_staff))
 
 
 class StatsView(APIView):
@@ -39,6 +47,7 @@ class StatsView(APIView):
                 "total_members": User.objects.count(),
                 "online_now": 1,  # last-seen presence tracking is a later addition
                 "online_members": [request.user.username],
+                "is_owner": is_owner(request.user),
                 "my_tier": m.tier,
                 "my_money": w.money,
                 "my_energy": w.energy,
@@ -100,6 +109,8 @@ class MembershipView(APIView):
         tier = str(request.data.get("tier", "")).lower()
         if tier not in VALID_TIERS:
             return Response({"detail": f"tier must be one of {sorted(VALID_TIERS)}"}, status=status.HTTP_400_BAD_REQUEST)
+        if tier in OWNER_ONLY_TIERS and not is_owner(request.user):
+            return Response({"detail": "Debug tier is owner-only."}, status=status.HTTP_403_FORBIDDEN)
         m = membership_for(request.user)
         m.tier = tier
         m.save(update_fields=["tier", "updated_at"])

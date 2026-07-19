@@ -3,7 +3,7 @@ Economy layer: membership tier, wallet (money/energy/spinaz), and a
 transaction ledger. The developer tax (platform's cut on every money
 transaction) is enforced here, server-side, so the client can't bypass it.
 
-Rates match the frontend: Free 5% · Premium 3% · StatZ 2%.
+Rates match the frontend: Free 10% · Premium 5% · StatZ 2%.
 """
 from django.conf import settings
 from django.db import models
@@ -11,10 +11,17 @@ from django.db import models
 TIER_FREE = "free"
 TIER_PREMIUM = "premium"
 TIER_STATZ = "statz"
-TIER_CHOICES = [(TIER_FREE, "Free"), (TIER_PREMIUM, "Premium"), (TIER_STATZ, "StatZ")]
+# Owner-only god-mode tier: unlimited limits, 0% tax. Set only for staff/owner.
+TIER_DEBUG = "debug"
+TIER_CHOICES = [
+    (TIER_FREE, "Free"),
+    (TIER_PREMIUM, "Premium"),
+    (TIER_STATZ, "StatZ"),
+    (TIER_DEBUG, "Debug"),
+]
 
 # Developer tax (platform cut) per tier, as a fraction of the transaction.
-DEV_TAX = {TIER_FREE: 0.10, TIER_PREMIUM: 0.05, TIER_STATZ: 0.02}
+DEV_TAX = {TIER_FREE: 0.10, TIER_PREMIUM: 0.05, TIER_STATZ: 0.02, TIER_DEBUG: 0.0}
 
 
 def split_cents(amount_cents, rate):
@@ -198,7 +205,10 @@ def wallet_for(user):
 
 
 def membership_for(user):
-    return Membership.objects.get_or_create(user=user)[0]
+    # Owner/staff default to StatZ on first touch (their editable god-mode is the
+    # separate "debug" tier they can switch into from MembershipZ).
+    default = TIER_STATZ if (user and (user.is_superuser or user.is_staff)) else TIER_FREE
+    return Membership.objects.get_or_create(user=user, defaults={"tier": default})[0]
 
 
 def credit_funds(user, amount_cents, note="Add funds"):
