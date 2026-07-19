@@ -59,5 +59,13 @@ AI_MODEL_COSTS = {
 }
 
 
+# Founding lifetime StatZ offer: first 50 members get lifetime StatZ at 50% off.
+FOUNDING_TIER = TIER_STATZ
+FOUNDING_LIMIT = 50
+LIFETIME_PRICE_CENTS = 30000          # $300 full lifetime StatZ
+FOUNDING_DISCOUNT = 0.50              # first 50 pay half
+FOUNDING_PRICE_CENTS = int(LIFETIME_PRICE_CENTS * (1 - FOUNDING_DISCOUNT))  # $150
+
+
 def ai_cost(model):
     return AI_MODEL_COSTS.get(model, AI_MODEL_COSTS["corey-gpt"])

@@ -43,6 +43,8 @@ class Membership(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     # Presence: touched on every stats poll; powers the header "online now" count.
     last_seen = models.DateTimeField(null=True, blank=True, db_index=True)
+    # Founding lifetime membership: tier never expires and never re-bills.
+    lifetime = models.BooleanField(default=False, db_index=True)
 
     @property
     def dev_tax_rate(self):
@@ -211,6 +213,40 @@ def membership_for(user):
     # separate "debug" tier they can switch into from MembershipZ).
     default = TIER_STATZ if (user and (user.is_superuser or user.is_staff)) else TIER_FREE
     return Membership.objects.get_or_create(user=user, defaults={"tier": default})[0]
+
+
+def founding_status():
+    """How many founding lifetime seats are claimed / remaining."""
+    from .catalog import FOUNDING_LIMIT, FOUNDING_PRICE_CENTS, LIFETIME_PRICE_CENTS, FOUNDING_TIER
+    claimed = Membership.objects.filter(lifetime=True).count()
+    return {
+        "claimed": claimed,
+        "limit": FOUNDING_LIMIT,
+        "remaining": max(0, FOUNDING_LIMIT - claimed),
+        "sold_out": claimed >= FOUNDING_LIMIT,
+        "tier": FOUNDING_TIER,
+        "price_cents": FOUNDING_PRICE_CENTS,
+        "full_price_cents": LIFETIME_PRICE_CENTS,
+    }
+
+
+def grant_lifetime(user):
+    """Grant the founding lifetime tier to `user`, race-safely capped at the
+    founding limit. Returns the Membership, or None if the offer is sold out.
+    Idempotent: a user who is already lifetime just keeps it."""
+    from django.db import transaction
+    from .catalog import FOUNDING_LIMIT, FOUNDING_TIER
+    with transaction.atomic():
+        m = Membership.objects.select_for_update().get_or_create(user=user)[0]
+        if m.lifetime:
+            return m
+        claimed = Membership.objects.select_for_update().filter(lifetime=True).count()
+        if claimed >= FOUNDING_LIMIT:
+            return None
+        m.lifetime = True
+        m.tier = FOUNDING_TIER
+        m.save(update_fields=["lifetime", "tier", "updated_at"])
+    return m
 
 
 def credit_funds(user, amount_cents, note="Add funds"):
