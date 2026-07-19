@@ -22,6 +22,7 @@ from .social import (
 )
 from .views import (
     AddFundsView,
+    AIChargeView,
     LimitsView,
     MembershipView,
     RoyaltiesView,
@@ -38,6 +39,7 @@ urlpatterns = [
     path("wallet/add/", AddFundsView.as_view(), name="economy-wallet-add"),
     path("membership/", MembershipView.as_view(), name="economy-membership"),
     path("limits/", LimitsView.as_view(), name="economy-limits"),
+    path("ai/charge/", AIChargeView.as_view(), name="economy-ai-charge"),
     path("specz/", SpecZView.as_view(), name="economy-specz"),
     path("specz/buy/", SpecZView.as_view(), name="economy-specz-buy"),
     path("royalties/", RoyaltiesView.as_view(), name="economy-royalties"),

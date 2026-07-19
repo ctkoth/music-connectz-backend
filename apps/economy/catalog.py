@@ -44,3 +44,17 @@ def cashout_rate(plan, dev_tax_rate):
     if plan == "quarterly":
         return CASHOUT_QUARTERLY
     return None
+
+
+# AI model per-message cost in cents — the *minimum* to cover the model run
+# (pass-through, no markup). Corey GPT is the cheapest house model; it's tuned on
+# member input + the built-in curricula so it costs the least to serve.
+AI_MODEL_COSTS = {
+    "corey-gpt": 1,
+    "standard": 4,
+    "technical": 4,
+}
+
+
+def ai_cost(model):
+    return AI_MODEL_COSTS.get(model, AI_MODEL_COSTS["corey-gpt"])

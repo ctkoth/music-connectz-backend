@@ -244,6 +244,26 @@ def pay_between(payer, payee, amount_cents, note=""):
     return dev, net
 
 
+def charge_ai_usage(user, cost_cents, note="AI usage"):
+    """Debit the wallet the *minimum* cost to cover an AI model run — pure
+    pass-through, no developer tax (the platform isn't marking AI up, just
+    covering the model). Returns the remaining money_cents, or None if the
+    member can't afford it (caller returns 402)."""
+    cost_cents = int(cost_cents or 0)
+    w = wallet_for(user)
+    if cost_cents <= 0:
+        return w.money_cents
+    if w.money_cents < cost_cents:
+        return None
+    w.money_cents -= cost_cents
+    w.save(update_fields=["money_cents", "updated_at"])
+    Transaction.objects.create(
+        user=user, kind=Transaction.KIND_SPEND, amount_cents=-cost_cents,
+        dev_tax_cents=0, note=note[:200],
+    )
+    return w.money_cents
+
+
 # ---- VenueZ ----
 class Venue(models.Model):
     MODE_COLLAB = "collaborative"
