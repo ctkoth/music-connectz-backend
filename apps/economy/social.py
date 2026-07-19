@@ -16,6 +16,7 @@ from .models import (
     AttractivenessRating,
     Face,
     FaceRating,
+    OverallRating,
     Profile,
     Reaction,
     SocialComment,
@@ -23,6 +24,7 @@ from .models import (
     Venue,
     VenueAttendance,
     attractiveness_median,
+    overall_median,
     face_median,
     membership_for,
     pay_between,
@@ -252,12 +254,20 @@ PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign
                   "attracted_to", "asexual", "traits", "personas", "links")
 
 
-def _profile_card(p):
+def _avatar_url(p, request):
+    try:
+        return request.build_absolute_uri(p.avatar.url) if p.avatar else None
+    except ValueError:
+        return None
+
+
+def _profile_card(p, request=None):
     """Compact card for search results."""
     m = getattr(p.user, "membership", None)
     return {
         "username": p.user.username,
         "display_name": p.display_name or p.user.username,
+        "avatar": _avatar_url(p, request) if request else None,
         "gender": p.gender,
         "sign": p.sign,
         "regions": p.regions,
@@ -265,6 +275,8 @@ def _profile_card(p):
         "sober": p.sober,
         "attracted_to": p.attracted_to,
         "median": attractiveness_median(p.user),
+        "attractiveness": attractiveness_median(p.user),
+        "overall": overall_median(p.user),
         "tier": m.tier if m else "free",
         "founding": bool(m and m.founding),
         "lifetime": bool(m and m.lifetime),
@@ -272,11 +284,14 @@ def _profile_card(p):
 
 
 def _profile_full(p, request):
-    card = _profile_card(p)
+    card = _profile_card(p, request)
     card.update({
         "bio": p.bio, "location": p.location, "birthday": p.birthday,
         "substances": p.substances, "asexual": p.asexual, "traits": p.traits,
         "personas": p.personas, "links": p.links, "mine": p.user_id == request.user.id,
+        "my_attractiveness": AttractivenessRating.objects.filter(rater=request.user, target=p.user).values_list("score", flat=True).first(),
+        "my_overall": OverallRating.objects.filter(rater=request.user, target=p.user).values_list("score", flat=True).first(),
+        "overall_count": OverallRating.objects.filter(target=p.user).count(),
     })
     return card
 
@@ -345,6 +360,55 @@ class ProfileView(APIView):
                 setattr(p, f, d[f])
         p.save()
         return Response(_profile_full(p, request))
+
+
+class ProfileAvatarView(APIView):
+    """Upload the current user's profile picture (multipart 'avatar')."""
+
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        f = request.FILES.get("avatar")
+        if not f:
+            return Response({"detail": "avatar file required"}, status=status.HTTP_400_BAD_REQUEST)
+        p = profile_for(request.user)
+        p.avatar = f
+        p.save(update_fields=["avatar", "updated_at"])
+        return Response(_profile_full(p, request))
+
+
+class ProfileRateView(APIView):
+    """Rate another member's profile picture: dimension = overall | attractiveness,
+    score 1-10. Upserts one rating per rater/target/dimension."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        username = str(request.data.get("target_username", "")).strip()
+        dimension = str(request.data.get("dimension", "overall")).strip().lower()
+        if dimension not in ("overall", "attractiveness"):
+            return Response({"detail": "dimension must be overall|attractiveness"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            score = int(request.data.get("score"))
+        except (TypeError, ValueError):
+            return Response({"detail": "score (1-10) required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not (1 <= score <= 10):
+            return Response({"detail": "score must be 1-10"}, status=status.HTTP_400_BAD_REQUEST)
+        target = User.objects.filter(username=username).first()
+        if not target:
+            return Response({"detail": "unknown user"}, status=status.HTTP_404_NOT_FOUND)
+        if target.id == request.user.id:
+            return Response({"detail": "can't rate yourself"}, status=status.HTTP_400_BAD_REQUEST)
+
+        model = OverallRating if dimension == "overall" else AttractivenessRating
+        model.objects.update_or_create(rater=request.user, target=target, defaults={"score": score})
+        return Response({
+            "target": target.username,
+            "dimension": dimension,
+            "overall": overall_median(target),
+            "attractiveness": attractiveness_median(target),
+        })
 
 
 class MemberProfileView(APIView):
