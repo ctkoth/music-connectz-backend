@@ -28,6 +28,8 @@ from .models import (
     face_median,
     membership_for,
     pay_between,
+    profile_age,
+    haversine_km,
     wallet_for,
 )
 from .serializers import WalletSerializer
@@ -277,6 +279,8 @@ def _profile_card(p, request=None):
         "median": attractiveness_median(p.user),
         "attractiveness": attractiveness_median(p.user),
         "overall": overall_median(p.user),
+        "age": profile_age(p),
+        "shares_location": bool(p.share_location and p.lat is not None and p.lng is not None),
         "tier": m.tier if m else "free",
         "founding": bool(m and m.founding),
         "lifetime": bool(m and m.lifetime),
@@ -411,6 +415,30 @@ class ProfileRateView(APIView):
         })
 
 
+class ProfileLocationView(APIView):
+    """Opt-in GPS location for in-person distance filtering.
+    POST {share: bool, lat, lng}. Turning share off clears the coordinates."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        p = profile_for(request.user)
+        share = bool(request.data.get("share", True))
+        p.share_location = share
+        if not share:
+            p.lat = p.lng = None
+        else:
+            try:
+                p.lat = float(request.data.get("lat"))
+                p.lng = float(request.data.get("lng"))
+            except (TypeError, ValueError):
+                return Response({"detail": "lat and lng required when sharing"}, status=status.HTTP_400_BAD_REQUEST)
+            if not (-90 <= p.lat <= 90 and -180 <= p.lng <= 180):
+                return Response({"detail": "lat/lng out of range"}, status=status.HTTP_400_BAD_REQUEST)
+        p.save(update_fields=["share_location", "lat", "lng", "updated_at"])
+        return Response({"share_location": p.share_location, "has_location": p.lat is not None})
+
+
 class MemberProfileView(APIView):
     """View any member's public profile by username."""
 
@@ -446,6 +474,21 @@ class MembersView(APIView):
         active_stances = {"use", "sometimes"}
         sober_only = request.query_params.get("sober") in ("1", "true", "True")
 
+        def num(key):
+            try:
+                return float(request.query_params.get(key))
+            except (TypeError, ValueError):
+                return None
+
+        # Range gates. When a min/max is set, members outside it (or with no
+        # value for that metric) are excluded — the range "gates exclusive".
+        age_min, age_max = num("age_min"), num("age_max")
+        attr_min, attr_max = num("attr_min"), num("attr_max")
+        max_km = num("max_km")  # distance range: within N km of the searcher
+
+        me = profile_for(request.user)
+        origin = (me.lat, me.lng) if (me.share_location and me.lat is not None) else (None, None)
+
         results = []
         qs = Profile.objects.exclude(user=request.user).select_related("user")[:500]
         for p in qs:
@@ -461,5 +504,26 @@ class MembersView(APIView):
                 subs = p.substances or {}
                 if any(subs.get(k) in active_stances for k in substances):
                     continue
-            results.append(_profile_card(p))
-        return Response({"members": results[:100]})
+            if age_min is not None or age_max is not None:
+                age = profile_age(p)
+                if age is None or (age_min is not None and age < age_min) or (age_max is not None and age > age_max):
+                    continue
+            if attr_min is not None or attr_max is not None:
+                a = attractiveness_median(p.user)
+                if a is None or (attr_min is not None and a < attr_min) or (attr_max is not None and a > attr_max):
+                    continue
+            dist = None
+            if origin[0] is not None and p.share_location and p.lat is not None:
+                dist = haversine_km(origin[0], origin[1], p.lat, p.lng)
+                if max_km is not None and (dist is None or dist > max_km):
+                    continue
+            elif max_km is not None:
+                # Distance filter requested but no shared location on one side → exclude.
+                continue
+            card = _profile_card(p, request)
+            card["distance_km"] = dist
+            results.append(card)
+        # Nearest first when a distance origin exists.
+        if origin[0] is not None:
+            results.sort(key=lambda c: (c.get("distance_km") is None, c.get("distance_km") or 0))
+        return Response({"members": results[:100], "origin_shared": origin[0] is not None})
