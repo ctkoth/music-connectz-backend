@@ -478,6 +478,76 @@ def haversine_km(lat1, lng1, lat2, lng2):
     return round(2 * r * asin(sqrt(a)), 1)
 
 
+# ---- DirectZ video works (ReelZ / EpisodeZ / MovieZ) ----
+class DirectZWork(models.Model):
+    """A collaborative video work. Contributors bring skills at a price; the
+    work is AI-rated on submit, then real user ratings take over as they land."""
+    FMT_CHOICES = [("reelz", "ReelZ"), ("episodez", "EpisodeZ"), ("moviez", "MovieZ")]
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="directz_works")
+    fmt = models.CharField(max_length=12, choices=FMT_CHOICES, default="reelz")
+    video_type = models.CharField(max_length=40, blank=True, default="")   # Music / Bio / Promotional Video
+    mood = models.CharField(max_length=32, blank=True, default="")
+    title = models.CharField(max_length=160)
+    description = models.TextField(blank=True, default="")
+    duration_sec = models.PositiveIntegerField(default=0)
+    contributors = models.JSONField(default=list, blank=True)  # [{name, tier, skills:[{name, price}]}]
+    ai_rating = models.FloatField(default=0)                    # 0-10 AI seed
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+
+class DirectZRating(models.Model):
+    rater = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="directz_ratings")
+    work = models.ForeignKey(DirectZWork, on_delete=models.CASCADE, related_name="ratings")
+    score = models.PositiveSmallIntegerField()  # 1-10
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("rater", "work")
+
+
+# Real user ratings take over once RATING_MIN_RATERS people have rated;
+# before that the AI seed stands.
+DIRECTZ_MIN_RATERS = 3
+
+
+def directz_ai_rating(work):
+    """A deterministic AI craft estimate (0-10) from how complete & staffed the
+    work is: contributor breadth, skills brought, description, and duration fit."""
+    contribs = work.get("contributors") if isinstance(work, dict) else work.contributors
+    desc = work.get("description") if isinstance(work, dict) else work.description
+    dur = work.get("duration_sec") if isinstance(work, dict) else work.duration_sec
+    fmt = work.get("fmt") if isinstance(work, dict) else work.fmt
+    contribs = contribs or []
+    n_people = len(contribs)
+    n_skills = sum(len(c.get("skills") or []) for c in contribs)
+    worth = sum((float(s.get("price") or 0) for c in contribs for s in (c.get("skills") or [])))
+    # Duration-fit: does the length match the format band?
+    bands = {"reelz": (30, 1800), "episodez": (1800, 3600), "moviez": (3600, 10800)}
+    lo, hi = bands.get(fmt, (0, 10 ** 9))
+    fit = 1.0 if (dur and lo <= dur <= hi) else 0.4
+    score = (
+        3.0
+        + min(n_people, 5) * 0.7        # collaboration breadth
+        + min(n_skills, 8) * 0.35       # skills brought
+        + min(len(desc or ""), 300) / 300 * 1.5  # described intent
+        + min(worth, 500) / 500 * 1.0   # investment
+    ) * fit
+    return round(max(1.0, min(10.0, score)), 1)
+
+
+def directz_display_rating(work):
+    """Real-user median once >=3 rate; otherwise the AI seed. Returns
+    {rating, source, ai_rating, user_median, count}."""
+    scores = list(work.ratings.values_list("score", flat=True))
+    user_median = _median(scores)
+    if len(scores) >= DIRECTZ_MIN_RATERS:
+        return {"rating": user_median, "source": "users", "ai_rating": round(work.ai_rating, 1), "user_median": user_median, "count": len(scores)}
+    return {"rating": round(work.ai_rating, 1), "source": "ai", "ai_rating": round(work.ai_rating, 1), "user_median": user_median, "count": len(scores)}
+
+
 # ---- Universal social layer (cross-user reactions + comments) ----
 class Reaction(models.Model):
     """One like (+1) or dislike (-1) per user per item. `item_id` is an opaque
