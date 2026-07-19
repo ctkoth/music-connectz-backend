@@ -117,7 +117,7 @@ class MembershipView(APIView):
 
     def get(self, request):
         m = membership_for(request.user)
-        return Response({"tier": m.tier, "dev_tax_rate": m.dev_tax_rate, "rates": DEV_TAX, "lifetime": m.lifetime})
+        return Response({"tier": m.tier, "dev_tax_rate": m.dev_tax_rate, "rates": DEV_TAX, "lifetime": m.lifetime, "founding": m.founding})
 
     def post(self, request):
         tier = str(request.data.get("tier", "")).lower()
