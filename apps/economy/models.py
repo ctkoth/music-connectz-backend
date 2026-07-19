@@ -444,11 +444,38 @@ class Profile(models.Model):
     traits = models.JSONField(default=list, blank=True)
     personas = models.JSONField(default=list, blank=True)
     links = models.JSONField(default=list, blank=True)  # [{label, url}] public links
+    # Location (opt-in) for in-person CollabZ / VenueZ distance filtering.
+    share_location = models.BooleanField(default=False)
+    lat = models.FloatField(null=True, blank=True)
+    lng = models.FloatField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
 
 def profile_for(user):
     return Profile.objects.get_or_create(user=user)[0]
+
+
+def profile_age(p):
+    """Age in years from a YYYY-MM-DD birthday, or None."""
+    import datetime
+    try:
+        y, m, d = (int(x) for x in (p.birthday or "").split("-"))
+        today = datetime.date.today()
+        return today.year - y - ((today.month, today.day) < (m, d))
+    except (ValueError, TypeError):
+        return None
+
+
+def haversine_km(lat1, lng1, lat2, lng2):
+    """Great-circle distance in km between two lat/lng points."""
+    from math import radians, sin, cos, asin, sqrt
+    if None in (lat1, lng1, lat2, lng2):
+        return None
+    r = 6371.0
+    dlat = radians(lat2 - lat1)
+    dlng = radians(lng2 - lng1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlng / 2) ** 2
+    return round(2 * r * asin(sqrt(a)), 1)
 
 
 # ---- Universal social layer (cross-user reactions + comments) ----
