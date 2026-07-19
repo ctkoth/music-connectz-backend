@@ -16,8 +16,8 @@ SPECZ_CATALOG = {
 # messages/posts/comments/AI prompts.
 TIER_LIMITS = {
     TIER_FREE: {"char_limit": 400, "upload_mb": 40, "storage_mb": 400},
-    TIER_PREMIUM: {"char_limit": 4000, "upload_mb": 400, "storage_mb": 5120},
-    TIER_STATZ: {"char_limit": 40000, "upload_mb": 4096, "storage_mb": 102400},
+    TIER_PREMIUM: {"char_limit": 1000, "upload_mb": 400, "storage_mb": 5120},
+    TIER_STATZ: {"char_limit": 5000, "upload_mb": 4096, "storage_mb": 102400},
     # Owner god-mode: effectively unlimited.
     TIER_DEBUG: {"char_limit": 1000000, "upload_mb": 1048576, "storage_mb": 10485760},
 }
