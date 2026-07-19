@@ -16,8 +16,8 @@ SPECZ_CATALOG = {
 # messages/posts/comments/AI prompts.
 TIER_LIMITS = {
     TIER_FREE: {"char_limit": 400, "upload_mb": 40, "storage_mb": 400},
-    TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 400, "storage_mb": 5120},
-    TIER_STATZ: {"char_limit": 5000, "upload_mb": 4096, "storage_mb": 102400},
+    TIER_PREMIUM: {"char_limit": 4000, "upload_mb": 400, "storage_mb": 5120},
+    TIER_STATZ: {"char_limit": 40000, "upload_mb": 4096, "storage_mb": 102400},
     # Owner god-mode: effectively unlimited.
     TIER_DEBUG: {"char_limit": 1000000, "upload_mb": 1048576, "storage_mb": 10485760},
 }
@@ -27,18 +27,20 @@ def limits_for(tier):
     return TIER_LIMITS.get(tier, TIER_LIMITS[TIER_FREE])
 
 
-# Royalty cashout tax by plan. Weekly uses the account's developer-tax rate
-# (Free 5% / Premium 3% / StatZ 2%); the others are flat.
+# Royalty cashout tax by plan. Weekly is its own per-tier schedule
+# (Free 10% / Premium 5% / StatZ 2%) — deliberately NOT the dev-tax rate,
+# which differs for StatZ (3%). The others are flat.
 CASHOUT_INSTANT = 0.15
 CASHOUT_MONTHLY = 0.01
 CASHOUT_QUARTERLY = 0.0
+CASHOUT_WEEKLY = {TIER_FREE: 0.10, TIER_PREMIUM: 0.05, TIER_STATZ: 0.02, TIER_DEBUG: 0.0}
 
 
-def cashout_rate(plan, dev_tax_rate):
+def cashout_rate(plan, tier):
     if plan == "instant":
         return CASHOUT_INSTANT
     if plan == "weekly":
-        return dev_tax_rate
+        return CASHOUT_WEEKLY.get(tier, CASHOUT_WEEKLY[TIER_FREE])
     if plan == "monthly":
         return CASHOUT_MONTHLY
     if plan == "quarterly":
