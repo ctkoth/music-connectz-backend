@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import SPECZ_CATALOG, cashout_rate, limits_for
+from .catalog import AI_MODEL_COSTS, SPECZ_CATALOG, ai_cost, cashout_rate, limits_for
 from .models import (
     DEV_TAX,
     MB,
@@ -16,6 +16,7 @@ from .models import (
     SpecZPurchase,
     Transaction,
     Upload,
+    charge_ai_usage,
     membership_for,
     split_cents,
     storage_used_bytes,
@@ -115,6 +116,33 @@ class MembershipView(APIView):
         m.tier = tier
         m.save(update_fields=["tier", "updated_at"])
         return Response({"tier": m.tier, "dev_tax_rate": m.dev_tax_rate})
+
+
+class AIChargeView(APIView):
+    """Charge the minimum cost to cover an AI model run (OCC / Corey GPT etc.).
+
+    Pure pass-through, no developer tax. Owner/debug runs are free. Returns the
+    new balance, or 402 when the member can't afford the model.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # Advertise the price list so the client can show costs.
+        return Response({"costs": AI_MODEL_COSTS})
+
+    def post(self, request):
+        model = str(request.data.get("model", "corey-gpt")).lower()
+        note = str(request.data.get("note", "OCC AI usage"))[:200]
+        cost = 0 if is_owner(request.user) else ai_cost(model)
+        remaining = charge_ai_usage(request.user, cost, note=note)
+        if remaining is None:
+            w = wallet_for(request.user)
+            return Response(
+                {"detail": "Not enough balance for this model.", "cost_cents": cost, "money_cents": w.money_cents},
+                status=status.HTTP_402_PAYMENT_REQUIRED,
+            )
+        return Response({"model": model, "cost_cents": cost, "money_cents": remaining, "money": round(remaining / 100, 2)})
 
 
 class LimitsView(APIView):
