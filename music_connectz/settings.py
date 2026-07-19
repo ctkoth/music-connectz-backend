@@ -209,6 +209,14 @@ APPLE_OAUTH_CLIENT_ID = os.environ.get("APPLE_OAUTH_CLIENT_ID", "")
 # the button. Where the frontend lives, for building return URLs.
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://musicconnectz.net").rstrip("/")
 
+# Platform owner(s) by email — these accounts are auto-promoted to
+# staff/superuser + StatZ on first sign-in. Comma-separated; override via env.
+OWNER_EMAILS = [
+    e.strip().lower()
+    for e in os.environ.get("OWNER_EMAILS", "ctkoth@gmail.com").split(",")
+    if e.strip()
+]
+
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")

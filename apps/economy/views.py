@@ -39,12 +39,32 @@ def is_owner(user):
     return bool(user and (user.is_superuser or user.is_staff))
 
 
+def ensure_owner(user):
+    """Bootstrap the platform owner by email (settings.OWNER_EMAILS). On first
+    detection we promote the account to staff+superuser and, if it's still on
+    the Free default, set StatZ — then it's freely modifiable afterward."""
+    from django.conf import settings
+    from .models import TIER_FREE
+    emails = getattr(settings, "OWNER_EMAILS", []) or []
+    if not user or not user.email or user.email.lower() not in emails:
+        return
+    if not (user.is_staff and user.is_superuser):
+        user.is_staff = True
+        user.is_superuser = True
+        user.save(update_fields=["is_staff", "is_superuser"])
+        m = membership_for(user)
+        if m.tier == TIER_FREE:  # first-time bootstrap; owner can change later
+            m.tier = TIER_STATZ
+            m.save(update_fields=["tier", "updated_at"])
+
+
 class StatsView(APIView):
     """Powers the frontend CommunityBar + tier gating: /api/auth/stats/."""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        ensure_owner(request.user)  # promote the configured owner account
         w = wallet_for(request.user)
         m = membership_for(request.user)
         # Presence: mark this member seen now, then count everyone seen recently.
