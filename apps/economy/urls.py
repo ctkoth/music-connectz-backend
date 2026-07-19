@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .merch import MerchBuyView, MerchDetailView, MerchView
+from .occ import OccChatView
 from .payments import (
     CheckoutConfigView,
     PaypalCaptureView,
@@ -40,6 +41,7 @@ urlpatterns = [
     path("membership/", MembershipView.as_view(), name="economy-membership"),
     path("limits/", LimitsView.as_view(), name="economy-limits"),
     path("ai/charge/", AIChargeView.as_view(), name="economy-ai-charge"),
+    path("ai/occ/", OccChatView.as_view(), name="economy-ai-occ"),
     path("specz/", SpecZView.as_view(), name="economy-specz"),
     path("specz/buy/", SpecZView.as_view(), name="economy-specz-buy"),
     path("royalties/", RoyaltiesView.as_view(), name="economy-royalties"),
