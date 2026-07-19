@@ -5,6 +5,7 @@ from .merch import MerchBuyView, MerchDetailView, MerchView
 from .occ import OccChatView
 from .payments import (
     CheckoutConfigView,
+    MembershipRefundView,
     FoundingCheckoutView,
     FoundingClaimView,
     FoundingView,
@@ -48,6 +49,7 @@ urlpatterns = [
     path("wallet/", WalletView.as_view(), name="economy-wallet"),
     path("wallet/add/", AddFundsView.as_view(), name="economy-wallet-add"),
     path("membership/", MembershipView.as_view(), name="economy-membership"),
+    path("membership/refund/", MembershipRefundView.as_view(), name="economy-membership-refund"),
     path("limits/", LimitsView.as_view(), name="economy-limits"),
     path("ai/charge/", AIChargeView.as_view(), name="economy-ai-charge"),
     path("ai/occ/", OccChatView.as_view(), name="economy-ai-occ"),

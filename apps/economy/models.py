@@ -50,6 +50,10 @@ class Membership(models.Model):
     # Stripe customer id for founding StatZ subscriptions (year/month), so a
     # cancellation webhook can find and downgrade the right member.
     stripe_customer_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    # Last paid purchase — powers the 10-day downgrade-for-refund window.
+    last_paid_at = models.DateTimeField(null=True, blank=True)
+    last_payment_ref = models.CharField(max_length=64, blank=True, default="")   # PaymentIntent or Subscription id
+    last_payment_kind = models.CharField(max_length=16, blank=True, default="")  # lifetime | year | month
 
     @property
     def dev_tax_rate(self):
@@ -239,6 +243,22 @@ def founding_status():
         "year_cents": FOUNDING_YEAR_CENTS,
         "month_cents": FOUNDING_MONTH_CENTS,
     }
+
+
+# Members may downgrade for a refund within this many days of a paid purchase.
+REFUND_WINDOW_DAYS = 10
+
+
+def refund_window(m):
+    """Refund eligibility for a membership. Returns {eligible, days_left, kind}."""
+    from django.utils import timezone
+    from datetime import timedelta
+    if not m.last_paid_at or not m.last_payment_kind:
+        return {"eligible": False, "days_left": 0, "kind": ""}
+    deadline = m.last_paid_at + timedelta(days=REFUND_WINDOW_DAYS)
+    now = timezone.now()
+    left = (deadline - now).days if now <= deadline else 0
+    return {"eligible": now <= deadline, "days_left": max(0, left), "kind": m.last_payment_kind}
 
 
 def grant_lifetime(user):
