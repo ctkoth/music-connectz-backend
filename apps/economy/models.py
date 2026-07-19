@@ -389,7 +389,7 @@ def merch_path(instance, filename):
 
 class MerchItem(models.Model):
     # Legal goods only — apparel, art, audio, digital. No substances/paraphernalia.
-    CATEGORIES = ["apparel", "art", "beats", "samples", "accessories", "digital"]
+    CATEGORIES = ["apparel", "art", "beats", "samples", "accessories", "digital", "routines"]
     seller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="merch_items")
     title = models.CharField(max_length=120)
     description = models.CharField(max_length=500, blank=True, default="")
