@@ -30,6 +30,10 @@ from .models import (
     pay_between,
     profile_age,
     haversine_km,
+    Follow,
+    follow_counts,
+    relationship,
+    energy_rate_per_hour,
     wallet_for,
 )
 from .serializers import WalletSerializer
@@ -253,7 +257,8 @@ class FaceRateView(APIView):
 # ---- Cross-user profiles ----
 PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign",
                   "nationalities", "regions", "substances", "sober",
-                  "attracted_to", "asexual", "traits", "personas", "links")
+                  "attracted_to", "asexual", "traits", "personas", "links",
+                  "external_followers")
 
 
 def _avatar_url(p, request):
@@ -284,6 +289,7 @@ def _profile_card(p, request=None):
         "tier": m.tier if m else "free",
         "founding": bool(m and m.founding),
         "lifetime": bool(m and m.lifetime),
+        **follow_counts(p.user),
     }
 
 
@@ -296,6 +302,8 @@ def _profile_full(p, request):
         "my_attractiveness": AttractivenessRating.objects.filter(rater=request.user, target=p.user).values_list("score", flat=True).first(),
         "my_overall": OverallRating.objects.filter(rater=request.user, target=p.user).values_list("score", flat=True).first(),
         "overall_count": OverallRating.objects.filter(target=p.user).count(),
+        "relationship": relationship(request.user, p.user),
+        "energy_per_hour": energy_rate_per_hour(p.user) if p.user_id == request.user.id else None,
     })
     return card
 
@@ -413,6 +421,34 @@ class ProfileRateView(APIView):
             "overall": overall_median(target),
             "attractiveness": attractiveness_median(target),
         })
+
+
+class FollowView(APIView):
+    """POST {username, action: follow|unfollow} → updated counts + relationship.
+    GET ?username= → that user's counts + your relationship to them."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        username = (request.query_params.get("username") or "").strip()
+        target = User.objects.filter(username=username).first()
+        if not target:
+            return Response({"detail": "unknown user"}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"username": target.username, **follow_counts(target), "relationship": relationship(request.user, target)})
+
+    def post(self, request):
+        username = str((request.data or {}).get("username", "")).strip()
+        action = str((request.data or {}).get("action", "follow")).lower()
+        target = User.objects.filter(username=username).first()
+        if not target:
+            return Response({"detail": "unknown user"}, status=status.HTTP_404_NOT_FOUND)
+        if target.id == request.user.id:
+            return Response({"detail": "can't follow yourself"}, status=status.HTTP_400_BAD_REQUEST)
+        if action == "unfollow":
+            Follow.objects.filter(follower=request.user, following=target).delete()
+        else:
+            Follow.objects.get_or_create(follower=request.user, following=target)
+        return Response({"username": target.username, **follow_counts(target), "relationship": relationship(request.user, target)})
 
 
 class ProfileLocationView(APIView):
