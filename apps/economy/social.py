@@ -608,7 +608,7 @@ class MembersView(APIView):
         # value for that metric) are excluded — the range "gates exclusive".
         age_min, age_max = num("age_min"), num("age_max")
         attr_min, attr_max = num("attr_min"), num("attr_max")
-        exp_min = num("exp_min")  # minimum years of skill experience
+        exp_min, exp_max = num("exp_min"), num("exp_max")  # years-of-experience range
         max_km = num("max_km")  # distance range: within N km of the searcher
 
         me = profile_for(request.user)
@@ -637,9 +637,9 @@ class MembersView(APIView):
                 a = attractiveness_median(p.user)
                 if a is None or (attr_min is not None and a < attr_min) or (attr_max is not None and a > attr_max):
                     continue
-            if exp_min is not None:
+            if exp_min is not None or exp_max is not None:
                 exp = profile_max_experience(p)
-                if exp is None or exp < exp_min:
+                if exp is None or (exp_min is not None and exp < exp_min) or (exp_max is not None and exp > exp_max):
                     continue
             dist = None
             if origin[0] is not None and p.share_location and p.lat is not None:
