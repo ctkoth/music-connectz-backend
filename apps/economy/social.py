@@ -373,6 +373,23 @@ class SocialView(APIView):
                     self._notify_target(item, "like", f"@{request.user.username} liked your post 👍", request.user)
         elif action == "comment":
             body = str((request.data or {}).get("body", "")).strip()[:500]
+            comment_id = (request.data or {}).get("comment_id")
+            if comment_id is not None:
+                # Edit your own comment within the tier's edit window.
+                from datetime import timedelta
+                from django.utils import timezone
+                from .catalog import edit_window_for
+                c = SocialComment.objects.filter(pk=comment_id, user=request.user).first()
+                if not c:
+                    return Response({"detail": "comment not found"}, status=status.HTTP_404_NOT_FOUND)
+                window = edit_window_for(membership_for(request.user).tier)
+                if timezone.now() > c.created_at + timedelta(seconds=window):
+                    return Response({"detail": "edit_window_passed", "window_seconds": window}, status=status.HTTP_403_FORBIDDEN)
+                if not body:
+                    return Response({"detail": "body required"}, status=status.HTTP_400_BAD_REQUEST)
+                c.body = body
+                c.save(update_fields=["body"])
+                return Response(self._payload(item, request))
             if not body:
                 return Response({"detail": "body required"}, status=status.HTTP_400_BAD_REQUEST)
             SocialComment.objects.create(user=request.user, item_id=item, body=body)
