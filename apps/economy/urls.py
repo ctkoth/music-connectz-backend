@@ -86,6 +86,7 @@ urlpatterns = [
     path("social/", SocialView.as_view(), name="economy-social"),
     path("social/react/", SocialView.as_view(), {"action": "react"}, name="economy-social-react"),
     path("social/comment/", SocialView.as_view(), {"action": "comment"}, name="economy-social-comment"),
+    path("social/rate/", SocialView.as_view(), {"action": "rate"}, name="economy-social-rate"),
     path("members/", MembersView.as_view(), name="economy-members"),
     path("members/<str:username>/", MemberProfileView.as_view(), name="economy-member"),
     path("postz/", PostsView.as_view(), name="economy-postz"),
