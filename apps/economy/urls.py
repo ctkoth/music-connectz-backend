@@ -5,6 +5,7 @@ from .postz import PostsView, PostJoinView
 from .notifications import NotificationsView
 from .moderation import ReportView, BlockView
 from .account import AccountExportView, AccountDeleteView
+from .messages_view import MessagesView
 from .merch import MerchBuyView, MerchDetailView, MerchView
 from .occ import OccChatView
 from .payments import (
@@ -87,6 +88,7 @@ urlpatterns = [
     path("profile/location/", ProfileLocationView.as_view(), name="economy-profile-location"),
     path("follow/", FollowView.as_view(), name="economy-follow"),
     path("notifications/", NotificationsView.as_view(), name="economy-notifications"),
+    path("messages/", MessagesView.as_view(), name="economy-messages"),
     path("report/", ReportView.as_view(), name="economy-report"),
     path("block/", BlockView.as_view(), name="economy-block"),
     path("account/export/", AccountExportView.as_view(), name="economy-account-export"),
