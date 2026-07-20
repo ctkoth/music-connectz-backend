@@ -183,6 +183,26 @@ class PaymentIntent(models.Model):
         return f"{self.provider} {self.amount_cents}c {self.status} <{self.user}>"
 
 
+class AutoTopUp(models.Model):
+    """A Stripe subscription that auto-funds the wallet on a schedule. Stripe owns
+    the billing + retries; each paid invoice credits money + tier Energy via the
+    webhook (idempotent per invoice id through PaymentIntent.provider_ref)."""
+    INTERVAL_CHOICES = [("week", "Weekly"), ("month", "Monthly"), ("year", "Annual")]
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="auto_topups")
+    stripe_subscription_id = models.CharField(max_length=255, unique=True)
+    stripe_customer_id = models.CharField(max_length=255, blank=True, default="")
+    amount_cents = models.PositiveIntegerField()
+    interval = models.CharField(max_length=8, choices=INTERVAL_CHOICES, default="month")
+    active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-active", "-created_at"]
+
+    def __str__(self):
+        return f"AutoTopUp {self.amount_cents}c/{self.interval} {'on' if self.active else 'off'} <{self.user}>"
+
+
 def upload_path(instance, filename):
     """Namespace uploaded files per user so quotas and cleanup stay isolated."""
     return f"uploads/{instance.user_id}/{filename}"

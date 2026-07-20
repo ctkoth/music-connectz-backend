@@ -18,7 +18,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
-    PaymentIntent, credit_funds, grant_lifetime, founding_status, membership_for,
+    AutoTopUp, PaymentIntent, Transaction, credit_funds, energy_for_topup,
+    grant_lifetime, founding_status, membership_for,
     refund_window, REFUND_WINDOW_DAYS,
 )
 from .serializers import WalletSerializer
@@ -64,6 +65,43 @@ def _complete_intent(intent):
         pi.completed_at = timezone.now()
         pi.save(update_fields=["dev_tax_cents", "net_cents", "status", "completed_at"])
     return pi
+
+
+def _credit_autotopup_invoice(invoice):
+    """Credit money + tier Energy for one paid auto-top-up invoice, exactly once.
+    Idempotent per invoice id via the unique PaymentIntent.provider_ref, and both
+    the money and energy grant happen inside the same status-guarded lock so a
+    replayed webhook can never double-credit either."""
+    sub_id = invoice.get("subscription")
+    inv_id = invoice.get("id")
+    if not sub_id or not inv_id:
+        return
+    ato = AutoTopUp.objects.filter(stripe_subscription_id=sub_id).first()
+    if not ato:
+        return
+    intent, _created = PaymentIntent.objects.get_or_create(
+        provider_ref=inv_id,
+        defaults={"user": ato.user, "provider": PaymentIntent.PROVIDER_STRIPE, "amount_cents": ato.amount_cents},
+    )
+    with transaction.atomic():
+        pi = PaymentIntent.objects.select_for_update().get(pk=intent.pk)
+        if pi.status == PaymentIntent.STATUS_COMPLETED:
+            return  # already credited — idempotent
+        dev, net = credit_funds(pi.user, pi.amount_cents, note="Auto top-up (Stripe)")
+        pi.dev_tax_cents = dev
+        pi.net_cents = net
+        pi.status = PaymentIntent.STATUS_COMPLETED
+        pi.completed_at = timezone.now()
+        pi.save(update_fields=["dev_tax_cents", "net_cents", "status", "completed_at"])
+        energy = energy_for_topup(pi.user, pi.amount_cents)
+        if energy:
+            w = wallet_for(pi.user)
+            w.energy = (w.energy or 0) + energy
+            w.save(update_fields=["energy", "updated_at"])
+            Transaction.objects.create(user=pi.user, kind=Transaction.KIND_REWARD, amount_cents=0, dev_tax_cents=0, note=f"Auto top-up energy +{energy}⚡")
+    if not ato.active:
+        ato.active = True
+        ato.save(update_fields=["active"])
 
 
 # ---------------------------------------------------------------- config
@@ -266,7 +304,23 @@ class StripeWebhookView(APIView):
             kind = meta.get("kind")
             uid = meta.get("user_id") or obj.get("client_reference_id")
             user = get_user_model().objects.filter(pk=uid).first() if uid else None
-            if kind == "lifetime" and user:
+            if kind == "autotopup" and user:
+                # Saved-card recurring top-up set up — record the subscription so
+                # each future invoice credits the wallet. First invoice credits
+                # separately via invoice.payment_succeeded.
+                sub = obj.get("subscription")
+                if sub:
+                    AutoTopUp.objects.update_or_create(
+                        stripe_subscription_id=sub,
+                        defaults={
+                            "user": user,
+                            "stripe_customer_id": obj.get("customer") or "",
+                            "amount_cents": int(meta.get("amount_cents") or 0),
+                            "interval": meta.get("interval") or "month",
+                            "active": True,
+                        },
+                    )
+            elif kind == "lifetime" and user:
                 grant_lifetime(user)  # idempotent
                 # Record the purchase for the 10-day refund window.
                 m = membership_for(user)
@@ -293,9 +347,20 @@ class StripeWebhookView(APIView):
                 ).first()
                 if intent:
                     _complete_intent(intent)
+        elif etype in ("invoice.payment_succeeded", "invoice.paid"):
+            # A recurring auto-top-up invoice was paid — credit money + tier energy.
+            _credit_autotopup_invoice(event["data"]["object"] or {})
         elif etype == "customer.subscription.deleted":
-            # Founding StatZ subscription ended — downgrade to Free (unless lifetime).
-            _downgrade_by_customer((event["data"]["object"] or {}).get("customer"))
+            sub_obj = event["data"]["object"] or {}
+            ato = AutoTopUp.objects.filter(stripe_subscription_id=sub_obj.get("id")).first()
+            if ato:
+                # Auto-top-up cancelled/ended — stop it, never touch the tier.
+                if ato.active:
+                    ato.active = False
+                    ato.save(update_fields=["active"])
+            else:
+                # Founding StatZ subscription ended — downgrade to Free (unless lifetime).
+                _downgrade_by_customer(sub_obj.get("customer"))
         elif etype == "invoice.payment_failed":
             # Renewal failed. If Stripe has no further retry scheduled
             # (next_payment_attempt is null), the sub is effectively dead now —
