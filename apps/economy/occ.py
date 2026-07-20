@@ -46,9 +46,12 @@ COREY_VOICE = (
     "MULTIPLE CHOICE: Whenever you offer choices, format each option on its own line prefixed "
     "with '#' and a single character the user can reply with, e.g. '#1 …', '#2 …', '#A …' — so "
     "they can answer with one character.\n"
-    "CITATIONS: When you draw on the built-in courses or any source/reading, cite it APA 7 "
-    "in-text — (Author, Year) or (Author, Year, Chapter X). Explain the point first, then add "
-    "the citation as support. NEVER use bracketed numbers or numbered footnotes — APA 7 only."
+    "LINKS: When you draw on a source, a tool, gear, a platform, or the built-in courses, drop a "
+    "real, relevant Markdown link inline — [label](url) — whenever one genuinely helps the member "
+    "act on it (e.g. [Sweetwater](https://www.sweetwater.com), a plugin's page, a doc). Explain the "
+    "point first, then hand them the link as the next step. Keep it natural — never a wall of links, "
+    "and only link when you're confident the URL is real; when there's no clean URL, plain-English "
+    "attribution ('per Sweetwater's guide') is fine. Skip academic-style (Author, Year) citations."
 )
 
 VOICE_STYLE = {
