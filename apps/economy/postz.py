@@ -86,6 +86,8 @@ def _post_dict(p, request, up=0, down=0):
         "links": p.links,
         "media_type": p.media_type,
         "media_url": p.media_url,
+        "is_album": p.is_album,
+        "items": p.items or [],
         "score": p.score or {},
         "visibility": p.visibility,
         "skill_cost_cents": p.skill_cost_cents,
@@ -154,9 +156,23 @@ class PostsView(APIView):
         media_url = str(d.get("media_url", "")).strip()[:500]
         media_type = str(d.get("media_type", "")).strip()[:24]
         score = d.get("score") if isinstance(d.get("score"), dict) else {}
+        # Album: a list of media items [{url, type, title, lyrics}]. Cap the count
+        # and sanitize each entry so the payload can't balloon.
+        raw_items = d.get("items") if isinstance(d.get("items"), list) else []
+        items = []
+        for it in raw_items[:50]:
+            if not isinstance(it, dict):
+                continue
+            items.append({
+                "url": str(it.get("url", ""))[:500],
+                "type": str(it.get("type", ""))[:24],
+                "title": str(it.get("title", ""))[:160],
+                "lyrics": str(it.get("lyrics", ""))[:8000],
+            })
+        is_album = bool(d.get("is_album")) or len(items) > 1
         # A scored/recorded take (score payload or media) counts against the tier's
         # daily submission cap (Free 5 · Premium 15 · StatZ 50).
-        is_submission = bool(score) or bool(media_url)
+        is_submission = bool(score) or bool(media_url) or bool(items)
         if is_submission:
             cap = submission_cap_for(request.user)
             used = submissions_used_today(request.user)
@@ -176,6 +192,7 @@ class PostsView(APIView):
             author=request.user, title=title,
             description=str(d.get("description", ""))[:4000],
             links=d.get("links") or [], media_type=media_type, media_url=media_url,
+            is_album=is_album, items=items,
             score=score, visibility=vis, skill_cost_cents=cost,
         )
         if is_submission:
