@@ -626,6 +626,40 @@ def record_submission(user):
     return row.count
 
 
+# ---- Member link clicks (tally + rewarded, safety-scanned) ----
+LINK_CLICK_REWARD_ENERGY = 5
+LINK_CLICK_MIN_ACTIVE_SECONDS = 30      # genuine visit before the reward
+LINK_CLICK_REWARD_DAILY_CAP = 20        # per clicker, per day
+
+
+class LinkCounter(models.Model):
+    """Running click tally for a member link (keyed by owner + URL)."""
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="link_counters", null=True, blank=True)
+    url = models.CharField(max_length=600)
+    clicks = models.PositiveIntegerField(default=0)
+    safe = models.BooleanField(default=True)          # Safe Browsing verdict (best-effort)
+    scanned = models.BooleanField(default=False)      # whether we've checked it
+    threat = models.CharField(max_length=60, blank=True, default="")
+
+    class Meta:
+        unique_together = ("owner", "url")
+
+
+class LinkClick(models.Model):
+    """A click on a member's link. One +5⚡ reward per clicker+link per day, for
+    clicking someone else's link, gated by a genuine dwell."""
+    counter = models.ForeignKey(LinkCounter, on_delete=models.CASCADE, related_name="click_events")
+    clicker = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="link_clicks")
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    active_seconds = models.PositiveIntegerField(default=0)
+    rewarded = models.BooleanField(default=False)
+    day = models.DateField()
+    clicked_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("counter", "clicker", "day")
+
+
 def award_spinaz(user, amount, note=""):
     """Credit SpinAZ to a user's wallet (best-effort, idempotent per caller)."""
     w = wallet_for(user)
