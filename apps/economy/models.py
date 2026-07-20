@@ -281,6 +281,17 @@ def grant_lifetime(user):
     return m
 
 
+# Topping up your wallet also grants Energy = gross cents × your tier multiplier
+# (so $1 = 100¢ = 100⚡ on Free). Premium doubles it, StatZ quadruples it.
+ENERGY_TOPUP_MULT = {TIER_FREE: 1, TIER_PREMIUM: 2, TIER_STATZ: 4, TIER_DEBUG: 4}
+
+
+def energy_for_topup(user, amount_cents):
+    """Energy granted for a wallet top-up: gross cents × tier multiplier."""
+    tier = membership_for(user).tier
+    return int(amount_cents or 0) * ENERGY_TOPUP_MULT.get(tier, 1)
+
+
 def credit_funds(user, amount_cents, note="Add funds"):
     """Credit a gross funding amount to a user's wallet, applying the developer
     tax server-side. Shared by manual add-funds and card/PayPal checkout so the

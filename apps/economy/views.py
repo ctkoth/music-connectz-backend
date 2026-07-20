@@ -21,6 +21,8 @@ from .models import (
     Transaction,
     Upload,
     charge_ai_usage,
+    energy_for_topup,
+    ENERGY_TOPUP_MULT,
     membership_for,
     split_cents,
     storage_used_bytes,
@@ -125,8 +127,10 @@ class AddFundsView(APIView):
         m = membership_for(request.user)
         w = wallet_for(request.user)
         dev, net = split_cents(amount_cents, m.dev_tax_rate)
+        energy_granted = energy_for_topup(request.user, amount_cents)
         w.money_cents += net
-        w.save(update_fields=["money_cents", "updated_at"])
+        w.energy = (w.energy or 0) + energy_granted
+        w.save(update_fields=["money_cents", "energy", "updated_at"])
         Transaction.objects.create(
             user=request.user, kind=Transaction.KIND_ADD, amount_cents=net,
             dev_tax_cents=dev, note=request.data.get("note", "Add funds")[:200],
@@ -134,7 +138,10 @@ class AddFundsView(APIView):
         return Response(
             {
                 "wallet": WalletSerializer(w).data,
-                "breakdown": {"gross_cents": amount_cents, "dev_tax_cents": dev, "net_cents": net, "rate": m.dev_tax_rate},
+                "breakdown": {
+                    "gross_cents": amount_cents, "dev_tax_cents": dev, "net_cents": net, "rate": m.dev_tax_rate,
+                    "energy_granted": energy_granted, "energy_mult": ENERGY_TOPUP_MULT.get(m.tier, 1),
+                },
             }
         )
 
