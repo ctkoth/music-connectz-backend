@@ -501,6 +501,58 @@ def haversine_km(lat1, lng1, lat2, lng2):
     return round(2 * r * asin(sqrt(a)), 1)
 
 
+# ---- PostZ (cross-user posts with visibility + restricted-join rewards) ----
+RESTRICTED_JOIN_REWARD_SPINAZ = 300
+
+
+class Post(models.Model):
+    """A member post. Visibility gates who sees it; restricted posts reward the
+    author 300 SpinAZ per valid join from a distinct non-author visitor."""
+    VIS_CHOICES = [("public", "Public"), ("restricted", "Restricted"), ("private", "Private")]
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="posts")
+    title = models.CharField(max_length=160)
+    description = models.TextField(blank=True, default="")
+    links = models.JSONField(default=list, blank=True)
+    media_type = models.CharField(max_length=24, blank=True, default="")
+    visibility = models.CharField(max_length=12, choices=VIS_CHOICES, default="public")
+    skill_cost_cents = models.PositiveIntegerField(default=0)  # combined skill price of what's used
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+
+class PostJoin(models.Model):
+    """A visit to a restricted post. One reward per distinct IP (non-author)."""
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="joins")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="post_joins")
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    active_seconds = models.PositiveIntegerField(default=0)
+    rewarded = models.BooleanField(default=False)
+    joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("post", "ip")
+
+
+def award_spinaz(user, amount, note=""):
+    """Credit SpinAZ to a user's wallet (best-effort, idempotent per caller)."""
+    w = wallet_for(user)
+    w.spinaz = (w.spinaz or 0) + int(amount)
+    w.save(update_fields=["spinaz", "updated_at"])
+    return w.spinaz
+
+
+def can_view_post(post, user):
+    if post.visibility == "public":
+        return True
+    if post.author_id == getattr(user, "id", None):
+        return True
+    if post.visibility == "restricted":
+        return bool(user and user.is_authenticated)  # members only
+    return False  # private
+
+
 # ---- Social graph: follow / friends / fans ----
 class Follow(models.Model):
     """follower → following. Mutual follows are friends; a one-way follower is
