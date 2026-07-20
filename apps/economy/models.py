@@ -642,29 +642,81 @@ class Follow(models.Model):
         unique_together = ("follower", "following")
 
 
+def social_sources(user):
+    """Every follower source that counts toward reach: the Music ConnectZ
+    follower count (always verified — it's our own number) plus each connected
+    external account from Profile.links that has been VERIFIED (real count +
+    proven to belong to this user). Unverified links are returned too but
+    flagged so callers can exclude them from the median (anti-cheat: nobody
+    games reach by typing a stranger's big follower number).
+
+    Each source: {label, followers, verified}."""
+    mcz_followers = len(set(
+        Follow.objects.filter(following=user).values_list("follower_id", flat=True)
+    ))
+    sources = [{"label": "Music ConnectZ", "followers": mcz_followers, "verified": True}]
+    p = getattr(user, "mcz_profile", None)
+    for link in (getattr(p, "links", None) or []):
+        if not isinstance(link, dict):
+            continue
+        try:
+            followers = int(link.get("followers") or 0)
+        except (TypeError, ValueError):
+            followers = 0
+        verified = bool(link.get("verified"))
+        # Prefer the independently verified count when we have one.
+        if verified and link.get("verified_count") is not None:
+            try:
+                followers = int(link.get("verified_count") or 0)
+            except (TypeError, ValueError):
+                pass
+        sources.append({
+            "label": link.get("label") or link.get("url") or "link",
+            "followers": followers,
+            "verified": verified,
+        })
+    return sources
+
+
+def reach_median(user):
+    """Median follower count across all VERIFIED sources. Median (not sum) so a
+    single huge account can't dominate — it's the typical reach across the
+    creator's proven presence. Unverified links are excluded."""
+    counts = [s["followers"] for s in social_sources(user) if s.get("verified")]
+    m = _median(counts)
+    return int(m) if m is not None else 0
+
+
 def follow_counts(user):
     """followers / following / friends(mutual) / fans(one-way) for a user, plus
-    any external-account followers they've declared on their profile."""
+    verified external social sources and the median reach across them."""
     following_ids = set(Follow.objects.filter(follower=user).values_list("following_id", flat=True))
     follower_ids = set(Follow.objects.filter(following=user).values_list("follower_id", flat=True))
     friends = following_ids & follower_ids           # mutual
     fans = follower_ids - following_ids              # follow you, you don't follow back
-    p = getattr(user, "mcz_profile", None)
-    external = int(getattr(p, "external_followers", 0) or 0) if p else 0
+    sources = social_sources(user)
+    verified_external = sum(
+        s["followers"] for s in sources
+        if s.get("verified") and s["label"] != "Music ConnectZ"
+    )
     return {
         "followers": len(follower_ids),
         "following": len(following_ids),
         "friends": len(friends),
         "fans": len(fans),
-        "external_followers": external,
-        "total_followers": len(follower_ids) + external,
+        "sources": sources,
+        "reach_median": reach_median(user),
+        # Back-compat: external_followers = sum of verified externals.
+        "external_followers": verified_external,
+        "total_followers": len(follower_ids) + verified_external,
     }
 
 
 def energy_rate_per_hour(user):
-    """Hourly passive energy by tier, from follower reach (MCZ + external):
-    Free = reach/10, Premium = reach/5, StatZ = reach/1."""
-    reach = follow_counts(user)["total_followers"]
+    """Hourly passive energy by tier, from the MEDIAN reach across a creator's
+    verified sources (Music ConnectZ + verified external accounts):
+    Free = median/10, Premium = median/5, StatZ = median/1."""
+    reach = reach_median(user)
     m = membership_for(user)
     divisor = {TIER_FREE: 10, TIER_PREMIUM: 5, TIER_STATZ: 1, TIER_DEBUG: 1}.get(m.tier, 10)
     return reach // divisor
@@ -820,3 +872,101 @@ class MerchPurchase(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+# ---- CollabZ escrow deals ----
+def collab_settlement(participants, currency="money"):
+    """Server-side port of the frontend `collabSettlement()` (economy.js): the
+    "everyone paid their worth" rule. Each participant pays an equal
+    worth/(n-1) share of every OTHER person's worth, and receives their own
+    worth funded by the others, net of the payer's developer tax. SpinAZ deals
+    carry no dev tax (matching how SpinAZ is treated elsewhere).
+
+    Input:  [{username, tier, worth_cents}]
+    Output: same dicts with pays_cents / receives_cents / tax_cents added.
+
+    Conservation: sum(pays) == pot, and sum(receives) + platform_tax == pot.
+    Because each value is rounded to whole cents independently, the *actual*
+    platform take is defined at settlement as (held - sum(receives)); tax_cents
+    here is the informational per-payer figure."""
+    ps = [{
+        "username": p.get("username"),
+        "tier": p.get("tier") or TIER_FREE,
+        "worth_cents": max(0, int(p.get("worth_cents") or 0)),
+    } for p in (participants or [])]
+    n = len(ps)
+    if n < 2:
+        for p in ps:
+            p.update(pays_cents=0, receives_cents=0, tax_cents=0)
+        return ps
+
+    def rate(p):
+        return 0.0 if currency == "spinaz" else DEV_TAX.get(p["tier"], DEV_TAX[TIER_FREE])
+
+    for i, p in enumerate(ps):
+        pays = 0.0
+        receives = 0.0
+        for j, q in enumerate(ps):
+            if j == i:
+                continue
+            pays += q["worth_cents"] / (n - 1)               # p funds a share of q's worth
+            receives += (p["worth_cents"] / (n - 1)) * (1 - rate(q))  # q funds p's worth, net of q's tax
+        p["pays_cents"] = int(round(pays))
+        p["receives_cents"] = int(round(receives))
+        p["tax_cents"] = int(round(pays * rate(p)))
+    return ps
+
+
+class CollabDeal(models.Model):
+    """An escrowed CollabZ settlement. Money (or SpinAZ) each payer owes is HELD
+    by the deal — not paid to recipients — until the payers approve release (or
+    it auto-releases after a window). Refundable during the dispute window. This
+    is the trust primitive that lets a stranger take the first deal."""
+    CURRENCY_MONEY = "money"
+    CURRENCY_SPINAZ = "spinaz"
+    CURRENCY_CHOICES = [(CURRENCY_MONEY, "Money"), (CURRENCY_SPINAZ, "SpinAZ")]
+
+    STATUS_DRAFT = "draft"
+    STATUS_FUNDED = "funded"
+    STATUS_DELIVERED = "delivered"
+    STATUS_RELEASED = "released"
+    STATUS_DISPUTED = "disputed"
+    STATUS_REFUNDED = "refunded"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_FUNDED, "Funded"),
+        (STATUS_DELIVERED, "Delivered"),
+        (STATUS_RELEASED, "Released"),
+        (STATUS_DISPUTED, "Disputed"),
+        (STATUS_REFUNDED, "Refunded"),
+        (STATUS_CANCELLED, "Cancelled"),
+    ]
+
+    initiator = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="collab_deals")
+    title = models.CharField(max_length=160, blank=True, default="")
+    currency = models.CharField(max_length=8, choices=CURRENCY_CHOICES, default=CURRENCY_MONEY)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
+    stake_spinaz = models.PositiveIntegerField(default=0)  # optional good-faith stake per participant
+    # Settlement plan: [{username, tier, worth_cents, pays_cents, receives_cents,
+    # tax_cents, funded, stake_paid}]
+    participants = models.JSONField(default=list, blank=True)
+    held_cents = models.PositiveIntegerField(default=0)
+    held_spinaz = models.PositiveIntegerField(default=0)
+    held_stake_spinaz = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    auto_release_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"CollabDeal<{self.id}> {self.status} {self.title}"
+
+    def payers(self):
+        return [p for p in self.participants if int(p.get("pays_cents") or 0) > 0]
+
+    def all_funded(self):
+        return all(p.get("funded") for p in self.payers())

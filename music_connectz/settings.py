@@ -216,6 +216,19 @@ OWNER_EMAILS = [
     for e in os.environ.get("OWNER_EMAILS", "ctkoth@gmail.com").split(",")
     if e.strip()
 ]
+# Also match owner by username (covers a mismatched account email).
+OWNER_USERNAMES = [
+    u.strip()
+    for u in os.environ.get("OWNER_USERNAMES", "K-Oth").split(",")
+    if u.strip()
+]
+
+# CollabZ escrow: money is held until the payer approves, or auto-releases this
+# many days after the deal is fully funded so recipients are never stuck. The
+# dispute window (from funding) freezes auto-release when a dispute is opened.
+ESCROW_AUTO_RELEASE_DAYS = int(os.environ.get("ESCROW_AUTO_RELEASE_DAYS", "10"))
+ESCROW_DISPUTE_DAYS = int(os.environ.get("ESCROW_DISPUTE_DAYS", "10"))
+COLLAB_DEFAULT_STAKE_SPINAZ = int(os.environ.get("COLLAB_DEFAULT_STAKE_SPINAZ", "0"))
 
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")

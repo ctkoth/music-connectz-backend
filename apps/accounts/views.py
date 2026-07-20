@@ -89,6 +89,13 @@ class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        # Self-heal owner promotion on any authenticated load.
+        try:
+            from apps.economy.views import ensure_owner
+            ensure_owner(request.user)
+            request.user.refresh_from_db()
+        except Exception:
+            pass
         return Response(PublicUserSerializer(request.user).data)
 
 

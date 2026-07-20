@@ -6,6 +6,16 @@ from .notifications import NotificationsView
 from .moderation import ReportView, BlockView
 from .account import AccountExportView, AccountDeleteView
 from .messages_view import MessagesView
+from .social_verify import SocialVerifyView
+from .collab import (
+    CollabDealsView,
+    CollabDetailView,
+    CollabFundView,
+    CollabDeliverView,
+    CollabReleaseView,
+    CollabDisputeView,
+    CollabRefundView,
+)
 from .merch import MerchBuyView, MerchDetailView, MerchView
 from .occ import OccChatView
 from .payments import (
@@ -42,6 +52,7 @@ from .views import (
     AIChargeView,
     LimitsView,
     MembershipView,
+    OwnerClaimView,
     RoyaltiesView,
     RoyaltyAccrueView,
     RoyaltyCashoutView,
@@ -56,6 +67,7 @@ urlpatterns = [
     path("wallet/add/", AddFundsView.as_view(), name="economy-wallet-add"),
     path("membership/", MembershipView.as_view(), name="economy-membership"),
     path("membership/refund/", MembershipRefundView.as_view(), name="economy-membership-refund"),
+    path("owner/claim/", OwnerClaimView.as_view(), name="economy-owner-claim"),
     path("limits/", LimitsView.as_view(), name="economy-limits"),
     path("ai/charge/", AIChargeView.as_view(), name="economy-ai-charge"),
     path("ai/occ/", OccChatView.as_view(), name="economy-ai-occ"),
@@ -97,6 +109,7 @@ urlpatterns = [
     path("social/react/", SocialView.as_view(), {"action": "react"}, name="economy-social-react"),
     path("social/comment/", SocialView.as_view(), {"action": "comment"}, name="economy-social-comment"),
     path("social/rate/", SocialView.as_view(), {"action": "rate"}, name="economy-social-rate"),
+    path("social/verify/", SocialVerifyView.as_view(), name="economy-social-verify"),
     path("members/", MembersView.as_view(), name="economy-members"),
     path("members/<str:username>/", MemberProfileView.as_view(), name="economy-member"),
     path("postz/", PostsView.as_view(), name="economy-postz"),
@@ -106,4 +119,11 @@ urlpatterns = [
     path("merch/", MerchView.as_view(), name="economy-merch"),
     path("merch/<int:pk>/", MerchDetailView.as_view(), name="economy-merch-detail"),
     path("merch/<int:pk>/buy/", MerchBuyView.as_view(), name="economy-merch-buy"),
+    path("collab/", CollabDealsView.as_view(), name="economy-collab"),
+    path("collab/<int:pk>/", CollabDetailView.as_view(), name="economy-collab-detail"),
+    path("collab/<int:pk>/fund/", CollabFundView.as_view(), name="economy-collab-fund"),
+    path("collab/<int:pk>/deliver/", CollabDeliverView.as_view(), name="economy-collab-deliver"),
+    path("collab/<int:pk>/release/", CollabReleaseView.as_view(), name="economy-collab-release"),
+    path("collab/<int:pk>/dispute/", CollabDisputeView.as_view(), name="economy-collab-dispute"),
+    path("collab/<int:pk>/refund/", CollabRefundView.as_view(), name="economy-collab-refund"),
 ]
