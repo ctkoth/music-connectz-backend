@@ -7,6 +7,15 @@ from .moderation import ReportView, BlockView
 from .account import AccountExportView, AccountDeleteView
 from .messages_view import MessagesView
 from .social_verify import SocialVerifyView
+from .collab import (
+    CollabDealsView,
+    CollabDetailView,
+    CollabFundView,
+    CollabDeliverView,
+    CollabReleaseView,
+    CollabDisputeView,
+    CollabRefundView,
+)
 from .merch import MerchBuyView, MerchDetailView, MerchView
 from .occ import OccChatView
 from .payments import (
@@ -110,4 +119,11 @@ urlpatterns = [
     path("merch/", MerchView.as_view(), name="economy-merch"),
     path("merch/<int:pk>/", MerchDetailView.as_view(), name="economy-merch-detail"),
     path("merch/<int:pk>/buy/", MerchBuyView.as_view(), name="economy-merch-buy"),
+    path("collab/", CollabDealsView.as_view(), name="economy-collab"),
+    path("collab/<int:pk>/", CollabDetailView.as_view(), name="economy-collab-detail"),
+    path("collab/<int:pk>/fund/", CollabFundView.as_view(), name="economy-collab-fund"),
+    path("collab/<int:pk>/deliver/", CollabDeliverView.as_view(), name="economy-collab-deliver"),
+    path("collab/<int:pk>/release/", CollabReleaseView.as_view(), name="economy-collab-release"),
+    path("collab/<int:pk>/dispute/", CollabDisputeView.as_view(), name="economy-collab-dispute"),
+    path("collab/<int:pk>/refund/", CollabRefundView.as_view(), name="economy-collab-refund"),
 ]

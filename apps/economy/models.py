@@ -872,3 +872,101 @@ class MerchPurchase(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+# ---- CollabZ escrow deals ----
+def collab_settlement(participants, currency="money"):
+    """Server-side port of the frontend `collabSettlement()` (economy.js): the
+    "everyone paid their worth" rule. Each participant pays an equal
+    worth/(n-1) share of every OTHER person's worth, and receives their own
+    worth funded by the others, net of the payer's developer tax. SpinAZ deals
+    carry no dev tax (matching how SpinAZ is treated elsewhere).
+
+    Input:  [{username, tier, worth_cents}]
+    Output: same dicts with pays_cents / receives_cents / tax_cents added.
+
+    Conservation: sum(pays) == pot, and sum(receives) + platform_tax == pot.
+    Because each value is rounded to whole cents independently, the *actual*
+    platform take is defined at settlement as (held - sum(receives)); tax_cents
+    here is the informational per-payer figure."""
+    ps = [{
+        "username": p.get("username"),
+        "tier": p.get("tier") or TIER_FREE,
+        "worth_cents": max(0, int(p.get("worth_cents") or 0)),
+    } for p in (participants or [])]
+    n = len(ps)
+    if n < 2:
+        for p in ps:
+            p.update(pays_cents=0, receives_cents=0, tax_cents=0)
+        return ps
+
+    def rate(p):
+        return 0.0 if currency == "spinaz" else DEV_TAX.get(p["tier"], DEV_TAX[TIER_FREE])
+
+    for i, p in enumerate(ps):
+        pays = 0.0
+        receives = 0.0
+        for j, q in enumerate(ps):
+            if j == i:
+                continue
+            pays += q["worth_cents"] / (n - 1)               # p funds a share of q's worth
+            receives += (p["worth_cents"] / (n - 1)) * (1 - rate(q))  # q funds p's worth, net of q's tax
+        p["pays_cents"] = int(round(pays))
+        p["receives_cents"] = int(round(receives))
+        p["tax_cents"] = int(round(pays * rate(p)))
+    return ps
+
+
+class CollabDeal(models.Model):
+    """An escrowed CollabZ settlement. Money (or SpinAZ) each payer owes is HELD
+    by the deal — not paid to recipients — until the payers approve release (or
+    it auto-releases after a window). Refundable during the dispute window. This
+    is the trust primitive that lets a stranger take the first deal."""
+    CURRENCY_MONEY = "money"
+    CURRENCY_SPINAZ = "spinaz"
+    CURRENCY_CHOICES = [(CURRENCY_MONEY, "Money"), (CURRENCY_SPINAZ, "SpinAZ")]
+
+    STATUS_DRAFT = "draft"
+    STATUS_FUNDED = "funded"
+    STATUS_DELIVERED = "delivered"
+    STATUS_RELEASED = "released"
+    STATUS_DISPUTED = "disputed"
+    STATUS_REFUNDED = "refunded"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_FUNDED, "Funded"),
+        (STATUS_DELIVERED, "Delivered"),
+        (STATUS_RELEASED, "Released"),
+        (STATUS_DISPUTED, "Disputed"),
+        (STATUS_REFUNDED, "Refunded"),
+        (STATUS_CANCELLED, "Cancelled"),
+    ]
+
+    initiator = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="collab_deals")
+    title = models.CharField(max_length=160, blank=True, default="")
+    currency = models.CharField(max_length=8, choices=CURRENCY_CHOICES, default=CURRENCY_MONEY)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
+    stake_spinaz = models.PositiveIntegerField(default=0)  # optional good-faith stake per participant
+    # Settlement plan: [{username, tier, worth_cents, pays_cents, receives_cents,
+    # tax_cents, funded, stake_paid}]
+    participants = models.JSONField(default=list, blank=True)
+    held_cents = models.PositiveIntegerField(default=0)
+    held_spinaz = models.PositiveIntegerField(default=0)
+    held_stake_spinaz = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    auto_release_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"CollabDeal<{self.id}> {self.status} {self.title}"
+
+    def payers(self):
+        return [p for p in self.participants if int(p.get("pays_cents") or 0) > 0]
+
+    def all_funded(self):
+        return all(p.get("funded") for p in self.payers())
