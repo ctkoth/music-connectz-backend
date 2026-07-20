@@ -9,6 +9,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from datetime import timedelta
+
 from django.db.models import Case, IntegerField, Sum, When
 from django.utils import timezone
 
@@ -29,6 +31,13 @@ from .models import (
 # ratings' job). Heavy dislike ratio downranks + flags for moderation.
 HIDE_FLAG_MIN_DOWN = 5   # need at least this many dislikes to consider hiding
 HIDE_FLAG_RATIO = 2.0    # ...and dislikes must exceed likes by this factor
+
+# Restricted-join reward anti-fraud. A reward requires a real, engaged visitor:
+# a distinct authenticated user + IP who was active >= N seconds, and caps how
+# much a post/author can mint per day so rotating IPs / accounts can't farm it.
+JOIN_MIN_ACTIVE_SECONDS = 5
+JOIN_REWARD_DAILY_CAP_PER_POST = 100
+JOIN_REWARD_DAILY_CAP_PER_AUTHOR = 500
 
 
 def _client_ip(request):
@@ -154,15 +163,36 @@ class PostJoinView(APIView):
         join, created = PostJoin.objects.get_or_create(
             post=p, ip=ip, defaults={"user": request.user, "active_seconds": active}
         )
-        rewarded = False
         if not created:
             join.active_seconds = max(join.active_seconds, active)
-            join.save(update_fields=["active_seconds"])
-        # Valid join = distinct IP that isn't the author's; reward once.
-        if created and not join.rewarded and p.author_id != request.user.id:
-            award_spinaz(p.author, RESTRICTED_JOIN_REWARD_SPINAZ, note=f"Restricted join on '{p.title}'")
-            join.rewarded = True
-            join.save(update_fields=["rewarded"])
-            rewarded = True
-            notify(p.author, "join", f"@{request.user.username} joined '{p.title}' — you earned {RESTRICTED_JOIN_REWARD_SPINAZ} SpinAZ 🛑", actor=request.user, item_id=f"post:{p.id}")
-        return Response({"joined": True, "rewarded": rewarded, "reward_spinaz": RESTRICTED_JOIN_REWARD_SPINAZ if rewarded else 0, "joins": p.joins.count()})
+            if join.user_id is None:
+                join.user = request.user
+            join.save(update_fields=["active_seconds", "user"])
+
+        rewarded = self._maybe_reward(p, join, request.user)
+        return Response({
+            "joined": True, "rewarded": rewarded,
+            "reward_spinaz": RESTRICTED_JOIN_REWARD_SPINAZ if rewarded else 0,
+            "joins": p.joins.count(),
+        })
+
+    def _maybe_reward(self, p, join, user):
+        """Pay the author once for a genuine, engaged, non-author visitor —
+        subject to per-post and per-author daily caps."""
+        if join.rewarded or p.author_id == user.id:
+            return False
+        if join.active_seconds < JOIN_MIN_ACTIVE_SECONDS:
+            return False  # bounce / bot — must show real engagement first
+        # One reward per distinct user per post (defeats IP rotation).
+        if PostJoin.objects.filter(post=p, user=user, rewarded=True).exclude(pk=join.pk).exists():
+            return False
+        day_ago = timezone.now() - timedelta(hours=24)
+        if PostJoin.objects.filter(post=p, rewarded=True, joined_at__gte=day_ago).count() >= JOIN_REWARD_DAILY_CAP_PER_POST:
+            return False
+        if PostJoin.objects.filter(post__author=p.author, rewarded=True, joined_at__gte=day_ago).count() >= JOIN_REWARD_DAILY_CAP_PER_AUTHOR:
+            return False
+        award_spinaz(p.author, RESTRICTED_JOIN_REWARD_SPINAZ, note=f"Restricted join on '{p.title}'")
+        join.rewarded = True
+        join.save(update_fields=["rewarded"])
+        notify(p.author, "join", f"@{user.username} joined '{p.title}' — you earned {RESTRICTED_JOIN_REWARD_SPINAZ} SpinAZ 🛑", actor=user, item_id=f"post:{p.id}")
+        return True
