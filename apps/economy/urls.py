@@ -7,6 +7,7 @@ from .moderation import ReportView, BlockView
 from .account import AccountExportView, AccountDeleteView
 from .messages_view import MessagesView
 from .social_verify import SocialVerifyView
+from .parcel import ParcelCampaignView
 from .collab import (
     CollabDealsView,
     CollabDetailView,
@@ -126,4 +127,5 @@ urlpatterns = [
     path("collab/<int:pk>/release/", CollabReleaseView.as_view(), name="economy-collab-release"),
     path("collab/<int:pk>/dispute/", CollabDisputeView.as_view(), name="economy-collab-dispute"),
     path("collab/<int:pk>/refund/", CollabRefundView.as_view(), name="economy-collab-refund"),
+    path("parcel/", ParcelCampaignView.as_view(), name="economy-parcel"),
 ]
