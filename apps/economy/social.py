@@ -38,6 +38,8 @@ from .models import (
     energy_rate_per_hour,
     notify,
     Post,
+    blocked_user_ids,
+    Block,
     wallet_for,
 )
 from .serializers import WalletSerializer
@@ -481,6 +483,8 @@ class FollowView(APIView):
         if action == "unfollow":
             Follow.objects.filter(follower=request.user, following=target).delete()
         else:
+            if target.id in blocked_user_ids(request.user):
+                return Response({"detail": "You've blocked this user (or they blocked you)."}, status=status.HTTP_403_FORBIDDEN)
             _, created = Follow.objects.get_or_create(follower=request.user, following=target)
             if created:
                 mutual = Follow.objects.filter(follower=target, following=request.user).exists()
@@ -565,7 +569,7 @@ class MembersView(APIView):
         origin = (me.lat, me.lng) if (me.share_location and me.lat is not None) else (None, None)
 
         results = []
-        qs = Profile.objects.exclude(user=request.user).select_related("user")[:500]
+        qs = Profile.objects.exclude(user=request.user).exclude(user_id__in=blocked_user_ids(request.user)).select_related("user")[:500]
         for p in qs:
             if regions and not (set(regions) & set(p.regions or [])):
                 continue
