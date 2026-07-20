@@ -223,6 +223,21 @@ OWNER_USERNAMES = [
     if u.strip()
 ]
 
+# Email (Parcel Primate campaigns + system mail). SMTP activates only when
+# EMAIL_HOST is set; otherwise mail is printed to the console so dev never
+# crashes and campaigns still record their on-platform posts/DMs.
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = _env_bool("EMAIL_USE_TLS", "1")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "Music ConnectZ <no-reply@musicconnectz.net>")
+EMAIL_BACKEND = (
+    "django.core.mail.backends.smtp.EmailBackend"
+    if EMAIL_HOST
+    else "django.core.mail.backends.console.EmailBackend"
+)
+
 # CollabZ escrow: money is held until the payer approves, or auto-releases this
 # many days after the deal is fully funded so recipients are never stuck. The
 # dispute window (from funding) freezes auto-release when a dispute is opened.
