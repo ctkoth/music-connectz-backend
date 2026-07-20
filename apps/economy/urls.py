@@ -1,7 +1,7 @@
 from django.urls import path
 
 from .directz_app import DirectZWorksView, DirectZRateView
-from .postz import PostsView, PostJoinView
+from .postz import PostsView, PostJoinView, PostShareView, SubmissionsView
 from .notifications import NotificationsView
 from .moderation import ReportView, BlockView
 from .account import AccountExportView, AccountDeleteView
@@ -117,6 +117,8 @@ urlpatterns = [
     path("members/<str:username>/", MemberProfileView.as_view(), name="economy-member"),
     path("postz/", PostsView.as_view(), name="economy-postz"),
     path("postz/<int:pk>/join/", PostJoinView.as_view(), name="economy-postz-join"),
+    path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
+    path("submissions/", SubmissionsView.as_view(), name="economy-submissions"),
     path("directz/", DirectZWorksView.as_view(), name="economy-directz"),
     path("directz/<int:pk>/rate/", DirectZRateView.as_view(), name="economy-directz-rate"),
     path("merch/", MerchView.as_view(), name="economy-merch"),

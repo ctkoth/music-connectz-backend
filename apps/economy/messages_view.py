@@ -27,6 +27,8 @@ def _msg(m, me):
         "to": m.recipient.username,
         "mine": m.sender_id == me.id,
         "body": m.body,
+        "media_url": m.media_url,
+        "media_type": m.media_type,
         "read": m.read,
         "at": m.created_at.isoformat(),
     }
@@ -79,8 +81,10 @@ class MessagesView(APIView):
             return Response(_msg(m, me))
 
         to = str((request.data or {}).get("to", "")).strip()
-        if not to or not body:
-            return Response({"detail": "to and body required"}, status=status.HTTP_400_BAD_REQUEST)
+        media_url = str((request.data or {}).get("media_url", "")).strip()[:500]
+        media_type = str((request.data or {}).get("media_type", "")).strip()[:60]
+        if not to or not (body or media_url):
+            return Response({"detail": "to and body (or media) required"}, status=status.HTTP_400_BAD_REQUEST)
         other = User.objects.filter(username=to).first()
         if not other:
             return Response({"detail": "unknown user"}, status=status.HTTP_404_NOT_FOUND)
@@ -91,6 +95,6 @@ class MessagesView(APIView):
         cap = limits_for(membership_for(me).tier)["char_limit"]
         if len(body) > cap:
             return Response({"detail": f"Message exceeds your {cap}-character limit — upgrade for more."}, status=status.HTTP_400_BAD_REQUEST)
-        m = Message.objects.create(sender=me, recipient=other, body=body)
+        m = Message.objects.create(sender=me, recipient=other, body=body, media_url=media_url, media_type=media_type)
         notify(other, "message", f"@{me.username} messaged you 💬", actor=me, item_id=f"dm:{me.username}")
         return Response(_msg(m, me), status=status.HTTP_201_CREATED)
