@@ -642,29 +642,81 @@ class Follow(models.Model):
         unique_together = ("follower", "following")
 
 
+def social_sources(user):
+    """Every follower source that counts toward reach: the Music ConnectZ
+    follower count (always verified — it's our own number) plus each connected
+    external account from Profile.links that has been VERIFIED (real count +
+    proven to belong to this user). Unverified links are returned too but
+    flagged so callers can exclude them from the median (anti-cheat: nobody
+    games reach by typing a stranger's big follower number).
+
+    Each source: {label, followers, verified}."""
+    mcz_followers = len(set(
+        Follow.objects.filter(following=user).values_list("follower_id", flat=True)
+    ))
+    sources = [{"label": "Music ConnectZ", "followers": mcz_followers, "verified": True}]
+    p = getattr(user, "mcz_profile", None)
+    for link in (getattr(p, "links", None) or []):
+        if not isinstance(link, dict):
+            continue
+        try:
+            followers = int(link.get("followers") or 0)
+        except (TypeError, ValueError):
+            followers = 0
+        verified = bool(link.get("verified"))
+        # Prefer the independently verified count when we have one.
+        if verified and link.get("verified_count") is not None:
+            try:
+                followers = int(link.get("verified_count") or 0)
+            except (TypeError, ValueError):
+                pass
+        sources.append({
+            "label": link.get("label") or link.get("url") or "link",
+            "followers": followers,
+            "verified": verified,
+        })
+    return sources
+
+
+def reach_median(user):
+    """Median follower count across all VERIFIED sources. Median (not sum) so a
+    single huge account can't dominate — it's the typical reach across the
+    creator's proven presence. Unverified links are excluded."""
+    counts = [s["followers"] for s in social_sources(user) if s.get("verified")]
+    m = _median(counts)
+    return int(m) if m is not None else 0
+
+
 def follow_counts(user):
     """followers / following / friends(mutual) / fans(one-way) for a user, plus
-    any external-account followers they've declared on their profile."""
+    verified external social sources and the median reach across them."""
     following_ids = set(Follow.objects.filter(follower=user).values_list("following_id", flat=True))
     follower_ids = set(Follow.objects.filter(following=user).values_list("follower_id", flat=True))
     friends = following_ids & follower_ids           # mutual
     fans = follower_ids - following_ids              # follow you, you don't follow back
-    p = getattr(user, "mcz_profile", None)
-    external = int(getattr(p, "external_followers", 0) or 0) if p else 0
+    sources = social_sources(user)
+    verified_external = sum(
+        s["followers"] for s in sources
+        if s.get("verified") and s["label"] != "Music ConnectZ"
+    )
     return {
         "followers": len(follower_ids),
         "following": len(following_ids),
         "friends": len(friends),
         "fans": len(fans),
-        "external_followers": external,
-        "total_followers": len(follower_ids) + external,
+        "sources": sources,
+        "reach_median": reach_median(user),
+        # Back-compat: external_followers = sum of verified externals.
+        "external_followers": verified_external,
+        "total_followers": len(follower_ids) + verified_external,
     }
 
 
 def energy_rate_per_hour(user):
-    """Hourly passive energy by tier, from follower reach (MCZ + external):
-    Free = reach/10, Premium = reach/5, StatZ = reach/1."""
-    reach = follow_counts(user)["total_followers"]
+    """Hourly passive energy by tier, from the MEDIAN reach across a creator's
+    verified sources (Music ConnectZ + verified external accounts):
+    Free = median/10, Premium = median/5, StatZ = median/1."""
+    reach = reach_median(user)
     m = membership_for(user)
     divisor = {TIER_FREE: 10, TIER_PREMIUM: 5, TIER_STATZ: 1, TIER_DEBUG: 1}.get(m.tier, 10)
     return reach // divisor

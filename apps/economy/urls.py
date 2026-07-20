@@ -6,6 +6,7 @@ from .notifications import NotificationsView
 from .moderation import ReportView, BlockView
 from .account import AccountExportView, AccountDeleteView
 from .messages_view import MessagesView
+from .social_verify import SocialVerifyView
 from .merch import MerchBuyView, MerchDetailView, MerchView
 from .occ import OccChatView
 from .payments import (
@@ -99,6 +100,7 @@ urlpatterns = [
     path("social/react/", SocialView.as_view(), {"action": "react"}, name="economy-social-react"),
     path("social/comment/", SocialView.as_view(), {"action": "comment"}, name="economy-social-comment"),
     path("social/rate/", SocialView.as_view(), {"action": "rate"}, name="economy-social-rate"),
+    path("social/verify/", SocialVerifyView.as_view(), name="economy-social-verify"),
     path("members/", MembersView.as_view(), name="economy-members"),
     path("members/<str:username>/", MemberProfileView.as_view(), name="economy-member"),
     path("postz/", PostsView.as_view(), name="economy-postz"),
