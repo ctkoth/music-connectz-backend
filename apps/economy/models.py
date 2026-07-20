@@ -559,7 +559,7 @@ class Notification(models.Model):
     KIND_CHOICES = [
         ("follow", "Follow"), ("rate", "Rating"), ("like", "Like"),
         ("comment", "Comment"), ("join", "Restricted join"), ("pay", "Payment"),
-        ("system", "System"),
+        ("message", "Message"), ("system", "System"),
     ]
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications")
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="notifications_sent")
@@ -578,6 +578,18 @@ def notify(user, kind, text, actor=None, item_id=""):
     if not user or (actor and actor.id == user.id):
         return None
     return Notification.objects.create(user=user, actor=actor, kind=kind, text=text[:280], item_id=item_id or "")
+
+
+# ---- Direct messages ----
+class Message(models.Model):
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="messages_sent")
+    recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="messages_received")
+    body = models.TextField()
+    read = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at",)
 
 
 # ---- Moderation: report content + block users ----
