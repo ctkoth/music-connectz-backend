@@ -19,6 +19,8 @@ from .models import (
     OverallRating,
     Profile,
     Reaction,
+    ItemRating,
+    item_rating_median,
     SocialComment,
     profile_for,
     Venue,
@@ -326,7 +328,12 @@ class SocialView(APIView):
             {"id": c.id, "user": c.user.username, "body": c.body, "at": c.created_at.isoformat()}
             for c in SocialComment.objects.filter(item_id=item).select_related("user")[:100]
         ]
-        return {"item": item, "up": ups, "down": downs, "my": mine.value if mine else 0, "comments": comments}
+        my_rating = ItemRating.objects.filter(user=request.user, item_id=item).values_list("score", flat=True).first()
+        return {
+            "item": item, "up": ups, "down": downs, "my": mine.value if mine else 0, "comments": comments,
+            "rating": item_rating_median(item), "my_rating": my_rating,
+            "rating_count": ItemRating.objects.filter(item_id=item).count(),
+        }
 
     def get(self, request):
         item = (request.query_params.get("item") or "").strip()
@@ -353,6 +360,17 @@ class SocialView(APIView):
             if not body:
                 return Response({"detail": "body required"}, status=status.HTTP_400_BAD_REQUEST)
             SocialComment.objects.create(user=request.user, item_id=item, body=body)
+        elif action == "rate":
+            try:
+                score = int((request.data or {}).get("score", 0))
+            except (TypeError, ValueError):
+                score = 0
+            if score == 0:
+                ItemRating.objects.filter(user=request.user, item_id=item).delete()
+            elif 1 <= score <= 10:
+                ItemRating.objects.update_or_create(user=request.user, item_id=item, defaults={"score": score})
+            else:
+                return Response({"detail": "score must be 1-10 (or 0 to clear)"}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self._payload(item, request))
 
 

@@ -687,6 +687,22 @@ class Reaction(models.Model):
         unique_together = ("user", "item_id")
 
 
+class ItemRating(models.Model):
+    """A 1-10 rating on any social item (post, work, profile, battle…), keyed by
+    the same opaque item_id as reactions/comments. One rating per user per item."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="item_ratings")
+    item_id = models.CharField(max_length=160, db_index=True)
+    score = models.PositiveSmallIntegerField()  # 1-10
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "item_id")
+
+
+def item_rating_median(item_id):
+    return _median(ItemRating.objects.filter(item_id=item_id).values_list("score", flat=True))
+
+
 class SocialComment(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="social_comments")
     item_id = models.CharField(max_length=160, db_index=True)
