@@ -199,6 +199,7 @@ def _face_dict(f, request):
         "mine": f.owner_id == request.user.id,
         "name": f.name,
         "url": request.build_absolute_uri(f.image.url) if f.image else None,
+        "tagged": f.tagged.username if f.tagged_id else "",
         "median": face_median(f),
         "count": f.ratings.count(),
         "my_rating": my,
@@ -223,7 +224,13 @@ class FaceZView(APIView):
         img = request.FILES.get("image")
         if not img:
             return Response({"detail": "image (multipart) required"}, status=status.HTTP_400_BAD_REQUEST)
-        f = Face.objects.create(owner=request.user, image=img, name=str(request.data.get("name", ""))[:80])
+        tagged = None
+        tname = str(request.data.get("tagged", "")).strip()
+        if tname:
+            tagged = User.objects.filter(username=tname).first()
+        f = Face.objects.create(owner=request.user, image=img, name=str(request.data.get("name", ""))[:80], tagged=tagged)
+        if tagged and tagged.id != request.user.id:
+            notify(tagged, "like", f"@{request.user.username} tagged you on FaceZ 🙂", actor=request.user, item_id=f"face:{f.id}")
         return Response({"face": _face_dict(f, request)}, status=status.HTTP_201_CREATED)
 
 

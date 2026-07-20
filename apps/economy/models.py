@@ -428,6 +428,8 @@ class Face(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="faces")
     image = models.ImageField(upload_to=face_path)
     name = models.CharField(max_length=80, blank=True, default="")
+    # The member tagged in this media (who the face is), for likeness/credit.
+    tagged = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="tagged_faces")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -552,6 +554,10 @@ class Post(models.Model):
     links = models.JSONField(default=list, blank=True)
     media_type = models.CharField(max_length=24, blank=True, default="")
     media_url = models.CharField(max_length=500, blank=True, default="")  # uploaded audio/video take
+    # Album support: a post is either single (uses media_url) or an album whose
+    # `items` carry multiple media entries [{url, type, title, lyrics}].
+    is_album = models.BooleanField(default=False)
+    items = models.JSONField(default=list, blank=True)
     # Optional scored-take payload (e.g. RapZ/SingZ lab result) for context on the post.
     score = models.JSONField(default=dict, blank=True)
     visibility = models.CharField(max_length=12, choices=VIS_CHOICES, default="public")
