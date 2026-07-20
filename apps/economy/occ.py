@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 
 from .catalog import ai_cost
 from .models import charge_ai_usage, wallet_for
-from .views import is_owner
+from .views import is_owner, platform_owner
 
 # House model that powers every OCC voice. The "voice" only shapes the system
 # prompt/tone (and the per-message price) — the underlying model is the same.
@@ -70,6 +70,14 @@ AAVE_STYLE = (
     "'I'm on it' = I'm helping you; 'bout' = about; 'fam' = family. Match the member's energy."
 )
 
+# Appended when the member has Suggestion mode on — Corey always closes with a
+# concrete what/why/how next step.
+SUGGEST_STYLE = (
+    "SUGGESTION MODE IS ON: always end your reply with a short '💡 Suggestion' — one concrete "
+    "next move phrased as What / Why / How (what to do, why it matters, how to do it in a step "
+    "or two). Keep it tight and actionable, never generic."
+)
+
 COURSES = (
     "You have been taught four college-level courses and can teach them on request: "
     "Digital Art (color, composition, tools, cover art, AI-art ethics), "
@@ -97,9 +105,13 @@ class OccChatView(APIView):
         knowledge = data.get("knowledge") or []  # [{course, text}] the user taught OCC
         history = data.get("history") or []       # [{role: 'user'|'occ', text}]
         slang = bool(data.get("slang"))           # AAVE colloquialisms opt-in (Settings)
+        suggest = bool(data.get("suggest"))       # Suggestion mode — always append a next-step
         acronyms = data.get("acronyms") or []     # [{term, means}] the member's CodeZ shorthand
 
-        cost = 0 if is_owner(request.user) else ai_cost(model_voice)
+        # OCC works like Claude Code: everyone — owners included — pays the model
+        # minimum to cover the run (Corey GPT is the cheapest voice). The charge is
+        # then routed to the platform owner as revenue.
+        cost = ai_cost(model_voice)
         # Check affordability up front so we don't call the model then fail to bill.
         if cost and wallet_for(request.user).money_cents < cost:
             return Response(
@@ -116,6 +128,8 @@ class OccChatView(APIView):
         # AAVE colloquialisms only apply to the Corey voice, and only when opted in.
         if slang and model_voice == "corey-gpt":
             system += f"\n\n{AAVE_STYLE}"
+        if suggest:
+            system += f"\n\n{SUGGEST_STYLE}"
         acro = ", ".join(
             f"{a.get('term')}={a.get('means')}" for a in acronyms if a.get("term")
         )
@@ -161,5 +175,13 @@ class OccChatView(APIView):
             return Response({"detail": "Empty response."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         remaining = charge_ai_usage(request.user, cost, note=f"OCC {model_voice}")
+        # Route the model charge to the platform owner as revenue ("pay Corey"),
+        # keeping money conserved — unless the payer *is* the owner (self-neutral).
+        if cost:
+            owner = platform_owner()
+            if owner and owner.id != request.user.id:
+                ow = wallet_for(owner)
+                ow.money_cents = (ow.money_cents or 0) + cost
+                ow.save(update_fields=["money_cents", "updated_at"])
         money = round((remaining if remaining is not None else wallet_for(request.user).money_cents) / 100, 2)
         return Response({"text": text, "model": model_voice, "cost_cents": cost, "money": money})

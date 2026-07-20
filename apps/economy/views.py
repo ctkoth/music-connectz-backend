@@ -41,6 +41,24 @@ def is_owner(user):
     return bool(user and (user.is_superuser or user.is_staff))
 
 
+def platform_owner():
+    """The account that receives platform revenue (e.g. OCC model charges).
+    Prefers a configured owner by username/email, else the first superuser."""
+    from django.conf import settings
+    from django.contrib.auth import get_user_model
+    from django.db.models import Q
+    User = get_user_model()
+    usernames = [u for u in (getattr(settings, "OWNER_USERNAMES", []) or [])]
+    emails = [e for e in (getattr(settings, "OWNER_EMAILS", []) or [])]
+    q = Q()
+    if usernames:
+        q |= Q(username__in=usernames)
+    if emails:
+        q |= Q(email__in=emails)
+    owner = User.objects.filter(q).first() if (usernames or emails) else None
+    return owner or User.objects.filter(is_superuser=True).order_by("id").first()
+
+
 def is_owner_candidate(user):
     """True if this account is a configured owner (by email OR username)."""
     from django.conf import settings
