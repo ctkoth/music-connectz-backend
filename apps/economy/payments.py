@@ -347,6 +347,10 @@ class StripeWebhookView(APIView):
                 ).first()
                 if intent:
                     _complete_intent(intent)
+        elif etype == "identity.verification_session.verified":
+            # Stripe Identity confirmed a government ID — set 18+ iff the DOB proves it.
+            from .identity import mark_18plus_from_session
+            mark_18plus_from_session(event["data"]["object"] or {})
         elif etype in ("invoice.payment_succeeded", "invoice.paid"):
             # A recurring auto-top-up invoice was paid — credit money + tier energy.
             _credit_autotopup_invoice(event["data"]["object"] or {})

@@ -310,6 +310,7 @@ def _profile_full(p, request):
         "overall_count": OverallRating.objects.filter(target=p.user).count(),
         "relationship": relationship(request.user, p.user),
         "energy_per_hour": energy_rate_per_hour(p.user) if p.user_id == request.user.id else None,
+        "verified_18plus": p.verified_18plus,
     })
     return card
 
