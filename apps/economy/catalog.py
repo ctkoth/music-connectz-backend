@@ -80,8 +80,8 @@ FOUNDING_LIMIT = 50
 FOUNDING_DISCOUNT = 0.50              # first 50 pay half
 LIFETIME_PRICE_CENTS = 30000          # $300 full lifetime StatZ
 FOUNDING_PRICE_CENTS = int(LIFETIME_PRICE_CENTS * (1 - FOUNDING_DISCOUNT))  # $150 lifetime
-FOUNDING_YEAR_CENTS = 7500            # $75/yr founding StatZ (full ~$150/yr)
-FOUNDING_MONTH_CENTS = 750            # $7.50/mo founding StatZ (full ~$15/mo)
+FOUNDING_YEAR_CENTS = 6000            # $60/yr founding StatZ (50% off full $120/yr)
+FOUNDING_MONTH_CENTS = 750            # $7.50/mo founding StatZ (50% off full $15/mo)
 # Plan -> (Stripe mode, unit amount cents, recurring interval or None)
 FOUNDING_PLANS = {
     "lifetime": {"mode": "payment", "cents": FOUNDING_PRICE_CENTS, "interval": None, "kind": "lifetime"},
