@@ -66,8 +66,10 @@ def cashout_rate(plan, tier):
 # (pass-through, no markup). Corey GPT is priced a touch under the cheapest other
 # voice so it's always the value option; it's tuned on member input + the built-in
 # curricula so it costs the least to serve.
+# Per-message minimum to cover the model (pass-through, no markup). Corey GPT is
+# deliberately the cheapest voice.
 AI_MODEL_COSTS = {
-    "corey-gpt": 2,
+    "corey-gpt": 1,
     "standard": 3,
     "technical": 3,
 }
