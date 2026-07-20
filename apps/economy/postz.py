@@ -17,13 +17,19 @@ from django.utils import timezone
 from .models import (
     Post,
     PostJoin,
+    PostShare,
     Reaction,
     ItemRating,
     RESTRICTED_JOIN_REWARD_SPINAZ,
+    SHARE_REWARD_ENERGY,
+    SHARE_MIN_ACTIVE_SECONDS,
     award_spinaz,
     can_view_post,
     item_rating_median,
     notify,
+    record_submission,
+    submission_cap_for,
+    submissions_used_today,
     wallet_for,
 )
 
@@ -79,13 +85,27 @@ def _post_dict(p, request, up=0, down=0):
         "description": p.description,
         "links": p.links,
         "media_type": p.media_type,
+        "media_url": p.media_url,
+        "score": p.score or {},
         "visibility": p.visibility,
         "skill_cost_cents": p.skill_cost_cents,
         "joins": p.joins.count() if p.visibility == "restricted" else 0,
+        "shares": p.shares.count(),
         "up": up, "down": down, "vibe": vibe, "flagged": flagged,
         "rating": item_rating_median(f"post:{p.id}"),
         "created_at": p.created_at.isoformat(),
     }
+
+
+class SubmissionsView(APIView):
+    """How many scored/creator submissions the member has left today."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        cap = submission_cap_for(request.user)
+        used = submissions_used_today(request.user)
+        return Response({"used": used, "cap": cap, "remaining": max(0, cap - used)})
 
 
 class PostsView(APIView):
@@ -131,6 +151,21 @@ class PostsView(APIView):
         if vis not in {"public", "restricted", "private"}:
             vis = "public"
         cost = max(0, int(d.get("skill_cost_cents") or 0))
+        media_url = str(d.get("media_url", "")).strip()[:500]
+        media_type = str(d.get("media_type", "")).strip()[:24]
+        score = d.get("score") if isinstance(d.get("score"), dict) else {}
+        # A scored/recorded take (score payload or media) counts against the tier's
+        # daily submission cap (Free 5 · Premium 15 · StatZ 50).
+        is_submission = bool(score) or bool(media_url)
+        if is_submission:
+            cap = submission_cap_for(request.user)
+            used = submissions_used_today(request.user)
+            if used >= cap:
+                return Response(
+                    {"detail": f"Daily submission limit reached ({used}/{cap}). Upgrade for more.",
+                     "used": used, "cap": cap},
+                    status=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
         # Posting costs energy = combined skill price (cents). Deduct what's there.
         w = wallet_for(request.user)
         charged = min(cost, max(0, w.energy))
@@ -140,9 +175,11 @@ class PostsView(APIView):
         p = Post.objects.create(
             author=request.user, title=title,
             description=str(d.get("description", ""))[:4000],
-            links=d.get("links") or [], media_type=str(d.get("media_type", ""))[:24],
-            visibility=vis, skill_cost_cents=cost,
+            links=d.get("links") or [], media_type=media_type, media_url=media_url,
+            score=score, visibility=vis, skill_cost_cents=cost,
         )
+        if is_submission:
+            record_submission(request.user)
         return Response({**_post_dict(p, request), "energy_charged": charged, "energy": w.energy}, status=status.HTTP_201_CREATED)
 
 
@@ -195,4 +232,56 @@ class PostJoinView(APIView):
         join.rewarded = True
         join.save(update_fields=["rewarded"])
         notify(p.author, "join", f"@{user.username} joined '{p.title}' — you earned {RESTRICTED_JOIN_REWARD_SPINAZ} SpinAZ 🛑", actor=user, item_id=f"post:{p.id}")
+        return True
+
+
+# One sharer can't farm shares by rotating IPs/accounts on the same post.
+SHARE_REWARD_DAILY_CAP = 20  # max share rewards a single user can earn per day
+
+
+class PostShareView(APIView):
+    """Share another member's post. First genuine share (>= 30s dwell) of a post
+    you don't own grants the sharer +5⚡, once per user+post."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        p = Post.objects.filter(pk=pk).select_related("author").first()
+        if not p:
+            return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+        if not can_view_post(p, request.user):
+            return Response({"detail": "you can't view this post"}, status=status.HTTP_403_FORBIDDEN)
+        active = max(0, int(request.data.get("active_seconds") or 0))
+        share, created = PostShare.objects.get_or_create(
+            post=p, user=request.user, defaults={"ip": _client_ip(request), "active_seconds": active}
+        )
+        if not created:
+            share.active_seconds = max(share.active_seconds, active)
+            share.save(update_fields=["active_seconds"])
+
+        rewarded = self._maybe_reward(p, share, request.user)
+        w = wallet_for(request.user)
+        return Response({
+            "shared": True, "rewarded": rewarded,
+            "reward_energy": SHARE_REWARD_ENERGY if rewarded else 0,
+            "energy": w.energy,
+            "shares": p.shares.count(),
+        })
+
+    def _maybe_reward(self, p, share, user):
+        """+5⚡ once per user+post for sharing someone else's post, gated by a
+        genuine dwell and a per-user daily cap."""
+        if share.rewarded or p.author_id == user.id:
+            return False
+        if share.active_seconds < SHARE_MIN_ACTIVE_SECONDS:
+            return False  # must have genuinely viewed it first
+        day_ago = timezone.now() - timedelta(hours=24)
+        if PostShare.objects.filter(user=user, rewarded=True, shared_at__gte=day_ago).count() >= SHARE_REWARD_DAILY_CAP:
+            return False
+        w = wallet_for(user)
+        w.energy = (w.energy or 0) + SHARE_REWARD_ENERGY
+        w.save(update_fields=["energy", "updated_at"])
+        share.rewarded = True
+        share.save(update_fields=["rewarded"])
+        notify(p.author, "like", f"@{user.username} shared your post '{p.title}' 🔁", actor=user, item_id=f"post:{p.id}")
         return True

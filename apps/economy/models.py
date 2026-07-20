@@ -7,6 +7,7 @@ Rates match the frontend: Free 10% · Premium 5% · StatZ 2%.
 """
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 TIER_FREE = "free"
 TIER_PREMIUM = "premium"
@@ -550,6 +551,9 @@ class Post(models.Model):
     description = models.TextField(blank=True, default="")
     links = models.JSONField(default=list, blank=True)
     media_type = models.CharField(max_length=24, blank=True, default="")
+    media_url = models.CharField(max_length=500, blank=True, default="")  # uploaded audio/video take
+    # Optional scored-take payload (e.g. RapZ/SingZ lab result) for context on the post.
+    score = models.JSONField(default=dict, blank=True)
     visibility = models.CharField(max_length=12, choices=VIS_CHOICES, default="public")
     skill_cost_cents = models.PositiveIntegerField(default=0)  # combined skill price of what's used
     created_at = models.DateTimeField(auto_now_add=True)
@@ -569,6 +573,57 @@ class PostJoin(models.Model):
 
     class Meta:
         unique_together = ("post", "ip")
+
+
+# Sharing another member's post rewards the sharer once, gated by a genuine dwell.
+SHARE_REWARD_ENERGY = 5
+SHARE_MIN_ACTIVE_SECONDS = 30           # must have genuinely viewed it
+SHARE_MAX_ACTIVE_SECONDS = 300          # 5 min — beyond this we don't require more
+
+
+class PostShare(models.Model):
+    """A member sharing someone else's post. One +5⚡ reward per user+post."""
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="shares")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="post_shares")
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    active_seconds = models.PositiveIntegerField(default=0)
+    rewarded = models.BooleanField(default=False)
+    shared_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("post", "user")
+
+
+class DailySubmission(models.Model):
+    """Counts scored/creator submissions per user per day, for tier daily caps
+    (Free 5 · Premium 15 · StatZ 50)."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="daily_submissions")
+    day = models.DateField()
+    count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        unique_together = ("user", "day")
+
+
+SUBMISSION_DAILY_CAP = {"free": 5, "premium": 15, "statz": 50}
+
+
+def submission_cap_for(user):
+    tier = membership_for(user).tier if user and user.is_authenticated else "free"
+    return SUBMISSION_DAILY_CAP.get(tier, SUBMISSION_DAILY_CAP["free"])
+
+
+def submissions_used_today(user):
+    row = DailySubmission.objects.filter(user=user, day=timezone.localdate()).first()
+    return row.count if row else 0
+
+
+def record_submission(user):
+    """Increment today's submission count; returns the new count."""
+    row, _ = DailySubmission.objects.get_or_create(user=user, day=timezone.localdate())
+    row.count = (row.count or 0) + 1
+    row.save(update_fields=["count"])
+    return row.count
 
 
 def award_spinaz(user, amount, note=""):
@@ -620,7 +675,10 @@ def notify(user, kind, text, actor=None, item_id=""):
 class Message(models.Model):
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="messages_sent")
     recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="messages_received")
-    body = models.TextField()
+    body = models.TextField(blank=True, default="")
+    # Optional recorded/uploaded audio or video attachment (a stored upload URL).
+    media_url = models.CharField(max_length=500, blank=True, default="")
+    media_type = models.CharField(max_length=60, blank=True, default="")  # MIME, e.g. audio/webm
     read = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
