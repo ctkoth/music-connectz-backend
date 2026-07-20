@@ -4,6 +4,7 @@ from .directz_app import DirectZWorksView, DirectZRateView
 from .postz import PostsView, PostJoinView
 from .notifications import NotificationsView
 from .moderation import ReportView, BlockView
+from .account import AccountExportView, AccountDeleteView
 from .merch import MerchBuyView, MerchDetailView, MerchView
 from .occ import OccChatView
 from .payments import (
@@ -88,6 +89,8 @@ urlpatterns = [
     path("notifications/", NotificationsView.as_view(), name="economy-notifications"),
     path("report/", ReportView.as_view(), name="economy-report"),
     path("block/", BlockView.as_view(), name="economy-block"),
+    path("account/export/", AccountExportView.as_view(), name="economy-account-export"),
+    path("account/delete/", AccountDeleteView.as_view(), name="economy-account-delete"),
     path("social/", SocialView.as_view(), name="economy-social"),
     path("social/react/", SocialView.as_view(), {"action": "react"}, name="economy-social-react"),
     path("social/comment/", SocialView.as_view(), {"action": "comment"}, name="economy-social-comment"),
