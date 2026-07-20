@@ -274,6 +274,32 @@ def _avatar_url(p, request):
         return None
 
 
+def _skill_years(start):
+    """Whole years from a YYYY-MM-DD skill start date to today, or None."""
+    import datetime
+    try:
+        y, m, d = (int(x) for x in str(start).split("-"))
+        today = datetime.date.today()
+        yrs = today.year - y - ((today.month, today.day) < (m, d))
+        return yrs if yrs >= 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def profile_max_experience(p):
+    """A member's greatest skill experience in years — max over every persona
+    skill's start date. Skills are `{name, start}` (back-compat: plain strings
+    have no date and don't count). None when nothing is dated."""
+    best = None
+    for persona in (p.personas or []):
+        for s in (persona.get("skills") or []):
+            start = s.get("start") if isinstance(s, dict) else None
+            yrs = _skill_years(start) if start else None
+            if yrs is not None and (best is None or yrs > best):
+                best = yrs
+    return best
+
+
 def _profile_card(p, request=None):
     """Compact card for search results."""
     m = getattr(p.user, "membership", None)
@@ -295,6 +321,7 @@ def _profile_card(p, request=None):
         "tier": m.tier if m else "free",
         "founding": bool(m and m.founding),
         "lifetime": bool(m and m.lifetime),
+        "experience_years": profile_max_experience(p),
         **follow_counts(p.user),
     }
 
@@ -581,6 +608,7 @@ class MembersView(APIView):
         # value for that metric) are excluded — the range "gates exclusive".
         age_min, age_max = num("age_min"), num("age_max")
         attr_min, attr_max = num("attr_min"), num("attr_max")
+        exp_min = num("exp_min")  # minimum years of skill experience
         max_km = num("max_km")  # distance range: within N km of the searcher
 
         me = profile_for(request.user)
@@ -608,6 +636,10 @@ class MembersView(APIView):
             if attr_min is not None or attr_max is not None:
                 a = attractiveness_median(p.user)
                 if a is None or (attr_min is not None and a < attr_min) or (attr_max is not None and a > attr_max):
+                    continue
+            if exp_min is not None:
+                exp = profile_max_experience(p)
+                if exp is None or exp < exp_min:
                     continue
             dist = None
             if origin[0] is not None and p.share_location and p.lat is not None:
