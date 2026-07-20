@@ -27,6 +27,20 @@ def limits_for(tier):
     return TIER_LIMITS.get(tier, TIER_LIMITS[TIER_FREE])
 
 
+# How long after posting a message/comment you can still edit it, by tier:
+# Free 6 min, Premium 60 min, StatZ 6 hours. (Owner/debug: no limit.)
+EDIT_WINDOW_SECONDS = {
+    TIER_FREE: 6 * 60,
+    TIER_PREMIUM: 60 * 60,
+    TIER_STATZ: 6 * 3600,
+    TIER_DEBUG: 10 ** 9,
+}
+
+
+def edit_window_for(tier):
+    return EDIT_WINDOW_SECONDS.get(tier, EDIT_WINDOW_SECONDS[TIER_FREE])
+
+
 # Royalty cashout tax by plan. Weekly is its own per-tier schedule
 # (Free 10% / Premium 5% / StatZ 3%) — matches the StatZ developer-tax rate.
 # The others are flat.

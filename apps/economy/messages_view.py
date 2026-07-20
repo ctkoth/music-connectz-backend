@@ -10,7 +10,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import limits_for
+from datetime import timedelta
+
+from django.utils import timezone
+
+from .catalog import limits_for, edit_window_for
 from .models import Message, blocked_user_ids, membership_for, notify
 
 User = get_user_model()
@@ -58,8 +62,23 @@ class MessagesView(APIView):
 
     def post(self, request):
         me = request.user
-        to = str((request.data or {}).get("to", "")).strip()
         body = str((request.data or {}).get("body", "")).strip()
+        # Edit an existing message (sender only, within the tier's edit window).
+        edit_id = (request.data or {}).get("edit_id")
+        if edit_id is not None:
+            m = Message.objects.filter(pk=edit_id, sender=me).first()
+            if not m:
+                return Response({"detail": "message not found"}, status=status.HTTP_404_NOT_FOUND)
+            window = edit_window_for(membership_for(me).tier)
+            if timezone.now() > m.created_at + timedelta(seconds=window):
+                return Response({"detail": "edit_window_passed", "window_seconds": window}, status=status.HTTP_403_FORBIDDEN)
+            if not body:
+                return Response({"detail": "body required"}, status=status.HTTP_400_BAD_REQUEST)
+            m.body = body[: limits_for(membership_for(me).tier)["char_limit"]]
+            m.save(update_fields=["body"])
+            return Response(_msg(m, me))
+
+        to = str((request.data or {}).get("to", "")).strip()
         if not to or not body:
             return Response({"detail": "to and body required"}, status=status.HTTP_400_BAD_REQUEST)
         other = User.objects.filter(username=to).first()
