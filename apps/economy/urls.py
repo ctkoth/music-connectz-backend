@@ -9,6 +9,7 @@ from .messages_view import MessagesView
 from .social_verify import SocialVerifyView
 from .parcel import ParcelCampaignView
 from .autotopup import AutoTopUpView, AutoTopUpCancelView
+from .identity import IdentityView
 from .collab import (
     CollabDealsView,
     CollabDetailView,
@@ -131,4 +132,5 @@ urlpatterns = [
     path("parcel/", ParcelCampaignView.as_view(), name="economy-parcel"),
     path("autotopup/", AutoTopUpView.as_view(), name="economy-autotopup"),
     path("autotopup/<int:pk>/cancel/", AutoTopUpCancelView.as_view(), name="economy-autotopup-cancel"),
+    path("identity/", IdentityView.as_view(), name="economy-identity"),
 ]

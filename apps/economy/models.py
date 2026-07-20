@@ -502,6 +502,11 @@ class Profile(models.Model):
     # Declared external-account followers (sum across connected socials) — feeds
     # the hourly energy rate alongside Music ConnectZ followers.
     external_followers = models.PositiveIntegerField(default=0)
+    # 18+ age verification (Stripe Identity). Set by the identity webhook once a
+    # government ID confirms the member is 18 or older — gates money betting +
+    # adult content. Never trust a self-reported birthday for this.
+    verified_18plus = models.BooleanField(default=False, db_index=True)
+    verified_18plus_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
 
