@@ -553,6 +553,71 @@ def can_view_post(post, user):
     return False  # private
 
 
+# ---- Notifications ----
+class Notification(models.Model):
+    """An in-app notification for `user`, optionally caused by `actor`."""
+    KIND_CHOICES = [
+        ("follow", "Follow"), ("rate", "Rating"), ("like", "Like"),
+        ("comment", "Comment"), ("join", "Restricted join"), ("pay", "Payment"),
+        ("system", "System"),
+    ]
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications")
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="notifications_sent")
+    kind = models.CharField(max_length=16, choices=KIND_CHOICES, default="system")
+    text = models.CharField(max_length=280)
+    item_id = models.CharField(max_length=160, blank=True, default="")  # deep-link target
+    read = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+
+def notify(user, kind, text, actor=None, item_id=""):
+    """Create a notification, skipping self-notifications and missing users."""
+    if not user or (actor and actor.id == user.id):
+        return None
+    return Notification.objects.create(user=user, actor=actor, kind=kind, text=text[:280], item_id=item_id or "")
+
+
+# ---- Moderation: report content + block users ----
+class Report(models.Model):
+    """A user report on any item (post, profile, comment…). Owner reviews these."""
+    REASONS = [
+        ("spam", "Spam"), ("harassment", "Harassment"), ("hate", "Hate/abuse"),
+        ("nsfw", "Adult/NSFW"), ("stolen", "Stolen content"), ("other", "Other"),
+    ]
+    reporter = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="reports_made")
+    item_id = models.CharField(max_length=160, db_index=True)
+    reason = models.CharField(max_length=16, choices=REASONS, default="other")
+    note = models.CharField(max_length=280, blank=True, default="")
+    resolved = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        unique_together = ("reporter", "item_id")
+
+
+class Block(models.Model):
+    """`blocker` has blocked `blocked` — they can't follow/appear to each other."""
+    blocker = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="blocking_set")
+    blocked = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="blocked_by_set")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("blocker", "blocked")
+
+
+def blocked_user_ids(user):
+    """IDs the user has blocked OR been blocked by — hide both directions."""
+    if not user or not user.is_authenticated:
+        return set()
+    out = set(Block.objects.filter(blocker=user).values_list("blocked_id", flat=True))
+    out |= set(Block.objects.filter(blocked=user).values_list("blocker_id", flat=True))
+    return out
+
+
 # ---- Social graph: follow / friends / fans ----
 class Follow(models.Model):
     """follower → following. Mutual follows are friends; a one-way follower is
