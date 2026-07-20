@@ -216,6 +216,12 @@ OWNER_EMAILS = [
     for e in os.environ.get("OWNER_EMAILS", "ctkoth@gmail.com").split(",")
     if e.strip()
 ]
+# Also match owner by username (covers a mismatched account email).
+OWNER_USERNAMES = [
+    u.strip()
+    for u in os.environ.get("OWNER_USERNAMES", "K-Oth").split(",")
+    if u.strip()
+]
 
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")

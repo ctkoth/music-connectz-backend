@@ -39,26 +39,32 @@ def is_owner(user):
     return bool(user and (user.is_superuser or user.is_staff))
 
 
-def ensure_owner(user):
-    """Bootstrap the platform owner by email (settings.OWNER_EMAILS). On first
-    detection we promote the account to staff+superuser and, if it's still on
-    the Free default, set StatZ — then it's freely modifiable afterward."""
+def is_owner_candidate(user):
+    """True if this account is a configured owner (by email OR username)."""
     from django.conf import settings
-    from .models import TIER_FREE
+    if not user:
+        return False
+    emails = [e.lower() for e in (getattr(settings, "OWNER_EMAILS", []) or [])]
+    usernames = [u.lower() for u in (getattr(settings, "OWNER_USERNAMES", []) or [])]
+    return (user.email and user.email.lower() in emails) or (user.username and user.username.lower() in usernames)
+
+
+def ensure_owner(user):
+    """Bootstrap the platform owner by email/username (settings.OWNER_EMAILS /
+    OWNER_USERNAMES). Promotes the account to staff+superuser and keeps it at
+    StatZ (bumping Free/Premium), never overriding a deliberate Debug switch."""
     from .models import TIER_FREE, TIER_PREMIUM
-    emails = getattr(settings, "OWNER_EMAILS", []) or []
-    if not user or not user.email or user.email.lower() not in emails:
+    if not is_owner_candidate(user):
         return
     if not (user.is_staff and user.is_superuser):
         user.is_staff = True
         user.is_superuser = True
         user.save(update_fields=["is_staff", "is_superuser"])
-    # Owner sits at StatZ by default. Bump from Free/Premium; never override a
-    # deliberate switch into Debug (owner god-mode), which is still theirs to pick.
     m = membership_for(user)
     if m.tier in (TIER_FREE, TIER_PREMIUM):
         m.tier = TIER_STATZ
         m.save(update_fields=["tier", "updated_at"])
+    return m
 
 
 class StatsView(APIView):
@@ -139,8 +145,9 @@ class MembershipView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        ensure_owner(request.user)  # self-heal owner promotion on any membership load
         m = membership_for(request.user)
-        return Response({"tier": m.tier, "dev_tax_rate": m.dev_tax_rate, "rates": DEV_TAX, "lifetime": m.lifetime, "founding": m.founding})
+        return Response({"tier": m.tier, "dev_tax_rate": m.dev_tax_rate, "rates": DEV_TAX, "lifetime": m.lifetime, "founding": m.founding, "is_owner": is_owner(request.user)})
 
     def post(self, request):
         tier = str(request.data.get("tier", "")).lower()
@@ -152,6 +159,20 @@ class MembershipView(APIView):
         m.tier = tier
         m.save(update_fields=["tier", "updated_at"])
         return Response({"tier": m.tier, "dev_tax_rate": m.dev_tax_rate})
+
+
+class OwnerClaimView(APIView):
+    """Self-serve owner promotion — succeeds only if the caller matches the
+    configured OWNER_EMAILS / OWNER_USERNAMES. Idempotent fallback if the
+    automatic bootstrap was missed."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not is_owner_candidate(request.user):
+            return Response({"detail": "This account isn't a configured owner."}, status=status.HTTP_403_FORBIDDEN)
+        m = ensure_owner(request.user)
+        return Response({"promoted": True, "tier": m.tier, "is_owner": is_owner(request.user)})
 
 
 class AIChargeView(APIView):
