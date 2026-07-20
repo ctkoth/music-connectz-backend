@@ -2,6 +2,7 @@ from django.urls import path
 
 from .directz_app import DirectZWorksView, DirectZRateView
 from .postz import PostsView, PostJoinView
+from .notifications import NotificationsView
 from .merch import MerchBuyView, MerchDetailView, MerchView
 from .occ import OccChatView
 from .payments import (
@@ -83,6 +84,7 @@ urlpatterns = [
     path("profile/rate/", ProfileRateView.as_view(), name="economy-profile-rate"),
     path("profile/location/", ProfileLocationView.as_view(), name="economy-profile-location"),
     path("follow/", FollowView.as_view(), name="economy-follow"),
+    path("notifications/", NotificationsView.as_view(), name="economy-notifications"),
     path("social/", SocialView.as_view(), name="economy-social"),
     path("social/react/", SocialView.as_view(), {"action": "react"}, name="economy-social-react"),
     path("social/comment/", SocialView.as_view(), {"action": "comment"}, name="economy-social-comment"),

@@ -21,6 +21,7 @@ from .models import (
     award_spinaz,
     can_view_post,
     item_rating_median,
+    notify,
     wallet_for,
 )
 
@@ -163,4 +164,5 @@ class PostJoinView(APIView):
             join.rewarded = True
             join.save(update_fields=["rewarded"])
             rewarded = True
+            notify(p.author, "join", f"@{request.user.username} joined '{p.title}' — you earned {RESTRICTED_JOIN_REWARD_SPINAZ} SpinAZ 🛑", actor=request.user, item_id=f"post:{p.id}")
         return Response({"joined": True, "rewarded": rewarded, "reward_spinaz": RESTRICTED_JOIN_REWARD_SPINAZ if rewarded else 0, "joins": p.joins.count()})

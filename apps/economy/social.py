@@ -36,6 +36,8 @@ from .models import (
     follow_counts,
     relationship,
     energy_rate_per_hour,
+    notify,
+    Post,
     wallet_for,
 )
 from .serializers import WalletSerializer
@@ -341,6 +343,16 @@ class SocialView(APIView):
             return Response({"detail": "item required"}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self._payload(item, request))
 
+    def _notify_target(self, item, kind, text, actor):
+        """If the item is a post, tell its author about the interaction."""
+        if not item.startswith("post:"):
+            return
+        try:
+            post = Post.objects.select_related("author").get(pk=int(item.split(":", 1)[1]))
+        except (ValueError, Post.DoesNotExist):
+            return
+        notify(post.author, kind, text, actor=actor, item_id=item)
+
     def post(self, request, action=None):
         item = str((request.data or {}).get("item", "")).strip()[:160]
         if not item:
@@ -355,11 +367,14 @@ class SocialView(APIView):
                 Reaction.objects.filter(user=request.user, item_id=item).delete()
             else:
                 Reaction.objects.update_or_create(user=request.user, item_id=item, defaults={"value": value})
+                if value == 1:
+                    self._notify_target(item, "like", f"@{request.user.username} liked your post 👍", request.user)
         elif action == "comment":
             body = str((request.data or {}).get("body", "")).strip()[:500]
             if not body:
                 return Response({"detail": "body required"}, status=status.HTTP_400_BAD_REQUEST)
             SocialComment.objects.create(user=request.user, item_id=item, body=body)
+            self._notify_target(item, "comment", f"@{request.user.username} commented on your post 💬", request.user)
         elif action == "rate":
             try:
                 score = int((request.data or {}).get("score", 0))
@@ -369,6 +384,7 @@ class SocialView(APIView):
                 ItemRating.objects.filter(user=request.user, item_id=item).delete()
             elif 1 <= score <= 10:
                 ItemRating.objects.update_or_create(user=request.user, item_id=item, defaults={"score": score})
+                self._notify_target(item, "rate", f"@{request.user.username} rated your post {score}/10 ⭐", request.user)
             else:
                 return Response({"detail": "score must be 1-10 (or 0 to clear)"}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self._payload(item, request))
@@ -465,7 +481,12 @@ class FollowView(APIView):
         if action == "unfollow":
             Follow.objects.filter(follower=request.user, following=target).delete()
         else:
-            Follow.objects.get_or_create(follower=request.user, following=target)
+            _, created = Follow.objects.get_or_create(follower=request.user, following=target)
+            if created:
+                mutual = Follow.objects.filter(follower=target, following=request.user).exists()
+                notify(target, "follow",
+                       f"@{request.user.username} {'is now your friend 🤝' if mutual else 'followed you'}",
+                       actor=request.user, item_id=f"profile:{request.user.username}")
         return Response({"username": target.username, **follow_counts(target), "relationship": relationship(request.user, target)})
 
 
