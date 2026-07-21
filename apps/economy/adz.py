@@ -55,7 +55,13 @@ class AdzView(APIView):
 
     def get(self, request):
         ads = [_ad_dict(c, request) for c in Commercial.objects.filter(active=True).select_related("owner")[:100]]
-        out = {"ads": ads}
+        mine = AdView.objects.filter(user=request.user, rewarded=True)
+        today = timezone.localdate()
+        out = {
+            "ads": ads,
+            "earned": sum(v.reward_spinaz for v in mine.only("reward_spinaz")),  # total SpinAZ earned watching ads
+            "earned_today": sum(v.reward_spinaz for v in mine.filter(day=today).only("reward_spinaz")),
+        }
         if is_owner(request.user):
             rewarded = AdView.objects.filter(rewarded=True)
             out["owner"] = {
