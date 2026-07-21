@@ -147,3 +147,109 @@ def verify_apple(id_token: str):
         "name": "",
         "avatar_url": "",
     }
+
+
+# ------------------------------------------------- Generic OAuth2 (code) ----
+# Standard "authorization code" providers that all follow the same shape:
+# swap the `code` for an access token at token_url, then load the profile from
+# userinfo_url. Per-provider quirks (Basic vs body client auth, client_key
+# naming, response field mapping) live in this registry. Public client IDs come
+# from <PREFIX>_OAUTH_CLIENT_ID and secrets from <PREFIX>_OAUTH_CLIENT_SECRET,
+# so a provider stays cleanly "not configured" (fail-closed) until both are set.
+def _first_image(u):
+    imgs = u.get("images") or []
+    return (imgs[0] or {}).get("url", "") if imgs else ""
+
+
+OAUTH2_PROVIDERS = {
+    "spotify": {
+        "token_url": "https://accounts.spotify.com/api/token",
+        "userinfo_url": "https://api.spotify.com/v1/me",
+        "basic_auth": True,  # client creds go in an HTTP Basic header
+        "map": lambda u: {"uid": str(u.get("id")), "email": (u.get("email") or ""),
+                          "name": u.get("display_name") or "", "avatar_url": _first_image(u)},
+    },
+    "microsoft": {
+        "token_url": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+        "userinfo_url": "https://graph.microsoft.com/v1.0/me",
+        "map": lambda u: {"uid": str(u.get("id")),
+                          "email": (u.get("mail") or u.get("userPrincipalName") or ""),
+                          "name": u.get("displayName") or "", "avatar_url": ""},
+    },
+    "facebook": {
+        "token_url": "https://graph.facebook.com/v18.0/oauth/access_token",
+        "userinfo_url": "https://graph.facebook.com/me?fields=id,name,email,picture.type(large)",
+        "map": lambda u: {"uid": str(u.get("id")), "email": (u.get("email") or ""),
+                          "name": u.get("name") or "",
+                          "avatar_url": (((u.get("picture") or {}).get("data")) or {}).get("url", "")},
+    },
+    "soundcloud": {
+        "token_url": "https://secure.soundcloud.com/oauth/token",
+        "userinfo_url": "https://api.soundcloud.com/me",
+        "map": lambda u: {"uid": str(u.get("id") or u.get("urn") or ""),
+                          "email": (u.get("email") or ""),
+                          "name": u.get("username") or u.get("full_name") or "",
+                          "avatar_url": u.get("avatar_url") or ""},
+    },
+    "twitter": {
+        "token_url": "https://api.twitter.com/2/oauth2/token",
+        "userinfo_url": "https://api.twitter.com/2/users/me?user.fields=profile_image_url",
+        "basic_auth": True,  # confidential client authenticates with Basic + PKCE verifier
+        "map": lambda u: (lambda d: {"uid": str(d.get("id")), "email": "",
+                                     "name": d.get("name") or d.get("username") or "",
+                                     "avatar_url": d.get("profile_image_url") or ""})(u.get("data") or u),
+    },
+}
+
+
+def exchange_oauth2(provider: str, code: str, redirect_uri: str = "", code_verifier: str = ""):
+    """Swap an authorization `code` for an access token, then load + normalize
+    the member's profile. Used for every standard code-flow provider."""
+    cfg = OAUTH2_PROVIDERS.get(provider)
+    if not cfg:
+        raise OAuthError(f"Unsupported provider '{provider}'.")
+    if not code:
+        raise OAuthError(f"Missing {provider} code.")
+    client_id = _env(f"{provider.upper()}_OAUTH_CLIENT_ID")
+    client_secret = _env(f"{provider.upper()}_OAUTH_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        raise OAuthError(f"{provider.title()} sign-in is not configured on the server.")
+
+    body = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "client_id": client_id,
+    }
+    if code_verifier:
+        body["code_verifier"] = code_verifier
+    headers = {"Accept": "application/json"}
+    auth = None
+    if cfg.get("basic_auth"):
+        auth = (client_id, client_secret)  # HTTP Basic
+    else:
+        body["client_secret"] = client_secret
+
+    try:
+        token_resp = requests.post(cfg["token_url"], data=body, headers=headers, auth=auth, timeout=10)
+        token = (token_resp.json() or {}).get("access_token")
+    except requests.RequestException:
+        raise OAuthError(f"Could not reach {provider.title()} to verify sign-in.")
+    except ValueError:
+        raise OAuthError(f"{provider.title()} returned an unexpected token response.")
+    if not token:
+        raise OAuthError(f"{provider.title()} did not return an access token.")
+
+    try:
+        profile = requests.get(
+            cfg["userinfo_url"], headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=10
+        ).json()
+    except (requests.RequestException, ValueError):
+        raise OAuthError(f"Could not load your {provider.title()} profile.")
+
+    info = cfg["map"](profile or {})
+    if not info.get("uid"):
+        raise OAuthError(f"{provider.title()} did not return a user id.")
+    info["provider"] = provider
+    info["email"] = (info.get("email") or "").lower()
+    return info

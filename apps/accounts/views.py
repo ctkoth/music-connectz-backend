@@ -7,7 +7,14 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import OAuthIdentity, Profile
-from .oauth import OAuthError, exchange_github, verify_apple, verify_google
+from .oauth import (
+    OAUTH2_PROVIDERS,
+    OAuthError,
+    exchange_github,
+    exchange_oauth2,
+    verify_apple,
+    verify_google,
+)
 from .serializers import (
     LoginSerializer,
     PublicUserSerializer,
@@ -115,6 +122,13 @@ class OAuthLoginView(APIView):
                 )
             elif provider == "apple":
                 info = verify_apple(data.get("id_token") or data.get("credential"))
+            elif provider in OAUTH2_PROVIDERS:
+                info = exchange_oauth2(
+                    provider,
+                    data.get("code"),
+                    data.get("redirect_uri", ""),
+                    data.get("code_verifier", ""),
+                )
             else:
                 return Response(
                     {"detail": f"Unsupported provider '{provider}'."},
@@ -132,14 +146,24 @@ class OAuthConfigView(APIView):
     """GET /api/auth/oauth-config/ — the PUBLIC OAuth client IDs the backend is
     configured with, so the login buttons can read them at runtime instead of
     relying on build-time VITE_* vars. Client IDs are public; secrets stay here.
-    Only the providers the backend fully supports (google/github/apple)."""
+    Covers every provider the backend can complete a sign-in for — the id_token
+    verifiers (google/apple), GitHub, and the generic code-flow providers
+    (spotify/microsoft/facebook/soundcloud/twitter)."""
 
     permission_classes = [AllowAny]
 
     def get(self, request):
+        import os
+
         from django.conf import settings
-        return Response({
+
+        cfg = {
             "google": getattr(settings, "GOOGLE_OAUTH_CLIENT_ID", "") or "",
             "github": getattr(settings, "GITHUB_OAUTH_CLIENT_ID", "") or "",
             "apple": getattr(settings, "APPLE_OAUTH_CLIENT_ID", "") or "",
-        })
+        }
+        # Generic code-flow providers advertise their PUBLIC client id from env;
+        # a provider stays hidden/disabled on the client until its id is present.
+        for provider in OAUTH2_PROVIDERS:
+            cfg[provider] = os.environ.get(f"{provider.upper()}_OAUTH_CLIENT_ID", "").strip()
+        return Response(cfg)
