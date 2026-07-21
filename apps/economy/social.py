@@ -364,14 +364,18 @@ class SocialView(APIView):
         downs = Reaction.objects.filter(item_id=item, value=-1).count()
         mine = Reaction.objects.filter(item_id=item, user=request.user).first()
         comments = [
-            {"id": c.id, "user": c.user.username, "body": c.body, "at": c.created_at.isoformat()}
+            {"id": c.id, "user": c.user.username, "body": c.body, "at": c.created_at.isoformat(),
+             "edited_at": c.edited_at.isoformat() if c.edited_at else None, "edit_history": c.edit_history or []}
             for c in SocialComment.objects.filter(item_id=item).select_related("user")[:100]
         ]
-        my_rating = ItemRating.objects.filter(user=request.user, item_id=item).values_list("score", flat=True).first()
+        my_r = ItemRating.objects.filter(user=request.user, item_id=item).first()
         return {
             "item": item, "up": ups, "down": downs, "my": mine.value if mine else 0, "comments": comments,
-            "rating": item_rating_median(item), "my_rating": my_rating,
+            "rating": item_rating_median(item), "my_rating": my_r.score if my_r else None,
             "rating_count": ItemRating.objects.filter(item_id=item).count(),
+            "my_rating_at": my_r.created_at.isoformat() if (my_r and my_r.created_at) else None,
+            "my_rating_edited_at": my_r.edited_at.isoformat() if (my_r and my_r.edited_at) else None,
+            "my_rating_history": (my_r.edit_history or []) if my_r else [],
         }
 
     def get(self, request):
@@ -422,8 +426,10 @@ class SocialView(APIView):
                     return Response({"detail": "edit_window_passed", "window_seconds": window}, status=status.HTTP_403_FORBIDDEN)
                 if not body:
                     return Response({"detail": "body required"}, status=status.HTTP_400_BAD_REQUEST)
+                c.edit_history = (c.edit_history or []) + [{"body": c.body, "at": timezone.now().isoformat()}]
                 c.body = body
-                c.save(update_fields=["body"])
+                c.edited_at = timezone.now()
+                c.save(update_fields=["body", "edit_history", "edited_at"])
                 return Response(self._payload(item, request))
             if not body:
                 return Response({"detail": "body required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -437,8 +443,24 @@ class SocialView(APIView):
             if score == 0:
                 ItemRating.objects.filter(user=request.user, item_id=item).delete()
             elif 1 <= score <= 10:
-                ItemRating.objects.update_or_create(user=request.user, item_id=item, defaults={"score": score})
-                self._notify_target(item, "rate", f"@{request.user.username} rated your post {score}/10 ⭐", request.user)
+                existing = ItemRating.objects.filter(user=request.user, item_id=item).first()
+                if existing is None:
+                    ItemRating.objects.create(user=request.user, item_id=item, score=score)
+                    self._notify_target(item, "rate", f"@{request.user.username} rated your post {score}/10 ⭐", request.user)
+                else:
+                    # Changing your rating is an edit — only within the tier's window.
+                    from datetime import timedelta
+                    from django.utils import timezone
+                    from .catalog import edit_window_for
+                    window = edit_window_for(membership_for(request.user).tier)
+                    anchor = existing.created_at or existing.updated_at
+                    if anchor and timezone.now() > anchor + timedelta(seconds=window):
+                        return Response({"detail": "edit_window_passed", "window_seconds": window}, status=status.HTTP_403_FORBIDDEN)
+                    if existing.score != score:
+                        existing.edit_history = (existing.edit_history or []) + [{"score": existing.score, "at": timezone.now().isoformat()}]
+                        existing.score = score
+                        existing.edited_at = timezone.now()
+                        existing.save(update_fields=["score", "edit_history", "edited_at"])
             else:
                 return Response({"detail": "score must be 1-10 (or 0 to clear)"}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self._payload(item, request))

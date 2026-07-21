@@ -563,6 +563,8 @@ class Post(models.Model):
     visibility = models.CharField(max_length=12, choices=VIS_CHOICES, default="public")
     skill_cost_cents = models.PositiveIntegerField(default=0)  # combined skill price of what's used
     created_at = models.DateTimeField(auto_now_add=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
+    edit_history = models.JSONField(default=list, blank=True)  # [{title, description, at}] prior versions
 
     class Meta:
         ordering = ("-created_at",)
@@ -721,6 +723,8 @@ class Message(models.Model):
     media_type = models.CharField(max_length=60, blank=True, default="")  # MIME, e.g. audio/webm
     read = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
+    edit_history = models.JSONField(default=list, blank=True)  # [{body, at}] prior versions
 
     class Meta:
         ordering = ("created_at",)
@@ -956,7 +960,10 @@ class ItemRating(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="item_ratings")
     item_id = models.CharField(max_length=160, db_index=True)
     score = models.PositiveSmallIntegerField()  # 1-10
+    created_at = models.DateTimeField(auto_now_add=True, null=True)  # window anchor
     updated_at = models.DateTimeField(auto_now=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
+    edit_history = models.JSONField(default=list, blank=True)  # [{score, at}] prior scores
 
     class Meta:
         unique_together = ("user", "item_id")
@@ -971,6 +978,8 @@ class SocialComment(models.Model):
     item_id = models.CharField(max_length=160, db_index=True)
     body = models.CharField(max_length=500)
     created_at = models.DateTimeField(auto_now_add=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
+    edit_history = models.JSONField(default=list, blank=True)  # [{body, at}] prior versions
 
     class Meta:
         ordering = ["-created_at"]

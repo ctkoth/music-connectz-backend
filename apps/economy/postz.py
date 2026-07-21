@@ -96,6 +96,8 @@ def _post_dict(p, request, up=0, down=0):
         "up": up, "down": down, "vibe": vibe, "flagged": flagged,
         "rating": item_rating_median(f"post:{p.id}"),
         "created_at": p.created_at.isoformat(),
+        "edited_at": p.edited_at.isoformat() if p.edited_at else None,
+        "edit_history": p.edit_history or [],
     }
 
 
@@ -146,6 +148,10 @@ class PostsView(APIView):
 
     def post(self, request):
         d = request.data
+        # Edit an existing post (author only, within the tier's edit window).
+        edit_id = d.get("edit_id")
+        if edit_id is not None:
+            return self._edit(request, edit_id, d)
         title = str(d.get("title", "")).strip()[:160]
         if not title:
             return Response({"detail": "title required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -198,6 +204,27 @@ class PostsView(APIView):
         if is_submission:
             record_submission(request.user)
         return Response({**_post_dict(p, request), "energy_charged": charged, "energy": w.energy}, status=status.HTTP_201_CREATED)
+
+    def _edit(self, request, edit_id, d):
+        """Edit your own post's title/description within the tier's edit window."""
+        from .catalog import edit_window_for
+        from .models import membership_for
+        p = Post.objects.filter(pk=edit_id, author=request.user).first()
+        if not p:
+            return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+        window = edit_window_for(membership_for(request.user).tier)
+        if timezone.now() > p.created_at + timedelta(seconds=window):
+            return Response({"detail": "edit_window_passed", "window_seconds": window}, status=status.HTTP_403_FORBIDDEN)
+        title = str(d.get("title", p.title)).strip()[:160] or p.title
+        description = str(d.get("description", p.description))[:4000]
+        if title == p.title and description == p.description:
+            return Response(_post_dict(p, request))
+        p.edit_history = (p.edit_history or []) + [{"title": p.title, "description": p.description, "at": timezone.now().isoformat()}]
+        p.title = title
+        p.description = description
+        p.edited_at = timezone.now()
+        p.save(update_fields=["title", "description", "edit_history", "edited_at"])
+        return Response(_post_dict(p, request))
 
 
 class PostJoinView(APIView):
