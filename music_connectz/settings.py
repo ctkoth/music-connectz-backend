@@ -204,6 +204,10 @@ GITHUB_OAUTH_CLIENT_ID = os.environ.get("GITHUB_OAUTH_CLIENT_ID", "")
 GITHUB_OAUTH_CLIENT_SECRET = os.environ.get("GITHUB_OAUTH_CLIENT_SECRET", "")
 APPLE_OAUTH_CLIENT_ID = os.environ.get("APPLE_OAUTH_CLIENT_ID", "")
 
+# Google Gemini — powers Image ConnectZ (image gen) + Video ConnectZ (Veo).
+# Set GEMINI_API_KEY on Render; endpoints 503 cleanly until then.
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
 # Payments (wallet funding). Each provider activates only when its keys are set;
 # otherwise the checkout endpoints report it as unavailable and the client hides
 # the button. Where the frontend lives, for building return URLs.

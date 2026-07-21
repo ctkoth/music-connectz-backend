@@ -14,9 +14,10 @@ from .catalog import ai_cost
 from .models import charge_ai_usage, can_afford_ai, wallet_for
 from .views import is_owner, platform_owner
 
-# House model that powers every OCC voice. The "voice" only shapes the system
-# prompt/tone (and the per-message price) — the underlying model is the same.
+# House model per OCC voice. The "voice" shapes the system prompt/tone + price;
+# Corey GPT runs on Fable 5, the other voices on flagship Opus 4.8.
 OCC_LLM_MODEL = "claude-opus-4-8"
+MODEL_BY_VOICE = {"corey-gpt": "claude-fable-5"}
 
 COREY_VOICE = (
     "You are OCC (Ocular Code ConnectZ) speaking as Corey / K-Oth — the founder voice of "
@@ -159,7 +160,7 @@ class OccChatView(APIView):
         try:
             client = anthropic.Anthropic()
             resp = client.messages.create(
-                model=OCC_LLM_MODEL,   # claude-opus-4-8 — flagship Opus powers every OCC voice
+                model=MODEL_BY_VOICE.get(model_voice, OCC_LLM_MODEL),  # Corey → Fable 5, others → Opus 4.8
                 max_tokens=3072,       # fuller Corey answers (was 1024)
                 system=system,
                 messages=messages,
