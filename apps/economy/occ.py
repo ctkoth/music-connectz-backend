@@ -19,6 +19,23 @@ from .views import is_owner, platform_owner
 OCC_LLM_MODEL = "claude-opus-4-8"
 MODEL_BY_VOICE = {"corey-gpt": "claude-fable-5"}
 
+
+def _create_with_fallback(client, primary, fallback, **kwargs):
+    """Generate with `primary`, but if that model isn't available on this
+    account/region fall back to `fallback` — so Corey speaks in Fable when it's
+    there and only drops to Opus if it isn't. Only availability errors trigger
+    the retry; auth / rate-limit / billing errors propagate unchanged."""
+    try:
+        return client.messages.create(model=primary, **kwargs)
+    except Exception as exc:
+        msg = str(exc).lower()
+        unavailable = "404" in msg or "not_found" in msg or (
+            "model" in msg and any(w in msg for w in ("not found", "does not exist", "unavailable", "not available", "invalid"))
+        )
+        if primary != fallback and unavailable:
+            return client.messages.create(model=fallback, **kwargs)
+        raise
+
 COREY_VOICE = (
     "You are OCC (Ocular Code ConnectZ) speaking as Corey / K-Oth — the founder voice of "
     "Music ConnectZ.\n\n"
@@ -159,8 +176,9 @@ class OccChatView(APIView):
 
         try:
             client = anthropic.Anthropic()
-            resp = client.messages.create(
-                model=MODEL_BY_VOICE.get(model_voice, OCC_LLM_MODEL),  # Corey → Fable 5, others → Opus 4.8
+            primary = MODEL_BY_VOICE.get(model_voice, OCC_LLM_MODEL)  # Corey → Fable 5, others → Opus 4.8
+            resp = _create_with_fallback(
+                client, primary, OCC_LLM_MODEL,  # Corey speaks in Fable when available, Opus only if not
                 max_tokens=3072,       # fuller Corey answers (was 1024)
                 system=system,
                 messages=messages,
