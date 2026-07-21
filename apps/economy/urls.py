@@ -4,6 +4,7 @@ from .directz_app import DirectZWorksView, DirectZRateView
 from .postz import PostsView, PostJoinView, PostShareView, SubmissionsView
 from .links import LinkClickView, LinkTalliesView
 from .distributez import TranscodeView, LyricsView
+from .adz import AdzView, AdDetailView, AdRewardView
 from .notifications import NotificationsView
 from .moderation import ReportView, BlockView
 from .account import AccountExportView, AccountDeleteView
@@ -125,6 +126,9 @@ urlpatterns = [
     path("link/tallies/", LinkTalliesView.as_view(), name="economy-link-tallies"),
     path("distributez/transcode/", TranscodeView.as_view(), name="economy-distributez-transcode"),
     path("distributez/lyrics/", LyricsView.as_view(), name="economy-distributez-lyrics"),
+    path("adz/", AdzView.as_view(), name="economy-adz"),
+    path("adz/<int:pk>/", AdDetailView.as_view(), name="economy-adz-detail"),
+    path("adz/<int:pk>/reward/", AdRewardView.as_view(), name="economy-adz-reward"),
     path("directz/", DirectZWorksView.as_view(), name="economy-directz"),
     path("directz/<int:pk>/rate/", DirectZRateView.as_view(), name="economy-directz-rate"),
     path("merch/", MerchView.as_view(), name="economy-merch"),
