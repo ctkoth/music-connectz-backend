@@ -12,7 +12,9 @@ from rest_framework.views import APIView
 from .models import (
     DirectZWork,
     DirectZRating,
+    DIRECTZ_BANDS,
     directz_ai_rating,
+    directz_band_for,
     directz_display_rating,
     membership_for,
 )
@@ -33,6 +35,8 @@ def _work_dict(w, request):
         "title": w.title,
         "description": w.description,
         "duration_sec": w.duration_sec,
+        "media_url": w.media_url,
+        "media_type": w.media_type,
         "contributors": w.contributors,
         "created_at": w.created_at.isoformat(),
         "my_rating": my,
@@ -59,6 +63,18 @@ class DirectZWorksView(APIView):
         title = str(d.get("title", "")).strip()[:160]
         if not title:
             return Response({"detail": "title required"}, status=status.HTTP_400_BAD_REQUEST)
+        duration_sec = int(d.get("duration_sec") or 0)
+        # Time-gate: a given category only accepts videos within its length band.
+        if duration_sec > 0:
+            lo, hi = DIRECTZ_BANDS.get(fmt, (0, 10 ** 9))
+            if not (lo <= duration_sec <= hi):
+                fits = directz_band_for(duration_sec)
+                return Response(
+                    {"detail": f"That length doesn't fit {fmt}. "
+                               + (f"It fits {fits}." if fits else "It's outside all DirectZ length bands (30s–3h)."),
+                     "code": "duration_out_of_band", "fmt": fmt, "fits": fits, "duration_sec": duration_sec},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         contributors = d.get("contributors") or []
         payload = {
             "fmt": fmt,
@@ -66,7 +82,9 @@ class DirectZWorksView(APIView):
             "mood": str(d.get("mood", ""))[:32],
             "title": title,
             "description": str(d.get("description", ""))[:4000],
-            "duration_sec": int(d.get("duration_sec") or 0),
+            "duration_sec": duration_sec,
+            "media_url": str(d.get("media_url", "")).strip()[:500],
+            "media_type": str(d.get("media_type", "")).strip()[:60],
             "contributors": contributors,
         }
         w = DirectZWork.objects.create(owner=request.user, ai_rating=directz_ai_rating(payload), **payload)

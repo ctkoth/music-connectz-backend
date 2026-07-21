@@ -883,6 +883,8 @@ class DirectZWork(models.Model):
     title = models.CharField(max_length=160)
     description = models.TextField(blank=True, default="")
     duration_sec = models.PositiveIntegerField(default=0)
+    media_url = models.CharField(max_length=500, blank=True, default="")   # uploaded video
+    media_type = models.CharField(max_length=60, blank=True, default="")
     contributors = models.JSONField(default=list, blank=True)  # [{name, tier, skills:[{name, price}]}]
     ai_rating = models.FloatField(default=0)                    # 0-10 AI seed
     created_at = models.DateTimeField(auto_now_add=True)
@@ -905,6 +907,17 @@ class DirectZRating(models.Model):
 # before that the AI seed stands.
 DIRECTZ_MIN_RATERS = 3
 
+# Length bands per category (seconds): ReelZ 30s–30m · EpisodeZ 30–60m · MovieZ 1–3h.
+DIRECTZ_BANDS = {"reelz": (30, 1800), "episodez": (1800, 3600), "moviez": (3600, 10800)}
+
+
+def directz_band_for(sec):
+    """Which format a given duration (seconds) fits, or None if out of all bands."""
+    for fmt, (lo, hi) in DIRECTZ_BANDS.items():
+        if lo <= sec <= hi:
+            return fmt
+    return None
+
 
 def directz_ai_rating(work):
     """A deterministic AI craft estimate (0-10) from how complete & staffed the
@@ -918,8 +931,7 @@ def directz_ai_rating(work):
     n_skills = sum(len(c.get("skills") or []) for c in contribs)
     worth = sum((float(s.get("price") or 0) for c in contribs for s in (c.get("skills") or [])))
     # Duration-fit: does the length match the format band?
-    bands = {"reelz": (30, 1800), "episodez": (1800, 3600), "moviez": (3600, 10800)}
-    lo, hi = bands.get(fmt, (0, 10 ** 9))
+    lo, hi = DIRECTZ_BANDS.get(fmt, (0, 10 ** 9))
     fit = 1.0 if (dur and lo <= dur <= hi) else 0.4
     score = (
         3.0
