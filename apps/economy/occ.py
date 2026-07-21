@@ -159,8 +159,8 @@ class OccChatView(APIView):
         try:
             client = anthropic.Anthropic()
             resp = client.messages.create(
-                model=OCC_LLM_MODEL,
-                max_tokens=1024,
+                model=OCC_LLM_MODEL,   # claude-opus-4-8 — flagship Opus powers every OCC voice
+                max_tokens=3072,       # fuller Corey answers (was 1024)
                 system=system,
                 messages=messages,
             )
