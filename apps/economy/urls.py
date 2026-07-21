@@ -6,6 +6,7 @@ from .links import LinkClickView, LinkTalliesView
 from .distributez import TranscodeView, LyricsView
 from .adz import AdzView, AdDetailView, AdRewardView
 from .translate import TranslateView
+from .gemini import GeminiImageView, GeminiVideoView, GeminiVideoStatusView
 from .notifications import NotificationsView
 from .moderation import ReportView, BlockView
 from .account import AccountExportView, AccountDeleteView
@@ -81,6 +82,9 @@ urlpatterns = [
     path("promptz/buy/", PromptzBuyView.as_view(), name="economy-promptz-buy"),
     path("ai/occ/", OccChatView.as_view(), name="economy-ai-occ"),
     path("translate/", TranslateView.as_view(), name="economy-translate"),
+    path("gemini/image/", GeminiImageView.as_view(), name="economy-gemini-image"),
+    path("gemini/video/", GeminiVideoView.as_view(), name="economy-gemini-video"),
+    path("gemini/video/status/", GeminiVideoStatusView.as_view(), name="economy-gemini-video-status"),
     path("specz/", SpecZView.as_view(), name="economy-specz"),
     path("specz/buy/", SpecZView.as_view(), name="economy-specz-buy"),
     path("royalties/", RoyaltiesView.as_view(), name="economy-royalties"),
