@@ -15,7 +15,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import ai_cost
-from .models import charge_ai_usage, wallet_for
+from .models import charge_ai_usage, can_afford_ai, wallet_for
 from .views import platform_owner
 
 TRANSLATE_MODEL = "claude-opus-4-8"
@@ -63,7 +63,7 @@ class TranslateView(APIView):
             return Response({"translations": texts, "cost_cents": 0, "money": round(wallet_for(request.user).money_cents / 100, 2)})
 
         cost = ai_cost("standard")
-        if cost and wallet_for(request.user).money_cents < cost:
+        if cost and not can_afford_ai(request.user, cost):
             return Response(
                 {"detail": "Not enough balance to translate.", "cost_cents": cost},
                 status=status.HTTP_402_PAYMENT_REQUIRED,
