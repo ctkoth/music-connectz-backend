@@ -126,3 +126,20 @@ class OAuthLoginView(APIView):
         user = _user_from_oauth(info)
         tokens = issue_tokens(user)
         return Response({"user": PublicUserSerializer(user).data, **tokens})
+
+
+class OAuthConfigView(APIView):
+    """GET /api/auth/oauth-config/ — the PUBLIC OAuth client IDs the backend is
+    configured with, so the login buttons can read them at runtime instead of
+    relying on build-time VITE_* vars. Client IDs are public; secrets stay here.
+    Only the providers the backend fully supports (google/github/apple)."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from django.conf import settings
+        return Response({
+            "google": getattr(settings, "GOOGLE_OAUTH_CLIENT_ID", "") or "",
+            "github": getattr(settings, "GITHUB_OAUTH_CLIENT_ID", "") or "",
+            "apple": getattr(settings, "APPLE_OAUTH_CLIENT_ID", "") or "",
+        })
