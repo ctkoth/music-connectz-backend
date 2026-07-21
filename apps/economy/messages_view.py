@@ -31,6 +31,8 @@ def _msg(m, me):
         "media_type": m.media_type,
         "read": m.read,
         "at": m.created_at.isoformat(),
+        "edited_at": m.edited_at.isoformat() if m.edited_at else None,
+        "edit_history": m.edit_history or [],
     }
 
 
@@ -76,8 +78,11 @@ class MessagesView(APIView):
                 return Response({"detail": "edit_window_passed", "window_seconds": window}, status=status.HTTP_403_FORBIDDEN)
             if not body:
                 return Response({"detail": "body required"}, status=status.HTTP_400_BAD_REQUEST)
+            # Record the prior version, then apply the edit.
+            m.edit_history = (m.edit_history or []) + [{"body": m.body, "at": timezone.now().isoformat()}]
             m.body = body[: limits_for(membership_for(me).tier)["char_limit"]]
-            m.save(update_fields=["body"])
+            m.edited_at = timezone.now()
+            m.save(update_fields=["body", "edit_history", "edited_at"])
             return Response(_msg(m, me))
 
         to = str((request.data or {}).get("to", "")).strip()

@@ -27,12 +27,12 @@ def limits_for(tier):
     return TIER_LIMITS.get(tier, TIER_LIMITS[TIER_FREE])
 
 
-# How long after posting a message/comment you can still edit it, by tier:
-# Free 6 min, Premium 60 min, StatZ 6 hours. (Owner/debug: no limit.)
+# How long after posting a message/comment/post/rating you can still edit it, by
+# tier: Free 4 min, Premium 40 min, StatZ 4 hours. (Owner/debug: no limit.)
 EDIT_WINDOW_SECONDS = {
-    TIER_FREE: 6 * 60,
-    TIER_PREMIUM: 60 * 60,
-    TIER_STATZ: 6 * 3600,
+    TIER_FREE: 4 * 60,
+    TIER_PREMIUM: 40 * 60,
+    TIER_STATZ: 4 * 3600,
     TIER_DEBUG: 10 ** 9,
 }
 
