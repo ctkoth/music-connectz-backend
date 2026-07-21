@@ -879,6 +879,7 @@ class DirectZWork(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="directz_works")
     fmt = models.CharField(max_length=12, choices=FMT_CHOICES, default="reelz")
     video_type = models.CharField(max_length=40, blank=True, default="")   # Music / Bio / Promotional Video
+    genre = models.CharField(max_length=40, blank=True, default="")        # format-appropriate: TV / movie / short
     mood = models.CharField(max_length=32, blank=True, default="")
     title = models.CharField(max_length=160)
     description = models.TextField(blank=True, default="")
