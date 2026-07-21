@@ -31,6 +31,7 @@ def _work_dict(w, request):
         "mine": w.owner_id == request.user.id,
         "fmt": w.fmt,
         "video_type": w.video_type,
+        "genre": w.genre,
         "mood": w.mood,
         "title": w.title,
         "description": w.description,
@@ -79,6 +80,7 @@ class DirectZWorksView(APIView):
         payload = {
             "fmt": fmt,
             "video_type": str(d.get("video_type", ""))[:40],
+            "genre": str(d.get("genre", ""))[:40],
             "mood": str(d.get("mood", ""))[:32],
             "title": title,
             "description": str(d.get("description", ""))[:4000],
