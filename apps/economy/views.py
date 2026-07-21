@@ -216,7 +216,18 @@ class AIChargeView(APIView):
     def post(self, request):
         model = str(request.data.get("model", "corey-gpt")).lower()
         note = str(request.data.get("note", "OCC AI usage"))[:200]
-        cost = 0 if is_owner(request.user) else ai_cost(model)
+        # Optional custom charge — e.g. an AI-score fee (rating × 10% × skill
+        # price, in cents). When omitted, fall back to the flat model minimum.
+        override = request.data.get("cents", None)
+        if override is not None:
+            try:
+                cost = max(0, int(round(float(override))))
+            except (TypeError, ValueError):
+                cost = 0
+        else:
+            cost = ai_cost(model)
+        if is_owner(request.user):
+            cost = 0
         remaining = charge_ai_usage(request.user, cost, note=note)
         if remaining is None:
             w = wallet_for(request.user)
@@ -224,6 +235,13 @@ class AIChargeView(APIView):
                 {"detail": "Not enough balance for this model.", "cost_cents": cost, "money_cents": w.money_cents},
                 status=status.HTTP_402_PAYMENT_REQUIRED,
             )
+        # Route the charge to the platform owner as revenue (money conserved).
+        if cost:
+            owner = platform_owner()
+            if owner and owner.id != request.user.id:
+                ow = wallet_for(owner)
+                ow.money_cents = (ow.money_cents or 0) + cost
+                ow.save(update_fields=["money_cents", "updated_at"])
         return Response({"model": model, "cost_cents": cost, "money_cents": remaining, "money": round(remaining / 100, 2)})
 
 
