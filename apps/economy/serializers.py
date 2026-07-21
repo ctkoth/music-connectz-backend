@@ -8,7 +8,7 @@ class WalletSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Wallet
-        fields = ["money_cents", "money", "energy", "spinaz", "updated_at"]
+        fields = ["money_cents", "money", "energy", "spinaz", "promptz", "updated_at"]
 
 
 class TransactionSerializer(serializers.ModelSerializer):

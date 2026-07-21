@@ -227,6 +227,32 @@ class AIChargeView(APIView):
         return Response({"model": model, "cost_cents": cost, "money_cents": remaining, "money": round(remaining / 100, 2)})
 
 
+class PromptzBuyView(APIView):
+    """POST { cents } — spend cash to buy prepaid PromptZ at 80% of face
+    ($0.80 → 100 PromptZ = a 25% bonus). 1 PromptZ = 1¢ of AI spend, applied to
+    translate / OCC / profile edits / AI-rate before cash."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        pay_cents = int((request.data or {}).get("cents") or 0)
+        if pay_cents <= 0:
+            return Response({"detail": "cents required"}, status=status.HTTP_400_BAD_REQUEST)
+        w = wallet_for(request.user)
+        if w.money_cents < pay_cents:
+            return Response({"detail": "Not enough balance — add funds first.", "cost_cents": pay_cents},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
+        w.money_cents -= pay_cents
+        granted = round(pay_cents * 1.25)  # buy at 80% of face value
+        w.promptz = (w.promptz or 0) + granted
+        w.save(update_fields=["money_cents", "promptz", "updated_at"])
+        Transaction.objects.create(
+            user=request.user, kind=Transaction.KIND_PURCHASE, amount_cents=-pay_cents,
+            dev_tax_cents=0, note=f"Bought {granted} PromptZ 🏷️",
+        )
+        return Response({"wallet": WalletSerializer(w).data, "granted": granted})
+
+
 class LimitsView(APIView):
     """Per-tier caps for the client to enforce (char/upload/storage)."""
 

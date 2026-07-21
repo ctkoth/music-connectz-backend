@@ -72,6 +72,7 @@ class Wallet(models.Model):
     royalties_cents = models.PositiveIntegerField(default=0)
     energy = models.IntegerField(default=0)
     spinaz = models.IntegerField(default=0)
+    promptz = models.IntegerField(default=0)  # prepaid AI credits; 1 PromptZ = 1¢ of AI spend
     updated_at = models.DateTimeField(auto_now=True)
 
     @property
@@ -346,22 +347,46 @@ def pay_between(payer, payee, amount_cents, note=""):
     return dev, net
 
 
+def can_afford_ai(user, cost_cents):
+    """Whether the member can cover an AI action — prepaid PromptZ (1 PromptZ =
+    1¢) plus cash together."""
+    cost_cents = int(cost_cents or 0)
+    if cost_cents <= 0:
+        return True
+    w = wallet_for(user)
+    return (w.promptz or 0) + (w.money_cents or 0) >= cost_cents
+
+
+def award_promptz(user, amount, note="PromptZ"):
+    """Grant prepaid AI credits (1 PromptZ = 1¢ of AI spend)."""
+    w = wallet_for(user)
+    w.promptz = (w.promptz or 0) + int(amount)
+    w.save(update_fields=["promptz", "updated_at"])
+    return w.promptz
+
+
 def charge_ai_usage(user, cost_cents, note="AI usage"):
-    """Debit the wallet the *minimum* cost to cover an AI model run — pure
-    pass-through, no developer tax (the platform isn't marking AI up, just
-    covering the model). Returns the remaining money_cents, or None if the
-    member can't afford it (caller returns 402)."""
+    """Debit the *minimum* cost to cover an AI model run — pure pass-through, no
+    developer tax. Spends prepaid PromptZ first (1 PromptZ = 1¢), then cash.
+    Returns remaining money_cents, or None if the member can't afford it even
+    with PromptZ (caller returns 402)."""
     cost_cents = int(cost_cents or 0)
     w = wallet_for(user)
     if cost_cents <= 0:
         return w.money_cents
-    if w.money_cents < cost_cents:
+    if (w.promptz or 0) + w.money_cents < cost_cents:
         return None
-    w.money_cents -= cost_cents
-    w.save(update_fields=["money_cents", "updated_at"])
+    from_promptz = min(w.promptz or 0, cost_cents)  # PromptZ first
+    from_cash = cost_cents - from_promptz
+    if from_promptz:
+        w.promptz -= from_promptz
+    if from_cash:
+        w.money_cents -= from_cash
+    w.save(update_fields=["promptz", "money_cents", "updated_at"])
+    tag = f" · {from_promptz}🏷️" if from_promptz else ""
     Transaction.objects.create(
-        user=user, kind=Transaction.KIND_SPEND, amount_cents=-cost_cents,
-        dev_tax_cents=0, note=note[:200],
+        user=user, kind=Transaction.KIND_SPEND, amount_cents=-from_cash,
+        dev_tax_cents=0, note=(note + tag)[:200],
     )
     return w.money_cents
 
