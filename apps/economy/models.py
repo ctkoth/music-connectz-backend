@@ -676,6 +676,43 @@ def award_spinaz(user, amount, note=""):
     return w.spinaz
 
 
+# ---- AdZ (Watch & Earn) — a commercial pays the owner; the viewer earns SpinAZ
+# equal to the cents the owner is paid per view. ----
+class Commercial(models.Model):
+    """A rewarded commercial. `payout_cents` = what the owner is paid per view;
+    the viewer earns that many SpinAZ (SpinAZ pegged to cents)."""
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="commercials")
+    title = models.CharField(max_length=160)
+    sponsor = models.CharField(max_length=120, blank=True, default="")
+    media_url = models.CharField(max_length=500, blank=True, default="")
+    media_type = models.CharField(max_length=24, blank=True, default="video")
+    link_url = models.CharField(max_length=600, blank=True, default="")   # optional advertiser link
+    payout_cents = models.PositiveIntegerField(default=1)                 # owner's revenue per view = viewer SpinAZ
+    min_watch_seconds = models.PositiveIntegerField(default=15)           # must watch this long to earn
+    daily_cap_per_user = models.PositiveIntegerField(default=3)           # rewards per viewer per day for THIS ad
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+
+class AdView(models.Model):
+    """A view of a commercial. One reward per viewer per ad per day (up to the
+    ad's daily cap), gated by a genuine watch time."""
+    commercial = models.ForeignKey(Commercial, on_delete=models.CASCADE, related_name="views")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ad_views")
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    watched_seconds = models.PositiveIntegerField(default=0)
+    rewarded = models.BooleanField(default=False)
+    reward_spinaz = models.PositiveIntegerField(default=0)
+    day = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+AD_REWARD_DAILY_CAP_PER_USER = 30  # total rewarded ad views per viewer per day (anti-farm)
+
+
 def can_view_post(post, user):
     if post.visibility == "public":
         return True
