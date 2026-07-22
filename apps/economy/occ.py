@@ -172,11 +172,23 @@ class OccChatView(APIView):
             text = str(turn.get("text", "")).strip()
             if text:
                 messages.append({"role": role, "content": text})
-        messages.append({"role": "user", "content": prompt})
+        # Optional image (a data URL) for vision tasks — e.g. "detect gym gear from a photo".
+        image = data.get("image")
+        if isinstance(image, str) and image.startswith("data:") and "," in image:
+            header, b64 = image.split(",", 1)
+            media_type = header.split(";")[0].split(":")[-1] or "image/jpeg"
+            messages.append({"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
+                {"type": "text", "text": prompt},
+            ]})
+        else:
+            image = None
+            messages.append({"role": "user", "content": prompt})
 
         try:
             client = anthropic.Anthropic()
-            primary = MODEL_BY_VOICE.get(model_voice, OCC_LLM_MODEL)  # Corey → Fable 5, others → Opus 4.8
+            # Vision needs a flagship model; Corey's Fable voice is text-only.
+            primary = OCC_LLM_MODEL if image else MODEL_BY_VOICE.get(model_voice, OCC_LLM_MODEL)  # Corey → Fable 5, others → Opus 4.8
             resp = _create_with_fallback(
                 client, primary, OCC_LLM_MODEL,  # Corey speaks in Fable when available, Opus only if not
                 max_tokens=3072,       # fuller Corey answers (was 1024)
