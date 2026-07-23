@@ -58,10 +58,18 @@ class GeminiImageView(APIView):
             return Response({"detail": "Not enough PromptZ / balance.", "cost_cents": cost}, status=status.HTTP_402_PAYMENT_REQUIRED)
 
         model = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image-preview")
+        # Optional reference image (a data URL) — the output is generated to
+        # resemble it (e.g. a cover/portrait drawn from the member's FaceZ photo).
+        parts = [{"text": prompt}]
+        reference = (request.data or {}).get("reference")
+        if isinstance(reference, str) and reference.startswith("data:") and "," in reference:
+            header, b64 = reference.split(",", 1)
+            ref_mime = header.split(";")[0].split(":")[-1] or "image/jpeg"
+            parts.insert(0, {"inlineData": {"mimeType": ref_mime, "data": b64}})
         try:
             r = requests.post(
                 f"{BASE}/models/{model}:generateContent?key={key}",
-                json={"contents": [{"parts": [{"text": prompt}]}],
+                json={"contents": [{"parts": parts}],
                       "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}},
                 timeout=90,
             )
