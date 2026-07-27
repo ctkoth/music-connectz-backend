@@ -73,6 +73,12 @@ class Wallet(models.Model):
     energy = models.IntegerField(default=0)
     spinaz = models.IntegerField(default=0)
     promptz = models.IntegerField(default=0)  # prepaid AI credits; 1 PromptZ = 1¢ of AI spend
+    # Free daily prompt allowance by tier (free 1 / premium 5 / statz 20). Resets
+    # each day — it does NOT stack. `prompt_day` is the YYYY-MM-DD the counter
+    # belongs to; a new day zeroes `prompts_used_today`. Prepaid promptz above is
+    # separate and persists.
+    prompt_day = models.CharField(max_length=10, blank=True, default="")
+    prompts_used_today = models.PositiveIntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
     @property
@@ -365,14 +371,55 @@ def award_promptz(user, amount, note="PromptZ"):
     return w.promptz
 
 
-def charge_ai_usage(user, cost_cents, note="AI usage"):
+# Free daily prompt allowance by tier. Resets each day — it does NOT stack.
+# Prepaid PromptZ (Wallet.promptz) is separate and persists. Owner/debug is
+# effectively unlimited (their AI runs are already free anyway).
+PROMPT_ALLOWANCE = {"free": 1, "premium": 5, "statz": 20, "debug": 10 ** 6}
+
+
+def daily_prompt_state(user):
+    """Return (allowance, used, remaining) for today's free prompts, rolling the
+    counter over at the start of a new day. Persists the reset when it happens."""
+    from django.utils import timezone
+    w = wallet_for(user)
+    allowance = PROMPT_ALLOWANCE.get(membership_for(user).tier, 1)
+    today = timezone.now().strftime("%Y-%m-%d")
+    if w.prompt_day != today:
+        w.prompt_day = today
+        w.prompts_used_today = 0
+        w.save(update_fields=["prompt_day", "prompts_used_today", "updated_at"])
+    remaining = max(0, allowance - (w.prompts_used_today or 0))
+    return allowance, (w.prompts_used_today or 0), remaining
+
+
+def _consume_daily_prompt(user):
+    """Spend one of today's free prompts if any remain. Returns True if one was
+    consumed (the caller should treat the run as free), else False."""
+    _, _, remaining = daily_prompt_state(user)  # also handles the daily reset
+    if remaining <= 0:
+        return False
+    w = wallet_for(user)
+    w.prompts_used_today = (w.prompts_used_today or 0) + 1
+    w.save(update_fields=["prompts_used_today", "updated_at"])
+    return True
+
+
+def charge_ai_usage(user, cost_cents, note="AI usage", count_daily=False):
     """Debit the *minimum* cost to cover an AI model run — pure pass-through, no
-    developer tax. Spends prepaid PromptZ first (1 PromptZ = 1¢), then cash.
-    Returns remaining money_cents, or None if the member can't afford it even
-    with PromptZ (caller returns 402)."""
+    developer tax. When `count_daily` is set (a genuine prompt run), the day's
+    free allowance is spent first and the run is free; otherwise spends prepaid
+    PromptZ (1 PromptZ = 1¢), then cash. Returns remaining money_cents, or None
+    if the member can't afford it even with PromptZ (caller returns 402)."""
     cost_cents = int(cost_cents or 0)
     w = wallet_for(user)
     if cost_cents <= 0:
+        return w.money_cents
+    # A free daily prompt covers the whole run before any paid balance is touched.
+    if count_daily and _consume_daily_prompt(user):
+        Transaction.objects.create(
+            user=user, kind=Transaction.KIND_SPEND, amount_cents=0,
+            dev_tax_cents=0, note=(note + " · daily prompt 🏷️")[:200],
+        )
         return w.money_cents
     if (w.promptz or 0) + w.money_cents < cost_cents:
         return None

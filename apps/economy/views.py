@@ -21,6 +21,7 @@ from .models import (
     Transaction,
     Upload,
     charge_ai_usage,
+    daily_prompt_state,
     energy_for_topup,
     ENERGY_TOPUP_MULT,
     membership_for,
@@ -105,6 +106,7 @@ class StatsView(APIView):
         online_members = list(
             online_qs.exclude(user=request.user).values_list("user__username", flat=True)[:50]
         )
+        prompt_allowance, prompts_used, prompts_remaining = daily_prompt_state(request.user)
         return Response(
             {
                 "total_members": User.objects.count(),
@@ -115,6 +117,11 @@ class StatsView(APIView):
                 "my_money": w.money,
                 "my_energy": w.energy,
                 "my_spinaz": w.spinaz,
+                "my_promptz": w.promptz,  # prepaid AI credits (persist)
+                # Free daily prompts by tier (free 1 / premium 5 / statz 20) — reset daily, don't stack.
+                "my_promptz_daily": prompt_allowance,
+                "my_promptz_daily_used": prompts_used,
+                "my_promptz_daily_remaining": prompts_remaining,
                 "dev_tax_rate": m.dev_tax_rate,
             }
         )
@@ -228,7 +235,9 @@ class AIChargeView(APIView):
             cost = ai_cost(model)
         if is_owner(request.user):
             cost = 0
-        remaining = charge_ai_usage(request.user, cost, note=note)
+        # A flat model run (no custom cents) is a genuine "prompt" — the tier's
+        # free daily allowance covers it before any paid balance is touched.
+        remaining = charge_ai_usage(request.user, cost, note=note, count_daily=(override is None))
         if remaining is None:
             w = wallet_for(request.user)
             return Response(
