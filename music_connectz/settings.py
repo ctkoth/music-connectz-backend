@@ -260,10 +260,13 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 ADMOB_APP_ID = os.environ.get("ADMOB_APP_ID", "")
 ADMOB_REWARDED_UNIT_ID = os.environ.get("ADMOB_REWARDED_UNIT_ID", "")
 
-# OfferZ — offerwall. OFFERZ_URL is the provider's wall (member id appended as
-# user_id); OFFERZ_CALLBACK_SECRET signs the completion callback
-# (/api/economy/offerz/callback/). Both must be set to switch OfferZ on.
+# OfferZ — offerwall (ayeT-Studios). OFFERZ_URL is the offerwall link (member id
+# appended as external_identifier). AYET_API_KEY is your ayeT publisher API key,
+# used to verify the X-Ayetstudios-Security-Hash HMAC on each S2S callback
+# (/api/economy/offerz/callback/). OFFERZ_CALLBACK_SECRET is a legacy generic
+# fallback for other providers. OfferZ switches on when OFFERZ_URL + a key are set.
 OFFERZ_URL = os.environ.get("OFFERZ_URL", "")
+AYET_API_KEY = os.environ.get("AYET_API_KEY", "")
 OFFERZ_CALLBACK_SECRET = os.environ.get("OFFERZ_CALLBACK_SECRET", "")
 
 PAYPAL_CLIENT_ID = os.environ.get("PAYPAL_CLIENT_ID", "")
