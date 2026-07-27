@@ -125,6 +125,7 @@ class MeView(APIView):
             p.birthday = bd
             p.sign = zodiac_for(bd)
             changed += ["birthday", "sign"]
+        # Limits match Profile.field.max_length in apps/economy/models.py.
         _limits = {"display_name": 80, "bio": 500, "location": 120, "gender": 24}
         for f, limit in _limits.items():
             if isinstance(data.get(f), str):

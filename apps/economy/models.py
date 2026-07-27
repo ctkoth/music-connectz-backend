@@ -604,6 +604,9 @@ def profile_age(p):
         return None
 
 
+# (MMDD cutoff, sign): birthday's month*100+day is compared against each cutoff
+# in order; the first cutoff >= md gives the sign. Dec 22-31 falls through to
+# the final "Capricorn" entry.
 _ZODIAC_CUTOFFS = [
     (119, "Capricorn"), (218, "Aquarius"), (320, "Pisces"), (419, "Aries"),
     (520, "Taurus"), (620, "Gemini"), (722, "Cancer"), (822, "Leo"),
