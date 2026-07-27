@@ -144,8 +144,8 @@ class StripeCheckoutView(APIView):
                 },
                 "quantity": 1,
             }],
-            success_url=f"{settings.FRONTEND_URL}/v2?checkout=success&provider=stripe",
-            cancel_url=f"{settings.FRONTEND_URL}/v2?checkout=cancel&provider=stripe",
+            success_url=f"{settings.FRONTEND_URL}/?checkout=success&provider=stripe",
+            cancel_url=f"{settings.FRONTEND_URL}/?checkout=cancel&provider=stripe",
             client_reference_id=str(request.user.id),
             metadata={"user_id": str(request.user.id), "amount_cents": str(amount_cents)},
         )
@@ -207,8 +207,8 @@ class FoundingCheckoutView(APIView):
         session = stripe.checkout.Session.create(
             mode=cfg["mode"],
             line_items=[{"price_data": price_data, "quantity": 1}],
-            success_url=f"{settings.FRONTEND_URL}/v2?checkout=success&provider=stripe&kind=founding&plan={plan}",
-            cancel_url=f"{settings.FRONTEND_URL}/v2?checkout=cancel&provider=stripe&kind=founding&plan={plan}",
+            success_url=f"{settings.FRONTEND_URL}/?checkout=success&provider=stripe&kind=founding&plan={plan}",
+            cancel_url=f"{settings.FRONTEND_URL}/?checkout=cancel&provider=stripe&kind=founding&plan={plan}",
             client_reference_id=str(request.user.id),
             metadata={"kind": cfg["kind"], "user_id": str(request.user.id), "plan": plan},
         )
@@ -412,8 +412,8 @@ class PaypalCreateView(APIView):
                 "application_context": {
                     "brand_name": "Music ConnectZ",
                     "user_action": "PAY_NOW",
-                    "return_url": f"{settings.FRONTEND_URL}/v2?checkout=success&provider=paypal",
-                    "cancel_url": f"{settings.FRONTEND_URL}/v2?checkout=cancel&provider=paypal",
+                    "return_url": f"{settings.FRONTEND_URL}/?checkout=success&provider=paypal",
+                    "cancel_url": f"{settings.FRONTEND_URL}/?checkout=cancel&provider=paypal",
                 },
             },
             timeout=20,

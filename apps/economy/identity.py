@@ -76,7 +76,7 @@ class IdentityView(APIView):
             type="document",
             metadata={"user_id": str(request.user.id)},
             options={"document": {"require_matching_selfie": True}},
-            return_url=f"{settings.FRONTEND_URL}/v2?verify=done",
+            return_url=f"{settings.FRONTEND_URL}/?verify=done",
         )
         # `url` is the hosted verification flow the client redirects to.
         return Response({"url": session.url, "client_secret": session.client_secret, "id": session.id})
