@@ -91,6 +91,14 @@ FOUNDING_PLANS = {
     "month": {"mode": "subscription", "cents": FOUNDING_MONTH_CENTS, "interval": "month", "kind": "founding_sub"},
 }
 
+# Premium tier — the mid subscription (lower fees, 2x energy, 5 daily prompts).
+PREMIUM_MONTH_CENTS = 600             # $6/mo
+PREMIUM_YEAR_CENTS = 4800            # $48/yr (2 months free)
+PREMIUM_PLANS = {
+    "year": {"mode": "subscription", "cents": PREMIUM_YEAR_CENTS, "interval": "year", "kind": "premium_sub"},
+    "month": {"mode": "subscription", "cents": PREMIUM_MONTH_CENTS, "interval": "month", "kind": "premium_sub"},
+}
+
 
 def ai_cost(model):
     return AI_MODEL_COSTS.get(model, AI_MODEL_COSTS["corey-gpt"])

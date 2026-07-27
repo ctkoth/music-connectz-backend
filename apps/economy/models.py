@@ -1300,3 +1300,20 @@ class CollabDeal(models.Model):
 
     def all_funded(self):
         return all(p.get("funded") for p in self.payers())
+
+
+# --- Rewarded ads (AdMob SSV) & offerwall (OfferZ) grants -------------------
+# One row per external reward callback, keyed by the provider's unique
+# transaction id, so a replayed callback can never pay a user twice.
+class RewardGrant(models.Model):
+    PROVIDER_ADMOB = "admob"
+    PROVIDER_OFFERZ = "offerz"
+    provider = models.CharField(max_length=16)
+    txn_id = models.CharField(max_length=191)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="reward_grants")
+    spinaz = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("provider", "txn_id")
+        indexes = [models.Index(fields=["provider", "-created_at"])]

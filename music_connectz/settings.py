@@ -253,6 +253,19 @@ STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
+# AdZ — Google AdMob rewarded video. The SSV callback verifies against Google's
+# public keys (no secret needed); these ids are what the client SDK needs, and
+# their presence switches rewarded ads on. Point AdMob's SSV callback at
+# /api/economy/adz/admob-ssv/ and pass the member id as custom_data.
+ADMOB_APP_ID = os.environ.get("ADMOB_APP_ID", "")
+ADMOB_REWARDED_UNIT_ID = os.environ.get("ADMOB_REWARDED_UNIT_ID", "")
+
+# OfferZ — offerwall. OFFERZ_URL is the provider's wall (member id appended as
+# user_id); OFFERZ_CALLBACK_SECRET signs the completion callback
+# (/api/economy/offerz/callback/). Both must be set to switch OfferZ on.
+OFFERZ_URL = os.environ.get("OFFERZ_URL", "")
+OFFERZ_CALLBACK_SECRET = os.environ.get("OFFERZ_CALLBACK_SECRET", "")
+
 PAYPAL_CLIENT_ID = os.environ.get("PAYPAL_CLIENT_ID", "")
 PAYPAL_SECRET = os.environ.get("PAYPAL_SECRET", "")
 # Webhook id from the PayPal dashboard — required to verify webhook signatures.
