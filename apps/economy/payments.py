@@ -24,7 +24,7 @@ from .models import (
 )
 from .serializers import WalletSerializer
 from .models import wallet_for
-from .catalog import FOUNDING_PLANS, FOUNDING_TIER
+from .catalog import FOUNDING_PLANS, FOUNDING_TIER, PREMIUM_PLANS
 
 MIN_CENTS = 100          # $1 minimum
 MAX_CENTS = 1_000_000    # $10,000 cap per funding
@@ -215,6 +215,37 @@ class FoundingCheckoutView(APIView):
         return Response({"url": session.url, "id": session.id, "plan": plan})
 
 
+class PremiumCheckoutView(APIView):
+    """Start a Stripe subscription checkout for Premium. plan = month | year.
+    The webhook (kind=premium_sub) grants the tier; cancellation downgrades it."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not settings.STRIPE_SECRET_KEY:
+            return Response({"detail": "Stripe is not configured"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        plan = str(request.data.get("plan", "month")).lower()
+        cfg = PREMIUM_PLANS.get(plan)
+        if not cfg:
+            return Response({"detail": f"plan must be one of {sorted(PREMIUM_PLANS)}"}, status=status.HTTP_400_BAD_REQUEST)
+        import stripe
+        stripe.api_key = settings.STRIPE_SECRET_KEY
+        session = stripe.checkout.Session.create(
+            mode=cfg["mode"],
+            line_items=[{"price_data": {
+                "currency": "usd",
+                "product_data": {"name": f"Music ConnectZ — Premium ({plan})"},
+                "unit_amount": cfg["cents"],
+                "recurring": {"interval": cfg["interval"]},
+            }, "quantity": 1}],
+            success_url=f"{settings.FRONTEND_URL}/?checkout=success&provider=stripe&kind=premium&plan={plan}",
+            cancel_url=f"{settings.FRONTEND_URL}/?checkout=cancel&provider=stripe&kind=premium&plan={plan}",
+            client_reference_id=str(request.user.id),
+            metadata={"kind": "premium_sub", "user_id": str(request.user.id), "plan": plan},
+        )
+        return Response({"url": session.url, "id": session.id, "plan": plan})
+
+
 class MembershipRefundView(APIView):
     """Downgrade for a refund within the 10-day window.
 
@@ -341,6 +372,18 @@ class StripeWebhookView(APIView):
                 m.last_payment_ref = obj.get("subscription") or ""
                 m.last_payment_kind = meta.get("plan") or "year"
                 m.save(update_fields=["tier", "founding", "stripe_customer_id", "last_paid_at", "last_payment_ref", "last_payment_kind", "updated_at"])
+            elif kind == "premium_sub" and user:
+                # Premium subscription — grant the tier and remember the Stripe
+                # customer so a cancellation can downgrade the right user.
+                m = membership_for(user)
+                m.tier = "premium"
+                cust = obj.get("customer")
+                if cust:
+                    m.stripe_customer_id = cust
+                m.last_paid_at = timezone.now()
+                m.last_payment_ref = obj.get("subscription") or ""
+                m.last_payment_kind = "premium_" + (meta.get("plan") or "month")
+                m.save(update_fields=["tier", "stripe_customer_id", "last_paid_at", "last_payment_ref", "last_payment_kind", "updated_at"])
             else:
                 intent = PaymentIntent.objects.filter(
                     provider=PaymentIntent.PROVIDER_STRIPE, provider_ref=obj.get("id")

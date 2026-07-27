@@ -5,6 +5,8 @@ from .postz import PostsView, PostJoinView, PostShareView, SubmissionsView
 from .links import LinkClickView, LinkTalliesView
 from .distributez import TranscodeView, LyricsView
 from .adz import AdzView, AdDetailView, AdRewardView
+from .rewards import (AdmobConfigView, AdmobSsvView, OfferzView,
+                      OfferzCallbackView)
 from .translate import TranslateView
 from .gemini import GeminiImageView, GeminiVideoView, GeminiVideoStatusView
 from .notifications import NotificationsView
@@ -30,6 +32,7 @@ from .payments import (
     CheckoutConfigView,
     MembershipRefundView,
     FoundingCheckoutView,
+    PremiumCheckoutView,
     FoundingClaimView,
     FoundingView,
     PaypalCaptureView,
@@ -101,6 +104,7 @@ urlpatterns = [
     path("founding/", FoundingView.as_view(), name="economy-founding"),
     path("founding/claim/", FoundingClaimView.as_view(), name="economy-founding-claim"),
     path("founding/checkout/", FoundingCheckoutView.as_view(), name="economy-founding-checkout"),
+    path("premium/checkout/", PremiumCheckoutView.as_view(), name="economy-premium-checkout"),
     path("venues/", VenuesView.as_view(), name="economy-venues"),
     path("venues/<int:pk>/join/", VenueJoinView.as_view(), name="economy-venue-join"),
     path("attractiveness/", AttractivenessView.as_view(), name="economy-attractiveness"),
@@ -137,6 +141,10 @@ urlpatterns = [
     path("adz/", AdzView.as_view(), name="economy-adz"),
     path("adz/<int:pk>/", AdDetailView.as_view(), name="economy-adz-detail"),
     path("adz/<int:pk>/reward/", AdRewardView.as_view(), name="economy-adz-reward"),
+    path("adz/admob-config/", AdmobConfigView.as_view(), name="economy-admob-config"),
+    path("adz/admob-ssv/", AdmobSsvView.as_view(), name="economy-admob-ssv"),
+    path("offerz/", OfferzView.as_view(), name="economy-offerz"),
+    path("offerz/callback/", OfferzCallbackView.as_view(), name="economy-offerz-callback"),
     path("directz/", DirectZWorksView.as_view(), name="economy-directz"),
     path("directz/<int:pk>/rate/", DirectZRateView.as_view(), name="economy-directz-rate"),
     path("merch/", MerchView.as_view(), name="economy-merch"),
