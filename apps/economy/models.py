@@ -535,6 +535,10 @@ class Profile(models.Model):
     # adult content. Never trust a self-reported birthday for this.
     verified_18plus = models.BooleanField(default=False, db_index=True)
     verified_18plus_at = models.DateTimeField(null=True, blank=True)
+    # One-time onboarding reward: set when the member finishes the intro flow so
+    # the grant (SpinAZ + Energy) can never be claimed twice.
+    onboarded = models.BooleanField(default=False)
+    onboarded_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
 
@@ -699,6 +703,67 @@ def award_spinaz(user, amount, note=""):
     w.spinaz = (w.spinaz or 0) + int(amount)
     w.save(update_fields=["spinaz", "updated_at"])
     return w.spinaz
+
+
+def award_energy(user, amount, note=""):
+    """Credit Energy to a user's wallet."""
+    w = wallet_for(user)
+    w.energy = (w.energy or 0) + int(amount)
+    w.save(update_fields=["energy", "updated_at"])
+    return w.energy
+
+
+# ---- Referrals (two-sided) — inviting a new member rewards both people once.
+# The joinee redeems the referrer's code (their username) during/after signup;
+# the referrer earns more (they brought the growth), the joinee gets a welcome
+# bonus. A member can only ever be referred once, and never by themselves.
+REFERRAL_REWARD_REFERRER_SPINAZ = 300
+REFERRAL_REWARD_JOINEE_SPINAZ = 100
+
+
+class Referral(models.Model):
+    referrer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                 related_name="referrals_made")
+    # A user can be referred at most once — enforced by the one-to-one joinee.
+    joinee = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                  related_name="referred_by")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Referral<{self.referrer} -> {self.joinee}>"
+
+
+def record_referral(referrer, joinee):
+    """Link joinee to referrer and pay both sides once. Returns the Referral, or
+    None if it couldn't be recorded (self-referral, or already referred)."""
+    if not referrer or not joinee or referrer.id == joinee.id:
+        return None
+    if Referral.objects.filter(joinee=joinee).exists():
+        return None
+    ref = Referral.objects.create(referrer=referrer, joinee=joinee)
+    award_spinaz(referrer, REFERRAL_REWARD_REFERRER_SPINAZ, "referral (referrer)")
+    award_spinaz(joinee, REFERRAL_REWARD_JOINEE_SPINAZ, "referral (welcome)")
+    return ref
+
+
+# ---- Onboarding — a one-time reward for finishing the intro flow.
+ONBOARD_REWARD_SPINAZ = 150
+ONBOARD_REWARD_ENERGY = 50
+
+
+def complete_onboarding(user):
+    """Mark onboarding done and grant the one-time reward. Idempotent — returns
+    the amounts granted (zeros if already onboarded)."""
+    from django.utils import timezone
+    p = profile_for(user)
+    if p.onboarded:
+        return {"spinaz": 0, "energy": 0, "already": True}
+    p.onboarded = True
+    p.onboarded_at = timezone.now()
+    p.save(update_fields=["onboarded", "onboarded_at", "updated_at"])
+    award_spinaz(user, ONBOARD_REWARD_SPINAZ, "onboarding")
+    award_energy(user, ONBOARD_REWARD_ENERGY, "onboarding")
+    return {"spinaz": ONBOARD_REWARD_SPINAZ, "energy": ONBOARD_REWARD_ENERGY, "already": False}
 
 
 # ---- AdZ (Watch & Earn) — a commercial pays the owner; the viewer earns SpinAZ
