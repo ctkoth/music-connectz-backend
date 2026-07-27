@@ -133,19 +133,24 @@ class AdmobSsvView(APIView):
         return Response({"ok": True})
 
 
+def _offerz_enabled():
+    return bool(getattr(settings, "OFFERZ_URL", "") and (
+        getattr(settings, "AYET_API_KEY", "") or getattr(settings, "OFFERZ_CALLBACK_SECRET", "")))
+
+
 class OfferzView(APIView):
-    """GET — the offerwall URL for this member (with their id as sub-id), and
-    whether OfferZ is switched on."""
+    """GET — the offerwall URL for this member (id appended as ayeT's
+    external_identifier), and whether OfferZ is switched on."""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         base = getattr(settings, "OFFERZ_URL", "")
-        enabled = bool(base and getattr(settings, "OFFERZ_CALLBACK_SECRET", ""))
+        enabled = _offerz_enabled()
         url = ""
         if enabled:
             sep = "&" if "?" in base else "?"
-            url = f"{base}{sep}user_id={request.user.id}"
+            url = f"{base}{sep}external_identifier={request.user.id}"
         earned = sum(
             g.spinaz for g in RewardGrant.objects.filter(
                 provider=RewardGrant.PROVIDER_OFFERZ, user=request.user
@@ -154,20 +159,47 @@ class OfferzView(APIView):
         return Response({"enabled": enabled, "url": url, "earned_spinaz": earned})
 
 
+def _verify_ayet(request):
+    """Verify ayeT-Studios' X-Ayetstudios-Security-Hash: HMAC-SHA256 of the
+    alphabetically-sorted query string, keyed by the publisher API key."""
+    from urllib.parse import urlencode
+    api_key = getattr(settings, "AYET_API_KEY", "")
+    provided = (request.headers.get("X-Ayetstudios-Security-Hash", "")
+                or request.META.get("HTTP_X_AYETSTUDIOS_SECURITY_HASH", ""))
+    if not api_key or not provided:
+        return False
+    items = sorted((k, request.GET[k]) for k in request.GET.keys())
+    qs = urlencode(items)
+    expected = hmac.new(api_key.encode(), qs.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, provided)
+
+
 class OfferzCallbackView(APIView):
-    """GET/POST — the offerwall provider's server callback. Verifies an
-    HMAC-SHA256 signature over 'user_id:amount:txn_id' with
-    OFFERZ_CALLBACK_SECRET, then grants SpinAZ once per txn_id."""
+    """GET — ayeT-Studios' S2S rewarded-offer callback. Verifies the
+    X-Ayetstudios-Security-Hash HMAC, then grants SpinAZ once per transaction_id.
+    Falls back to a generic sig-param HMAC for other providers."""
 
     permission_classes = [AllowAny]
 
     def get(self, request):
-        return self._handle(request.GET)
+        # ayeT mode (preferred): HMAC in the X-Ayetstudios-Security-Hash header.
+        if getattr(settings, "AYET_API_KEY", ""):
+            if not _verify_ayet(request):
+                return Response({"detail": "bad signature"}, status=status.HTTP_403_FORBIDDEN)
+            d = request.GET
+            uid = str(d.get("external_identifier") or d.get("user_id") or "")
+            txn = str(d.get("transaction_id") or d.get("txn_id") or "")
+            try:
+                amount = max(0, int(float(d.get("currency_amount") or d.get("amount") or 0)))
+            except (TypeError, ValueError):
+                amount = 0
+            return self._grant(uid, txn, amount)
+        return self._handle_generic(request.GET)
 
     def post(self, request):
-        return self._handle(request.data or request.POST)
+        return self._handle_generic(request.data or request.POST)
 
-    def _handle(self, data):
+    def _handle_generic(self, data):
         secret = getattr(settings, "OFFERZ_CALLBACK_SECRET", "")
         if not secret:
             return Response({"detail": "OfferZ is not configured"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
@@ -181,6 +213,9 @@ class OfferzCallbackView(APIView):
         expected = hmac.new(secret.encode(), f"{uid}:{amount}:{txn}".encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected, sig.lower()):
             return Response({"detail": "bad signature"}, status=status.HTTP_403_FORBIDDEN)
+        return self._grant(uid, txn, amount)
+
+    def _grant(self, uid, txn, amount):
         user = User.objects.filter(pk=uid).first() if uid else None
         if not user or not txn or amount <= 0:
             return Response({"ok": False})
