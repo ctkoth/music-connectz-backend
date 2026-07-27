@@ -73,17 +73,34 @@ def _verify_admob_signature(query_string, signature_b64, key_id):
         return False
 
 
+# Age policy for AdZ (13+ store rating). Under 13 can't see rewarded ads at all;
+# 13–17 may, but only NON-personalized (tag-for-users-under-age-of-consent).
+AD_MIN_AGE = 13
+AD_PERSONALIZED_AGE = 18
+
+
 class AdmobConfigView(APIView):
-    """Public ad config the client SDK needs (app id + rewarded unit id) and
-    whether rewarded ads are switched on server-side."""
+    """Ad config the client SDK needs (app id + rewarded unit id), whether
+    rewarded ads are on, and the age gate derived from the member's profile
+    birthday: `allowed` (may they watch) and `personalized` (18+ only)."""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from apps.economy.models import profile_age, profile_for
+        age = profile_age(profile_for(request.user))
+        # Unknown age (no birthday) is treated as a minor: allowed, but ads stay
+        # non-personalized and the client nudges them to add a birthday.
+        allowed = age is None or age >= AD_MIN_AGE
+        personalized = age is not None and age >= AD_PERSONALIZED_AGE
         return Response({
             "enabled": bool(getattr(settings, "ADMOB_APP_ID", "") and getattr(settings, "ADMOB_REWARDED_UNIT_ID", "")),
             "app_id": getattr(settings, "ADMOB_APP_ID", ""),
             "rewarded_unit_id": getattr(settings, "ADMOB_REWARDED_UNIT_ID", ""),
+            "age": age,
+            "allowed": allowed,
+            "personalized": personalized,
+            "min_age": AD_MIN_AGE,
         })
 
 
