@@ -65,8 +65,8 @@ class AutoTopUpView(APIView):
                 },
                 "quantity": 1,
             }],
-            success_url=f"{settings.FRONTEND_URL}/v2?checkout=success&provider=stripe&kind=autotopup",
-            cancel_url=f"{settings.FRONTEND_URL}/v2?checkout=cancel&provider=stripe&kind=autotopup",
+            success_url=f"{settings.FRONTEND_URL}/?checkout=success&provider=stripe&kind=autotopup",
+            cancel_url=f"{settings.FRONTEND_URL}/?checkout=cancel&provider=stripe&kind=autotopup",
             client_reference_id=str(request.user.id),
             metadata={"kind": "autotopup", "user_id": str(request.user.id), "amount_cents": str(amount_cents), "interval": interval},
         )
