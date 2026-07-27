@@ -19,7 +19,7 @@ jobs:
   release-build:
     runs-on: ubuntu-latest
 
-    steps:b
+    steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
