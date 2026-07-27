@@ -21,13 +21,48 @@ class PublicUserSerializer(serializers.ModelSerializer):
     )
     # Owner/staff unlock the debug (god-mode) membership tier in the client.
     is_owner = serializers.SerializerMethodField()
+    # Economy + onboarding fields the client reads off /api/auth/me/ (membership
+    # tier, wallet balances, onboarding state, and the searchable profile bits).
+    tier = serializers.SerializerMethodField()
+    spinaz = serializers.SerializerMethodField()
+    energy = serializers.SerializerMethodField()
+    onboarded = serializers.SerializerMethodField()
+    personas = serializers.SerializerMethodField()
+    nationalities = serializers.SerializerMethodField()
 
     def get_is_owner(self, obj):
         return bool(obj.is_superuser or obj.is_staff)
 
+    def get_tier(self, obj):
+        from apps.economy.models import membership_for
+        return membership_for(obj).tier
+
+    def get_spinaz(self, obj):
+        from apps.economy.models import wallet_for
+        return wallet_for(obj).spinaz
+
+    def get_energy(self, obj):
+        from apps.economy.models import wallet_for
+        return wallet_for(obj).energy
+
+    def get_onboarded(self, obj):
+        from apps.economy.models import profile_for
+        return profile_for(obj).onboarded
+
+    def get_personas(self, obj):
+        from apps.economy.models import profile_for
+        return profile_for(obj).personas or []
+
+    def get_nationalities(self, obj):
+        from apps.economy.models import profile_for
+        return profile_for(obj).nationalities or []
+
     class Meta:
         model = User
-        fields = ("id", "username", "email", "phone", "avatar_url", "is_owner")
+        fields = (
+            "id", "username", "email", "phone", "avatar_url", "is_owner",
+            "tier", "spinaz", "energy", "onboarded", "personas", "nationalities",
+        )
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -35,6 +70,9 @@ class RegisterSerializer(serializers.Serializer):
     email = serializers.EmailField()
     phone = serializers.CharField(max_length=32, required=False, allow_blank=True, default="")
     password = serializers.CharField(write_only=True, min_length=8)
+    birthday = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
+    # Inviter's referral code (their username). Credits both sides once on join.
+    ref = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
 
     def validate_username(self, value):
         value = value.strip()
@@ -63,6 +101,20 @@ class RegisterSerializer(serializers.Serializer):
         Profile.objects.update_or_create(
             user=user, defaults={"phone": validated.get("phone", "")}
         )
+        # Store the birthday on the searchable economy profile if provided.
+        birthday = (validated.get("birthday") or "").strip()
+        if birthday:
+            from apps.economy.models import profile_for
+            ep = profile_for(user)
+            ep.birthday = birthday[:10]
+            ep.save(update_fields=["birthday", "updated_at"])
+        # Two-sided referral: credit the inviter + welcome the joinee (once).
+        code = (validated.get("ref") or "").strip()
+        if code and code.lower() != user.username.lower():
+            from apps.economy.models import record_referral
+            referrer = User.objects.filter(username__iexact=code).first()
+            if referrer:
+                record_referral(referrer, user)
         return user
 
 
