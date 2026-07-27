@@ -105,6 +105,59 @@ class MeView(APIView):
             pass
         return Response(PublicUserSerializer(request.user).data)
 
+    def delete(self, request):
+        """Permanently delete the signed-in account and its owned data. FK
+        cascades remove profile, wallet, membership, posts, follows, etc.
+        Required for app-store login policies + GDPR/CCPA erasure."""
+        user = request.user
+        username = user.username
+        user.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ReferralsView(APIView):
+    """GET /api/auth/referrals/ — my referral code (username) + join stats."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.economy.models import (
+            REFERRAL_REWARD_REFERRER_SPINAZ,
+            Referral,
+        )
+        made = Referral.objects.filter(referrer=request.user).count()
+        return Response({
+            "code": request.user.username,
+            "count": made,
+            "spinaz_earned": made * REFERRAL_REWARD_REFERRER_SPINAZ,
+            "reward_per_join": REFERRAL_REWARD_REFERRER_SPINAZ,
+        })
+
+
+class OnboardCompleteView(APIView):
+    """POST /api/auth/onboard/complete/ — claim the one-time onboarding reward
+    (idempotent). GET returns current status."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from apps.economy.models import profile_for
+        return Response({"onboarded": profile_for(request.user).onboarded})
+
+    def post(self, request):
+        from apps.economy.models import (
+            ONBOARD_REWARD_ENERGY,
+            ONBOARD_REWARD_SPINAZ,
+            complete_onboarding,
+        )
+        result = complete_onboarding(request.user)
+        return Response({
+            "onboarded": True,
+            "granted": not result["already"],
+            "reward_spinaz": ONBOARD_REWARD_SPINAZ,
+            "reward_energy": ONBOARD_REWARD_ENERGY,
+        })
+
 
 class OAuthLoginView(APIView):
     """POST /api/auth/oauth/<provider>/ — verify provider token, return JWT."""
