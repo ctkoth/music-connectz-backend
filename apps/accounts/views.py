@@ -125,9 +125,10 @@ class MeView(APIView):
             p.birthday = bd
             p.sign = zodiac_for(bd)
             changed += ["birthday", "sign"]
-        for f in ("display_name", "bio", "location", "gender"):
+        _limits = {"display_name": 80, "bio": 500, "location": 120, "gender": 24}
+        for f, limit in _limits.items():
             if isinstance(data.get(f), str):
-                setattr(p, f, data[f][:500])
+                setattr(p, f, data[f][:limit])
                 changed.append(f)
         if changed:
             p.save(update_fields=list(dict.fromkeys(changed + ["updated_at"])))

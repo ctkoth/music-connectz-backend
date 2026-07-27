@@ -605,9 +605,9 @@ def profile_age(p):
 
 
 _ZODIAC_CUTOFFS = [
-    (120, "Capricorn"), (219, "Aquarius"), (320, "Pisces"), (420, "Aries"),
-    (521, "Taurus"), (621, "Gemini"), (722, "Cancer"), (823, "Leo"),
-    (923, "Virgo"), (1023, "Libra"), (1122, "Scorpio"), (1222, "Sagittarius"),
+    (119, "Capricorn"), (218, "Aquarius"), (320, "Pisces"), (419, "Aries"),
+    (520, "Taurus"), (620, "Gemini"), (722, "Cancer"), (822, "Leo"),
+    (922, "Virgo"), (1022, "Libra"), (1121, "Scorpio"), (1221, "Sagittarius"),
     (1231, "Capricorn"),
 ]
 
