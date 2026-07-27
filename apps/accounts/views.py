@@ -125,9 +125,13 @@ class MeView(APIView):
             p.birthday = bd
             p.sign = zodiac_for(bd)
             changed += ["birthday", "sign"]
+        # Truncate to each column's real width — display_name/location/gender are
+        # much narrower than bio, and overflowing them raises a DataError (500)
+        # on PostgreSQL instead of quietly saving.
         for f in ("display_name", "bio", "location", "gender"):
             if isinstance(data.get(f), str):
-                setattr(p, f, data[f][:500])
+                limit = p._meta.get_field(f).max_length
+                setattr(p, f, data[f][:limit])
                 changed.append(f)
         if changed:
             p.save(update_fields=list(dict.fromkeys(changed + ["updated_at"])))

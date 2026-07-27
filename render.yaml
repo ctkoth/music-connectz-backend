@@ -6,7 +6,12 @@ services:
     autoDeploy: true
     rootDir: .
     buildCommand: "./build.sh"
-    startCommand: "gunicorn music_connectz.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120"
+    # --access-logfile makes slow requests visible in the Render log stream, and
+    # recycling workers keeps a leaked/wedged one from degrading the whole box.
+    startCommand: "gunicorn music_connectz.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 --graceful-timeout 30 --max-requests 500 --max-requests-jitter 50 --access-logfile - --error-logfile -"
+    # `/` is a static JSON payload that touches no database, so a failing health
+    # check means the process itself is wedged and Render should replace it.
+    healthCheckPath: /
     envVars:
       - key: SECRET_KEY
         generateValue: true

@@ -33,44 +33,52 @@ class PublicUserSerializer(serializers.ModelSerializer):
     age = serializers.SerializerMethodField()
     zodiac = serializers.SerializerMethodField()
 
+    # Nine of the fields below live on the economy profile/wallet/membership. Look
+    # each row up ONCE per user and cache it on the serializer — resolving them
+    # field-by-field cost ten round-trips to Postgres on every /api/auth/me/,
+    # /login/ and /register/ response, which is most of those endpoints' latency.
+    def _economy(self, obj, kind):
+        cache = self.__dict__.setdefault("_mcz_cache", {})
+        key = (kind, obj.pk)
+        if key not in cache:
+            from apps.economy.models import membership_for, profile_for, wallet_for
+            cache[key] = {
+                "profile": profile_for,
+                "wallet": wallet_for,
+                "membership": membership_for,
+            }[kind](obj)
+        return cache[key]
+
     def get_birthday(self, obj):
-        from apps.economy.models import profile_for
-        return profile_for(obj).birthday or ""
+        return self._economy(obj, "profile").birthday or ""
 
     def get_age(self, obj):
-        from apps.economy.models import profile_age, profile_for
-        return profile_age(profile_for(obj))
+        from apps.economy.models import profile_age
+        return profile_age(self._economy(obj, "profile"))
 
     def get_zodiac(self, obj):
-        from apps.economy.models import profile_for
-        return profile_for(obj).sign or ""
+        return self._economy(obj, "profile").sign or ""
 
     def get_is_owner(self, obj):
         return bool(obj.is_superuser or obj.is_staff)
 
     def get_tier(self, obj):
-        from apps.economy.models import membership_for
-        return membership_for(obj).tier
+        return self._economy(obj, "membership").tier
 
     def get_spinaz(self, obj):
-        from apps.economy.models import wallet_for
-        return wallet_for(obj).spinaz
+        return self._economy(obj, "wallet").spinaz
 
     def get_energy(self, obj):
-        from apps.economy.models import wallet_for
-        return wallet_for(obj).energy
+        return self._economy(obj, "wallet").energy
 
     def get_onboarded(self, obj):
-        from apps.economy.models import profile_for
-        return profile_for(obj).onboarded
+        return self._economy(obj, "profile").onboarded
 
     def get_personas(self, obj):
-        from apps.economy.models import profile_for
-        return profile_for(obj).personas or []
+        return self._economy(obj, "profile").personas or []
 
     def get_nationalities(self, obj):
-        from apps.economy.models import profile_for
-        return profile_for(obj).nationalities or []
+        return self._economy(obj, "profile").nationalities or []
 
     class Meta:
         model = User
@@ -120,10 +128,14 @@ class RegisterSerializer(serializers.Serializer):
         # Store the birthday on the searchable economy profile if provided.
         birthday = (validated.get("birthday") or "").strip()
         if birthday:
-            from apps.economy.models import profile_for
+            # Derive the sign here too, exactly as PATCH /api/auth/me/ does —
+            # otherwise a member who gave their birthday at signup had a blank
+            # ZodiacZ sign until they edited their profile again.
+            from apps.economy.models import profile_for, zodiac_for
             ep = profile_for(user)
             ep.birthday = birthday[:10]
-            ep.save(update_fields=["birthday", "updated_at"])
+            ep.sign = zodiac_for(ep.birthday)
+            ep.save(update_fields=["birthday", "sign", "updated_at"])
         # Two-sided referral: credit the inviter + welcome the joinee (once).
         code = (validated.get("ref") or "").strip()
         if code and code.lower() != user.username.lower():
