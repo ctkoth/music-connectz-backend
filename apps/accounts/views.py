@@ -105,6 +105,34 @@ class MeView(APIView):
             pass
         return Response(PublicUserSerializer(request.user).data)
 
+    def patch(self, request):
+        """Update the member's editable profile fields (personas, birthday →
+        drives ZodiacZ + the AdZ age gate, nationalities, and basic display
+        bits) on the searchable economy profile. Returns the updated user."""
+        from apps.economy.models import profile_for, zodiac_for
+        p = profile_for(request.user)
+        data = request.data or {}
+        changed = []
+        if isinstance(data.get("personas"), list):
+            p.personas = [str(x)[:60] for x in data["personas"]][:50]
+            changed.append("personas")
+        if isinstance(data.get("nationalities"), list):
+            p.nationalities = [str(x)[:60] for x in data["nationalities"]][:30]
+            changed.append("nationalities")
+        if "birthday" in data:
+            bd = (data.get("birthday") or "")
+            bd = bd.strip()[:10] if isinstance(bd, str) else ""
+            p.birthday = bd
+            p.sign = zodiac_for(bd)
+            changed += ["birthday", "sign"]
+        for f in ("display_name", "bio", "location", "gender"):
+            if isinstance(data.get(f), str):
+                setattr(p, f, data[f][:500])
+                changed.append(f)
+        if changed:
+            p.save(update_fields=list(dict.fromkeys(changed + ["updated_at"])))
+        return Response(PublicUserSerializer(request.user).data)
+
     def delete(self, request):
         """Permanently delete the signed-in account and its owned data. FK
         cascades remove profile, wallet, membership, posts, follows, etc.

@@ -604,6 +604,27 @@ def profile_age(p):
         return None
 
 
+_ZODIAC_CUTOFFS = [
+    (120, "Capricorn"), (219, "Aquarius"), (320, "Pisces"), (420, "Aries"),
+    (521, "Taurus"), (621, "Gemini"), (722, "Cancer"), (823, "Leo"),
+    (923, "Virgo"), (1023, "Libra"), (1122, "Scorpio"), (1222, "Sagittarius"),
+    (1231, "Capricorn"),
+]
+
+
+def zodiac_for(birthday):
+    """Western zodiac sign from a YYYY-MM-DD birthday, or "" if unparseable."""
+    try:
+        _, m, d = (int(x) for x in (birthday or "").split("-"))
+    except (ValueError, TypeError):
+        return ""
+    md = m * 100 + d
+    for cutoff, name in _ZODIAC_CUTOFFS:
+        if md <= cutoff:
+            return name
+    return "Capricorn"
+
+
 def haversine_km(lat1, lng1, lat2, lng2):
     """Great-circle distance in km between two lat/lng points."""
     from math import radians, sin, cos, asin, sqrt

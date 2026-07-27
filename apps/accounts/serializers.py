@@ -29,6 +29,21 @@ class PublicUserSerializer(serializers.ModelSerializer):
     onboarded = serializers.SerializerMethodField()
     personas = serializers.SerializerMethodField()
     nationalities = serializers.SerializerMethodField()
+    birthday = serializers.SerializerMethodField()
+    age = serializers.SerializerMethodField()
+    zodiac = serializers.SerializerMethodField()
+
+    def get_birthday(self, obj):
+        from apps.economy.models import profile_for
+        return profile_for(obj).birthday or ""
+
+    def get_age(self, obj):
+        from apps.economy.models import profile_age, profile_for
+        return profile_age(profile_for(obj))
+
+    def get_zodiac(self, obj):
+        from apps.economy.models import profile_for
+        return profile_for(obj).sign or ""
 
     def get_is_owner(self, obj):
         return bool(obj.is_superuser or obj.is_staff)
@@ -62,6 +77,7 @@ class PublicUserSerializer(serializers.ModelSerializer):
         fields = (
             "id", "username", "email", "phone", "avatar_url", "is_owner",
             "tier", "spinaz", "energy", "onboarded", "personas", "nationalities",
+            "birthday", "age", "zodiac",
         )
 
 
