@@ -8,9 +8,13 @@ apps (dawz, designz, managez, scoutz, shotz, writez, common) — those live only
 your git history. Your Postgres data is untouched either way.
 """
 import os
+import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Which manage.py command (if any) is running. Under gunicorn this is empty.
+_MANAGEMENT_ARGV = set(sys.argv[1:2])
 
 
 def _env_bool(name, default="0"):
@@ -91,14 +95,42 @@ DATABASES = {
 }
 _db_url = os.environ.get("DATABASE_URL", "")
 if _db_url:
-    try:
-        import dj_database_url
+    import dj_database_url
 
-        DATABASES["default"] = dj_database_url.parse(
-            _db_url, conn_max_age=600, ssl_require=True
+    # NOTE: no try/except here on purpose. Swallowing a parse error left the
+    # sqlite default in place, so production silently booted against an empty,
+    # per-deploy-ephemeral database — every existing account "vanished" and
+    # login answered "No account matches that login". Fail the boot instead.
+    DATABASES["default"] = dj_database_url.parse(
+        _db_url, conn_max_age=600, ssl_require=True
+    )
+    # Persistent connections (conn_max_age) are reused across requests, and
+    # Postgres/Render will drop ones that have gone idle. Without a health check
+    # the first request on a dead connection 500s; with it, Django reconnects.
+    DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
+    # Bound the TCP connect and any single statement. Unbounded, an unreachable
+    # or wedged database pins every gunicorn thread until the worker times out,
+    # which is what turns a slow database into a site that never responds.
+    _db_options = DATABASES["default"].setdefault("OPTIONS", {})
+    _db_options.setdefault("connect_timeout", int(os.environ.get("DB_CONNECT_TIMEOUT", "10")))
+    # Only for the serving process — migrations and other management commands
+    # legitimately run long statements and must not be cut off mid-deploy.
+    _serving = not any(
+        a in _MANAGEMENT_ARGV for a in ("migrate", "makemigrations", "reset_schema", "seed_skillz", "shell", "dbshell")
+    )
+    _statement_timeout_ms = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "30000"))
+    if _serving and _statement_timeout_ms > 0:
+        _db_options.setdefault(
+            "options", f"-c statement_timeout={_statement_timeout_ms}"
         )
-    except Exception:
-        pass
+elif not DEBUG:
+    import warnings
+
+    warnings.warn(
+        "DATABASE_URL is not set — falling back to sqlite. On Render this disk "
+        "is ephemeral, so accounts will not survive a deploy.",
+        RuntimeWarning,
+    )
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
