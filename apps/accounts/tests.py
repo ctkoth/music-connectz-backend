@@ -65,3 +65,76 @@ class AuthFlowTests(TestCase):
             resp = self.client.get("/api/auth/me/")
         self.assertEqual(resp.status_code, 200)
         self.assertLessEqual(len(queries), 6, [q["sql"] for q in queries])
+
+
+class OAuthLinkingTests(TestCase):
+    """Matching an OAuth sign-in to an existing account by email hands over
+    that account, so it must only happen on a provider-verified address."""
+
+    def setUp(self):
+        self.existing = User.objects.create_user("owner", "owner@example.com", PASSWORD)
+
+    def _info(self, **over):
+        info = {"provider": "spotify", "uid": "uid-1", "email": "owner@example.com",
+                "email_verified": False, "name": "Owner", "avatar_url": ""}
+        info.update(over)
+        return info
+
+    def test_verified_email_links_to_the_existing_account(self):
+        from apps.accounts.views import _user_from_oauth
+        user = _user_from_oauth(self._info(provider="google", email_verified=True))
+        self.assertEqual(user.pk, self.existing.pk)
+
+    def test_unverified_email_is_refused_not_silently_linked(self):
+        from apps.accounts.oauth import OAuthError
+        from apps.accounts.views import _user_from_oauth
+        with self.assertRaises(OAuthError):
+            _user_from_oauth(self._info())
+        # and no shadow account was opened on that address either
+        self.assertEqual(User.objects.filter(email__iexact="owner@example.com").count(), 1)
+
+    def test_unverified_email_with_no_clash_still_creates_an_account(self):
+        from apps.accounts.views import _user_from_oauth
+        user = _user_from_oauth(self._info(email="nobody@example.com"))
+        self.assertNotEqual(user.pk, self.existing.pk)
+        self.assertEqual(user.email, "nobody@example.com")
+
+    def test_known_identity_short_circuits_before_any_email_check(self):
+        from apps.accounts.models import OAuthIdentity
+        from apps.accounts.views import _user_from_oauth
+        OAuthIdentity.objects.create(provider="spotify", provider_uid="uid-1", user=self.existing)
+        # Same unverified payload that is refused above — a linked identity wins.
+        self.assertEqual(_user_from_oauth(self._info()).pk, self.existing.pk)
+
+
+class OAuthVerifierShapeTests(TestCase):
+    """Every verifier must declare email_verified — a missing key is falsy and
+    would quietly disable linking for a provider that does verify."""
+
+    def test_generic_code_flow_never_claims_verification(self):
+        import apps.accounts.oauth as oauth_mod
+        captured = {}
+
+        class FakeResp:
+            status_code = 200
+            def json(self):
+                return captured["payload"]
+
+        captured["payload"] = {"access_token": "t"}
+        orig_post, orig_get = oauth_mod.requests.post, oauth_mod.requests.get
+        oauth_mod.requests.post = lambda *a, **k: FakeResp()
+        oauth_mod.requests.get = lambda *a, **k: type(
+            "R", (), {"json": lambda self: {"id": "42", "email": "x@example.com",
+                                            "display_name": "X", "images": []}}
+        )()
+        try:
+            import os
+            os.environ["SPOTIFY_OAUTH_CLIENT_ID"] = "id"
+            os.environ["SPOTIFY_OAUTH_CLIENT_SECRET"] = "secret"
+            info = oauth_mod.exchange_oauth2("spotify", "code", "https://x/cb")
+        finally:
+            oauth_mod.requests.post, oauth_mod.requests.get = orig_post, orig_get
+            os.environ.pop("SPOTIFY_OAUTH_CLIENT_ID", None)
+            os.environ.pop("SPOTIFY_OAUTH_CLIENT_SECRET", None)
+        self.assertIn("email_verified", info)
+        self.assertIs(info["email_verified"], False)

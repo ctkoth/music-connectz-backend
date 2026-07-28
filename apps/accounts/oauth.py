@@ -54,6 +54,9 @@ def verify_google(credential: str):
         "provider": "google",
         "uid": data["sub"],
         "email": (data.get("email") or "").lower(),
+        # Unverified addresses are rejected above, so anything reaching here is
+        # confirmed by Google and safe to match against an existing account.
+        "email_verified": True,
         "name": data.get("name") or "",
         "avatar_url": data.get("picture") or "",
     }
@@ -90,6 +93,14 @@ def exchange_github(code: str, redirect_uri: str = ""):
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
     user = requests.get("https://api.github.com/user", headers=headers, timeout=10).json()
 
+    # A malformed/error response would otherwise sail through as uid "None",
+    # which every failed sign-in would then share.
+    if not user.get("id"):
+        raise OAuthError("GitHub did not return an account for that token.")
+
+    # GitHub only publishes an address on the profile once it is verified, and
+    # the fallback explicitly demands primary+verified, so either path is safe
+    # to match on.
     email = user.get("email") or ""
     if not email:
         emails = requests.get(
@@ -105,6 +116,7 @@ def exchange_github(code: str, redirect_uri: str = ""):
         "provider": "github",
         "uid": str(user.get("id")),
         "email": email.lower(),
+        "email_verified": bool(email),
         "name": user.get("name") or user.get("login") or "",
         "avatar_url": user.get("avatar_url") or "",
     }
@@ -127,7 +139,7 @@ def verify_apple(id_token: str):
         # minted for THIS app.
         raise OAuthError("Apple sign-in is not configured on the server.")
     try:
-        jwk_client = PyJWKClient("https://appleid.apple.com/auth/keys")
+        jwk_client = PyJWKClient("https://appleid.apple.com/auth/keys", timeout=10)
         signing_key = jwk_client.get_signing_key_from_jwt(id_token)
         data = jwt.decode(
             id_token,
@@ -140,10 +152,14 @@ def verify_apple(id_token: str):
     except Exception:
         raise OAuthError("Apple rejected that sign-in token.")
 
+    # Apple sends email_verified as a bool on some tokens and the string
+    # "true" on others.
+    verified = data.get("email_verified")
     return {
         "provider": "apple",
         "uid": data["sub"],
         "email": (data.get("email") or "").lower(),
+        "email_verified": verified is True or str(verified).lower() == "true",
         "name": "",
         "avatar_url": "",
     }
@@ -252,4 +268,8 @@ def exchange_oauth2(provider: str, code: str, redirect_uri: str = "", code_verif
         raise OAuthError(f"{provider.title()} did not return a user id.")
     info["provider"] = provider
     info["email"] = (info.get("email") or "").lower()
+    # None of these userinfo endpoints tell us whether the address was
+    # confirmed, so it never auto-matches an existing account. Flip a provider
+    # to True only once its response is known to carry a verified flag.
+    info["email_verified"] = False
     return info

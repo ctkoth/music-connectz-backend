@@ -36,7 +36,13 @@ def _unique_username(base):
 
 
 def _user_from_oauth(info):
-    """Find-or-create a user from a verified OAuth payload, return (user)."""
+    """Find-or-create a user from a verified OAuth payload, return (user).
+
+    Matching an existing account by email hands the caller that account, so we
+    only do it when the provider actually ASSERTED the address is verified.
+    A provider that lets someone set an arbitrary unverified email would
+    otherwise be a way to take over any account by claiming its address.
+    """
     identity = OAuthIdentity.objects.filter(
         provider=info["provider"], provider_uid=info["uid"]
     ).first()
@@ -45,7 +51,17 @@ def _user_from_oauth(info):
 
     user = None
     if info.get("email"):
-        user = User.objects.filter(email__iexact=info["email"]).first()
+        match = User.objects.filter(email__iexact=info["email"]).first()
+        if match and not info.get("email_verified"):
+            # Refuse rather than silently opening a second account on the same
+            # address — duplicate emails would also make password login
+            # ambiguous, since it resolves an identifier to a single user.
+            raise OAuthError(
+                f"An account already uses {info['email']}. "
+                f"{info['provider'].title()} didn't confirm you own that address, "
+                "so sign in with your original method and link it from there."
+            )
+        user = match
 
     if not user:
         base = info.get("name") or (info["email"].split("@")[0] if info.get("email") else info["provider"])
@@ -219,10 +235,12 @@ class OAuthLoginView(APIView):
                     {"detail": f"Unsupported provider '{provider}'."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            # Linking lives inside the same try so a refused link answers 400
+            # with its reason, not a 500.
+            user = _user_from_oauth(info)
         except OAuthError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = _user_from_oauth(info)
         tokens = issue_tokens(user)
         return Response({"user": PublicUserSerializer(user).data, **tokens})
 
