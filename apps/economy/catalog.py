@@ -11,20 +11,34 @@ SPECZ_CATALOG = {
     "trending": {"name": "Trending Metadata Report", "price_cents": 899},
 }
 
+# A cap high enough that no human writes past it, while staying a plain int —
+# so every `len(x) > cap` and `x[:cap]` in the codebase keeps working, and it
+# still serializes to JSON. Clients should render `char_limit_unlimited` rather
+# than printing this number.
+UNLIMITED_CHARS = 10 ** 9
+
 # Per-tier limits. Storage in MB (Free 400MB / Premium 5GB / StatZ 100GB),
 # uploads in MB (Free 40MB / Premium 400MB / StatZ 4GB), char limits for
 # messages/posts/comments/AI prompts.
 TIER_LIMITS = {
     TIER_FREE: {"char_limit": 400, "upload_mb": 40, "storage_mb": 400},
     TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 400, "storage_mb": 5120},
-    TIER_STATZ: {"char_limit": 5000, "upload_mb": 4096, "storage_mb": 102400},
+    # StatZ writes without a character cap — the client already advertised this
+    # ("StatZ char limit: Unlimited") while the server was still cutting at
+    # 5000, so a StatZ member was told one thing and refused another.
+    TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 4096, "storage_mb": 102400},
     # Owner god-mode: effectively unlimited.
-    TIER_DEBUG: {"char_limit": 1000000, "upload_mb": 1048576, "storage_mb": 10485760},
+    TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760},
 }
 
 
 def limits_for(tier):
     return TIER_LIMITS.get(tier, TIER_LIMITS[TIER_FREE])
+
+
+def chars_unlimited(tier):
+    """True when this tier writes without a character cap."""
+    return limits_for(tier)["char_limit"] >= UNLIMITED_CHARS
 
 
 # How long after posting a message/comment/post/rating you can still edit it, by

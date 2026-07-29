@@ -286,9 +286,13 @@ class LimitsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from .catalog import chars_unlimited
+
         m = membership_for(request.user)
         lim = dict(limits_for(m.tier))
         lim["tier"] = m.tier
+        # So the client can print "Unlimited" instead of a nine-figure number.
+        lim["char_limit_unlimited"] = chars_unlimited(m.tier)
         lim["dev_tax_rate"] = m.dev_tax_rate
         lim["storage_used_mb"] = round(storage_used_bytes(request.user) / MB, 2)
         return Response(lim)
