@@ -14,6 +14,8 @@ The frontend pages are /forgot (asks for an identifier) and /reset-password
 (reads ?uid= and ?token= off the query string), so the emailed link must point
 at FRONTEND_URL/reset-password with exactly those two parameters.
 """
+import logging
+
 from django.conf import settings
 from django.contrib.auth import get_user_model, password_validation
 from django.contrib.auth.tokens import default_token_generator
@@ -29,6 +31,7 @@ from rest_framework.views import APIView
 from .serializers import issue_tokens
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 # Deliberately identical whether or not an account matched. Saying "no account
 # with that email" would turn this endpoint into a membership oracle.
@@ -72,9 +75,19 @@ class ForgotPasswordView(APIView):
 
         # An account with no email address on file has nowhere to send the link.
         # Still answer with SENT_DETAIL so the response reveals nothing.
+        if user and not user.email:
+            logger.warning(
+                "Password reset requested for %r, but that account has no email "
+                "address on file — nothing was sent.", user.username,
+            )
+
         if user and user.email:
             link = reset_link_for(user)
             try:
+                # fail_silently=False so the exception reaches the handler below
+                # and gets logged. The RESPONSE is unchanged either way — a
+                # caller must not be able to tell delivery from failure, or from
+                # the account not existing.
                 send_mail(
                     subject="Reset your Music ConnectZ password",
                     message=(
@@ -89,10 +102,23 @@ class ForgotPasswordView(APIView):
                     ),
                     from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
                     recipient_list=[user.email],
-                    fail_silently=True,  # a dead SMTP host must not 500 the request
+                    fail_silently=False,
                 )
+                logger.info("Password reset link sent to %r.", user.username)
             except Exception:
-                pass
+                # Log the username, never the address — this line ends up in the
+                # Render stream. The traceback carries the SMTP error, which is
+                # the whole point: a misconfigured mail host used to fail in
+                # complete silence.
+                logger.exception(
+                    "Password reset email FAILED for %r via EMAIL_HOST=%r port=%s "
+                    "TLS=%s backend=%s",
+                    user.username,
+                    getattr(settings, "EMAIL_HOST", ""),
+                    getattr(settings, "EMAIL_PORT", ""),
+                    getattr(settings, "EMAIL_USE_TLS", ""),
+                    getattr(settings, "EMAIL_BACKEND", ""),
+                )
 
         return Response({"detail": SENT_DETAIL})
 

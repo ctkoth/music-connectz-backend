@@ -268,6 +268,29 @@ EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = _env_bool("EMAIL_USE_TLS", "1")
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "Music ConnectZ <no-reply@musicconnectz.net>")
+# Send our own loggers to stdout so they land in the Render log stream. Without
+# this, a logger outside the "django" namespace falls back to Python's
+# last-resort handler: WARNING and above only, no timestamp, no logger name —
+# which is a poor way to find out why an email didn't send. LOG_LEVEL=INFO turns
+# on the successful-send lines too.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {"format": "%(asctime)s %(levelname)s %(name)s | %(message)s"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "standard"},
+    },
+    "loggers": {
+        "apps": {
+            "handlers": ["console"],
+            "level": os.environ.get("LOG_LEVEL", "WARNING").upper(),
+            "propagate": False,
+        },
+    },
+}
+
 EMAIL_BACKEND = (
     "django.core.mail.backends.smtp.EmailBackend"
     if EMAIL_HOST

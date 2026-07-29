@@ -124,3 +124,42 @@ class ResetPasswordTests(TestCase):
         self.assertEqual(resp.status_code, 200, resp.content)
         oauth_user.refresh_from_db()
         self.assertTrue(oauth_user.check_password(NEW))
+
+
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+                   FRONTEND_URL="https://musicconnectz.net")
+class ForgotPasswordLoggingTests(TestCase):
+    """A misconfigured mail host used to fail in complete silence. It must now
+    be visible in the logs — without changing the response, which has to stay
+    identical whether delivery worked, failed, or the account didn't exist."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("member", "member@example.com", OLD)
+
+    def test_smtp_failure_is_logged_but_the_response_is_unchanged(self):
+        from unittest.mock import patch
+        with patch("apps.accounts.passwords.send_mail",
+                   side_effect=OSError("[Errno 101] Network is unreachable")):
+            with self.assertLogs("apps.accounts.passwords", level="ERROR") as logs:
+                resp = self.client.post(FORGOT, {"identifier": "member"}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["detail"], SENT_DETAIL)
+        blob = "\n".join(logs.output)
+        self.assertIn("FAILED", blob)
+        self.assertIn("Network is unreachable", blob)   # the actual SMTP error
+        self.assertIn("member", blob)                   # which account
+
+    def test_the_log_line_never_carries_the_email_address(self):
+        from unittest.mock import patch
+        with patch("apps.accounts.passwords.send_mail", side_effect=OSError("nope")):
+            with self.assertLogs("apps.accounts.passwords", level="ERROR") as logs:
+                self.client.post(FORGOT, {"identifier": "member"}, format="json")
+        self.assertNotIn("member@example.com", "\n".join(logs.output))
+
+    def test_account_with_no_email_is_logged_as_a_dead_end(self):
+        User.objects.create_user("noemail", "", OLD)
+        with self.assertLogs("apps.accounts.passwords", level="WARNING") as logs:
+            resp = self.client.post(FORGOT, {"identifier": "noemail"}, format="json")
+        self.assertEqual(resp.data["detail"], SENT_DETAIL)
+        self.assertIn("no email address", "\n".join(logs.output))
