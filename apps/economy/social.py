@@ -299,6 +299,13 @@ def profile_max_experience(p):
     have no date and don't count). None when nothing is dated."""
     best = None
     for persona in (p.personas or []):
+        # A persona is either {"key", "name", "skills": [...]} or, from before
+        # the skill picker existed, a bare key string. The string form carries
+        # no dates and simply doesn't count — but calling .get() on it raised
+        # AttributeError, and this runs inside _profile_card, so viewing ANY
+        # member who had picked a PersonaZ answered 500.
+        if not isinstance(persona, dict):
+            continue
         for s in (persona.get("skills") or []):
             start = s.get("start") if isinstance(s, dict) else None
             yrs = _skill_years(start) if start else None
