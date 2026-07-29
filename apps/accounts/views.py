@@ -35,6 +35,32 @@ def _unique_username(base):
     return candidate
 
 
+def _clean_persona(raw):
+    """Normalize one PersonaZ entry, keeping its skills and their start dates.
+
+    Accepts the string form (just a key) and the dict form; always returns a
+    dict so downstream code has one shape to reason about. Start dates are the
+    input to profile_max_experience, so they are preserved verbatim when they
+    look like a date and dropped when they don't.
+    """
+    if not isinstance(raw, dict):
+        return {"key": str(raw)[:60], "name": str(raw)[:60], "skills": []}
+
+    skills = []
+    for s in (raw.get("skills") or [])[:100]:
+        if isinstance(s, dict):
+            name = str(s.get("name", ""))[:80]
+            start = str(s.get("start") or "")[:10]
+        else:
+            name, start = str(s)[:80], ""
+        if not name:
+            continue
+        skills.append({"name": name, "start": start} if start else {"name": name})
+
+    key = str(raw.get("key") or raw.get("name") or "")[:60]
+    return {"key": key, "name": str(raw.get("name") or key)[:60], "skills": skills}
+
+
 def _user_from_oauth(info):
     """Find-or-create a user from a verified OAuth payload, return (user).
 
@@ -130,7 +156,12 @@ class MeView(APIView):
         data = request.data or {}
         changed = []
         if isinstance(data.get("personas"), list):
-            p.personas = [str(x)[:60] for x in data["personas"]][:50]
+            # A persona is {"key", "name", "skills": [{"name", "start"}]} once
+            # the member has used the skill picker, or a bare key string from
+            # before it existed. Stringifying everything flattened the dict form
+            # to "{'key': ...}" and destroyed the skills — and with them the
+            # start dates the whole experience metric is derived from.
+            p.personas = [_clean_persona(x) for x in data["personas"]][:50]
             changed.append("personas")
         if isinstance(data.get("nationalities"), list):
             p.nationalities = [str(x)[:60] for x in data["nationalities"]][:30]
