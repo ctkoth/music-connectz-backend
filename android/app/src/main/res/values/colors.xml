@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Same values as tools/make_brand_assets.py. Change them there and re-run it. -->
+<resources>
+    <color name="brand_ink">#140A2E</color>
+    <color name="brand_violet">#3A1078</color>
+    <color name="brand_accent">#7C4DFF</color>
+    <color name="brand_spark">#FF3D9A</color>
+</resources>

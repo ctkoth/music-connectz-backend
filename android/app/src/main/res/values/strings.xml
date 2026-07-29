@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Music ConnectZ</string>
+
+    <!--
+      Tells Chrome which site this app claims. The site has to claim the app
+      back from https://<site>/.well-known/assetlinks.json — both halves must
+      agree or the app opens with a visible URL bar, which reads as a repackaged
+      website to a Play reviewer.
+
+      The URL is literal here on purpose: Android does not expand @string/
+      references nested inside another string. If you change the `siteUrl`
+      Gradle property, change this too — the build fails loudly if you forget
+      (see the checkAssetStatements task in build.gradle.kts).
+    -->
+    <string name="asset_statements" translatable="false">
+        [{ "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {"namespace": "web", "site": "https://musicconnectz.net"}}]
+    </string>
+</resources>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MusicConnectZ" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@color/brand_ink</item>
+        <item name="android:navigationBarColor">@color/brand_ink</item>
+    </style>
+
+    <!--
+      Pre-Android-12 launch theme: the window itself is the splash, which is the
+      only way to avoid a white flash before the activity draws. Android 12+
+      overrides this with values-v31.
+    -->
+    <style name="Theme.MusicConnectZ.Splash" parent="Theme.MusicConnectZ">
+        <item name="android:windowBackground">@drawable/splash</item>
+    </style>
+</resources>

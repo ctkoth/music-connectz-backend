@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The only thing we ever share out: the splash bitmap, handed to Chrome. -->
+<paths>
+    <files-path
+        name="twa_splash"
+        path="twa_splash/" />
+</paths>
