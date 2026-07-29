@@ -8,6 +8,7 @@ from django.urls import include, path, re_path
 from django.views.static import serve as static_serve
 
 from apps.economy.views import StatsView
+from apps.omviardz.wellknown import AssetLinksView
 
 # SkillZ training is generated per app_key. MimeZ/DirectZ/LessonZ mount their own
 # inside their urls.py; the InstrumentZ apps have no Django app of their own, so
@@ -49,6 +50,10 @@ urlpatterns = [
     path("api/mimez/", include("apps.mimez.urls")),
     path("api/directz/", include("apps.directz.urls")),
     path("api/lessonz/", include("apps.lessonz.urls")),
+    path("api/omviardz/", include("apps.omviardz.urls")),
+    # Android app <-> site link verification. Must sit at the domain root, not
+    # under /api/ — Google fetches this exact path over https.
+    path(".well-known/assetlinks.json", AssetLinksView.as_view(), name="assetlinks"),
 ] + [
     path(f"api/{key}/", include((training_urlpatterns(key), key)))
     for key in INSTRUMENT_APP_KEYS

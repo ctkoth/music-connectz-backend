@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Handed to Chrome as the TWA splash, and used as the pre-Android-12 window
+  background. The wordless mark on brand ink, nothing else — no name, because
+  the launcher already said it.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/brand_ink" />
+    <item
+        android:width="176dp"
+        android:height="176dp"
+        android:drawable="@drawable/ic_launcher_foreground"
+        android:gravity="center" />
+</layer-list>
