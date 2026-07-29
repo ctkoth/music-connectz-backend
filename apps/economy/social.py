@@ -497,13 +497,39 @@ class ProfileAvatarView(APIView):
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
+    # A profile picture is displayed at 56–80px. Anything past a few MB is a
+    # mistake or an abuse, whatever the member's upload tier allows elsewhere.
+    MAX_MB = 8
+
     def post(self, request):
         f = request.FILES.get("avatar")
         if not f:
             return Response({"detail": "avatar file required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        content_type = (getattr(f, "content_type", "") or "").lower()
+        if not content_type.startswith("image/"):
+            return Response(
+                {"detail": "That file isn't an image. Use a JPG, PNG, WebP or GIF."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if f.size > self.MAX_MB * 1024 * 1024:
+            return Response(
+                {"detail": f"That image is too big — keep a profile picture under {self.MAX_MB}MB."},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+
         p = profile_for(request.user)
         p.avatar = f
         p.save(update_fields=["avatar", "updated_at"])
+        return Response(_profile_full(p, request))
+
+    def delete(self, request):
+        """Remove the picture and fall back to the default PersonaZ art."""
+        p = profile_for(request.user)
+        if p.avatar:
+            p.avatar.delete(save=False)
+            p.avatar = None
+            p.save(update_fields=["avatar", "updated_at"])
         return Response(_profile_full(p, request))
 
 
