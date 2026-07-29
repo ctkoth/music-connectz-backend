@@ -62,7 +62,21 @@ class MessagesView(APIView):
                 convos[other.id] = {"user": other.username, "last": m.body[:80], "at": m.created_at.isoformat(), "unread": 0}
             if m.recipient_id == me.id and not m.read:
                 convos[other.id]["unread"] += 1
-        return Response({"conversations": list(convos.values())})
+
+        # inbox/sent are the flat split the MessageZ screen renders. They come
+        # off the same 500 rows already fetched above — no extra queries — and
+        # sit alongside `conversations` so a threaded view can use that instead
+        # without another endpoint.
+        inbox = [_msg(m, me) for m in msgs if m.recipient_id == me.id]
+        sent = [_msg(m, me) for m in msgs if m.sender_id == me.id]
+        return Response({
+            "conversations": list(convos.values()),
+            "inbox": inbox,
+            "sent": sent,
+            # DMs cost nothing here today. Reported so the client states the
+            # real price instead of assuming one.
+            "dm_cost_energy": 0,
+        })
 
     def post(self, request):
         me = request.user
