@@ -598,9 +598,14 @@ class MemberProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, username):
-        p = Profile.objects.filter(user__username=username).select_related("user").first()
-        if not p:
+        # Resolve the USER first. Profile rows are created lazily, so a member
+        # who has never opened ProfileZ has none — and looking the profile up
+        # directly 404'd them, which made them unopenable from the online list
+        # even though the account is perfectly real.
+        user = User.objects.filter(username__iexact=username).first()
+        if not user:
             return Response({"detail": "profile not found"}, status=status.HTTP_404_NOT_FOUND)
+        p = profile_for(user)
         return Response(_profile_full(p, request))
 
 
