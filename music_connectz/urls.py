@@ -9,6 +9,19 @@ from django.views.static import serve as static_serve
 
 from apps.economy.views import StatsView
 
+# SkillZ training is generated per app_key. MimeZ/DirectZ/LessonZ mount their own
+# inside their urls.py; the InstrumentZ apps have no Django app of their own, so
+# their trees are mounted here. The frontend's <InstrumentZ appKey="…"> builds
+# basePath as /api/<appKey>, so every key below must match an appKey it renders
+# or that app's SkillZ panel 404s.
+try:
+    from apps.skillz.training import training_urlpatterns
+except Exception:  # pragma: no cover - never let this take the deploy down
+    def training_urlpatterns(app_key):
+        return []
+
+INSTRUMENT_APP_KEYS = ["singz", "rapz"]
+
 
 def health(_request):
     return JsonResponse(
@@ -36,6 +49,9 @@ urlpatterns = [
     path("api/mimez/", include("apps.mimez.urls")),
     path("api/directz/", include("apps.directz.urls")),
     path("api/lessonz/", include("apps.lessonz.urls")),
+] + [
+    path(f"api/{key}/", include((training_urlpatterns(key), key)))
+    for key in INSTRUMENT_APP_KEYS
 ]
 
 # Serve user uploads. When S3/R2 is configured (S3_BUCKET_NAME), django-storages
