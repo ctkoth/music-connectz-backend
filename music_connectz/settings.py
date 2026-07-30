@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     "apps.directz",
     "apps.lessonz",
     "apps.omviardz",
+    "apps.bodiez",
 ]
 
 MIDDLEWARE = [

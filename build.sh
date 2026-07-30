@@ -11,4 +11,5 @@ python manage.py migrate --no-input
 # `|| true` because an empty product list is a degraded feature, not a reason to
 # fail a deploy.
 python manage.py seed_pod || true
+python manage.py seed_bodiez || true
 python manage.py collectstatic --no-input || true

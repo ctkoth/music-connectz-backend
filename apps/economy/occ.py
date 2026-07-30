@@ -11,7 +11,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import ai_cost
-from .models import charge_ai_usage, can_afford_ai, wallet_for
+from .models import (charge_ai_usage, can_afford_ai, daily_prompt_state,
+                     wallet_for)
 from .views import is_owner, platform_owner
 
 # House model per OCC voice. The "voice" shapes the system prompt/tone + price;
@@ -131,7 +132,10 @@ class OccChatView(APIView):
         # then routed to the platform owner as revenue.
         cost = ai_cost(model_voice)
         # Check affordability up front so we don't call the model then fail to bill.
-        if cost and not can_afford_ai(request.user, cost):
+        # count_daily, because this IS the prompt the daily allowance is for — the
+        # check and the charge below have to agree, or a free member with three
+        # free prompts and no balance gets turned away from a free run.
+        if cost and not can_afford_ai(request.user, cost, count_daily=True):
             return Response(
                 {"detail": "Not enough balance for this model.", "cost_cents": cost},
                 status=status.HTTP_402_PAYMENT_REQUIRED,
@@ -205,14 +209,28 @@ class OccChatView(APIView):
         if not text:
             return Response({"detail": "Empty response."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
-        remaining = charge_ai_usage(request.user, cost, note=f"OCC {model_voice}")
+        # count_daily spends today's free allowance first, then PromptZ, then cash.
+        # Without it the advertised "free 3 / premium 10 / StatZ 20 daily prompts"
+        # never applied to OCC chat at all — the one feature it exists for.
+        before_cash = wallet_for(request.user).money_cents or 0
+        remaining = charge_ai_usage(request.user, cost, note=f"OCC {model_voice}",
+                                    count_daily=True)
+        cash_spent = max(0, before_cash - (remaining if remaining is not None else before_cash))
+
         # Route the model charge to the platform owner as revenue ("pay Corey"),
         # keeping money conserved — unless the payer *is* the owner (self-neutral).
-        if cost:
+        # Only what was actually paid in CASH: a run covered by a free daily
+        # prompt or by prepaid PromptZ moved no money, and crediting the owner for
+        # it would mint revenue nobody paid.
+        if cash_spent:
             owner = platform_owner()
             if owner and owner.id != request.user.id:
                 ow = wallet_for(owner)
-                ow.money_cents = (ow.money_cents or 0) + cost
+                ow.money_cents = (ow.money_cents or 0) + cash_spent
                 ow.save(update_fields=["money_cents", "updated_at"])
         money = round((remaining if remaining is not None else wallet_for(request.user).money_cents) / 100, 2)
-        return Response({"text": text, "model": model_voice, "cost_cents": cost, "money": money})
+        allowance, used, prompts_left = daily_prompt_state(request.user)
+        return Response({"text": text, "model": model_voice, "cost_cents": cost,
+                         "charged_cents": cash_spent, "money": money,
+                         "daily_prompts": {"allowance": allowance, "used": used,
+                                           "remaining": prompts_left}})

@@ -353,11 +353,22 @@ def pay_between(payer, payee, amount_cents, note=""):
     return dev, net
 
 
-def can_afford_ai(user, cost_cents):
-    """Whether the member can cover an AI action — prepaid PromptZ (1 PromptZ =
-    1¢) plus cash together."""
+def can_afford_ai(user, cost_cents, count_daily=False):
+    """Whether the member can cover an AI action.
+
+    Prepaid PromptZ (1 PromptZ = 1¢) plus cash, and — when `count_daily` is set —
+    today's free allowance as well.
+
+    That flag matters more than it looks. `charge_ai_usage(count_daily=True)`
+    spends a free daily prompt before touching any balance, so a caller that
+    checked affordability WITHOUT it would turn away a free member who has three
+    free prompts and no money, for a run that was going to cost them nothing.
+    The two calls have to agree about what counts.
+    """
     cost_cents = int(cost_cents or 0)
     if cost_cents <= 0:
+        return True
+    if count_daily and daily_prompt_state(user)[2] > 0:
         return True
     w = wallet_for(user)
     return (w.promptz or 0) + (w.money_cents or 0) >= cost_cents
@@ -374,7 +385,12 @@ def award_promptz(user, amount, note="PromptZ"):
 # Free daily prompt allowance by tier. Resets each day — it does NOT stack.
 # Prepaid PromptZ (Wallet.promptz) is separate and persists. Owner/debug is
 # effectively unlimited (their AI runs are already free anyway).
-PROMPT_ALLOWANCE = {"free": 1, "premium": 5, "statz": 20, "debug": 10 ** 6}
+#
+# Free was 1/day, which is enough to try the AI once and conclude it isn't for
+# you. Three is enough to actually use it — and a free member who wants an AI
+# coaching read can spend one on that rather than being locked out of the
+# feature entirely.
+PROMPT_ALLOWANCE = {"free": 3, "premium": 10, "statz": 20, "debug": 10 ** 6}
 
 
 def daily_prompt_state(user):

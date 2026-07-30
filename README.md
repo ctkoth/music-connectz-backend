@@ -93,7 +93,10 @@ POST /api/auth/oauth/google|github|apple/
 GET  /api/mimez/skillz/profile|drills|badges|leaderboard/   POST /api/mimez/skillz/complete/
 GET  /api/directz/skillz/...                                POST /api/directz/skillz/complete/
 GET  /api/omviardz/tour/                                    POST /api/omviardz/answer/
-GET  /api/economy/personaz/          GET /api/economy/genrez/
+GET  /api/economy/personaz/          GET /api/economy/genrez/[?kind=music|screen]
+GET  /api/bodiez/catalog/            GET /api/bodiez/exercises/?equipment=&muscles=
+POST /api/bodiez/routines/ai/        POST /api/bodiez/sessions/<id>/sets/
+GET  /api/bodiez/progress/  /bodymap/  /coach/   GET /api/bodiez/locations/ (Premium)
 POST /api/economy/occ/projects/<id>/agent/   (OCC coding agent — tool loop)
 GET  /api/economy/pod/blanks/        POST /api/economy/pod/listings/<id>/buy/
 POST /api/economy/play/verify/       (Google Play Billing purchase verification)
@@ -153,11 +156,18 @@ setup: **[MERCH_POD.md](MERCH_POD.md)**
 
 `GET /api/economy/personaz/` serves every persona and its skills, and
 `GET /api/economy/genrez/` the genre list — so the frontend stops carrying its own
-copies. **8 personas, 271 skills, 47 genres.** The five 2.2 personas and all
-fifteen 2.2 genres are preserved verbatim and flagged `since: "2.2"`; Ghostwriter,
-Manager and Developer (top 20 languages) were built in the same paradigm, and the
-instrument families 2.2 had no home for — wind, brass, electronic/DJ — were added
-without editing anything that shipped.
+copies. **11 personas, 415 skills, 47 music genres + 30 screen genres.**
+
+The five 2.2 personas and all fifteen 2.2 genres are preserved **verbatim** and
+flagged `since: "2.2"` — nothing that shipped was edited. Built in the same
+paradigm on top: Ghostwriter, Manager, Developer (**top 40 languages**), Mime
+(selfies, lipsync, comedy, drama + every ReelZ/EpisodeZ/MovieZ genre),
+Weightlifter (every equipment type and muscle goal, shared with BodieZ), and A&R
+Scout. The instrument families 2.2 had no home for — wind, brass, electronic/DJ —
+were added to Artist the same way.
+
+`GET /api/economy/genrez/?kind=screen` serves the 30 screen genres on their own;
+`?kind=music` the 47 music ones.
 
 ```bash
 python manage.py audit_personaz          # catalog + stored-data audit
@@ -166,6 +176,36 @@ python manage.py audit_personaz --fix    # normalize stored profiles in place
 
 Findings from the 2.2 audit, the paradigm every persona follows, and what the
 frontend needs to change: **[PERSONAZ_AUDIT.md](PERSONAZ_AUDIT.md)**
+
+## BodieZ — training
+
+Jefit's training metrics behind Lilith's project management. Routines and loose
+thoughts move through the same buckets — Inbox 📥 · Today 💪 · Upcoming 📅 ·
+Anytime 🏋️ · Someday 🧠 · Logbook 🧾 · Trash 🚮 — and every other tab is a view
+over that data.
+
+**27 equipment types, 14 muscle groups, 98 exercises.** The member toggles the
+equipment they actually have and the library filters to what they can do today.
+Equipment requirements are **any-of groups**, not a flat AND list: a goblet squat
+takes a kettlebell *or* a dumbbell; a bench press takes a barbell *and* a flat
+*or* incline bench.
+
+Routines carry supersets, rest timers, target weight, target sets and target
+reps. Sessions compute volume, Epley 1RM (capped at 12 reps — above that the
+formula is fiction), progressive-overload verdicts, streaks and a 7-day BodyMap
+where secondary muscles get half credit.
+
+```bash
+python manage.py seed_bodiez     # equipment, muscles, exercise library (idempotent)
+```
+
+**AI coach** writes a real routine from the filtered catalog — anything it
+invents that isn't in the catalog is dropped. Free members spend one of their
+**3 daily prompts**, Premium **10**, StatZ runs it without spending one. StatZ
+also gets other members' public routines (`/routines/?shared=1`); Premium gets
+gym **locations** with per-gym equipment, muscle coverage and gaps.
+
+Blueprint vs. what's built, with the honest gaps: **[BODIEZ_AUDIT.md](BODIEZ_AUDIT.md)**
 
 ## Android app + Google Play
 

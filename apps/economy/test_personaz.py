@@ -245,14 +245,21 @@ class NewPersonaTests(TestCase):
             ["Programming Languages", "Developer Tools", "Development Skills"],
         )
 
-    def test_developer_carries_exactly_the_top_twenty_languages(self):
+    def test_developer_carries_exactly_the_top_forty_languages(self):
         langs = PERSONAZ["developer"]["categories"]["Programming Languages"]
-        # 20 languages plus the "Any Language" wildcard.
-        self.assertEqual(len(langs), 21)
-        self.assertEqual(len(langs) - 1, 20)
+        # 40 languages plus the "Any Language" wildcard.
+        self.assertEqual(len(langs), 41)
+        self.assertEqual(len(langs) - 1, 40)
+        # the first twenty — what most people actually ship
         for expected in ("Python", "JavaScript", "TypeScript", "Java", "C", "C++", "C#",
                          "SQL", "Go", "Rust", "PHP", "Swift", "Kotlin", "Ruby", "R",
                          "Dart", "Scala", "MATLAB", "Perl", "Lua"):
+            self.assertIn(expected, langs, expected)
+        # and the twenty that cover the programmer who isn't writing web apps
+        for expected in ("Shell / Bash", "PowerShell", "Assembly", "Objective-C",
+                         "Visual Basic", "Groovy", "Haskell", "Elixir", "Erlang",
+                         "Clojure", "F#", "Julia", "Fortran", "COBOL", "Solidity",
+                         "Zig", "Nim", "OCaml", "Ada", "Prolog"):
             self.assertIn(expected, langs, expected)
 
     def test_developer_covers_this_platform_s_own_stack(self):
@@ -308,7 +315,10 @@ class KeyDriftTests(TestCase):
         self.assertEqual(normalize_persona_key("coder"), "developer")
 
     def test_genuinely_unknown_keys_report_as_unknown(self):
-        self.assertIsNone(normalize_persona_key("mime"))
+        # NOT a plausible persona name: this test used to say "mime", which then
+        # became a real persona — the same trap as the Theremin skill. Use a
+        # string nothing will ever legitimately be called.
+        self.assertIsNone(normalize_persona_key("not-a-real-persona"))
         self.assertIsNone(normalize_persona_key(""))
         self.assertIsNone(normalize_persona_key(None))
 
@@ -384,10 +394,11 @@ class NormalizeTests(TestCase):
         self.assertEqual(out[0]["skills"], [])
 
     def test_personas_outside_the_catalog_are_kept_not_deleted(self):
-        """The platform has personas the picker doesn't carry — MimeZ, DirectZ.
-        A catalog is not a licence to throw away a member's data."""
-        out = normalize_personas(["mime", {"key": "directz", "skills": [{"name": "Whatever"}]}])
-        self.assertEqual([p["key"] for p in out], ["mime", "directz"])
+        """The platform has personas the picker doesn't carry — DirectZ, and
+        whatever gets built next. A catalog is not a licence to throw away a
+        member's data."""
+        out = normalize_personas(["dawz", {"key": "directz", "skills": [{"name": "Whatever"}]}])
+        self.assertEqual([p["key"] for p in out], ["dawz", "directz"])
         self.assertFalse(out[0]["catalog"])
         self.assertEqual(out[1]["skills"][0]["name"], "Whatever")
         self.assertFalse(out[1]["skills"][0]["catalog"])
@@ -467,7 +478,7 @@ class CatalogEndpointTests(TestCase):
     def test_developer_detail_lists_the_languages(self):
         resp = self.client.get("/api/economy/personaz/developer/")
         langs = next(c for c in resp.data["categories"] if c["name"] == "Programming Languages")
-        self.assertEqual(len(langs["skills"]), 21)
+        self.assertEqual(len(langs["skills"]), 41)
         self.assertTrue(langs["skills"][0]["any"])
 
     def test_an_unknown_persona_404s_with_the_known_list(self):
@@ -497,7 +508,7 @@ class AuditCommandTests(TestCase):
         p = profile_for(user)
         p.personas = [
             {"key": "Beat-producer", "skills": [{"name": "Sampling 🎵", "startDate": "6/1/2016"}]},
-            "mime",
+            "dawz",
         ]
         p.save()
 
@@ -506,5 +517,5 @@ class AuditCommandTests(TestCase):
         self.assertEqual(p.personas[0]["key"], "producer")
         self.assertEqual(p.personas[0]["skills"][0]["start"], "2016-06-01")
         # the persona outside the catalog survived
-        self.assertEqual(p.personas[1]["key"], "mime")
+        self.assertEqual(p.personas[1]["key"], "dawz")
         self.assertFalse(p.personas[1]["catalog"])

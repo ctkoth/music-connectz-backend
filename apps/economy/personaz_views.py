@@ -70,7 +70,9 @@ class GenreZView(APIView):
 
     permission_classes = [AllowAny]
 
-    def get(self, _request):
+    def get(self, request):
+        from .genrez import KIND_MUSIC, KIND_SCREEN
         from .genrez import catalog_payload as genre_catalog
 
-        return Response(genre_catalog())
+        kind = (request.query_params.get("kind") or "").strip().lower()
+        return Response(genre_catalog(kind if kind in (KIND_MUSIC, KIND_SCREEN) else None))

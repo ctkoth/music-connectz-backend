@@ -42,6 +42,15 @@ _EMOJI = {
     "Dubstep": "🛸", "Garage": "🚪", "Trance": "🌠", "Hardstyle": "⚡",
     "Phonk": "🚗", "Hyperpop": "💊", "Emo": "🖤", "Experimental": "🧪",
     "World": "🌍", "Instrumental": "🎼", "Spoken Word": "🗣️",
+    # Screen genres (ReelZ / EpisodeZ / MovieZ)
+    "Comedy": "😂", "Drama": "🎭", "Action": "💥", "Thriller": "😰",
+    "Horror": "👻", "Sci-Fi": "🛸", "Fantasy": "🐉", "Romance": "💘",
+    "Mystery": "🕵️", "Crime": "🚔", "True Crime": "🔪", "Adventure": "🗺️",
+    "Documentary": "🎥", "Animation": "✏️", "Anime": "🍥", "Musical": "🎼",
+    "Family": "👨‍👩‍👧", "Reality": "📺", "Sketch": "🎬", "Skit": "🤣",
+    "Vlog": "📹", "Tutorial": "🛠️", "Prank": "🃏", "Challenge": "🏁",
+    "Dance": "💃", "Lip Sync": "💋", "POV": "👁️", "ASMR": "🌙",
+    "Talk Show": "🎙️", "Storytime": "📖",
 }
 
 # Added after the audit. 2.2's fifteen skew heavily to hip-hop and electronic —
@@ -58,7 +67,22 @@ EXTRA_GENRES = ["Rock", "Metal", "Punk", "Alternative", "Country", "Folk",
 # genre describes the work, a skill describes the person.
 ALSO_SKILLS = {"Trap", "Drill", "Cloud Rap", "Boom Bap"}
 
-GENRES = V22_GENRES + EXTRA_GENRES
+# ReelZ, EpisodeZ and MovieZ are video surfaces, and "Trap" is not a genre of
+# short film. A music genre and a screen genre are different vocabularies used by
+# different apps, so they're separate lists joined by a `kind` — not one flat list
+# that makes a filmmaker scroll past Amapiano.
+SCREEN_GENRES = ["Comedy", "Drama", "Action", "Thriller", "Horror", "Sci-Fi",
+                 "Fantasy", "Romance", "Mystery", "Crime", "True Crime",
+                 "Adventure", "Documentary", "Animation", "Anime", "Musical",
+                 "Family", "Reality", "Sketch", "Skit", "Vlog", "Storytime",
+                 "Tutorial", "Prank", "Challenge", "Dance", "Lip Sync", "POV",
+                 "ASMR", "Talk Show"]
+
+KIND_MUSIC = "music"
+KIND_SCREEN = "screen"
+
+GENRES = V22_GENRES + EXTRA_GENRES + SCREEN_GENRES
+MUSIC_GENRES = V22_GENRES + EXTRA_GENRES
 
 # {squashed name: canonical name} — built once, so lookup is a dict hit rather
 # than a scan.
@@ -121,22 +145,51 @@ def is_v22(name):
     return name in V22_GENRES
 
 
+def kind_of(name):
+    """Which vocabulary a genre belongs to — music, or screen."""
+    return KIND_SCREEN if name in SCREEN_GENRES else KIND_MUSIC
+
+
 def genre_payload(name):
     return {
         "key": name,
         "name": name,          # exactly what 2.2 rendered — no emoji in the name
         "emoji": _EMOJI.get(name, "🎵"),
         "since": "2.2" if is_v22(name) else "2.4",
+        "kind": kind_of(name),
         "also_a_skill": name in ALSO_SKILLS,
     }
 
 
-def catalog_payload():
-    """The whole genre list, 2.2's fifteen first and flagged as such."""
+def normalize_genres_of_kind(values, kind, limit=12):
+    """Clean a list and keep only the genres belonging to one vocabulary.
+
+    So a MovieZ upload can't be filed under Amapiano, and a track can't be filed
+    under Talk Show.
+    """
+    return [g for g in normalize_genres(values, limit=limit) if kind_of(g) == kind]
+
+
+def catalog_payload(kind=None):
+    """The whole genre list, 2.2's fifteen first and flagged as such.
+
+    ``kind`` narrows it to one vocabulary — MusicZ surfaces want `music`, the
+    video surfaces (ReelZ / EpisodeZ / MovieZ) want `screen`.
+    """
+    names = GENRES
+    if kind == KIND_MUSIC:
+        names = MUSIC_GENRES
+    elif kind == KIND_SCREEN:
+        names = SCREEN_GENRES
     return {
-        "genres": [genre_payload(g) for g in GENRES],
+        "genres": [genre_payload(g) for g in names],
+        "kind": kind or "all",
+        "kinds": {
+            KIND_MUSIC: len(MUSIC_GENRES),
+            KIND_SCREEN: len(SCREEN_GENRES),
+        },
         "v22": list(V22_GENRES),
-        "count": len(GENRES),
+        "count": len(names),
         # 2.2 stored `selectedGenre` as a single string and the picker cleared
         # every other button on click. Stated so a client doesn't have to infer
         # it from behaviour.
@@ -145,5 +198,6 @@ def catalog_payload():
             "required_on_work": True,
             "max_on_profile": 12,
             "note": "A work example takes one genre. A profile may list several.",
+            "kinds": "music = MusicZ surfaces; screen = ReelZ / EpisodeZ / MovieZ.",
         },
     }
