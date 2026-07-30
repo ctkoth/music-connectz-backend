@@ -169,10 +169,36 @@ then add StoreKit deliberately rather than under review pressure.
 
 ## 8. Screenshots for the listing
 
-`tools/store_shots.py` captures at the exact sizes App Store Connect demands
-(1242×2688 for 6.5", 1290×2796 for 6.9"). But it drives the **web** app — once
-the native app has screens worth showing, take those from the simulator in CI
-instead, because the store listing has to show the app you're shipping.
+**Actions → iOS → Run workflow → tick `screenshots`.** Download them from the
+run's Artifacts. That's the whole flow.
+
+It runs `ios/UITests/ScreenshotTests.swift` against the real app in a simulator
+and captures six screens: sign-in, the tour, PersonaZ, a persona's skills,
+BodieZ, and Account. The **simulator device is the screenshot size**, so the job
+runs a matrix:
+
+| Simulator | Pixels | App Store slot |
+|---|---|---|
+| iPhone 11 Pro Max | 1242×2688 | 6.5" |
+| iPhone 15 Pro Max | 1290×2796 | 6.9" |
+
+Every PNG is size-checked before upload. App Store Connect rejects an off-size
+file with an error that doesn't name it; the job names it.
+
+**Optional secrets** — `MCZ_UITEST_USER` and `MCZ_UITEST_PASSWORD`, a real
+account on the live backend. Without them the job still runs and still produces
+the sign-in shot; it just can't get past the login screen. Use the same account
+you give App Review as test credentials.
+
+Two things to know:
+
+- **Login happens through the actual UI**, typing into the real fields. No test
+  backdoor in the app, and it means a broken sign-in fails the screenshot job
+  instead of quietly producing a screenshot of a broken sign-in.
+- `tools/store_shots.py` still exists and still captures the **web** app at the
+  same sizes. It's the right tool for the Play listing and for marketing pages —
+  but not for this listing, because an App Store listing has to show the app
+  you're actually shipping.
 
 ## 9. Honest state of it
 

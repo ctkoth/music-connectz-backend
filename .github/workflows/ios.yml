@@ -20,6 +20,10 @@ on:
         description: "Upload the build to TestFlight"
         type: boolean
         default: false
+      screenshots:
+        description: "Capture App Store screenshots from the simulator"
+        type: boolean
+        default: false
 
 concurrency:
   group: ios-${{ github.ref }}
@@ -52,6 +56,85 @@ jobs:
             -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty && exit ${PIPESTATUS[0]}
+
+  screenshots:
+    name: App Store screenshots
+    runs-on: macos-14
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.screenshots
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The simulator device IS the screenshot size. These two are the slots
+          # App Store Connect asks for.
+          - device: "iPhone 11 Pro Max"
+            slot: "6.5-inch"
+            expect: "1242x2688"
+          - device: "iPhone 15 Pro Max"
+            slot: "6.9-inch"
+            expect: "1290x2796"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+
+      # xcparse pulls the attachments out of the .xcresult bundle. Without it the
+      # screenshots exist but stay locked inside a format only Xcode opens.
+      - name: Install xcparse
+        run: brew install chargepoint/xcparse/xcparse
+
+      - name: Run the screenshot pass
+        env:
+          MCZ_UITEST_USER: ${{ secrets.MCZ_UITEST_USER }}
+          MCZ_UITEST_PASSWORD: ${{ secrets.MCZ_UITEST_PASSWORD }}
+        run: |
+          cd ios
+          xcodebuild test \
+            -project MusicConnectZ.xcodeproj \
+            -scheme MusicConnectZScreenshots \
+            -destination "platform=iOS Simulator,name=${{ matrix.device }},OS=latest" \
+            -resultBundlePath "$RUNNER_TEMP/screens.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcpretty && exit ${PIPESTATUS[0]}
+
+      - name: Extract the PNGs
+        run: |
+          mkdir -p "$RUNNER_TEMP/shots"
+          xcparse screenshots --os --test \
+            "$RUNNER_TEMP/screens.xcresult" "$RUNNER_TEMP/shots"
+          find "$RUNNER_TEMP/shots" -name '*.png' -print
+
+      # App Store Connect rejects an off-size upload with an error that doesn't
+      # say which file was wrong. Check here, where the answer is obvious.
+      - name: Verify every shot is exactly ${{ matrix.expect }}
+        run: |
+          bad=0
+          while IFS= read -r png; do
+            w=$(sips -g pixelWidth  "$png" | awk '/pixelWidth/{print $2}')
+            h=$(sips -g pixelHeight "$png" | awk '/pixelHeight/{print $2}')
+            if [ "${w}x${h}" != "${{ matrix.expect }}" ]; then
+              echo "::error::$(basename "$png") is ${w}x${h}, expected ${{ matrix.expect }}"
+              bad=1
+            else
+              echo "ok  $(basename "$png")  ${w}x${h}"
+            fi
+          done < <(find "$RUNNER_TEMP/shots" -name '*.png')
+          exit $bad
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-store-screenshots-${{ matrix.slot }}
+          path: ${{ runner.temp }}/shots/**/*.png
+          if-no-files-found: error
 
   testflight:
     name: Archive + upload to TestFlight

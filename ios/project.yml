@@ -51,6 +51,19 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: net.musicconnectz.app.tests
 
+  # Separate from the unit tests on purpose: UI tests boot a simulator and take
+  # minutes, so the fast check on every push shouldn't have to wait for them.
+  MusicConnectZUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: MusicConnectZ
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.musicconnectz.app.uitests
+
 schemes:
   MusicConnectZ:
     build:
@@ -62,3 +75,14 @@ schemes:
         - MusicConnectZTests
     archive:
       config: Release
+
+  # Its own scheme so CI can run the screenshot pass without dragging the unit
+  # tests along, and vice versa.
+  MusicConnectZScreenshots:
+    build:
+      targets:
+        MusicConnectZ: all
+        MusicConnectZUITests: [test]
+    test:
+      targets:
+        - MusicConnectZUITests
