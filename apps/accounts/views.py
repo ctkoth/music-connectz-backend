@@ -40,9 +40,17 @@ def _clean_persona(raw):
 
     Accepts the string form (just a key) and the dict form; always returns a
     dict so downstream code has one shape to reason about. Start dates are the
-    input to profile_max_experience, so they are preserved verbatim when they
-    look like a date and dropped when they don't.
+    input to profile_max_experience, so they are preserved when they look like a
+    date and dropped when they don't.
+
+    The date handling is deliberately generous. The skill picker writes
+    `{name, startDate: "7/4/2020"}` while this only ever looked for a `start` key
+    in ISO form — so every skill was stored undated and profile_max_experience
+    answered None for everybody, no matter how long they'd been playing. Both
+    field names and both formats are accepted now and stored as YYYY-MM-DD.
     """
+    from apps.economy.personaz import normalize_start
+
     if not isinstance(raw, dict):
         return {"key": str(raw)[:60], "name": str(raw)[:60], "skills": []}
 
@@ -50,9 +58,11 @@ def _clean_persona(raw):
     for s in (raw.get("skills") or [])[:100]:
         if isinstance(s, dict):
             name = str(s.get("name", ""))[:80]
-            start = str(s.get("start") or "")[:10]
+            start = normalize_start(
+                s.get("start") or s.get("startDate") or s.get("start_date")
+            )
         else:
-            name, start = str(s)[:80], ""
+            name, start = str(s)[:80], None
         if not name:
             continue
         skills.append({"name": name, "start": start} if start else {"name": name})

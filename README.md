@@ -93,6 +93,7 @@ POST /api/auth/oauth/google|github|apple/
 GET  /api/mimez/skillz/profile|drills|badges|leaderboard/   POST /api/mimez/skillz/complete/
 GET  /api/directz/skillz/...                                POST /api/directz/skillz/complete/
 GET  /api/omviardz/tour/                                    POST /api/omviardz/answer/
+GET  /api/economy/personaz/          GET /api/economy/personaz/<key>/
 GET  /.well-known/assetlinks.json    (Android app <-> site link verification)
 GET  /admin/
 ```
@@ -105,6 +106,21 @@ no wallet charge, no prompt allowance. Works with no `ANTHROPIC_API_KEY` (every
 option ships written copy in the payload) and gets live Corey when one is set.
 
 Client contract, mobile design tokens, and how to add a step: **[OMVIARDZ.md](OMVIARDZ.md)**
+
+## PersonaZ — the persona/skill catalog
+
+`GET /api/economy/personaz/` serves every persona and its skills, so the frontend
+stops carrying its own copy. 8 personas, 224 skills: the five from the 2.2 build
+preserved verbatim, plus Ghostwriter, Manager and Developer (top 20 languages),
+built in the same paradigm.
+
+```bash
+python manage.py audit_personaz          # catalog + stored-data audit
+python manage.py audit_personaz --fix    # normalize stored profiles in place
+```
+
+Findings from the 2.2 audit, the paradigm every persona follows, and what the
+frontend needs to change: **[PERSONAZ_AUDIT.md](PERSONAZ_AUDIT.md)**
 
 ## Android app + Google Play
 

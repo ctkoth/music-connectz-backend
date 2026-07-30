@@ -282,15 +282,23 @@ def _avatar_url(p, request):
 
 
 def _skill_years(start):
-    """Whole years from a YYYY-MM-DD skill start date to today, or None."""
+    """Whole years from a skill start date to today, or None.
+
+    Parses through personaz.normalize_start so a date the skill picker wrote as
+    `7/4/2020` counts the same as an ISO one. Profiles saved before that was
+    accepted still hold slash dates, and they were all reading as None.
+    """
     import datetime
-    try:
-        y, m, d = (int(x) for x in str(start).split("-"))
-        today = datetime.date.today()
-        yrs = today.year - y - ((today.month, today.day) < (m, d))
-        return yrs if yrs >= 0 else None
-    except (ValueError, TypeError):
+
+    from .personaz import normalize_start
+
+    iso = normalize_start(start)
+    if not iso:
         return None
+    y, m, d = (int(x) for x in iso.split("-"))
+    today = datetime.date.today()
+    yrs = today.year - y - ((today.month, today.day) < (m, d))
+    return yrs if yrs >= 0 else None
 
 
 def profile_max_experience(p):
@@ -307,7 +315,12 @@ def profile_max_experience(p):
         if not isinstance(persona, dict):
             continue
         for s in (persona.get("skills") or []):
-            start = s.get("start") if isinstance(s, dict) else None
+            # `startDate` is what the 2.2 skill picker wrote; `start` is what the
+            # API documents. Read both or the metric silently ignores real dates.
+            start = (
+                s.get("start") or s.get("startDate") or s.get("start_date")
+                if isinstance(s, dict) else None
+            )
             yrs = _skill_years(start) if start else None
             if yrs is not None and (best is None or yrs > best):
                 best = yrs

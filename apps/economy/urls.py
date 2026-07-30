@@ -28,6 +28,7 @@ from .collab import (
 )
 from .merch import MerchBuyView, MerchDetailView, MerchView
 from .occ import OccChatView
+from .personaz_views import PersonaZDetailView, PersonaZView
 from .payments import (
     CheckoutConfigView,
     MembershipRefundView,
@@ -112,6 +113,8 @@ urlpatterns = [
     path("facez/", FaceZView.as_view(), name="economy-facez"),
     path("facez/<int:pk>/", FaceDetailView.as_view(), name="economy-face-detail"),
     path("facez/<int:pk>/rate/", FaceRateView.as_view(), name="economy-face-rate"),
+    path("personaz/", PersonaZView.as_view(), name="economy-personaz"),
+    path("personaz/<str:key>/", PersonaZDetailView.as_view(), name="economy-personaz-detail"),
     path("profile/", ProfileView.as_view(), name="economy-profile"),
     path("profile/avatar/", ProfileAvatarView.as_view(), name="economy-profile-avatar"),
     path("profile/rate/", ProfileRateView.as_view(), name="economy-profile-rate"),
