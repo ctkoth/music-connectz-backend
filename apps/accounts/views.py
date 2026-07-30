@@ -173,6 +173,12 @@ class MeView(APIView):
             # start dates the whole experience metric is derived from.
             p.personas = [_clean_persona(x) for x in data["personas"]][:50]
             changed.append("personas")
+        if isinstance(data.get("genres"), (list, str)):
+            # Closed vocabulary: unknown genres are dropped rather than stored,
+            # because a genre nobody can search for is not a genre.
+            from apps.economy.genrez import normalize_genres
+            p.genres = normalize_genres(data["genres"])
+            changed.append("genres")
         if isinstance(data.get("nationalities"), list):
             p.nationalities = [str(x)[:60] for x in data["nationalities"]][:30]
             changed.append("nationalities")

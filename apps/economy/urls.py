@@ -30,7 +30,7 @@ from .merch import MerchBuyView, MerchDetailView, MerchView
 from .occ import OccChatView
 from .occ_views import (AgentRunsView, AgentView, ProjectDetailView,
                         ProjectFilesView, ProjectsView, ProjectUndoView)
-from .personaz_views import PersonaZDetailView, PersonaZView
+from .personaz_views import GenreZView, PersonaZDetailView, PersonaZView
 from .play_views import (PlayProductsView, PlayPurchasesView, PlayVerifyView)
 from .pod_views import (BlanksView, DesignDetailView, DesignsView,
                         ListingBuyView, ListingDetailView, ListingsView,
@@ -144,6 +144,7 @@ urlpatterns = [
     path("facez/", FaceZView.as_view(), name="economy-facez"),
     path("facez/<int:pk>/", FaceDetailView.as_view(), name="economy-face-detail"),
     path("facez/<int:pk>/rate/", FaceRateView.as_view(), name="economy-face-rate"),
+    path("genrez/", GenreZView.as_view(), name="economy-genrez"),
     path("personaz/", PersonaZView.as_view(), name="economy-personaz"),
     path("personaz/<str:key>/", PersonaZDetailView.as_view(), name="economy-personaz-detail"),
     path("profile/", ProfileView.as_view(), name="economy-profile"),

@@ -93,7 +93,7 @@ POST /api/auth/oauth/google|github|apple/
 GET  /api/mimez/skillz/profile|drills|badges|leaderboard/   POST /api/mimez/skillz/complete/
 GET  /api/directz/skillz/...                                POST /api/directz/skillz/complete/
 GET  /api/omviardz/tour/                                    POST /api/omviardz/answer/
-GET  /api/economy/personaz/          GET /api/economy/personaz/<key>/
+GET  /api/economy/personaz/          GET /api/economy/genrez/
 POST /api/economy/occ/projects/<id>/agent/   (OCC coding agent — tool loop)
 GET  /api/economy/pod/blanks/        POST /api/economy/pod/listings/<id>/buy/
 POST /api/economy/play/verify/       (Google Play Billing purchase verification)
@@ -107,6 +107,10 @@ The mobile onboarding walkthrough: it spotlights one control at a time, Corey
 explains it in his own voice, and it branches on what the member answers. Free —
 no wallet charge, no prompt allowance. Works with no `ANTHROPIC_API_KEY` (every
 option ships written copy in the payload) and gets live Corey when one is set.
+
+The `personaz` and `genrez` steps carry real pickers and ship both catalogs in the
+tour payload, so a member finishes the tour with their skills and genres actually
+set — not just explained.
 
 Client contract, mobile design tokens, and how to add a step: **[OMVIARDZ.md](OMVIARDZ.md)**
 
@@ -147,10 +151,13 @@ setup: **[MERCH_POD.md](MERCH_POD.md)**
 
 ## PersonaZ — the persona/skill catalog
 
-`GET /api/economy/personaz/` serves every persona and its skills, so the frontend
-stops carrying its own copy. 8 personas, **271 skills**: the five from the 2.2 build
-preserved verbatim, plus Ghostwriter, Manager and Developer (top 20 languages),
-built in the same paradigm.
+`GET /api/economy/personaz/` serves every persona and its skills, and
+`GET /api/economy/genrez/` the genre list — so the frontend stops carrying its own
+copies. **8 personas, 271 skills, 47 genres.** The five 2.2 personas and all
+fifteen 2.2 genres are preserved verbatim and flagged `since: "2.2"`; Ghostwriter,
+Manager and Developer (top 20 languages) were built in the same paradigm, and the
+instrument families 2.2 had no home for — wind, brass, electronic/DJ — were added
+without editing anything that shipped.
 
 ```bash
 python manage.py audit_personaz          # catalog + stored-data audit

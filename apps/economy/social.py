@@ -270,7 +270,7 @@ class FaceRateView(APIView):
 # ---- Cross-user profiles ----
 PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign",
                   "nationalities", "regions", "substances", "sober",
-                  "attracted_to", "asexual", "traits", "personas", "links",
+                  "attracted_to", "asexual", "traits", "personas", "genres", "links",
                   "external_followers")
 
 
@@ -358,7 +358,7 @@ def _profile_full(p, request):
     card.update({
         "bio": p.bio, "location": p.location, "birthday": p.birthday,
         "substances": p.substances, "asexual": p.asexual, "traits": p.traits,
-        "personas": p.personas, "links": p.links, "mine": p.user_id == request.user.id,
+        "personas": p.personas, "genres": p.genres, "links": p.links, "mine": p.user_id == request.user.id,
         "my_attractiveness": AttractivenessRating.objects.filter(rater=request.user, target=p.user).values_list("score", flat=True).first(),
         "my_overall": OverallRating.objects.filter(rater=request.user, target=p.user).values_list("score", flat=True).first(),
         "overall_count": OverallRating.objects.filter(target=p.user).count(),

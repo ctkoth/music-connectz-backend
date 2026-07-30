@@ -569,6 +569,10 @@ class Profile(models.Model):
     asexual = models.BooleanField(default=False)
     traits = models.JSONField(default=list, blank=True)
     personas = models.JSONField(default=list, blank=True)
+    # What this member makes. Closed vocabulary from apps/economy/genrez.py —
+    # 2.2 required a genre on every work example but never stored one on the
+    # profile, so there was no way to find "the drill producers".
+    genres = models.JSONField(default=list, blank=True)
     links = models.JSONField(default=list, blank=True)  # [{label, url}] public links
     # Location (opt-in) for in-person CollabZ / VenueZ distance filtering.
     share_location = models.BooleanField(default=False)

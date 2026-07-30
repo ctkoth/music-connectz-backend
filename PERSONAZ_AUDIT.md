@@ -14,7 +14,7 @@ Verdict per requirement:
 
 | Requirement | Status |
 |---|---|
-| Audit 2.2 skills | ✅ 12 findings below — **11 closed**, 1 left open by instruction (#6) |
+| Audit 2.2 skills | ✅ 13 findings below — **12 closed**, 1 left open by instruction (#6) |
 | Existing personas keep these exact skills | ✅ all 5 preserved verbatim, 2 corrupted entries repaired |
 | New personas get skills in the same paradigm | ✅ Ghostwriter, Manager, Developer built |
 | Developer gets the top 20 languages | ✅ exactly 20, plus the "Any" wildcard |
@@ -180,6 +180,51 @@ addition would break.
 
 Artist went from 5 categories / 50 skills to **8 categories / 97 skills**. Catalog
 total: **271 skills**.
+
+### 🔴 13. The genre list was missed by this audit — **mine, not 2.2's**
+
+The first pass of this audit read `instrumentDatabase` and reported on skills. It
+never found the genres, because they weren't there — they were a bare array
+inside a modal handler:
+
+```js
+function openGenreModal() {
+  const genres = ['Trap', 'Drill', 'Cloud Rap', 'Boom Bap', 'House', 'Techno',
+                  'Pop', 'Hip Hop', 'R&B', 'Jazz', 'Soul', 'Indie',
+                  'Electronic', 'Ambient', 'Lo-Fi'];
+```
+
+Fifteen genres, flat, **single-select**, and **required** on the Upload Work
+Example form (`🎵 Genre/Style *`). An entire data structure with a mandatory field
+attached to it, and the audit walked past it. Searching for `instrumentDatabase`
+rather than for every literal array is what missed it — a lesson about auditing by
+structure instead of by grep.
+
+**Fixed:** [`apps/economy/genrez.py`](apps/economy/genrez.py) carries all fifteen
+verbatim, in their original order, served at `GET /api/economy/genrez/`.
+
+Three details preserved that are easy to flatten:
+
+- **No emoji in the names.** Unlike every skill label, the genre buttons rendered
+  plain text. `name` is byte-for-byte what a member saw; `emoji` is separate
+  metadata a UI may use or ignore.
+- **Single-select.** `selectedGenre` was a string and the picker cleared every
+  other button on click. Stated in the payload as `rules.select: "one"` rather
+  than left for a client to infer from behaviour.
+- **Four are also Rapping skills** — Trap, Drill, Cloud Rap, Boom Bap appear in
+  both. That overlap is deliberate in 2.2 (a genre describes the work, a skill
+  describes the person), so both are kept and `also_a_skill` flags them.
+
+**Added, never edited:** 32 more genres, since 2.2's fifteen skew hard to hip-hop
+and electronic — a rock band, a gospel choir, an afrobeats artist or a country
+singer had nowhere to file their work. `since` marks which is which so a picker
+can render the familiar ones first.
+
+Genres are also now stored on the profile (`Profile.genres`, `PATCH
+/api/auth/me/ {genres: […]}`), which 2.2 never did — it required a genre per work
+example but had no way to answer "who makes drill?". Unknown genres are **dropped**
+on write, unlike persona skills: a genre is a closed vocabulary that drives
+discovery, and a free-text one is a genre nobody can search for.
 
 ---
 

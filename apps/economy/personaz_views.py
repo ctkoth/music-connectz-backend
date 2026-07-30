@@ -59,3 +59,18 @@ class PersonaZDetailView(APIView):
                 ],
             }
         )
+
+
+class GenreZView(APIView):
+    """GET the genre list — 2.2's fifteen first, flagged, then the additions.
+
+    Public for the same reason as the persona catalog: static reference data the
+    picker needs before anyone has signed in.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, _request):
+        from .genrez import catalog_payload as genre_catalog
+
+        return Response(genre_catalog())

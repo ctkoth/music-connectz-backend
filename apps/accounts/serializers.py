@@ -28,6 +28,7 @@ class PublicUserSerializer(serializers.ModelSerializer):
     energy = serializers.SerializerMethodField()
     onboarded = serializers.SerializerMethodField()
     personas = serializers.SerializerMethodField()
+    genres = serializers.SerializerMethodField()
     nationalities = serializers.SerializerMethodField()
     birthday = serializers.SerializerMethodField()
     age = serializers.SerializerMethodField()
@@ -77,6 +78,9 @@ class PublicUserSerializer(serializers.ModelSerializer):
     def get_personas(self, obj):
         return self._economy(obj, "profile").personas or []
 
+    def get_genres(self, obj):
+        return self._economy(obj, "profile").genres or []
+
     def get_nationalities(self, obj):
         return self._economy(obj, "profile").nationalities or []
 
@@ -84,7 +88,7 @@ class PublicUserSerializer(serializers.ModelSerializer):
         model = User
         fields = (
             "id", "username", "email", "phone", "avatar_url", "is_owner",
-            "tier", "spinaz", "energy", "onboarded", "personas", "nationalities",
+            "tier", "spinaz", "energy", "onboarded", "personas", "genres", "nationalities",
             "birthday", "age", "zodiac",
         )
 
