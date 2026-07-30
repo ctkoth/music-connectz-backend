@@ -1398,6 +1398,37 @@ class AgentRun(models.Model):
         ordering = ["-created_at"]
 
 
+class ProjectSnapshot(models.Model):
+    """The whole workspace, captured before an agent run touches it.
+
+    OCC has no git, and the reason that matters isn't version history — it's that
+    an agentic run makes several edits and any one of them can be wrong. Without
+    an undo, a bad run leaves a member hand-repairing files an AI broke.
+
+    A snapshot is the full file set as JSON. Crude compared to a diff, and
+    correct: restoring is unambiguous, and a workspace is capped at 2MB of text so
+    the storage cost is bounded and known.
+    """
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="snapshots")
+    run = models.OneToOneField(
+        "AgentRun", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="snapshot",
+    )
+    label = models.CharField(max_length=140, blank=True, default="")
+    files = models.JSONField(default=dict, blank=True)   # {path: content}
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"snap:{self.project_id}@{self.created_at:%Y-%m-%d %H:%M}"
+
+    @property
+    def file_count(self):
+        return len(self.files or {})
+
+
 # --- MerchZ print-on-demand ------------------------------------------------
 # Made-to-order: a creator uploads ONE design, lists it on as many blank
 # products as they like, and nothing is produced until somebody buys. No stock,
@@ -1416,6 +1447,11 @@ class MerchDesign(models.Model):
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="merch_designs")
     title = models.CharField(max_length=120)
     image = models.ImageField(upload_to=design_path)
+    # Measured once at upload, not read off the file every time a listing renders
+    # — object storage makes that a network round trip per product page.
+    width = models.PositiveIntegerField(default=0)
+    height = models.PositiveIntegerField(default=0)
+    has_alpha = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -1423,6 +1459,58 @@ class MerchDesign(models.Model):
 
     def __str__(self):
         return f"{self.owner}/{self.title}"
+
+    @property
+    def shortest_side(self):
+        """What a min-resolution check is actually about — a 6000x400 banner is
+        not a 6000px design."""
+        return min(self.width, self.height) if self.width and self.height else 0
+
+    def check_for(self, product):
+        """(ok, [problems]) — will this artwork print acceptably on that blank?
+
+        Advisory, not enforcement. A warning a creator can override beats a
+        refusal that's wrong: image analysis can't tell a deliberately lo-fi
+        design from a mistake, and a flat two-colour logo genuinely is fine at a
+        size that would ruin a photograph.
+        """
+        rules = product.artwork
+        problems = []
+        if not self.width or not self.height:
+            return True, []          # unmeasured (legacy row) — don't invent a verdict
+        if self.shortest_side < rules["min_px"]:
+            problems.append(
+                f"{product.name} prints with {rules['name']}, which wants at least "
+                f"{rules['min_px']}px on the short side — this is {self.shortest_side}px. "
+                "It will look soft."
+            )
+        # Cut-and-sew only. A poster is full-bleed too, but it isn't sewn, so
+        # aspect ratio and seams are none of its business.
+        if rules.get("cut_and_sew"):
+            ratio = max(self.width, self.height) / max(1, min(self.width, self.height))
+            if ratio > 1.6:
+                problems.append(
+                    f"{product.name} is printed on flat panels that are then cut and sewn, so "
+                    f"artwork should be roughly square — this is {ratio:.1f}:1 and seams will "
+                    "crop it hard."
+                )
+        # Sublimation and AOP have no white ink; paper is already white.
+        if rules.get("no_white_ink") and self.has_alpha:
+            problems.append(
+                f"{product.name} has no white ink — transparent areas come out as bare "
+                "fabric, not white. Flatten the background."
+            )
+        if rules.get("on_garment") and not self.has_alpha:
+            problems.append(
+                f"{product.name} prints the artwork onto the garment, so a transparent "
+                "background usually looks better than a solid rectangle."
+            )
+        if rules["max_colors"]:
+            problems.append(
+                f"{product.name} is {rules['name'].lower()} — {rules['max_colors']} colours "
+                "maximum, no gradients or photographs. Check your design is flat shapes."
+            )
+        return not problems, problems
 
 
 class PrintProduct(models.Model):
@@ -1550,6 +1638,12 @@ class PrintOrder(models.Model):
     quantity = models.PositiveSmallIntegerField(default=1)
     # What the buyer paid on top for an extended size / dark colour, per unit.
     upcharge_cents = models.PositiveIntegerField(default=0)
+    # On a refund, how much of the seller's credit could NOT be clawed back
+    # because they had already spent it. Wallets are PositiveIntegerFields — they
+    # cannot go negative — so the platform absorbs the difference. Recorded rather
+    # than swallowed: an unrecoverable clawback is an accounting fact somebody has
+    # to be able to see and chase.
+    clawback_shortfall_cents = models.PositiveIntegerField(default=0)
     # Money is snapshotted: a creator repricing later must not rewrite history.
     price_cents = models.PositiveIntegerField(default=0)
     base_cost_cents = models.PositiveIntegerField(default=0)

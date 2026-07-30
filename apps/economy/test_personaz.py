@@ -29,6 +29,48 @@ V22_PERSONAS = ("artist", "producer", "mix-engineer", "designer", "videographer"
 # picker opened empty. Built here in the same paradigm.
 NEW_PERSONAS = ("ghostwriter", "manager", "developer")
 
+# The artist families exactly as the 2.2 build shipped them, transcribed from
+# `instrumentDatabase` in musicconnectz_code_2.2.docx. Categories added after the
+# audit are deliberately NOT here — this fixture exists to prove the 2.2 content
+# survived, not to freeze the catalog against growth.
+V22_ARTIST = {
+    "String Instruments": {
+        "Any String": "Any String 🎸", "Acoustic Guitar": "Acoustic Guitar 🎸",
+        "Electric Guitar": "Electric Guitar 🎸", "Bass Guitar": "Bass Guitar 🎸",
+        "Ukulele": "Ukulele 🎸", "Banjo": "Banjo 🎸", "Mandolin": "Mandolin 🎸",
+        "Violin": "Violin 🎻", "Viola": "Viola 🎻", "Cello": "Cello 🎻",
+        "Double Bass": "Double Bass 🎻", "Harp": "Harp 🎵",
+    },
+    "Keyboard Instruments": {
+        "Any Keyboard": "Any Keyboard 🎹", "Acoustic Piano": "Acoustic Piano 🎹",
+        "Digital Piano": "Digital Piano 🎹", "Synthesizer": "Synthesizer 🎹",
+        "Organ": "Organ 🎹", "Harpsichord": "Harpsichord 🎹",
+        "Accordion": "Accordion 🎹",
+    },
+    "Percussion Instruments": {
+        "Any Percussion": "Any Percussion 🥁", "Drums (Snare)": "Drums (Snare) 🥁",
+        "Drums (Bass)": "Drums (Bass) 🥁", "Drums (Bongo)": "Drums (Bongo) 🥁",
+        "Cymbals": "Cymbals 🥁",
+    },
+    "Rapping": {
+        "Any Rapping": "Any Rapping 🎤", "Alternative Rap": "Alternative Rap 🎸",
+        "Boom Bap": "Boom Bap 🥁", "Chopper": "Chopper 🚁",
+        "Cloud Rap": "Cloud Rap ☁️", "Conscious Rap": "Conscious Rap 🧠",
+        "Crunk": "Crunk 🔥", "Drill": "Drill ⚔️", "Emo Rap": "Emo Rap 🖤",
+        "G-Funk": "G-Funk 🌴", "Gangsta Rap": "Gangsta Rap ⛓️",
+        "Hardcore Hip Hop": "Hardcore Hip Hop 🎤", "Jazz Rap": "Jazz Rap 🎷",
+        "Mumble Rap": "Mumble Rap 💤", "Old School": "Old School 📻",
+        "Snap": "Snap 🫰", "Trap": "Trap 🏚️",
+    },
+    "Singing": {
+        "Any Singing": "Any Singing 🎶", "Bass": "Bass 🧔‍♂️",
+        "Baritone": "Baritone 🎙️", "Tenor": "Tenor 🎤",
+        "Countertenor": "Countertenor 🕊️", "Contralto": "Contralto 🎻",
+        "Alto": "Alto 🎶", "Mezzo-Soprano": "Mezzo-Soprano 🌊",
+        "Soprano": "Soprano ☀️",
+    },
+}
+
 
 class ParadigmTests(TestCase):
     """Every persona, old and new, obeys the same shape."""
@@ -93,18 +135,48 @@ class V22SkillsPreservedTests(TestCase):
             self.assertIn(key, PERSONAZ)
             self.assertEqual(PERSONAZ[key]["since"], "2.2")
 
-    def test_artist_keeps_all_five_families_and_their_counts(self):
+    def test_artist_keeps_every_2_2_family_and_every_2_2_skill_verbatim(self):
+        """Preserved-verbatim means nothing was changed or removed. Families were
+        ADDED after the audit (#12), so this asserts the 2.2 content is intact
+        rather than asserting a total that additions would break."""
         cats = PERSONAZ["artist"]["categories"]
-        self.assertEqual(
-            list(cats),
-            ["String Instruments", "Keyboard Instruments", "Percussion Instruments",
-             "Rapping", "Singing"],
-        )
-        self.assertEqual(len(cats["String Instruments"]), 12)
-        self.assertEqual(len(cats["Keyboard Instruments"]), 7)
-        self.assertEqual(len(cats["Percussion Instruments"]), 5)
-        self.assertEqual(len(cats["Rapping"]), 17)
-        self.assertEqual(len(cats["Singing"]), 9)
+        for family, skills in V22_ARTIST.items():
+            self.assertIn(family, cats, family)
+            for key, label in skills.items():
+                self.assertIn(key, cats[family], f"{family}/{key} disappeared")
+                self.assertEqual(cats[family][key], label, f"{family}/{key} relabelled")
+
+    def test_the_2_2_families_still_open_with_their_original_wildcards(self):
+        cats = PERSONAZ["artist"]["categories"]
+        for family, skills in V22_ARTIST.items():
+            self.assertEqual(next(iter(cats[family])), next(iter(skills)), family)
+
+    def test_the_audit_gap_families_are_now_covered(self):
+        """#12: 2.2 had nowhere to put a saxophone, a trumpet or a full kit."""
+        cats = PERSONAZ["artist"]["categories"]
+        self.assertIn("Wind & Woodwind", cats)
+        self.assertIn("Brass Instruments", cats)
+        self.assertIn("Electronic & DJ", cats)
+        for expected, family in (
+            ("Saxophone (Tenor)", "Wind & Woodwind"),
+            ("Flute", "Wind & Woodwind"),
+            ("Clarinet", "Wind & Woodwind"),
+            ("Harmonica", "Wind & Woodwind"),
+            ("Trumpet", "Brass Instruments"),
+            ("Trombone", "Brass Instruments"),
+            ("French Horn", "Brass Instruments"),
+            ("Tuba", "Brass Instruments"),
+            ("Full Drum Kit", "Percussion Instruments"),
+            ("Congas", "Percussion Instruments"),
+            ("DJ Decks", "Electronic & DJ"),
+            ("Turntablism", "Electronic & DJ"),
+        ):
+            self.assertIn(expected, cats[family], expected)
+
+    def test_a_saxophonist_can_now_register_their_instrument(self):
+        """The concrete complaint behind finding #12."""
+        self.assertEqual(skill_key_for("artist", "Saxophone (Tenor) 🎷"), "Saxophone (Tenor)")
+        self.assertEqual(skill_key_for("artist", "Trumpet"), "Trumpet")
 
     def test_artist_labels_are_verbatim(self):
         cats = PERSONAZ["artist"]["categories"]
@@ -321,12 +393,17 @@ class NormalizeTests(TestCase):
         self.assertFalse(out[1]["skills"][0]["catalog"])
 
     def test_an_unknown_skill_on_a_known_persona_is_kept_and_flagged(self):
+        # A string that will never be a catalog entry. (This test used to say
+        # "Theremin" — which then became a real skill when the Electronic & DJ
+        # family was added, so the test was asserting the opposite of the truth.)
+        unknown = "Not A Real Instrument"
+        self.assertIsNone(skill_key_for("artist", unknown))
         out = normalize_personas([{"key": "artist", "skills": [
-            {"name": "Acoustic Guitar 🎸"}, {"name": "Theremin"},
+            {"name": "Acoustic Guitar 🎸"}, {"name": unknown},
         ]}])
         skills = out[0]["skills"]
         self.assertEqual(skills[0]["catalog"], True)
-        self.assertEqual(skills[1], {"key": None, "name": "Theremin", "start": None,
+        self.assertEqual(skills[1], {"key": None, "name": unknown, "start": None,
                                      "catalog": False})
 
     def test_the_same_persona_sent_under_two_spellings_merges(self):
@@ -366,7 +443,9 @@ class CatalogEndpointTests(TestCase):
     def test_each_persona_reports_its_categories_and_wildcards(self):
         data = self.client.get("/api/economy/personaz/").data
         artist = next(p for p in data["personas"] if p["key"] == "artist")
-        self.assertEqual(len(artist["categories"]), 5)
+        self.assertEqual(len(artist["categories"]),
+                         len(PERSONAZ["artist"]["categories"]))
+        self.assertGreaterEqual(len(artist["categories"]), len(V22_ARTIST))
         self.assertEqual(artist["skill_count"], len(skills_for("artist")))
         strings = artist["categories"][0]
         self.assertEqual(strings["name"], "String Instruments")

@@ -60,6 +60,68 @@ _ARTIST = {
         "Drums (Bass)": "Drums (Bass) 🥁",
         "Drums (Bongo)": "Drums (Bongo) 🥁",
         "Cymbals": "Cymbals 🥁",
+        # Added after the 2.2 audit (#12). The 2.2 list had no full kit and no
+        # hand percussion, so a drummer could register a snare but not the
+        # instrument they actually play. Nothing above was changed or removed.
+        "Full Drum Kit": "Full Drum Kit 🥁",
+        "Hi-Hat": "Hi-Hat 🥁",
+        "Congas": "Congas 🪘",
+        "Djembe": "Djembe 🪘",
+        "Timbales": "Timbales 🥁",
+        "Cajón": "Cajón 🪘",
+        "Tambourine": "Tambourine 🎶",
+        "Shaker": "Shaker 🎶",
+        "Marimba": "Marimba 🎹",
+        "Steel Drum": "Steel Drum 🛢️",
+        "Electronic Drum Pad": "Electronic Drum Pad 🎛️",
+    },
+    # Added after the 2.2 audit (#12). 2.2 covered strings, keys, percussion,
+    # rapping and singing — so a saxophonist, trumpeter or flautist had nowhere
+    # to put their instrument at all. Two new families, same paradigm.
+    "Wind & Woodwind": {
+        "Any Wind": "Any Wind 🎷",
+        "Saxophone (Alto)": "Saxophone (Alto) 🎷",
+        "Saxophone (Tenor)": "Saxophone (Tenor) 🎷",
+        "Saxophone (Soprano)": "Saxophone (Soprano) 🎷",
+        "Saxophone (Baritone)": "Saxophone (Baritone) 🎷",
+        "Flute": "Flute 🪈",
+        "Piccolo": "Piccolo 🪈",
+        "Clarinet": "Clarinet 🎼",
+        "Bass Clarinet": "Bass Clarinet 🎼",
+        "Oboe": "Oboe 🎼",
+        "Bassoon": "Bassoon 🎼",
+        "Recorder": "Recorder 🪈",
+        "Harmonica": "Harmonica 🎵",
+        "Bagpipes": "Bagpipes 🏴",
+        "Pan Flute": "Pan Flute 🪈",
+    },
+    "Brass Instruments": {
+        "Any Brass": "Any Brass 🎺",
+        "Trumpet": "Trumpet 🎺",
+        "Cornet": "Cornet 🎺",
+        "Trombone": "Trombone 🎺",
+        "Bass Trombone": "Bass Trombone 🎺",
+        "French Horn": "French Horn 📯",
+        "Tuba": "Tuba 🎺",
+        "Euphonium": "Euphonium 🎺",
+        "Flugelhorn": "Flugelhorn 🎺",
+        "Sousaphone": "Sousaphone 🎺",
+    },
+    # Producing live is performing. 2.2 had no place for a DJ or a beat-machine
+    # player under `artist` at all — they had to claim the producer persona even
+    # when the skill in question is a stage skill.
+    "Electronic & DJ": {
+        "Any Electronic": "Any Electronic 🎛️",
+        "DJ Decks": "DJ Decks 🎧",
+        "Turntablism": "Turntablism 💿",
+        "Beatboxing": "Beatboxing 🎤",
+        "Drum Machine": "Drum Machine 🥁",
+        "MPC / Sampler": "MPC / Sampler 🎛️",
+        "MIDI Controller": "MIDI Controller 🎹",
+        "Launchpad": "Launchpad 🟩",
+        "Modular Synth": "Modular Synth 🔌",
+        "Vocoder / Talkbox": "Vocoder / Talkbox 🗣️",
+        "Theremin": "Theremin 📡",
     },
     "Rapping": {
         "Any Rapping": "Any Rapping 🎤",

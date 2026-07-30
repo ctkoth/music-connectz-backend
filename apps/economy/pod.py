@@ -44,6 +44,11 @@ PRINT_METHODS = {
         "method": "dtg",
         "name": "Direct-to-garment",
         "full_bleed": False,
+        # Printed onto a finished garment, so a transparent background is
+        # normally what you want.
+        "on_garment": True,
+        "cut_and_sew": False,
+        "no_white_ink": False,
         "min_px": 1800,
         "max_colors": None,
         "notes": (
@@ -56,6 +61,9 @@ PRINT_METHODS = {
         "method": "embroidery",
         "name": "Embroidery",
         "full_bleed": False,
+        "on_garment": True,
+        "cut_and_sew": False,
+        "no_white_ink": False,
         "min_px": 1000,
         "max_colors": 6,
         "notes": (
@@ -68,6 +76,10 @@ PRINT_METHODS = {
         "method": "sublimation",
         "name": "Dye sublimation",
         "full_bleed": True,
+        "on_garment": False,
+        "cut_and_sew": False,
+        # No white ink: anything transparent (or white) comes out as bare fabric.
+        "no_white_ink": True,
         "min_px": 3000,
         "max_colors": None,
         "notes": (
@@ -80,6 +92,11 @@ PRINT_METHODS = {
         "method": "aop",
         "name": "All-over print",
         "full_bleed": True,
+        "on_garment": False,
+        # Printed on flat panels that are then cut and sewn — this is what makes
+        # aspect ratio and seams matter, and it is NOT true of a poster.
+        "cut_and_sew": True,
+        "no_white_ink": True,
         "min_px": 4000,
         "max_colors": None,
         "notes": (
@@ -92,6 +109,9 @@ PRINT_METHODS = {
         "method": "vinyl",
         "name": "Cut vinyl",
         "full_bleed": False,
+        "on_garment": True,
+        "cut_and_sew": False,
+        "no_white_ink": False,
         "min_px": 1500,
         "max_colors": 4,
         "notes": (
@@ -103,6 +123,10 @@ PRINT_METHODS = {
         "method": "paper",
         "name": "Giclée / paper print",
         "full_bleed": True,
+        "on_garment": False,
+        "cut_and_sew": False,
+        # Paper IS white, so transparency prints as white — no warning needed.
+        "no_white_ink": False,
         "min_px": 3600,
         "max_colors": None,
         "notes": (
@@ -566,6 +590,72 @@ def submit_order(order):
         return False
 
 
+@transaction.atomic
+def refund_order(order, reason="", by=None):
+    """Cancel a paid order and put the money back where it came from.
+
+    Returns (ok, detail). Every leg of the original sale is reversed:
+
+        buyer      + the full price they paid
+        seller     - the net they were credited
+        platform   - the tax it kept, and releases the withheld print cost
+
+    Refusing is the right answer once a printer has it. Money moves before the
+    goods exist, so a `pending` order costs nothing to unwind — but a `shipped`
+    one has a real garment in a real van, and silently refunding that would have
+    the platform eating the cost with no way to notice.
+
+    A seller who has already spent their credit does NOT block the buyer's refund.
+    Wallets are non-negative by design across this platform, so the clawback takes
+    whatever is there and the unrecoverable remainder is recorded on the order as
+    `clawback_shortfall_cents` — the platform absorbs it. That's a deliberate
+    trade: the buyer is owed their money back regardless of what the seller did
+    with theirs, and a recorded shortfall is something support can chase, where a
+    refused refund is an angry customer and a chargeback.
+    """
+    if order.status in PrintOrder.TERMINAL:
+        return False, f"order is already {order.status}"
+    if order.status not in (PrintOrder.STATUS_PENDING, PrintOrder.STATUS_SUBMITTED):
+        return False, (
+            f"this order is {order.status} — it's already being made or on its way, so it "
+            "can't be refunded here. Handle it as a return with the buyer."
+        )
+
+    bw = wallet_for(order.buyer)
+    sw = wallet_for(order.seller)
+    clawback = min(order.seller_cents, sw.money_cents or 0)
+    shortfall = order.seller_cents - clawback
+
+    bw.money_cents = (bw.money_cents or 0) + order.price_cents
+    sw.money_cents = (sw.money_cents or 0) - clawback
+    bw.save(update_fields=["money_cents", "updated_at"])
+    sw.save(update_fields=["money_cents", "updated_at"])
+
+    note = f"MerchZ POD refund: {order.listing.title}"
+    if reason:
+        note += f" ({reason})"
+    Transaction.objects.create(user=order.buyer, kind=Transaction.KIND_REWARD,
+                               amount_cents=order.price_cents, dev_tax_cents=0,
+                               note=note[:200])
+    Transaction.objects.create(user=order.seller, kind=Transaction.KIND_SPEND,
+                               amount_cents=-clawback, dev_tax_cents=0,
+                               note=(note + (f" — {shortfall}c unrecovered" if shortfall else ""))[:200])
+
+    order.status = PrintOrder.STATUS_CANCELLED
+    order.clawback_shortfall_cents = shortfall
+    order.note = (f"Refunded {order.price_cents}c"
+                  + (f" — {reason}" if reason else "")
+                  + (f" (by {by.username})" if by else "")
+                  + (f" · {shortfall}c not recovered from seller" if shortfall else ""))[:300]
+    order.save(update_fields=["status", "clawback_shortfall_cents", "note", "updated_at"])
+    return True, ""
+
+
+def refundable(order):
+    """Whether `refund_order` would succeed — for showing or hiding a button."""
+    return order.status in (PrintOrder.STATUS_PENDING, PrintOrder.STATUS_SUBMITTED)
+
+
 def advance(order, status, provider_order_id="", tracking_url="", note=""):
     """Move an order along. Terminal states are final so a replayed provider
     webhook can't reopen a delivered or cancelled order."""
@@ -582,3 +672,58 @@ def advance(order, status, provider_order_id="", tracking_url="", note=""):
             fields.append(field)
     order.save(update_fields=fields)
     return True, ""
+
+
+def measure_design(design):
+    """Record an uploaded design's pixel size and transparency, once.
+
+    Stored on the row rather than read on demand: with S3/R2 the file isn't
+    local, so measuring it on every product-page render would be a network round
+    trip per blank. Failure is non-fatal — an unmeasured design simply skips the
+    artwork checks instead of blocking the upload.
+    """
+    try:
+        from PIL import Image
+
+        design.image.open()
+        with Image.open(design.image) as img:
+            design.width, design.height = img.size
+            design.has_alpha = img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info
+        design.save(update_fields=["width", "height", "has_alpha"])
+        return True
+    except Exception as exc:
+        log.info("pod: could not measure design %s (%s)", design.pk, str(exc)[:160])
+        return False
+    finally:
+        try:
+            design.image.close()
+        except Exception:
+            pass
+
+
+def suitability(design):
+    """Which blanks this artwork is good enough for, and why not for the rest.
+
+    Returned at upload so a creator sees "great for posters, too small for a
+    hoodie" before they list anything — the moment when fixing the file is still
+    cheap.
+    """
+    rows = []
+    for product in PrintProduct.objects.filter(active=True):
+        ok, problems = design.check_for(product)
+        rows.append({
+            "product": product.key,
+            "name": product.name,
+            "print_method": product.print_method,
+            "ok": ok,
+            "warnings": problems,
+        })
+    return {
+        "measured": bool(design.width and design.height),
+        "width": design.width,
+        "height": design.height,
+        "shortest_side": design.shortest_side,
+        "has_alpha": design.has_alpha,
+        "good_for": [r["product"] for r in rows if r["ok"]],
+        "warnings_for": [r for r in rows if not r["ok"]],
+    }

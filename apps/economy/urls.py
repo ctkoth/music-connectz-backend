@@ -29,11 +29,11 @@ from .collab import (
 from .merch import MerchBuyView, MerchDetailView, MerchView
 from .occ import OccChatView
 from .occ_views import (AgentRunsView, AgentView, ProjectDetailView,
-                        ProjectFilesView, ProjectsView)
+                        ProjectFilesView, ProjectsView, ProjectUndoView)
 from .personaz_views import PersonaZDetailView, PersonaZView
 from .pod_views import (BlanksView, DesignDetailView, DesignsView,
                         ListingBuyView, ListingDetailView, ListingsView,
-                        OrderInvoiceView, OrderStatusView, OrdersView,
+                        OrderInvoiceView, OrderRefundView, OrderStatusView, OrdersView,
                         SalesReportView, StatementView)
 from .payments import (
     CheckoutConfigView,
@@ -97,6 +97,7 @@ urlpatterns = [
     path("occ/projects/<int:pk>/files/", ProjectFilesView.as_view(), name="economy-occ-files"),
     path("occ/projects/<int:pk>/agent/", AgentView.as_view(), name="economy-occ-agent"),
     path("occ/projects/<int:pk>/runs/", AgentRunsView.as_view(), name="economy-occ-runs"),
+    path("occ/projects/<int:pk>/undo/", ProjectUndoView.as_view(), name="economy-occ-undo"),
     # MerchZ print-on-demand — made when it sells.
     path("pod/blanks/", BlanksView.as_view(), name="economy-pod-blanks"),
     path("pod/designs/", DesignsView.as_view(), name="economy-pod-designs"),
@@ -107,6 +108,7 @@ urlpatterns = [
     path("pod/orders/", OrdersView.as_view(), name="economy-pod-orders"),
     path("pod/orders/<int:pk>/status/", OrderStatusView.as_view(), name="economy-pod-order-status"),
     path("pod/orders/<int:pk>/invoice/", OrderInvoiceView.as_view(), name="economy-pod-invoice"),
+    path("pod/orders/<int:pk>/refund/", OrderRefundView.as_view(), name="economy-pod-refund"),
     path("pod/sales/", SalesReportView.as_view(), name="economy-pod-sales"),
     path("pod/statement/", StatementView.as_view(), name="economy-pod-statement"),
     path("translate/", TranslateView.as_view(), name="economy-translate"),

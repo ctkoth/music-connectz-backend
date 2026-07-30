@@ -35,7 +35,7 @@ and the gap is a deliberate one.
 | Move & delete | ✅ `rename_file`, `delete_file` | |
 | Multi-step agentic loop | ✅ | 8–64 steps by tier |
 | **Run commands / tests** | ❌ | see below |
-| **Git** | ❌ | no repo, no commits |
+| **Git** | ⚠️ partial | no repo or commits, but **snapshots + undo** — see below |
 | **Fetch the web / MCP** | ❌ | |
 | **Sub-agents** | ❌ | |
 | Real repo on disk | ❌ | a workspace of up to 200 files |
@@ -60,9 +60,33 @@ To close the gap, in the order I'd do it:
    or a managed option like [E2B](https://e2b.dev/) / Modal).
 2. A `run_command` tool that posts the workspace to that worker and returns
    stdout/stderr/exit code — the agent contract is already shaped for it.
-3. Git on the workspace, so runs become commits and a bad run is revertible.
+3. Git on the workspace, so runs become commits with real history.
 
-Steps 2 and 3 are small once 1 exists. Step 1 is the whole job.
+Step 2 is small once 1 exists. Step 1 is the whole job. **The part of step 3 that
+actually mattered is already done** — see snapshots below.
+
+### Snapshots instead of git
+
+The reason git matters for an agent isn't version history, it's that an agentic
+run makes several edits and any one of them can be wrong. Without an undo, a bad
+run leaves a member hand-repairing files an AI broke.
+
+```
+GET  /api/economy/occ/projects/<id>/undo/    the undo stack
+POST /api/economy/occ/projects/<id>/undo/    restore (newest, or {"snapshot_id"})
+```
+
+The whole workspace is captured before every run that could write, and a run that
+changed files returns `undo: {snapshot_id, files}`. Restoring is exact: files the
+run created are **deleted**, not merged — a half-restore that leaves the agent's
+new file behind is the worst outcome, because the workspace then matches neither
+state. The pre-restore state is itself snapshotted first, so **undo is undoable**;
+an undo you can't undo is just a second way to lose work.
+
+Snapshots are the full file set as JSON — crude next to a diff, and unambiguous to
+restore. 20 per project, oldest falling off: this is an undo stack, not an
+archive. Nothing is snapshotted for a dry run, for a run that changed nothing, or
+for an empty project.
 
 ### Where the workspace lives
 

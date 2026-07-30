@@ -362,3 +362,54 @@ def run_tool(workspace, name, params):
         return False, f"Wrong arguments for {name}: {exc}"
     except Exception as exc:  # a tool must never take the run down
         return False, f"{name} failed: {str(exc)[:200]}"
+
+
+# Keep only this many snapshots per project. Old ones fall off — this is an undo
+# stack, not an archive, and a member with 200 runs doesn't need 200 copies of a
+# 2MB workspace.
+MAX_SNAPSHOTS = 20
+
+
+def take_snapshot(project, label="", run=None):
+    """Capture the whole workspace. Returns the snapshot, or None if empty.
+
+    An empty project isn't worth a snapshot — restoring to "nothing" is what
+    deleting files already does, and it would push a real snapshot off the stack.
+    """
+    from .models import ProjectSnapshot
+
+    files = {f.path: f.content for f in project.files.only("path", "content")}
+    if not files:
+        return None
+    snap = ProjectSnapshot.objects.create(
+        project=project, run=run, label=label[:140], files=files)
+    stale = list(
+        ProjectSnapshot.objects.filter(project=project)
+        .order_by("-created_at")
+        .values_list("id", flat=True)[MAX_SNAPSHOTS:]
+    )
+    if stale:
+        ProjectSnapshot.objects.filter(id__in=stale).delete()
+    return snap
+
+
+def restore_snapshot(snapshot):
+    """Put the workspace back exactly as the snapshot found it.
+
+    Files created after the snapshot are deleted, not merged — a half-restore that
+    leaves an agent's new file behind is the worst outcome, because the workspace
+    then matches neither state. Returns (restored, removed) counts.
+    """
+    from django.db import transaction
+
+    from .models import ProjectFile
+
+    project = snapshot.project
+    wanted = dict(snapshot.files or {})
+    with transaction.atomic():
+        removed = ProjectFile.objects.filter(project=project).exclude(
+            path__in=list(wanted)).delete()[0]
+        for path, content in wanted.items():
+            ProjectFile.objects.update_or_create(
+                project=project, path=path, defaults={"content": content})
+    return len(wanted), removed

@@ -14,7 +14,7 @@ Verdict per requirement:
 
 | Requirement | Status |
 |---|---|
-| Audit 2.2 skills | ✅ 12 findings below |
+| Audit 2.2 skills | ✅ 12 findings below — **11 closed**, 1 left open by instruction (#6) |
 | Existing personas keep these exact skills | ✅ all 5 preserved verbatim, 2 corrupted entries repaired |
 | New personas get skills in the same paradigm | ✅ Ghostwriter, Manager, Developer built |
 | Developer gets the top 20 languages | ✅ exactly 20, plus the "Any" wildcard |
@@ -156,17 +156,30 @@ its name would be styled as a wildcard and behave differently.
 **Fixed:** wildcards are first-in-category by contract, flagged explicitly as
 `"any": true` in the API, and tested (first entry is a wildcard; no others are).
 
-### 🟢 12. Gaps in the artist instrument list
+### 🟢 12. Gaps in the artist instrument list — **now closed**
 
-No wind, brass, or woodwind family — a saxophonist, trumpeter, or flautist cannot
-register their instrument. Percussion is also thin (snare, bass, bongo, cymbals;
-no hi-hat, full kit, congas, or tambourine).
+No wind, brass, or woodwind family — a saxophonist, trumpeter, or flautist could
+not register their instrument at all. Percussion was also thin (snare, bass,
+bongo, cymbals; no full kit, no hand percussion).
 
-**Not changed.** "Existing personas need these exact skills" was the instruction,
-and adding families changes what existing members see. It's a one-block addition
-to `_ARTIST` in `apps/economy/personaz.py` when you want it — flagging it as the
-most likely real-world complaint, because a sax player currently has nowhere to
-go.
+**Fixed by ADDING, never editing.** Three new families and eleven new percussion
+entries; every 2.2 key and label is untouched, and the tests now assert that as a
+subset check against a transcription of the 2.2 data rather than a count that an
+addition would break.
+
+- **Wind & Woodwind** (15) — four saxophones, flute, piccolo, clarinet, bass
+  clarinet, oboe, bassoon, recorder, harmonica, bagpipes, pan flute
+- **Brass Instruments** (10) — trumpet, cornet, trombone, bass trombone, French
+  horn, tuba, euphonium, flugelhorn, sousaphone
+- **Electronic & DJ** (11) — DJ decks, turntablism, beatboxing, drum machine,
+  MPC/sampler, MIDI controller, launchpad, modular synth, vocoder/talkbox,
+  theremin. Producing live is performing; 2.2 forced a DJ to claim the producer
+  persona for what is a stage skill.
+- **Percussion** grew to 16 — full drum kit, hi-hat, congas, djembe, timbales,
+  cajón, tambourine, shaker, marimba, steel drum, electronic drum pad
+
+Artist went from 5 categories / 50 skills to **8 categories / 97 skills**. Catalog
+total: **271 skills**.
 
 ---
 
@@ -193,7 +206,7 @@ All three rules are enforced by tests, for all 8 personas.
 
 | Persona | Since | Categories | Skills |
 |---|---|---|---|
-| 🎤 Artist | 2.2 | String · Keyboard · Percussion · Rapping · Singing | 50 |
+| 🎤 Artist | 2.2 | String · Keyboard · Percussion · **Wind** · **Brass** · **Electronic/DJ** · Rapping · Singing | 97 |
 | 🎚️ Beat Producer | 2.2 | Music DAWs · Production Techniques | 24 |
 | 🎛️ Mix Engineer | 2.2 | Music DAWs · Engineering Skills | 24 |
 | 🎨 Designer | 2.2 | Design Software · Design Skills | 17 |
@@ -202,7 +215,7 @@ All three rules are enforced by tests, for all 8 personas.
 | 🕴️ Manager | **new** | Management Tools · Management Skills | 25 |
 | 👾 Developer | **new** | Programming Languages · Developer Tools · Development Skills | 45 |
 
-**8 personas, 224 skills.**
+**8 personas, 271 skills.**
 
 ### Developer — the top 20 languages
 

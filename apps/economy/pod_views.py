@@ -8,6 +8,7 @@
     POST        /api/economy/pod/listings/<id>/buy/ buy it (made to order)
     GET         /api/economy/pod/orders/            your orders + your sales
     POST        /api/economy/pod/orders/<id>/status/ seller/owner moves it along
+    POST        /api/economy/pod/orders/<id>/refund/ cancel + reverse the money
     GET         /api/economy/pod/orders/<id>/invoice/ one order, as a document
     GET         /api/economy/pod/sales/             what's selling (ranked)
     GET         /api/economy/pod/statement/         a month, for the accountant
@@ -64,6 +65,9 @@ def _design_dict(d, request):
         "id": d.id,
         "title": d.title,
         "image_url": _image_url(d.image, request),
+        "width": d.width,
+        "height": d.height,
+        "has_alpha": d.has_alpha,
         "listings": d.listings.count(),
         "created_at": d.created_at,
     }
@@ -102,6 +106,7 @@ def _order_dict(o):
         "seller_cents": o.seller_cents,
         "dev_tax_cents": o.dev_tax_cents,
         "status": o.status,
+        "refundable": pod.refundable(o),
         "provider": o.provider,
         "provider_order_id": o.provider_order_id,
         "tracking_url": o.tracking_url,
@@ -156,7 +161,11 @@ class DesignsView(APIView):
             return Response({"detail": f"you already have {MAX_DESIGNS} designs"},
                             status=status.HTTP_400_BAD_REQUEST)
         d = MerchDesign.objects.create(owner=request.user, title=title[:120], image=image)
-        return Response({"design": _design_dict(d, request)}, status=status.HTTP_201_CREATED)
+        pod.measure_design(d)
+        return Response({"design": _design_dict(d, request),
+                         # Which blanks this artwork is actually good enough for.
+                         "suitability": pod.suitability(d)},
+                        status=status.HTTP_201_CREATED)
 
 
 class DesignDetailView(APIView):
@@ -213,6 +222,7 @@ class ListingsView(APIView):
         if PrintListing.objects.filter(design=design, product=product).exists():
             return Response({"detail": f"{design.title} is already listed on {product.name}"},
                             status=status.HTTP_409_CONFLICT)
+        artwork_ok, artwork_warnings = design.check_for(product)
         li = PrintListing.objects.create(
             design=design, product=product, seller=request.user,
             title=str(d.get("title") or f"{design.title} — {product.name}")[:120],
@@ -220,7 +230,11 @@ class ListingsView(APIView):
             price_cents=int(d["price_cents"]),
         )
         return Response({"listing": _listing_dict(li, request),
-                         "quote": pod.quote(product, li.price_cents)},
+                         "quote": pod.quote(product, li.price_cents),
+                         # Advisory: the listing is created either way. A warning a
+                         # creator can override beats a refusal that's wrong.
+                         "artwork_ok": artwork_ok,
+                         "artwork_warnings": artwork_warnings},
                         status=status.HTTP_201_CREATED)
 
 
@@ -386,3 +400,31 @@ class StatementView(APIView):
             now = timezone.now()
             year, month = now.year, now.month
         return Response({"statement": pod_reports.statement(request.user, year, month)})
+
+
+class OrderRefundView(APIView):
+    """POST {reason} — cancel a made-to-order sale and reverse the money.
+
+    Seller, buyer, or the platform owner. The buyer gets to cancel their own
+    order because nothing has been made yet — making them ask the seller for
+    something the system can do instantly is just friction.
+
+    Refused once the order is in production or shipped: there's a real garment in
+    a real van by then, and quietly refunding it would have the platform eating
+    the print cost with nothing recording that it happened.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        o = PrintOrder.objects.select_related(
+            "listing", "buyer", "seller").filter(pk=pk).first()
+        if not o or not pod_reports.can_view(o, request.user):
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        ok, detail = pod.refund_order(
+            o, reason=str((request.data or {}).get("reason", ""))[:200], by=request.user)
+        if not ok:
+            return Response({"detail": detail, "refundable": pod.refundable(o)},
+                            status=status.HTTP_400_BAD_REQUEST)
+        return Response({"order": _order_dict(o), "refunded_cents": o.price_cents,
+                         "wallet": WalletSerializer(wallet_for(request.user)).data})

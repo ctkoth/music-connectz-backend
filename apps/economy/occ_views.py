@@ -6,6 +6,7 @@
     DELETE      /api/economy/occ/projects/<id>/files/     delete one (?path=)
     POST        /api/economy/occ/projects/<id>/agent/     run the agent
     GET         /api/economy/occ/projects/<id>/runs/      what the agent has done
+    GET  POST   /api/economy/occ/projects/<id>/undo/      the undo stack / restore
 
 Every route is scoped to `request.user` — a project id belonging to somebody else
 is a 404, not a 403, so ids can't be probed for existence.
@@ -17,8 +18,9 @@ from rest_framework.views import APIView
 
 from .models import AgentRun, Project, ProjectFile
 from .occ_agent import MAX_STEPS, max_steps_for, run_agent, transcript
-from .occ_tools import (MAX_FILE_CHARS, MAX_FILES, MAX_TOTAL_CHARS,
-                        TOOL_SCHEMAS, normalize_path)
+from .occ_tools import (MAX_FILE_CHARS, MAX_FILES, MAX_SNAPSHOTS,
+                        MAX_TOTAL_CHARS, TOOL_SCHEMAS, normalize_path,
+                        restore_snapshot, take_snapshot)
 
 MAX_PROJECTS = 25
 
@@ -56,6 +58,7 @@ class ProjectsView(APIView):
                 "file_chars": MAX_FILE_CHARS, "total_chars": MAX_TOTAL_CHARS,
                 "max_steps": max_steps_for(request.user),
                 "max_steps_by_tier": MAX_STEPS,
+                "snapshots": MAX_SNAPSHOTS,
             },
             # So a client can show what the agent is able to do without guessing.
             "tools": [{"name": t["name"], "description": t["description"]} for t in TOOL_SCHEMAS],
@@ -199,3 +202,48 @@ class AgentRunsView(APIView):
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
         runs = AgentRun.objects.filter(project=p).select_related("project")[:25]
         return Response({"runs": [transcript(r) for r in runs]})
+
+
+class ProjectUndoView(APIView):
+    """GET the undo stack; POST {snapshot_id?} to restore.
+
+    Without a snapshot_id it undoes the most recent change — which is what "undo"
+    means and what a member will reach for after a run goes wrong. The state
+    before the restore is itself snapshotted first, so undo is reversible too; an
+    undo you can't undo is just a second way to lose work.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        p = _owned(request, pk)
+        if not p:
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"snapshots": [
+            {"id": s.id, "label": s.label, "files": s.file_count,
+             "run_id": s.run_id, "created_at": s.created_at}
+            for s in p.snapshots.all()[:MAX_SNAPSHOTS]
+        ], "limit": MAX_SNAPSHOTS})
+
+    def post(self, request, pk):
+        p = _owned(request, pk)
+        if not p:
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        wanted = (request.data or {}).get("snapshot_id")
+        snap = (p.snapshots.filter(pk=wanted).first() if wanted
+                else p.snapshots.first())
+        if not snap:
+            return Response(
+                {"detail": "no such snapshot" if wanted else "nothing to undo"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        # Snapshot the current state first so the undo is itself undoable.
+        take_snapshot(p, label=f"before undo of #{snap.id}")
+        restored, removed = restore_snapshot(snap)
+        p.save(update_fields=["updated_at"])
+        return Response({
+            "restored_from": snap.id,
+            "files_restored": restored,
+            "files_removed": removed,
+            "project": _project_dict(p, files=True),
+        })

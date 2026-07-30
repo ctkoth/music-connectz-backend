@@ -14,8 +14,8 @@ from rest_framework.test import APIClient
 
 from apps.economy import pod, pod_reports
 from apps.economy.models import (TIER_FREE, MerchDesign, PrintListing,
-                                 PrintOrder, PrintProduct, membership_for,
-                                 wallet_for)
+                                 PrintOrder, PrintProduct, Transaction,
+                                 membership_for, wallet_for)
 
 User = get_user_model()
 
@@ -929,3 +929,251 @@ class ReportingTests(TestCase):
     def test_reports_need_a_login(self):
         for url in ("/api/economy/pod/sales/", "/api/economy/pod/statement/"):
             self.assertEqual(APIClient().get(url).status_code, 401, url)
+
+
+class RefundTests(TestCase):
+    """Cancelling a paid order has to put the money back — all three legs."""
+
+    def setUp(self):
+        pod.seed_blanks()
+        self.client = APIClient()
+        self.seller = User.objects.create_user("maker", "m@e.com", "pw12345678")
+        self.buyer = User.objects.create_user("fan", "f@e.com", "pw12345678")
+        self.other = User.objects.create_user("nosy", "n@e.com", "pw12345678")
+        w = wallet_for(self.buyer)
+        w.money_cents = 20_000
+        w.save()
+        m = membership_for(self.buyer)
+        m.tier = TIER_FREE
+        m.save(update_fields=["tier", "updated_at"])
+        design = MerchDesign.objects.create(owner=self.seller, title="Logo", image=a_png())
+        self.listing = PrintListing.objects.create(
+            design=design, product=PrintProduct.objects.get(key="tee"),
+            seller=self.seller, title="Logo Tee", price_cents=2500)
+
+    def _order(self, **kw):
+        kw.setdefault("ship_to", ADDRESS)
+        kw.setdefault("size", "L")
+        kw.setdefault("color", "White")
+        o, err = pod.place_order(self.buyer, self.listing, **kw)
+        self.assertIsNone(err, err)
+        return o
+
+    def test_a_refund_reverses_every_leg_exactly(self):
+        before_buyer = wallet_for(self.buyer).money_cents
+        order = self._order()
+        self.assertEqual(wallet_for(self.buyer).money_cents, before_buyer - 2500)
+        seller_after_sale = wallet_for(self.seller).money_cents
+
+        ok, detail = pod.refund_order(order, reason="wrong size", by=self.buyer)
+        self.assertTrue(ok, detail)
+        # buyer whole again, seller's credit clawed back
+        self.assertEqual(wallet_for(self.buyer).money_cents, before_buyer)
+        self.assertEqual(wallet_for(self.seller).money_cents,
+                         seller_after_sale - order.seller_cents)
+        self.assertEqual(order.status, PrintOrder.STATUS_CANCELLED)
+        self.assertIn("wrong size", order.note)
+
+    def test_the_refund_is_recorded_on_both_sides(self):
+        order = self._order()
+        pod.refund_order(order, reason="changed mind")
+        notes = list(Transaction.objects.filter(
+            note__icontains="refund").values_list("user_id", "amount_cents"))
+        self.assertIn((self.buyer.id, order.price_cents), notes)
+        self.assertIn((self.seller.id, -order.seller_cents), notes)
+
+    def test_a_refund_removes_the_sale_from_revenue_but_not_from_sight(self):
+        keep = self._order()
+        binned = self._order()
+        pod.refund_order(binned)
+        report = pod_reports.sales_report(self.seller)
+        self.assertEqual(report["totals"]["orders"], 1)
+        self.assertEqual(report["totals"]["gross_cents"], keep.price_cents)
+        self.assertEqual(report["cancelled"]["orders"], 1)
+
+    def test_a_submitted_order_can_still_be_refunded(self):
+        order = self._order()
+        pod.advance(order, PrintOrder.STATUS_SUBMITTED)
+        self.assertTrue(pod.refundable(order))
+        self.assertTrue(pod.refund_order(order)[0])
+
+    def test_an_order_already_being_made_cannot_be_refunded(self):
+        """There's a real garment involved by then — silently refunding it would
+        have the platform eat the print cost with nothing recording it."""
+        for state in (PrintOrder.STATUS_IN_PRODUCTION, PrintOrder.STATUS_SHIPPED):
+            order = self._order()
+            pod.advance(order, state)
+            self.assertFalse(pod.refundable(order))
+            ok, detail = pod.refund_order(order)
+            self.assertFalse(ok)
+            self.assertIn("can't be refunded here", detail)
+            self.assertEqual(order.status, state)
+
+    def test_a_refund_cannot_be_run_twice(self):
+        order = self._order()
+        self.assertTrue(pod.refund_order(order)[0])
+        paid_back = wallet_for(self.buyer).money_cents
+        ok, detail = pod.refund_order(order)
+        self.assertFalse(ok)
+        self.assertIn("already cancelled", detail)
+        # and no second credit landed
+        self.assertEqual(wallet_for(self.buyer).money_cents, paid_back)
+
+    def test_the_buyer_gets_their_money_back_even_if_the_seller_spent_theirs(self):
+        """Wallets can't go negative on this platform, so the clawback takes what
+        is there and the shortfall is RECORDED rather than swallowed. The buyer is
+        owed their money back regardless of what the seller did with theirs."""
+        order = self._order()
+        sw = wallet_for(self.seller)
+        sw.money_cents = 0                    # seller already spent it
+        sw.save()
+
+        self.assertTrue(pod.refund_order(order)[0])
+        self.assertEqual(wallet_for(self.buyer).money_cents, 20_000)   # whole again
+        self.assertEqual(wallet_for(self.seller).money_cents, 0)       # not negative
+        order.refresh_from_db()
+        self.assertEqual(order.clawback_shortfall_cents, order.seller_cents)
+        self.assertIn("not recovered", order.note)
+
+    def test_a_partial_clawback_takes_what_is_there(self):
+        order = self._order()
+        sw = wallet_for(self.seller)
+        sw.money_cents = 100                  # some, not all
+        sw.save()
+        pod.refund_order(order)
+        order.refresh_from_db()
+        self.assertEqual(wallet_for(self.seller).money_cents, 0)
+        self.assertEqual(order.clawback_shortfall_cents, order.seller_cents - 100)
+
+    def test_a_normal_refund_records_no_shortfall(self):
+        order = self._order()
+        pod.refund_order(order)
+        order.refresh_from_db()
+        self.assertEqual(order.clawback_shortfall_cents, 0)
+        self.assertNotIn("not recovered", order.note)
+
+    def test_either_side_can_refund_but_a_stranger_cannot(self):
+        for user, expected in ((self.buyer, 200), (self.seller, 200), (self.other, 404)):
+            order = self._order()
+            self.client.force_authenticate(user)
+            resp = self.client.post(f"/api/economy/pod/orders/{order.id}/refund/",
+                                    {"reason": "test"}, format="json")
+            self.assertEqual(resp.status_code, expected, user.username)
+
+    def test_the_endpoint_reports_refundability_when_it_refuses(self):
+        order = self._order()
+        pod.advance(order, PrintOrder.STATUS_SHIPPED)
+        self.client.force_authenticate(self.seller)
+        resp = self.client.post(f"/api/economy/pod/orders/{order.id}/refund/", {},
+                                format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(resp.data["refundable"])
+
+    def test_orders_advertise_whether_they_can_be_refunded(self):
+        self._order()
+        self.client.force_authenticate(self.buyer)
+        order = self.client.get("/api/economy/pod/orders/").data["orders"][0]
+        self.assertTrue(order["refundable"])
+
+
+class ArtworkCheckTests(TestCase):
+    """Warn about artwork that won't survive the process — before it's printed."""
+
+    def setUp(self):
+        pod.seed_blanks()
+        self.client = APIClient()
+        self.seller = User.objects.create_user("maker", "m@e.com", "pw12345678")
+        self.client.force_authenticate(self.seller)
+
+    def _design(self, width, height, alpha=False, title="Art"):
+        d = MerchDesign.objects.create(owner=self.seller, title=title, image=a_png())
+        d.width, d.height, d.has_alpha = width, height, alpha
+        d.save(update_fields=["width", "height", "has_alpha"])
+        return d
+
+    def test_upload_measures_the_image(self):
+        resp = self.client.post("/api/economy/pod/designs/",
+                                {"title": "Logo", "image": a_png()}, format="multipart")
+        self.assertEqual(resp.status_code, 201)
+        # the 1x1 test PNG — tiny, but measured
+        self.assertEqual(resp.data["design"]["width"], 1)
+        self.assertEqual(resp.data["design"]["height"], 1)
+        self.assertTrue(resp.data["suitability"]["measured"])
+        # and 1px is good enough for nothing
+        self.assertEqual(resp.data["suitability"]["good_for"], [])
+
+    def test_a_big_square_design_passes_the_forgiving_processes(self):
+        d = self._design(4500, 4500, alpha=True)
+        poster = PrintProduct.objects.get(key="poster")
+        ok, problems = d.check_for(poster)
+        self.assertTrue(ok, problems)
+
+    def test_a_low_res_design_is_flagged_for_a_big_print(self):
+        d = self._design(900, 900, alpha=True)
+        ok, problems = d.check_for(PrintProduct.objects.get(key="poster"))
+        self.assertFalse(ok)
+        self.assertIn("900px", problems[0])
+        self.assertIn("look soft", problems[0])
+
+    def test_the_short_side_is_what_counts(self):
+        """A 6000x400 banner is not a 6000px design."""
+        d = self._design(6000, 400, alpha=True)
+        self.assertEqual(d.shortest_side, 400)
+        ok, _ = d.check_for(PrintProduct.objects.get(key="tee"))
+        self.assertFalse(ok)
+
+    def test_all_over_print_wants_square_opaque_artwork(self):
+        kimono = PrintProduct.objects.get(key="kimono")
+        wrong = self._design(6000, 2000, alpha=True)
+        ok, problems = wrong.check_for(kimono)
+        self.assertFalse(ok)
+        joined = " ".join(problems)
+        self.assertIn("roughly square", joined)
+        self.assertIn("bare fabric", joined)      # transparency warning
+
+        right = self._design(4500, 4500, alpha=False)
+        ok, problems = right.check_for(kimono)
+        self.assertTrue(ok, problems)
+
+    def test_embroidery_always_warns_about_colours(self):
+        """Even a perfect file can't be a photograph on a cap."""
+        d = self._design(4000, 4000, alpha=True)
+        ok, problems = d.check_for(PrintProduct.objects.get(key="cap"))
+        self.assertFalse(ok)
+        self.assertIn("6 colours maximum", " ".join(problems))
+
+    def test_an_unmeasured_legacy_design_is_not_judged(self):
+        d = self._design(0, 0)
+        ok, problems = d.check_for(PrintProduct.objects.get(key="poster"))
+        self.assertTrue(ok)
+        self.assertEqual(problems, [])
+
+    def test_suitability_splits_the_catalog_into_good_and_warned(self):
+        d = self._design(4500, 4500, alpha=False)
+        s = pod.suitability(d)
+        self.assertIn("kimono", s["good_for"])
+        self.assertTrue(s["warnings_for"])
+        warned = {r["product"] for r in s["warnings_for"]}
+        self.assertIn("cap", warned)        # embroidery always warns
+        self.assertEqual(s["shortest_side"], 4500)
+
+    def test_listing_warns_but_does_not_refuse(self):
+        """Image analysis can't tell a deliberately lo-fi design from a mistake,
+        so a warning a creator can override beats a refusal that's wrong."""
+        d = self._design(500, 500, alpha=True)
+        resp = self.client.post("/api/economy/pod/listings/",
+                                {"design_id": d.id, "product": "hoodie",
+                                 "price_cents": 5500}, format="json")
+        self.assertEqual(resp.status_code, 201)
+        self.assertFalse(resp.data["artwork_ok"])
+        self.assertTrue(resp.data["artwork_warnings"])
+        self.assertTrue(PrintListing.objects.filter(pk=resp.data["listing"]["id"]).exists())
+
+    def test_a_good_listing_reports_no_warnings(self):
+        d = self._design(4500, 4500, alpha=True)
+        resp = self.client.post("/api/economy/pod/listings/",
+                                {"design_id": d.id, "product": "poster",
+                                 "price_cents": 2999}, format="json")
+        self.assertEqual(resp.status_code, 201)
+        self.assertTrue(resp.data["artwork_ok"])
+        self.assertEqual(resp.data["artwork_warnings"], [])

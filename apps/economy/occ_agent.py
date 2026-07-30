@@ -34,7 +34,8 @@ import logging
 from .catalog import ai_cost
 from .models import (TIER_DEBUG, TIER_FREE, TIER_PREMIUM, TIER_STATZ,
                      can_afford_ai, charge_ai_usage, membership_for, wallet_for)
-from .occ_tools import TOOL_SCHEMAS, WRITE_TOOLS, Workspace, run_tool
+from .occ_tools import (TOOL_SCHEMAS, WRITE_TOOLS, Workspace, run_tool,
+                        take_snapshot)
 
 log = logging.getLogger("apps.omviardz")
 
@@ -189,6 +190,10 @@ def run_agent(user, project, prompt, history=None, max_steps=None, dry_run=False
         result.update(stopped=STOP_ERROR, text="Coding agent unavailable (no LLM backend).")
         return result, 503
 
+    # Snapshot BEFORE anything runs, so a bad run is one call to undo. Skipped on
+    # a dry run, which by definition changes nothing.
+    snapshot = None if dry_run else take_snapshot(project, label=str(prompt)[:140])
+
     messages = []
     for turn in (history or [])[-6:]:
         role = "assistant" if turn.get("role") in ("occ", "assistant") else "user"
@@ -292,12 +297,20 @@ def run_agent(user, project, prompt, history=None, max_steps=None, dry_run=False
             f"{len(result['changed'])} file(s) changed before it stopped."
         )
 
-    AgentRun.objects.create(
+    run = AgentRun.objects.create(
         user=user, project=project, prompt=str(prompt)[:4000],
         reply=result["text"][:8000], steps=result["steps"],
         tool_calls=result["tool_calls"][:200], changed=result["changed"][:200],
         cost_cents=result["cost_cents"], stopped=result["stopped"], dry_run=dry_run,
     )
+    result["run_id"] = run.id
+    # Only offer an undo when there is something to undo.
+    if snapshot and result["changed"]:
+        snapshot.run = run
+        snapshot.save(update_fields=["run"])
+        result["undo"] = {"snapshot_id": snapshot.id, "files": snapshot.file_count}
+    elif snapshot:
+        snapshot.delete()
     result["money"] = round((wallet_for(user).money_cents or 0) / 100, 2)
     status = 200 if result["stopped"] in (STOP_DONE, STOP_MAX_STEPS) else (
         402 if result["stopped"] == STOP_BUDGET else 503
@@ -322,6 +335,10 @@ def transcript(run):
         "cost_cents": run.cost_cents,
         "stopped": run.stopped,
         "dry_run": run.dry_run,
+        "undo": (
+            {"snapshot_id": run.snapshot.id, "files": run.snapshot.file_count}
+            if getattr(run, "snapshot", None) else None
+        ),
         "created_at": run.created_at,
     }
 

@@ -74,8 +74,31 @@ API returns the rules with it.
 So: your one design **won't** work everywhere. A photographic cover will print
 beautifully on a tee, poster and mug, and come back from embroidery as an
 unrecognisable blob. The kimono and jackets want a repeating pattern, not a logo.
-Nothing validates this yet — the rules are published so the UI can warn, but a
-creator can still order the wrong thing.
+
+### Artwork is measured on upload and checked per blank
+
+Every design's pixel size and transparency are recorded at upload (once — with
+object storage, re-reading the file per product page is a network round trip
+each). `POST /pod/designs/` then returns a `suitability` block:
+
+```json
+{"measured": true, "width": 4500, "height": 4500, "shortest_side": 4500,
+ "good_for": ["poster", "tee", "hoodie", "kimono", "…"],
+ "warnings_for": [{"product": "cap", "print_method": "embroidery",
+                   "warnings": ["Embroidered Baseball Cap is embroidery — 6 colours maximum,
+                                 no gradients or photographs…"]}]}
+```
+
+Listing returns `artwork_ok` and `artwork_warnings` for that specific blank. The
+checks are **advisory and the listing is created either way** — image analysis
+can't tell a deliberately lo-fi design from a mistake, and a flat two-colour logo
+genuinely is fine at a size that would ruin a photograph. A warning you can
+override beats a refusal that's wrong.
+
+What it catches: resolution below the method's minimum (measured on the **short**
+side, because a 6000×400 banner is not a 6000px design), artwork too oblong for a
+cut-and-sew garment, transparency going to a no-white-ink process, a solid
+rectangle heading for a garment, and embroidery's colour ceiling.
 
 ---
 
@@ -133,13 +156,15 @@ The product page gets a price range — "$25.00 – $30.00" — from
 
 - **One print area per listing.** Front-only. Back and sleeve prints are separate
   costs at every provider and would need per-placement pricing.
-- **Artwork quality is on you.** 300 DPI at print size or it looks soft. Nothing
-  here validates resolution yet.
+- **Artwork is checked, not enforced.** Uploads are measured and warned about per
+  print method (see below) — but a warning you can override, not a refusal.
 - **Shipping is one flat cost per blank**, folded into the landed cost.
   International shipping and multi-item basket consolidation aren't modelled — a
   two-item order pays two shipping costs.
-- **No returns flow.** `cancelled` exists as a status; refunding the wallet is not
-  wired to it.
+- **Refunds exist; returns don't.** `POST /pod/orders/<id>/refund/` reverses the
+  money while an order is still `pending` or `submitted`. Once it's in production
+  or shipped it's refused — there's a real garment in a real van by then, and
+  that's a return to settle with the buyer, not a button.
 
 ---
 
@@ -196,6 +221,27 @@ shirt deserves to see why.
 Visible to the **buyer, the seller, and the platform owner** only — the document
 carries a shipping address. Anyone else gets a 404, not a 403, because whether an
 order exists isn't their business either.
+
+### Refunds
+
+```
+POST /api/economy/pod/orders/<id>/refund/   {"reason": "wrong size"}
+```
+
+Reverses all three legs: the buyer gets the full price back, the seller's credit
+is clawed back, and the withheld print cost is released. Either side can do it —
+the buyer included, because nothing has been made yet and making them ask the
+seller for something the system can do instantly is pure friction.
+
+**Refused once the order is `in_production` or `shipped`.** There's a real garment
+in a real van by then; silently refunding it would have the platform eat the print
+cost with nothing recording that it happened.
+
+If the seller has already spent their credit, the buyer is still made whole.
+Wallets are non-negative platform-wide, so the clawback takes what's there and the
+remainder is recorded on the order as `clawback_shortfall_cents` — the platform
+absorbs it, visibly. A recorded shortfall is something support can chase; a
+refused refund is an angry customer and a chargeback.
 
 ### A monthly statement
 

@@ -13,12 +13,14 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.economy.models import (TIER_FREE, TIER_STATZ, AgentRun, Project,
-                                 ProjectFile, membership_for, wallet_for)
+                                 ProjectFile, ProjectSnapshot, membership_for,
+                                 wallet_for)
 from apps.economy.occ_agent import (MAX_STEPS, STOP_BUDGET, STOP_DONE,
                                     STOP_ERROR, STOP_MAX_STEPS, build_system,
                                     max_steps_for, run_agent)
-from apps.economy.occ_tools import (MAX_FILES, TOOL_NAMES, Workspace,
-                                   normalize_path, run_tool)
+from apps.economy.occ_tools import (MAX_FILES, MAX_SNAPSHOTS, TOOL_NAMES,
+                                   Workspace, normalize_path, run_tool,
+                                   take_snapshot)
 
 User = get_user_model()
 
@@ -549,3 +551,157 @@ class ProjectEndpointTests(TestCase):
 
     def test_projects_need_a_login(self):
         self.assertEqual(APIClient().get("/api/economy/occ/projects/").status_code, 401)
+
+
+class UndoTests(TestCase):
+    """OCC has no git. It has snapshots, which is the part that matters: an
+    agentic run makes several edits and any one of them can be wrong."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("coder", "c@e.com", "pw12345678")
+        w = wallet_for(self.user)
+        w.money_cents = 5_000
+        w.save()
+        self.client.force_authenticate(self.user)
+        self.project = Project.objects.create(owner=self.user, name="app")
+
+    def _file(self, path, content):
+        return ProjectFile.objects.create(project=self.project, path=path, content=content)
+
+    def test_a_run_that_changes_files_offers_an_undo(self):
+        self._file("app.py", "original\n")
+        result, _, _ = run_with(
+            self.user, self.project, "rewrite app.py",
+            [[tool_block("read_file", {"path": "app.py"}, id="a")],
+             [tool_block("write_file", {"path": "app.py", "content": "ruined\n"}, id="b")],
+             [text_block("done")]],
+        )
+        self.assertEqual(result["changed"], ["app.py"])
+        self.assertIn("undo", result)
+        self.assertEqual(result["undo"]["files"], 1)
+        self.assertEqual(ProjectFile.objects.get(path="app.py").content, "ruined\n")
+
+        resp = self.client.post(f"/api/economy/occ/projects/{self.project.id}/undo/",
+                                {}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(ProjectFile.objects.get(path="app.py").content, "original\n")
+
+    def test_undo_removes_files_the_run_created(self):
+        """A half-restore that leaves the agent's new file behind is the worst
+        outcome — the workspace then matches neither state."""
+        self._file("keep.py", "1\n")
+        run_with(self.user, self.project, "add a file",
+                 [[tool_block("write_file", {"path": "new.py", "content": "2\n"})],
+                  [text_block("done")]])
+        self.assertEqual(ProjectFile.objects.filter(project=self.project).count(), 2)
+
+        self.client.post(f"/api/economy/occ/projects/{self.project.id}/undo/", {},
+                         format="json")
+        paths = set(ProjectFile.objects.filter(project=self.project).values_list("path", flat=True))
+        self.assertEqual(paths, {"keep.py"})
+
+    def test_undo_restores_a_deleted_file(self):
+        self._file("gone.py", "important\n")
+        run_with(self.user, self.project, "delete it",
+                 [[tool_block("delete_file", {"path": "gone.py"})],
+                  [text_block("done")]])
+        self.assertFalse(ProjectFile.objects.filter(path="gone.py").exists())
+
+        self.client.post(f"/api/economy/occ/projects/{self.project.id}/undo/", {},
+                         format="json")
+        self.assertEqual(ProjectFile.objects.get(path="gone.py").content, "important\n")
+
+    def test_undo_is_itself_undoable(self):
+        """An undo you can't undo is just a second way to lose work."""
+        self._file("app.py", "v1\n")
+        run_with(self.user, self.project, "change it",
+                 [[tool_block("read_file", {"path": "app.py"}, id="a")],
+                  [tool_block("write_file", {"path": "app.py", "content": "v2\n"}, id="b")],
+                  [text_block("done")]])
+        self.client.post(f"/api/economy/occ/projects/{self.project.id}/undo/", {},
+                         format="json")
+        self.assertEqual(ProjectFile.objects.get(path="app.py").content, "v1\n")
+
+        # the newest snapshot is now the pre-undo state (v2)
+        resp = self.client.post(f"/api/economy/occ/projects/{self.project.id}/undo/", {},
+                                format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(ProjectFile.objects.get(path="app.py").content, "v2\n")
+
+    def test_a_run_that_changed_nothing_leaves_no_snapshot(self):
+        self._file("app.py", "1\n")
+        result, _, _ = run_with(self.user, self.project, "just look",
+                               [[tool_block("list_files", {})], [text_block("nothing to do")]])
+        self.assertEqual(result["changed"], [])
+        self.assertNotIn("undo", result)
+        self.assertEqual(ProjectSnapshot.objects.count(), 0)
+
+    def test_a_dry_run_takes_no_snapshot(self):
+        self._file("app.py", "1\n")
+        run_with(self.user, self.project, "plan it",
+                 [[tool_block("read_file", {"path": "app.py"})], [text_block("plan")]],
+                 dry_run=True)
+        self.assertEqual(ProjectSnapshot.objects.count(), 0)
+
+    def test_an_empty_project_is_not_snapshotted(self):
+        """Restoring to "nothing" is what deleting files already does, and it
+        would push a real snapshot off the stack."""
+        run_with(self.user, self.project, "start it",
+                 [[tool_block("write_file", {"path": "a.py", "content": "1"})],
+                  [text_block("done")]])
+        self.assertEqual(ProjectSnapshot.objects.count(), 0)
+
+    def test_the_undo_stack_is_listed_and_bounded(self):
+        self._file("app.py", "0\n")
+        for i in range(MAX_SNAPSHOTS + 4):
+            take_snapshot(self.project, label=f"snap {i}")
+        self.assertEqual(ProjectSnapshot.objects.filter(project=self.project).count(),
+                         MAX_SNAPSHOTS)
+        data = self.client.get(f"/api/economy/occ/projects/{self.project.id}/undo/").data
+        self.assertEqual(len(data["snapshots"]), MAX_SNAPSHOTS)
+        self.assertEqual(data["limit"], MAX_SNAPSHOTS)
+        # the newest survived, the oldest fell off
+        self.assertEqual(data["snapshots"][0]["label"], f"snap {MAX_SNAPSHOTS + 3}")
+
+    def test_undoing_a_specific_snapshot(self):
+        self._file("app.py", "v1\n")
+        snap = take_snapshot(self.project, label="v1")
+        ProjectFile.objects.filter(path="app.py").update(content="v9\n")
+        resp = self.client.post(f"/api/economy/occ/projects/{self.project.id}/undo/",
+                                {"snapshot_id": snap.id}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["restored_from"], snap.id)
+        self.assertEqual(ProjectFile.objects.get(path="app.py").content, "v1\n")
+
+    def test_nothing_to_undo_is_a_404(self):
+        resp = self.client.post(f"/api/economy/occ/projects/{self.project.id}/undo/", {},
+                                format="json")
+        self.assertEqual(resp.status_code, 404)
+        self.assertIn("nothing to undo", resp.data["detail"])
+
+    def test_another_members_snapshot_cannot_be_restored(self):
+        other = User.objects.create_user("other", "o@e.com", "pw12345678")
+        theirs = Project.objects.create(owner=other, name="theirs")
+        ProjectFile.objects.create(project=theirs, path="x.py", content="1")
+        snap = take_snapshot(theirs, label="theirs")
+        # wrong project in the URL -> 404
+        self.assertEqual(
+            self.client.post(f"/api/economy/occ/projects/{theirs.id}/undo/", {},
+                             format="json").status_code, 404)
+        # right project, someone else's snapshot id -> also 404
+        self._file("mine.py", "1")
+        take_snapshot(self.project, label="mine")
+        resp = self.client.post(f"/api/economy/occ/projects/{self.project.id}/undo/",
+                                {"snapshot_id": snap.id}, format="json")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_the_run_history_reports_which_runs_are_undoable(self):
+        self._file("app.py", "1\n")
+        run_with(self.user, self.project, "change it",
+                 [[tool_block("read_file", {"path": "app.py"}, id="a")],
+                  [tool_block("write_file", {"path": "app.py", "content": "2\n"}, id="b")],
+                  [text_block("done")]])
+        runs = self.client.get(f"/api/economy/occ/projects/{self.project.id}/runs/").data["runs"]
+        self.assertIsNotNone(runs[0]["undo"])
+        self.assertEqual(runs[0]["undo"]["files"], 1)
