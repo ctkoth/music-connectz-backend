@@ -1,9 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- No permissions on purpose. A Trusted Web Activity hands the browser the
-         networking, so the app itself needs nothing — which makes the Play Data
-         safety form short and honest. Adding a WebView later would change that. -->
+    <!-- One permission, and only because Play requires it: digital goods bought
+         inside the app must go through Google Play Billing, not Stripe. The TWA
+         reaches it through the Digital Goods API, and the backend verifies every
+         purchase token at /api/economy/play/verify/ before granting anything.
+         See GOOGLE_PLAY.md §9.
+
+         BILLING is not a privacy-relevant permission, so the Data safety form
+         stays short: no networking permission (Chrome does that), no storage, no
+         location. -->
+    <uses-permission android:name="com.android.vending.BILLING" />
 
     <application
         android:allowBackup="true"
@@ -45,6 +52,12 @@
             <meta-data
                 android:name="android.support.customtabs.trusted.FILE_PROVIDER_AUTHORITIES"
                 android:value="${applicationId}.fileprovider" />
+
+            <!-- Lets the web app call the Digital Goods API / Payment Request
+                 with the "https://play.google.com/billing" payment method. -->
+            <meta-data
+                android:name="android.support.customtabs.trusted.ENABLE_PLAY_BILLING"
+                android:value="true" />
 
             <meta-data
                 android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR"

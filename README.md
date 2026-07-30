@@ -96,6 +96,7 @@ GET  /api/omviardz/tour/                                    POST /api/omviardz/a
 GET  /api/economy/personaz/          GET /api/economy/personaz/<key>/
 POST /api/economy/occ/projects/<id>/agent/   (OCC coding agent — tool loop)
 GET  /api/economy/pod/blanks/        POST /api/economy/pod/listings/<id>/buy/
+POST /api/economy/play/verify/       (Google Play Billing purchase verification)
 GET  /.well-known/assetlinks.json    (Android app <-> site link verification)
 GET  /admin/
 ```
@@ -115,8 +116,11 @@ OCC can now change code, not just explain it: an agentic tool loop (read, write,
 exact-string edit, search, rename, delete) over a per-member workspace, running
 until it's done or the step cap is hit. Every run is recorded with its tool calls.
 
-It has **no code execution, no shell, no git** — running member code on the API
-host needs container isolation this backend doesn't have, and OCC is told never to
+A bad run is one call to undo: the workspace is snapshotted before every writing
+run (`POST /occ/projects/<id>/undo/`), and the undo is itself undoable.
+
+It has **no code execution and no shell** — running member code on the API host
+needs container isolation this backend doesn't have, and OCC is told never to
 claim it ran anything. What that gap takes to close, and the full API:
 **[OCC_AGENT.md](OCC_AGENT.md)**
 
@@ -144,7 +148,7 @@ setup: **[MERCH_POD.md](MERCH_POD.md)**
 ## PersonaZ — the persona/skill catalog
 
 `GET /api/economy/personaz/` serves every persona and its skills, so the frontend
-stops carrying its own copy. 8 personas, 224 skills: the five from the 2.2 build
+stops carrying its own copy. 8 personas, **271 skills**: the five from the 2.2 build
 preserved verbatim, plus Ghostwriter, Manager and Developer (top 20 languages),
 built in the same paradigm.
 
@@ -161,6 +165,12 @@ frontend needs to change: **[PERSONAZ_AUDIT.md](PERSONAZ_AUDIT.md)**
 `android/` is a Trusted Web Activity — it opens the site full-screen with no URL
 bar, so the mobile web app is the Android app. Build an APK with no local
 toolchain: GitHub → Actions → **Android APK** → Run workflow.
+
+**Play Billing** (required for digital goods in the Android app) is built:
+`POST /api/economy/play/verify/` checks a purchase token against Google's Play
+Developer API, grants exactly once per token, and refuses a token bound to another
+account. Needs `PLAY_PACKAGE_NAME` + `PLAY_SERVICE_ACCOUNT_JSON`; answers 503
+until then so the client falls back to web checkout.
 
 - **[GOOGLE_PLAY.md](GOOGLE_PLAY.md)** — joining Play, signing, the declarations
   that get checked, the 12-tester closed test, and the three things most likely

@@ -266,9 +266,56 @@ Your options, honestly:
 
 1. **Add Play Billing to the TWA** via the
    [Digital Goods API](https://developer.chrome.com/docs/android/trusted-web-activity/receive-payments-play-billing/)
-   — the sanctioned path. Real work: `com.android.vending.BILLING` permission,
-   products defined in Console, and a purchase-verification endpoint on this
-   backend. Plan for it.
+   — the sanctioned path, and **the backend half is now built**:
+
+   | Piece | Status |
+   |---|---|
+   | `com.android.vending.BILLING` permission | ✅ in the manifest |
+   | `ENABLE_PLAY_BILLING` TWA meta-data + billing library | ✅ in `android/` |
+   | Server-side purchase verification | ✅ `POST /api/economy/play/verify/` |
+   | Product catalog | ✅ `GET /api/economy/play/products/` |
+   | Products created in Play Console | ⬜ **yours** |
+   | Service account + key | ⬜ **yours** |
+   | Web app calling the Digital Goods API | ⬜ frontend |
+
+   What's left on your side:
+
+   1. **Play Console → Monetise → In-app products / Subscriptions.** Create the
+      product ids exactly as `GET /api/economy/play/products/` lists them
+      (`topup_500`, `topup_1000`, `topup_2500`, `topup_5000`, `premium_month`,
+      `premium_year`, `statz_month`, `statz_year`, `statz_lifetime`). Google
+      charges the price you set there; the backend grants what
+      `PLAY_PRODUCTS` says — keep the two in step.
+   2. **A service account** in
+      [Google Cloud](https://console.cloud.google.com/iam-admin/serviceaccounts)
+      with the Google Play Android Developer API enabled, then invited under
+      **Play Console → Users and permissions** with *View financial data* and
+      *Manage orders*. Download its JSON key.
+   3. **Set it on Render:**
+      ```
+      PLAY_PACKAGE_NAME=net.musicconnectz.app
+      PLAY_SERVICE_ACCOUNT_JSON={"type":"service_account", …}   # the whole file
+      ```
+      Until then `/play/verify/` answers **503** and the client should fall back
+      to web checkout — it fails visibly rather than silently granting.
+   4. **Frontend:** on Android, buy with
+      [`getDigitalGoodsService('https://play.google.com/billing')`](https://developer.chrome.com/docs/android/trusted-web-activity/receive-payments-play-billing/)
+      + Payment Request, then POST the resulting `purchaseToken` and
+      `product_id` to `/api/economy/play/verify/`. Set
+      `obfuscatedExternalAccountId` to the member's id at purchase time — the
+      backend refuses a token bound to a different account, which is what stops a
+      leaked token being redeemed by whoever holds it.
+
+   **Test it** with a
+   [licence tester](https://support.google.com/googleplay/android-developer/answer/6062777):
+   real tokens, no charge.
+
+   ⚠️ **A pricing decision to make deliberately:** Google takes 15–30% before the
+   money reaches you, and `credit_funds` then applies the platform's own developer
+   tax to the member's wallet credit. That's consistent with Stripe/PayPal top-ups
+   (same credit for the same price whichever way they paid), but it is two cuts.
+   If you'd rather absorb one on Play, change the `KIND_WALLET` branch in
+   `apps/economy/play_billing.py` — it's four lines and it's commented.
 2. **Don't sell inside the Android app.** Let purchases happen on the website
    only, and don't link to them from the app. Play permits this but the rules on
    *steering* users out are narrow and enforced — read the policy before you

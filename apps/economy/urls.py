@@ -31,6 +31,7 @@ from .occ import OccChatView
 from .occ_views import (AgentRunsView, AgentView, ProjectDetailView,
                         ProjectFilesView, ProjectsView, ProjectUndoView)
 from .personaz_views import PersonaZDetailView, PersonaZView
+from .play_views import (PlayProductsView, PlayPurchasesView, PlayVerifyView)
 from .pod_views import (BlanksView, DesignDetailView, DesignsView,
                         ListingBuyView, ListingDetailView, ListingsView,
                         OrderInvoiceView, OrderRefundView, OrderStatusView, OrdersView,
@@ -132,6 +133,10 @@ urlpatterns = [
     path("founding/claim/", FoundingClaimView.as_view(), name="economy-founding-claim"),
     path("founding/checkout/", FoundingCheckoutView.as_view(), name="economy-founding-checkout"),
     path("premium/checkout/", PremiumCheckoutView.as_view(), name="economy-premium-checkout"),
+    # Google Play Billing — required for digital goods bought inside the Android app.
+    path("play/products/", PlayProductsView.as_view(), name="economy-play-products"),
+    path("play/verify/", PlayVerifyView.as_view(), name="economy-play-verify"),
+    path("play/purchases/", PlayPurchasesView.as_view(), name="economy-play-purchases"),
     path("venues/", VenuesView.as_view(), name="economy-venues"),
     path("venues/<int:pk>/join/", VenueJoinView.as_view(), name="economy-venue-join"),
     path("attractiveness/", AttractivenessView.as_view(), name="economy-attractiveness"),

@@ -1664,3 +1664,33 @@ class PrintOrder(models.Model):
 
     def __str__(self):
         return f"order#{self.id} {self.listing_id} {self.status}"
+
+
+class PlayPurchase(models.Model):
+    """One verified Google Play purchase. The unique token is the idempotency key.
+
+    Same shape as RewardGrant, for the same reason: a purchase token can be
+    replayed — by a retrying client, a flaky network, or someone trying it on —
+    and a unique column makes a double grant impossible at the database rather
+    than probable at the application.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="play_purchases")
+    product_id = models.CharField(max_length=120)
+    # Play tokens are long; 191 keeps a unique index valid on MySQL too.
+    purchase_token = models.CharField(max_length=191, unique=True)
+    order_id = models.CharField(max_length=120, blank=True, default="")
+    kind = models.CharField(max_length=16, default="wallet")
+    value_cents = models.PositiveIntegerField(default=0)
+    subscription = models.BooleanField(default=False)
+    granted = models.BooleanField(default=False)
+    acknowledged = models.BooleanField(default=False)
+    detail = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["user", "-created_at"])]
+
+    def __str__(self):
+        return f"play:{self.product_id}·{self.user}"
