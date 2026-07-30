@@ -133,8 +133,13 @@ same on every variant.
 python manage.py seed_pod        # blank catalog (idempotent)
 ```
 
-Sizes, colours, stock-outs, the money split, and provider setup:
-**[MERCH_POD.md](MERCH_POD.md)**
+Sellers get invoices (`/pod/orders/<id>/invoice/`), a revenue-ranked "what's
+selling" report with size and colour breakdowns (`/pod/sales/`), and a monthly
+statement (`/pod/statement/`). These are sales records, not tax invoices — no
+sales tax or VAT is calculated or collected.
+
+Sizes, colours, stock-outs, print-method limits, the money split, and provider
+setup: **[MERCH_POD.md](MERCH_POD.md)**
 
 ## PersonaZ — the persona/skill catalog
 

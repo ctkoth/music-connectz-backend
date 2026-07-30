@@ -8,17 +8,21 @@
     POST        /api/economy/pod/listings/<id>/buy/ buy it (made to order)
     GET         /api/economy/pod/orders/            your orders + your sales
     POST        /api/economy/pod/orders/<id>/status/ seller/owner moves it along
+    GET         /api/economy/pod/orders/<id>/invoice/ one order, as a document
+    GET         /api/economy/pod/sales/             what's selling (ranked)
+    GET         /api/economy/pod/statement/         a month, for the accountant
 
 The catalog endpoint is public so a shop can be browsed before signing up.
 Everything else needs a login.
 """
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import pod
+from . import pod, pod_reports
 from .models import (MerchDesign, PrintListing, PrintOrder, PrintProduct,
                      wallet_for)
 from .serializers import WalletSerializer
@@ -324,3 +328,61 @@ class OrderStatusView(APIView):
             return Response({"detail": detail, "statuses": PrintOrder.STATUSES},
                             status=status.HTTP_400_BAD_REQUEST)
         return Response({"order": _order_dict(o)})
+
+
+class SalesReportView(APIView):
+    """GET what's selling. `?from=YYYY-MM-DD&to=YYYY-MM-DD` to bound it.
+
+    Ranked by revenue, not units — ten stickers and one hoodie are not the same
+    result, and this is the number a creator should decide from.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        start = pod_reports.parse_day(request.query_params.get("from"))
+        end = pod_reports.parse_day(request.query_params.get("to"), end=True)
+        if request.query_params.get("from") and not start:
+            return Response({"detail": "from must be YYYY-MM-DD"},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if request.query_params.get("to") and not end:
+            return Response({"detail": "to must be YYYY-MM-DD"},
+                            status=status.HTTP_400_BAD_REQUEST)
+        return Response(pod_reports.sales_report(request.user, start=start, end=end))
+
+
+class OrderInvoiceView(APIView):
+    """GET one order's invoice. Buyer, seller, or the platform owner only —
+    the document carries a shipping address."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        o = PrintOrder.objects.select_related(
+            "listing", "listing__product", "buyer", "seller").filter(pk=pk).first()
+        # 404 rather than 403 for someone else's invoice: whether an order exists
+        # isn't their business either.
+        if not o or not pod_reports.can_view(o, request.user):
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"invoice": pod_reports.invoice(o, viewer=request.user)})
+
+
+class StatementView(APIView):
+    """GET a month's statement. `?month=YYYY-MM`, defaults to this month."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        raw = str(request.query_params.get("month", "")).strip()
+        if raw:
+            try:
+                year, month = (int(x) for x in raw.split("-", 1))
+                if not 1 <= month <= 12:
+                    raise ValueError
+            except (TypeError, ValueError):
+                return Response({"detail": "month must be YYYY-MM"},
+                                status=status.HTTP_400_BAD_REQUEST)
+        else:
+            now = timezone.now()
+            year, month = now.year, now.month
+        return Response({"statement": pod_reports.statement(request.user, year, month)})

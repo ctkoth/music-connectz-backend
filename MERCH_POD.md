@@ -143,6 +143,84 @@ The product page gets a price range — "$25.00 – $30.00" — from
 
 ---
 
+## Seller paperwork: invoices, what's selling, and a monthly statement
+
+Three different questions, three endpoints:
+
+```
+GET /api/economy/pod/orders/<id>/invoice/   one order, as a document
+GET /api/economy/pod/sales/                 what's selling (ranked by revenue)
+GET /api/economy/pod/statement/?month=YYYY-MM   a month, for the accountant
+```
+
+### What's selling
+
+```
+7 orders · 7 units · gross $220.49  (print $139.00 · fee $8.15 · YOU $73.34)
+awaiting fulfilment: 7  ·  cancelled: 1
+
+Best sellers:
+  Logo Tee        5 units  gross $134.00  net $42.75
+  Logo Hoodie     1 units  gross $ 56.50  net $20.25
+  Logo Cap        1 units  gross $ 29.99  net $10.34
+
+By size:   L=3  3XL=1  One size=1  2XL=1  M=1
+By colour: Black=4  White=2  Navy=1
+```
+
+Ranked by **revenue, not units** — ten stickers and one hoodie are not the same
+result, and revenue is the number to decide from. Also broken down by product, by
+size, by colour, and by month (chronological, so it reads as a trend line).
+
+Size and colour are the actionable ones: if 3XL is a third of your tee sales,
+that's what to feature and what to keep an eye on for stock-outs.
+
+`?from=YYYY-MM-DD&to=YYYY-MM-DD` bounds it. A seller only ever sees their own
+sales.
+
+### An invoice
+
+```
+MCZ-POD-000004  status=pending  seller=k-oth buyer=fan
+  Logo Tee                            Unisex T-Shirt · 3XL / Black    x1  $30.00
+  Size/colour upcharge (3XL / Black)  printer's cost for this variant  x1  $5.00  (incl.)
+  gross $30.00 = print $20.50 + fee $0.95 + you $8.55
+```
+
+Invoice numbers are derived from the order id (`MCZ-POD-000004`) — stable,
+quotable, and with no counter to keep in sync. `lines` comes in document shape
+(description / quantity / unit / amount) so a client renders it without doing
+arithmetic, and the variant upcharge is its own line: a buyer seeing $30 on a $25
+shirt deserves to see why.
+
+Visible to the **buyer, the seller, and the platform owner** only — the document
+carries a shipping address. Anyone else gets a 404, not a 403, because whether an
+order exists isn't their business either.
+
+### A monthly statement
+
+Every sale in the month with its invoice number, plus gross, print costs withheld,
+platform fee, and net payout. It carries a `balanced` flag that is only true when
+every line and the totals actually add up — if the arithmetic ever disagreed with
+itself, the statement says so rather than printing a confident wrong number.
+
+### ⚠️ These are sales records, not tax invoices
+
+**No sales tax or VAT is calculated, collected, or remitted anywhere in this
+system**, and the documents carry no tax registration number. Every document says
+so on its face. A seller with a sales-tax, VAT or GST obligation has to handle it
+themselves — and if you start selling physical goods across borders at volume, get
+advice before you get a letter.
+
+Cancelled and failed orders are excluded from revenue but still listed and
+counted. A report that buries cancellations makes them impossible to notice.
+
+Every figure comes from what was snapshotted on the order at sale time, never
+recomputed from the current listing — repricing today must not change what last
+month earned.
+
+---
+
 ## The money
 
 The economics are the whole feature, so they're worth being explicit about:

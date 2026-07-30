@@ -12,7 +12,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from apps.economy import pod
+from apps.economy import pod, pod_reports
 from apps.economy.models import (TIER_FREE, MerchDesign, PrintListing,
                                  PrintOrder, PrintProduct, membership_for,
                                  wallet_for)
@@ -700,3 +700,232 @@ class BlankCatalogCoverageTests(TestCase):
             self.assertEqual(resp.status_code, 201, f"{p.key}: {resp.content}")
         self.assertEqual(PrintListing.objects.count(), PrintProduct.objects.count())
         self.assertEqual(MerchDesign.objects.count(), 1)
+
+
+class ReportingTests(TestCase):
+    """Invoices, statements, and "what's selling" — the seller's paperwork."""
+
+    def setUp(self):
+        pod.seed_blanks()
+        self.client = APIClient()
+        self.seller = User.objects.create_user("maker", "m@e.com", "pw12345678")
+        self.buyer = User.objects.create_user("fan", "f@e.com", "pw12345678")
+        self.other = User.objects.create_user("nosy", "n@e.com", "pw12345678")
+        w = wallet_for(self.buyer)
+        w.money_cents = 100_000
+        w.save()
+        m = membership_for(self.buyer)
+        m.tier = TIER_FREE
+        m.save(update_fields=["tier", "updated_at"])
+        design = MerchDesign.objects.create(owner=self.seller, title="Logo", image=a_png())
+        self.tee = PrintListing.objects.create(
+            design=design, product=PrintProduct.objects.get(key="tee"),
+            seller=self.seller, title="Logo Tee", price_cents=2500)
+        self.hoodie = PrintListing.objects.create(
+            design=design, product=PrintProduct.objects.get(key="hoodie"),
+            seller=self.seller, title="Logo Hoodie", price_cents=5500)
+
+    def _buy(self, listing, **kw):
+        kw.setdefault("ship_to", ADDRESS)
+        order, err = pod.place_order(self.buyer, listing, **kw)
+        self.assertIsNone(err, err)
+        return order
+
+    # ------------------------------------------------------------ invoice
+    def test_an_invoice_reconciles_to_the_penny(self):
+        order = self._buy(self.tee, size="L", color="White")
+        doc = pod_reports.invoice(order, viewer=self.seller)
+        t = doc["totals"]
+        self.assertEqual(t["gross_cents"],
+                         t["print_cost_cents"] + t["platform_fee_cents"] + t["seller_net_cents"])
+        self.assertEqual(doc["number"], f"MCZ-POD-{order.id:06d}")
+        self.assertEqual(doc["lines"][0]["description"], "Logo Tee")
+        self.assertEqual(doc["lines"][0]["quantity"], 1)
+        self.assertEqual(t["gross"], 25.0)
+
+    def test_an_invoice_shows_the_variant_upcharge_as_its_own_line(self):
+        """A buyer seeing $30 on a $25 shirt deserves to see why."""
+        order = self._buy(self.tee, size="3XL", color="Black")
+        doc = pod_reports.invoice(order, viewer=self.buyer)
+        self.assertEqual(doc["totals"]["gross_cents"], 3000)
+        upcharge = doc["lines"][1]
+        self.assertIn("upcharge", upcharge["description"])
+        self.assertEqual(upcharge["amount_cents"], 500)
+        self.assertTrue(upcharge["included_above"])
+
+    def test_quantity_shows_a_unit_price(self):
+        order = self._buy(self.tee, size="M", color="White", quantity=4)
+        doc = pod_reports.invoice(order, viewer=self.seller)
+        self.assertEqual(doc["lines"][0]["quantity"], 4)
+        self.assertEqual(doc["lines"][0]["unit_cents"], 2500)
+        self.assertEqual(doc["lines"][0]["amount_cents"], 10_000)
+
+    def test_the_invoice_says_it_is_not_a_tax_invoice(self):
+        order = self._buy(self.tee, size="M", color="White")
+        doc = pod_reports.invoice(order, viewer=self.seller)
+        self.assertIn("no sales tax", doc["tax_note"].lower())
+
+    def test_only_the_buyer_seller_and_owner_can_see_an_invoice(self):
+        order = self._buy(self.tee, size="M", color="White")
+        self.assertTrue(pod_reports.can_view(order, self.seller))
+        self.assertTrue(pod_reports.can_view(order, self.buyer))
+        self.assertFalse(pod_reports.can_view(order, self.other))
+        # and the shipping address is withheld from anyone else
+        self.assertNotIn("ship_to", pod_reports.invoice(order, viewer=self.other))
+        self.assertEqual(pod_reports.invoice(order, viewer=self.seller)["ship_to"]["city"],
+                         "Denver")
+
+    def test_the_invoice_endpoint_404s_for_a_stranger(self):
+        order = self._buy(self.tee, size="M", color="White")
+        for user, expected in ((self.seller, 200), (self.buyer, 200), (self.other, 404)):
+            self.client.force_authenticate(user)
+            resp = self.client.get(f"/api/economy/pod/orders/{order.id}/invoice/")
+            self.assertEqual(resp.status_code, expected, user.username)
+
+    # ------------------------------------------------------------ what's selling
+    def test_the_report_ranks_by_revenue_not_units(self):
+        """Ten stickers and one hoodie are not the same result."""
+        for _ in range(4):
+            self._buy(self.tee, size="M", color="White")       # 4 x $25 = $100
+        self._buy(self.hoodie, size="L", color="Sand")          # 1 x $55
+        report = pod_reports.sales_report(self.seller)
+
+        self.assertEqual(report["totals"]["orders"], 5)
+        self.assertEqual(report["totals"]["units"], 5)
+        self.assertEqual(report["totals"]["gross_cents"], 4 * 2500 + 5500)
+        best = report["best_sellers"]
+        self.assertEqual(best[0]["name"], "Logo Tee")
+        self.assertEqual(best[0]["units"], 4)
+        self.assertEqual(best[1]["name"], "Logo Hoodie")
+
+    def test_the_report_breaks_down_by_size_and_color(self):
+        """Which sizes move is what decides what you feature."""
+        self._buy(self.tee, size="L", color="Black")
+        self._buy(self.tee, size="L", color="White")
+        self._buy(self.tee, size="3XL", color="Black")
+        report = pod_reports.sales_report(self.seller)
+        sizes = {r["size"]: r["units"] for r in report["by_size"]}
+        self.assertEqual(sizes["L"], 2)
+        self.assertEqual(sizes["3XL"], 1)
+        colors = {r["color"]: r["units"] for r in report["by_color"]}
+        self.assertEqual(colors["Black"], 2)
+        self.assertEqual(colors["White"], 1)
+
+    def test_the_report_groups_by_product_and_month(self):
+        self._buy(self.tee, size="M", color="White")
+        self._buy(self.hoodie, size="M", color="Sand")
+        report = pod_reports.sales_report(self.seller)
+        products = {r["product"]: r["units"] for r in report["by_product"]}
+        self.assertEqual(products, {"tee": 1, "hoodie": 1})
+        self.assertEqual(len(report["by_month"]), 1)
+        self.assertEqual(report["by_month"][0]["orders"], 2)
+
+    def test_the_report_totals_reconcile(self):
+        self._buy(self.tee, size="2XL", color="Navy")
+        self._buy(self.hoodie, size="3XL", color="Black")
+        t = pod_reports.sales_report(self.seller)["totals"]
+        self.assertEqual(t["gross_cents"],
+                         t["print_cost_cents"] + t["fee_cents"] + t["net_cents"])
+
+    def test_cancelled_orders_leave_revenue_but_stay_visible(self):
+        keep = self._buy(self.tee, size="M", color="White")
+        binned = self._buy(self.tee, size="M", color="White")
+        pod.advance(binned, PrintOrder.STATUS_CANCELLED)
+
+        report = pod_reports.sales_report(self.seller)
+        self.assertEqual(report["totals"]["orders"], 1)
+        self.assertEqual(report["totals"]["gross_cents"], keep.price_cents)
+        # not hidden — a report that buries cancellations makes them unnoticeable
+        self.assertEqual(report["cancelled"]["orders"], 1)
+        self.assertEqual(report["by_status"]["cancelled"], 1)
+
+    def test_the_report_counts_what_still_needs_making(self):
+        self._buy(self.tee, size="M", color="White")
+        shipped = self._buy(self.tee, size="L", color="White")
+        pod.advance(shipped, PrintOrder.STATUS_SHIPPED)
+        report = pod_reports.sales_report(self.seller)
+        self.assertEqual(report["awaiting_fulfilment"], 1)
+
+    def test_a_seller_with_no_sales_gets_zeroes_not_an_error(self):
+        report = pod_reports.sales_report(self.other)
+        self.assertEqual(report["totals"]["orders"], 0)
+        self.assertEqual(report["totals"]["gross_cents"], 0)
+        self.assertEqual(report["best_sellers"], [])
+        self.assertEqual(report["by_month"], [])
+
+    def test_a_seller_only_ever_sees_their_own_sales(self):
+        self._buy(self.tee, size="M", color="White")
+        self.client.force_authenticate(self.other)
+        data = self.client.get("/api/economy/pod/sales/").data
+        self.assertEqual(data["totals"]["orders"], 0)
+        self.assertEqual(data["seller"], "nosy")
+
+    def test_the_report_endpoint_validates_its_dates(self):
+        self.client.force_authenticate(self.seller)
+        self.assertEqual(
+            self.client.get("/api/economy/pod/sales/?from=last-tuesday").status_code, 400)
+        self.assertEqual(
+            self.client.get("/api/economy/pod/sales/?to=13/1/2026").status_code, 400)
+        self.assertEqual(
+            self.client.get("/api/economy/pod/sales/?from=2026-01-01&to=2026-12-31").status_code,
+            200)
+
+    def test_a_date_window_excludes_sales_outside_it(self):
+        from datetime import timedelta
+
+        from django.utils import timezone as tz
+
+        order = self._buy(self.tee, size="M", color="White")
+        PrintOrder.objects.filter(pk=order.pk).update(
+            created_at=tz.now() - timedelta(days=90))
+        recent = pod_reports.parse_day((tz.now() - timedelta(days=7)).date().isoformat())
+        self.assertEqual(pod_reports.sales_report(self.seller, start=recent)["totals"]["orders"], 0)
+        self.assertEqual(pod_reports.sales_report(self.seller)["totals"]["orders"], 1)
+
+    # ------------------------------------------------------------ statement
+    def test_a_monthly_statement_lists_every_sale_and_balances(self):
+        from django.utils import timezone as tz
+
+        self._buy(self.tee, size="M", color="White")
+        self._buy(self.hoodie, size="2XL", color="Black")
+        now = tz.now()
+        st = pod_reports.statement(self.seller, now.year, now.month)
+
+        self.assertEqual(len(st["lines"]), 2)
+        self.assertTrue(st["balanced"])
+        self.assertEqual(st["period"], f"{now.year:04d}-{now.month:02d}")
+        self.assertEqual(st["number"], f"MCZ-STMT-{self.seller.id}-{now.year}{now.month:02d}")
+        self.assertEqual(st["payout_cents"], st["totals"]["net_cents"])
+        self.assertEqual(st["totals"]["gross_cents"],
+                         sum(l["gross_cents"] for l in st["lines"]))
+        # every line carries the invoice number it came from
+        self.assertTrue(all(l["invoice"].startswith("MCZ-POD-") for l in st["lines"]))
+
+    def test_a_statement_for_a_quiet_month_is_empty_and_still_balances(self):
+        st = pod_reports.statement(self.seller, 2020, 2)
+        self.assertEqual(st["lines"], [])
+        self.assertEqual(st["payout_cents"], 0)
+        self.assertTrue(st["balanced"])
+
+    def test_a_december_statement_rolls_the_year_over(self):
+        st = pod_reports.statement(self.seller, 2026, 12)
+        self.assertEqual(st["to"].year, 2027)
+        self.assertEqual(st["to"].month, 1)
+
+    def test_the_statement_endpoint_defaults_to_this_month_and_validates(self):
+        self._buy(self.tee, size="M", color="White")
+        self.client.force_authenticate(self.seller)
+        resp = self.client.get("/api/economy/pod/statement/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.data["statement"]["lines"]), 1)
+
+        self.assertEqual(self.client.get("/api/economy/pod/statement/?month=2026-13").status_code,
+                         400)
+        self.assertEqual(self.client.get("/api/economy/pod/statement/?month=nope").status_code,
+                         400)
+        self.assertEqual(
+            self.client.get("/api/economy/pod/statement/?month=2026-01").status_code, 200)
+
+    def test_reports_need_a_login(self):
+        for url in ("/api/economy/pod/sales/", "/api/economy/pod/statement/"):
+            self.assertEqual(APIClient().get(url).status_code, 401, url)

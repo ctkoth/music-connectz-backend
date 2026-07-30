@@ -33,7 +33,8 @@ from .occ_views import (AgentRunsView, AgentView, ProjectDetailView,
 from .personaz_views import PersonaZDetailView, PersonaZView
 from .pod_views import (BlanksView, DesignDetailView, DesignsView,
                         ListingBuyView, ListingDetailView, ListingsView,
-                        OrderStatusView, OrdersView)
+                        OrderInvoiceView, OrderStatusView, OrdersView,
+                        SalesReportView, StatementView)
 from .payments import (
     CheckoutConfigView,
     MembershipRefundView,
@@ -105,6 +106,9 @@ urlpatterns = [
     path("pod/listings/<int:pk>/buy/", ListingBuyView.as_view(), name="economy-pod-buy"),
     path("pod/orders/", OrdersView.as_view(), name="economy-pod-orders"),
     path("pod/orders/<int:pk>/status/", OrderStatusView.as_view(), name="economy-pod-order-status"),
+    path("pod/orders/<int:pk>/invoice/", OrderInvoiceView.as_view(), name="economy-pod-invoice"),
+    path("pod/sales/", SalesReportView.as_view(), name="economy-pod-sales"),
+    path("pod/statement/", StatementView.as_view(), name="economy-pod-statement"),
     path("translate/", TranslateView.as_view(), name="economy-translate"),
     path("gemini/image/", GeminiImageView.as_view(), name="economy-gemini-image"),
     path("gemini/video/", GeminiVideoView.as_view(), name="economy-gemini-video"),
