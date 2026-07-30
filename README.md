@@ -94,6 +94,8 @@ GET  /api/mimez/skillz/profile|drills|badges|leaderboard/   POST /api/mimez/skil
 GET  /api/directz/skillz/...                                POST /api/directz/skillz/complete/
 GET  /api/omviardz/tour/                                    POST /api/omviardz/answer/
 GET  /api/economy/personaz/          GET /api/economy/personaz/<key>/
+POST /api/economy/occ/projects/<id>/agent/   (OCC coding agent — tool loop)
+GET  /api/economy/pod/blanks/        POST /api/economy/pod/listings/<id>/buy/
 GET  /.well-known/assetlinks.json    (Android app <-> site link verification)
 GET  /admin/
 ```
@@ -106,6 +108,31 @@ no wallet charge, no prompt allowance. Works with no `ANTHROPIC_API_KEY` (every
 option ships written copy in the payload) and gets live Corey when one is set.
 
 Client contract, mobile design tokens, and how to add a step: **[OMVIARDZ.md](OMVIARDZ.md)**
+
+## OCC coding agent
+
+OCC can now change code, not just explain it: an agentic tool loop (read, write,
+exact-string edit, search, rename, delete) over a per-member workspace, running
+until it's done or the step cap is hit. Every run is recorded with its tool calls.
+
+It has **no code execution, no shell, no git** — running member code on the API
+host needs container isolation this backend doesn't have, and OCC is told never to
+claim it ran anything. What that gap takes to close, and the full API:
+**[OCC_AGENT.md](OCC_AGENT.md)**
+
+## MerchZ print-on-demand
+
+One design, listed on any number of blanks, produced only when it sells — no
+inventory. The buyer's exact size gets printed; extended sizes and dark garments
+carry the printer's upcharge, paid by the buyer so the creator's margin is the
+same on every variant.
+
+```bash
+python manage.py seed_pod        # blank catalog (idempotent)
+```
+
+Sizes, colours, stock-outs, the money split, and provider setup:
+**[MERCH_POD.md](MERCH_POD.md)**
 
 ## PersonaZ — the persona/skill catalog
 

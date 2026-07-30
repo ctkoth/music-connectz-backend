@@ -11,6 +11,7 @@ if [ "${RESET_DB:-0}" = "1" ]; then
 fi
 python manage.py migrate --no-input
 python manage.py seed_skillz || true
+python manage.py seed_pod || true
 exec gunicorn music_connectz.wsgi:application --bind 0.0.0.0:$PORT \
   --workers 2 --threads 4 --timeout 120 --graceful-timeout 30 \
   --max-requests 500 --max-requests-jitter 50 \

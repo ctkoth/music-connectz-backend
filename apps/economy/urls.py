@@ -28,7 +28,12 @@ from .collab import (
 )
 from .merch import MerchBuyView, MerchDetailView, MerchView
 from .occ import OccChatView
+from .occ_views import (AgentRunsView, AgentView, ProjectDetailView,
+                        ProjectFilesView, ProjectsView)
 from .personaz_views import PersonaZDetailView, PersonaZView
+from .pod_views import (BlanksView, DesignDetailView, DesignsView,
+                        ListingBuyView, ListingDetailView, ListingsView,
+                        OrderStatusView, OrdersView)
 from .payments import (
     CheckoutConfigView,
     MembershipRefundView,
@@ -85,6 +90,21 @@ urlpatterns = [
     path("ai/charge/", AIChargeView.as_view(), name="economy-ai-charge"),
     path("promptz/buy/", PromptzBuyView.as_view(), name="economy-promptz-buy"),
     path("ai/occ/", OccChatView.as_view(), name="economy-ai-occ"),
+    # OCC coding agent — projects, files, and agentic runs.
+    path("occ/projects/", ProjectsView.as_view(), name="economy-occ-projects"),
+    path("occ/projects/<int:pk>/", ProjectDetailView.as_view(), name="economy-occ-project"),
+    path("occ/projects/<int:pk>/files/", ProjectFilesView.as_view(), name="economy-occ-files"),
+    path("occ/projects/<int:pk>/agent/", AgentView.as_view(), name="economy-occ-agent"),
+    path("occ/projects/<int:pk>/runs/", AgentRunsView.as_view(), name="economy-occ-runs"),
+    # MerchZ print-on-demand — made when it sells.
+    path("pod/blanks/", BlanksView.as_view(), name="economy-pod-blanks"),
+    path("pod/designs/", DesignsView.as_view(), name="economy-pod-designs"),
+    path("pod/designs/<int:pk>/", DesignDetailView.as_view(), name="economy-pod-design"),
+    path("pod/listings/", ListingsView.as_view(), name="economy-pod-listings"),
+    path("pod/listings/<int:pk>/", ListingDetailView.as_view(), name="economy-pod-listing"),
+    path("pod/listings/<int:pk>/buy/", ListingBuyView.as_view(), name="economy-pod-buy"),
+    path("pod/orders/", OrdersView.as_view(), name="economy-pod-orders"),
+    path("pod/orders/<int:pk>/status/", OrderStatusView.as_view(), name="economy-pod-order-status"),
     path("translate/", TranslateView.as_view(), name="economy-translate"),
     path("gemini/image/", GeminiImageView.as_view(), name="economy-gemini-image"),
     path("gemini/video/", GeminiVideoView.as_view(), name="economy-gemini-video"),

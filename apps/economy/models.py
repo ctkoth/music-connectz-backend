@@ -1340,3 +1340,222 @@ class RewardGrant(models.Model):
     class Meta:
         unique_together = ("provider", "txn_id")
         indexes = [models.Index(fields=["provider", "-created_at"])]
+
+
+# --- OCC coding workspace ---------------------------------------------------
+# Files live in these rows, never on the server's filesystem. That is the whole
+# containment story for the coding agent: there is no path out of a workspace,
+# because the filesystem was never in scope. See apps/economy/occ_tools.py.
+class Project(models.Model):
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="occ_projects")
+    name = models.CharField(max_length=80)
+    description = models.CharField(max_length=500, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("owner", "name")
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"{self.owner}/{self.name}"
+
+
+class ProjectFile(models.Model):
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="files")
+    path = models.CharField(max_length=300)
+    content = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("project", "path")
+        ordering = ["path"]
+
+    def __str__(self):
+        return f"{self.project_id}:{self.path}"
+
+
+class AgentRun(models.Model):
+    """One agentic run: the prompt, every tool call, what changed, what it cost.
+
+    Kept because an agent that edits files without a record is not auditable —
+    a member has to be able to see what OCC actually did, not just what it said.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="occ_runs")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="runs")
+    prompt = models.TextField(blank=True, default="")
+    reply = models.TextField(blank=True, default="")
+    steps = models.PositiveSmallIntegerField(default=0)
+    tool_calls = models.JSONField(default=list, blank=True)
+    changed = models.JSONField(default=list, blank=True)
+    cost_cents = models.PositiveIntegerField(default=0)
+    stopped = models.CharField(max_length=24, default="done")
+    dry_run = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+# --- MerchZ print-on-demand ------------------------------------------------
+# Made-to-order: a creator uploads ONE design, lists it on as many blank
+# products as they like, and nothing is produced until somebody buys. No stock,
+# no upfront spend, no box of unsold shirts in a closet.
+def design_path(instance, filename):
+    return f"merch/designs/{instance.owner_id}/{filename}"
+
+
+class MerchDesign(models.Model):
+    """One piece of artwork, reusable across products.
+
+    The point of separating this from MerchItem: a creator with one good design
+    can list it on a tee, a hoodie and a mug without uploading it three times or
+    keeping three sets of artwork in sync.
+    """
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="merch_designs")
+    title = models.CharField(max_length=120)
+    image = models.ImageField(upload_to=design_path)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.owner}/{self.title}"
+
+
+class PrintProduct(models.Model):
+    """A blank a design can be printed on, and what the printer charges.
+
+    Seeded from apps/economy/pod.py. `base_cost_cents` is the print + fulfilment
+    cost that must come out of every sale before anyone is paid — a creator who
+    prices below it would otherwise sell at a loss without being told.
+    """
+    key = models.CharField(max_length=40, unique=True)
+    name = models.CharField(max_length=80)
+    category = models.CharField(max_length=32, default="apparel")
+    base_cost_cents = models.PositiveIntegerField(default=0)
+    shipping_cents = models.PositiveIntegerField(default=0)
+    sizes = models.JSONField(default=list, blank=True)
+    colors = models.JSONField(default=list, blank=True)
+    # Printers charge more for extended sizes (a 3XL garment costs more blank)
+    # and more to print on dark colours (DTG needs a white underbase). Without
+    # these, every big or black shirt would quietly come out of the creator's
+    # margin. {"2XL": 200, "3XL": 400} — extra cents per unit.
+    size_upcharges = models.JSONField(default=dict, blank=True)
+    color_upcharges = models.JSONField(default=dict, blank=True)
+    # Supplier stock-outs. You hold no inventory, but the PRINTER does, and a
+    # blank can run out. Entries are "3XL", "Black", or "3XL|Black".
+    unavailable = models.JSONField(default=list, blank=True)
+    provider = models.CharField(max_length=24, default="manual")
+    provider_variant = models.CharField(max_length=64, blank=True, default="")
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["category", "base_cost_cents"]
+
+    def __str__(self):
+        return f"{self.key} (${self.base_cost_cents / 100:.2f})"
+
+    @property
+    def landed_cost_cents(self):
+        """Cheapest variant: what the sale has to cover before anyone earns."""
+        return (self.base_cost_cents or 0) + (self.shipping_cents or 0)
+
+    def upcharge_cents(self, size="", color=""):
+        """Extra the printer charges for this exact size/colour, per unit."""
+        return (int((self.size_upcharges or {}).get(size, 0) or 0)
+                + int((self.color_upcharges or {}).get(color, 0) or 0))
+
+    def landed_cost_for(self, size="", color=""):
+        """Print + ship cost for the variant actually being made."""
+        return self.landed_cost_cents + self.upcharge_cents(size, color)
+
+    def variant_available(self, size="", color=""):
+        """False when the printer is out of that blank.
+
+        Matches a blocked size, a blocked colour, or a blocked size|colour pair,
+        because suppliers run out at all three granularities.
+        """
+        blocked = {str(x).strip().lower() for x in (self.unavailable or [])}
+        s, c = str(size or "").strip().lower(), str(color or "").strip().lower()
+        if s and s in blocked:
+            return False
+        if c and c in blocked:
+            return False
+        return f"{s}|{c}" not in blocked
+
+
+class PrintListing(models.Model):
+    """A design on a product, at a price the creator set. This is the thing a
+    buyer buys. Made to order — `sold` can rise forever with no inventory."""
+    design = models.ForeignKey(MerchDesign, on_delete=models.CASCADE, related_name="listings")
+    product = models.ForeignKey(PrintProduct, on_delete=models.PROTECT, related_name="listings")
+    seller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="print_listings")
+    title = models.CharField(max_length=120)
+    description = models.CharField(max_length=500, blank=True, default="")
+    price_cents = models.PositiveIntegerField(default=0)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        unique_together = ("design", "product")
+
+    def __str__(self):
+        return f"{self.title} on {self.product.key}"
+
+    @property
+    def margin_cents(self):
+        """What the creator earns per sale, before the developer tax."""
+        return max(0, (self.price_cents or 0) - self.product.landed_cost_cents)
+
+
+class PrintOrder(models.Model):
+    """A made-to-order sale, from paid to delivered.
+
+    Created at purchase and then driven by the provider. `pending` means paid and
+    queued but not yet sent to a printer — which is a legitimate resting state
+    when no provider key is configured, not a failure.
+    """
+    STATUS_PENDING = "pending"
+    STATUS_SUBMITTED = "submitted"
+    STATUS_IN_PRODUCTION = "in_production"
+    STATUS_SHIPPED = "shipped"
+    STATUS_DELIVERED = "delivered"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_FAILED = "failed"
+    STATUSES = [STATUS_PENDING, STATUS_SUBMITTED, STATUS_IN_PRODUCTION,
+                STATUS_SHIPPED, STATUS_DELIVERED, STATUS_CANCELLED, STATUS_FAILED]
+    # Terminal states never move again, so a replayed webhook can't resurrect one.
+    TERMINAL = {STATUS_DELIVERED, STATUS_CANCELLED, STATUS_FAILED}
+
+    listing = models.ForeignKey(PrintListing, on_delete=models.PROTECT, related_name="orders")
+    buyer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="print_orders")
+    seller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="print_sales")
+    size = models.CharField(max_length=16, blank=True, default="")
+    color = models.CharField(max_length=32, blank=True, default="")
+    quantity = models.PositiveSmallIntegerField(default=1)
+    # What the buyer paid on top for an extended size / dark colour, per unit.
+    upcharge_cents = models.PositiveIntegerField(default=0)
+    # Money is snapshotted: a creator repricing later must not rewrite history.
+    price_cents = models.PositiveIntegerField(default=0)
+    base_cost_cents = models.PositiveIntegerField(default=0)
+    seller_cents = models.PositiveIntegerField(default=0)
+    dev_tax_cents = models.PositiveIntegerField(default=0)
+    ship_to = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=16, default=STATUS_PENDING)
+    provider = models.CharField(max_length=24, default="manual")
+    provider_order_id = models.CharField(max_length=120, blank=True, default="")
+    tracking_url = models.CharField(max_length=300, blank=True, default="")
+    note = models.CharField(max_length=300, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["provider", "provider_order_id"])]
+
+    def __str__(self):
+        return f"order#{self.id} {self.listing_id} {self.status}"
