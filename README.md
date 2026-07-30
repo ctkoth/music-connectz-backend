@@ -122,8 +122,10 @@ claim it ran anything. What that gap takes to close, and the full API:
 
 ## MerchZ print-on-demand
 
-One design, listed on any number of blanks, produced only when it sells — no
-inventory. The buyer's exact size gets printed; extended sizes and dark garments
+One design, listed on any of **20 blanks** (tees, tanks, long sleeves, hoodies,
+crewnecks, AOP kimono/bomber/windbreaker, embroidered denim jacket, baseball
+/snapback/trucker caps, beanie, beach towel, tote, mug, posters, stickers),
+produced only when it sells — no inventory. The buyer's exact size gets printed; extended sizes and dark garments
 carry the printer's upcharge, paid by the buyer so the creator's margin is the
 same on every variant.
 

@@ -45,6 +45,9 @@ def _product_dict(p, price_cents=None):
         "suggested_price_cents": pod.suggested_price_cents(p),
         "sizes": p.sizes,
         "colors": p.colors,
+        # What the artwork has to be to survive this blank's process.
+        "print_method": p.print_method,
+        "artwork": p.artwork,
         # Per-variant cost and stock, so the buyer picks their real size and
         # sees the upcharge next to it instead of at checkout.
         "variants": pod.variant_table(p, price_cents),
@@ -114,6 +117,9 @@ class BlanksView(APIView):
         products = PrintProduct.objects.filter(active=True)
         return Response({
             "blanks": [_product_dict(p) for p in products],
+            # Grouped so a picker can show "Apparel / Headwear / Home" tabs.
+            "categories": sorted({p.category for p in products}),
+            "print_methods": pod.PRINT_METHODS,
             "provider": pod.provider_name(),
             # Said out loud because it's the pitch: nothing is made until it sells.
             "made_to_order": True,

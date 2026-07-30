@@ -613,3 +613,90 @@ class VariantTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn("size must be one of", resp.data["detail"])
         self.assertIn("variants", resp.data)
+
+
+class BlankCatalogCoverageTests(TestCase):
+    """What a creator can actually put a design on, and its process limits."""
+
+    def setUp(self):
+        pod.seed_blanks()
+
+    def test_the_things_people_ask_for_are_all_there(self):
+        keys = set(PrintProduct.objects.values_list("key", flat=True))
+        for expected in ("tee", "tank", "long-sleeve", "hoodie", "crewneck",
+                         "kimono", "bomber", "windbreaker", "denim-jacket",
+                         "cap", "snapback", "trucker", "beanie",
+                         "towel", "tote", "mug", "poster", "sticker", "vinyl-sleeve"):
+            self.assertIn(expected, keys, expected)
+
+    def test_every_blank_declares_a_known_print_method(self):
+        for p in PrintProduct.objects.all():
+            self.assertIn(p.print_method, pod.PRINT_METHODS, p.key)
+            self.assertEqual(p.artwork["method"], p.print_method, p.key)
+
+    def test_caps_and_jackets_are_embroidered_with_the_limits_that_implies(self):
+        for key in ("cap", "snapback", "trucker", "beanie", "denim-jacket"):
+            p = PrintProduct.objects.get(key=key)
+            self.assertEqual(p.print_method, "embroidery", key)
+            # embroidery is the one method with a hard colour ceiling
+            self.assertEqual(p.artwork["max_colors"], 6, key)
+            self.assertFalse(p.artwork["full_bleed"], key)
+            self.assertIn("gradients", p.artwork["notes"])
+
+    def test_the_kimono_and_jackets_are_all_over_print_and_need_full_bleed_art(self):
+        for key in ("kimono", "bomber", "windbreaker"):
+            p = PrintProduct.objects.get(key=key)
+            self.assertEqual(p.print_method, "aop", key)
+            self.assertTrue(p.artwork["full_bleed"], key)
+            # cut-and-sew: a centred logo is the wrong design
+            self.assertGreaterEqual(p.artwork["min_px"], 4000, key)
+            self.assertIn("seams", p.artwork["notes"])
+
+    def test_the_towel_is_sublimation_so_white_is_bare_fabric(self):
+        towel = PrintProduct.objects.get(key="towel")
+        self.assertEqual(towel.print_method, "sublimation")
+        self.assertIn("no white ink", towel.artwork["notes"])
+
+    def test_the_kimono_has_a_generous_size_run_not_exact_sizes(self):
+        """Cut-and-sew garments come in paired sizes, not S/M/L/XL/2XL/3XL."""
+        kimono = PrintProduct.objects.get(key="kimono")
+        self.assertEqual(kimono.sizes, ["S/M", "L/XL", "2XL/3XL"])
+        self.assertEqual(kimono.upcharge_cents("2XL/3XL"), 500)
+
+    def test_every_blank_is_priceable_above_its_cost(self):
+        for p in PrintProduct.objects.all():
+            ok, detail = pod.validate_price(p, pod.suggested_price_cents(p))
+            self.assertTrue(ok, f"{p.key}: {detail}")
+
+    def test_jackets_cost_more_than_tees_so_the_suggested_price_follows(self):
+        tee = PrintProduct.objects.get(key="tee")
+        jacket = PrintProduct.objects.get(key="denim-jacket")
+        self.assertGreater(jacket.landed_cost_cents, tee.landed_cost_cents)
+        self.assertGreater(pod.suggested_price_cents(jacket),
+                           pod.suggested_price_cents(tee))
+
+    def test_the_api_publishes_the_methods_and_the_categories(self):
+        data = APIClient().get("/api/economy/pod/blanks/").data
+        self.assertIn("apparel", data["categories"])
+        self.assertIn("accessories", data["categories"])
+        self.assertIn("home", data["categories"])
+        self.assertIn("embroidery", data["print_methods"])
+        cap = next(b for b in data["blanks"] if b["key"] == "cap")
+        self.assertEqual(cap["print_method"], "embroidery")
+        self.assertEqual(cap["artwork"]["max_colors"], 6)
+        self.assertIn("Baseball", cap["name"])
+
+    def test_a_design_can_go_on_every_blank_in_the_catalog(self):
+        """The pitch: one design, no inventory, every product."""
+        seller = User.objects.create_user("maker", "m@e.com", "pw12345678")
+        design = MerchDesign.objects.create(owner=seller, title="Logo", image=a_png())
+        client = APIClient()
+        client.force_authenticate(seller)
+        for p in PrintProduct.objects.all():
+            resp = client.post("/api/economy/pod/listings/",
+                               {"design_id": design.id, "product": p.key,
+                                "price_cents": pod.suggested_price_cents(p)},
+                               format="json")
+            self.assertEqual(resp.status_code, 201, f"{p.key}: {resp.content}")
+        self.assertEqual(PrintListing.objects.count(), PrintProduct.objects.count())
+        self.assertEqual(MerchDesign.objects.count(), 1)

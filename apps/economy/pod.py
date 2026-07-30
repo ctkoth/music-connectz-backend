@@ -35,6 +35,84 @@ MIN_PRICE_CENTS = 100
 MAX_PRICE_CENTS = 5_000_00
 MAX_QUANTITY = 25
 
+# How artwork gets onto a blank — and what each method can't do. This is the real
+# limitation on a custom-merch shop: not which products exist, but which artwork
+# survives which process. The client shows these next to the blank so a creator
+# finds out before ordering, not after.
+PRINT_METHODS = {
+    "dtg": {
+        "method": "dtg",
+        "name": "Direct-to-garment",
+        "full_bleed": False,
+        "min_px": 1800,
+        "max_colors": None,
+        "notes": (
+            "Ink sprayed straight onto the fabric. Photos and gradients are fine. Dark "
+            "garments need a white underbase, which is why they cost more — and white ink on "
+            "a white shirt is invisible, so the garment itself has to be your white."
+        ),
+    },
+    "embroidery": {
+        "method": "embroidery",
+        "name": "Embroidery",
+        "full_bleed": False,
+        "min_px": 1000,
+        "max_colors": 6,
+        "notes": (
+            "Stitched, not printed — so no gradients, no photographs, and no detail finer "
+            "than about 3mm. Six thread colours, bold shapes, and text no smaller than 5mm "
+            "or the letters close up. A logo works; album art usually doesn't."
+        ),
+    },
+    "sublimation": {
+        "method": "sublimation",
+        "name": "Dye sublimation",
+        "full_bleed": True,
+        "min_px": 3000,
+        "max_colors": None,
+        "notes": (
+            "Dye bonded into the fibres, so it never cracks or peels and the colours are "
+            "vivid. Only works on white or light polyester — cotton won't take it, and there "
+            "is no white ink, so anything white in your design comes out as bare fabric."
+        ),
+    },
+    "aop": {
+        "method": "aop",
+        "name": "All-over print",
+        "full_bleed": True,
+        "min_px": 4000,
+        "max_colors": None,
+        "notes": (
+            "Printed on flat fabric panels BEFORE the garment is cut and sewn. Artwork has to "
+            "be full-bleed at large dimensions, and seams will interrupt it — a centred logo "
+            "is the wrong design for this. Repeating patterns and textures are what it's for."
+        ),
+    },
+    "vinyl": {
+        "method": "vinyl",
+        "name": "Cut vinyl",
+        "full_bleed": False,
+        "min_px": 1500,
+        "max_colors": 4,
+        "notes": (
+            "Solid colour shapes cut from sheet vinyl. Crisp edges, no gradients, and every "
+            "colour is a separate layer — keep it to a few flat shapes."
+        ),
+    },
+    "paper": {
+        "method": "paper",
+        "name": "Giclée / paper print",
+        "full_bleed": True,
+        "min_px": 3600,
+        "max_colors": None,
+        "notes": (
+            "Full colour on paper, the most forgiving process here. 300 DPI at final size is "
+            "the only real requirement — a 1000px file on a 24-inch poster looks soft."
+        ),
+    },
+}
+
+
 # The blank catalog. Costs are realistic mid-2026 print-on-demand economics
 # (garment + print + typical domestic shipping) and are meant to be edited to
 # match whatever your provider actually quotes — `seed_pod` updates in place, so
@@ -44,6 +122,7 @@ BLANKS = [
         "key": "tee",
         "name": "Unisex T-Shirt",
         "category": "apparel",
+        "print_method": "dtg",
         "base_cost_cents": 1100,
         "shipping_cents": 450,
         "sizes": ["S", "M", "L", "XL", "2XL", "3XL"],
@@ -58,6 +137,7 @@ BLANKS = [
         "key": "tee-premium",
         "name": "Premium Heavyweight Tee",
         "category": "apparel",
+        "print_method": "dtg",
         "base_cost_cents": 1550,
         "shipping_cents": 450,
         "sizes": ["S", "M", "L", "XL", "2XL"],
@@ -69,6 +149,7 @@ BLANKS = [
         "key": "hoodie",
         "name": "Pullover Hoodie",
         "category": "apparel",
+        "print_method": "dtg",
         "base_cost_cents": 2600,
         "shipping_cents": 650,
         "sizes": ["S", "M", "L", "XL", "2XL", "3XL"],
@@ -80,6 +161,7 @@ BLANKS = [
         "key": "crewneck",
         "name": "Crewneck Sweatshirt",
         "category": "apparel",
+        "print_method": "dtg",
         "base_cost_cents": 2200,
         "shipping_cents": 650,
         "sizes": ["S", "M", "L", "XL", "2XL"],
@@ -88,9 +170,119 @@ BLANKS = [
         "color_upcharges": {"Black": 150, "Navy": 150},
     },
     {
-        "key": "cap",
-        "name": "Embroidered Cap",
+        "key": "tank",
+        "name": "Unisex Tank Top",
+        "category": "apparel",
+        "print_method": "dtg",
+        "base_cost_cents": 1200,
+        "shipping_cents": 450,
+        "sizes": ["S", "M", "L", "XL", "2XL"],
+        "colors": ["Black", "White", "Heather Grey", "Navy"],
+        "size_upcharges": {"2XL": 200},
+        "color_upcharges": {"Black": 100, "Navy": 100},
+    },
+    {
+        "key": "long-sleeve",
+        "name": "Long Sleeve Tee",
+        "category": "apparel",
+        "print_method": "dtg",
+        "base_cost_cents": 1700,
+        "shipping_cents": 500,
+        "sizes": ["S", "M", "L", "XL", "2XL", "3XL"],
+        "colors": ["Black", "White", "Navy", "Heather Grey"],
+        "size_upcharges": {"2XL": 250, "3XL": 450},
+        "color_upcharges": {"Black": 100, "Navy": 100},
+    },
+    {
+        "key": "kimono",
+        "name": "All-Over-Print Kimono Robe",
+        "category": "apparel",
+        "print_method": "aop",
+        "base_cost_cents": 4200,
+        "shipping_cents": 750,
+        # Cut-and-sew, so the size run is short and generous rather than exact.
+        "sizes": ["S/M", "L/XL", "2XL/3XL"],
+        "colors": ["Full print"],
+        "size_upcharges": {"2XL/3XL": 500},
+    },
+    {
+        "key": "bomber",
+        "name": "All-Over-Print Bomber Jacket",
+        "category": "apparel",
+        "print_method": "aop",
+        "base_cost_cents": 4600,
+        "shipping_cents": 850,
+        "sizes": ["S", "M", "L", "XL", "2XL"],
+        "colors": ["Full print"],
+        "size_upcharges": {"2XL": 500},
+    },
+    {
+        "key": "windbreaker",
+        "name": "All-Over-Print Windbreaker",
+        "category": "apparel",
+        "print_method": "aop",
+        "base_cost_cents": 3900,
+        "shipping_cents": 800,
+        "sizes": ["S", "M", "L", "XL", "2XL"],
+        "colors": ["Full print"],
+        "size_upcharges": {"2XL": 450},
+    },
+    {
+        "key": "denim-jacket",
+        "name": "Embroidered Denim Jacket",
+        "category": "apparel",
+        "print_method": "embroidery",
+        "base_cost_cents": 5400,
+        "shipping_cents": 900,
+        "sizes": ["S", "M", "L", "XL", "2XL"],
+        "colors": ["Light Wash", "Dark Wash", "Black"],
+        "size_upcharges": {"2XL": 600},
+    },
+    {
+        "key": "towel",
+        "name": "Beach Towel (30x60)",
+        "category": "home",
+        "print_method": "sublimation",
+        "base_cost_cents": 2500,
+        "shipping_cents": 750,
+        "sizes": ['30x60"', '20x40"'],
+        "colors": ["White base"],
+    },
+    {
+        "key": "snapback",
+        "name": "Snapback Cap",
         "category": "accessories",
+        "print_method": "embroidery",
+        "base_cost_cents": 1600,
+        "shipping_cents": 450,
+        "sizes": ["One size"],
+        "colors": ["Black", "White", "Navy", "Black/Grey"],
+    },
+    {
+        "key": "trucker",
+        "name": "Trucker Cap (mesh back)",
+        "category": "accessories",
+        "print_method": "embroidery",
+        "base_cost_cents": 1500,
+        "shipping_cents": 450,
+        "sizes": ["One size"],
+        "colors": ["Black", "White/Black", "Navy/White"],
+    },
+    {
+        "key": "beanie",
+        "name": "Cuffed Beanie",
+        "category": "accessories",
+        "print_method": "embroidery",
+        "base_cost_cents": 1350,
+        "shipping_cents": 400,
+        "sizes": ["One size"],
+        "colors": ["Black", "Charcoal", "Maroon", "Forest"],
+    },
+    {
+        "key": "cap",
+        "name": "Embroidered Baseball Cap",
+        "category": "accessories",
+        "print_method": "embroidery",
         "base_cost_cents": 1400,
         "shipping_cents": 450,
         "sizes": ["One size"],
@@ -100,6 +292,7 @@ BLANKS = [
         "key": "tote",
         "name": "Canvas Tote",
         "category": "accessories",
+        "print_method": "dtg",
         "base_cost_cents": 1150,
         "shipping_cents": 450,
         "sizes": ["One size"],
@@ -109,6 +302,7 @@ BLANKS = [
         "key": "mug",
         "name": "Ceramic Mug (11oz)",
         "category": "accessories",
+        "print_method": "sublimation",
         "base_cost_cents": 800,
         "shipping_cents": 550,
         "sizes": ["11oz", "15oz"],
@@ -118,6 +312,7 @@ BLANKS = [
         "key": "poster",
         "name": "Matte Poster (18x24)",
         "category": "art",
+        "print_method": "paper",
         "base_cost_cents": 950,
         "shipping_cents": 600,
         "sizes": ['12x18"', '18x24"', '24x36"'],
@@ -127,6 +322,7 @@ BLANKS = [
         "key": "sticker",
         "name": "Vinyl Sticker Pack",
         "category": "accessories",
+        "print_method": "vinyl",
         "base_cost_cents": 300,
         "shipping_cents": 200,
         "sizes": ['3"', '5"'],
@@ -136,6 +332,7 @@ BLANKS = [
         "key": "vinyl-sleeve",
         "name": "Record Sleeve Print (12x12)",
         "category": "art",
+        "print_method": "paper",
         "base_cost_cents": 1250,
         "shipping_cents": 600,
         "sizes": ['12x12"'],
@@ -157,6 +354,7 @@ def seed_blanks():
                 "shipping_cents": blank["shipping_cents"],
                 "sizes": blank["sizes"],
                 "colors": blank["colors"],
+                "print_method": blank.get("print_method", "dtg"),
                 "size_upcharges": blank.get("size_upcharges", {}),
                 "color_upcharges": blank.get("color_upcharges", {}),
                 "provider": provider_name(),

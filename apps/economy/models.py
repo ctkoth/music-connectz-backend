@@ -1448,6 +1448,10 @@ class PrintProduct(models.Model):
     # Supplier stock-outs. You hold no inventory, but the PRINTER does, and a
     # blank can run out. Entries are "3XL", "Black", or "3XL|Black".
     unavailable = models.JSONField(default=list, blank=True)
+    # How the artwork gets onto the blank. This, not the product, is what
+    # constrains a design: embroidery can't do a gradient, sublimation can't do
+    # cotton, and all-over print needs full-bleed artwork rather than a logo.
+    print_method = models.CharField(max_length=16, default="dtg")
     provider = models.CharField(max_length=24, default="manual")
     provider_variant = models.CharField(max_length=64, blank=True, default="")
     active = models.BooleanField(default=True)
@@ -1471,6 +1475,13 @@ class PrintProduct(models.Model):
     def landed_cost_for(self, size="", color=""):
         """Print + ship cost for the variant actually being made."""
         return self.landed_cost_cents + self.upcharge_cents(size, color)
+
+    @property
+    def artwork(self):
+        """What a design has to be to print well on this blank."""
+        from .pod import PRINT_METHODS
+
+        return PRINT_METHODS.get(self.print_method, PRINT_METHODS["dtg"])
 
     def variant_available(self, size="", color=""):
         """False when the printer is out of that blank.

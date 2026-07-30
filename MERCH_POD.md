@@ -14,6 +14,71 @@ upload "Logo" once
 
 ---
 
+## What you can put a design on
+
+**20 blanks.** `GET /api/economy/pod/blanks/` is the live list — this table is a
+snapshot.
+
+### Apparel
+| Blank | Process | Sizes | Cost to make |
+|---|---|---|---|
+| Unisex T-Shirt | DTG | S–3XL | $15.50 |
+| Premium Heavyweight Tee | DTG | S–2XL | $20.00 |
+| **Unisex Tank Top** | DTG | S–2XL | $16.50 |
+| Long Sleeve Tee | DTG | S–3XL | $22.00 |
+| Crewneck Sweatshirt | DTG | S–2XL | $28.50 |
+| Pullover Hoodie | DTG | S–3XL | $32.50 |
+| **All-Over-Print Kimono Robe** | AOP | S/M, L/XL, 2XL/3XL | $49.50 |
+| **All-Over-Print Bomber Jacket** | AOP | S–2XL | $54.50 |
+| **All-Over-Print Windbreaker** | AOP | S–2XL | $47.00 |
+| **Embroidered Denim Jacket** | Embroidery | S–2XL | $63.00 |
+
+### Headwear
+| Blank | Process | Cost to make |
+|---|---|---|
+| **Embroidered Baseball Cap** | Embroidery | $18.50 |
+| **Snapback Cap** | Embroidery | $20.50 |
+| **Trucker Cap (mesh back)** | Embroidery | $19.50 |
+| **Cuffed Beanie** | Embroidery | $17.50 |
+
+### Home & accessories
+| Blank | Process | Cost to make |
+|---|---|---|
+| **Beach Towel (30x60 / 20x40)** | Sublimation | $32.50 |
+| Canvas Tote | DTG | $16.00 |
+| Ceramic Mug (11oz / 15oz) | Sublimation | $13.50 |
+| Matte Poster (12x18 → 24x36) | Paper | $15.50 |
+| Record Sleeve Print (12x12) | Paper | $18.50 |
+| Vinyl Sticker Pack (3" / 5") | Cut vinyl | $5.00 |
+
+Costs are landed (blank + print + domestic shipping) for the base variant, before
+size/colour upcharges. They're realistic placeholders — replace them in
+`apps/economy/pod.py` with what your provider actually quotes and re-run
+`seed_pod`.
+
+## The process decides what your artwork can be
+
+This is the limit that catches people out — not which products exist, but which
+artwork survives which process. Every blank declares its `print_method`, and the
+API returns the rules with it.
+
+| Process | Full bleed | Min resolution | Colours | The catch |
+|---|---|---|---|---|
+| **DTG** | no | 1800px | any | Photos and gradients fine. Dark garments need a white underbase (costs more), and **white ink on a white shirt is invisible** — the garment is your white. |
+| **Embroidery** | no | 1000px | **6 max** | Stitched, not printed. **No gradients, no photographs**, nothing finer than ~3mm, no text under 5mm. A logo works; album art doesn't. |
+| **Sublimation** | yes | 3000px | any | Vivid and permanent, but white/light **polyester only** — cotton won't take it, and there's no white ink, so white in your design is bare fabric. |
+| **All-over print** | **yes** | 4000px | any | Printed on flat panels **before the garment is cut and sewn**. Needs full-bleed art at large dimensions and **seams interrupt it** — a centred logo is the wrong design. Patterns and textures are what it's for. |
+| **Cut vinyl** | no | 1500px | 4 max | Solid shapes cut from sheet. Crisp edges, no gradients, each colour a layer. |
+| **Paper** | yes | 3600px | any | The forgiving one. 300 DPI at final size or a 24-inch poster looks soft. |
+
+So: your one design **won't** work everywhere. A photographic cover will print
+beautifully on a tee, poster and mug, and come back from embroidery as an
+unrecognisable blob. The kimono and jackets want a repeating pattern, not a logo.
+Nothing validates this yet — the rules are published so the UI can warn, but a
+creator can still order the wrong thing.
+
+---
+
 ## Can you sell any size and colour?
 
 Short answer: **the buyer's exact size gets printed, but the choices aren't
