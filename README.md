@@ -207,6 +207,30 @@ gym **locations** with per-gym equipment, muscle coverage and gaps.
 
 Blueprint vs. what's built, with the honest gaps: **[BODIEZ_AUDIT.md](BODIEZ_AUDIT.md)**
 
+## iOS app
+
+`ios/` is a **native SwiftUI** app against this same API — deliberately not a
+WebView. Apple's [guideline 4.2](https://developer.apple.com/app-store/review/guidelines/#minimum-functionality)
+rejects repackaged websites, so the Trusted Web Activity trick that works on
+Android has no iOS equivalent.
+
+Built: auth (email/password, and native Sign in with Apple), the OmviardZ tour,
+PersonaZ browsing, the BodieZ library with server-side equipment filtering, and
+in-app account deletion. Tokens live in the Keychain; a 401 triggers exactly one
+refresh-and-retry.
+
+**No Mac needed.** `.github/workflows/ios.yml` builds and tests on a macOS
+runner — the `build` job needs no Apple account at all — and signs in the cloud
+via an App Store Connect API key for TestFlight.
+
+⚠️ Native Sign in with Apple needs `APPLE_OAUTH_BUNDLE_ID=net.musicconnectz.app`
+on Render. Apple mints tokens whose audience is the **Bundle ID** for native
+sign-in and the **Services ID** for web; the backend now accepts both, and fails
+closed if neither is configured.
+
+Setup, TestFlight, and the In-App Purchase question that affects the economy:
+**[IOS_APP.md](IOS_APP.md)**
+
 ## Android app + Google Play
 
 `android/` is a Trusted Web Activity — it opens the site full-screen with no URL

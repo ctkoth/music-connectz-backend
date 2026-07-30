@@ -8,7 +8,8 @@ or raises OAuthError with a user-safe message.
 Env vars expected (set on Render):
     GOOGLE_OAUTH_CLIENT_ID
     GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET
-    APPLE_OAUTH_CLIENT_ID         (the Services ID / audience)
+    APPLE_OAUTH_CLIENT_ID         (the Services ID — audience for WEB sign-in)
+    APPLE_OAUTH_BUNDLE_ID         (the Bundle ID — audience for the NATIVE iOS app)
 """
 import os
 
@@ -133,10 +134,15 @@ def verify_apple(id_token: str):
     except Exception:
         raise OAuthError("Apple sign-in requires PyJWT on the server.")
 
-    client_id = _env("APPLE_OAUTH_CLIENT_ID")
-    if not client_id:
-        # Fail closed: without our audience we can't confirm the token was
-        # minted for THIS app.
+    # Apple mints a DIFFERENT audience depending on where the user signed in:
+    # the Services ID for web sign-in, the app's Bundle ID for native Sign in
+    # with Apple on iOS. Accepting only one locks out the other platform, so we
+    # accept both and let PyJWT match either. Still fail closed — an empty list
+    # would mean verifying nothing.
+    audiences = [a for a in (_env("APPLE_OAUTH_CLIENT_ID"),
+                             _env("APPLE_OAUTH_BUNDLE_ID")) if a]
+    if not audiences:
+        # Without our audience we can't confirm the token was minted for THIS app.
         raise OAuthError("Apple sign-in is not configured on the server.")
     try:
         jwk_client = PyJWKClient("https://appleid.apple.com/auth/keys", timeout=10)
@@ -145,7 +151,7 @@ def verify_apple(id_token: str):
             id_token,
             signing_key.key,
             algorithms=["RS256"],
-            audience=client_id,
+            audience=audiences,
             issuer="https://appleid.apple.com",
             options={"verify_aud": True},
         )
