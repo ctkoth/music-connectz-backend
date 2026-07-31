@@ -28,6 +28,7 @@ keys, same labels, same emoji, same order — because members have already picke
 them and stored labels on their profiles. The only edits are the two corrupted
 entries, called out inline.
 """
+import re
 
 # Skills for the personas that shipped in 2.2, preserved exactly.
 _ARTIST = {
@@ -664,6 +665,24 @@ def _squash(value):
     return " ".join(str(value or "").split()).lower()
 
 
+# Everything that isn't a letter, digit, space, hyphen, underscore or ampersand.
+# Emoji, variation selectors (U+FE0F), zero-width joiners and skin-tone
+# modifiers all fall in here.
+_MARKS = re.compile(r"[^\w\s&-]", re.UNICODE)
+
+
+def _demoji(value):
+    """Drop emoji and decoration, keeping the words.
+
+    2.2 stores the *decorated label* as the persona, not the key — `personaNames`
+    holds '🎚️Producer' and the collab filter holds '🎤Independent  Artist'. Some
+    of those have a space after the emoji and some don't, so matching on the
+    exact label only ever worked by coincidence. Strip the decoration and match
+    on the words, which is the part that actually carries the meaning.
+    """
+    return _squash(_MARKS.sub(" ", str(value or "")))
+
+
 def normalize_persona_key(value):
     """Canonical persona key for anything a client might send, or None.
 
@@ -677,6 +696,25 @@ def normalize_persona_key(value):
         return squashed
     if squashed in PERSONA_ALIASES:
         return PERSONA_ALIASES[squashed]
+
+    # Retry without emoji. 2.2 stores decorated labels ('🎚️Producer',
+    # '🎤Independent  Artist'), and those reach us verbatim from saved profiles
+    # and from the collab filter — six of them resolved to None, which silently
+    # dropped that member's persona and every skill under it.
+    bare = _demoji(value)
+    if bare and bare != squashed:
+        if bare in PERSONAZ:
+            return bare
+        if bare in PERSONA_ALIASES:
+            return PERSONA_ALIASES[bare]
+        hyphen_bare = bare.replace(" ", "-")
+        if hyphen_bare in PERSONAZ:
+            return hyphen_bare
+        if hyphen_bare in PERSONA_ALIASES:
+            return PERSONA_ALIASES[hyphen_bare]
+        found = _NO_SEPARATOR.get(_strip_separators(bare))
+        if found:
+            return found
     # "🎤 Artist" / "Mix Engineer" — match on the display name too, since the
     # frontend has passed labels where keys were expected.
     for key, persona in PERSONAZ.items():
