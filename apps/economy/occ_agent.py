@@ -151,7 +151,8 @@ def build_system(project, extra=""):
     return "\n\n".join(p for p in parts if p)
 
 
-def run_agent(user, project, prompt, history=None, max_steps=None, dry_run=False):
+def run_agent(user, project, prompt, history=None, max_steps=None, dry_run=False,
+              suggest=False):
     """Run the loop until the model is done, the steps run out, or money does.
 
     Returns a dict describing the whole run — the text reply, every tool call and
@@ -209,6 +210,17 @@ def run_agent(user, project, prompt, history=None, max_steps=None, dry_run=False
         "Investigate with read-only tools and describe exactly what you would change."
         if dry_run else ""
     )
+    # Suggestions matter most here — this is the loop that actually changes the
+    # member's code, so "what did you just do to me, and what should I do next"
+    # is the whole question. It had no suggestion mode at all until now.
+    from .suggest import SUGGEST_STYLE
+    from .suggest import gate as suggest_gate
+    suggest, suggest_notice = suggest_gate(user, suggest)
+    result["suggestions"] = suggest
+    if suggest_notice:
+        result["suggestions_notice"] = suggest_notice
+    if suggest:
+        extra = f"{extra}\n\n{SUGGEST_STYLE}".strip()
     system = build_system(project, extra)
 
     client = anthropic.Anthropic()

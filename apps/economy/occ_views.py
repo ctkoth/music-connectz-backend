@@ -186,6 +186,7 @@ class AgentView(APIView):
             history=d.get("history") or [],
             max_steps=d.get("max_steps"),
             dry_run=bool(d.get("dry_run")),
+            suggest=bool(d.get("suggest")),
         )
         p.save(update_fields=["updated_at"])
         return Response(result, status=code)

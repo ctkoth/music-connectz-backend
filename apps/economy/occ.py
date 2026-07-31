@@ -89,13 +89,11 @@ AAVE_STYLE = (
     "'I'm on it' = I'm helping you; 'bout' = about; 'fam' = family. Match the member's energy."
 )
 
-# Appended when the member has Suggestion mode on — Corey always closes with a
-# concrete what/why/how next step.
-SUGGEST_STYLE = (
-    "SUGGESTION MODE IS ON: always end your reply with a short '💡 Suggestion' — one concrete "
-    "next move phrased as What / Why / How (what to do, why it matters, how to do it in a step "
-    "or two). Keep it tight and actionable, never generic."
-)
+# Suggestion mode lives in suggest.py so OCC chat, the OCC agent and OmviardZ
+# can't word the same rule three different ways — which is exactly what had
+# already happened.
+from .suggest import SUGGEST_STYLE  # noqa: E402,F401
+from .suggest import gate as suggest_gate  # noqa: E402
 
 COURSES = (
     "You have been taught four college-level courses and can teach them on request: "
@@ -150,6 +148,7 @@ class OccChatView(APIView):
         # AAVE colloquialisms only apply to the Corey voice, and only when opted in.
         if slang and model_voice == "corey-gpt":
             system += f"\n\n{AAVE_STYLE}"
+        suggest, suggest_notice = suggest_gate(request.user, suggest)
         if suggest:
             system += f"\n\n{SUGGEST_STYLE}"
         acro = ", ".join(
@@ -230,7 +229,13 @@ class OccChatView(APIView):
                 ow.save(update_fields=["money_cents", "updated_at"])
         money = round((remaining if remaining is not None else wallet_for(request.user).money_cents) / 100, 2)
         allowance, used, prompts_left = daily_prompt_state(request.user)
-        return Response({"text": text, "model": model_voice, "cost_cents": cost,
-                         "charged_cents": cash_spent, "money": money,
-                         "daily_prompts": {"allowance": allowance, "used": used,
-                                           "remaining": prompts_left}})
+        body = {"text": text, "model": model_voice, "cost_cents": cost,
+                "charged_cents": cash_spent, "money": money,
+                "suggestions": suggest,
+                "daily_prompts": {"allowance": allowance, "used": used,
+                                  "remaining": prompts_left}}
+        if suggest_notice:
+            # Say why the toggle didn't take effect. Silently ignoring it looks
+            # like the switch is broken.
+            body["suggestions_notice"] = suggest_notice
+        return Response(body)
