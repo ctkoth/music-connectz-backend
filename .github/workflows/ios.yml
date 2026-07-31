@@ -55,25 +55,28 @@ jobs:
 
       # Simulator builds are unsigned, which is exactly why this job needs no
       # Apple account. A compile error shows up here, not at upload time.
-      # Ask the runner which simulators it actually has rather than naming one
-      # and hoping. A hardcoded "iPhone 15" breaks the same way the Xcode pin
-      # did, one image bump later.
-      # Ask the runner which simulators it actually has rather than naming one
-      # and hoping. A hardcoded "iPhone 15" breaks the same way the Xcode pin
-      # did, one image bump later. Plain shell on purpose — an inline Python
-      # heredoc inside a YAML block scalar is how this step broke the first time.
+      # Ask the runner what it has, and target the simulator by UUID.
+      #
+      # Naming it went wrong twice: "iPhone 15" isn't guaranteed to exist, and
+      # cutting the name at the first "(" turns "iPhone SE (3rd generation)"
+      # into "iPhone SE", which is not a device. A UUID has no such ambiguity
+      # and needs no OS= qualifier either.
       - name: Pick an available iPhone simulator
         run: |
           xcrun simctl list devices available
-          name=$(xcrun simctl list devices available \
-                 | sed -n 's/^[[:space:]]*\(iPhone[^(]*\)(.*/\1/p' \
-                 | sed 's/[[:space:]]*$//' | tail -1)
-          if [ -z "$name" ]; then
+          line=$(xcrun simctl list devices available | grep -E '^[[:space:]]+iPhone' | tail -1)
+          if [ -z "$line" ]; then
             echo "::error::no iPhone simulator available on this runner"
             exit 1
           fi
-          echo "Using simulator: $name"
-          echo "SIM_NAME=$name" >> "$GITHUB_ENV"
+          udid=$(printf '%s' "$line" | sed -n 's/.*(\([0-9A-Fa-f-]\{36\}\)).*/\1/p')
+          name=$(printf '%s' "$line" | sed 's/[[:space:]]*(\([0-9A-Fa-f-]\{36\}\)).*//; s/^[[:space:]]*//')
+          if [ -z "$udid" ]; then
+            echo "::error::could not read a simulator UUID from: $line"
+            exit 1
+          fi
+          echo "Using simulator: $name ($udid)"
+          echo "SIM_ID=$udid" >> "$GITHUB_ENV"
 
       - name: Build and test
         run: |
@@ -81,7 +84,7 @@ jobs:
           xcodebuild test \
             -project MusicConnectZ.xcodeproj \
             -scheme MusicConnectZ \
-            -destination "platform=iOS Simulator,name=$SIM_NAME,OS=latest" \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty && exit ${PIPESTATUS[0]}
 
