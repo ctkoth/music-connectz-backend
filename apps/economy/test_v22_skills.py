@@ -12,7 +12,8 @@ handful that did work only worked because they happened to equal a label exactly
 """
 from django.test import SimpleTestCase
 
-from .personaz import (PERSONAZ, V22_SKILLS, _demoji, normalize_persona_key,
+from .personaz import (PERSONAZ, SKILL_ALIASES, V22_SKILLS,
+                       V22_SKILLS_RETIRED, _demoji, normalize_persona_key,
                        skill_key_for)
 
 # --- personaNames: what 2.2 saves onto a member's profile -------------------
@@ -217,12 +218,18 @@ class EveryV22SkillResolvesTests(SimpleTestCase):
             f"  {label}  ",                     # copied with stray whitespace
         }
 
-    def test_every_2_2_skill_resolves_from_its_key(self):
+    def test_every_2_2_skill_still_resolves_to_something(self):
+        """A 2.2 skill either still exists, or resolves to what replaced it.
+        What it must never do is resolve to nothing — that's a member losing a
+        skill they picked while it was on offer."""
         for persona, cats in V22_SKILLS.items():
             for cat, keys in cats.items():
                 for key in keys:
                     with self.subTest(persona=persona, category=cat, skill=key):
-                        self.assertEqual(skill_key_for(persona, key), key)
+                        got = skill_key_for(persona, key)
+                        self.assertIsNotNone(got)
+                        expected = SKILL_ALIASES.get(key, key)
+                        self.assertEqual(got, expected)
 
     def test_every_2_2_skill_resolves_from_every_stored_label_form(self):
         checked = 0
@@ -230,11 +237,29 @@ class EveryV22SkillResolvesTests(SimpleTestCase):
             for cat, keys in cats.items():
                 catalog = PERSONAZ[persona]["categories"][cat]
                 for key in keys:
+                    if key in V22_SKILLS_RETIRED:
+                        continue        # no longer has a label to be stored as
                     for form in self.forms_for(catalog[key]):
                         checked += 1
                         with self.subTest(persona=persona, skill=key, form=form):
                             self.assertEqual(skill_key_for(persona, form), key)
         self.assertGreater(checked, 500, "the sweep stopped covering the set")
+
+    def test_a_retired_skill_resolves_but_is_no_longer_offered(self):
+        """Removing a name from the picker is a UI decision. Making somebody's
+        saved skill unreadable is data loss. They are not the same thing."""
+        for retired, current in SKILL_ALIASES.items():
+            with self.subTest(retired=retired):
+                for persona in ("producer", "mix-engineer"):
+                    daws = PERSONAZ[persona]["categories"]["Music DAWs"]
+                    self.assertNotIn(retired, daws, "still on offer")
+                    self.assertIn(current, daws, "replacement went missing too")
+                    self.assertEqual(skill_key_for(persona, retired), current)
+
+    def test_an_alias_cannot_shadow_a_skill_that_is_still_offered(self):
+        """Aliases are consulted last, so a live skill always wins."""
+        for _retired, current in SKILL_ALIASES.items():
+            self.assertEqual(skill_key_for("mix-engineer", current), current)
 
     def test_the_count_is_still_the_whole_2_2_build(self):
         total = sum(len(keys) for cats in V22_SKILLS.values()
@@ -405,7 +430,7 @@ class DawZSuiteTests(SimpleTestCase):
         v22_daws = [
             "Any DAW", "Ableton Live", "Adobe Audition", "Audacity",
             "Bitwig Studio", "Cakewalk", "Cubase", "FL Studio", "GarageBand",
-            "Logic Pro", "Luna", "Mixcraft", "PreSonus Studio One",
+            "Logic Pro", "Luna", "Mixcraft",
             "Pro Tools", "Reason", "Reaper", "Studio One", "Waveform Pro",
         ]
         daws = P["producer"]["categories"]["Music DAWs"]
@@ -423,11 +448,16 @@ class V22OnlyViewTests(SimpleTestCase):
     """
 
     def test_it_serves_exactly_the_2_2_skill_count(self):
-        from .personaz import V22_SKILL_COUNT, catalog_payload
+        from .personaz import (V22_SKILL_COUNT, V22_SKILL_COUNT_OFFERED,
+                               catalog_payload)
         body = catalog_payload(since="2.2")
         total = sum(len(c["skills"]) for p in body["personas"] for c in p["categories"])
-        self.assertEqual(total, V22_SKILL_COUNT)
+        self.assertEqual(total, V22_SKILL_COUNT_OFFERED)
+        # The historical count does not shrink when a skill is retired —
+        # V22_SKILLS answers "what did 2.2 have", the catalog answers "what can
+        # you pick today", and collapsing them loses the difference.
         self.assertEqual(V22_SKILL_COUNT, 131)
+        self.assertEqual(V22_SKILL_COUNT_OFFERED, 129)
 
     def test_it_serves_only_the_five_2_2_personas(self):
         from .personaz import catalog_payload

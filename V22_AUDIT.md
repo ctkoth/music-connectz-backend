@@ -190,16 +190,29 @@ The **key** is unchanged in both cases, so a member who already picked one keeps
 it and a 2.2 client's stored label still resolves. Only what the picker shows
 was brought current. Pinned by a test.
 
-### 5d. One duplicate, left alone deliberately
+### 5d. One duplicate, now resolved
 
-2.2 lists **`PreSonus Studio One`** and **`Studio One`** in the same category.
-They are the same product, so the picker offers one DAW twice and a member can
-claim both.
+2.2 listed **`PreSonus Studio One`** and **`Studio One`** in the same category.
+Same product, offered twice, so a member could claim one DAW as two skills.
 
-Both are kept. Removing either would silently delete a skill from whoever
-picked that one, and there is no way to tell from the data which of the two a
-member meant. Worth cleaning up in the client, where the choice can be
-presented to the member rather than made for them.
+The long name is retired; the short one is the survivor. It is **removed from
+the picker but not from the data**: `SKILL_ALIASES` maps it to `Studio One`, so
+anyone who picked it while it was on offer still resolves.
+
+That distinction is the point. Taking a name off the picker is a UI decision.
+Making somebody's saved skill unreadable is data loss, and they are not the
+same change. Aliases are consulted *last*, after the live catalog, so one can
+never shadow a skill that is still on offer.
+
+Two counts now exist, deliberately:
+
+| | | |
+|---|---:|---|
+| `V22_SKILL_COUNT` | 131 | what 2.2 shipped — history, does not shrink |
+| `V22_SKILL_COUNT_OFFERED` | 129 | what `?since=2.2` can still serve |
+
+Collapsing them into one number would lose the ability to tell "2.2 never had
+this" from "2.2 had it and we retired it".
 
 ---
 

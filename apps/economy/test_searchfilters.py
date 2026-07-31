@@ -476,11 +476,15 @@ class CollabSkillsRequiredTests(TestCase):
         self.assertIn("ranges", body)
 
     def test_the_picker_can_serve_exactly_the_2_2_vocabulary(self):
-        """"I need 2.2" — five personas, 131 skills, nothing added since."""
+        """"I need 2.2" — the five 2.2 personas and their skills, nothing added
+        since. Retired skills are excluded: they can't be picked any more, so
+        offering one would be a dead option."""
+        from .personaz import V22_SKILL_COUNT_OFFERED
+
         body = APIClient().get(reverse("collabz-catalog"), {"since": "2.2"}).json()
         self.assertEqual(body["since"], "2.2")
         self.assertEqual(len(body["personas"]), 5)
-        self.assertEqual(body["skill_count"], 131)
+        self.assertEqual(body["skill_count"], V22_SKILL_COUNT_OFFERED)
         self.assertTrue(all(s["v22"] for p in body["personas"]
                             for c in p["categories"] for s in c["skills"]))
 

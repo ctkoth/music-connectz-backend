@@ -192,10 +192,9 @@ _MUSIC_DAWS = {
     "Logic Pro": "Logic Pro 🎵",
     "Luna": "Luna ☁️",
     "Mixcraft": "Mixcraft 🎚️",
-    # NOTE: "PreSonus Studio One" and "Studio One" are the same product. Both are
-    # kept because both shipped in 2.2 and members may have picked either.
-    # See PERSONAZ_AUDIT.md #6 for the one-line dedupe when you want it.
-    "PreSonus Studio One": "PreSonus Studio One 🎛️",
+    # 2.2 listed this product twice, as "PreSonus Studio One" and "Studio One".
+    # The long form is gone; the short one is the survivor. Anyone who picked
+    # the long form still resolves to it — see SKILL_ALIASES.
     "Pro Tools": "Pro Tools 🎙️",
     "Reason": "Reason 🎛️",
     "Reaper": "Reaper 🔧",
@@ -203,6 +202,19 @@ _MUSIC_DAWS = {
     "Trump Toupee": "Trump Toupee 🤵🏼‍♂️",
     "Waveform Pro": "Waveform Pro 📊",
     "Witchcraft": "Witchcraft 🔮",
+}
+
+
+# Skills that were retired from the picker but must still resolve, because
+# members picked them while they were on offer. Dropping a name from the
+# catalog is a UI decision; making a member's saved skill un-readable is data
+# loss, and they are not the same thing.
+#
+#   {retired name: the skill it now means}
+SKILL_ALIASES = {
+    # 2.2 offered PreSonus's DAW under both its full and short names, in the
+    # same category. Only the short one is offered now.
+    "PreSonus Studio One": "Studio One",
 }
 
 
@@ -825,6 +837,12 @@ def skill_key_for(persona_key, value):
         for key, label in flat.items():
             if bare in (_demoji(key), _demoji(label)):
                 return key
+    # Last: a name that was retired from the picker. Checked after the live
+    # catalog so an alias can never shadow a skill that's actually on offer.
+    for retired, current in SKILL_ALIASES.items():
+        if bare in (_demoji(retired),) or squashed == _squash(retired):
+            if current in flat:
+                return current
     return None
 
 
@@ -1029,14 +1047,29 @@ V22_SKILLS = {
     },
 }
 
+# What 2.2 shipped. This is a historical record and does not shrink when a
+# skill is retired — V22_SKILLS stays the answer to "what did 2.2 have", and
+# the live catalog answers "what can you pick today". Rewriting history to
+# match the present would lose the ability to tell the two apart, which is the
+# whole reason the provenance exists.
 V22_SKILL_COUNT = 131
+
+# 2.2 skills no longer offered in the picker. They still resolve, via
+# SKILL_ALIASES, so nobody loses a skill they picked while it was on offer.
+V22_SKILLS_RETIRED = frozenset(SKILL_ALIASES)
+
+# What `?since=2.2` can actually still serve: 2.2's set minus the retirements.
+V22_SKILL_COUNT_OFFERED = V22_SKILL_COUNT - sum(
+    1 for persona, cats in V22_SKILLS.items() for keys in cats.values()
+    for k in keys if k in V22_SKILLS_RETIRED)
 
 
 def _visible_count(key, persona, only_v22):
     if not only_v22:
         return len(skills_for(key))
-    return sum(len(V22_SKILLS.get(key, {}).get(cat, ()))
-               for cat in persona["categories"])
+    return sum(1 for cat in persona["categories"]
+               for k in V22_SKILLS.get(key, {}).get(cat, ())
+               if k not in V22_SKILLS_RETIRED)
 
 
 def is_v22_skill(persona_key, category, skill_key):

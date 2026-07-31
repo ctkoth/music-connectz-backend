@@ -192,8 +192,10 @@ class V22SkillsPreservedTests(TestCase):
             PERSONAZ["producer"]["categories"]["Music DAWs"],
             PERSONAZ["mix-engineer"]["categories"]["Music DAWs"],
         )
-        # 18 from 2.2, plus the seven Music ConnectZ DAWs from DawZ.
-        self.assertEqual(len(PERSONAZ["producer"]["categories"]["Music DAWs"]), 25)
+        # 18 from 2.2, minus "PreSonus Studio One" (2.2 listed the same product
+        # twice and the long name was retired), plus the seven DawZ apps.
+        self.assertEqual(len(PERSONAZ["producer"]["categories"]["Music DAWs"]),
+                         18 - 1 + 7)
 
     def test_the_corrupted_reaper_entry_is_repaired(self):
         """2.2 had `Reaper:'Reaper🪦': 'Azrael☠️'` — a JavaScript syntax error
