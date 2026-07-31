@@ -171,6 +171,11 @@ TABS = [
 
     tab("VenueZ", "🏛️", "Host or join events — collaborative or performance."),
 
+    tab("VSTZ", "🔌",
+        "The plugins you own. Toggle your rack, then find members who have what "
+        "your session needs. Native plugins can't run in a browser — this is for "
+        "matching, and the desktop app is what loads them."),
+
     tab("DawZ", "🎛️", "Digital audio workstations, filtered by the VSTs you own.",
         modals=[
             modal("Fruity Möbius", "🍑", "FL Studio knockoff."),

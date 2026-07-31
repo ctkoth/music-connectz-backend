@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     "apps.battlez",
     "apps.collabz",
     "apps.tabz",
+    "apps.vstz",
 ]
 
 MIDDLEWARE = [
