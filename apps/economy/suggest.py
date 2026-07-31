@@ -40,10 +40,16 @@ SUGGEST_TIERS = (TIER_STATZ, TIER_DEBUG)
 
 
 def may_suggest(user):
-    """Whether this member gets Suggestion mode. StatZ (and debug) only."""
+    """Whether this member gets Suggestion mode. StatZ (and debug) only.
+
+    Honours an active StatZ trial — SuggestionZ is one of the three things the
+    spec names as the point of that trial, so gating it on the paid tier would
+    make the trial advertise a feature it doesn't hand over.
+    """
     if not user or not getattr(user, "is_authenticated", False):
         return False
-    return membership_for(user).tier in SUGGEST_TIERS
+    from .trials import effective_tier
+    return effective_tier(user) in SUGGEST_TIERS
 
 
 def gate(user, wanted):

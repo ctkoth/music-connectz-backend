@@ -18,6 +18,7 @@ from .parcel import ParcelCampaignView
 from .autotopup import AutoTopUpView, AutoTopUpCancelView
 from .identity import IdentityView
 from .membership_spinaz import MembershipSpinazView
+from .trial_views import TrialView
 from .collab import (
     CollabDealsView,
     CollabDetailView,
@@ -136,6 +137,7 @@ urlpatterns = [
     path("premium/checkout/", PremiumCheckoutView.as_view(), name="economy-premium-checkout"),
     path("statz/checkout/", StatzCheckoutView.as_view(), name="economy-statz-checkout"),
     path("membership/spinaz/", MembershipSpinazView.as_view(), name="economy-membership-spinaz"),
+    path("trial/", TrialView.as_view(), name="economy-trial"),
     # Google Play Billing — required for digital goods bought inside the Android app.
     path("play/products/", PlayProductsView.as_view(), name="economy-play-products"),
     path("play/verify/", PlayVerifyView.as_view(), name="economy-play-verify"),

@@ -103,6 +103,22 @@ def payload(user, feature="", required_tier=None, need_cents=0, need_spinaz=0):
         out["short_spinaz"] = max(0, int(need_spinaz) - (w.spinaz or 0))
 
     if required_tier and tier_rank(current) < tier_rank(required_tier):
+        # Offer today's trial right here. This is the moment they wanted the
+        # feature — asking them to find a Settings toggle instead is how you
+        # lose someone who was one tap from trying it.
+        from .trials import TRIAL_SPECS, can_start
+        if required_tier in TRIAL_SPECS:
+            ok, reason = can_start(user, required_tier)
+            spec = TRIAL_SPECS[required_tier]
+            out["trial"] = {
+                "tier": required_tier,
+                "seconds": spec["seconds"],
+                "blurb": spec["blurb"],
+                "can_start": ok,
+                "reason": reason or None,
+                "start": "/api/economy/trial/",
+            }
+
         out["required_tier"] = required_tier
         out["required_tier_label"] = TIER_LABELS.get(required_tier, required_tier)
         out["plans"] = plans_for(required_tier)

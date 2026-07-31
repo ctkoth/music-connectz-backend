@@ -56,7 +56,13 @@ STATZ_TIERS = {TIER_STATZ, TIER_DEBUG}
 
 
 def tier_of(user):
-    return membership_for(user).tier
+    """The tier the gates honour — including an active trial.
+
+    Reads effective_tier, not the paid tier. A trial that doesn't actually
+    unlock anything is a countdown attached to nothing.
+    """
+    from apps.economy.trials import effective_tier
+    return effective_tier(user)
 
 
 def _gate(user, tiers, feature):
