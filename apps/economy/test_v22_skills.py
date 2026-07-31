@@ -260,3 +260,61 @@ class V22GenreTests(SimpleTestCase):
         emoji = {r["key"]: r["emoji"] for r in catalog_payload()["genres"]}
         stored = [f"{n} {emoji[n]}" for n in V22_GENRES_FROM_DOC[:12]]
         self.assertEqual(normalize_genres(stored), V22_GENRES_FROM_DOC[:12])
+
+
+class DawZSuiteTests(SimpleTestCase):
+    """The seven Music ConnectZ DAWs are skills in their own right.
+
+    Members work in these on the platform (DawZ), so "I use Fruity Möbius" is a
+    real thing to be able to say. Each sits ALONGSIDE the product it imitates —
+    knowing Fruity Möbius is not knowing FL Studio.
+    """
+
+    # Music ConnectZ app -> the product it imitates, per the DawZ spec.
+    DAWZ = {
+        "Azrael": ("Azrael ☠️", "Reaper"),
+        "Arsenal": ("Arsenal ⚔️", "Pro Tools"),
+        "Fruity Möbius": ("Fruity Möbius 🍑", "FL Studio"),
+        "Witchcraft": ("Witchcraft 🔮", "Mixcraft"),
+        "Trump Toupee": ("Trump Toupee 🤵🏼‍♂️", "Bitwig Studio"),
+        "Intuition": ("Intuition 🤔", "Logic Pro"),
+        "FormulaWon": ("FormulaWon 🚦", "GarageBand"),
+    }
+
+    DAW_PERSONAS = ("producer", "mix-engineer")
+
+    def test_all_seven_are_offered_to_both_daw_personas(self):
+        for persona in self.DAW_PERSONAS:
+            daws = PERSONAZ[persona]["categories"]["Music DAWs"]
+            for key, (label, _) in self.DAWZ.items():
+                with self.subTest(persona=persona, daw=key):
+                    self.assertEqual(daws.get(key), label)
+
+    def test_each_sits_alongside_the_product_it_imitates(self):
+        daws = PERSONAZ["producer"]["categories"]["Music DAWs"]
+        for key, (_, imitates) in self.DAWZ.items():
+            with self.subTest(daw=key):
+                self.assertIn(imitates, daws,
+                              f"{key} replaced {imitates} instead of joining it")
+
+    def test_they_resolve_from_a_stored_label(self):
+        from .personaz import skill_key_for
+        for persona in self.DAW_PERSONAS:
+            for key, (label, _) in self.DAWZ.items():
+                with self.subTest(persona=persona, daw=key):
+                    self.assertEqual(skill_key_for(persona, label), key)
+
+    def test_the_2_2_daws_all_survived(self):
+        """Adding seven must not have disturbed the eighteen that shipped."""
+        from .personaz import PERSONAZ as P
+        v22_daws = [
+            "Any DAW", "Ableton Live", "Adobe Audition", "Audacity",
+            "Bitwig Studio", "Cakewalk", "Cubase", "FL Studio", "GarageBand",
+            "Logic Pro", "Luna", "Mixcraft", "PreSonus Studio One",
+            "Pro Tools", "Reason", "Reaper", "Studio One", "Waveform Pro",
+        ]
+        daws = P["producer"]["categories"]["Music DAWs"]
+        for key in v22_daws:
+            with self.subTest(daw=key):
+                self.assertIn(key, daws)
+        self.assertEqual(len(daws), len(v22_daws) + len(self.DAWZ))

@@ -192,9 +192,8 @@ class V22SkillsPreservedTests(TestCase):
             PERSONAZ["producer"]["categories"]["Music DAWs"],
             PERSONAZ["mix-engineer"]["categories"]["Music DAWs"],
         )
-        # 18 from 2.2, plus Azrael ☠️ — the Music ConnectZ DAW the corrupted
-        # 2.2 line was reaching for. Both it and Reaper are carried.
-        self.assertEqual(len(PERSONAZ["producer"]["categories"]["Music DAWs"]), 19)
+        # 18 from 2.2, plus the seven Music ConnectZ DAWs from DawZ.
+        self.assertEqual(len(PERSONAZ["producer"]["categories"]["Music DAWs"]), 25)
 
     def test_the_corrupted_reaper_entry_is_repaired(self):
         """2.2 had `Reaper:'Reaper🪦': 'Azrael☠️'` — a JavaScript syntax error

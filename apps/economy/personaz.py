@@ -172,17 +172,23 @@ _MUSIC_DAWS = {
     "Any DAW": "Any DAW 🎛️",
     "Ableton Live": "Ableton Live 🎵",
     "Adobe Audition": "Adobe Audition 🎙️",
+    "Arsenal": "Arsenal ⚔️",
     "Audacity": "Audacity 🎧",
-    # Azrael is Music ConnectZ's own Reaper-style DAW (DawZ: "+Azrael☠️ reaper
-    # knockoff"). It sits alongside Reaper rather than replacing it — the broken
-    # 2.2 line was reaching for one or the other, but they are two different
-    # things to be skilled in, and a member may well use both.
+    # The seven Music ConnectZ DAWs from DawZ sit alongside the products they
+    # imitate rather than replacing them: Azrael/Reaper, Arsenal/Pro Tools,
+    # Fruity Möbius/FL Studio, Witchcraft/Mixcraft, Trump Toupee/Bitwig,
+    # Intuition/Logic, FormulaWon/GarageBand. They are separate skills — members
+    # work in these on the platform, and someone who only knows Fruity Möbius
+    # had no way to say so.
     "Azrael": "Azrael ☠️",
     "Bitwig Studio": "Bitwig Studio 🎚️",
     "Cakewalk": "Cakewalk 🎼",
     "Cubase": "Cubase 🎛️",
     "FL Studio": "FL Studio 🎚️",
+    "FormulaWon": "FormulaWon 🚦",
+    "Fruity Möbius": "Fruity Möbius 🍑",
     "GarageBand": "GarageBand 🎵",
+    "Intuition": "Intuition 🤔",
     "Logic Pro": "Logic Pro 🎵",
     "Luna": "Luna ☁️",
     "Mixcraft": "Mixcraft 🎚️",
@@ -194,7 +200,9 @@ _MUSIC_DAWS = {
     "Reason": "Reason 🎛️",
     "Reaper": "Reaper 🔧",
     "Studio One": "Studio One 🎛️",
+    "Trump Toupee": "Trump Toupee 🤵🏼‍♂️",
     "Waveform Pro": "Waveform Pro 📊",
+    "Witchcraft": "Witchcraft 🔮",
 }
 
 
