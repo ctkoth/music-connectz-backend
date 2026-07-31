@@ -602,6 +602,28 @@ class Profile(models.Model):
     # adult content. Never trust a self-reported birthday for this.
     verified_18plus = models.BooleanField(default=False, db_index=True)
     verified_18plus_at = models.DateTimeField(null=True, blank=True)
+    # A boolean can only say "verified" or "not verified" — it cannot tell a
+    # member who just finished the flow whether they passed, failed, or are
+    # still being checked. These carry the answer, and the reason for it.
+    VERIFY_UNSTARTED = "unstarted"
+    VERIFY_PROCESSING = "processing"
+    VERIFY_VERIFIED = "verified"
+    VERIFY_FAILED = "failed"
+    VERIFY_CANCELED = "canceled"
+    VERIFY_CHOICES = [
+        (VERIFY_UNSTARTED, "Not started"),
+        (VERIFY_PROCESSING, "Checking"),
+        (VERIFY_VERIFIED, "Verified"),
+        (VERIFY_FAILED, "Failed"),
+        (VERIFY_CANCELED, "Canceled"),
+    ]
+    verification_status = models.CharField(
+        max_length=12, choices=VERIFY_CHOICES, default=VERIFY_UNSTARTED, db_index=True)
+    verification_reason = models.CharField(max_length=64, blank=True, default="")
+    verification_detail = models.CharField(max_length=300, blank=True, default="")
+    verification_session_id = models.CharField(max_length=120, blank=True, default="")
+    verification_updated_at = models.DateTimeField(null=True, blank=True)
+    verification_attempts = models.PositiveIntegerField(default=0)
     # One-time onboarding reward: set when the member finishes the intro flow so
     # the grant (SpinAZ + Energy) can never be claimed twice.
     onboarded = models.BooleanField(default=False)
