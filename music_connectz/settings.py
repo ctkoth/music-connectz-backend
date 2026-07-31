@@ -55,6 +55,9 @@ INSTALLED_APPS = [
     "apps.lessonz",
     "apps.omviardz",
     "apps.bodiez",
+    "apps.battlez",
+    "apps.collabz",
+    "apps.tabz",
 ]
 
 MIDDLEWARE = [
