@@ -3,12 +3,53 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.economy import searchfilters
 from apps.economy.models import Post
+from apps.economy.personaz import (PERSONAZ, normalize_persona_key,
+                                   skill_key_for)
 
 from .models import (KIND_CHOICES, ROLE_COLLABORATOR, ROLE_INVITED, ROLE_OWNER,
                      STATUS_CHOICES, STATUS_OPEN, CollabMember, CollabProject)
 
 ICONS = {"original": None, "cover": "🫴🏼", "remix": "🔄"}
+
+
+def _clean_skills(raw, limit=30):
+    """Canonical skill keys from anything the client sends, across every persona.
+
+    Resolves decorated labels the same way persona keys do, because a picker
+    sends back what it displayed — "Acoustic Guitar 🎸", not "Acoustic Guitar".
+    """
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return []
+    out = []
+    for value in raw:
+        for persona_key in PERSONAZ:
+            # skill_key_for resolves a key OR a stored label, which is what a
+            # picker sends back — "Acoustic Guitar 🎸", not "Acoustic Guitar".
+            found = skill_key_for(persona_key, value)
+            if found:
+                if found not in out:
+                    out.append(found)
+                break
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _unknown_skills(raw):
+    """What the client sent that isn't a skill — reported rather than dropped."""
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return []
+    unknown = []
+    for value in raw:
+        if not any(skill_key_for(k, value) for k in PERSONAZ):
+            unknown.append(str(value)[:60])
+    return unknown
 
 
 def _member_dict(m):
@@ -28,6 +69,7 @@ def _project_dict(p, full=False):
         "split_total": p.split_total(),
         "updated_at": p.updated_at,
     }
+    out["skills"] = p.skills
     if full:
         out["members"] = [_member_dict(m) for m in p.members.select_related("user")]
         out["split_warning"] = p.split_error()
@@ -46,6 +88,21 @@ class CatalogView(APIView):
                       for k, v in KIND_CHOICES],
             "statuses": [{"key": k, "label": v} for k, v in STATUS_CHOICES],
             "roles": ["owner", "collaborator", "invited"],
+            # The picker's options. Skills are REQUIRED on a post, so the form
+            # needs the real vocabulary rather than a free-text box — which is
+            # what "Skill (optional)" was, and nothing could filter on it.
+            "skills_required": True,
+            "personas": [
+                {"key": key, "label": f"{p['emoji']} {p['name']}",
+                 "categories": [
+                     {"name": cat,
+                      "skills": [{"key": sk, "label": label}
+                                 for sk, label in skills.items()]}
+                     for cat, skills in p["categories"].items()
+                 ]}
+                for key, p in PERSONAZ.items()
+            ],
+            "ranges": searchfilters.catalog(),
         })
 
 
@@ -79,8 +136,11 @@ class ProjectsView(APIView):
                 return Response({"detail": "No such source post."},
                                 status=status.HTTP_400_BAD_REQUEST)
 
+        # Skills first — a collab nobody can be matched to is not a collab.
+        skills = _clean_skills(d.get("skills"))
         p = CollabProject(
             owner=request.user, title=title[:160], kind=kind,
+            skills=skills,
             brief=str(d.get("brief", ""))[:2000],
             source_post=source,
             source_credit=str(d.get("source_credit", ""))[:300],
@@ -88,9 +148,10 @@ class ProjectsView(APIView):
             genres=[str(g)[:60] for g in (d.get("genres") or [])][:20],
             status=STATUS_OPEN,
         )
-        problem = p.source_error()
+        problem = p.skills_error() or p.source_error()
         if problem:
-            return Response({"detail": problem},
+            return Response({"detail": problem,
+                             "unrecognised_skills": _unknown_skills(d.get("skills"))},
                             status=status.HTTP_400_BAD_REQUEST)
         p.save()
         CollabMember.objects.create(project=p, user=request.user, role=ROLE_OWNER,
@@ -127,9 +188,10 @@ class ProjectDetailView(APIView):
                 return Response({"detail": "That's not your post."},
                                 status=status.HTTP_400_BAD_REQUEST)
             p.result_post = result
-        problem = p.source_error()
+        problem = p.skills_error() or p.source_error()
         if problem:
-            return Response({"detail": problem},
+            return Response({"detail": problem,
+                             "unrecognised_skills": _unknown_skills(d.get("skills"))},
                             status=status.HTTP_400_BAD_REQUEST)
         p.save()
         return Response({"project": _project_dict(p, full=True)})
@@ -224,3 +286,63 @@ class MembersView(APIView):
         member.delete()
         return Response({"split_total": p.split_total(),
                          "split_warning": p.split_error()})
+
+
+class MatchView(APIView):
+    """GET members who fit a collab, gated by the five ranges.
+
+        ?skills=Mixing,Trap&age=18-30&distance_max=50&skill_rating_min=7
+
+    The ranges are exclusive gates — outside means excluded, not ranked lower.
+    Members with no value for a gated range come back under `unknown` instead of
+    being dropped, so a new member with no ratings yet is still reachable.
+
+    Used by CollabZ, and the same shape serves VenueZ, BattleZ and the Social
+    ConnectZ search, which is why the gates live in economy/searchfilters.py
+    rather than here.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.contrib.auth import get_user_model
+
+        from apps.economy.models import profile_for
+
+        wanted = _clean_skills(
+            [s for s in (request.query_params.get("skills") or "").split(",") if s.strip()])
+        ranges = searchfilters.parse(request.query_params)
+
+        candidates = []
+        for user in get_user_model().objects.exclude(pk=request.user.pk)[:2000]:
+            if wanted:
+                have = set()
+                for entry in (profile_for(user).personas or []):
+                    key = entry.get("key") if isinstance(entry, dict) else entry
+                    canonical = normalize_persona_key(key)
+                    if not canonical:
+                        continue
+                    for sk in (entry.get("skills") or []) if isinstance(entry, dict) else []:
+                        name = sk.get("name") if isinstance(sk, dict) else sk
+                        found = skill_key_for(canonical, name)
+                        if found:
+                            have.add(found)
+                if not set(wanted) <= have:
+                    continue
+            candidates.append(user)
+
+        split = searchfilters.apply(candidates, ranges, viewer=request.user)
+
+        def row(user):
+            _, detail = searchfilters.evaluate(user, ranges, viewer=request.user)
+            return {"username": user.username, "gates": detail}
+
+        return Response({
+            "skills": wanted,
+            "ranges": {k: r.payload() for k, r in ranges.items()},
+            "matches": [row(u) for u in split["matches"][:100]],
+            # Separate and labelled: "outside your range" and "we don't know yet"
+            # are different answers, and only one is worth acting on.
+            "unknown": [row(u) for u in split["unknown"][:25]],
+            "excluded_count": len(split["excluded"]),
+        })

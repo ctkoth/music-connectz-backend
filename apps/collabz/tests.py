@@ -14,6 +14,23 @@ def member(name):
     return User.objects.create_user(username=name, password="collabz-pass-1")
 
 
+class SkillsRequiredTests(TestCase):
+    """A collab has to say what it needs. "Skill (optional)" made every post
+    unmatchable — nobody can be paired with "help me make a song"."""
+
+    def setUp(self):
+        self.u = member("skill_owner")
+
+    def test_no_skills_is_an_error(self):
+        p = CollabProject(owner=self.u, title="Vague", kind="original")
+        self.assertIn("at least one skill", p.skills_error())
+
+    def test_one_skill_is_enough(self):
+        p = CollabProject(owner=self.u, title="Clear", kind="original",
+                          skills=["Mixing"])
+        self.assertIsNone(p.skills_error())
+
+
 class SourceRuleTests(TestCase):
     def setUp(self):
         self.u = member("owner")
@@ -83,7 +100,7 @@ class ApiTests(TestCase):
 
     def test_creating_a_project_makes_you_its_owner(self):
         r = self.client.post(reverse("collabz-projects"),
-                             {"title": "Track one", "kind": "original"},
+                             {"title": "Track one", "kind": "original", "skills": ["Mixing"]},
                              format="json")
         self.assertEqual(r.status_code, 201)
         members = r.json()["project"]["members"]
@@ -92,7 +109,7 @@ class ApiTests(TestCase):
 
     def test_cover_without_source_is_rejected_by_the_api(self):
         r = self.client.post(reverse("collabz-projects"),
-                             {"title": "Bad cover", "kind": "cover"},
+                             {"title": "Bad cover", "kind": "cover", "skills": ["Mixing"]},
                              format="json")
         self.assertEqual(r.status_code, 400)
         self.assertIn("needs a source", r.json()["detail"])
@@ -102,11 +119,12 @@ class ApiTests(TestCase):
                                      title="The original")
         r = self.client.post(reverse("collabz-projects"),
                              {"title": "Good cover", "kind": "cover",
+                              "skills": ["Mixing"],
                               "source_post_id": source.id}, format="json")
         self.assertEqual(r.status_code, 201)
 
     def test_only_the_owner_invites_other_people(self):
-        r = self.client.post(reverse("collabz-projects"), {"title": "Mine"},
+        r = self.client.post(reverse("collabz-projects"), {"title": "Mine", "skills": ["Mixing"]},
                              format="json")
         pid = r.json()["project"]["id"]
 
@@ -117,7 +135,7 @@ class ApiTests(TestCase):
         self.assertEqual(r.status_code, 403)
 
     def test_anyone_can_add_themselves_and_the_split_warning_surfaces(self):
-        r = self.client.post(reverse("collabz-projects"), {"title": "Open"},
+        r = self.client.post(reverse("collabz-projects"), {"title": "Open", "skills": ["Mixing"]},
                              format="json")
         pid = r.json()["project"]["id"]
 
@@ -131,14 +149,14 @@ class ApiTests(TestCase):
         self.assertIn("30%", r.json()["split_warning"])
 
     def test_the_owner_cannot_be_removed(self):
-        r = self.client.post(reverse("collabz-projects"), {"title": "Locked"},
+        r = self.client.post(reverse("collabz-projects"), {"title": "Locked", "skills": ["Mixing"]},
                              format="json")
         pid = r.json()["project"]["id"]
         r = self.client.delete(reverse("collabz-members", args=[pid]))
         self.assertEqual(r.status_code, 409)
 
     def test_you_cannot_claim_someone_elses_post_as_the_result(self):
-        r = self.client.post(reverse("collabz-projects"), {"title": "Result"},
+        r = self.client.post(reverse("collabz-projects"), {"title": "Result", "skills": ["Mixing"]},
                              format="json")
         pid = r.json()["project"]["id"]
         theirs = Post.objects.create(author=member("stranger"), title="Not yours")

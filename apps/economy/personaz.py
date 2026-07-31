@@ -643,6 +643,11 @@ PERSONAZ = {
 # five personas, so stored profiles contain all of these spellings. Normalising
 # rather than rejecting means nobody loses a persona they already picked.
 PERSONA_ALIASES = {
+    # On the live CollabZ post form and absent from the catalog, so it resolved
+    # to None. A director on a music platform is directing video; mapping it to
+    # videographer beats dropping the member's persona entirely.
+    "director": "videographer",
+    "video director": "videographer",
     "beat-producer": "producer",
     "beat producer": "producer",
     "beatproducer": "producer",

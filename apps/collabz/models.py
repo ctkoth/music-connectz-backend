@@ -70,8 +70,13 @@ class CollabProject(models.Model):
     result_post = models.ForeignKey(Post, on_delete=models.SET_NULL, null=True,
                                     blank=True, related_name="collab_results")
 
-    # Personas or skills being looked for, so the project shows up in searches.
+    # Personas being looked for, so the project shows up in searches.
     seeking = models.JSONField(default=list, blank=True)
+    # The SKILLS the collab needs — required, not optional. A collab post with
+    # no skill is unsearchable: nobody can be matched to "help me make a song".
+    # Validated against the PersonaZ catalog so it's the 2.2 vocabulary rather
+    # than free text nobody can filter on.
+    skills = models.JSONField(default=list, blank=True)
     genres = models.JSONField(default=list, blank=True)
 
     # The escrow, when there's money involved. Optional — plenty of collabs are
@@ -87,6 +92,13 @@ class CollabProject(models.Model):
 
     def __str__(self):
         return f"CollabProject<{self.id}> {self.kind} {self.title}"
+
+    def skills_error(self):
+        """A collab has to say what it needs. Returns a message or None."""
+        if not self.skills:
+            return ("Pick at least one skill — a collab with no skill can't be "
+                    "matched to anyone.")
+        return None
 
     def source_error(self):
         """A cover of nothing is not a cover. Returns a message or None."""

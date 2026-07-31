@@ -592,6 +592,10 @@ class Profile(models.Model):
     links = models.JSONField(default=list, blank=True)  # [{label, url}] public links
     # Location (opt-in) for in-person CollabZ / VenueZ distance filtering.
     share_location = models.BooleanField(default=False)
+    # What this member charges for their skill, in cents. Zero is a real answer
+    # — plenty of people collaborate for free — so the search price gate treats
+    # it as a value rather than as missing data.
+    skill_price_cents = models.PositiveIntegerField(default=0)
     lat = models.FloatField(null=True, blank=True)
     lng = models.FloatField(null=True, blank=True)
     # Declared external-account followers (sum across connected socials) — feeds
