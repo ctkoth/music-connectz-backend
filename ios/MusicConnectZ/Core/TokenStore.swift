@@ -12,14 +12,16 @@ struct TokenStore {
     private static let accessKey = "access"
     private static let refreshKey = "refresh"
 
+    // No `nonmutating` on these setters: static members are already nonmutating,
+    // and saying so is a compile error rather than a redundancy.
     static var access: String? {
         get { read(accessKey) }
-        nonmutating set { write(accessKey, newValue) }
+        set { write(accessKey, newValue) }
     }
 
     static var refresh: String? {
         get { read(refreshKey) }
-        nonmutating set { write(refreshKey, newValue) }
+        set { write(refreshKey, newValue) }
     }
 
     static var isSignedIn: Bool { access?.isEmpty == false }
