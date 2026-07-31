@@ -711,10 +711,22 @@ def _squash(value):
     return " ".join(str(value or "").split()).lower()
 
 
-# Everything that isn't a letter, digit, space, hyphen, underscore or ampersand.
-# Emoji, variation selectors (U+FE0F), zero-width joiners and skin-tone
-# modifiers all fall in here.
-_MARKS = re.compile(r"[^\w\s&-]", re.UNICODE)
+def _is_decoration(ch):
+    """True for emoji and the invisible bits that travel with them.
+
+    The rule is "non-ASCII and not a letter or digit". Two earlier attempts got
+    this wrong in opposite directions:
+
+    * `[^\\w\\s&-]` also dropped `#` and `+`, so "C#🎯" and "C++⚙️" both
+      collapsed to "C" and a developer who picked C# resolved to C. A false
+      match is worse than the miss it was fixing — a miss loses one member's
+      skill, a false match silently rewrites it to a different one.
+    * Unicode category `So/Sk/Cf/Mn` missed emoji that are classified
+      elsewhere: 〰️ (U+3030) is category Po, and it appears in a real label.
+
+    Non-ASCII letters are kept, because they are content: Cajón, Fruity Möbius.
+    """
+    return ord(ch) > 127 and not ch.isalnum()
 
 # A keycap emoji is a plain digit plus a combining mark: "1⃣" is "1" + U+20E3.
 # Stripping only the mark leaves the digit welded to the name — 2.2's
@@ -732,8 +744,12 @@ def _demoji(value):
     of those have a space after the emoji and some don't, so matching on the
     exact label only ever worked by coincidence. Strip the decoration and match
     on the words, which is the part that actually carries the meaning.
+
+    Punctuation that carries meaning survives: `#` in C#, `+` in C++, `&` in
+    A&R, `/` in UI/UX. Only emoji-class codepoints go.
     """
-    return _squash(_MARKS.sub(" ", _KEYCAP.sub(" ", str(value or ""))))
+    text = _KEYCAP.sub(" ", str(value or ""))
+    return _squash("".join(" " if _is_decoration(ch) else ch for ch in text))
 
 
 def normalize_persona_key(value):
@@ -784,8 +800,19 @@ def normalize_persona_key(value):
     return _NO_SEPARATOR.get(_strip_separators(squashed))
 
 
+_SEPARATORS = re.compile(r"[\s\-_&.]+", re.UNICODE)
+
+
 def _strip_separators(value):
-    return _squash(value).replace(" ", "").replace("-", "").replace("_", "")
+    """Reduce to letters and digits, for the last-resort match.
+
+    `&` counts as a separator here so "A&R Scout" and the key "ar-scout" both
+    reach "arscout". Without it, "🔎A&R Scout" — the label with the emoji
+    welded on, which is how 2.2 writes them — resolved to nothing while the
+    spaced form worked, purely because the spaced one happened to hit an
+    exact-label comparison further down.
+    """
+    return _SEPARATORS.sub("", _squash(value))
 
 
 # {separator-free spelling: canonical key} — built once, covers both the catalog

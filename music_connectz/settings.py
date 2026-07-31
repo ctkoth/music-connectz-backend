@@ -46,6 +46,10 @@ INSTALLED_APPS = [
     # third-party
     "corsheaders",
     "rest_framework",
+    # Stores the refresh tokens invalidated by rotation, so a used or revoked
+    # one can be rejected. Without it ROTATE_REFRESH_TOKENS issues new tokens
+    # but the old ones keep working, which is not rotation.
+    "rest_framework_simplejwt.token_blacklist",
     # local — skillz first so its tables migrate before the apps that use it
     "apps.skillz",
     "apps.accounts",
@@ -232,6 +236,12 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=14),
     "AUTH_HEADER_TYPES": ("Bearer",),
+    # Each refresh returns a NEW refresh token and blacklists the one used.
+    # Without this a stolen refresh token was good for the full fourteen days
+    # and a password change did nothing to it — the one action somebody takes
+    # when they think they've been compromised had no effect at all.
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
 }
 
 # CORS / CSRF — apps.accounts.ready() also sanitizes these at startup so a

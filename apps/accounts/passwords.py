@@ -28,7 +28,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .serializers import issue_tokens
+from .serializers import issue_tokens, revoke_all_refresh_tokens
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -167,6 +167,13 @@ class ResetPasswordView(APIView):
         # so this link — and any older one — stops working from here.
         user.set_password(new_password)
         user.save(update_fields=["password"])
+
+        # And so does every session already signed in. A reset is what somebody
+        # does when they think their account is taken; leaving the attacker's
+        # refresh token alive for the rest of its fourteen days would make the
+        # reset theatre. The new pair below is issued after the revocation, so
+        # the person resetting stays signed in and everyone else is kicked out.
+        revoke_all_refresh_tokens(user)
 
         from .serializers import PublicUserSerializer
 

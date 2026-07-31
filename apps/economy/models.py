@@ -79,7 +79,18 @@ class Wallet(models.Model):
     # separate and persists.
     prompt_day = models.CharField(max_length=10, blank=True, default="")
     prompts_used_today = models.PositiveIntegerField(default=0)
+    # Set when a card charge that funded this wallet is disputed. Spending is
+    # blocked while it stands; the balance is NOT zeroed, because part of it may
+    # be money the member genuinely deposited and a chargeback is a claim, not
+    # yet a finding. `money_cents` is unsigned, so a clawback could not be
+    # represented as a negative balance even if we wanted to.
+    frozen_reason = models.CharField(max_length=200, blank=True, default="")
+    frozen_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def frozen(self):
+        return bool(self.frozen_reason)
 
     @property
     def money(self):
@@ -170,7 +181,11 @@ class PaymentIntent(models.Model):
 
     STATUS_PENDING = "pending"
     STATUS_COMPLETED = "completed"
-    STATUS_CHOICES = [(STATUS_PENDING, "Pending"), (STATUS_COMPLETED, "Completed")]
+    # The cardholder charged this back. Terminal for our purposes: Stripe has
+    # already pulled the money, whatever the dispute's eventual outcome.
+    STATUS_DISPUTED = "disputed"
+    STATUS_CHOICES = [(STATUS_PENDING, "Pending"), (STATUS_COMPLETED, "Completed"),
+                      (STATUS_DISPUTED, "Disputed")]
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="payment_intents"
@@ -336,12 +351,39 @@ def credit_funds(user, amount_cents, note="Add funds"):
     return dev, net
 
 
+class WalletFrozen(Exception):
+    """Raised when a wallet under a chargeback tries to spend.
+
+    A dispute means the card issuer has already taken the money back. Letting
+    the balance keep moving pays other members out of the platform's float on
+    the strength of a payment that was reversed — and once it has reached a
+    third party's wallet there is nothing left to claw back.
+    """
+
+    def __init__(self, wallet):
+        self.wallet = wallet
+        super().__init__(wallet.frozen_reason or "This wallet is on hold.")
+
+
+def check_spendable(user):
+    """Raise WalletFrozen if this member may not spend. Returns the wallet."""
+    w = wallet_for(user)
+    if w.frozen:
+        raise WalletFrozen(w)
+    return w
+
+
 def pay_between(payer, payee, amount_cents, note=""):
     """Move money payer -> payee, applying the payer's developer tax. The payee
     receives the net; the platform keeps the tax. Caller must ensure the payer
-    has the balance and wrap in a transaction. Returns (dev_cents, net_cents)."""
+    has the balance and wrap in a transaction. Returns (dev_cents, net_cents).
+
+    Refuses outright if the payer's wallet is frozen. This is the single choke
+    point every member-to-member payment goes through, so the check lives here
+    rather than in each of the callers that would otherwise have to remember.
+    """
     m = membership_for(payer)
-    pw = wallet_for(payer)
+    pw = check_spendable(payer)
     rw = wallet_for(payee)
     dev, net = split_cents(amount_cents, m.dev_tax_rate)
     pw.money_cents -= amount_cents

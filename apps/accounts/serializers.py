@@ -14,6 +14,29 @@ def issue_tokens(user):
     return {"access": str(refresh.access_token), "refresh": str(refresh)}
 
 
+def revoke_all_refresh_tokens(user):
+    """Blacklist every outstanding refresh token for this user.
+
+    Called on password reset. Access tokens are stateless and can't be recalled,
+    so an attacker keeps theirs for up to the access lifetime (60 minutes) — but
+    they lose the ability to mint new ones, which is what turns a stolen token
+    from two weeks of access into one hour.
+
+    Returns the number revoked. Silently does nothing if the blacklist app isn't
+    installed, so this can't break a deployment that hasn't migrated yet.
+    """
+    try:
+        from rest_framework_simplejwt.token_blacklist.models import (
+            BlacklistedToken, OutstandingToken)
+    except ImportError:                                   # pragma: no cover
+        return 0
+    revoked = 0
+    for token in OutstandingToken.objects.filter(user=user):
+        _, created = BlacklistedToken.objects.get_or_create(token=token)
+        revoked += 1 if created else 0
+    return revoked
+
+
 class PublicUserSerializer(serializers.ModelSerializer):
     phone = serializers.CharField(source="profile.phone", read_only=True, default="")
     avatar_url = serializers.CharField(

@@ -7,6 +7,8 @@ enforced server-side) and is made idempotent by the unique PaymentIntent
 provider_ref — a replayed Stripe webhook or a double PayPal capture can never
 credit a wallet twice.
 """
+import logging
+
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -26,6 +28,8 @@ from .serializers import WalletSerializer
 from .models import wallet_for
 from .catalog import (FOUNDING_PLANS, FOUNDING_TIER, PREMIUM_PLANS,
                        STATZ_PLANS)
+
+logger = logging.getLogger(__name__)
 
 MIN_CENTS = 100          # $1 minimum
 MAX_CENTS = 1_000_000    # $10,000 cap per funding
@@ -65,6 +69,109 @@ def _downgrade_by_customer(cust):
     if m and m.tier != "free":
         m.tier = "free"
         m.save(update_fields=["tier", "updated_at"])
+
+
+# Stripe subscription statuses that mean "this member is paid up right now".
+# `past_due` is deliberately not here — Stripe is still retrying, and the tier
+# stays until `invoice.payment_failed` says the retries are done.
+_LIVE_SUB_STATUSES = {"active", "trialing"}
+_DEAD_SUB_STATUSES = {"canceled", "unpaid", "incomplete_expired"}
+
+
+def _tier_for_price(sub_obj):
+    """Which tier this subscription's price maps to, or None if we can't tell."""
+    from .catalog import PREMIUM_PLANS, STATZ_PLANS
+
+    kinds = set()
+    for item in (sub_obj.get("items") or {}).get("data") or []:
+        meta = (item.get("price") or {}).get("metadata") or {}
+        if meta.get("kind"):
+            kinds.add(meta["kind"])
+    meta = sub_obj.get("metadata") or {}
+    if meta.get("kind"):
+        kinds.add(meta["kind"])
+    if any(k in {p["kind"] for p in STATZ_PLANS.values()} for k in kinds):
+        return "statz"
+    if any(k in {p["kind"] for p in PREMIUM_PLANS.values()} for k in kinds):
+        return "premium"
+    return None
+
+
+def _apply_subscription_update(sub_obj):
+    """Follow a subscription's status and plan through `customer.subscription.updated`.
+
+    Stripe sends this for plan switches, for recovery from `past_due`, for
+    trial conversion and for cancel-at-period-end. None of it reached us, so a
+    member who fixed their card stayed downgraded and a plan switch left the
+    old tier in place against the new price.
+    """
+    from .models import AutoTopUp, Membership
+
+    sub_id = sub_obj.get("id")
+    status_ = sub_obj.get("status") or ""
+
+    # An auto-top-up subscription is not a tier. Only its liveness matters.
+    ato = AutoTopUp.objects.filter(stripe_subscription_id=sub_id).first()
+    if ato:
+        live = status_ in _LIVE_SUB_STATUSES
+        if ato.active != live:
+            ato.active = live
+            ato.save(update_fields=["active"])
+        return
+
+    m = Membership.objects.filter(stripe_customer_id=sub_obj.get("customer"),
+                                  lifetime=False).first()
+    if not m:
+        return
+    if status_ in _DEAD_SUB_STATUSES:
+        if m.tier != "free":
+            m.tier = "free"
+            m.save(update_fields=["tier", "updated_at"])
+        return
+    if status_ not in _LIVE_SUB_STATUSES:
+        # past_due and friends: leave the tier alone. Stripe is still trying,
+        # and downgrading someone mid-retry punishes an expired card.
+        return
+    tier = _tier_for_price(sub_obj)
+    if tier and m.tier != tier:
+        m.tier = tier
+        m.save(update_fields=["tier", "updated_at"])
+
+
+def _freeze_for_dispute(dispute):
+    """A charge was charged back. Freeze the wallet it funded.
+
+    The balance is not zeroed. Part of it may be money the member genuinely
+    deposited, a dispute is a claim rather than a finding, and `money_cents` is
+    unsigned so a clawback could not be represented anyway. Freezing stops the
+    bleeding — which is the part that cannot be undone later — and leaves the
+    accounting decision to a human.
+    """
+    from django.utils import timezone
+
+    charge = dispute.get("charge")
+    intent = dispute.get("payment_intent")
+    refs = [r for r in (intent, charge) if r]
+    if not refs:
+        return
+    pi = PaymentIntent.objects.filter(provider_ref__in=refs).first()
+    if not pi:
+        # A dispute on a charge we have no record of — a subscription invoice,
+        # say. Nothing to freeze, but it must not pass silently.
+        logger.warning("stripe: dispute %s for unknown charge %s/%s",
+                       dispute.get("id"), intent, charge)
+        return
+    pi.status = PaymentIntent.STATUS_DISPUTED
+    pi.save(update_fields=["status"])
+    w = wallet_for(pi.user)
+    if not w.frozen:
+        w.frozen_reason = (
+            f"A card payment of ${pi.amount_cents / 100:.2f} was disputed. "
+            f"Spending is on hold until it's resolved.")
+        w.frozen_at = timezone.now()
+        w.save(update_fields=["frozen_reason", "frozen_at", "updated_at"])
+    logger.warning("stripe: dispute %s froze wallet for user %s (%sc)",
+                   dispute.get("id"), pi.user_id, pi.amount_cents)
 
 
 def _complete_intent(intent):
@@ -478,6 +585,18 @@ class StripeWebhookView(APIView):
             obj = event["data"]["object"] or {}
             if obj.get("next_payment_attempt") is None:
                 _downgrade_by_customer(obj.get("customer"))
+        elif etype == "customer.subscription.updated":
+            # Plan changes and status transitions never reached us. A member who
+            # fixed their card stayed downgraded until they emailed support, and
+            # somebody switching Premium <-> StatZ kept the old tier while
+            # paying the new price.
+            _apply_subscription_update(event["data"]["object"] or {})
+        elif etype == "charge.dispute.created":
+            # A chargeback. Stripe has already pulled the money; the wallet
+            # freezes now rather than after the dispute resolves, because by
+            # then the balance can have been spent into other members' wallets
+            # and there is nothing left to reverse.
+            _freeze_for_dispute(event["data"]["object"] or {})
         return Response({"received": True})
 
 
