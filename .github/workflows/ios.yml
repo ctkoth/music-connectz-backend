@@ -36,8 +36,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+      # Pin to the NEWEST Xcode on the runner, not a fixed version. Homebrew
+      # installs the current XcodeGen, which writes project format 77; an older
+      # pinned Xcode then refuses to open its own generated project with
+      # "a future Xcode project file format". Following the runner keeps the
+      # generator and the compiler on the same side of that line.
+      - name: Select the newest Xcode on the runner
+        run: |
+          latest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$latest" ]; then sudo xcode-select -s "$latest"; fi
+          xcodebuild -version
 
       # The .xcodeproj is generated, never committed — see ios/project.yml.
       - name: Generate the Xcode project
@@ -47,13 +55,33 @@ jobs:
 
       # Simulator builds are unsigned, which is exactly why this job needs no
       # Apple account. A compile error shows up here, not at upload time.
+      # Ask the runner which simulators it actually has rather than naming one
+      # and hoping. A hardcoded "iPhone 15" breaks the same way the Xcode pin
+      # did, one image bump later.
+      # Ask the runner which simulators it actually has rather than naming one
+      # and hoping. A hardcoded "iPhone 15" breaks the same way the Xcode pin
+      # did, one image bump later. Plain shell on purpose — an inline Python
+      # heredoc inside a YAML block scalar is how this step broke the first time.
+      - name: Pick an available iPhone simulator
+        run: |
+          xcrun simctl list devices available
+          name=$(xcrun simctl list devices available \
+                 | sed -n 's/^[[:space:]]*\(iPhone[^(]*\)(.*/\1/p' \
+                 | sed 's/[[:space:]]*$//' | tail -1)
+          if [ -z "$name" ]; then
+            echo "::error::no iPhone simulator available on this runner"
+            exit 1
+          fi
+          echo "Using simulator: $name"
+          echo "SIM_NAME=$name" >> "$GITHUB_ENV"
+
       - name: Build and test
         run: |
           cd ios
           xcodebuild test \
             -project MusicConnectZ.xcodeproj \
             -scheme MusicConnectZ \
-            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            -destination "platform=iOS Simulator,name=$SIM_NAME,OS=latest" \
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty && exit ${PIPESTATUS[0]}
 
@@ -77,8 +105,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+      # Pin to the NEWEST Xcode on the runner, not a fixed version. Homebrew
+      # installs the current XcodeGen, which writes project format 77; an older
+      # pinned Xcode then refuses to open its own generated project with
+      # "a future Xcode project file format". Following the runner keeps the
+      # generator and the compiler on the same side of that line.
+      - name: Select the newest Xcode on the runner
+        run: |
+          latest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$latest" ]; then sudo xcode-select -s "$latest"; fi
+          xcodebuild -version
 
       - name: Generate the Xcode project
         run: |
@@ -144,8 +180,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+      # Pin to the NEWEST Xcode on the runner, not a fixed version. Homebrew
+      # installs the current XcodeGen, which writes project format 77; an older
+      # pinned Xcode then refuses to open its own generated project with
+      # "a future Xcode project file format". Following the runner keeps the
+      # generator and the compiler on the same side of that line.
+      - name: Select the newest Xcode on the runner
+        run: |
+          latest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$latest" ]; then sudo xcode-select -s "$latest"; fi
+          xcodebuild -version
 
       - name: Generate the Xcode project
         run: |
