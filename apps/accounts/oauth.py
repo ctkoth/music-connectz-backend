@@ -24,13 +24,35 @@ def _env(name):
     return os.environ.get(name, "").strip()
 
 
+def _audiences(*names):
+    """Every accepted `aud` value, from several env vars, each comma-splittable.
+
+    Providers mint a different audience per platform. Collecting them in one
+    place means adding a native client is an env change, not a code change —
+    and an empty result still fails closed, because verifying against nothing
+    would accept anyone's token.
+    """
+    out = []
+    for name in names:
+        for part in _env(name).split(","):
+            part = part.strip()
+            if part and part not in out:
+                out.append(part)
+    return out
+
+
 # ---------------------------------------------------------------- Google ----
 def verify_google(credential: str):
     """Verify a Google ID token (the `credential` from Google Identity Services)."""
     if not credential:
         raise OAuthError("Missing Google credential.")
-    client_id = _env("GOOGLE_OAUTH_CLIENT_ID")
-    if not client_id:
+    # Google issues a SEPARATE OAuth client ID per platform — web, Android and
+    # iOS each have their own, and the `aud` claim carries whichever one signed
+    # the user in. Accepting only the web ID locks every native client out, the
+    # same way Apple's Services-ID-only check locked out native iOS.
+    client_ids = _audiences("GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_ANDROID_CLIENT_ID",
+                            "GOOGLE_OAUTH_IOS_CLIENT_ID")
+    if not client_ids:
         # Fail closed: without our client-ID we cannot verify the token was
         # issued for THIS app, so any valid Google token would be accepted.
         raise OAuthError("Google sign-in is not configured on the server.")
@@ -45,7 +67,7 @@ def verify_google(credential: str):
     if resp.status_code != 200:
         raise OAuthError("Google rejected that sign-in token.")
     data = resp.json()
-    if data.get("aud") != client_id:
+    if data.get("aud") not in client_ids:
         raise OAuthError("Google token audience mismatch.")
     if data.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
         raise OAuthError("Google token issuer mismatch.")
@@ -87,12 +109,24 @@ def exchange_github(code: str, redirect_uri: str = ""):
         )
     except requests.RequestException:
         raise OAuthError("Could not reach GitHub to verify sign-in.")
-    token = token_resp.json().get("access_token")
+    try:
+        # A 502 from GitHub returns an HTML error page, not JSON. Unwrapped,
+        # that raises inside the view and answers 500 — telling the member the
+        # bug is ours when GitHub is the one having a bad day.
+        token = (token_resp.json() or {}).get("access_token")
+    except ValueError:
+        raise OAuthError("GitHub returned an unexpected response. Try again.")
     if not token:
         raise OAuthError("GitHub did not return an access token.")
 
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
-    user = requests.get("https://api.github.com/user", headers=headers, timeout=10).json()
+    try:
+        user = requests.get("https://api.github.com/user", headers=headers,
+                            timeout=10).json()
+    except (requests.RequestException, ValueError):
+        raise OAuthError("Could not load your GitHub profile.")
+    if not isinstance(user, dict):
+        raise OAuthError("GitHub returned an unexpected profile.")
 
     # A malformed/error response would otherwise sail through as uid "None",
     # which every failed sign-in would then share.
@@ -104,9 +138,14 @@ def exchange_github(code: str, redirect_uri: str = ""):
     # to match on.
     email = user.get("email") or ""
     if not email:
-        emails = requests.get(
-            "https://api.github.com/user/emails", headers=headers, timeout=10
-        ).json()
+        try:
+            emails = requests.get(
+                "https://api.github.com/user/emails", headers=headers, timeout=10
+            ).json()
+        except (requests.RequestException, ValueError):
+            # Not fatal — a member with no public address still has a uid, and
+            # uid is what actually identifies them.
+            emails = None
         if isinstance(emails, list):
             primary = next(
                 (e for e in emails if e.get("primary") and e.get("verified")), None
@@ -139,8 +178,7 @@ def verify_apple(id_token: str):
     # with Apple on iOS. Accepting only one locks out the other platform, so we
     # accept both and let PyJWT match either. Still fail closed — an empty list
     # would mean verifying nothing.
-    audiences = [a for a in (_env("APPLE_OAUTH_CLIENT_ID"),
-                             _env("APPLE_OAUTH_BUNDLE_ID")) if a]
+    audiences = _audiences("APPLE_OAUTH_CLIENT_ID", "APPLE_OAUTH_BUNDLE_ID")
     if not audiences:
         # Without our audience we can't confirm the token was minted for THIS app.
         raise OAuthError("Apple sign-in is not configured on the server.")

@@ -68,6 +68,7 @@ class ForgotPasswordView(APIView):
     """POST /api/auth/password/forgot/ — {identifier} -> emails a reset link."""
 
     permission_classes = [AllowAny]
+    throttle_scope = "auth-password"
     authentication_classes = []
 
     def post(self, request):
@@ -131,6 +132,7 @@ class ResetPasswordView(APIView):
     """
 
     permission_classes = [AllowAny]
+    throttle_scope = "auth-password"
     authentication_classes = []
 
     def post(self, request):

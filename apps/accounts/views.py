@@ -121,6 +121,7 @@ def _user_from_oauth(info):
 
 class RegisterView(APIView):
     permission_classes = [AllowAny]
+    throttle_scope = "auth-register"
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -135,6 +136,7 @@ class RegisterView(APIView):
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_scope = "auth-login"
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -258,6 +260,9 @@ class OAuthLoginView(APIView):
     """POST /api/auth/oauth/<provider>/ — verify provider token, return JWT."""
 
     permission_classes = [AllowAny]
+    # Unauthenticated, and every call reaches out to Google/GitHub/Apple —
+    # without a cap this endpoint is a free proxy for hammering them.
+    throttle_scope = "auth-oauth"
 
     def post(self, request, provider):
         data = request.data or {}

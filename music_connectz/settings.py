@@ -200,7 +200,30 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.SessionAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    # Only the scopes named below are throttled — there is no global anon rate,
+    # so public catalogs (tabz, personaz, genrez) stay uncapped. These are the
+    # unauthenticated doors: credential guessing on login/reset, and OAuth,
+    # which makes an outbound call to Google/GitHub/Apple per request and would
+    # otherwise let anyone use this server to hammer them.
+    "DEFAULT_THROTTLE_CLASSES": ("rest_framework.throttling.ScopedRateThrottle",),
+    "DEFAULT_THROTTLE_RATES": {
+        "auth-login": os.environ.get("THROTTLE_AUTH_LOGIN", "30/min"),
+        "auth-oauth": os.environ.get("THROTTLE_AUTH_OAUTH", "30/min"),
+        "auth-register": os.environ.get("THROTTLE_AUTH_REGISTER", "20/hour"),
+        "auth-password": os.environ.get("THROTTLE_AUTH_PASSWORD", "10/hour"),
+    },
 }
+
+# Throttle counters live in the cache and persist across test methods, so a
+# suite that legitimately logs in dozens of times would throttle itself. Turn
+# the rates off under `manage.py test` rather than loosening them in production
+# — and note apps/accounts/test_throttle.py switches them back on to prove the
+# throttling actually works, so this doesn't leave the feature untested.
+TESTING = "test" in sys.argv
+if TESTING:
+    REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
+        scope: None for scope in REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]
+    }
 
 from datetime import timedelta  # noqa: E402
 
