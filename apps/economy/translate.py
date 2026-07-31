@@ -17,6 +17,7 @@ from rest_framework.views import APIView
 from .catalog import ai_cost
 from .models import charge_ai_usage, can_afford_ai, wallet_for
 from .views import platform_owner
+from .upgrade import response as upgrade_response
 
 TRANSLATE_MODEL = "claude-opus-4-8"
 MAX_TEXTS = 60
@@ -65,7 +66,9 @@ class TranslateView(APIView):
         cost = ai_cost("standard")
         if cost and not can_afford_ai(request.user, cost):
             return Response(
-                {"detail": "Not enough balance to translate.", "cost_cents": cost},
+                upgrade_response(request.user, feature="Translate",
+                                 need_cents=cost,
+                                 detail="Not enough balance to translate."),
                 status=status.HTTP_402_PAYMENT_REQUIRED,
             )
 

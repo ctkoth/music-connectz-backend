@@ -60,13 +60,19 @@ def tier_of(user):
 
 
 def _gate(user, tiers, feature):
-    """(ok, response). One place, so the paywall message is always the same shape."""
+    """(ok, response). One place, so the paywall message is always the same shape.
+
+    Named the tier but stopped there — no price, no checkout link, no mention
+    that SpinAZ can pay for it. The shared upgrade payload adds all three, so a
+    blocked member can act without leaving to hunt for a pricing page.
+    """
     if tier_of(user) in tiers:
         return True, None
-    needed = "StatZ" if tiers is STATZ_TIERS else "Premium"
+    needed = "statz" if tiers is STATZ_TIERS else "premium"
+    from apps.economy.upgrade import response as upgrade_response
     return False, Response(
-        {"detail": f"{feature} is a {needed} feature.", "required_tier": needed.lower(),
-         "your_tier": tier_of(user)},
+        upgrade_response(user, feature=feature, required_tier=needed,
+                         detail=f"{feature} is a {needed.title()} feature."),
         status=status.HTTP_402_PAYMENT_REQUIRED,
     )
 

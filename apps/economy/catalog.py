@@ -113,6 +113,17 @@ PREMIUM_PLANS = {
     "month": {"mode": "subscription", "cents": PREMIUM_MONTH_CENTS, "interval": "month", "kind": "premium_sub"},
 }
 
+# StatZ — the top tier — had NO purchase path at all until now. Everything gated
+# to it (the AI coach without spending a prompt, other members' routines, CallZ,
+# automations, SuggestionZ, gym locations) was unreachable by paying money.
+# Priced per the spec: $5/mo or $40/yr on top of Premium.
+STATZ_MONTH_CENTS = 500
+STATZ_YEAR_CENTS = 4000
+STATZ_PLANS = {
+    "year": {"mode": "subscription", "cents": STATZ_YEAR_CENTS, "interval": "year", "kind": "statz_sub"},
+    "month": {"mode": "subscription", "cents": STATZ_MONTH_CENTS, "interval": "month", "kind": "statz_sub"},
+}
+
 
 def ai_cost(model):
     return AI_MODEL_COSTS.get(model, AI_MODEL_COSTS["corey-gpt"])

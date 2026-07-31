@@ -40,6 +40,13 @@ def _bill(user, note):
     return cost
 
 
+def _upgrade(user, cost):
+    """Same door on both AI endpoints — a dead-end 402 is a wasted upgrade."""
+    from .upgrade import response as upgrade_response
+    return upgrade_response(user, feature="AI", need_cents=cost,
+                            detail="Not enough PromptZ / balance.")
+
+
 class GeminiImageView(APIView):
     """POST { prompt } → a generated image as a data URI. Synchronous."""
 
@@ -55,7 +62,7 @@ class GeminiImageView(APIView):
                             status=status.HTTP_503_SERVICE_UNAVAILABLE)
         cost = ai_cost("standard")
         if cost and not can_afford_ai(request.user, cost):
-            return Response({"detail": "Not enough PromptZ / balance.", "cost_cents": cost}, status=status.HTTP_402_PAYMENT_REQUIRED)
+            return Response(_upgrade(request.user, cost), status=status.HTTP_402_PAYMENT_REQUIRED)
 
         model = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image-preview")
         # Optional reference image (a data URL) — the output is generated to
@@ -106,7 +113,7 @@ class GeminiVideoView(APIView):
                             status=status.HTTP_503_SERVICE_UNAVAILABLE)
         cost = ai_cost("standard")
         if cost and not can_afford_ai(request.user, cost):
-            return Response({"detail": "Not enough PromptZ / balance.", "cost_cents": cost}, status=status.HTTP_402_PAYMENT_REQUIRED)
+            return Response(_upgrade(request.user, cost), status=status.HTTP_402_PAYMENT_REQUIRED)
 
         model = os.environ.get("GEMINI_VIDEO_MODEL", "veo-3.0-generate-preview")
         try:

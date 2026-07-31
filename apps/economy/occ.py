@@ -134,8 +134,10 @@ class OccChatView(APIView):
         # check and the charge below have to agree, or a free member with three
         # free prompts and no balance gets turned away from a free run.
         if cost and not can_afford_ai(request.user, cost, count_daily=True):
+            from .upgrade import response as upgrade_response
             return Response(
-                {"detail": "Not enough balance for this model.", "cost_cents": cost},
+                upgrade_response(request.user, feature="OCC", need_cents=cost,
+                                 detail="Not enough balance for this model."),
                 status=status.HTTP_402_PAYMENT_REQUIRED,
             )
 
