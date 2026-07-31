@@ -182,20 +182,28 @@ def normalize_genres_of_kind(values, kind, limit=12):
     return [g for g in normalize_genres(values, limit=limit) if kind_of(g) == kind]
 
 
-def catalog_payload(kind=None):
+def catalog_payload(kind=None, since=None):
     """The whole genre list, 2.2's fifteen first and flagged as such.
 
     ``kind`` narrows it to one vocabulary — MusicZ surfaces want `music`, the
     video surfaces (ReelZ / EpisodeZ / MovieZ) want `screen`.
+
+    ``since="2.2"`` serves only the fifteen the 2.2 build shipped, in the order
+    it rendered them.
     """
     names = GENRES
     if kind == KIND_MUSIC:
         names = MUSIC_GENRES
     elif kind == KIND_SCREEN:
         names = SCREEN_GENRES
+    if str(since or "").strip() == "2.2":
+        # 2.2 had no screen genres at all, so a `kind=screen&since=2.2` request
+        # correctly comes back empty rather than inventing history.
+        names = [g for g in V22_GENRES if g in names]
     return {
         "genres": [genre_payload(g) for g in names],
         "kind": kind or "all",
+        "since": since or "all",
         "kinds": {
             KIND_MUSIC: len(MUSIC_GENRES),
             KIND_SCREEN: len(SCREEN_GENRES),

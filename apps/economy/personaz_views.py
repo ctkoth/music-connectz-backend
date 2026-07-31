@@ -19,8 +19,12 @@ from .personaz import (PERSONAZ, catalog_payload, is_any_skill, label_for,
 class PersonaZView(APIView):
     permission_classes = [AllowAny]
 
-    def get(self, _request):
-        return Response(catalog_payload())
+    def get(self, request):
+        # ?since=2.2 serves exactly the 2.2 build — five personas, 131 skills,
+        # nothing added afterwards. Filtered from the one catalog rather than a
+        # second copy, so the two can never disagree about a label.
+        since = (request.query_params.get("since") or "").strip()
+        return Response(catalog_payload(since=since or None))
 
 
 class PersonaZDetailView(APIView):
@@ -75,4 +79,7 @@ class GenreZView(APIView):
         from .genrez import catalog_payload as genre_catalog
 
         kind = (request.query_params.get("kind") or "").strip().lower()
-        return Response(genre_catalog(kind if kind in (KIND_MUSIC, KIND_SCREEN) else None))
+        since = (request.query_params.get("since") or "").strip()
+        return Response(genre_catalog(
+            kind if kind in (KIND_MUSIC, KIND_SCREEN) else None,
+            since=since or None))

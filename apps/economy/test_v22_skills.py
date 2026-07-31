@@ -318,3 +318,72 @@ class DawZSuiteTests(SimpleTestCase):
             with self.subTest(daw=key):
                 self.assertIn(key, daws)
         self.assertEqual(len(daws), len(v22_daws) + len(self.DAWZ))
+
+
+class V22OnlyViewTests(SimpleTestCase):
+    """`?since=2.2` serves the original build and nothing else.
+
+    Filtered from the single catalog rather than stored twice, so the 2.2 view
+    and the full view can never disagree about a label.
+    """
+
+    def test_it_serves_exactly_the_2_2_skill_count(self):
+        from .personaz import V22_SKILL_COUNT, catalog_payload
+        body = catalog_payload(since="2.2")
+        total = sum(len(c["skills"]) for p in body["personas"] for c in p["categories"])
+        self.assertEqual(total, V22_SKILL_COUNT)
+        self.assertEqual(V22_SKILL_COUNT, 131)
+
+    def test_it_serves_only_the_five_2_2_personas(self):
+        from .personaz import catalog_payload
+        keys = [p["key"] for p in catalog_payload(since="2.2")["personas"]]
+        self.assertEqual(sorted(keys), ["artist", "designer", "mix-engineer",
+                                        "producer", "videographer"])
+
+    def test_nothing_added_afterwards_leaks_in(self):
+        from .personaz import catalog_payload
+        body = catalog_payload(since="2.2")
+        cats, skills = set(), set()
+        for p in body["personas"]:
+            for c in p["categories"]:
+                cats.add(c["name"])
+                skills.update(s["key"] for s in c["skills"])
+        for gone in ("Wind & Woodwind", "Brass Instruments", "Electronic & DJ"):
+            self.assertNotIn(gone, cats)
+        for gone in ("Azrael", "Fruity Möbius", "Full Drum Kit", "Congas"):
+            self.assertNotIn(gone, skills)
+
+    def test_the_labels_match_the_full_catalog_exactly(self):
+        """One catalog, two views — a label must never differ between them."""
+        from .personaz import catalog_payload
+        full = {(p["key"], c["name"], s["key"]): s["label"]
+                for p in catalog_payload()["personas"]
+                for c in p["categories"] for s in c["skills"]}
+        for p in catalog_payload(since="2.2")["personas"]:
+            for c in p["categories"]:
+                for s in c["skills"]:
+                    with self.subTest(skill=s["key"]):
+                        self.assertEqual(s["label"],
+                                         full[(p["key"], c["name"], s["key"])])
+
+    def test_skill_count_reports_the_filtered_total(self):
+        from .personaz import catalog_payload
+        for p in catalog_payload(since="2.2")["personas"]:
+            counted = sum(len(c["skills"]) for c in p["categories"])
+            with self.subTest(persona=p["key"]):
+                self.assertEqual(p["skill_count"], counted)
+
+    def test_the_full_catalog_is_untouched_by_the_filter(self):
+        from .personaz import catalog_payload
+        self.assertEqual(len(catalog_payload()["personas"]), 11)
+
+    def test_genres_filter_the_same_way(self):
+        from .genrez import catalog_payload as g
+        body = g(since="2.2")
+        self.assertEqual(body["count"], 15)
+        self.assertEqual([x["key"] for x in body["genres"]], V22_GENRES_FROM_DOC)
+
+    def test_2_2_had_no_screen_genres_so_that_view_is_empty(self):
+        """Rather than inventing history to fill the list."""
+        from .genrez import catalog_payload as g
+        self.assertEqual(g(kind="screen", since="2.2")["count"], 0)

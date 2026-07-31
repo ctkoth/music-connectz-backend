@@ -917,8 +917,108 @@ def normalize_personas(value):
     return out
 
 
-def catalog_payload():
-    """The whole catalog, in the order the picker should render it."""
+# Exactly what 2.2 shipped, per persona and category — transcribed from
+# `instrumentDatabase` in musicconnectz_code_2.2.docx. 131 skills.
+#
+# This is provenance, not a second catalog: the labels live once, above.
+# Keeping the 2.2 membership here is what lets `catalog_payload(since="2.2")`
+# serve the original build exactly, and lets a test prove every one of them
+# is still present after any addition.
+V22_SKILLS = {
+    "artist": {
+        "String Instruments": (
+            "Any String", "Acoustic Guitar", "Electric Guitar",
+            "Bass Guitar", "Ukulele", "Banjo", "Mandolin", "Violin", "Viola",
+            "Cello", "Double Bass", "Harp",
+        ),
+        "Keyboard Instruments": (
+            "Any Keyboard", "Acoustic Piano", "Digital Piano", "Synthesizer",
+            "Organ", "Harpsichord", "Accordion",
+        ),
+        "Percussion Instruments": (
+            "Any Percussion", "Drums (Snare)", "Drums (Bass)",
+            "Drums (Bongo)", "Cymbals",
+        ),
+        "Rapping": (
+            "Any Rapping", "Alternative Rap", "Boom Bap", "Chopper",
+            "Cloud Rap", "Conscious Rap", "Crunk", "Drill", "Emo Rap",
+            "G-Funk", "Gangsta Rap", "Hardcore Hip Hop", "Jazz Rap",
+            "Mumble Rap", "Old School", "Snap", "Trap",
+        ),
+        "Singing": (
+            "Any Singing", "Bass", "Baritone", "Tenor", "Countertenor",
+            "Contralto", "Alto", "Mezzo-Soprano", "Soprano",
+        ),
+    },
+    "producer": {
+        "Music DAWs": (
+            "Any DAW", "Ableton Live", "Adobe Audition", "Audacity",
+            "Bitwig Studio", "Cakewalk", "Cubase", "FL Studio", "GarageBand",
+            "Logic Pro", "Luna", "Mixcraft", "PreSonus Studio One",
+            "Pro Tools", "Reason", "Reaper", "Studio One", "Waveform Pro",
+        ),
+        "Production Techniques": (
+            "Any Production", "Beat Making", "Sampling", "Sound Design",
+            "Arrangement", "Synthesis",
+        ),
+    },
+    "mix-engineer": {
+        "Music DAWs": (
+            "Any DAW", "Ableton Live", "Adobe Audition", "Audacity",
+            "Bitwig Studio", "Cakewalk", "Cubase", "FL Studio", "GarageBand",
+            "Logic Pro", "Luna", "Mixcraft", "PreSonus Studio One",
+            "Pro Tools", "Reason", "Reaper", "Studio One", "Waveform Pro",
+        ),
+        "Engineering Skills": (
+            "Any Engineering", "Mixing", "Mastering", "EQ", "Compression",
+            "Reverb/Effects",
+        ),
+    },
+    "designer": {
+        "Design Software": (
+            "Any Design Software", "Photoshop", "Illustrator", "Figma",
+            "Canva", "Affinity Designer", "CorelDRAW", "Sketch", "InDesign",
+        ),
+        "Design Skills": (
+            "Any Design Skill", "UI/UX Design", "Graphic Design", "Branding",
+            "Layout Design", "Typography", "Color Theory", "Icon Design",
+        ),
+    },
+    "videographer": {
+        "Video Software": (
+            "Any Video Software", "Adobe Premiere", "DaVinci Resolve",
+            "Final Cut Pro", "Sony Vegas", "Filmora", "After Effects", "OBS",
+        ),
+        "Video Skills": (
+            "Any Video Skill", "Editing", "Color Grading", "Motion Graphics",
+            "Cinematography", "Drone Footage", "Lighting", "Sound Design",
+        ),
+    },
+}
+
+V22_SKILL_COUNT = 131
+
+
+def _visible_count(key, persona, only_v22):
+    if not only_v22:
+        return len(skills_for(key))
+    return sum(len(V22_SKILLS.get(key, {}).get(cat, ()))
+               for cat in persona["categories"])
+
+
+def is_v22_skill(persona_key, category, skill_key):
+    """Was this exact skill in the 2.2 build?"""
+    return skill_key in V22_SKILLS.get(persona_key, {}).get(category, ())
+
+
+def catalog_payload(since=None):
+    """The whole catalog, in the order the picker should render it.
+
+    `since="2.2"` serves ONLY what the 2.2 build shipped — the five personas and
+    their 131 skills, nothing added afterwards. It filters rather than storing a
+    second copy, so the two can never disagree about a label.
+    """
+    only_v22 = str(since or "").strip() == "2.2"
     return {
         "personas": [
             {
@@ -928,20 +1028,24 @@ def catalog_payload():
                 "label": label_for(key),
                 "blurb": persona["blurb"],
                 "since": persona["since"],
-                "skill_count": len(skills_for(key)),
+                "skill_count": _visible_count(key, persona, only_v22),
                 "categories": [
                     {
                         "name": cat,
                         "skills": [
                             {"key": sk, "label": label, "any": is_any_skill(sk)}
                             for sk, label in skills.items()
+                            if not only_v22 or is_v22_skill(key, cat, sk)
                         ],
                     }
                     for cat, skills in persona["categories"].items()
+                    if not only_v22 or cat in V22_SKILLS.get(key, {})
                 ],
             }
             for key, persona in PERSONAZ.items()
+            if not only_v22 or key in V22_SKILLS
         ],
+        "since": since or "all",
         "aliases": dict(PERSONA_ALIASES),
         # The client renders "Any …" entries in the accent colour and treats a
         # skill date as required — both stated here so it stops being folklore.
