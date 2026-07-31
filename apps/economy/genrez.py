@@ -21,6 +21,7 @@ Two things worth knowing about the 2.2 list:
   That overlap is real and deliberate in 2.2 — a genre describes the work, a skill
   describes the person — so both are kept and `also_a_skill` flags them.
 """
+import re
 
 # Genres exactly as 2.2 shipped them, in the order they were rendered.
 V22_GENRES = ["Trap", "Drill", "Cloud Rap", "Boom Bap", "House", "Techno", "Pop",
@@ -84,6 +85,11 @@ KIND_SCREEN = "screen"
 GENRES = V22_GENRES + EXTRA_GENRES + SCREEN_GENRES
 MUSIC_GENRES = V22_GENRES + EXTRA_GENRES
 
+# Everything that isn't a letter or digit — emoji, variation selectors (U+FE0F),
+# zero-width joiners, skin-tone modifiers. Applied after the separator squashing
+# in _squash, by which point spaces and hyphens are already gone.
+_MARKS = re.compile(r"[^0-9a-z]", re.UNICODE)
+
 # {squashed name: canonical name} — built once, so lookup is a dict hit rather
 # than a scan.
 _INDEX = {}
@@ -97,7 +103,13 @@ def _squash(value):
     """
     text = " ".join(str(value or "").split()).lower()
     text = text.replace(" and ", " & ")
-    return text.replace("&", "n").replace("-", "").replace(" ", "")
+    text = text.replace("&", "n").replace("-", "").replace(" ", "")
+    # Drop emoji and decoration. The catalog serves every genre with an emoji
+    # ("Trap 🏚️"), the tour ships those labels, and a client that stores what it
+    # displayed sends the decorated form straight back — which matched nothing
+    # at all, so every genre a member had picked was silently dropped. Same
+    # failure the persona keys had.
+    return _MARKS.sub("", text)
 
 
 for _name in GENRES:

@@ -159,14 +159,25 @@ _ARTIST = {
 # Shared by producer and mix-engineer in 2.2 — the same list, so it lives once.
 #
 # REPAIRED: the mix-engineer copy of this list had `Reaper:'Reaper🪦': 'Azrael☠️'`
-# in it, which is not valid JavaScript. It threw a SyntaxError at parse time and
-# took the entire app script down with it. The producer copy was intact, so it is
-# the one reproduced here. Its "Studio One1⃣ 🎛️" typo is corrected too.
+# in it, which is not valid JavaScript — two colons in one entry. It threw a
+# SyntaxError at parse time and took the entire app script down with it. The
+# producer copy was intact, so it is the one reproduced here. Its
+# "Studio One1⃣ 🎛️" typo is corrected too.
+#
+# That broken line was reaching for EITHER Reaper or Azrael and we now carry
+# BOTH, on Corey's call: Reaper is the real product, Azrael is the Music
+# ConnectZ DAW that imitates it, and being skilled in one doesn't mean being
+# skilled in the other.
 _MUSIC_DAWS = {
     "Any DAW": "Any DAW 🎛️",
     "Ableton Live": "Ableton Live 🎵",
     "Adobe Audition": "Adobe Audition 🎙️",
     "Audacity": "Audacity 🎧",
+    # Azrael is Music ConnectZ's own Reaper-style DAW (DawZ: "+Azrael☠️ reaper
+    # knockoff"). It sits alongside Reaper rather than replacing it — the broken
+    # 2.2 line was reaching for one or the other, but they are two different
+    # things to be skilled in, and a member may well use both.
+    "Azrael": "Azrael ☠️",
     "Bitwig Studio": "Bitwig Studio 🎚️",
     "Cakewalk": "Cakewalk 🎼",
     "Cubase": "Cubase 🎛️",

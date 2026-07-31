@@ -150,3 +150,113 @@ class V22SkillContentTests(SimpleTestCase):
                         first.lower().startswith("any"),
                         f"{persona}/{cat} starts with {first!r}, not an 'Any …' "
                         f"wildcard — the client renders that slot specially")
+
+
+class ReaperAndAzraelTests(SimpleTestCase):
+    """2.2's broken line reached for one or the other. We carry both.
+
+    `Reaper:'Reaper🪦': 'Azrael☠️'` is a syntax error, so 2.2 never had a working
+    answer here. Reaper is the real product; Azrael is the Music ConnectZ DAW
+    that imitates it (DawZ: "+Azrael☠️ reaper knockoff"). Being skilled in one
+    is not being skilled in the other.
+    """
+
+    DAW_PERSONAS = ("producer", "mix-engineer")
+
+    def test_both_are_offered(self):
+        for persona in self.DAW_PERSONAS:
+            daws = PERSONAZ[persona]["categories"]["Music DAWs"]
+            with self.subTest(persona=persona):
+                self.assertEqual(daws.get("Reaper"), "Reaper 🔧")
+                self.assertEqual(daws.get("Azrael"), "Azrael ☠️")
+
+    def test_they_are_separate_skills_not_one_renamed(self):
+        daws = PERSONAZ["mix-engineer"]["categories"]["Music DAWs"]
+        self.assertNotEqual(daws["Reaper"], daws["Azrael"])
+
+    def test_neither_carries_the_2_2_corruption(self):
+        """The mangled key and the stray keycap must not have survived."""
+        for persona in self.DAW_PERSONAS:
+            daws = PERSONAZ[persona]["categories"]["Music DAWs"]
+            with self.subTest(persona=persona):
+                self.assertNotIn("Reaper🪦", daws)
+                self.assertEqual(daws.get("Studio One"), "Studio One 🎛️")
+                self.assertNotIn("1⃣", daws.get("Studio One", ""))
+
+    def test_both_resolve_from_a_stored_label(self):
+        """A member who picked either must not lose it on the way back in."""
+        from .personaz import skill_key_for
+        for persona in self.DAW_PERSONAS:
+            self.assertEqual(skill_key_for(persona, "Reaper 🔧"), "Reaper")
+            self.assertEqual(skill_key_for(persona, "Azrael ☠️"), "Azrael")
+
+
+# ---------------------------------------------------------------- genres ----
+# The 2.2 genre list, extracted from `openGenreModal()`:
+#   const genres = ['Trap', 'Drill', ...];
+# Fifteen, flat, single-select, required on the Upload Work Example form.
+V22_GENRES_FROM_DOC = [
+    "Trap", "Drill", "Cloud Rap", "Boom Bap", "House", "Techno", "Pop",
+    "Hip Hop", "R&B", "Jazz", "Soul", "Indie", "Electronic", "Ambient", "Lo-Fi",
+]
+
+
+class V22GenreTests(SimpleTestCase):
+    def test_all_fifteen_are_present_in_order(self):
+        from .genrez import V22_GENRES
+        self.assertEqual(V22_GENRES, V22_GENRES_FROM_DOC)
+
+    def test_each_one_resolves_from_the_plain_2_2_string(self):
+        from .genrez import normalize_genre
+        for name in V22_GENRES_FROM_DOC:
+            with self.subTest(genre=name):
+                self.assertEqual(normalize_genre(name), name)
+
+    def test_each_one_resolves_from_its_decorated_label(self):
+        """The catalog serves 'Trap 🏚️'. A client that stores what it displayed
+        sends that back — and every one of them used to resolve to None, which
+        silently dropped every genre the member had picked."""
+        from .genrez import catalog_payload, normalize_genre
+
+        emoji = {r["key"]: r["emoji"] for r in catalog_payload()["genres"]}
+        for name in V22_GENRES_FROM_DOC:
+            for sent in (f"{name} {emoji[name]}", f"{name}{emoji[name]}"):
+                with self.subTest(genre=name, sent=sent):
+                    self.assertEqual(normalize_genre(sent), name)
+
+    def test_case_and_stray_whitespace_still_resolve(self):
+        from .genrez import normalize_genre
+        for name in V22_GENRES_FROM_DOC:
+            with self.subTest(genre=name):
+                self.assertEqual(normalize_genre(name.lower()), name)
+                self.assertEqual(normalize_genre(f"  {name}  "), name)
+
+    def test_the_hand_typed_spellings_still_work(self):
+        """Members have always typed these by hand; the squash rule is why."""
+        from .genrez import normalize_genre
+        for sent in ("r and b", "RnB", "r&b", "R&B 💜"):
+            self.assertEqual(normalize_genre(sent), "R&B")
+        for sent in ("lofi", "lo fi", "Lo-Fi 📻"):
+            self.assertEqual(normalize_genre(sent), "Lo-Fi")
+
+    def test_decoration_alone_is_not_a_genre(self):
+        """Stripping emoji must not turn junk into a match."""
+        from .genrez import normalize_genre
+        for junk in ("🏚️", "✨🔥", "", "   ", "not-a-genre", "dawz"):
+            with self.subTest(junk=junk):
+                self.assertIsNone(normalize_genre(junk))
+
+    def test_the_four_that_are_also_rapping_skills_are_flagged(self):
+        """A genre describes the work, a skill describes the person — 2.2 had
+        both and the overlap is deliberate."""
+        from .genrez import ALSO_SKILLS
+        self.assertEqual(ALSO_SKILLS, {"Trap", "Drill", "Cloud Rap", "Boom Bap"})
+        for name in ALSO_SKILLS:
+            self.assertIn(name, PERSONAZ["artist"]["categories"]["Rapping"])
+
+    def test_a_members_saved_genres_survive_a_round_trip(self):
+        from .genrez import catalog_payload, normalize_genres
+
+        emoji = {r["key"]: r["emoji"] for r in catalog_payload()["genres"]}
+        stored = [f"{n} {emoji[n]}" for n in V22_GENRES_FROM_DOC[:12]]
+        self.assertEqual(normalize_genres(stored), V22_GENRES_FROM_DOC[:12])
