@@ -172,3 +172,47 @@ class IdentityApiTests(TestCase):
                              format="json")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["status"], Profile.VERIFY_UNSTARTED)
+
+
+class NewSessionIsNotAFailureTests(TestCase):
+    """`requires_input` means two different things.
+
+    It is the status of a session that FAILED and needs another attempt, and
+    also the status of one just created that is waiting on the member. Stripe
+    fires `identity.verification_session.created` with it before they have done
+    anything, so treating it as failure means "Didn't pass ❌" the instant they
+    press start.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="fresh", password="verify-pass-4")
+
+    def test_a_brand_new_session_is_not_reported_as_a_failure(self):
+        record_session(session("requires_input", self.user))  # no last_error
+        p = profile_for(self.user)
+        self.assertEqual(p.verification_status, Profile.VERIFY_PROCESSING)
+        self.assertNotEqual(p.verification_status, Profile.VERIFY_FAILED)
+
+    def test_requires_input_with_a_real_error_still_fails(self):
+        record_session(session("requires_input", self.user,
+                               last_error={"code": "selfie_face_mismatch"}))
+        self.assertEqual(profile_for(self.user).verification_status,
+                         Profile.VERIFY_FAILED)
+
+    def test_the_created_event_does_not_undo_an_earlier_pass(self):
+        """Stripe can deliver events out of order."""
+        record_session(session("verified", self.user,
+                               verified_outputs={"dob": dob_for_age(33)}))
+        record_session(session("requires_input", self.user))
+        p = profile_for(self.user)
+        self.assertTrue(p.verified_18plus,
+                        "a late 'created' event must not revoke a real pass")
+        self.assertEqual(p.verification_status, Profile.VERIFY_VERIFIED,
+                         "nor drop a verified member back to 'Checking...'")
+
+    def test_a_late_processing_event_does_not_regress_a_pass_either(self):
+        record_session(session("verified", self.user,
+                               verified_outputs={"dob": dob_for_age(50)}))
+        record_session(session("processing", self.user))
+        self.assertEqual(profile_for(self.user).verification_status,
+                         Profile.VERIFY_VERIFIED)

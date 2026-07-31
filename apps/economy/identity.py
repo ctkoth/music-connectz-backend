@@ -96,6 +96,12 @@ def record_session(session, user=None):
     state = session.get("status") or ""
     session_id = session.get("id") or p.verification_session_id
 
+    # A pass is terminal for an AGE gate — a date of birth doesn't change. Stripe
+    # can deliver events out of order, and a late `created` or `processing` for
+    # an old session would otherwise drop a verified member back to "Checking…".
+    if p.verified_18plus and state != "verified":
+        return p
+
     if state == "verified":
         dob = ((session.get("verified_outputs") or {}).get("dob")) or {}
         age = _age_from_dob(dob)
@@ -128,12 +134,24 @@ def record_session(session, user=None):
 
     elif state == "requires_input":
         err = session.get("last_error") or {}
-        code = err.get("code") or "unknown"
-        _save(p, verification_status=Profile.VERIFY_FAILED,
-              verification_reason=code,
-              verification_detail=ERROR_COPY.get(
-                  code, err.get("reason") or "That check didn't go through. You can try again."),
-              verification_session_id=session_id)
+        if not err:
+            # `requires_input` is ALSO the status of a brand-new session — it
+            # means "waiting on the member", and `identity.verification_session.
+            # created` fires with it before they have done anything at all.
+            # Without this branch, starting a check instantly reads as "Didn't
+            # pass", which is worse than the silence it replaced.
+            _save(p, verification_status=Profile.VERIFY_PROCESSING,
+                  verification_reason="",
+                  verification_detail="Waiting for you to finish the ID check.",
+                  verification_session_id=session_id)
+        else:
+            code = err.get("code") or "unknown"
+            _save(p, verification_status=Profile.VERIFY_FAILED,
+                  verification_reason=code,
+                  verification_detail=ERROR_COPY.get(
+                      code,
+                      err.get("reason") or "That check didn't go through. You can try again."),
+                  verification_session_id=session_id)
 
     elif state == "canceled":
         _save(p, verification_status=Profile.VERIFY_CANCELED,

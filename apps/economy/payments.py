@@ -40,6 +40,20 @@ def _amount_or_error(request):
     return amount_cents, None
 
 
+def _signature_error():
+    """Stripe's signature exception, wherever this SDK version keeps it.
+
+    `requirements.txt` pins `stripe>=8.0` with no upper bound, and `stripe.error`
+    is a legacy alias the SDK has been moving away from. If a future release
+    drops it, evaluating the old path inside an `except` clause raises
+    AttributeError *while handling a rejected forgery* — turning a clean 400
+    into a 500, which Stripe then retries. Resolve it defensively instead.
+    """
+    import stripe
+    return getattr(stripe, "SignatureVerificationError", None) or \
+        stripe.error.SignatureVerificationError
+
+
 def _downgrade_by_customer(cust):
     """Drop a founding subscriber back to Free when their sub ends/fails
     (never touches lifetime members)."""
@@ -324,7 +338,7 @@ class StripeWebhookView(APIView):
         sig = request.META.get("HTTP_STRIPE_SIGNATURE", "")
         try:
             event = stripe.Webhook.construct_event(request.body, sig, settings.STRIPE_WEBHOOK_SECRET)
-        except (ValueError, stripe.error.SignatureVerificationError):
+        except (ValueError, _signature_error()):
             return Response({"detail": "invalid signature"}, status=status.HTTP_400_BAD_REQUEST)
 
         from django.contrib.auth import get_user_model
