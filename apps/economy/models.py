@@ -468,6 +468,10 @@ class Venue(models.Model):
     host_price_cents = models.PositiveIntegerField(default=0)
     visitor_pay_cents = models.PositiveIntegerField(default=0)
     min_attract = models.PositiveSmallIntegerField(default=0)  # 0-10
+    # The five search ranges, frozen at post time — see economy.searchfilters.
+    # `min_attract` is the old single-ended version of one of them and is kept
+    # in step with it, so an old client that only knows min_attract still works.
+    requirements = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

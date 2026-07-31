@@ -4,6 +4,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.economy import searchfilters as sf
 from apps.economy.models import Post
 
 from .models import (CURRENCY_CHOICES, CURRENCY_MONEY, CURRENCY_SPINAZ,
@@ -24,6 +25,8 @@ def _battle_dict(b, user=None, full=False):
         "accepts_entries": b.accepts_entries,
         "accepts_bets": b.accepts_bets,
         "accepts_votes": b.accepts_votes,
+        "requirements": b.requirements or {},
+        "requirements_text": sf.describe(sf.load(b.requirements)),
     }
     if user and user.is_authenticated:
         out["your_side"] = b.side_of(user)
@@ -60,7 +63,11 @@ class CatalogView(APIView):
                               "winner never gets back less than they staked.",
                 "tie": "A tie refunds every stake. Nobody's money gets decided "
                        "by a coin flip.",
+                "requirements": "Range gates set at post time are exclusive and "
+                                "apply to entering the battle, not to betting "
+                                "or voting on it.",
             },
+            "ranges": sf.catalog(),
         })
 
 
@@ -86,7 +93,8 @@ class BattlesView(APIView):
         fmt = d.get("format") if d.get("format") in dict(FORMAT_CHOICES) else FORMAT_1V1
         b = Battle.objects.create(
             created_by=request.user, title=title[:160],
-            rules=str(d.get("rules", ""))[:2000], format=fmt)
+            rules=str(d.get("rules", ""))[:2000], format=fmt,
+            requirements=sf.store(d))
         return Response({"battle": _battle_dict(b, request.user, full=True)},
                         status=status.HTTP_201_CREATED)
 
@@ -142,6 +150,15 @@ class EntriesView(APIView):
         if b.entries.filter(user=request.user).exists():
             return Response({"detail": "You're already in this battle."},
                             status=status.HTTP_409_CONFLICT)
+
+        # The creator's range gates decide who may compete. Checked before the
+        # side-full check so a barred contestant hears the real reason rather
+        # than "that side is full", which reads as bad luck instead of a rule.
+        # Distance is measured against whoever made the battle.
+        refused = sf.entry_error(request.user, b.requirements, viewer=b.created_by)
+        if refused:
+            return Response({"detail": refused, "requirements": b.requirements},
+                            status=status.HTTP_403_FORBIDDEN)
 
         cap = b.max_per_side()
         if cap is not None and b.entries.filter(side=side).count() >= cap:

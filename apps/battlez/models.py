@@ -66,6 +66,11 @@ class Battle(models.Model):
     post_b = models.ForeignKey(Post, on_delete=models.SET_NULL, null=True, blank=True,
                                related_name="battles_as_b")
 
+    # Who's allowed in the ring — the five search ranges, frozen at post time.
+    # See economy.searchfilters. Gates entry, never betting or voting: a
+    # spectator's age doesn't change whether a battle is worth watching.
+    requirements = models.JSONField(default=dict, blank=True)
+
     opens_at = models.DateTimeField(default=timezone.now)
     closes_at = models.DateTimeField(null=True, blank=True, db_index=True)
     winner = models.CharField(max_length=1, choices=SIDE_CHOICES, blank=True, default="")

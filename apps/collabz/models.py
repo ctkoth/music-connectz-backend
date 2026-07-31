@@ -78,6 +78,10 @@ class CollabProject(models.Model):
     # than free text nobody can filter on.
     skills = models.JSONField(default=list, blank=True)
     genres = models.JSONField(default=list, blank=True)
+    # Who the owner will work with — the five search ranges, frozen at post
+    # time. See economy.searchfilters. Applies to people joining themselves;
+    # an owner's own invite is a deliberate choice and overrides the gate.
+    requirements = models.JSONField(default=dict, blank=True)
 
     # The escrow, when there's money involved. Optional — plenty of collabs are
     # two people and no invoice.

@@ -70,6 +70,9 @@ def _project_dict(p, full=False):
         "updated_at": p.updated_at,
     }
     out["skills"] = p.skills
+    out["requirements"] = p.requirements or {}
+    out["requirements_text"] = searchfilters.describe(
+        searchfilters.load(p.requirements))
     if full:
         out["members"] = [_member_dict(m) for m in p.members.select_related("user")]
         out["split_warning"] = p.split_error()
@@ -146,6 +149,7 @@ class ProjectsView(APIView):
             source_credit=str(d.get("source_credit", ""))[:300],
             seeking=[str(s)[:60] for s in (d.get("seeking") or [])][:20],
             genres=[str(g)[:60] for g in (d.get("genres") or [])][:20],
+            requirements=searchfilters.store(d),
             status=STATUS_OPEN,
         )
         problem = p.skills_error() or p.source_error()
@@ -240,6 +244,17 @@ class MembersView(APIView):
             role = ROLE_INVITED
         else:
             target, role = request.user, ROLE_COLLABORATOR
+            # Joining yourself has to clear the owner's range gates. An invite
+            # doesn't: the owner picked that person on purpose, and a filter
+            # overruling a deliberate choice is the filter being wrong.
+            already_on = p.members.filter(user=request.user).exists()
+            if not already_on:
+                refused = searchfilters.entry_error(request.user, p.requirements,
+                                                    viewer=p.owner)
+                if refused:
+                    return Response({"detail": refused,
+                                     "requirements": p.requirements},
+                                    status=status.HTTP_403_FORBIDDEN)
 
         member, created = CollabMember.objects.get_or_create(
             project=p, user=target, defaults={"role": role})

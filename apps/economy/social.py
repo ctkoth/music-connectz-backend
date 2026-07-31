@@ -42,6 +42,7 @@ from .models import (
     Block,
     wallet_for,
 )
+from . import searchfilters as sf
 from .serializers import WalletSerializer
 
 User = get_user_model()
@@ -60,6 +61,8 @@ def _venue_dict(v, request):
         "host_price_cents": v.host_price_cents,
         "visitor_pay_cents": v.visitor_pay_cents,
         "min_attract": v.min_attract,
+        "requirements": v.requirements or {},
+        "requirements_text": sf.describe(sf.load(v.requirements)),
         "attending": v.attendances.filter(visitor=request.user).exists(),
         "created_at": v.created_at,
     }
@@ -86,12 +89,25 @@ class VenuesView(APIView):
             except (TypeError, ValueError):
                 return 0
 
+        # The five ranges the host is gating on, plus the older single-ended
+        # `min_attract`. Whichever the client sent, both end up saying the same
+        # thing — two fields that disagree about who may attend is a bug the
+        # host only finds out about when somebody is wrongly turned away.
+        requirements = sf.store(d)
+        min_attract = min(10, max(0, cents("min_attract")))
+        attract = requirements.get("attractiveness")
+        if attract and attract.get("min"):
+            min_attract = int(attract["min"])
+        elif min_attract:
+            requirements["attractiveness"] = {"min": float(min_attract), "max": None}
+
         v = Venue.objects.create(
             host=request.user, title=title[:120], mode=mode, vtype=vtype,
             custom_name=str(d.get("custom_name", ""))[:60],
             host_price_cents=cents("host_price_cents"),
             visitor_pay_cents=cents("visitor_pay_cents") if mode == Venue.MODE_COLLAB else 0,
-            min_attract=min(10, max(0, cents("min_attract"))),
+            min_attract=min_attract,
+            requirements=requirements,
         )
         return Response({"venue": _venue_dict(v, request)}, status=status.HTTP_201_CREATED)
 
@@ -106,14 +122,13 @@ class VenueJoinView(APIView):
         if venue.host_id == request.user.id:
             return Response({"detail": "you can't attend your own venue"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Scalable attractiveness gate — rated visitors below the bar are blocked.
-        if venue.min_attract > 0:
-            med = attractiveness_median(request.user)
-            if med is not None and med < venue.min_attract:
-                return Response(
-                    {"detail": f"needs attractiveness {venue.min_attract}+, yours is {med}"},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
+        # The host's range gates. Exclusive: outside means turned away, and the
+        # reason is named so the visitor knows whether it's fixable.
+        # Distance is measured against the host, so the viewer is the host.
+        refused = sf.entry_error(request.user, venue.requirements, viewer=venue.host)
+        if refused:
+            return Response({"detail": refused, "requirements": venue.requirements},
+                            status=status.HTTP_403_FORBIDDEN)
 
         vw = wallet_for(request.user)
         if vw.money_cents < venue.host_price_cents:
@@ -659,9 +674,22 @@ class MembersView(APIView):
     """Search members by multi-select metrics: regions, genders, signs, sober.
 
     OR within a metric, AND across metrics — mirrors the client filter.
+
+    The five ranges (skill rating, skill price, attractiveness, age, distance)
+    come from economy.searchfilters, so a search here gates on exactly what a
+    CollabZ, VenueZ or BattleZ post gates on. They used to be reimplemented
+    inline, which is how this view ended up with two of the five missing and an
+    attractiveness gate that read scores their owners had made private.
     """
 
     permission_classes = [IsAuthenticated]
+
+    # Older clients spell two of the ranges differently. Kept working rather
+    # than broken: a shipped app can't be asked to rename its query string.
+    LEGACY_PARAMS = {
+        "attr_min": "attractiveness_min", "attr_max": "attractiveness_max",
+        "max_km": "distance_max",
+    }
 
     def get(self, request):
         def multi(key):
@@ -684,17 +712,23 @@ class MembersView(APIView):
             except (TypeError, ValueError):
                 return None
 
-        # Range gates. When a min/max is set, members outside it (or with no
-        # value for that metric) are excluded — the range "gates exclusive".
-        age_min, age_max = num("age_min"), num("age_max")
-        attr_min, attr_max = num("attr_min"), num("attr_max")
-        exp_min, exp_max = num("exp_min"), num("exp_max")  # years-of-experience range
-        max_km = num("max_km")  # distance range: within N km of the searcher
+        # The five shared ranges — exclusive gates, unknown values excluded and
+        # counted separately so a new member with no ratings yet is reported
+        # rather than silently erased from every search forever.
+        params = dict(request.query_params.items())
+        for old, new in self.LEGACY_PARAMS.items():
+            if params.get(old) and not params.get(new):
+                params[new] = params[old]
+        ranges = sf.parse(params)
+
+        # Years of experience isn't one of the five; it stays local.
+        exp_min, exp_max = num("exp_min"), num("exp_max")
 
         me = profile_for(request.user)
         origin = (me.lat, me.lng) if (me.share_location and me.lat is not None) else (None, None)
 
         results = []
+        unknown = 0
         qs = Profile.objects.exclude(user=request.user).exclude(user_id__in=blocked_user_ids(request.user)).select_related("user")[:500]
         for p in qs:
             if regions and not (set(regions) & set(p.regions or [])):
@@ -709,30 +743,31 @@ class MembersView(APIView):
                 subs = p.substances or {}
                 if any(subs.get(k) in active_stances for k in substances):
                     continue
-            if age_min is not None or age_max is not None:
-                age = profile_age(p)
-                if age is None or (age_min is not None and age < age_min) or (age_max is not None and age > age_max):
-                    continue
-            if attr_min is not None or attr_max is not None:
-                a = attractiveness_median(p.user)
-                if a is None or (attr_min is not None and a < attr_min) or (attr_max is not None and a > attr_max):
-                    continue
             if exp_min is not None or exp_max is not None:
                 exp = profile_max_experience(p)
                 if exp is None or (exp_min is not None and exp < exp_min) or (exp_max is not None and exp > exp_max):
                     continue
+            if ranges:
+                passes, detail = sf.evaluate(p.user, ranges, viewer=request.user)
+                if not passes:
+                    if any(d["reason"] == "unknown" for d in detail.values()):
+                        unknown += 1
+                    continue
+            # Shown on the card whether or not distance was gated on.
             dist = None
             if origin[0] is not None and p.share_location and p.lat is not None:
                 dist = haversine_km(origin[0], origin[1], p.lat, p.lng)
-                if max_km is not None and (dist is None or dist > max_km):
-                    continue
-            elif max_km is not None:
-                # Distance filter requested but no shared location on one side → exclude.
-                continue
             card = _profile_card(p, request)
             card["distance_km"] = dist
             results.append(card)
         # Nearest first when a distance origin exists.
         if origin[0] is not None:
             results.sort(key=lambda c: (c.get("distance_km") is None, c.get("distance_km") or 0))
-        return Response({"members": results[:100], "origin_shared": origin[0] is not None})
+        return Response({
+            "members": results[:100],
+            "origin_shared": origin[0] is not None,
+            # "and 12 more with nothing set for that filter" — worth offering,
+            # and the only way a member with no ratings yet ever gets found.
+            "unknown_count": unknown,
+            "ranges": [r.payload() for r in ranges.values()],
+        })

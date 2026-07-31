@@ -20,8 +20,8 @@ One range parses from either shape, because clients disagree:
 
     ?age=18-30          ?age_min=18&age_max=30
 """
-from .models import (attractiveness_median, haversine_km, overall_median,
-                     profile_age, profile_for)
+from .models import (attractiveness_median, haversine_km, membership_for,
+                     overall_median, profile_age, profile_for)
 
 # key -> (label, emoji, hard floor, hard ceiling, unit)
 RANGES = {
@@ -99,6 +99,77 @@ def parse(params):
     return out
 
 
+# --- ranges a POST carries with it ------------------------------------------
+#
+# A search gate lives for one request. A gate somebody set when they posted a
+# CollabZ, VenueZ or BattleZ has to outlive it: it decides who may join, hours
+# or days later. Same five ranges, same exclusive rule, stored on the row.
+
+def store(params):
+    """Freeze the ranges in `params` into something JSON-serialisable."""
+    return {key: {"min": rng.low, "max": rng.high}
+            for key, rng in parse(params).items()}
+
+
+def load(stored):
+    """Rebuild {key: Range} from a stored requirements dict."""
+    out = {}
+    for key, bounds in (stored or {}).items():
+        if key not in RANGES or not isinstance(bounds, dict):
+            continue
+        rng = Range(key, bounds.get("min"), bounds.get("max"))
+        if rng.active:
+            out[key] = rng
+    return out
+
+
+def describe(ranges):
+    """Human-readable gates, for showing the requirements on the post."""
+    lines = []
+    for key, rng in ranges.items():
+        label, emoji, _floor, _ceiling, unit = RANGES[key]
+        if rng.low is not None and rng.high is not None:
+            span = f"{_plain(rng.low)}–{_plain(rng.high)}"
+        elif rng.low is not None:
+            span = f"{_plain(rng.low)}+"
+        else:
+            span = f"up to {_plain(rng.high)}"
+        lines.append(f"{emoji} {label} {span} {unit}".strip())
+    return lines
+
+
+def _plain(value):
+    """2.0 reads as a bug in a UI. 2 doesn't."""
+    return str(int(value)) if float(value) == int(value) else str(value)
+
+
+def entry_error(user, stored, viewer=None):
+    """Why `user` may not join a post carrying `stored` gates — or None.
+
+    The message names the gate and the member's own value, because "you don't
+    qualify" with no reason is the kind of rejection people argue with support
+    about. Unknown is stated as unknown: "set your birthday" is fixable, and
+    telling somebody they're the wrong age when we simply never asked is not.
+    """
+    ranges = load(stored)
+    if not ranges:
+        return None
+    ok, detail = evaluate(user, ranges, viewer=viewer)
+    if ok:
+        return None
+    for key, rng in ranges.items():
+        info = detail[key]
+        if info["ok"]:
+            continue
+        label = RANGES[key][0]
+        want = ", ".join(describe({key: rng}))
+        if info["reason"] == "unknown":
+            return (f"This one gates on {label.lower()} ({want}) and yours "
+                    f"isn't set yet.")
+        return (f"This one is {want} — yours is {_plain(info['value'])}.")
+    return None
+
+
 # --- how each range reads its value off a member ----------------------------
 
 def skill_rating_of(user, **_):
@@ -107,9 +178,14 @@ def skill_rating_of(user, **_):
 
 def attractiveness_of(user, **_):
     """Only counts when the member opted in to public attractiveness. A gate
-    must never expose a score somebody chose to keep off their profile."""
-    p = profile_for(user)
-    if not getattr(p, "attractiveness_public", False):
+    must never expose a score somebody chose to keep off their profile.
+
+    The opt-in is on Membership, not Profile. Reading it with a getattr default
+    made this return None for everybody — an attractiveness gate that matched
+    nobody, and an opt-out test that passed without testing anything. Read the
+    attribute directly so a rename breaks loudly instead of quietly.
+    """
+    if not membership_for(user).attractiveness_public:
         return None
     return attractiveness_median(user)
 
@@ -121,9 +197,7 @@ def age_of(user, **_):
 def skill_price_of(user, **_):
     """What they charge, in cents. Zero is a real answer — plenty of members
     collaborate for free — so it is not treated as missing."""
-    p = profile_for(user)
-    value = getattr(p, "skill_price_cents", None)
-    return value if value is not None else 0
+    return profile_for(user).skill_price_cents or 0
 
 
 def distance_of(user, viewer=None, **_):
@@ -133,7 +207,7 @@ def distance_of(user, viewer=None, **_):
         return None
     mine, theirs = profile_for(viewer), profile_for(user)
     for p in (mine, theirs):
-        if not getattr(p, "share_location", False):
+        if not (p.share_location and p.lat is not None and p.lng is not None):
             return None
     return haversine_km(mine.lat, mine.lng, theirs.lat, theirs.lng)
 
@@ -201,4 +275,6 @@ def catalog():
                      "reported separately as `unknown` rather than dropped."),
         },
         "applies_to": ["collabz", "venuez", "battlez", "social"],
+        "set_when_posting": ["collabz", "venuez", "battlez"],
+        "searched_on": ["social"],
     }

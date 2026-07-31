@@ -10,7 +10,8 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from . import searchfilters as sf
-from .models import (AttractivenessRating, OverallRating, profile_for)
+from .models import (AttractivenessRating, OverallRating, membership_for,
+                     profile_for)
 
 User = get_user_model()
 
@@ -23,8 +24,12 @@ def member(name, *, birthday="", price=0, lat=None, lng=None, share=False,
     p.skill_price_cents = price
     p.lat, p.lng = lat, lng
     p.share_location = share
-    p.attractiveness_public = attractive_public
     p.save()
+    # The attractiveness opt-in is on Membership, not Profile. Setting it on the
+    # profile here is what let a resolver that read the wrong model look correct.
+    m = membership_for(u)
+    m.attractiveness_public = attractive_public
+    m.save(update_fields=["attractiveness_public"])
     return u
 
 
@@ -107,6 +112,13 @@ class ResolverTests(TestCase):
         rate(u, [8, 8, 10])
         self.assertEqual(sf.skill_rating_of(u), 8)
 
+    def test_a_published_attractiveness_score_is_readable(self):
+        """The other half of the opt-out test. Without this, a resolver that
+        returned None for *everybody* still passed — which it did."""
+        u = member("published")
+        rate(u, [7, 9], kind="attractiveness")
+        self.assertEqual(sf.attractiveness_of(u), 8)
+
     def test_attractiveness_is_hidden_when_the_member_opted_out(self):
         """A gate must never expose a score kept off the profile."""
         u = member("private", attractive_public=False)
@@ -162,6 +174,218 @@ class CatalogTests(TestCase):
     def test_it_names_every_surface_that_uses_them(self):
         self.assertEqual(sorted(sf.catalog()["applies_to"]),
                          ["battlez", "collabz", "social", "venuez"])
+
+
+class StoredRequirementsTests(TestCase):
+    """A search gate lives for one request. A gate set when somebody POSTED has
+    to still be there when a stranger tries to join, hours later."""
+
+    def test_a_round_trip_keeps_the_bounds(self):
+        stored = sf.store({"age": "18-30"})
+        self.assertEqual(stored["age"], {"min": 18.0, "max": 30.0})
+        loaded = sf.load(stored)
+        self.assertTrue(loaded["age"].contains(25))
+        self.assertFalse(loaded["age"].contains(40))
+
+    def test_junk_in_the_stored_dict_is_ignored_not_fatal(self):
+        """Hand-edited or older rows must not 500 the join button."""
+        self.assertEqual(sf.load({"nonsense": {"min": 1}, "age": "oops"}), {})
+        self.assertEqual(sf.load(None), {})
+
+    def test_it_describes_each_gate_in_words(self):
+        text = sf.describe(sf.load(sf.store({"age": "18-30",
+                                             "skill_rating_min": "7"})))
+        self.assertIn("🎂 Age 18–30 years", text)
+        self.assertIn("⭐ Skill rating 7+ score", text)
+
+    def test_no_gates_lets_anybody_in(self):
+        self.assertIsNone(sf.entry_error(member("open_door"), {}))
+
+    def test_being_out_of_range_says_the_range_and_their_value(self):
+        kid = member("too_young", birthday="2015-01-01")
+        why = sf.entry_error(kid, sf.store({"age": "18-30"}))
+        self.assertIn("18–30", why)
+        self.assertIn(str(sf.age_of(kid)), why)
+
+    def test_having_no_value_says_so_instead_of_guessing(self):
+        """"You're the wrong age" is a lie when we never asked for a birthday."""
+        why = sf.entry_error(member("no_birthday"), sf.store({"age": "18-30"}))
+        self.assertIn("isn't set yet", why)
+
+
+class VenueGateTests(TestCase):
+    def setUp(self):
+        self.host = member("venue_host", birthday="1990-01-01")
+        self.client = APIClient()
+        self.client.force_authenticate(self.host)
+
+    def make(self, **extra):
+        r = self.client.post(reverse("economy-venues"),
+                             dict({"title": "Open mic"}, **extra), format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        return r.json()["venue"]
+
+    def join_as(self, user, venue_id):
+        c = APIClient()
+        c.force_authenticate(user)
+        return c.post(reverse("economy-venue-join", args=[venue_id]), {},
+                      format="json")
+
+    def test_the_venue_shows_what_it_gates_on(self):
+        v = self.make(age_min=21)
+        self.assertIn("🎂 Age 21+ years", v["requirements_text"])
+
+    def test_somebody_outside_the_range_is_turned_away_with_a_reason(self):
+        v = self.make(age="21-40")
+        r = self.join_as(member("underage", birthday="2012-01-01"), v["id"])
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("21–40", r.json()["detail"])
+
+    def test_somebody_inside_the_range_gets_in(self):
+        v = self.make(age="21-40")
+        r = self.join_as(member("of_age", birthday="1995-01-01"), v["id"])
+        self.assertEqual(r.status_code, 200, r.content)
+
+    def test_the_old_min_attract_field_still_gates(self):
+        """A shipped client that only knows min_attract must keep working."""
+        v = self.make(min_attract=7)
+        self.assertEqual(v["requirements"]["attractiveness"]["min"], 7.0)
+        low = member("plain")
+        rate(low, [3, 3], kind="attractiveness")
+        self.assertEqual(self.join_as(low, v["id"]).status_code, 403)
+
+
+class BattleGateTests(TestCase):
+    def setUp(self):
+        self.creator = member("ring_master", birthday="1990-01-01")
+        self.client = APIClient()
+        self.client.force_authenticate(self.creator)
+
+    def make(self, **extra):
+        r = self.client.post(reverse("battlez-battles"),
+                             dict({"title": "Bars", "format": "cypher"}, **extra),
+                             format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        return r.json()["battle"]
+
+    def enter_as(self, user, battle_id, side="a"):
+        c = APIClient()
+        c.force_authenticate(user)
+        return c.post(reverse("battlez-entries", args=[battle_id]),
+                      {"side": side}, format="json")
+
+    def test_a_battle_carries_its_gates(self):
+        b = self.make(skill_rating_min=8)
+        self.assertIn("⭐ Skill rating 8+ score", b["requirements_text"])
+
+    def test_an_under_rated_challenger_is_refused(self):
+        b = self.make(skill_rating_min=8)
+        weak = member("weak")
+        rate(weak, [4, 4, 5])
+        r = self.enter_as(weak, b["id"])
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("8+", r.json()["detail"])
+
+    def test_a_qualifying_challenger_gets_in(self):
+        b = self.make(skill_rating_min=8)
+        strong = member("strong")
+        rate(strong, [9, 9, 10])
+        self.assertEqual(self.enter_as(strong, b["id"]).status_code, 201)
+
+    def test_gates_do_not_touch_betting_or_voting(self):
+        """Who may compete is not who may watch."""
+        b = self.make(skill_rating_min=8)
+        watcher = member("spectator")
+        c = APIClient()
+        c.force_authenticate(watcher)
+        r = c.post(reverse("battlez-votes", args=[b["id"]]), {"side": "a"},
+                   format="json")
+        self.assertNotEqual(r.status_code, 403)
+
+
+class CollabGateTests(TestCase):
+    def setUp(self):
+        self.owner = member("collab_owner", birthday="1990-01-01")
+        self.client = APIClient()
+        self.client.force_authenticate(self.owner)
+
+    def make(self, **extra):
+        r = self.client.post(reverse("collabz-projects"),
+                             dict({"title": "Track", "kind": "original",
+                                   "skills": ["Mixing"]}, **extra), format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        return r.json()["project"]
+
+    def join_as(self, user, pid):
+        c = APIClient()
+        c.force_authenticate(user)
+        return c.post(reverse("collabz-members", args=[pid]), {}, format="json")
+
+    def test_a_price_gate_turns_away_somebody_too_expensive(self):
+        p = self.make(skill_price_max=5000)
+        r = self.join_as(member("pricey", price=20_000), p["id"])
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("Skill price", " ".join(p["requirements_text"]))
+
+    def test_somebody_within_budget_joins(self):
+        p = self.make(skill_price_max=5000)
+        self.assertEqual(self.join_as(member("affordable", price=2500),
+                                      p["id"]).status_code, 201)
+
+    def test_an_owners_invite_overrides_the_gate(self):
+        """The owner picked that person on purpose. A filter that overrules a
+        deliberate choice is the filter being wrong."""
+        p = self.make(skill_price_max=5000)
+        member("chosen", price=99_000)
+        r = self.client.post(reverse("collabz-members", args=[p["id"]]),
+                             {"username": "chosen"}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+
+
+class SocialSearchTests(TestCase):
+    def setUp(self):
+        self.me = member("searcher", birthday="1990-01-01")
+        self.client = APIClient()
+        self.client.force_authenticate(self.me)
+
+    def search(self, **params):
+        return self.client.get(reverse("economy-members"), params).json()
+
+    def test_it_gates_on_skill_price_which_it_never_used_to(self):
+        member("cheap", price=1000)
+        member("dear", price=50_000)
+        names = [m["username"] for m in
+                 self.search(skill_price_max=5000)["members"]]
+        self.assertEqual(names, ["cheap"])
+
+    def test_it_gates_on_skill_rating_which_it_never_used_to(self):
+        good = member("good_mixer")
+        rate(good, [9, 9])
+        member("unrated_mixer")
+        names = [m["username"] for m in
+                 self.search(skill_rating_min=8)["members"]]
+        self.assertEqual(names, ["good_mixer"])
+
+    def test_a_private_attractiveness_score_is_not_searchable(self):
+        """The old inline gate read the median regardless of the opt-out, so a
+        score somebody hid could still be filtered on — which reveals it."""
+        hidden = member("kept_private", attractive_public=False)
+        rate(hidden, [9, 9], kind="attractiveness")
+        names = [m["username"] for m in
+                 self.search(attractiveness_min=8)["members"]]
+        self.assertNotIn("kept_private", names)
+
+    def test_the_old_parameter_names_still_work(self):
+        member("young_one", birthday="2015-01-01")
+        old = member("grown", birthday="1995-01-01")
+        rate(old, [9, 9], kind="attractiveness")
+        names = [m["username"] for m in self.search(attr_min=8)["members"]]
+        self.assertEqual(names, ["grown"])
+
+    def test_members_with_nothing_set_are_counted_not_just_dropped(self):
+        member("blank_slate")
+        body = self.search(age_min=18)
+        self.assertEqual(body["unknown_count"], 1)
 
 
 class CollabSkillsRequiredTests(TestCase):
