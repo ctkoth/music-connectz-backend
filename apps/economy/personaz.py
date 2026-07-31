@@ -210,7 +210,11 @@ _MUSIC_DAWS = {
 PERSONAZ = {
     # ------------------------------------------------ shipped in 2.2
     "artist": {
-        "name": "Artist",
+        # 2.2 calls this "Independent Artist" on the button and in the collab
+        # filter; the catalog said just "Artist". Same persona, same key — but
+        # a picker that renames what somebody already picked reads like their
+        # choice was lost, so it says what 2.2 says.
+        "name": "Independent Artist",
         "emoji": "🎤",
         "since": "2.2",
         "blurb": "You perform. Instruments, bars, or voice.",
@@ -287,10 +291,16 @@ PERSONAZ = {
         "categories": {
             "Video Software": {
                 "Any Video Software": "Any Video Software 🎬",
-                "Adobe Premiere": "Adobe Premiere 🎬",
+                # Two product names 2.2 got right for its day and that have
+                # since moved on. The KEY stays as 2.2 wrote it, so a member who
+                # already picked one keeps it and the old stored label still
+                # resolves — only what the picker displays is brought current.
+                "Adobe Premiere": "Adobe Premiere Pro 🎬",
                 "DaVinci Resolve": "DaVinci Resolve 🎞️",
                 "Final Cut Pro": "Final Cut Pro 🎥",
-                "Sony Vegas": "Sony Vegas 📹",
+                # Magix bought VEGAS from Sony in 2016; it hasn't been "Sony
+                # Vegas" for a decade.
+                "Sony Vegas": "VEGAS Pro 📹",
                 "Filmora": "Filmora 🎬",
                 "After Effects": "After Effects ✨",
                 "OBS": "OBS Studio 🔴",

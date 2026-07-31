@@ -250,6 +250,35 @@ class EveryV22SkillResolvesTests(SimpleTestCase):
         self.assertEqual(_demoji("808"), "808")
         self.assertEqual(_demoji("Sound Forge 2"), "sound forge 2")
 
+    def test_the_artist_persona_is_named_the_way_2_2_names_it(self):
+        """2.2's button and collab filter both say "Independent Artist"."""
+        self.assertEqual(PERSONAZ["artist"]["name"], "Independent Artist")
+        for sent in ("Independent Artist", "Independent  artist",
+                     "🎤Independent Artist", "artist"):
+            with self.subTest(sent=sent):
+                self.assertEqual(normalize_persona_key(sent), "artist")
+
+    def test_independent_artist_covers_instruments_beyond_2_2(self):
+        """2.2 had strings, keys and five percussion entries — no wind, no
+        brass, nothing electronic. A saxophonist had no way to say so."""
+        cats = PERSONAZ["artist"]["categories"]
+        for cat in ("Wind & Woodwind", "Brass Instruments", "Electronic & DJ"):
+            with self.subTest(category=cat):
+                self.assertIn(cat, cats)
+        self.assertIsNotNone(skill_key_for("artist", "Saxophone (Tenor)"))
+        self.assertIsNotNone(skill_key_for("artist", "Trumpet"))
+        self.assertIsNotNone(skill_key_for("artist", "Turntablism"))
+
+    def test_a_renamed_product_keeps_its_2_2_key_and_old_label(self):
+        """Bringing a display name up to date must not drop what a member
+        already picked, or what a 2.2 client stored."""
+        for old, new in (("Sony Vegas 📹", "VEGAS Pro 📹"),
+                         ("Adobe Premiere 🎬", "Adobe Premiere Pro 🎬")):
+            with self.subTest(old=old):
+                key = skill_key_for("videographer", old)
+                self.assertIsNotNone(key, "a 2.2 label stopped resolving")
+                self.assertEqual(skill_key_for("videographer", new), key)
+
     def test_decoration_alone_still_resolves_to_nothing(self):
         """Stripping harder must not turn junk into a false match."""
         for junk in ("🎸", "🎛️ ✨", "1⃣", "   "):

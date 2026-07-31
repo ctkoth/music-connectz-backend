@@ -142,7 +142,68 @@ claims. "I make Trap" is not "I can rap Trap."
 
 ---
 
-## 5. What's pinned
+## 5. Spelling and naming pass over all 131
+
+Every one of the 131 skill names is spelled correctly. No typos, no stray
+whitespace, no double spaces, no invisible characters. Three entries where the
+key differs from the label are intentional — `Photoshop` → "Adobe Photoshop",
+and the same for Illustrator and InDesign.
+
+Four things were wrong for other reasons.
+
+### 5a. The persona was called the wrong thing
+
+2.2 calls it **Independent Artist** — on the button and in the collab filter.
+The catalog said just "Artist". Same persona, same key; only the display name
+changed, because a picker that renames what somebody already picked reads like
+their choice was lost.
+
+### 5b. Independent Artist was missing most instruments
+
+2.2 gave it strings, keyboards and **five** percussion entries — snare, bass
+drum, bongo, cymbals, and the wildcard. No wind. No brass. Nothing electronic.
+A saxophonist, a trumpeter or a DJ had no way to say what they play.
+
+Now covered, 97 skills across 8 categories:
+
+| Category | Count | In 2.2 |
+|---|---:|---|
+| String Instruments | 12 | ✅ |
+| Keyboard Instruments | 7 | ✅ |
+| Percussion Instruments | 16 | 5 |
+| **Wind & Woodwind** | 15 | ✗ |
+| **Brass Instruments** | 10 | ✗ |
+| **Electronic & DJ** | 11 | ✗ |
+| Rapping | 17 | ✅ |
+| Singing | 9 | ✅ |
+
+### 5c. Two product names had moved on
+
+Not misspellings — correct for their day, wrong now.
+
+| 2.2 label | Now displays |
+|---|---|
+| `Sony Vegas 📹` | `VEGAS Pro 📹` — Magix bought it from Sony in 2016 |
+| `Adobe Premiere 🎬` | `Adobe Premiere Pro 🎬` |
+
+The **key** is unchanged in both cases, so a member who already picked one keeps
+it and a 2.2 client's stored label still resolves. Only what the picker shows
+was brought current. Pinned by a test.
+
+### 5d. One duplicate, left alone deliberately
+
+2.2 lists **`PreSonus Studio One`** and **`Studio One`** in the same category.
+They are the same product, so the picker offers one DAW twice and a member can
+claim both.
+
+Both are kept. Removing either would silently delete a skill from whoever
+picked that one, and there is no way to tell from the data which of the two a
+member meant. Worth cleaning up in the client, where the choice can be
+presented to the member rather than made for them.
+
+---
+
+## 6. What's pinned
 
 `apps/economy/test_v22_skills.py` — 38 tests.
 
