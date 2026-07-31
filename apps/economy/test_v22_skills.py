@@ -12,7 +12,8 @@ handful that did work only worked because they happened to equal a label exactly
 """
 from django.test import SimpleTestCase
 
-from .personaz import PERSONAZ, normalize_persona_key
+from .personaz import (PERSONAZ, V22_SKILLS, _demoji, normalize_persona_key,
+                       skill_key_for)
 
 # --- personaNames: what 2.2 saves onto a member's profile -------------------
 PERSONA_NAMES = {
@@ -189,6 +190,71 @@ class ReaperAndAzraelTests(SimpleTestCase):
         for persona in self.DAW_PERSONAS:
             self.assertEqual(skill_key_for(persona, "Reaper 🔧"), "Reaper")
             self.assertEqual(skill_key_for(persona, "Azrael ☠️"), "Azrael")
+
+
+class EveryV22SkillResolvesTests(SimpleTestCase):
+    """Exhaustive, not spot-checked: all 131 skills, in every form 2.2 could
+    have stored them in.
+
+    The spot-checks above prove the labels are unchanged. This proves they can
+    be *read back*, which is the failure that actually loses a member's skills.
+    Driven off V22_SKILLS so it covers the whole set rather than a sample.
+
+    The forms matter because 2.2 is inconsistent about the space before the
+    emoji. Most entries are "Acoustic Guitar 🎸"; some are "Reaper🪦" and
+    "🎚️Producer" with none. Matching only the spaced form meant a skill
+    survived or vanished depending on whether whoever typed that catalog line
+    happened to hit the space bar.
+    """
+
+    def forms_for(self, label):
+        """Every way a client might hand this label back to us."""
+        return {
+            label,                              # exactly as served
+            label.replace(" ", "", 1) if label.startswith(" ") else label,
+            "".join(label.rsplit(" ", 1)),      # emoji welded to the name
+            label.strip().upper(),
+            f"  {label}  ",                     # copied with stray whitespace
+        }
+
+    def test_every_2_2_skill_resolves_from_its_key(self):
+        for persona, cats in V22_SKILLS.items():
+            for cat, keys in cats.items():
+                for key in keys:
+                    with self.subTest(persona=persona, category=cat, skill=key):
+                        self.assertEqual(skill_key_for(persona, key), key)
+
+    def test_every_2_2_skill_resolves_from_every_stored_label_form(self):
+        checked = 0
+        for persona, cats in V22_SKILLS.items():
+            for cat, keys in cats.items():
+                catalog = PERSONAZ[persona]["categories"][cat]
+                for key in keys:
+                    for form in self.forms_for(catalog[key]):
+                        checked += 1
+                        with self.subTest(persona=persona, skill=key, form=form):
+                            self.assertEqual(skill_key_for(persona, form), key)
+        self.assertGreater(checked, 500, "the sweep stopped covering the set")
+
+    def test_the_count_is_still_the_whole_2_2_build(self):
+        total = sum(len(keys) for cats in V22_SKILLS.values()
+                    for keys in cats.values())
+        self.assertEqual(total, 131)
+
+    def test_a_keycap_is_decoration_but_a_digit_is_content(self):
+        """2.2 wrote 'Studio One1⃣ 🎛️'. Stripping only the combining mark left
+        "Studio One1", which matched nothing — but dropping every digit would
+        break real names like "808"."""
+        self.assertEqual(skill_key_for("mix-engineer", "Studio One1⃣ 🎛️"),
+                         "Studio One")
+        self.assertEqual(_demoji("808"), "808")
+        self.assertEqual(_demoji("Sound Forge 2"), "sound forge 2")
+
+    def test_decoration_alone_still_resolves_to_nothing(self):
+        """Stripping harder must not turn junk into a false match."""
+        for junk in ("🎸", "🎛️ ✨", "1⃣", "   "):
+            with self.subTest(junk=junk):
+                self.assertIsNone(skill_key_for("artist", junk))
 
 
 # ---------------------------------------------------------------- genres ----

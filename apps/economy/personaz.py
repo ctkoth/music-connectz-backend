@@ -694,6 +694,13 @@ def _squash(value):
 # modifiers all fall in here.
 _MARKS = re.compile(r"[^\w\s&-]", re.UNICODE)
 
+# A keycap emoji is a plain digit plus a combining mark: "1⃣" is "1" + U+20E3.
+# Stripping only the mark leaves the digit welded to the name — 2.2's
+# 'Studio One1⃣ 🎛️' becomes "Studio One1", which matches nothing. The whole
+# sequence has to go. Matched narrowly rather than dropping every digit,
+# because a digit is real content in names like "808" or "Sound Forge 2".
+_KEYCAP = re.compile(r"[0-9#*]️?⃣", re.UNICODE)
+
 
 def _demoji(value):
     """Drop emoji and decoration, keeping the words.
@@ -704,7 +711,7 @@ def _demoji(value):
     exact label only ever worked by coincidence. Strip the decoration and match
     on the words, which is the part that actually carries the meaning.
     """
-    return _squash(_MARKS.sub(" ", str(value or "")))
+    return _squash(_MARKS.sub(" ", _KEYCAP.sub(" ", str(value or ""))))
 
 
 def normalize_persona_key(value):
@@ -789,6 +796,11 @@ def skill_key_for(persona_key, value):
 
     Needed because 2.2 stored the *label* ("Acoustic Guitar 🎸") as the skill
     name, so existing profiles have to be read back through this.
+
+    The emoji does not have to be separated by a space. 2.2 writes both forms —
+    "Acoustic Guitar 🎸" but also "Reaper🪦" and "🎚️Producer" — and matching only
+    the spaced one meant a stored label lost its skill depending on whether
+    whoever typed that catalog entry happened to hit the space bar.
     """
     if not value:
         return None
@@ -797,6 +809,12 @@ def skill_key_for(persona_key, value):
     for key, label in flat.items():
         if squashed in (_squash(key), _squash(label)):
             return key
+    # Retry with the decoration stripped, exactly as normalize_persona_key does.
+    bare = _demoji(value)
+    if bare and bare != squashed:
+        for key, label in flat.items():
+            if bare in (_demoji(key), _demoji(label)):
+                return key
     return None
 
 
