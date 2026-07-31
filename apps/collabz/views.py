@@ -5,8 +5,8 @@ from rest_framework.views import APIView
 
 from apps.economy import searchfilters
 from apps.economy.models import Post
-from apps.economy.personaz import (PERSONAZ, normalize_persona_key,
-                                   skill_key_for)
+from apps.economy.personaz import (PERSONAZ, is_v22_skill,
+                                   normalize_persona_key, skill_key_for)
 
 from .models import (KIND_CHOICES, ROLE_COLLABORATOR, ROLE_INVITED, ROLE_OWNER,
                      STATUS_CHOICES, STATUS_OPEN, CollabMember, CollabProject)
@@ -80,11 +80,36 @@ def _project_dict(p, full=False):
 
 
 class CatalogView(APIView):
-    """GET the CollabZ vocabulary. Public — it's a picker."""
+    """GET the CollabZ vocabulary. Public — it's a picker.
+
+    `?since=2.2` serves ONLY the five personas and 131 skills the 2.2 build
+    shipped, for a form that has to match 2.2 exactly. Without it you get the
+    full catalog, which is a superset — every 2.2 skill is still in there.
+    """
 
     permission_classes = [AllowAny]
 
-    def get(self, _request):
+    def get(self, request):
+        only_v22 = str(request.query_params.get("since", "")).strip() == "2.2"
+
+        def categories(key, persona):
+            for cat, skills in persona["categories"].items():
+                picked = [{"key": sk, "label": label,
+                           "v22": is_v22_skill(key, cat, sk)}
+                          for sk, label in skills.items()
+                          if not only_v22 or is_v22_skill(key, cat, sk)]
+                if picked:
+                    yield {"name": cat, "skills": picked}
+
+        personas = []
+        for key, p in PERSONAZ.items():
+            cats = list(categories(key, p))
+            if only_v22 and not cats:
+                continue
+            personas.append({"key": key, "label": f"{p['emoji']} {p['name']}",
+                             "categories": cats,
+                             "skill_count": sum(len(c["skills"]) for c in cats)})
+
         return Response({
             "kinds": [{"key": k, "label": v, "icon": ICONS.get(k),
                        "needs_source": k in ("cover", "remix")}
@@ -95,16 +120,9 @@ class CatalogView(APIView):
             # needs the real vocabulary rather than a free-text box — which is
             # what "Skill (optional)" was, and nothing could filter on it.
             "skills_required": True,
-            "personas": [
-                {"key": key, "label": f"{p['emoji']} {p['name']}",
-                 "categories": [
-                     {"name": cat,
-                      "skills": [{"key": sk, "label": label}
-                                 for sk, label in skills.items()]}
-                     for cat, skills in p["categories"].items()
-                 ]}
-                for key, p in PERSONAZ.items()
-            ],
+            "since": "2.2" if only_v22 else None,
+            "personas": personas,
+            "skill_count": sum(p["skill_count"] for p in personas),
             "ranges": searchfilters.catalog(),
         })
 

@@ -429,3 +429,21 @@ class CollabSkillsRequiredTests(TestCase):
         names = [c["name"] for c in artist["categories"]]
         self.assertIn("String Instruments", names)
         self.assertIn("ranges", body)
+
+    def test_the_picker_can_serve_exactly_the_2_2_vocabulary(self):
+        """"I need 2.2" — five personas, 131 skills, nothing added since."""
+        body = APIClient().get(reverse("collabz-catalog"), {"since": "2.2"}).json()
+        self.assertEqual(body["since"], "2.2")
+        self.assertEqual(len(body["personas"]), 5)
+        self.assertEqual(body["skill_count"], 131)
+        self.assertTrue(all(s["v22"] for p in body["personas"]
+                            for c in p["categories"] for s in c["skills"]))
+
+    def test_the_full_catalog_is_a_superset_of_2_2(self):
+        """Neither list may drift from the other — they're one source filtered."""
+        def flat(params):
+            body = APIClient().get(reverse("collabz-catalog"), params).json()
+            return {(p["key"], c["name"], s["key"]) for p in body["personas"]
+                    for c in p["categories"] for s in c["skills"]}
+
+        self.assertTrue(flat({"since": "2.2"}) <= flat({}))
