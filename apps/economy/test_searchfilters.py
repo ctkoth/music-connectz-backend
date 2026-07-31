@@ -388,6 +388,51 @@ class SocialSearchTests(TestCase):
         self.assertEqual(body["unknown_count"], 1)
 
 
+class DiscoverabilityTests(TestCase):
+    """A gate that's enforced but undiscoverable is a filter nobody can find.
+
+    Every surface that applies the ranges has to be able to hand a client the
+    bounds to draw them with — and from one source, because four hand-kept
+    slider lists is how they end up disagreeing about the maximum age.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(member("browser"))
+
+    def catalog_from(self, url_name, key, **params):
+        body = self.client.get(reverse(url_name), params).json()
+        self.assertIn(key, body, f"{url_name} can't tell a client the ranges")
+        return body[key]
+
+    def test_the_shared_endpoint_is_public(self):
+        r = APIClient().get(reverse("economy-searchfilters"))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.json()["ranges"]), 5)
+
+    def test_every_surface_serves_the_same_five_ranges(self):
+        def keys(payload):
+            return sorted(r["key"] for r in payload["ranges"])
+
+        expected = keys(sf.catalog())
+        self.assertEqual(len(expected), 5)
+        self.assertEqual(keys(self.catalog_from("economy-venues", "ranges")),
+                         expected)
+        self.assertEqual(
+            keys(self.catalog_from("economy-members", "available_ranges")),
+            expected)
+        self.assertEqual(keys(self.catalog_from("collabz-catalog", "ranges")),
+                         expected)
+        self.assertEqual(keys(self.catalog_from("battlez-catalog", "ranges")),
+                         expected)
+
+    def test_the_search_reports_active_gates_separately_from_available_ones(self):
+        body = self.client.get(reverse("economy-members"),
+                               {"age": "18-30"}).json()
+        self.assertEqual([r["key"] for r in body["ranges"]], ["age"])
+        self.assertEqual(len(body["available_ranges"]["ranges"]), 5)
+
+
 class CollabSkillsRequiredTests(TestCase):
     """"Skill (optional)" was a free-text box nobody could filter on."""
 

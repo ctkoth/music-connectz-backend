@@ -65,6 +65,7 @@ from .social import (
     FaceDetailView,
     FaceRateView,
     FaceZView,
+    SearchFiltersView,
     VenueJoinView,
     VenuesView,
 )
@@ -142,6 +143,7 @@ urlpatterns = [
     path("play/products/", PlayProductsView.as_view(), name="economy-play-products"),
     path("play/verify/", PlayVerifyView.as_view(), name="economy-play-verify"),
     path("play/purchases/", PlayPurchasesView.as_view(), name="economy-play-purchases"),
+    path("searchfilters/", SearchFiltersView.as_view(), name="economy-searchfilters"),
     path("venues/", VenuesView.as_view(), name="economy-venues"),
     path("venues/<int:pk>/join/", VenueJoinView.as_view(), name="economy-venue-join"),
     path("attractiveness/", AttractivenessView.as_view(), name="economy-attractiveness"),

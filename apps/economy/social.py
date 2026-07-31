@@ -8,7 +8,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import status
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -68,12 +68,33 @@ def _venue_dict(v, request):
     }
 
 
+class SearchFiltersView(APIView):
+    """GET the five range gates so a client can draw the sliders.
+
+    Public, and shared by every surface. CollabZ and BattleZ already serve this
+    inside their own catalogs, but VenueZ and Social ConnectZ have no catalog to
+    hang it on — so the ranges were enforceable on those two and undiscoverable,
+    which is a filter nobody can find. One endpoint rather than four copies:
+    four hand-maintained slider lists is how they end up disagreeing about what
+    the maximum age is.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, _request):
+        return Response(sf.catalog())
+
+
 class VenuesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         venues = Venue.objects.select_related("host").all()[:200]
-        return Response({"venues": [_venue_dict(v, request) for v in venues]})
+        # Inline as well as on the shared endpoint: the VenueZ screen needs the
+        # slider bounds at the same moment it needs the list, and a second
+        # round trip to draw a filter is a filter that renders late.
+        return Response({"venues": [_venue_dict(v, request) for v in venues],
+                         "ranges": sf.catalog()})
 
     def post(self, request):
         d = request.data
@@ -769,5 +790,8 @@ class MembersView(APIView):
             # "and 12 more with nothing set for that filter" — worth offering,
             # and the only way a member with no ratings yet ever gets found.
             "unknown_count": unknown,
+            # What's currently gating, and what could. The search screen draws
+            # its sliders from `available` without a second request.
             "ranges": [r.payload() for r in ranges.values()],
+            "available_ranges": sf.catalog(),
         })
