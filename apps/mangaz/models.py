@@ -55,6 +55,46 @@ ROOM_ROLES = [
     (ROLE_WRITER, "Writer"), (ROLE_READER, "Reader"),
 ]
 
+# The viewing formats. Same rooms, same supervision, same AI royalty — they
+# differ only in how long the finished thing is allowed to run. Durations come
+# off the app icons, which are the spec: EpisodeZ says "60 MINUTE LIMIT" and
+# MovieZ says "1-3 hour max".
+#
+#   key -> (label, icon, min seconds or None, max seconds or None)
+FORMATS = {
+    "manga": ("MangaZ", "📚", None, None),          # pages, not minutes
+    "reel": ("ReelZ", "⏪", None, 3 * 60),
+    "episode": ("EpisodeZ", "📺", None, 60 * 60),
+    "movie": ("MovieZ", "🎥", 60 * 60, 3 * 60 * 60),
+}
+FORMAT_CHOICES = [(k, v[0]) for k, v in FORMATS.items()]
+
+
+def duration_error(fmt, seconds):
+    """Why this runtime doesn't fit the format, or None.
+
+    A limit that only exists in the icon is a limit nobody enforces — and the
+    member finds out after they've cut the thing.
+    """
+    if fmt not in FORMATS:
+        return f"Unknown format {fmt!r}."
+    _label, _icon, low, high = FORMATS[fmt]
+    if seconds in (None, ""):
+        return None                      # not cut yet; nothing to check
+    try:
+        seconds = int(seconds)
+    except (TypeError, ValueError):
+        return "Runtime has to be a whole number of seconds."
+    if seconds < 0:
+        return "Runtime can't be negative."
+    label = FORMATS[fmt][0]
+    if low is not None and 0 < seconds < low:
+        return f"{label} runs at least {low // 60} minutes — this is {seconds // 60}."
+    if high is not None and seconds > high:
+        return f"{label} tops out at {high // 60} minutes — this is {seconds // 60}."
+    return None
+
+
 SOURCE_HUMAN = "human"
 SOURCE_SCRIPT = "script"        # member pasted a script, AI laid it out
 SOURCE_CHARACTER = "character"  # AI wrote from the character's bio + MBTI
@@ -208,6 +248,115 @@ class RoomMember(models.Model):
         ordering = ["joined_at"]
 
 
+class Meet(models.Model):
+    """An in-person session for a room. Teens and adults, in the same place.
+
+    This is a real thing creative people do — a studio afternoon, a school
+    programme, a table at a con — and refusing to support it just means it
+    happens off-platform where nothing is recorded. So it is supported, with
+    the conditions that make it defensible rather than a liability:
+
+      * a **verified adult supervisor**, who has to be attending
+      * **guardian consent on file** for every minor attending
+      * a **public place**, stated in the record
+      * every attendee named, so who was there is not a memory afterwards
+
+    Guardian consent here is a recorded assertion with a contact on it, not
+    proof — no backend can verify a parent. Recording who asserted it, and
+    when, is what makes it checkable later; claiming it is verification would
+    be the dishonest part.
+    """
+
+    room = models.ForeignKey(Room, on_delete=models.CASCADE, related_name="meets")
+    title = models.CharField(max_length=160)
+    place = models.CharField(max_length=300, help_text="Where — a public place")
+    is_public_place = models.BooleanField(default=True)
+    starts_at = models.DateTimeField()
+    organiser = models.ForeignKey(settings.AUTH_USER_MODEL,
+                                  on_delete=models.CASCADE,
+                                  related_name="mangaz_meets")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["starts_at"]
+
+    def __str__(self):
+        return f"Meet<{self.id}> {self.title}"
+
+    def minors_attending(self):
+        return [a.user for a in self.attendees.select_related("user")
+                if is_minor(a.user)]
+
+    def missing_consent(self):
+        """Minors attending without guardian consent recorded."""
+        consented = set(self.consents.filter(granted=True)
+                        .values_list("minor_id", flat=True))
+        return [u for u in self.minors_attending() if u.id not in consented]
+
+    def readiness_error(self):
+        """Why this meet may not go ahead, or None.
+
+        Recomputed rather than stored: somebody joins, and a meet that was
+        fine becomes one that needs consent. A flag set at creation would go
+        stale exactly when it mattered.
+        """
+        room_problem = self.room.supervision_error()
+        if room_problem:
+            return room_problem
+        minors = self.minors_attending()
+        if not minors:
+            return None
+        if not self.is_public_place:
+            return ("In-person sessions with under-18s have to be somewhere "
+                    "public.")
+        if not self.room.supervisor_id:
+            return "An in-person session with under-18s needs a supervisor."
+        if not is_verified_adult(self.room.supervisor):
+            return "The supervisor has to be a verified adult."
+        if not self.attendees.filter(user=self.room.supervisor_id).exists():
+            return ("The supervisor has to be attending, not just named on "
+                    "the room.")
+        missing = self.missing_consent()
+        if missing:
+            names = ", ".join(u.username for u in missing)
+            return (f"Guardian consent isn't on file for: {names}.")
+        return None
+
+
+class MeetAttendee(models.Model):
+    meet = models.ForeignKey(Meet, on_delete=models.CASCADE, related_name="attendees")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="mangaz_meet_attendance")
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("meet", "user")
+        ordering = ["added_at"]
+
+
+class GuardianConsent(models.Model):
+    """A recorded assertion that a minor's guardian said yes to one meet.
+
+    Per-meet on purpose. A blanket consent that covers every future session is
+    the thing a guardian did not actually agree to, and it is the shape that
+    gets a platform in trouble.
+    """
+
+    meet = models.ForeignKey(Meet, on_delete=models.CASCADE, related_name="consents")
+    minor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="mangaz_consents")
+    guardian_name = models.CharField(max_length=120)
+    guardian_contact = models.CharField(max_length=200)
+    granted = models.BooleanField(default=True)
+    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL,
+                                    on_delete=models.SET_NULL, null=True,
+                                    related_name="mangaz_consents_recorded")
+    recorded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("meet", "minor")
+
+
 class RoomApproval(models.Model):
     """The supervisor's yes for one adult in a room that has minors in it.
 
@@ -236,6 +385,13 @@ class MangaZ(models.Model):
     room = models.ForeignKey(Room, on_delete=models.CASCADE, related_name="mangaz")
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
                               related_name="mangaz_works")
+    # MangaZ, ReelZ, EpisodeZ or MovieZ. One model rather than four apps: they
+    # are the same collaboration with the same supervision, the same AI royalty
+    # and the same provenance — only the runtime limit differs. Four copies
+    # would drift, and the age rules are the last thing that should.
+    format = models.CharField(max_length=10, choices=FORMAT_CHOICES,
+                              default="manga", db_index=True)
+    runtime_seconds = models.PositiveIntegerField(null=True, blank=True)
     synopsis = models.TextField(blank=True, default="")
     characters = models.ManyToManyField(CharacterZ, blank=True,
                                         related_name="appears_in")
@@ -250,6 +406,15 @@ class MangaZ(models.Model):
 
     def __str__(self):
         return f"MangaZ<{self.id}> {self.title}"
+
+    def runtime_error(self):
+        return duration_error(self.format, self.runtime_seconds)
+
+    def format_payload(self):
+        label, icon, low, high = FORMATS[self.format]
+        return {"key": self.format, "label": label, "icon": icon,
+                "min_seconds": low, "max_seconds": high,
+                "runtime_seconds": self.runtime_seconds}
 
     def ai_pages(self):
         return self.pages.filter(source__in=AI_SOURCES)

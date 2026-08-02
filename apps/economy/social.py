@@ -322,7 +322,10 @@ class FaceRateView(APIView):
 PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign",
                   "nationalities", "regions", "substances", "sober",
                   "attracted_to", "asexual", "traits", "personas", "genres", "links",
-                  "external_followers")
+                  "external_followers",
+                  # How they want links opened — new tab, new window, or in
+                  # place. Editable like any other preference.
+                  "link_target")
 
 
 def _avatar_url(p, request):
@@ -416,6 +419,9 @@ def _profile_full(p, request):
         "relationship": relationship(request.user, p.user),
         "energy_per_hour": energy_rate_per_hour(p.user) if p.user_id == request.user.id else None,
         "verified_18plus": p.verified_18plus,
+        # How they want links opened — new tab, new window, or in place. The
+        # client can't honour a preference it was never told about.
+        "link_target": p.link_target,
     })
     return card
 

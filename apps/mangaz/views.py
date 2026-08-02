@@ -19,10 +19,11 @@ from rest_framework.views import APIView
 from apps.economy.models import Face
 
 from .ai import AiUnavailable, write_from_character, write_from_script
-from .models import (AI_ROYALTY_RATE, MBTI_TYPES, ROLE_ARTIST, ROLE_SUPERVISOR,
-                     SOURCE_CHARACTER, SOURCE_HUMAN, SOURCE_SCRIPT, CharacterZ,
-                     MangaZ, Page, Room, RoomApproval, RoomMember,
-                     is_minor, is_verified_adult)
+from .models import (AI_ROYALTY_RATE, FORMATS, MBTI_TYPES, ROLE_ARTIST,
+                     ROLE_SUPERVISOR, SOURCE_CHARACTER, SOURCE_HUMAN,
+                     SOURCE_SCRIPT, CharacterZ, GuardianConsent, MangaZ, Meet,
+                     MeetAttendee, Page, Room, RoomApproval, RoomMember,
+                     duration_error, is_minor, is_verified_adult)
 
 User = get_user_model()
 
@@ -52,6 +53,7 @@ def _room_dict(room, user=None):
 def _manga_dict(m, full=False):
     out = {"id": m.id, "title": m.title, "owner": m.owner.username,
            "room": m.room_id, "synopsis": m.synopsis,
+           "format": m.format_payload(),
            "characters": [c.name for c in m.characters.all()],
            "provenance": m.provenance(), "updated_at": m.updated_at}
     if full:
@@ -72,6 +74,11 @@ class CatalogView(APIView):
     def get(self, _request):
         return Response({
             "mbti": MBTI_TYPES,
+            "formats": [
+                {"key": k, "label": label, "icon": icon,
+                 "min_seconds": low, "max_seconds": high}
+                for k, (label, icon, low, high) in FORMATS.items()
+            ],
             "sources": [
                 {"key": SOURCE_HUMAN, "label": "Written by hand", "ai": False},
                 {"key": SOURCE_SCRIPT, "label": "AI from your script", "ai": True},
@@ -255,8 +262,19 @@ class MangaListView(APIView):
         if not title:
             return Response({"detail": "A manga needs a title."},
                             status=status.HTTP_400_BAD_REQUEST)
+        fmt = str(d.get("format", "manga"))
+        if fmt not in FORMATS:
+            return Response({"detail": f"Unknown format {fmt!r}.",
+                             "formats": sorted(FORMATS)},
+                            status=status.HTTP_400_BAD_REQUEST)
+        runtime = d.get("runtime_seconds")
+        bad = duration_error(fmt, runtime)
+        if bad:
+            return Response({"detail": bad},
+                            status=status.HTTP_400_BAD_REQUEST)
         m = MangaZ.objects.create(title=title[:160], room=room,
-                                  owner=request.user,
+                                  owner=request.user, format=fmt,
+                                  runtime_seconds=runtime or None,
                                   synopsis=str(d.get("synopsis", ""))[:4000])
         for cid in (d.get("character_ids") or [])[:20]:
             c = CharacterZ.objects.filter(pk=cid).filter(
@@ -371,3 +389,113 @@ class RoyaltyQuoteView(APIView):
         return Response({"sale_cents": sale,
                          "ai_royalty_cents": m.ai_royalty_cents(sale),
                          "provenance": m.provenance()})
+
+
+def _meet_dict(meet):
+    return {
+        "id": meet.id, "title": meet.title, "place": meet.place,
+        "is_public_place": meet.is_public_place, "starts_at": meet.starts_at,
+        "organiser": meet.organiser.username, "room": meet.room_id,
+        "attendees": [a.user.username for a in meet.attendees.select_related("user")],
+        "minors_attending": [u.username for u in meet.minors_attending()],
+        "consent_missing": [u.username for u in meet.missing_consent()],
+        "ready": meet.readiness_error() is None,
+        "why_not": meet.readiness_error(),
+    }
+
+
+class MeetsView(APIView):
+    """In-person sessions for a room. Teens and adults in the same place.
+
+    Supported rather than refused: a studio afternoon or a school programme is
+    a real thing creative people do, and not supporting it just moves it
+    somewhere nothing is recorded. The conditions are in Meet.readiness_error.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        room, err = _room_for(request.user, pk)
+        if err:
+            return Response({"detail": err[0]}, status=err[1])
+        return Response({"meets": [_meet_dict(m) for m in room.meets.all()]})
+
+    def post(self, request, pk):
+        room, err = _room_for(request.user, pk)
+        if err:
+            return Response({"detail": err[0]}, status=err[1])
+        d = request.data or {}
+        title = str(d.get("title", "")).strip()
+        place = str(d.get("place", "")).strip()
+        starts_at = d.get("starts_at")
+        if not (title and place and starts_at):
+            return Response(
+                {"detail": "A meet needs a title, a place and a start time."},
+                status=status.HTTP_400_BAD_REQUEST)
+        meet = Meet.objects.create(
+            room=room, title=title[:160], place=place[:300],
+            is_public_place=bool(d.get("is_public_place", True)),
+            starts_at=starts_at, organiser=request.user)
+        MeetAttendee.objects.create(meet=meet, user=request.user)
+        return Response({"meet": _meet_dict(meet)},
+                        status=status.HTTP_201_CREATED)
+
+
+class MeetAttendView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        meet = Meet.objects.filter(pk=pk).first()
+        if not meet:
+            return Response({"detail": "No such meet."},
+                            status=status.HTTP_404_NOT_FOUND)
+        if not meet.room.members.filter(user=request.user).exists():
+            return Response({"detail": "You're not in this room."},
+                            status=status.HTTP_403_FORBIDDEN)
+        MeetAttendee.objects.get_or_create(meet=meet, user=request.user)
+        # Reported, not refused. A minor joining is exactly what creates the
+        # consent requirement, and blocking the join would hide the reason —
+        # `why_not` names what's still needed so somebody can go and get it.
+        return Response({"meet": _meet_dict(meet)},
+                        status=status.HTTP_201_CREATED)
+
+
+class MeetConsentView(APIView):
+    """Record a guardian's yes for one minor at one meet.
+
+    Only the supervisor records it, and only for a minor who is attending.
+    This is a recorded assertion with a contact on it, not proof — no backend
+    can verify a parent, and pretending otherwise would be the dishonest part.
+    Per-meet on purpose: blanket consent covering every future session is the
+    thing a guardian did not actually agree to.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        meet = Meet.objects.filter(pk=pk).first()
+        if not meet:
+            return Response({"detail": "No such meet."},
+                            status=status.HTTP_404_NOT_FOUND)
+        if meet.room.supervisor_id != request.user.id:
+            return Response(
+                {"detail": "Only the room's supervisor records guardian consent."},
+                status=status.HTTP_403_FORBIDDEN)
+        d = request.data or {}
+        target = User.objects.filter(username=str(d.get("username", ""))).first()
+        if not target or not meet.attendees.filter(user=target).exists():
+            return Response({"detail": "That member isn't attending this meet."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        name = str(d.get("guardian_name", "")).strip()
+        contact = str(d.get("guardian_contact", "")).strip()
+        if not (name and contact):
+            return Response(
+                {"detail": "Record the guardian's name and a contact for them."},
+                status=status.HTTP_400_BAD_REQUEST)
+        GuardianConsent.objects.update_or_create(
+            meet=meet, minor=target,
+            defaults={"guardian_name": name[:120],
+                      "guardian_contact": contact[:200],
+                      "granted": bool(d.get("granted", True)),
+                      "recorded_by": request.user})
+        return Response({"meet": _meet_dict(meet)})

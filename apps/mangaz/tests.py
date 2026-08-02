@@ -16,8 +16,8 @@ from apps.economy.models import profile_for
 
 from .ai import AiUnavailable
 from .models import (AI_ROYALTY_RATE, SOURCE_CHARACTER, SOURCE_HUMAN,
-                     SOURCE_SCRIPT, CharacterZ, MangaZ, Page, Room, RoomMember,
-                     is_minor, is_verified_adult)
+                     SOURCE_SCRIPT, CharacterZ, MangaZ, Meet, Page, Room,
+                     RoomMember, is_minor, is_verified_adult)
 
 User = get_user_model()
 
@@ -390,3 +390,190 @@ class ApiTests(TestCase):
         outsider.force_authenticate(adult("outsider"))
         r = outsider.get(reverse("mangaz-work", args=[manga_id]))
         self.assertEqual(r.status_code, 404)
+
+
+class ViewingFormatTests(TestCase):
+    """ReelZ, EpisodeZ and MovieZ are the same collaboration as MangaZ with a
+    runtime limit. The limits come off the app icons, which are the spec."""
+
+    def setUp(self):
+        self.sup = adult("format_sup")
+        self.client = APIClient()
+        self.client.force_authenticate(self.sup)
+        self.room_id = self.client.post(reverse("mangaz-rooms"),
+                                        {"title": "Set"},
+                                        format="json").json()["room"]["id"]
+
+    def make(self, fmt, seconds=None):
+        body = {"title": fmt, "room_id": self.room_id, "format": fmt}
+        if seconds is not None:
+            body["runtime_seconds"] = seconds
+        return self.client.post(reverse("mangaz-works"), body, format="json")
+
+    def test_all_four_formats_are_offered(self):
+        keys = [f["key"] for f in
+                APIClient().get(reverse("mangaz-catalog")).json()["formats"]]
+        self.assertEqual(sorted(keys), ["episode", "manga", "movie", "reel"])
+
+    def test_an_episode_over_sixty_minutes_is_refused(self):
+        r = self.make("episode", 61 * 60)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("60 minutes", r.json()["detail"])
+
+    def test_an_episode_at_the_limit_is_fine(self):
+        self.assertEqual(self.make("episode", 60 * 60).status_code, 201)
+
+    def test_a_movie_under_an_hour_is_refused(self):
+        r = self.make("movie", 30 * 60)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("at least", r.json()["detail"])
+
+    def test_a_movie_over_three_hours_is_refused(self):
+        self.assertEqual(self.make("movie", 4 * 60 * 60).status_code, 400)
+
+    def test_a_two_hour_movie_is_fine(self):
+        self.assertEqual(self.make("movie", 2 * 60 * 60).status_code, 201)
+
+    def test_a_reel_is_capped_at_three_minutes(self):
+        self.assertEqual(self.make("reel", 4 * 60).status_code, 400)
+        self.assertEqual(self.make("reel", 90).status_code, 201)
+
+    def test_manga_has_no_runtime_limit(self):
+        """Pages, not minutes."""
+        self.assertEqual(self.make("manga", 99999).status_code, 201)
+
+    def test_no_runtime_yet_is_allowed(self):
+        """Not cut yet — there's nothing to check."""
+        self.assertEqual(self.make("movie").status_code, 201)
+
+    def test_an_unknown_format_is_refused(self):
+        self.assertEqual(self.make("podcast", 60).status_code, 400)
+
+    def test_every_format_gets_the_same_ai_royalty(self):
+        runtimes = {"reel": 120, "episode": 45 * 60, "movie": 90 * 60}
+        for fmt, seconds in runtimes.items():
+            with self.subTest(format=fmt):
+                r = self.make(fmt, seconds)
+                self.assertEqual(r.status_code, 201, r.content)
+                mid = r.json()["manga"]["id"]
+                with patch("apps.mangaz.views.write_from_script",
+                           return_value=("x", {}, "m")):
+                    self.client.post(reverse("mangaz-pages", args=[mid]),
+                                     {"mode": SOURCE_SCRIPT, "script": "hi"},
+                                     format="json")
+                body = self.client.get(reverse("mangaz-royalty", args=[mid]),
+                                       {"sale_cents": "1000"}).json()
+                self.assertEqual(body["ai_royalty_cents"], 100)
+
+
+class InPersonMeetTests(TestCase):
+    """Teens and adults working together in the same room, in real life.
+
+    Supported rather than refused — a studio afternoon is a real thing, and
+    not supporting it moves it somewhere nothing is recorded.
+    """
+
+    def setUp(self):
+        self.sup = adult("meet_sup")
+        self.client = APIClient()
+        self.client.force_authenticate(self.sup)
+        self.room = Room.objects.create(title="Studio", owner=self.sup,
+                                        supervisor=self.sup)
+        RoomMember.objects.create(room=self.room, user=self.sup)
+
+    def make_meet(self, **over):
+        body = dict({"title": "Session", "place": "Community centre",
+                     "starts_at": "2027-01-01T10:00:00Z"}, **over)
+        return self.client.post(reverse("mangaz-meets", args=[self.room.id]),
+                                body, format="json")
+
+    def add_teen(self, meet_id, name="teen_attendee"):
+        teen = kid(name)
+        RoomMember.objects.create(room=self.room, user=teen)
+        c = APIClient()
+        c.force_authenticate(teen)
+        c.post(reverse("mangaz-meet-attend", args=[meet_id]), {}, format="json")
+        return teen
+
+    def test_an_adults_only_meet_is_ready_immediately(self):
+        self.assertTrue(self.make_meet().json()["meet"]["ready"])
+
+    def test_a_teen_attending_creates_a_consent_requirement(self):
+        meet_id = self.make_meet().json()["meet"]["id"]
+        self.add_teen(meet_id)
+        body = self.client.get(reverse("mangaz-meets",
+                                       args=[self.room.id])).json()["meets"][0]
+        self.assertFalse(body["ready"])
+        self.assertIn("Guardian consent", body["why_not"])
+
+    def test_a_teen_is_not_blocked_from_joining_just_flagged(self):
+        """Blocking would hide the reason. Naming what's missing lets somebody
+        go and get it."""
+        meet_id = self.make_meet().json()["meet"]["id"]
+        teen = self.add_teen(meet_id, "flagged_teen")
+        meet = Meet.objects.get(pk=meet_id)
+        self.assertIn(teen, [a.user for a in meet.attendees.all()])
+
+    def test_recorded_consent_makes_it_ready(self):
+        meet_id = self.make_meet().json()["meet"]["id"]
+        self.add_teen(meet_id, "consented_teen")
+        r = self.client.post(reverse("mangaz-meet-consent", args=[meet_id]),
+                             {"username": "consented_teen",
+                              "guardian_name": "A Parent",
+                              "guardian_contact": "parent@example.com"},
+                             format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.json()["meet"]["ready"])
+
+    def test_a_private_place_is_refused_when_a_teen_attends(self):
+        meet_id = self.make_meet(is_public_place=False).json()["meet"]["id"]
+        self.add_teen(meet_id, "private_place_teen")
+        self.client.post(reverse("mangaz-meet-consent", args=[meet_id]),
+                         {"username": "private_place_teen",
+                          "guardian_name": "P", "guardian_contact": "p@e.com"},
+                         format="json")
+        meet = Meet.objects.get(pk=meet_id)
+        self.assertIn("somewhere public", meet.readiness_error())
+
+    def test_the_supervisor_has_to_be_attending_not_just_named(self):
+        meet_id = self.make_meet().json()["meet"]["id"]
+        self.add_teen(meet_id, "unsupervised_teen")
+        self.client.post(reverse("mangaz-meet-consent", args=[meet_id]),
+                         {"username": "unsupervised_teen",
+                          "guardian_name": "P", "guardian_contact": "p@e.com"},
+                         format="json")
+        Meet.objects.get(pk=meet_id).attendees.filter(user=self.sup).delete()
+        self.assertIn("has to be attending",
+                      Meet.objects.get(pk=meet_id).readiness_error())
+
+    def test_only_the_supervisor_records_consent(self):
+        meet_id = self.make_meet().json()["meet"]["id"]
+        teen = self.add_teen(meet_id, "other_teen")
+        other = APIClient()
+        other.force_authenticate(adult("random_adult"))
+        r = other.post(reverse("mangaz-meet-consent", args=[meet_id]),
+                       {"username": "other_teen", "guardian_name": "X",
+                        "guardian_contact": "x@e.com"}, format="json")
+        self.assertEqual(r.status_code, 403)
+
+    def test_consent_needs_a_contact_not_just_a_name(self):
+        meet_id = self.make_meet().json()["meet"]["id"]
+        self.add_teen(meet_id, "nameonly_teen")
+        r = self.client.post(reverse("mangaz-meet-consent", args=[meet_id]),
+                             {"username": "nameonly_teen",
+                              "guardian_name": "A Parent"}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_consent_is_per_meet_not_blanket(self):
+        """A guardian saying yes to one afternoon did not say yes to every
+        future session — which is the shape that gets a platform in trouble."""
+        first = self.make_meet(title="One").json()["meet"]["id"]
+        self.add_teen(first, "returning_teen")
+        self.client.post(reverse("mangaz-meet-consent", args=[first]),
+                         {"username": "returning_teen", "guardian_name": "P",
+                          "guardian_contact": "p@e.com"}, format="json")
+        second = self.make_meet(title="Two").json()["meet"]["id"]
+        c = APIClient()
+        c.force_authenticate(User.objects.get(username="returning_teen"))
+        c.post(reverse("mangaz-meet-attend", args=[second]), {}, format="json")
+        self.assertIsNotNone(Meet.objects.get(pk=second).readiness_error())

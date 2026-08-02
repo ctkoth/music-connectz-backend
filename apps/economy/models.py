@@ -676,6 +676,20 @@ class Profile(models.Model):
     verification_attempts = models.PositiveIntegerField(default=0)
     # One-time onboarding reward: set when the member finishes the intro flow so
     # the grant (SpinAZ + Energy) can never be claimed twice.
+    # How this member wants links opened: a new tab, a new window, or in place.
+    # A preference rather than a hardcoded target="_blank" — on a phone a new
+    # window is a nuisance, on a desktop losing the page you were reading is,
+    # and only the member knows which they are. Default "tab" because that's
+    # what most of the web does and a default nobody notices is the right one.
+    LINK_TAB = "tab"
+    LINK_WINDOW = "window"
+    LINK_SAME = "same"
+    LINK_TARGET_CHOICES = [
+        (LINK_TAB, "New tab"), (LINK_WINDOW, "New window"),
+        (LINK_SAME, "Same tab"),
+    ]
+    link_target = models.CharField(max_length=8, choices=LINK_TARGET_CHOICES,
+                                   default=LINK_TAB)
     onboarded = models.BooleanField(default=False)
     onboarded_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)

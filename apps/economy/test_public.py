@@ -213,3 +213,34 @@ class ScrapingIsBoundedTests(TestCase):
     def test_a_negative_limit_does_not_invert_the_slice(self):
         body = self.client.get(reverse("public-feed"), {"limit": "-5"}).json()
         self.assertGreaterEqual(len(body["posts"]), 1)
+
+
+class LinkTargetPreferenceTests(TestCase):
+    """Members choose how links open. On a phone a new window is a nuisance;
+    on a desktop losing the page you were reading is. Only they know which."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.u = member("link_chooser")
+        self.client.force_authenticate(self.u)
+
+    def test_the_default_is_a_new_tab(self):
+        self.assertEqual(profile_for(self.u).link_target, "tab")
+
+    def test_a_member_can_choose_a_new_window(self):
+        r = self.client.post(reverse("economy-profile"),
+                             {"link_target": "window"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        profile_for(self.u).refresh_from_db()
+        self.assertEqual(profile_for(self.u).link_target, "window")
+
+    def test_a_member_can_choose_to_stay_in_place(self):
+        self.client.post(reverse("economy-profile"), {"link_target": "same"},
+                         format="json")
+        self.assertEqual(profile_for(self.u).link_target, "same")
+
+    def test_the_choice_comes_back_on_the_profile(self):
+        self.client.post(reverse("economy-profile"), {"link_target": "window"},
+                         format="json")
+        body = self.client.get(reverse("economy-profile")).json()
+        self.assertIn("link_target", str(body))

@@ -161,9 +161,9 @@ TABS = [
             modal("Instrumental ConnectZ", "🎹", "Beats and instrumentals."),
             modal("Mix ConnectZ", "🎚️", "Mixes."),
             modal("Video ConnectZ", "📺", "Music videoz and introduction videoz."),
-            modal("ReelZ", "🎞️", "Short vertical cuts."),
-            modal("MovieZ", "🎬", "Full-length features."),
-            modal("EpisodeZ", "📼", "Series, episode by episode."),
+            modal("ReelZ", "⏪", "Short cuts — up to 3 minutes."),
+            modal("EpisodeZ", "📺", "Series, episode by episode. 60 minute limit."),
+            modal("MovieZ", "🎥", "Features. 1–3 hours."),
             modal("MangaZ", "📚",
                   "Design manga with your CharacterZ — write by hand, paste a "
                   "script for the AI to lay out, or let it write from a "
