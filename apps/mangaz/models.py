@@ -493,3 +493,177 @@ class Page(models.Model):
     def ai_assisted(self):
         """True if a machine made either half of this page."""
         return self.source in AI_SOURCES or self.art_source in AI_SOURCES
+
+
+# --- selling ----------------------------------------------------------------
+#
+# A MangaZ nobody can buy is a hobby. Three ways to sell one, and they are
+# deliberately different products rather than three prices for the same thing:
+#
+#   own         buy the volume, keep it
+#   pass        read it for a fixed window (a rental)
+#   commission  pay the designer's skill price by the hour for new work
+#
+# There is no "charge the reader per minute they read". It sounds like the
+# hourly model but it is a different and worse deal: the reader cannot know
+# what a book will cost before they open it, and a slow reader pays more than
+# a fast one for the same book — which charges most to exactly the people who
+# savour the work. A PASS is the honest version of "by time": a known price
+# for a known window, which is what every rental on earth does.
+
+SALE_OWN = "own"
+SALE_PASS = "pass"
+SALE_COMMISSION = "commission"
+SALE_KINDS = [
+    (SALE_OWN, "Buy it"),
+    (SALE_PASS, "Reading pass"),
+    (SALE_COMMISSION, "Commission"),
+]
+
+# A pass is priced off the designer's hourly skill price, which is what that
+# field is FOR — the rate they charge for their time. One hour of their rate
+# buys this many hours of reading, so a well-paid designer's book costs more
+# without them having to price it by hand.
+PASS_HOURS = 48
+
+
+class Volume(models.Model):
+    """A sellable chunk of a MangaZ. Pages stay where they are; a volume is a
+    range over them, so re-cutting a book doesn't duplicate its art."""
+
+    manga = models.ForeignKey(MangaZ, on_delete=models.CASCADE,
+                              related_name="volumes")
+    number = models.PositiveIntegerField(default=1)
+    title = models.CharField(max_length=160, blank=True, default="")
+    first_page = models.PositiveIntegerField(default=1)
+    last_page = models.PositiveIntegerField(default=1)
+    price_cents = models.PositiveIntegerField(default=0)
+    pass_price_cents = models.PositiveIntegerField(default=0)
+    pass_hours = models.PositiveIntegerField(default=PASS_HOURS)
+    published = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("manga", "number")
+        ordering = ["number"]
+
+    def __str__(self):
+        return f"Volume {self.number} of {self.manga_id}"
+
+    def pages(self):
+        return self.manga.pages.filter(number__gte=self.first_page,
+                                       number__lte=self.last_page)
+
+    def page_count(self):
+        return self.pages().count()
+
+    def suggested_price_cents(self):
+        """What to charge, derived from the designer's own hourly rate.
+
+        Their skill price is what they charge for an hour of their time. A page
+        is roughly an hour of drawing, so a volume's floor is rate × pages. It
+        is a SUGGESTION, not a cap — a creator who wants to give it away or
+        charge triple still can.
+        """
+        rate = profile_for(self.manga.owner).skill_price_cents or 0
+        return rate * max(1, self.page_count())
+
+    def suggested_pass_cents(self):
+        """A pass costs about one hour of the designer's rate. Cheap enough to
+        be an impulse, and it makes their hourly rate mean something to a
+        reader who will never commission them."""
+        return profile_for(self.manga.owner).skill_price_cents or 0
+
+    def publish_error(self):
+        if self.last_page < self.first_page:
+            return "The last page can't come before the first."
+        if not self.page_count():
+            return "There are no pages in that range yet."
+        if not (self.price_cents or self.pass_price_cents):
+            return ("Set a price or a pass price — a volume with neither can't "
+                    "be sold, only given away.")
+        return None
+
+    def contributors(self):
+        """Who wrote or drew this volume, and how much of it — by PAGES.
+
+        Splitting by page count rather than a negotiated percentage, because
+        the data already knows who made what and a split nobody has to agree
+        on is a split nobody argues about. A page counts once for its author
+        whether they wrote it, drew it, or both.
+        """
+        counts = {}
+        for page in self.pages().select_related("author"):
+            counts[page.author] = counts.get(page.author, 0) + 1
+        return counts
+
+    def split_cents(self, net_cents):
+        """Divide a sale between contributors by pages made. Returns
+        {user: cents}, with any rounding remainder going to the owner."""
+        counts = self.contributors()
+        total_pages = sum(counts.values())
+        if not total_pages:
+            return {self.manga.owner: net_cents}
+        shares, paid = {}, 0
+        for user, pages in counts.items():
+            cut = net_cents * pages // total_pages
+            shares[user] = cut
+            paid += cut
+        # Rounding remainder to the owner rather than dropping it — cents that
+        # vanish in integer division are cents somebody earned.
+        owner = self.manga.owner
+        shares[owner] = shares.get(owner, 0) + (net_cents - paid)
+        return shares
+
+
+class Sale(models.Model):
+    """One purchase. Owning is forever; a pass expires."""
+
+    volume = models.ForeignKey(Volume, on_delete=models.CASCADE,
+                               related_name="sales")
+    buyer = models.ForeignKey(settings.AUTH_USER_MODEL,
+                              on_delete=models.CASCADE,
+                              related_name="mangaz_purchases")
+    kind = models.CharField(max_length=12, choices=SALE_KINDS, default=SALE_OWN)
+    price_cents = models.PositiveIntegerField(default=0)
+    dev_tax_cents = models.PositiveIntegerField(default=0)
+    ai_royalty_cents = models.PositiveIntegerField(default=0)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def active(self):
+        """A pass that has run out is not access. Owning never expires."""
+        from django.utils import timezone
+        if self.kind == SALE_OWN:
+            return True
+        return bool(self.expires_at and self.expires_at > timezone.now())
+
+
+class Commission(models.Model):
+    """New work, paid at the designer's hourly rate.
+
+    This is where "by the hour" belongs — somebody buying the designer's TIME,
+    which is what `skill_price_cents` measures. Hours are agreed up front and
+    the total is shown before anyone pays, so nobody discovers the bill after
+    the fact.
+    """
+
+    manga = models.ForeignKey(MangaZ, on_delete=models.SET_NULL, null=True,
+                              blank=True, related_name="commissions")
+    designer = models.ForeignKey(settings.AUTH_USER_MODEL,
+                                 on_delete=models.CASCADE,
+                                 related_name="mangaz_commissions")
+    client = models.ForeignKey(settings.AUTH_USER_MODEL,
+                               on_delete=models.CASCADE,
+                               related_name="mangaz_commissions_bought")
+    brief = models.TextField(blank=True, default="")
+    hours = models.PositiveIntegerField(default=1)
+    rate_cents = models.PositiveIntegerField(default=0)
+    paid = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def total_cents(self):
+        return self.hours * self.rate_cents

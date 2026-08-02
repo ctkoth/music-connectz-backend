@@ -9,6 +9,8 @@ Either way the endpoint sets `source` and records the prompt. The client never
 gets to say "this was written by hand" about something a model wrote — that
 claim decides a 10% royalty, and a field the payer controls is not a fact.
 """
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import status
@@ -18,7 +20,10 @@ from rest_framework.views import APIView
 
 from apps.economy.models import Face
 
-from apps.economy.models import membership_for
+from apps.economy.models import (membership_for, pay_between,
+                                 profile_for, wallet_for)
+from apps.economy.nextstep import not_enough
+from apps.economy.views import platform_owner
 from apps.economy.upgrade import response as upgrade_response
 
 from .ai import AiUnavailable, write_from_character, write_from_script
@@ -28,7 +33,9 @@ from .models import (AI_ROYALTY_RATE, FORMATS, MBTI_TYPES, ROLE_ARTIST,
                      ROLE_SUPERVISOR, SOURCE_CHARACTER, SOURCE_HUMAN,
                      SOURCE_SCRIPT, CharacterZ, GuardianConsent, MangaZ, Meet,
                      MeetAttendee, Page, Room, RoomApproval, RoomMember,
-                     duration_error, is_minor, is_verified_adult)
+                     PASS_HOURS, SALE_OWN, SALE_PASS, Commission, Sale,
+                     Volume, duration_error, is_minor,
+                     is_verified_adult)
 
 User = get_user_model()
 
@@ -592,3 +599,212 @@ class ArtView(APIView):
                          "prompt": record,
                          "provenance": m.provenance()},
                         status=status.HTTP_201_CREATED)
+
+
+def _volume_dict(v, user=None):
+    out = {
+        "id": v.id, "number": v.number, "title": v.title,
+        "manga": v.manga_id, "manga_title": v.manga.title,
+        "pages": v.page_count(),
+        "first_page": v.first_page, "last_page": v.last_page,
+        "price_cents": v.price_cents,
+        "pass_price_cents": v.pass_price_cents, "pass_hours": v.pass_hours,
+        "published": v.published,
+        "suggested_price_cents": v.suggested_price_cents(),
+        "suggested_pass_cents": v.suggested_pass_cents(),
+        "contributors": {u.username: n for u, n in v.contributors().items()},
+        "ai_royalty_rate": AI_ROYALTY_RATE if v.manga.used_ai() else 0.0,
+    }
+    if user is not None:
+        sale = v.sales.filter(buyer=user).order_by("-created_at").first()
+        out["you_own"] = bool(sale and sale.kind == SALE_OWN)
+        out["your_pass_active"] = bool(sale and sale.kind == SALE_PASS
+                                       and sale.active())
+    return out
+
+
+class VolumesView(APIView):
+    """List and cut volumes. A MangaZ nobody can buy is a hobby."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        m = MangaZ.objects.filter(pk=pk).first()
+        if not m:
+            return Response({"detail": "No such manga."},
+                            status=status.HTTP_404_NOT_FOUND)
+        # Published volumes are readable by anyone; drafts only by the room.
+        in_room = m.room.members.filter(user=request.user).exists()
+        qs = m.volumes.all() if in_room else m.volumes.filter(published=True)
+        return Response({"volumes": [_volume_dict(v, request.user) for v in qs]})
+
+    def post(self, request, pk):
+        m = MangaZ.objects.filter(pk=pk, owner=request.user).first()
+        if not m:
+            return Response({"detail": "Only the owner cuts volumes."},
+                            status=status.HTTP_403_FORBIDDEN)
+        d = request.data or {}
+
+        def num(key, default=0):
+            try:
+                return max(0, int(d.get(key, default) or 0))
+            except (TypeError, ValueError):
+                return default
+
+        v = Volume(
+            manga=m, number=num("number", m.volumes.count() + 1) or 1,
+            title=str(d.get("title", ""))[:160],
+            first_page=num("first_page", 1) or 1,
+            last_page=num("last_page", m.pages.count()) or 1,
+            price_cents=num("price_cents"),
+            pass_price_cents=num("pass_price_cents"),
+            pass_hours=num("pass_hours", PASS_HOURS) or PASS_HOURS,
+            published=bool(d.get("published")))
+        # Priced by hand or not at all — fall back to their own hourly rate so
+        # a creator who doesn't want to think about pricing still ships.
+        if not v.price_cents and not v.pass_price_cents:
+            v.price_cents = v.suggested_price_cents()
+            v.pass_price_cents = v.suggested_pass_cents()
+        problem = v.publish_error() if v.published else None
+        if problem:
+            return Response({"detail": problem},
+                            status=status.HTTP_400_BAD_REQUEST)
+        v.save()
+        return Response({"volume": _volume_dict(v, request.user)},
+                        status=status.HTTP_201_CREATED)
+
+
+class BuyVolumeView(APIView):
+    """Buy a volume outright, or take a reading pass.
+
+    The money splits between everyone who made pages in it, by page count.
+    The data already knows who made what, and a split nobody has to negotiate
+    is a split nobody argues about.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        v = Volume.objects.select_related("manga", "manga__owner").filter(
+            pk=pk, published=True).first()
+        if not v:
+            return Response({"detail": "No such volume on sale."},
+                            status=status.HTTP_404_NOT_FOUND)
+        kind = str((request.data or {}).get("kind", SALE_OWN))
+        if kind not in (SALE_OWN, SALE_PASS):
+            return Response({"detail": "kind must be 'own' or 'pass'."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if v.manga.owner_id == request.user.id:
+            return Response({"detail": "It's already yours."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        price = v.price_cents if kind == SALE_OWN else v.pass_price_cents
+        if not price:
+            return Response({"detail": f"That volume isn't sold as a {kind}."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if v.sales.filter(buyer=request.user, kind=SALE_OWN).exists():
+            return Response({"detail": "You already own this one."},
+                            status=status.HTTP_409_CONFLICT)
+
+        wallet = wallet_for(request.user)
+        if wallet.money_cents < price:
+            return Response(
+                not_enough(request.user, need_cents=price,
+                           feature=f"{v.manga.title} vol. {v.number}",
+                           detail=f"{v.manga.title} vol. {v.number} costs "
+                                  f"${price / 100:.2f} — you're "
+                                  f"${(price - wallet.money_cents) / 100:.2f} short."),
+                status=status.HTTP_402_PAYMENT_REQUIRED)
+
+        # The AI royalty comes off the top, before the split. The people who
+        # made the pages divide what's left, so nobody's share silently pays
+        # somebody else's model bill.
+        royalty = v.manga.ai_royalty_cents(price)
+        owner = platform_owner()
+        dev_total = 0
+        for member_user, cut in v.split_cents(price - royalty).items():
+            if cut <= 0:
+                continue
+            dev, _net = pay_between(request.user, member_user, cut,
+                                    note=f"MangaZ: {v.manga.title} v{v.number}")
+            dev_total += dev
+        if royalty and owner:
+            pay_between(request.user, owner, royalty,
+                        note=f"MangaZ AI royalty: {v.manga.title} v{v.number}")
+
+        expires = None
+        if kind == SALE_PASS:
+            from django.utils import timezone
+            expires = timezone.now() + timedelta(hours=v.pass_hours)
+        sale = Sale.objects.create(volume=v, buyer=request.user, kind=kind,
+                                   price_cents=price, dev_tax_cents=dev_total,
+                                   ai_royalty_cents=royalty,
+                                   expires_at=expires)
+        return Response({
+            "sale": {"kind": sale.kind, "price_cents": sale.price_cents,
+                     "ai_royalty_cents": sale.ai_royalty_cents,
+                     "expires_at": sale.expires_at, "active": sale.active()},
+            "volume": _volume_dict(v, request.user),
+            "wallet": wallet_for(request.user).money_cents,
+        }, status=status.HTTP_201_CREATED)
+
+
+class CommissionView(APIView):
+    """Hire the designer by the hour, at their own skill price.
+
+    This is where "by the hour" belongs — somebody buying their TIME, which is
+    what skill_price_cents measures. The total is shown before anyone pays.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Quote first. Nobody should discover a bill after the fact."""
+        designer = User.objects.filter(
+            username=request.query_params.get("designer", "")).first()
+        if not designer:
+            return Response({"detail": "No such designer."},
+                            status=status.HTTP_404_NOT_FOUND)
+        try:
+            hours = max(1, int(request.query_params.get("hours", 1)))
+        except (TypeError, ValueError):
+            hours = 1
+        rate = profile_for(designer).skill_price_cents or 0
+        return Response({"designer": designer.username, "hours": hours,
+                         "rate_cents": rate, "total_cents": rate * hours,
+                         "note": "Their hourly skill price. Agreed before you pay."})
+
+    @transaction.atomic
+    def post(self, request):
+        d = request.data or {}
+        designer = User.objects.filter(username=str(d.get("designer", ""))).first()
+        if not designer or designer.id == request.user.id:
+            return Response({"detail": "Pick a designer other than yourself."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            hours = max(1, int(d.get("hours", 1)))
+        except (TypeError, ValueError):
+            hours = 1
+        rate = profile_for(designer).skill_price_cents or 0
+        if not rate:
+            return Response(
+                {"detail": f"{designer.username} hasn't set an hourly skill "
+                           f"price yet, so there's nothing to quote."},
+                status=status.HTTP_409_CONFLICT)
+        total = rate * hours
+        if wallet_for(request.user).money_cents < total:
+            return Response(
+                not_enough(request.user, need_cents=total,
+                           feature=f"{hours}h with {designer.username}"),
+                status=status.HTTP_402_PAYMENT_REQUIRED)
+        pay_between(request.user, designer, total,
+                    note=f"MangaZ commission: {hours}h")
+        c = Commission.objects.create(
+            designer=designer, client=request.user,
+            brief=str(d.get("brief", ""))[:4000], hours=hours,
+            rate_cents=rate, paid=True)
+        return Response({"commission": {
+            "id": c.id, "designer": designer.username, "hours": c.hours,
+            "rate_cents": c.rate_cents, "total_cents": c.total_cents(),
+        }}, status=status.HTTP_201_CREATED)

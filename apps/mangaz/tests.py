@@ -4,7 +4,7 @@ The supervision tests are the important half. Everything else here is a
 feature; that part is a child-safety rule, and a rule enforced only in the UI
 is not enforced.
 """
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -12,13 +12,14 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from apps.economy.models import membership_for, profile_for
+from apps.economy.models import membership_for, profile_for, wallet_for
 
 from .ai import AiUnavailable
 from .art import ArtUnavailable
 from .models import (AI_ROYALTY_RATE, SOURCE_CHARACTER, SOURCE_HUMAN,
                      SOURCE_SCRIPT, CharacterZ, MangaZ, Meet, Page, Room,
-                     RoomMember, is_minor, is_verified_adult)
+                     RoomMember, Sale, Volume, is_minor,
+                     is_verified_adult)
 
 User = get_user_model()
 
@@ -805,3 +806,203 @@ class AiIsChargedAtCostTests(TestCase):
         w.money_cents, w.promptz = 0, 0
         w.save()
         self.assertTrue(affordable(self.owner))
+
+
+class SellingTests(TestCase):
+    """A MangaZ nobody can buy is a hobby.
+
+    Three products, deliberately different: own it, rent it for a window, or
+    hire the designer by the hour. There is no per-minute reading meter — see
+    the note in models.py for why that's a worse deal than it sounds.
+    """
+
+    def setUp(self):
+        self.owner = adult("vol_owner")
+        p = profile_for(self.owner)
+        p.skill_price_cents = 500          # $5/hr
+        p.save(update_fields=["skill_price_cents"])
+        room = Room.objects.create(title="Studio", owner=self.owner,
+                                   supervisor=self.owner)
+        RoomMember.objects.create(room=room, user=self.owner)
+        self.room = room
+        self.manga = MangaZ.objects.create(title="Book", room=room,
+                                           owner=self.owner)
+        for n in range(1, 5):
+            Page.objects.create(manga=self.manga, number=n, author=self.owner,
+                                source=SOURCE_HUMAN, script=f"p{n}")
+        self.client = APIClient()
+        self.client.force_authenticate(self.owner)
+
+    def cut(self, **over):
+        body = dict({"first_page": 1, "last_page": 4, "published": True,
+                     "price_cents": 2000}, **over)
+        r = self.client.post(reverse("mangaz-volumes", args=[self.manga.id]),
+                             body, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        return r.json()["volume"]
+
+    def buyer(self, name, cents=100_000):
+        u = adult(name)
+        w = wallet_for(u)
+        w.money_cents = cents
+        w.save(update_fields=["money_cents"])
+        c = APIClient()
+        c.force_authenticate(u)
+        return u, c
+
+    # --- pricing off the designer's own rate ---------------------------------
+
+    def test_the_suggested_price_comes_from_their_hourly_rate(self):
+        """$5/hr x 4 pages. A creator who doesn't want to think about pricing
+        still ships."""
+        v = self.cut()
+        self.assertEqual(v["suggested_price_cents"], 500 * 4)
+
+    def test_a_pass_costs_about_an_hour_of_their_rate(self):
+        self.assertEqual(self.cut()["suggested_pass_cents"], 500)
+
+    def test_pricing_nothing_falls_back_to_the_suggestion(self):
+        v = self.cut(price_cents=0, pass_cents=0)
+        self.assertGreater(v["price_cents"], 0)
+
+    def test_a_creator_can_charge_what_they_like(self):
+        self.assertEqual(self.cut(price_cents=99_00)["price_cents"], 9900)
+
+    # --- buying --------------------------------------------------------------
+
+    def test_buying_a_volume_pays_the_maker(self):
+        v = self.cut()
+        _u, c = self.buyer("reader")
+        before = wallet_for(self.owner).money_cents
+        r = c.post(reverse("mangaz-buy", args=[v["id"]]), {"kind": "own"},
+                   format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertGreater(wallet_for(self.owner).money_cents, before)
+
+    def test_owning_it_does_not_expire(self):
+        v = self.cut()
+        _u, c = self.buyer("keeper")
+        body = c.post(reverse("mangaz-buy", args=[v["id"]]), {"kind": "own"},
+                      format="json").json()
+        self.assertIsNone(body["sale"]["expires_at"])
+        self.assertTrue(body["sale"]["active"])
+
+    def test_a_pass_expires(self):
+        """A known price for a known window — which is what every rental on
+        earth does, and what "by time" should mean."""
+        v = self.cut(pass_price_cents=500)
+        _u, c = self.buyer("renter")
+        body = c.post(reverse("mangaz-buy", args=[v["id"]]), {"kind": "pass"},
+                      format="json").json()
+        self.assertIsNotNone(body["sale"]["expires_at"])
+        self.assertTrue(body["sale"]["active"])
+
+    def test_an_expired_pass_is_not_access(self):
+        from django.utils import timezone
+        v = self.cut(pass_price_cents=500)
+        _u, c = self.buyer("lapsed")
+        c.post(reverse("mangaz-buy", args=[v["id"]]), {"kind": "pass"},
+               format="json")
+        sale = Sale.objects.get(kind="pass")
+        sale.expires_at = timezone.now() - timedelta(hours=1)
+        sale.save(update_fields=["expires_at"])
+        self.assertFalse(sale.active())
+
+    def test_buying_twice_is_refused(self):
+        v = self.cut()
+        _u, c = self.buyer("double")
+        c.post(reverse("mangaz-buy", args=[v["id"]]), {"kind": "own"}, format="json")
+        r = c.post(reverse("mangaz-buy", args=[v["id"]]), {"kind": "own"}, format="json")
+        self.assertEqual(r.status_code, 409)
+
+    def test_a_broke_reader_gets_the_price_and_a_route(self):
+        v = self.cut(price_cents=50_000)
+        _u, c = self.buyer("skint_reader", cents=100)
+        r = c.post(reverse("mangaz-buy", args=[v["id"]]), {"kind": "own"},
+                   format="json")
+        self.assertEqual(r.status_code, 402)
+        self.assertIn("next", r.json())
+        self.assertIn("short_cents", r.json())
+
+    def test_an_unpublished_volume_is_not_on_sale(self):
+        v = self.cut(published=False)
+        _u, c = self.buyer("early")
+        self.assertEqual(
+            c.post(reverse("mangaz-buy", args=[v["id"]]), {"kind": "own"},
+                   format="json").status_code, 404)
+
+    # --- splits --------------------------------------------------------------
+
+    def test_the_money_splits_by_pages_made(self):
+        """The data already knows who made what. A split nobody has to
+        negotiate is a split nobody argues about."""
+        helper = adult("co_artist")
+        RoomMember.objects.create(room=self.room, user=helper)
+        for n in range(5, 9):                       # 4 pages each now
+            Page.objects.create(manga=self.manga, number=n, author=helper,
+                                source=SOURCE_HUMAN, script=f"p{n}")
+        v = self.cut(last_page=8, price_cents=10_000)
+        shares = Volume.objects.get(pk=v["id"]).split_cents(10_000)
+        self.assertEqual(shares[self.owner], 5000)
+        self.assertEqual(shares[helper], 5000)
+
+    def test_rounding_remainder_goes_to_the_owner_not_the_void(self):
+        """Cents that vanish in integer division are cents somebody earned."""
+        helper = adult("third")
+        for n in range(5, 7):
+            Page.objects.create(manga=self.manga, number=n, author=helper,
+                                source=SOURCE_HUMAN, script=f"p{n}")
+        v = Volume.objects.create(manga=self.manga, number=9, first_page=1,
+                                  last_page=6, price_cents=1000,
+                                  published=True)
+        self.assertEqual(sum(v.split_cents(1000).values()), 1000)
+
+    def test_the_ai_royalty_comes_off_before_the_split(self):
+        """Nobody's share should quietly pay somebody else's model bill."""
+        Page.objects.create(manga=self.manga, number=9, author=self.owner,
+                            source=SOURCE_SCRIPT, script="ai")
+        v = self.cut(last_page=9, price_cents=10_000)
+        _u, c = self.buyer("ai_reader")
+        body = c.post(reverse("mangaz-buy", args=[v["id"]]), {"kind": "own"},
+                      format="json").json()
+        self.assertEqual(body["sale"]["ai_royalty_cents"], 1000)
+
+    def test_a_hand_made_volume_owes_no_royalty(self):
+        v = self.cut()
+        _u, c = self.buyer("human_reader")
+        body = c.post(reverse("mangaz-buy", args=[v["id"]]), {"kind": "own"},
+                      format="json").json()
+        self.assertEqual(body["sale"]["ai_royalty_cents"], 0)
+
+    # --- commissions ---------------------------------------------------------
+
+    def test_a_commission_quotes_before_anyone_pays(self):
+        _u, c = self.buyer("client")
+        body = c.get(reverse("mangaz-commission"),
+                     {"designer": "vol_owner", "hours": "3"}).json()
+        self.assertEqual(body["rate_cents"], 500)
+        self.assertEqual(body["total_cents"], 1500)
+
+    def test_a_commission_pays_the_designer_their_hourly_rate(self):
+        _u, c = self.buyer("client2")
+        before = wallet_for(self.owner).money_cents
+        r = c.post(reverse("mangaz-commission"),
+                   {"designer": "vol_owner", "hours": 3}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["commission"]["total_cents"], 1500)
+        self.assertGreater(wallet_for(self.owner).money_cents, before)
+
+    def test_a_designer_with_no_rate_cannot_be_commissioned(self):
+        """Quoting $0 an hour for somebody's time is worse than saying no."""
+        no_rate = adult("no_rate")
+        _u, c = self.buyer("client3")
+        r = c.post(reverse("mangaz-commission"),
+                   {"designer": "no_rate", "hours": 2}, format="json")
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("hourly skill price", r.json()["detail"])
+
+    def test_you_cannot_commission_yourself(self):
+        r = self.client.post(reverse("mangaz-commission"),
+                             {"designer": "vol_owner", "hours": 1},
+                             format="json")
+        self.assertEqual(r.status_code, 400)
