@@ -51,6 +51,8 @@ from .payments import (StatzCheckoutView,
     StripeCheckoutView,
     StripeWebhookView,
 )
+from .publicview import (PublicFeedView, PublicMembersView,
+                         PublicOverviewView, PublicProfileView)
 from .social import (
     MemberProfileView,
     MembersView,
@@ -144,6 +146,12 @@ urlpatterns = [
     path("play/verify/", PlayVerifyView.as_view(), name="economy-play-verify"),
     path("play/purchases/", PlayPurchasesView.as_view(), name="economy-play-purchases"),
     path("searchfilters/", SearchFiltersView.as_view(), name="economy-searchfilters"),
+    # Public, read-only. No account needed — see publicview.py for what
+    # is deliberately withheld (location, attractiveness, age).
+    path("public/", PublicOverviewView.as_view(), name="public-overview"),
+    path("public/feed/", PublicFeedView.as_view(), name="public-feed"),
+    path("public/members/", PublicMembersView.as_view(), name="public-members"),
+    path("public/members/<str:username>/", PublicProfileView.as_view(), name="public-member"),
     path("venues/", VenuesView.as_view(), name="economy-venues"),
     path("venues/<int:pk>/join/", VenueJoinView.as_view(), name="economy-venue-join"),
     path("attractiveness/", AttractivenessView.as_view(), name="economy-attractiveness"),

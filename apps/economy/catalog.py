@@ -106,8 +106,20 @@ FOUNDING_PLANS = {
 }
 
 # Premium tier — the mid subscription (lower fees, 2x energy, 5 daily prompts).
-PREMIUM_MONTH_CENTS = 600             # $6/mo
-PREMIUM_YEAR_CENTS = 4800            # $48/yr (2 months free)
+#
+# $10/mo, not the $6 this used to say. The founding block above is the proof,
+# not the spec: it computes its 50% discount from a "full $15/mo" and "full
+# $120/yr" StatZ. StatZ costs $5/mo and $40/yr ON TOP of Premium, so those
+# full prices are only reachable when Premium is $10/mo and $80/yr. At $6 the
+# stack came to $11/mo, and the founding discount was quietly being taken off
+# a price nothing else in the codebase charged.
+#
+# Raising this later is much harder than launching at it — every subscriber at
+# the low price is either grandfathered or feels the rise as a betrayal. The
+# discount for early members already exists as the founding offer, which is
+# time-limited by design and doesn't anchor the list price.
+PREMIUM_MONTH_CENTS = 1000            # $10/mo   -> $15/mo with StatZ
+PREMIUM_YEAR_CENTS = 8000             # $80/yr   -> $120/yr with StatZ
 PREMIUM_PLANS = {
     "year": {"mode": "subscription", "cents": PREMIUM_YEAR_CENTS, "interval": "year", "kind": "premium_sub"},
     "month": {"mode": "subscription", "cents": PREMIUM_MONTH_CENTS, "interval": "month", "kind": "premium_sub"},

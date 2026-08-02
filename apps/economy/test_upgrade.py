@@ -5,10 +5,11 @@ price, no tier, no way forward — at the single highest-intent moment in the
 product. These tests pin the shape of the answer.
 """
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
+from . import catalog
 from .catalog import STATZ_MONTH_CENTS, STATZ_PLANS, STATZ_YEAR_CENTS
 from .models import (TIER_FREE, TIER_PREMIUM, TIER_STATZ, award_spinaz,
                      membership_for, wallet_for)
@@ -153,3 +154,33 @@ class GateResponseTests(TestCase):
         self.assertEqual(body["required_tier"], TIER_PREMIUM)
         self.assertTrue(body["plans"], "a paywall with no price is a dead end")
         self.assertIn("checkout", body)
+
+
+class PriceConsistencyTests(SimpleTestCase):
+    """The founding discount is computed off a "full" StatZ price. That price
+    has to be one the stack actually charges, or the discount is off a number
+    nobody pays.
+
+    This is what caught Premium being $6: the founding block says full StatZ is
+    $15/mo and $120/yr, and StatZ is +$5/mo and +$40/yr on top of Premium, so
+    Premium has to be $10/mo and $80/yr for those to be reachable.
+    """
+
+    def test_premium_plus_statz_is_the_full_monthly_the_founding_offer_halves(self):
+        full_month = int(catalog.FOUNDING_MONTH_CENTS / (1 - catalog.FOUNDING_DISCOUNT))
+        self.assertEqual(
+            catalog.PREMIUM_MONTH_CENTS + catalog.STATZ_MONTH_CENTS, full_month)
+
+    def test_premium_plus_statz_is_the_full_yearly_the_founding_offer_halves(self):
+        full_year = int(catalog.FOUNDING_YEAR_CENTS / (1 - catalog.FOUNDING_DISCOUNT))
+        self.assertEqual(
+            catalog.PREMIUM_YEAR_CENTS + catalog.STATZ_YEAR_CENTS, full_year)
+
+    def test_paying_yearly_is_always_cheaper_than_paying_monthly(self):
+        for name, month, year in (
+            ("premium", catalog.PREMIUM_MONTH_CENTS, catalog.PREMIUM_YEAR_CENTS),
+            ("statz", catalog.STATZ_MONTH_CENTS, catalog.STATZ_YEAR_CENTS),
+        ):
+            with self.subTest(tier=name):
+                self.assertLess(year, month * 12,
+                                "an annual plan that costs more is a trap")
