@@ -95,11 +95,27 @@ def duration_error(fmt, seconds):
     return None
 
 
+def page_art_path(instance, filename):
+    """Where a page's art lives. Grouped by manga so a book's art stays
+    together, which matters when somebody asks for their work back."""
+    import uuid
+    ext = (filename.rsplit(".", 1)[-1] or "png").lower()[:8]
+    return f"mangaz/{instance.manga_id}/pages/{uuid.uuid4().hex}.{ext}"
+
+
+# How the art got there. Separate from how the WRITING got there, because a
+# page can be drawn by hand and written by a model or the reverse.
+ART_DRAWN = "drawn"       # finger or mouse, in the app
+ART_UPLOAD = "upload"     # a file they already had
+
+
 SOURCE_HUMAN = "human"
 SOURCE_SCRIPT = "script"        # member pasted a script, AI laid it out
 SOURCE_CHARACTER = "character"  # AI wrote from the character's bio + MBTI
 SOURCE_CHOICES = [
-    (SOURCE_HUMAN, "Written by hand"),
+    (SOURCE_HUMAN, "Made by hand"),
+    (ART_DRAWN, "Drawn in the app"),
+    (ART_UPLOAD, "Uploaded"),
     (SOURCE_SCRIPT, "AI from an inserted script"),
     (SOURCE_CHARACTER, "AI from character bio and MBTI"),
 ]
@@ -468,6 +484,13 @@ class Page(models.Model):
     author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
                                related_name="mangaz_pages")
     script = models.TextField(blank=True, default="")
+    # The page image itself — drawn with a finger or a mouse, uploaded, or
+    # generated. A real file, not a data URI in a text column: an AI image
+    # base64s to well over 100,000 characters, and this used to be a
+    # CharField(500). SQLite ignores max_length so the tests passed; Postgres
+    # raises DataError, so generated art would have failed in production only.
+    art = models.ImageField(upload_to=page_art_path, blank=True, null=True)
+    # An EXTERNAL link only — art hosted somewhere else. Never a data URI.
     art_url = models.CharField(max_length=500, blank=True, default="")
     source = models.CharField(max_length=12, choices=SOURCE_CHOICES,
                               default=SOURCE_HUMAN)
@@ -491,8 +514,22 @@ class Page(models.Model):
 
     @property
     def ai_assisted(self):
-        """True if a machine made either half of this page."""
+        """True if a machine made either half of this page.
+
+        Drawing it yourself or uploading your own file is emphatically not AI,
+        so a hand-drawn page owes no royalty no matter what the script did.
+        """
         return self.source in AI_SOURCES or self.art_source in AI_SOURCES
+
+    def art_src(self):
+        """What the client should render: the stored file, else an external
+        link, else nothing."""
+        if self.art:
+            try:
+                return self.art.url
+            except ValueError:
+                return ""
+        return self.art_url or ""
 
 
 # --- selling ----------------------------------------------------------------

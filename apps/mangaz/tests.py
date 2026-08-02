@@ -1006,3 +1006,128 @@ class SellingTests(TestCase):
                              {"designer": "vol_owner", "hours": 1},
                              format="json")
         self.assertEqual(r.status_code, 400)
+
+
+class DrawYourOwnPageTests(TestCase):
+    """Drawing a page yourself is the whole point of a manga app.
+
+    Two free routes — a finger/mouse drawing posted as a canvas data URI, and
+    a file you already made. Charging for either would be charging somebody to
+    use their own hands.
+    """
+
+    # A real 1x1 PNG, base64. Small, but a genuine image so ImageField's
+    # validation actually runs — a fake payload would test nothing.
+    PNG = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+           "z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+    def setUp(self):
+        self.owner = adult("artist")
+        room = Room.objects.create(title="Studio", owner=self.owner,
+                                   supervisor=self.owner)
+        RoomMember.objects.create(room=room, user=self.owner)
+        self.room = room
+        self.manga = MangaZ.objects.create(title="Book", room=room,
+                                           owner=self.owner)
+        self.client = APIClient()
+        self.client.force_authenticate(self.owner)
+
+    def url(self, number=1):
+        return reverse("mangaz-page-art", args=[self.manga.id, number])
+
+    def draw(self, number=1, mime="image/png"):
+        return self.client.post(self.url(number),
+                                {"image": f"data:{mime};base64,{self.PNG}"},
+                                format="json")
+
+    def test_a_finger_drawing_becomes_a_page(self):
+        r = self.draw()
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["page"]["art_source"], "drawn")
+        self.assertTrue(r.json()["page"]["art"])
+
+    def test_the_drawing_is_stored_as_a_file_not_a_data_uri(self):
+        """An AI image base64s to well over 100,000 characters. art_url was a
+        CharField(500) — sqlite ignores max_length, Postgres raises DataError,
+        so this failed in production only."""
+        self.draw()
+        page = Page.objects.get(manga=self.manga, number=1)
+        self.assertTrue(page.art)
+        self.assertFalse(page.art_url.startswith("data:"))
+
+    def test_uploading_a_file_works_too(self):
+        import base64
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        f = SimpleUploadedFile("page.png", base64.b64decode(self.PNG),
+                               content_type="image/png")
+        r = self.client.post(self.url(2), {"art": f}, format="multipart")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["page"]["art_source"], "upload")
+
+    def test_drawing_your_own_page_is_never_ai(self):
+        """No royalty for a page a person drew."""
+        self.draw()
+        self.assertFalse(Page.objects.get(manga=self.manga, number=1).ai_assisted)
+        self.assertEqual(self.manga.ai_royalty_cents(10_000), 0)
+
+    def test_redrawing_over_ai_art_clears_the_royalty(self):
+        """Otherwise the work keeps paying on a page a person drew."""
+        Page.objects.create(manga=self.manga, number=3, author=self.owner,
+                            source=SOURCE_HUMAN, art_source=SOURCE_CHARACTER,
+                            ai_prompt={"art": {"mode": "character_art"}})
+        self.assertTrue(self.manga.used_ai())
+        self.draw(number=3)
+        self.assertFalse(self.manga.used_ai())
+        self.assertEqual(self.manga.ai_royalty_cents(10_000), 0)
+
+    def test_an_ai_written_page_you_drew_yourself_still_owes_the_royalty(self):
+        """The words were still generated. Drawing over it doesn't undo that."""
+        Page.objects.create(manga=self.manga, number=4, author=self.owner,
+                            source=SOURCE_SCRIPT, script="ai wrote this")
+        self.draw(number=4)
+        self.assertTrue(self.manga.used_ai())
+
+    def test_sending_nothing_says_what_it_accepts(self):
+        r = self.client.post(self.url(), {}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("accepts", r.json())
+
+    def test_junk_that_looks_like_a_data_uri_is_refused(self):
+        r = self.client.post(self.url(), {"image": "data:image/png;base64,!!!"},
+                             format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_a_non_image_data_uri_is_refused(self):
+        """A data: URI is not automatically a picture."""
+        r = self.client.post(self.url(),
+                             {"image": "data:text/html;base64,PHNjcmlwdD4="},
+                             format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_you_can_rub_it_out_and_start_again(self):
+        self.draw()
+        r = self.client.delete(self.url())
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(Page.objects.get(manga=self.manga, number=1).art)
+
+    def test_somebody_outside_the_room_cannot_draw_on_your_book(self):
+        outsider = APIClient()
+        outsider.force_authenticate(adult("intruder"))
+        r = outsider.post(self.url(),
+                          {"image": f"data:image/png;base64,{self.PNG}"},
+                          format="json")
+        self.assertEqual(r.status_code, 404)
+
+    def test_drawing_stops_when_the_room_goes_unsafe(self):
+        RoomMember.objects.create(room=self.room, user=kid("late_teen"))
+        self.room.supervisor = None
+        self.room.save(update_fields=["supervisor"])
+        self.assertEqual(self.draw().status_code, 409)
+
+    def test_drawing_costs_nothing(self):
+        """Charging somebody to use their own hands is not a business model."""
+        before = wallet_for(self.owner).money_cents
+        self.draw()
+        self.assertEqual(wallet_for(self.owner).money_cents, before)
