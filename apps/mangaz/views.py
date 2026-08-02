@@ -18,7 +18,12 @@ from rest_framework.views import APIView
 
 from apps.economy.models import Face
 
+from apps.economy.models import membership_for
+from apps.economy.upgrade import response as upgrade_response
+
 from .ai import AiUnavailable, write_from_character, write_from_script
+from .art import (ArtNotAllowed, ArtUnavailable, can_generate,
+                  draw_from_character)
 from .models import (AI_ROYALTY_RATE, FORMATS, MBTI_TYPES, ROLE_ARTIST,
                      ROLE_SUPERVISOR, SOURCE_CHARACTER, SOURCE_HUMAN,
                      SOURCE_SCRIPT, CharacterZ, GuardianConsent, MangaZ, Meet,
@@ -499,3 +504,91 @@ class MeetConsentView(APIView):
                       "granted": bool(d.get("granted", True)),
                       "recorded_by": request.user})
         return Response({"meet": _meet_dict(meet)})
+
+
+class ArtView(APIView):
+    """POST — draw a page's art from a CharacterZ. Premium and StatZ only.
+
+    The Premium hook. Everything else in MangaZ stays free: the tabs, the
+    icons, the rooms, the collabs, the writing. What you pay for is being able
+    to MAKE something — which is what people keep paying for, unlike a nicer
+    button, which they resent.
+
+    Generated art counts as AI, so the 10% royalty applies. Recorded on
+    `art_source` separately from the writing, because a page can be written by
+    hand and drawn by the model, and collapsing the two would either miss a
+    royalty or charge one nobody owes.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        """What this member can do here, before they try and get refused."""
+        m = MangaZ.objects.filter(pk=pk,
+                                  room__members__user=request.user).first()
+        if not m:
+            return Response({"detail": "No such manga."},
+                            status=status.HTTP_404_NOT_FOUND)
+        allowed = can_generate(request.user)
+        return Response({
+            "can_generate": allowed,
+            "tier": membership_for(request.user).tier,
+            "why_not": None if allowed else (
+                "Generating art from your CharacterZ is a Premium feature."),
+            "free_anyway": ["reading", "writing", "rooms", "collabs",
+                            "in-person meets", "publishing"],
+            "note": ("Art made this way counts as AI, so the 10% developer "
+                     "royalty applies to sales of the work."),
+        })
+
+    @transaction.atomic
+    def post(self, request, pk):
+        m = MangaZ.objects.filter(pk=pk,
+                                  room__members__user=request.user).first()
+        if not m:
+            return Response({"detail": "No such manga."},
+                            status=status.HTTP_404_NOT_FOUND)
+        unsafe = m.room.supervision_error()
+        if unsafe:
+            return Response({"detail": unsafe},
+                            status=status.HTTP_409_CONFLICT)
+
+        d = request.data or {}
+        character = CharacterZ.objects.filter(
+            pk=d.get("character_id")).filter(models_q(request.user)).first()
+        if not character:
+            return Response(
+                {"detail": "Pick one of your characters, or a shared one."},
+                status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            image, record, model_name = draw_from_character(
+                request.user, character, str(d.get("brief", "")))
+        except ArtNotAllowed as exc:
+            # A dead-end 402 is a wasted upgrade — say what it costs and where.
+            return Response({"detail": str(exc), "upgrade": upgrade_response(
+                request.user, feature="MangaZ art")},
+                status=status.HTTP_402_PAYMENT_REQUIRED)
+        except ArtUnavailable as exc:
+            return Response({"detail": str(exc)},
+                            status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        page_number = d.get("page")
+        page = m.pages.filter(number=page_number).first() if page_number else None
+        if page is None:
+            page = Page.objects.create(manga=m, number=m.pages.count() + 1,
+                                       author=request.user,
+                                       source=SOURCE_HUMAN)
+        page.art_url = image
+        page.art_source = SOURCE_CHARACTER
+        page.ai_prompt = {**(page.ai_prompt or {}), "art": record}
+        page.ai_model = model_name
+        page.save(update_fields=["art_url", "art_source", "ai_prompt",
+                                 "ai_model"])
+        return Response({"page": {"number": page.number,
+                                  "art_source": page.art_source,
+                                  "ai_assisted": page.ai_assisted},
+                         "image": image,
+                         "prompt": record,
+                         "provenance": m.provenance()},
+                        status=status.HTTP_201_CREATED)

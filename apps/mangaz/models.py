@@ -417,7 +417,11 @@ class MangaZ(models.Model):
                 "runtime_seconds": self.runtime_seconds}
 
     def ai_pages(self):
-        return self.pages.filter(source__in=AI_SOURCES)
+        """Pages where a machine wrote the words OR drew the art. Either one
+        earns the royalty — the AI made part of what's being sold."""
+        from django.db.models import Q
+        return self.pages.filter(Q(source__in=AI_SOURCES)
+                                 | Q(art_source__in=AI_SOURCES))
 
     def used_ai(self):
         return self.ai_pages().exists()
@@ -440,12 +444,14 @@ class MangaZ(models.Model):
         their pages aren't being passed off as AI or the reverse.
         """
         pages = list(self.pages.all())
-        by_source = {}
+        by_source, by_art = {}, {}
         for page in pages:
             by_source[page.source] = by_source.get(page.source, 0) + 1
+            by_art[page.art_source] = by_art.get(page.art_source, 0) + 1
         return {
             "pages": len(pages),
             "by_source": by_source,
+            "art_by_source": by_art,
             "used_ai": self.used_ai(),
             "ai_royalty_rate": AI_ROYALTY_RATE if self.used_ai() else 0.0,
             "note": ("Made with Intelligence AI — an extra 10% developer "
@@ -465,6 +471,11 @@ class Page(models.Model):
     art_url = models.CharField(max_length=500, blank=True, default="")
     source = models.CharField(max_length=12, choices=SOURCE_CHOICES,
                               default=SOURCE_HUMAN)
+    # How the ART was made, tracked separately from the writing. A page can be
+    # written by hand and drawn by the AI, or the reverse, and collapsing the
+    # two would either miss a royalty or charge one that isn't owed.
+    art_source = models.CharField(max_length=12, choices=SOURCE_CHOICES,
+                                  default=SOURCE_HUMAN)
     # What was actually sent to the model, when one was used. Kept so a member
     # can see what was written on their behalf and from which character sheet.
     ai_prompt = models.JSONField(default=dict, blank=True)
@@ -480,4 +491,5 @@ class Page(models.Model):
 
     @property
     def ai_assisted(self):
-        return self.source in AI_SOURCES
+        """True if a machine made either half of this page."""
+        return self.source in AI_SOURCES or self.art_source in AI_SOURCES

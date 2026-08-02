@@ -13,6 +13,9 @@ import json
 import logging
 import os
 
+from apps.economy.catalog import ai_cost
+from apps.economy.models import can_afford_ai, charge_ai_usage
+
 logger = logging.getLogger(__name__)
 
 MODEL = os.environ.get("MANGAZ_AI_MODEL", "claude-sonnet-5")
@@ -48,6 +51,36 @@ def _client():
     return anthropic.Anthropic(api_key=key)
 
 
+def bill(user, note):
+    """Charge the member what the model run costs us. Nothing on top.
+
+    Pure pass-through via `charge_ai_usage`: the day's free prompt allowance
+    first, then prepaid PromptZ, then cash — no developer tax. Writing was
+    running entirely free until this existed, which meant every AI page came
+    out of the platform's pocket and the cost grew with usage.
+
+    Charged AFTER the model answers, in the caller. Billing for a call that
+    returned nothing is the thing that ends a subscription.
+    """
+    cost = ai_cost("standard")
+    if not cost:
+        return 0
+    charge_ai_usage(user, cost, note=note[:200], count_daily=True)
+    return cost
+
+
+def affordable(user):
+    """True if they can cover a run. Checked before calling the model, so a
+    member who can't pay is told before they wait 20 seconds for it.
+
+    `count_daily=True` has to match what `bill` charges with. Without it this
+    turned away a free member holding three unused daily prompts — refusing a
+    run that would have cost them nothing.
+    """
+    cost = ai_cost("standard")
+    return not cost or can_afford_ai(user, cost, count_daily=True)
+
+
 def _run(prompt):
     """Send one prompt. Returns the text. Raises AiUnavailable on any failure.
 
@@ -79,13 +112,18 @@ def write_from_script(user, script):
     this still counts as AI-assisted: the output is generated, even though the
     story isn't.
     """
+    if not affordable(user):
+        raise AiUnavailable(
+            "Not enough PromptZ or balance for an AI run right now.")
     prompt = (
         "Lay this script out as a manga page. Keep the writer's words — break "
         "them into panels, add panel directions, and do not rewrite the "
         "dialogue.\n\n"
         f"{script.strip()[:8000]}")
     text = _run(prompt)
-    return text, {"mode": "script", "script_chars": len(script)}, MODEL
+    cost = bill(user, "MangaZ: AI layout from script")
+    return text, {"mode": "script", "script_chars": len(script),
+                  "cost_cents": cost}, MODEL
 
 
 def write_from_character(user, character, beat=""):
@@ -95,6 +133,9 @@ def write_from_character(user, character, beat=""):
     "a character" with nothing to go on writes the same person every time, and
     the sheet is what makes two members' casts sound different.
     """
+    if not affordable(user):
+        raise AiUnavailable(
+            "Not enough PromptZ or balance for an AI run right now.")
     sheet = character.prompt_sheet()
     ask = beat.strip() or "Write the next page of their story."
     prompt = (
@@ -104,4 +145,6 @@ def write_from_character(user, character, beat=""):
         "Write them consistently with the sheet — the MBTI and the voice note "
         "are how they behave and how they talk, not decoration.")
     text = _run(prompt)
-    return text, {"mode": "character", "sheet": sheet, "beat": ask[:2000]}, MODEL
+    cost = bill(user, f"MangaZ: AI page as {character.name}")
+    return text, {"mode": "character", "sheet": sheet, "beat": ask[:2000],
+                  "cost_cents": cost}, MODEL

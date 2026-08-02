@@ -1,7 +1,7 @@
 from django.urls import path
 
 from .views import (CatalogView, CharacterZView, MangaDetailView,
-                    MangaListView, MeetAttendView, MeetConsentView,
+                    ArtView, MangaListView, MeetAttendView, MeetConsentView,
                     MeetsView, PagesView, RoomJoinView, RoomsView,
                     RoomSuperviseView, RoyaltyQuoteView)
 
@@ -18,6 +18,7 @@ urlpatterns = [
     path("works/", MangaListView.as_view(), name="mangaz-works"),
     path("works/<int:pk>/", MangaDetailView.as_view(), name="mangaz-work"),
     path("works/<int:pk>/pages/", PagesView.as_view(), name="mangaz-pages"),
+    path("works/<int:pk>/art/", ArtView.as_view(), name="mangaz-art"),
     path("works/<int:pk>/royalty/", RoyaltyQuoteView.as_view(),
          name="mangaz-royalty"),
 ]

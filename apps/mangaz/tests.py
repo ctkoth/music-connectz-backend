@@ -12,9 +12,10 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from apps.economy.models import profile_for
+from apps.economy.models import membership_for, profile_for
 
 from .ai import AiUnavailable
+from .art import ArtUnavailable
 from .models import (AI_ROYALTY_RATE, SOURCE_CHARACTER, SOURCE_HUMAN,
                      SOURCE_SCRIPT, CharacterZ, MangaZ, Meet, Page, Room,
                      RoomMember, is_minor, is_verified_adult)
@@ -577,3 +578,230 @@ class InPersonMeetTests(TestCase):
         c.force_authenticate(User.objects.get(username="returning_teen"))
         c.post(reverse("mangaz-meet-attend", args=[second]), {}, format="json")
         self.assertIsNotNone(Meet.objects.get(pk=second).readiness_error())
+
+
+class PremiumArtTests(TestCase):
+    """The Premium hook. Everything else in MangaZ stays free — what you pay
+    for is being able to MAKE something."""
+
+    def setUp(self):
+        self.owner = adult("art_owner")
+        self.room = Room.objects.create(title="Studio", owner=self.owner,
+                                        supervisor=self.owner)
+        RoomMember.objects.create(room=self.room, user=self.owner)
+        self.manga = MangaZ.objects.create(title="Book", room=self.room,
+                                           owner=self.owner)
+        self.character = CharacterZ.objects.create(owner=self.owner, name="Rin",
+                                                   mbti="INFJ", bio="Quiet")
+        self.client = APIClient()
+        self.client.force_authenticate(self.owner)
+
+    def set_tier(self, tier):
+        m = membership_for(self.owner)
+        m.tier = tier
+        m.save(update_fields=["tier"])
+
+    def draw(self, **over):
+        body = dict({"character_id": self.character.id, "brief": "close up"},
+                    **over)
+        return self.client.post(reverse("mangaz-art", args=[self.manga.id]),
+                                body, format="json")
+
+    def test_a_free_member_is_refused_with_a_way_forward(self):
+        """A dead-end 402 is a wasted upgrade."""
+        self.set_tier("free")
+        r = self.draw()
+        self.assertEqual(r.status_code, 402)
+        self.assertIn("Premium", r.json()["detail"])
+        self.assertIn("upgrade", r.json())
+
+    def test_the_refusal_says_what_is_still_free(self):
+        self.set_tier("free")
+        body = self.client.get(reverse("mangaz-art",
+                                       args=[self.manga.id])).json()
+        self.assertFalse(body["can_generate"])
+        self.assertIn("writing", body["free_anyway"])
+        self.assertIn("collabs", body["free_anyway"])
+
+    def test_premium_can_generate(self):
+        self.set_tier("premium")
+        with patch("apps.mangaz.views.draw_from_character",
+                   return_value=("data:image/png;base64,AAA",
+                                 {"mode": "character_art"}, "gemini-x")):
+            r = self.draw()
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertTrue(r.json()["page"]["ai_assisted"])
+
+    def test_statz_can_too(self):
+        self.set_tier("statz")
+        with patch("apps.mangaz.views.draw_from_character",
+                   return_value=("data:image/png;base64,AAA", {}, "gemini-x")):
+            self.assertEqual(self.draw().status_code, 201)
+
+    def test_generated_art_earns_the_royalty_even_on_a_hand_written_page(self):
+        """A page written by hand and drawn by the model still had the AI make
+        part of what's being sold."""
+        self.set_tier("premium")
+        Page.objects.create(manga=self.manga, number=1, author=self.owner,
+                            source=SOURCE_HUMAN, script="I wrote this")
+        with patch("apps.mangaz.views.draw_from_character",
+                   return_value=("data:image/png;base64,AAA", {}, "gemini-x")):
+            self.draw(page=1)
+        self.assertTrue(self.manga.used_ai())
+        self.assertEqual(self.manga.ai_royalty_cents(10_000), 1000)
+
+    def test_hand_drawn_and_hand_written_still_owes_nothing(self):
+        Page.objects.create(manga=self.manga, number=1, author=self.owner,
+                            source=SOURCE_HUMAN, art_source=SOURCE_HUMAN,
+                            script="mine", art_url="https://example.com/a.png")
+        self.assertEqual(self.manga.ai_royalty_cents(10_000), 0)
+
+    def test_provenance_reports_writing_and_art_separately(self):
+        self.set_tier("premium")
+        Page.objects.create(manga=self.manga, number=1, author=self.owner,
+                            source=SOURCE_HUMAN)
+        with patch("apps.mangaz.views.draw_from_character",
+                   return_value=("data:image/png;base64,AAA", {}, "gemini-x")):
+            self.draw(page=1)
+        prov = self.manga.provenance()
+        self.assertEqual(prov["by_source"][SOURCE_HUMAN], 1)
+        self.assertEqual(prov["art_by_source"][SOURCE_CHARACTER], 1)
+
+    def test_the_image_service_being_down_is_a_503_not_a_500(self):
+        self.set_tier("premium")
+        with patch("apps.mangaz.views.draw_from_character",
+                   side_effect=ArtUnavailable("not right now")):
+            r = self.draw()
+        self.assertEqual(r.status_code, 503)
+
+    def test_you_cannot_draw_with_somebody_elses_private_character(self):
+        self.set_tier("premium")
+        theirs = CharacterZ.objects.create(owner=adult("stranger"),
+                                           name="Theirs", shared=False)
+        self.assertEqual(self.draw(character_id=theirs.id).status_code, 400)
+
+    def test_art_is_refused_when_the_room_goes_unsafe(self):
+        self.set_tier("premium")
+        RoomMember.objects.create(room=self.room, user=kid("late_teen"))
+        self.room.supervisor = None
+        self.room.save(update_fields=["supervisor"])
+        self.assertEqual(self.draw().status_code, 409)
+
+    def test_the_prompt_records_the_sheet_it_drew_from(self):
+        """Art generated from hidden inputs is art nobody can correct."""
+        from .art import build_prompt
+        prompt, sheet = build_prompt(self.character, "close up")
+        self.assertIn("Rin", prompt)
+        self.assertIn("Quiet", prompt)
+        self.assertEqual(sheet["mbti"], "INFJ")
+
+    def test_the_house_style_is_always_applied(self):
+        from .art import build_prompt
+        prompt, _ = build_prompt(self.character)
+        self.assertIn("no sexual content", prompt)
+
+
+class AiIsChargedAtCostTests(TestCase):
+    """Every AI run bills what the model costs. Nothing on top.
+
+    Writing ran entirely free until this existed — every AI page came out of
+    the platform's pocket, and the bill grew with usage.
+    """
+
+    def setUp(self):
+        self.owner = adult("payer")
+        room = Room.objects.create(title="Desk", owner=self.owner,
+                                   supervisor=self.owner)
+        RoomMember.objects.create(room=room, user=self.owner)
+        self.manga = MangaZ.objects.create(title="Book", room=room,
+                                           owner=self.owner)
+        self.client = APIClient()
+        self.client.force_authenticate(self.owner)
+
+    def test_the_charge_is_pure_pass_through_no_developer_tax(self):
+        """The member pays what the run costs. The platform's margin is the
+        subscription and the 10% royalty, not a markup on every call."""
+        from apps.economy.catalog import ai_cost
+        from apps.economy.models import wallet_for
+        from .ai import bill
+
+        w = wallet_for(self.owner)
+        w.money_cents, w.promptz = 10_000, 0
+        w.prompts_used_today = 999         # daily allowance already spent
+        w.prompt_day = date.today().isoformat()   # ...and spent TODAY
+        w.save()
+        charged = bill(self.owner, "test run")
+        self.assertEqual(charged, ai_cost("standard"))
+        wallet_for(self.owner).refresh_from_db()
+        self.assertEqual(wallet_for(self.owner).money_cents,
+                         10_000 - ai_cost("standard"))
+
+    def test_a_free_daily_prompt_covers_a_run_before_any_money(self):
+        from apps.economy.models import wallet_for
+        from .ai import bill
+
+        w = wallet_for(self.owner)
+        w.money_cents, w.promptz = 10_000, 0
+        w.save()
+        bill(self.owner, "first of the day")
+        self.assertEqual(wallet_for(self.owner).money_cents, 10_000)
+
+    def test_promptz_are_spent_before_cash(self):
+        from apps.economy.catalog import ai_cost
+        from apps.economy.models import wallet_for
+        from .ai import bill
+
+        w = wallet_for(self.owner)
+        w.money_cents, w.promptz = 10_000, 500
+        w.prompts_used_today, w.prompt_day = 999, date.today().isoformat()
+        w.save()
+        bill(self.owner, "paid run")
+        after = wallet_for(self.owner)
+        self.assertEqual(after.money_cents, 10_000)
+        self.assertEqual(after.promptz, 500 - ai_cost("standard"))
+
+    def test_somebody_who_cannot_pay_is_told_before_the_model_runs(self):
+        """Not after they've waited twenty seconds for it."""
+        from apps.economy.models import wallet_for
+        from .ai import affordable
+
+        w = wallet_for(self.owner)
+        w.money_cents, w.promptz = 0, 0
+        w.prompts_used_today, w.prompt_day = 999, date.today().isoformat()
+        w.save()
+        self.assertFalse(affordable(self.owner))
+
+    def test_a_failed_run_charges_nothing(self):
+        """Billing for a call that returned nothing is what ends a
+        subscription."""
+        from apps.economy.models import wallet_for
+
+        w = wallet_for(self.owner)
+        w.money_cents, w.promptz = 10_000, 0
+        w.prompts_used_today, w.prompt_day = 999, date.today().isoformat()
+        w.save()
+        with patch("apps.mangaz.ai._run",
+                   side_effect=AiUnavailable("model down")):
+            from .ai import write_from_script
+            with self.assertRaises(AiUnavailable):
+                write_from_script(self.owner, "some script")
+        self.assertEqual(wallet_for(self.owner).money_cents, 10_000)
+
+    def test_the_cost_is_reported_back_on_the_page(self):
+        """A charge somebody discovers on their statement is one they dispute."""
+        with patch("apps.mangaz.ai._run", return_value="[PANEL 1]"):
+            from .ai import write_from_script
+            _text, record, _model = write_from_script(self.owner, "hello")
+        self.assertIn("cost_cents", record)
+
+    def test_a_broke_member_with_an_unused_daily_prompt_is_not_turned_away(self):
+        """The check has to match what the charge does. Without count_daily it
+        refused a free member holding three unused prompts — a run that would
+        have cost them nothing."""
+        from apps.economy.models import wallet_for
+        from .ai import affordable
+
+        w = wallet_for(self.owner)
+        w.money_cents, w.promptz = 0, 0
+        w.save()
+        self.assertTrue(affordable(self.owner))
