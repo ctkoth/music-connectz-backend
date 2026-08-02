@@ -42,6 +42,7 @@ from .models import (
     Block,
     wallet_for,
 )
+from . import agepolicy
 from . import searchfilters as sf
 from .serializers import WalletSerializer
 
@@ -214,6 +215,12 @@ class AttractivenessRateView(APIView):
             return Response({"detail": "unknown user"}, status=status.HTTP_404_NOT_FOUND)
         if target.id == request.user.id:
             return Response({"detail": "can't rate yourself"}, status=status.HTTP_400_BAD_REQUEST)
+        # Rating how somebody LOOKS is 18+ on both sides. Rating what they MADE
+        # is open to everyone — see economy/agepolicy.py. Until this check
+        # existed, any adult could score a 14-year-old out of 10.
+        refused = agepolicy.adults_only_error(request.user, target)
+        if refused:
+            return Response({"detail": refused}, status=status.HTTP_403_FORBIDDEN)
 
         AttractivenessRating.objects.update_or_create(
             rater=request.user, target=target, defaults={"score": score}
@@ -299,6 +306,14 @@ class FaceRateView(APIView):
             return Response({"detail": "score (1-10) required"}, status=status.HTTP_400_BAD_REQUEST)
         if not (1 <= score <= 10):
             return Response({"detail": "score must be 1-10"}, status=status.HTTP_400_BAD_REQUEST)
+        # Same line as attractiveness: a face is a body, not a work. The face's
+        # owner and anyone tagged in it both have to be adults, and so does the
+        # rater — a photo of a minor must not be scoreable by anybody.
+        refused = agepolicy.adults_only_error(request.user, f.owner)
+        if not refused and f.tagged_id:
+            refused = agepolicy.adults_only_error(request.user, f.tagged)
+        if refused:
+            return Response({"detail": refused}, status=status.HTTP_403_FORBIDDEN)
         FaceRating.objects.update_or_create(rater=request.user, face=f, defaults={"score": score})
         return Response({"id": f.id, "median": face_median(f), "count": f.ratings.count(), "my_rating": score})
 

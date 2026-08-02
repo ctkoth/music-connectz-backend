@@ -185,6 +185,13 @@ def attractiveness_of(user, **_):
     nobody, and an opt-out test that passed without testing anything. Read the
     attribute directly so a rename breaks loudly instead of quietly.
     """
+    # 18+ floor, checked at READ time as well as write time. Ratings collected
+    # before a birthday was filled in must stop counting the moment we learn
+    # who they belong to — otherwise a minor stays searchable on a score
+    # gathered while nobody knew their age. See economy/agepolicy.py.
+    from . import agepolicy
+    if agepolicy.excluded_from_body_ratings(user):
+        return None
     if not membership_for(user).attractiveness_public:
         return None
     return attractiveness_median(user)

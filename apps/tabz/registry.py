@@ -161,6 +161,18 @@ TABS = [
             modal("Instrumental ConnectZ", "🎹", "Beats and instrumentals."),
             modal("Mix ConnectZ", "🎚️", "Mixes."),
             modal("Video ConnectZ", "📺", "Music videoz and introduction videoz."),
+            modal("ReelZ", "🎞️", "Short vertical cuts."),
+            modal("MovieZ", "🎬", "Full-length features."),
+            modal("EpisodeZ", "📼", "Series, episode by episode."),
+            modal("MangaZ", "📚",
+                  "Design manga with your CharacterZ — write by hand, paste a "
+                  "script for the AI to lay out, or let it write from a "
+                  "character's bio and MBTI. Any age can collab; rooms with "
+                  "under-18s have a verified adult supervising. AI-made "
+                  "MangaZ pays an extra 10% developer royalty."),
+            modal("CharacterZ", "🐆",
+                  "FaceZ with personalitieZ — bio, MBTI, traits and voice, so "
+                  "the AI writes them the same way twice."),
             modal("Ocular Code ConnectZ", "👁️‍🗨️",
                   "Visual Studio knockoff — OCC with its own tab map."),
             modal("Rate ConnectZ", "📨🤔",

@@ -115,13 +115,15 @@ class ResolverTests(TestCase):
     def test_a_published_attractiveness_score_is_readable(self):
         """The other half of the opt-out test. Without this, a resolver that
         returned None for *everybody* still passed — which it did."""
-        u = member("published")
+        # Needs a birthday: an unknown age is now excluded from body ratings
+        # outright, because "we don't know" is not "we checked".
+        u = member("published", birthday="1995-01-01")
         rate(u, [7, 9], kind="attractiveness")
         self.assertEqual(sf.attractiveness_of(u), 8)
 
     def test_attractiveness_is_hidden_when_the_member_opted_out(self):
         """A gate must never expose a score kept off the profile."""
-        u = member("private", attractive_public=False)
+        u = member("private", birthday="1995-01-01", attractive_public=False)
         rate(u, [9, 9], kind="attractiveness")
         self.assertIsNone(sf.attractiveness_of(u))
 

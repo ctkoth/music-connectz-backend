@@ -183,13 +183,16 @@ class Room(models.Model):
                 return ("This room needs a verified adult supervisor before "
                         "under-18s can join.")
             return None
-        # An adult joining. If there's already a minor here, the supervisor
-        # decides — an adult must never be able to put themselves in a room
-        # with a minor unilaterally.
-        if self.has_minor() and user.id != self.supervisor_id:
-            if not self.approvals.filter(user=user, approved=True).exists():
-                return ("This room has under-18s in it, so the supervisor has "
-                        "to approve you before you can join.")
+        # An adult joining a room that has minors in it. They may — a teenager
+        # working with an experienced adult is the point of an all-ages
+        # creative platform, and requiring per-person approval to COLLABORATE
+        # made the ordinary case the awkward one.
+        #
+        # The safeguards are that a verified adult is present and answerable,
+        # and that the supervisor can refuse anyone. What is closed is the
+        # dating surface, not the studio: see economy/agepolicy.py.
+        if self.approvals.filter(user=user, approved=False).exists():
+            return "The supervisor of this room has asked you not to join."
         return None
 
 
