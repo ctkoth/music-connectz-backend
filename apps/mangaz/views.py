@@ -614,6 +614,9 @@ def _volume_dict(v, user=None):
         "suggested_pass_cents": v.suggested_pass_cents(),
         "contributors": {u.username: n for u, n in v.contributors().items()},
         "ai_royalty_rate": AI_ROYALTY_RATE if v.manga.used_ai() else 0.0,
+        # Shown before anyone buys, so contributors can check the
+        # arithmetic while it still costs nothing to change it.
+        "split_preview": v.split_preview(),
     }
     if user is not None:
         sale = v.sales.filter(buyer=user).order_by("-created_at").first()

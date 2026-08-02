@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -357,10 +357,39 @@ class RoyaltiesView(APIView):
         return Response({"royalties_cents": w.royalties_cents, "royalties": w.royalties, "entries": entries})
 
 
-class RoyaltyAccrueView(APIView):
-    """Accrue royalties to a user (called when their media earns; open for testing)."""
+def accrue_royalty(user, amount_cents, source=""):
+    """Credit earned royalties. The ONLY way royalties enter a wallet.
 
-    permission_classes = [IsAuthenticated]
+    A function rather than an endpoint: royalties are earned by something the
+    platform observed — a sale, a play, a licence — never by a client saying
+    so. See RoyaltyAccrueView for what this replaced.
+    """
+    amount_cents = int(amount_cents or 0)
+    if amount_cents <= 0:
+        return 0
+    w = wallet_for(user)
+    w.royalties_cents += amount_cents
+    w.save(update_fields=["royalties_cents", "updated_at"])
+    RoyaltyEntry.objects.create(
+        user=user, kind=RoyaltyEntry.KIND_ACCRUAL,
+        amount_cents=amount_cents, source=str(source)[:200])
+    return amount_cents
+
+
+class RoyaltyAccrueView(APIView):
+    """Accrue royalties to a member. STAFF ONLY.
+
+    This used to be open to any authenticated member with a docstring reading
+    "open for testing". Any member could POST an arbitrary amount_cents,
+    credit their own royalty balance and cash it out — an open faucet on real
+    money, not a royalty system.
+
+    It stays as a staff tool because support genuinely needs to make an
+    adjustment sometimes. Everything automatic goes through `accrue_royalty`,
+    which the platform calls when something actually earned.
+    """
+
+    permission_classes = [IsAdminUser]
 
     def post(self, request):
         try:
@@ -369,14 +398,23 @@ class RoyaltyAccrueView(APIView):
             return Response({"detail": "amount_cents (integer) required"}, status=status.HTTP_400_BAD_REQUEST)
         if amount_cents <= 0:
             return Response({"detail": "amount must be positive"}, status=status.HTTP_400_BAD_REQUEST)
-        w = wallet_for(request.user)
-        w.royalties_cents += amount_cents
-        w.save(update_fields=["royalties_cents", "updated_at"])
-        RoyaltyEntry.objects.create(
-            user=request.user, kind=RoyaltyEntry.KIND_ACCRUAL, amount_cents=amount_cents,
-            source=str(request.data.get("source", ""))[:200],
-        )
-        return Response({"royalties_cents": w.royalties_cents, "royalties": w.royalties})
+        # Staff credit somebody else, not themselves — an adjustment tool that
+        # only works on your own account is a way to pay yourself.
+        target = request.user
+        username = str(request.data.get("username", "")).strip()
+        if username:
+            from django.contrib.auth import get_user_model
+            target = get_user_model().objects.filter(username=username).first()
+            if not target:
+                return Response({"detail": "No such member."},
+                                status=status.HTTP_404_NOT_FOUND)
+        accrue_royalty(target, amount_cents,
+                       source=str(request.data.get("source", "")) or
+                       f"staff adjustment by {request.user.username}")
+        w = wallet_for(target)
+        return Response({"user": target.username,
+                         "royalties_cents": w.royalties_cents,
+                         "royalties": w.royalties})
 
 
 class RoyaltyCashoutView(APIView):

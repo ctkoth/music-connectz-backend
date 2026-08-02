@@ -598,22 +598,32 @@ class Volume(models.Model):
         return counts
 
     def split_cents(self, net_cents):
-        """Divide a sale between contributors by pages made. Returns
-        {user: cents}, with any rounding remainder going to the owner."""
-        counts = self.contributors()
-        total_pages = sum(counts.values())
-        if not total_pages:
-            return {self.manga.owner: net_cents}
-        shares, paid = {}, 0
-        for user, pages in counts.items():
-            cut = net_cents * pages // total_pages
-            shares[user] = cut
-            paid += cut
-        # Rounding remainder to the owner rather than dropping it — cents that
-        # vanish in integer division are cents somebody earned.
-        owner = self.manga.owner
-        shares[owner] = shares.get(owner, 0) + (net_cents - paid)
-        return shares
+        """Divide a sale between contributors by pages made. {user: cents}.
+
+        Uses economy.splits, the same arithmetic CollabZ pays its agreed
+        percentages with — different weights, one implementation. Three copies
+        would eventually disagree about who gets the rounding remainder, and
+        the person who loses it never finds out.
+        """
+        from apps.economy.splits import by_weight
+
+        return by_weight(net_cents, self.contributors(),
+                         fallback=self.manga.owner)
+
+    def split_preview(self, price_cents=None):
+        """What each contributor would get from a sale, before one happens.
+
+        A payout people only see afterwards is one they query afterwards, and
+        by then it has already happened.
+        """
+        from apps.economy.splits import describe
+
+        price = self.price_cents if price_cents is None else int(price_cents)
+        royalty = self.manga.ai_royalty_cents(price)
+        out = describe(self.split_cents(price - royalty), price - royalty)
+        out["price_cents"] = price
+        out["ai_royalty_cents"] = royalty
+        return out
 
 
 class Sale(models.Model):
