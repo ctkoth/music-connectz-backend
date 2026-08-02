@@ -43,6 +43,75 @@ def _system(target_name):
     )
 
 
+
+class TranslateUnavailable(RuntimeError):
+    """The backend can't be reached, or gave something unparseable. A 503 —
+    a dependency being down, not the member doing anything wrong."""
+
+
+def transcreate(texts, target_lang, target_name="", keep_verbatim=()):
+    """Transcreate a batch of strings. Returns the list, same length and order.
+
+    Extracted from TranslateView so callers inside the app — MangaZ lettering,
+    for one — can translate without going out over HTTP and without a second
+    copy of the prompt rules. One place decides how brand names and emoji are
+    handled, so a manga page and a UI label get the same treatment.
+
+    `keep_verbatim` adds names that must survive untranslated on top of the
+    brand list. Character names go here: Rin has to still be Rin in Japanese,
+    and a transcreator with no instruction will happily localise her.
+
+    Charges nothing. Billing belongs to the caller, which knows whether this
+    was one page or sixty.
+    """
+    import json as _json
+
+    texts = [str(t) for t in texts][:MAX_TEXTS]
+    if not texts:
+        return []
+    lang = str(target_lang or "").strip().lower()
+    if lang in ("en", "eng", "english") or not any(t.strip() for t in texts):
+        return list(texts)
+
+    try:
+        import anthropic
+    except ImportError as exc:
+        raise TranslateUnavailable("Translation backend unavailable.") from exc
+
+    system = _system(target_name or lang)
+    if keep_verbatim:
+        names = ", ".join(str(n) for n in keep_verbatim if str(n).strip())
+        if names:
+            system += (f" (6) These are character names — keep them exactly as "
+                       f"written, never translate or localise them: {names}.")
+    try:
+        client = anthropic.Anthropic()
+        resp = client.messages.create(
+            model=TRANSLATE_MODEL, max_tokens=2048, system=system,
+            messages=[{"role": "user",
+                       "content": _json.dumps(texts, ensure_ascii=False)}])
+        raw = "".join(b.text for b in resp.content
+                      if getattr(b, "type", "") == "text").strip()
+    except TranslateUnavailable:
+        raise
+    except Exception as exc:
+        raise TranslateUnavailable(f"Translation backend error: {exc}"[:200]) from exc
+
+    out = None
+    try:
+        out = _json.loads(raw)
+    except Exception:
+        a, b = raw.find("["), raw.rfind("]")
+        if a != -1 and b != -1 and b > a:
+            try:
+                out = _json.loads(raw[a:b + 1])
+            except Exception:
+                out = None
+    if not isinstance(out, list) or len(out) != len(texts):
+        raise TranslateUnavailable("Could not parse translation.")
+    return [str(x) for x in out]
+
+
 class TranslateView(APIView):
     """POST { texts: [str], target_lang, target_name?, source_lang? } → transcreated
     strings. Charges the model minimum once per batch on success."""

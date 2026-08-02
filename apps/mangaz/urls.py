@@ -2,7 +2,7 @@ from django.urls import path
 
 from .views import (CatalogView, CharacterZView, MangaDetailView,
                     ArtView, BalloonDetailView, BalloonsView,
-                    BuyVolumeView, PageArtView, CommissionView, MangaListView, MeetAttendView, MeetConsentView,
+                    BuyVolumeView, PageArtView, TranslatePageView, CommissionView, MangaListView, MeetAttendView, MeetConsentView,
                     MeetsView, PagesView, RoomJoinView, RoomsView,
                     RoomSuperviseView, RoyaltyQuoteView, VolumesView)
 
@@ -26,6 +26,8 @@ urlpatterns = [
          name="mangaz-balloons"),
     path("balloons/<int:pk>/", BalloonDetailView.as_view(),
          name="mangaz-balloon"),
+    path("works/<int:pk>/pages/<int:number>/translate/",
+         TranslatePageView.as_view(), name="mangaz-translate"),
     path("works/<int:pk>/volumes/", VolumesView.as_view(), name="mangaz-volumes"),
     path("volumes/<int:pk>/buy/", BuyVolumeView.as_view(), name="mangaz-buy"),
     path("commission/", CommissionView.as_view(), name="mangaz-commission"),

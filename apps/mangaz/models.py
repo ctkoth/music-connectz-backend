@@ -793,6 +793,10 @@ class Balloon(models.Model):
     order = models.PositiveIntegerField(default=1)
 
     font_scale = models.FloatField(default=1.0)
+    # {lang: text}. Stored ALONGSIDE the original, never over it — a
+    # translation that overwrites its source is one nobody can correct, re-do
+    # in a better voice, or check against what the author actually wrote.
+    translations = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -816,19 +820,38 @@ class Balloon(models.Model):
             return "That balloon runs off the edge of the page."
         return None
 
+    def text_in(self, lang=""):
+        """The text in `lang`, falling back to the original.
+
+        Falling back rather than blanking: a page half-translated should read
+        as a page half-translated, not as a page with holes in it.
+        """
+        lang = (lang or "").strip().lower()
+        if not lang:
+            return self.text
+        return (self.translations or {}).get(lang) or self.text
+
+    def languages(self):
+        return sorted((self.translations or {}).keys())
+
     def capacity(self):
         """Roughly how many characters fit at this size."""
         area = self.width * self.height
         return max(1, int(area * CHARS_PER_PERCENT_AREA / max(0.3, self.font_scale)))
 
-    def overflow(self):
-        """How many characters too long the text is, or 0.
+    def overflow(self, lang=""):
+        """How many characters too long the text is in `lang`, or 0.
+
+        Re-checked per language on purpose. German runs roughly 30% longer
+        than English and Finnish longer still, so a balloon that fit perfectly
+        in the original will spill once translated — that is THE classic
+        localisation bug, and a page that only checks the source language
+        ships it every time.
 
         Reported, never enforced. Truncating somebody's dialogue to fit a box
-        is the one outcome nobody wants; showing them it will spill lets them
-        cut it or make the balloon bigger.
+        is the one outcome nobody wants.
         """
-        return max(0, len(self.text) - self.capacity())
+        return max(0, len(self.text_in(lang)) - self.capacity())
 
     def payload(self):
         return {
@@ -842,10 +865,22 @@ class Balloon(models.Model):
             "order": self.order, "font_scale": self.font_scale,
             "overflow_chars": self.overflow(),
             "capacity_chars": self.capacity(),
+            "languages": self.languages(),
         }
 
+    def payload_in(self, lang):
+        """The balloon as it reads in one language, with that language's own
+        overflow — which is the number that decides whether it fits."""
+        out = self.payload()
+        out["lang"] = lang
+        out["text"] = self.text_in(lang)
+        out["original"] = self.text
+        out["translated"] = lang in (self.translations or {})
+        out["overflow_chars"] = self.overflow(lang)
+        return out
 
-def page_script(page):
+
+def page_script(page, lang=""):
     """The page's dialogue as ordered plain text.
 
     What a screen reader reads, what a translator works from, and what you'd
@@ -854,15 +889,16 @@ def page_script(page):
     """
     lines = []
     for b in page.balloons.all():
-        if not b.text.strip():
+        text = b.text_in(lang)
+        if not text.strip():
             continue
         who = b.speaker.name if b.speaker_id else None
         if b.kind == "caption":
-            lines.append(f"[{b.text}]")
+            lines.append(f"[{text}]")
         elif b.kind == "sfx":
-            lines.append(f"*{b.text}*")
+            lines.append(f"*{text}*")
         elif who:
-            lines.append(f"{who}: {b.text}")
+            lines.append(f"{who}: {text}")
         else:
-            lines.append(b.text)
+            lines.append(text)
     return "\n".join(lines)

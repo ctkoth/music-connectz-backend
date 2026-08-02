@@ -24,7 +24,10 @@ from apps.economy.models import Face
 
 from apps.economy.models import (membership_for, pay_between,
                                  profile_for, wallet_for)
+from apps.economy.catalog import ai_cost
+from apps.economy.models import can_afford_ai, charge_ai_usage
 from apps.economy.nextstep import not_enough
+from apps.economy.translate import TranslateUnavailable, transcreate
 from apps.economy.views import platform_owner
 from apps.economy.upgrade import response as upgrade_response
 
@@ -1063,3 +1066,117 @@ class BalloonDetailView(APIView):
                             status=status.HTTP_404_NOT_FOUND)
         b.delete()
         return Response({"deleted": True})
+
+
+class TranslatePageView(APIView):
+    """Translate a page's lettering. One batch, one charge.
+
+    Only possible because balloons are data: the drawing is untouched, so a
+    page can be read in six languages without six versions of the art.
+
+    Decisions worth knowing:
+
+      * Translations are stored ALONGSIDE the original, never over it.
+      * The whole page goes in ONE batch. TranslateZ charges per batch, so
+        translating balloon-by-balloon would bill a page ten times over.
+      * Character names are held verbatim — Rin has to still be Rin, and a
+        transcreator with no instruction will happily localise her.
+      * SFX are skipped by default. In manga a sound effect is drawn art, not
+        dialogue; translating it produces a word floating over a picture of a
+        different word.
+      * Overflow is re-checked IN THE TARGET LANGUAGE, because German runs
+        ~30% longer than English and that's the classic localisation bug.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk, number):
+        """Read the page in a language you've already translated into."""
+        page = Page.objects.filter(
+            manga_id=pk, number=number,
+            manga__room__members__user=request.user).first()
+        if not page:
+            return Response({"detail": "No such page."},
+                            status=status.HTTP_404_NOT_FOUND)
+        lang = str(request.query_params.get("lang", "")).strip().lower()
+        balloons = list(page.balloons.all())
+        return Response({
+            "page": page.number, "lang": lang or None,
+            "available": sorted({l for b in balloons for l in b.languages()}),
+            "balloons": [b.payload_in(lang) for b in balloons],
+            "script": page_script(page, lang),
+            "spills": [b.id for b in balloons if b.overflow(lang)],
+        })
+
+    @transaction.atomic
+    def post(self, request, pk, number):
+        page = Page.objects.filter(
+            manga_id=pk, number=number,
+            manga__room__members__user=request.user).first()
+        if not page:
+            return Response({"detail": "No such page."},
+                            status=status.HTTP_404_NOT_FOUND)
+        d = request.data or {}
+        lang = str(d.get("target_lang", "")).strip().lower()
+        if not lang:
+            return Response({"detail": "target_lang is required."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        include_sfx = bool(d.get("include_sfx"))
+        balloons = [b for b in page.balloons.all()
+                    if b.text.strip() and (include_sfx or b.kind != "sfx")]
+        if not balloons:
+            return Response({"detail": "Nothing on this page to translate.",
+                             "note": ("Sound effects are skipped by default — "
+                                      "in manga they're drawn art, not "
+                                      "dialogue. Pass include_sfx to change "
+                                      "that.")},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        cost = ai_cost("standard")
+        if cost and not can_afford_ai(request.user, cost):
+            return Response(
+                not_enough(request.user, need_cents=cost,
+                           feature=f"translating page {page.number}"),
+                status=status.HTTP_402_PAYMENT_REQUIRED)
+
+        # Character names travel verbatim. Everyone who speaks on this page,
+        # plus anyone in the work's cast, so a name mentioned in dialogue is
+        # protected too and not only the speaker's own label.
+        names = {b.speaker.name for b in balloons if b.speaker_id}
+        names |= {c.name for c in page.manga.characters.all()}
+
+        try:
+            translated = transcreate([b.text for b in balloons], lang,
+                                     target_name=str(d.get("target_name", "")),
+                                     keep_verbatim=sorted(names))
+        except TranslateUnavailable as exc:
+            return Response({"detail": str(exc)},
+                            status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        for balloon, text in zip(balloons, translated):
+            balloon.translations = {**(balloon.translations or {}), lang: text}
+            balloon.save(update_fields=["translations"])
+
+        # Charged once, after it worked. A page billed per balloon would cost
+        # ten times what it should, and a failed batch should cost nothing.
+        charged = 0
+        if cost:
+            charge_ai_usage(request.user, cost,
+                            note=f"MangaZ translate p{page.number} → {lang}")
+            charged = cost
+
+        spills = [b.payload_in(lang) for b in balloons if b.overflow(lang)]
+        body = {
+            "lang": lang, "translated": len(balloons),
+            "cost_cents": charged,
+            "balloons": [b.payload_in(lang) for b in balloons],
+            "script": page_script(page, lang),
+        }
+        if spills:
+            body["warning"] = (
+                f"{len(spills)} balloon(s) now overflow in {lang}. Translated "
+                f"text is often longer than the original — grow the balloon or "
+                f"trim the line.")
+            body["spills"] = [b["id"] for b in spills]
+        return Response(body, status=status.HTTP_201_CREATED)

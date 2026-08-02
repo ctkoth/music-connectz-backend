@@ -13,6 +13,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from apps.economy.models import membership_for, profile_for, wallet_for
+from apps.economy.translate import TranslateUnavailable
 
 from .ai import AiUnavailable
 from .art import ArtUnavailable
@@ -1311,3 +1312,158 @@ class LetteringTests(TestCase):
         self.room.supervisor = None
         self.room.save(update_fields=["supervisor"])
         self.assertEqual(self.add().status_code, 409)
+
+
+class TranslateLetteringTests(TestCase):
+    """A page reads in six languages without six versions of the art.
+
+    Only possible because the words are data. A page with its lettering burned
+    into the picture needs a redraw per language, which is why most comics
+    never get translated at all.
+    """
+
+    def setUp(self):
+        self.owner = adult("translator")
+        self.room = Room.objects.create(title="Studio", owner=self.owner,
+                                        supervisor=self.owner)
+        RoomMember.objects.create(room=self.room, user=self.owner)
+        self.manga = MangaZ.objects.create(title="Book", room=self.room,
+                                           owner=self.owner)
+        self.page = Page.objects.create(manga=self.manga, number=1,
+                                        author=self.owner, source=SOURCE_HUMAN)
+        self.rin = CharacterZ.objects.create(owner=self.owner, name="Rin")
+        self.manga.characters.add(self.rin)
+        self.hello = Balloon.objects.create(page=self.page, kind="speech",
+                                            text="You came.", speaker=self.rin,
+                                            order=1, width=40, height=30)
+        self.sfx = Balloon.objects.create(page=self.page, kind="sfx",
+                                          text="KRAK", order=2, y=50,
+                                          width=20, height=10)
+        self.client = APIClient()
+        self.client.force_authenticate(self.owner)
+        w = wallet_for(self.owner)
+        w.money_cents = 100_000
+        w.save(update_fields=["money_cents"])
+
+    def url(self):
+        return reverse("mangaz-translate", args=[self.manga.id, 1])
+
+    def translate(self, returns=None, **body):
+        with patch("apps.mangaz.views.transcreate",
+                   return_value=returns or ["Du bist gekommen."]) as fake:
+            r = self.client.post(self.url(),
+                                 dict({"target_lang": "de"}, **body),
+                                 format="json")
+        return r, fake
+
+    def test_a_page_translates(self):
+        r, _ = self.translate()
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["lang"], "de")
+        self.assertEqual(r.json()["translated"], 1)
+
+    def test_the_original_is_kept_not_overwritten(self):
+        """A translation that replaces its source is one nobody can correct,
+        re-do in a better voice, or check against what the author wrote."""
+        self.translate()
+        self.hello.refresh_from_db()
+        self.assertEqual(self.hello.text, "You came.")
+        self.assertEqual(self.hello.text_in("de"), "Du bist gekommen.")
+
+    def test_an_untranslated_language_falls_back_to_the_original(self):
+        """A half-translated page should read as half-translated, not as a
+        page with holes in it."""
+        self.translate()
+        self.assertEqual(self.hello.text_in("fr"), "You came.")
+
+    def test_the_whole_page_goes_in_one_batch(self):
+        """TranslateZ charges per batch. Balloon-by-balloon would bill a page
+        ten times over."""
+        Balloon.objects.create(page=self.page, kind="speech", text="Second.",
+                               order=3, y=70, width=30, height=20)
+        _r, fake = self.translate(returns=["a", "b"])
+        self.assertEqual(fake.call_count, 1)
+        self.assertEqual(len(fake.call_args[0][0]), 2)
+
+    def test_sfx_are_skipped_by_default(self):
+        """In manga a sound effect is drawn art. Translating it produces a
+        word floating over a picture of a different word."""
+        _r, fake = self.translate()
+        self.assertEqual(fake.call_args[0][0], ["You came."])
+
+    def test_sfx_can_be_included_on_purpose(self):
+        _r, fake = self.translate(returns=["a", "b"], include_sfx=True)
+        self.assertIn("KRAK", fake.call_args[0][0])
+
+    def test_character_names_are_held_verbatim(self):
+        """Rin has to still be Rin. A transcreator with no instruction will
+        happily localise her."""
+        _r, fake = self.translate()
+        self.assertIn("Rin", fake.call_args[1]["keep_verbatim"])
+
+    def test_overflow_is_rechecked_in_the_target_language(self):
+        """German runs ~30% longer than English. A balloon that fit in the
+        original spills once translated — the classic localisation bug."""
+        r, _ = self.translate(returns=["x" * 4000])
+        self.assertIn("warning", r.json())
+        self.assertIn("spills", r.json())
+
+    def test_text_that_still_fits_raises_no_warning(self):
+        r, _ = self.translate()
+        self.assertNotIn("warning", r.json())
+
+    def test_the_script_exports_in_the_translated_language(self):
+        self.translate()
+        body = self.client.get(self.url(), {"lang": "de"}).json()
+        self.assertIn("Rin: Du bist gekommen.", body["script"])
+
+    def test_the_english_script_is_unchanged(self):
+        self.translate()
+        self.assertIn("Rin: You came.",
+                      self.client.get(self.url()).json()["script"])
+
+    def test_it_lists_which_languages_a_page_has(self):
+        self.translate()
+        self.assertEqual(self.client.get(self.url()).json()["available"], ["de"])
+
+    def test_the_art_is_never_touched(self):
+        """The whole point — one drawing, many languages."""
+        self.page.art_url = "https://example.com/page1.png"
+        self.page.save(update_fields=["art_url"])
+        self.translate()
+        self.page.refresh_from_db()
+        self.assertEqual(self.page.art_url, "https://example.com/page1.png")
+
+    def test_a_broke_member_gets_the_price_and_a_route(self):
+        w = wallet_for(self.owner)
+        w.money_cents, w.promptz = 0, 0
+        w.prompts_used_today = 999
+        from datetime import date as _d
+        w.prompt_day = _d.today().isoformat()
+        w.save()
+        r = self.client.post(self.url(), {"target_lang": "de"}, format="json")
+        self.assertEqual(r.status_code, 402)
+        self.assertIn("next", r.json())
+
+    def test_a_failed_translation_charges_nothing_and_stores_nothing(self):
+        before = wallet_for(self.owner).money_cents
+        with patch("apps.mangaz.views.transcreate",
+                   side_effect=TranslateUnavailable("backend down")):
+            r = self.client.post(self.url(), {"target_lang": "de"},
+                                 format="json")
+        self.assertEqual(r.status_code, 503)
+        self.hello.refresh_from_db()
+        self.assertEqual(self.hello.translations, {})
+        self.assertEqual(wallet_for(self.owner).money_cents, before)
+
+    def test_an_empty_page_says_why_rather_than_charging(self):
+        Balloon.objects.filter(page=self.page).exclude(kind="sfx").delete()
+        r = self.client.post(self.url(), {"target_lang": "de"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("Sound effects", r.json()["note"])
+
+    def test_outsiders_cannot_translate_your_book(self):
+        outsider = APIClient()
+        outsider.force_authenticate(adult("intruder3"))
+        r = outsider.post(self.url(), {"target_lang": "de"}, format="json")
+        self.assertEqual(r.status_code, 404)
