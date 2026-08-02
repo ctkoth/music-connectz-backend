@@ -56,6 +56,7 @@ urlpatterns = [
     path("api/collabz/", include("apps.collabz.urls")),
     path("api/tabz/", include("apps.tabz.urls")),
     path("api/vstz/", include("apps.vstz.urls")),
+    path("api/mangaz/", include("apps.mangaz.urls")),
     # Android app <-> site link verification. Must sit at the domain root, not
     # under /api/ — Google fetches this exact path over https.
     path(".well-known/assetlinks.json", AssetLinksView.as_view(), name="assetlinks"),

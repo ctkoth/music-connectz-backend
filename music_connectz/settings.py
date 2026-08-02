@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     "apps.collabz",
     "apps.tabz",
     "apps.vstz",
+    "apps.mangaz",
 ]
 
 MIDDLEWARE = [
