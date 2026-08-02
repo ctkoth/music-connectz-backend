@@ -11,7 +11,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import ai_cost
-from .models import charge_ai_usage, can_afford_ai, wallet_for
+from .models import (charge_ai_usage, can_afford_ai, daily_prompt_state,
+                     wallet_for)
 from .views import is_owner, platform_owner
 
 # House model per OCC voice. The "voice" shapes the system prompt/tone + price;
@@ -88,13 +89,11 @@ AAVE_STYLE = (
     "'I'm on it' = I'm helping you; 'bout' = about; 'fam' = family. Match the member's energy."
 )
 
-# Appended when the member has Suggestion mode on — Corey always closes with a
-# concrete what/why/how next step.
-SUGGEST_STYLE = (
-    "SUGGESTION MODE IS ON: always end your reply with a short '💡 Suggestion' — one concrete "
-    "next move phrased as What / Why / How (what to do, why it matters, how to do it in a step "
-    "or two). Keep it tight and actionable, never generic."
-)
+# Suggestion mode lives in suggest.py so OCC chat, the OCC agent and OmviardZ
+# can't word the same rule three different ways — which is exactly what had
+# already happened.
+from .suggest import SUGGEST_STYLE  # noqa: E402,F401
+from .suggest import gate as suggest_gate  # noqa: E402
 
 COURSES = (
     "You have been taught four college-level courses and can teach them on request: "
@@ -131,9 +130,14 @@ class OccChatView(APIView):
         # then routed to the platform owner as revenue.
         cost = ai_cost(model_voice)
         # Check affordability up front so we don't call the model then fail to bill.
-        if cost and not can_afford_ai(request.user, cost):
+        # count_daily, because this IS the prompt the daily allowance is for — the
+        # check and the charge below have to agree, or a free member with three
+        # free prompts and no balance gets turned away from a free run.
+        if cost and not can_afford_ai(request.user, cost, count_daily=True):
+            from .upgrade import response as upgrade_response
             return Response(
-                {"detail": "Not enough balance for this model.", "cost_cents": cost},
+                upgrade_response(request.user, feature="OCC", need_cents=cost,
+                                 detail="Not enough balance for this model."),
                 status=status.HTTP_402_PAYMENT_REQUIRED,
             )
 
@@ -146,6 +150,7 @@ class OccChatView(APIView):
         # AAVE colloquialisms only apply to the Corey voice, and only when opted in.
         if slang and model_voice == "corey-gpt":
             system += f"\n\n{AAVE_STYLE}"
+        suggest, suggest_notice = suggest_gate(request.user, suggest)
         if suggest:
             system += f"\n\n{SUGGEST_STYLE}"
         acro = ", ".join(
@@ -205,14 +210,34 @@ class OccChatView(APIView):
         if not text:
             return Response({"detail": "Empty response."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
-        remaining = charge_ai_usage(request.user, cost, note=f"OCC {model_voice}")
+        # count_daily spends today's free allowance first, then PromptZ, then cash.
+        # Without it the advertised "free 3 / premium 10 / StatZ 20 daily prompts"
+        # never applied to OCC chat at all — the one feature it exists for.
+        before_cash = wallet_for(request.user).money_cents or 0
+        remaining = charge_ai_usage(request.user, cost, note=f"OCC {model_voice}",
+                                    count_daily=True)
+        cash_spent = max(0, before_cash - (remaining if remaining is not None else before_cash))
+
         # Route the model charge to the platform owner as revenue ("pay Corey"),
         # keeping money conserved — unless the payer *is* the owner (self-neutral).
-        if cost:
+        # Only what was actually paid in CASH: a run covered by a free daily
+        # prompt or by prepaid PromptZ moved no money, and crediting the owner for
+        # it would mint revenue nobody paid.
+        if cash_spent:
             owner = platform_owner()
             if owner and owner.id != request.user.id:
                 ow = wallet_for(owner)
-                ow.money_cents = (ow.money_cents or 0) + cost
+                ow.money_cents = (ow.money_cents or 0) + cash_spent
                 ow.save(update_fields=["money_cents", "updated_at"])
         money = round((remaining if remaining is not None else wallet_for(request.user).money_cents) / 100, 2)
-        return Response({"text": text, "model": model_voice, "cost_cents": cost, "money": money})
+        allowance, used, prompts_left = daily_prompt_state(request.user)
+        body = {"text": text, "model": model_voice, "cost_cents": cost,
+                "charged_cents": cash_spent, "money": money,
+                "suggestions": suggest,
+                "daily_prompts": {"allowance": allowance, "used": used,
+                                  "remaining": prompts_left}}
+        if suggest_notice:
+            # Say why the toggle didn't take effect. Silently ignoring it looks
+            # like the switch is broken.
+            body["suggestions_notice"] = suggest_notice
+        return Response(body)

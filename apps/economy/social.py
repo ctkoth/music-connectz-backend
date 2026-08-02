@@ -8,7 +8,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import status
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -42,6 +42,9 @@ from .models import (
     Block,
     wallet_for,
 )
+from . import agepolicy
+from . import nextstep
+from . import searchfilters as sf
 from .serializers import WalletSerializer
 
 User = get_user_model()
@@ -60,9 +63,28 @@ def _venue_dict(v, request):
         "host_price_cents": v.host_price_cents,
         "visitor_pay_cents": v.visitor_pay_cents,
         "min_attract": v.min_attract,
+        "requirements": v.requirements or {},
+        "requirements_text": sf.describe(sf.load(v.requirements)),
         "attending": v.attendances.filter(visitor=request.user).exists(),
         "created_at": v.created_at,
     }
+
+
+class SearchFiltersView(APIView):
+    """GET the five range gates so a client can draw the sliders.
+
+    Public, and shared by every surface. CollabZ and BattleZ already serve this
+    inside their own catalogs, but VenueZ and Social ConnectZ have no catalog to
+    hang it on — so the ranges were enforceable on those two and undiscoverable,
+    which is a filter nobody can find. One endpoint rather than four copies:
+    four hand-maintained slider lists is how they end up disagreeing about what
+    the maximum age is.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, _request):
+        return Response(sf.catalog())
 
 
 class VenuesView(APIView):
@@ -70,7 +92,11 @@ class VenuesView(APIView):
 
     def get(self, request):
         venues = Venue.objects.select_related("host").all()[:200]
-        return Response({"venues": [_venue_dict(v, request) for v in venues]})
+        # Inline as well as on the shared endpoint: the VenueZ screen needs the
+        # slider bounds at the same moment it needs the list, and a second
+        # round trip to draw a filter is a filter that renders late.
+        return Response({"venues": [_venue_dict(v, request) for v in venues],
+                         "ranges": sf.catalog()})
 
     def post(self, request):
         d = request.data
@@ -86,12 +112,25 @@ class VenuesView(APIView):
             except (TypeError, ValueError):
                 return 0
 
+        # The five ranges the host is gating on, plus the older single-ended
+        # `min_attract`. Whichever the client sent, both end up saying the same
+        # thing — two fields that disagree about who may attend is a bug the
+        # host only finds out about when somebody is wrongly turned away.
+        requirements = sf.store(d)
+        min_attract = min(10, max(0, cents("min_attract")))
+        attract = requirements.get("attractiveness")
+        if attract and attract.get("min"):
+            min_attract = int(attract["min"])
+        elif min_attract:
+            requirements["attractiveness"] = {"min": float(min_attract), "max": None}
+
         v = Venue.objects.create(
             host=request.user, title=title[:120], mode=mode, vtype=vtype,
             custom_name=str(d.get("custom_name", ""))[:60],
             host_price_cents=cents("host_price_cents"),
             visitor_pay_cents=cents("visitor_pay_cents") if mode == Venue.MODE_COLLAB else 0,
-            min_attract=min(10, max(0, cents("min_attract"))),
+            min_attract=min_attract,
+            requirements=requirements,
         )
         return Response({"venue": _venue_dict(v, request)}, status=status.HTTP_201_CREATED)
 
@@ -106,18 +145,24 @@ class VenueJoinView(APIView):
         if venue.host_id == request.user.id:
             return Response({"detail": "you can't attend your own venue"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Scalable attractiveness gate — rated visitors below the bar are blocked.
-        if venue.min_attract > 0:
-            med = attractiveness_median(request.user)
-            if med is not None and med < venue.min_attract:
-                return Response(
-                    {"detail": f"needs attractiveness {venue.min_attract}+, yours is {med}"},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
+        # The host's range gates. Exclusive: outside means turned away, and the
+        # reason is named so the visitor knows whether it's fixable.
+        # Distance is measured against the host, so the viewer is the host.
+        refused = sf.entry_error(request.user, venue.requirements, viewer=venue.host)
+        if refused:
+            return Response({"detail": refused, "requirements": venue.requirements},
+                            status=status.HTTP_403_FORBIDDEN)
 
         vw = wallet_for(request.user)
         if vw.money_cents < venue.host_price_cents:
-            return Response({"detail": "insufficient balance to attend"}, status=status.HTTP_402_PAYMENT_REQUIRED)
+            return Response(
+                nextstep.not_enough(
+                    request.user, need_cents=venue.host_price_cents,
+                    feature=venue.title,
+                    detail=f"{venue.title} costs "
+                           f"${venue.host_price_cents / 100:.2f} to attend — "
+                           f"you're ${(venue.host_price_cents - vw.money_cents) / 100:.2f} short."),
+                status=status.HTTP_402_PAYMENT_REQUIRED)
 
         with transaction.atomic():
             # Visitor pays the host (developer tax enforced).
@@ -178,6 +223,12 @@ class AttractivenessRateView(APIView):
             return Response({"detail": "unknown user"}, status=status.HTTP_404_NOT_FOUND)
         if target.id == request.user.id:
             return Response({"detail": "can't rate yourself"}, status=status.HTTP_400_BAD_REQUEST)
+        # Rating how somebody LOOKS is 18+ on both sides. Rating what they MADE
+        # is open to everyone — see economy/agepolicy.py. Until this check
+        # existed, any adult could score a 14-year-old out of 10.
+        refused = agepolicy.adults_only_error(request.user, target)
+        if refused:
+            return Response({"detail": refused}, status=status.HTTP_403_FORBIDDEN)
 
         AttractivenessRating.objects.update_or_create(
             rater=request.user, target=target, defaults={"score": score}
@@ -263,6 +314,14 @@ class FaceRateView(APIView):
             return Response({"detail": "score (1-10) required"}, status=status.HTTP_400_BAD_REQUEST)
         if not (1 <= score <= 10):
             return Response({"detail": "score must be 1-10"}, status=status.HTTP_400_BAD_REQUEST)
+        # Same line as attractiveness: a face is a body, not a work. The face's
+        # owner and anyone tagged in it both have to be adults, and so does the
+        # rater — a photo of a minor must not be scoreable by anybody.
+        refused = agepolicy.adults_only_error(request.user, f.owner)
+        if not refused and f.tagged_id:
+            refused = agepolicy.adults_only_error(request.user, f.tagged)
+        if refused:
+            return Response({"detail": refused}, status=status.HTTP_403_FORBIDDEN)
         FaceRating.objects.update_or_create(rater=request.user, face=f, defaults={"score": score})
         return Response({"id": f.id, "median": face_median(f), "count": f.ratings.count(), "my_rating": score})
 
@@ -270,8 +329,11 @@ class FaceRateView(APIView):
 # ---- Cross-user profiles ----
 PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign",
                   "nationalities", "regions", "substances", "sober",
-                  "attracted_to", "asexual", "traits", "personas", "links",
-                  "external_followers")
+                  "attracted_to", "asexual", "traits", "personas", "genres", "links",
+                  "external_followers",
+                  # How they want links opened — new tab, new window, or in
+                  # place. Editable like any other preference.
+                  "link_target")
 
 
 def _avatar_url(p, request):
@@ -282,15 +344,23 @@ def _avatar_url(p, request):
 
 
 def _skill_years(start):
-    """Whole years from a YYYY-MM-DD skill start date to today, or None."""
+    """Whole years from a skill start date to today, or None.
+
+    Parses through personaz.normalize_start so a date the skill picker wrote as
+    `7/4/2020` counts the same as an ISO one. Profiles saved before that was
+    accepted still hold slash dates, and they were all reading as None.
+    """
     import datetime
-    try:
-        y, m, d = (int(x) for x in str(start).split("-"))
-        today = datetime.date.today()
-        yrs = today.year - y - ((today.month, today.day) < (m, d))
-        return yrs if yrs >= 0 else None
-    except (ValueError, TypeError):
+
+    from .personaz import normalize_start
+
+    iso = normalize_start(start)
+    if not iso:
         return None
+    y, m, d = (int(x) for x in iso.split("-"))
+    today = datetime.date.today()
+    yrs = today.year - y - ((today.month, today.day) < (m, d))
+    return yrs if yrs >= 0 else None
 
 
 def profile_max_experience(p):
@@ -307,7 +377,12 @@ def profile_max_experience(p):
         if not isinstance(persona, dict):
             continue
         for s in (persona.get("skills") or []):
-            start = s.get("start") if isinstance(s, dict) else None
+            # `startDate` is what the 2.2 skill picker wrote; `start` is what the
+            # API documents. Read both or the metric silently ignores real dates.
+            start = (
+                s.get("start") or s.get("startDate") or s.get("start_date")
+                if isinstance(s, dict) else None
+            )
             yrs = _skill_years(start) if start else None
             if yrs is not None and (best is None or yrs > best):
                 best = yrs
@@ -345,13 +420,16 @@ def _profile_full(p, request):
     card.update({
         "bio": p.bio, "location": p.location, "birthday": p.birthday,
         "substances": p.substances, "asexual": p.asexual, "traits": p.traits,
-        "personas": p.personas, "links": p.links, "mine": p.user_id == request.user.id,
+        "personas": p.personas, "genres": p.genres, "links": p.links, "mine": p.user_id == request.user.id,
         "my_attractiveness": AttractivenessRating.objects.filter(rater=request.user, target=p.user).values_list("score", flat=True).first(),
         "my_overall": OverallRating.objects.filter(rater=request.user, target=p.user).values_list("score", flat=True).first(),
         "overall_count": OverallRating.objects.filter(target=p.user).count(),
         "relationship": relationship(request.user, p.user),
         "energy_per_hour": energy_rate_per_hour(p.user) if p.user_id == request.user.id else None,
         "verified_18plus": p.verified_18plus,
+        # How they want links opened — new tab, new window, or in place. The
+        # client can't honour a preference it was never told about.
+        "link_target": p.link_target,
     })
     return card
 
@@ -646,9 +724,22 @@ class MembersView(APIView):
     """Search members by multi-select metrics: regions, genders, signs, sober.
 
     OR within a metric, AND across metrics — mirrors the client filter.
+
+    The five ranges (skill rating, skill price, attractiveness, age, distance)
+    come from economy.searchfilters, so a search here gates on exactly what a
+    CollabZ, VenueZ or BattleZ post gates on. They used to be reimplemented
+    inline, which is how this view ended up with two of the five missing and an
+    attractiveness gate that read scores their owners had made private.
     """
 
     permission_classes = [IsAuthenticated]
+
+    # Older clients spell two of the ranges differently. Kept working rather
+    # than broken: a shipped app can't be asked to rename its query string.
+    LEGACY_PARAMS = {
+        "attr_min": "attractiveness_min", "attr_max": "attractiveness_max",
+        "max_km": "distance_max",
+    }
 
     def get(self, request):
         def multi(key):
@@ -671,17 +762,23 @@ class MembersView(APIView):
             except (TypeError, ValueError):
                 return None
 
-        # Range gates. When a min/max is set, members outside it (or with no
-        # value for that metric) are excluded — the range "gates exclusive".
-        age_min, age_max = num("age_min"), num("age_max")
-        attr_min, attr_max = num("attr_min"), num("attr_max")
-        exp_min, exp_max = num("exp_min"), num("exp_max")  # years-of-experience range
-        max_km = num("max_km")  # distance range: within N km of the searcher
+        # The five shared ranges — exclusive gates, unknown values excluded and
+        # counted separately so a new member with no ratings yet is reported
+        # rather than silently erased from every search forever.
+        params = dict(request.query_params.items())
+        for old, new in self.LEGACY_PARAMS.items():
+            if params.get(old) and not params.get(new):
+                params[new] = params[old]
+        ranges = sf.parse(params)
+
+        # Years of experience isn't one of the five; it stays local.
+        exp_min, exp_max = num("exp_min"), num("exp_max")
 
         me = profile_for(request.user)
         origin = (me.lat, me.lng) if (me.share_location and me.lat is not None) else (None, None)
 
         results = []
+        unknown = 0
         qs = Profile.objects.exclude(user=request.user).exclude(user_id__in=blocked_user_ids(request.user)).select_related("user")[:500]
         for p in qs:
             if regions and not (set(regions) & set(p.regions or [])):
@@ -696,30 +793,34 @@ class MembersView(APIView):
                 subs = p.substances or {}
                 if any(subs.get(k) in active_stances for k in substances):
                     continue
-            if age_min is not None or age_max is not None:
-                age = profile_age(p)
-                if age is None or (age_min is not None and age < age_min) or (age_max is not None and age > age_max):
-                    continue
-            if attr_min is not None or attr_max is not None:
-                a = attractiveness_median(p.user)
-                if a is None or (attr_min is not None and a < attr_min) or (attr_max is not None and a > attr_max):
-                    continue
             if exp_min is not None or exp_max is not None:
                 exp = profile_max_experience(p)
                 if exp is None or (exp_min is not None and exp < exp_min) or (exp_max is not None and exp > exp_max):
                     continue
+            if ranges:
+                passes, detail = sf.evaluate(p.user, ranges, viewer=request.user)
+                if not passes:
+                    if any(d["reason"] == "unknown" for d in detail.values()):
+                        unknown += 1
+                    continue
+            # Shown on the card whether or not distance was gated on.
             dist = None
             if origin[0] is not None and p.share_location and p.lat is not None:
                 dist = haversine_km(origin[0], origin[1], p.lat, p.lng)
-                if max_km is not None and (dist is None or dist > max_km):
-                    continue
-            elif max_km is not None:
-                # Distance filter requested but no shared location on one side → exclude.
-                continue
             card = _profile_card(p, request)
             card["distance_km"] = dist
             results.append(card)
         # Nearest first when a distance origin exists.
         if origin[0] is not None:
             results.sort(key=lambda c: (c.get("distance_km") is None, c.get("distance_km") or 0))
-        return Response({"members": results[:100], "origin_shared": origin[0] is not None})
+        return Response({
+            "members": results[:100],
+            "origin_shared": origin[0] is not None,
+            # "and 12 more with nothing set for that filter" — worth offering,
+            # and the only way a member with no ratings yet ever gets found.
+            "unknown_count": unknown,
+            # What's currently gating, and what could. The search screen draws
+            # its sliders from `available` without a second request.
+            "ranges": [r.payload() for r in ranges.values()],
+            "available_ranges": sf.catalog(),
+        })

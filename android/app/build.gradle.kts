@@ -96,6 +96,10 @@ dependencies {
     // Trusted Web Activity: opens the real site full-screen in Chrome with no
     // URL bar (once assetlinks.json verifies), so the mobile web app IS the app.
     implementation("com.google.androidbrowserhelper:androidbrowserhelper:2.5.0")
+    // Play Billing, reached from the web app through the Digital Goods API. Play
+    // policy requires this for digital goods bought inside the app — see
+    // GOOGLE_PLAY.md §9, and apps/economy/play_billing.py for verification.
+    implementation("com.google.androidbrowserhelper:billing:1.0.0-alpha10")
     implementation("androidx.browser:browser:1.8.0")
     // FileProvider, for handing the splash bitmap to Chrome. The splash screen
     // itself needs no library: Android 12+ uses the platform attributes in

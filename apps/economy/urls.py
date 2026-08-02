@@ -17,6 +17,8 @@ from .social_verify import SocialVerifyView
 from .parcel import ParcelCampaignView
 from .autotopup import AutoTopUpView, AutoTopUpCancelView
 from .identity import IdentityView
+from .membership_spinaz import MembershipSpinazView
+from .trial_views import TrialView
 from .collab import (
     CollabDealsView,
     CollabDetailView,
@@ -28,7 +30,15 @@ from .collab import (
 )
 from .merch import MerchBuyView, MerchDetailView, MerchView
 from .occ import OccChatView
-from .payments import (
+from .occ_views import (AgentRunsView, AgentView, ProjectDetailView,
+                        ProjectFilesView, ProjectsView, ProjectUndoView)
+from .personaz_views import GenreZView, PersonaZDetailView, PersonaZView
+from .play_views import (PlayProductsView, PlayPurchasesView, PlayVerifyView)
+from .pod_views import (BlanksView, DesignDetailView, DesignsView,
+                        ListingBuyView, ListingDetailView, ListingsView,
+                        OrderInvoiceView, OrderRefundView, OrderStatusView, OrdersView,
+                        SalesReportView, StatementView)
+from .payments import (StatzCheckoutView, 
     CheckoutConfigView,
     MembershipRefundView,
     FoundingCheckoutView,
@@ -41,6 +51,8 @@ from .payments import (
     StripeCheckoutView,
     StripeWebhookView,
 )
+from .publicview import (PublicFeedView, PublicMembersView,
+                         PublicOverviewView, PublicProfileView)
 from .social import (
     MemberProfileView,
     MembersView,
@@ -55,6 +67,7 @@ from .social import (
     FaceDetailView,
     FaceRateView,
     FaceZView,
+    SearchFiltersView,
     VenueJoinView,
     VenuesView,
 )
@@ -84,6 +97,26 @@ urlpatterns = [
     path("ai/charge/", AIChargeView.as_view(), name="economy-ai-charge"),
     path("promptz/buy/", PromptzBuyView.as_view(), name="economy-promptz-buy"),
     path("ai/occ/", OccChatView.as_view(), name="economy-ai-occ"),
+    # OCC coding agent — projects, files, and agentic runs.
+    path("occ/projects/", ProjectsView.as_view(), name="economy-occ-projects"),
+    path("occ/projects/<int:pk>/", ProjectDetailView.as_view(), name="economy-occ-project"),
+    path("occ/projects/<int:pk>/files/", ProjectFilesView.as_view(), name="economy-occ-files"),
+    path("occ/projects/<int:pk>/agent/", AgentView.as_view(), name="economy-occ-agent"),
+    path("occ/projects/<int:pk>/runs/", AgentRunsView.as_view(), name="economy-occ-runs"),
+    path("occ/projects/<int:pk>/undo/", ProjectUndoView.as_view(), name="economy-occ-undo"),
+    # MerchZ print-on-demand — made when it sells.
+    path("pod/blanks/", BlanksView.as_view(), name="economy-pod-blanks"),
+    path("pod/designs/", DesignsView.as_view(), name="economy-pod-designs"),
+    path("pod/designs/<int:pk>/", DesignDetailView.as_view(), name="economy-pod-design"),
+    path("pod/listings/", ListingsView.as_view(), name="economy-pod-listings"),
+    path("pod/listings/<int:pk>/", ListingDetailView.as_view(), name="economy-pod-listing"),
+    path("pod/listings/<int:pk>/buy/", ListingBuyView.as_view(), name="economy-pod-buy"),
+    path("pod/orders/", OrdersView.as_view(), name="economy-pod-orders"),
+    path("pod/orders/<int:pk>/status/", OrderStatusView.as_view(), name="economy-pod-order-status"),
+    path("pod/orders/<int:pk>/invoice/", OrderInvoiceView.as_view(), name="economy-pod-invoice"),
+    path("pod/orders/<int:pk>/refund/", OrderRefundView.as_view(), name="economy-pod-refund"),
+    path("pod/sales/", SalesReportView.as_view(), name="economy-pod-sales"),
+    path("pod/statement/", StatementView.as_view(), name="economy-pod-statement"),
     path("translate/", TranslateView.as_view(), name="economy-translate"),
     path("gemini/image/", GeminiImageView.as_view(), name="economy-gemini-image"),
     path("gemini/video/", GeminiVideoView.as_view(), name="economy-gemini-video"),
@@ -105,6 +138,20 @@ urlpatterns = [
     path("founding/claim/", FoundingClaimView.as_view(), name="economy-founding-claim"),
     path("founding/checkout/", FoundingCheckoutView.as_view(), name="economy-founding-checkout"),
     path("premium/checkout/", PremiumCheckoutView.as_view(), name="economy-premium-checkout"),
+    path("statz/checkout/", StatzCheckoutView.as_view(), name="economy-statz-checkout"),
+    path("membership/spinaz/", MembershipSpinazView.as_view(), name="economy-membership-spinaz"),
+    path("trial/", TrialView.as_view(), name="economy-trial"),
+    # Google Play Billing — required for digital goods bought inside the Android app.
+    path("play/products/", PlayProductsView.as_view(), name="economy-play-products"),
+    path("play/verify/", PlayVerifyView.as_view(), name="economy-play-verify"),
+    path("play/purchases/", PlayPurchasesView.as_view(), name="economy-play-purchases"),
+    path("searchfilters/", SearchFiltersView.as_view(), name="economy-searchfilters"),
+    # Public, read-only. No account needed — see publicview.py for what
+    # is deliberately withheld (location, attractiveness, age).
+    path("public/", PublicOverviewView.as_view(), name="public-overview"),
+    path("public/feed/", PublicFeedView.as_view(), name="public-feed"),
+    path("public/members/", PublicMembersView.as_view(), name="public-members"),
+    path("public/members/<str:username>/", PublicProfileView.as_view(), name="public-member"),
     path("venues/", VenuesView.as_view(), name="economy-venues"),
     path("venues/<int:pk>/join/", VenueJoinView.as_view(), name="economy-venue-join"),
     path("attractiveness/", AttractivenessView.as_view(), name="economy-attractiveness"),
@@ -112,6 +159,9 @@ urlpatterns = [
     path("facez/", FaceZView.as_view(), name="economy-facez"),
     path("facez/<int:pk>/", FaceDetailView.as_view(), name="economy-face-detail"),
     path("facez/<int:pk>/rate/", FaceRateView.as_view(), name="economy-face-rate"),
+    path("genrez/", GenreZView.as_view(), name="economy-genrez"),
+    path("personaz/", PersonaZView.as_view(), name="economy-personaz"),
+    path("personaz/<str:key>/", PersonaZDetailView.as_view(), name="economy-personaz-detail"),
     path("profile/", ProfileView.as_view(), name="economy-profile"),
     path("profile/avatar/", ProfileAvatarView.as_view(), name="economy-profile-avatar"),
     path("profile/rate/", ProfileRateView.as_view(), name="economy-profile-rate"),

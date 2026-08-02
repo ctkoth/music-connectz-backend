@@ -21,3 +21,8 @@ stripe>=8.0
 # OCC's real LLM backend (Corey GPT). Active only when ANTHROPIC_API_KEY is set;
 # otherwise OCC falls back to its built-in templated replies.
 anthropic>=0.40
+# Serverless compute for the jobs that can't share a box with the web server —
+# DistributeZ transcoding today. Active only when MODAL_TOKEN_ID and
+# MODAL_TOKEN_SECRET are set; without them economy/transcode.py falls back to
+# local ffmpeg, and refuses cleanly when the host has neither.
+modal>=0.64

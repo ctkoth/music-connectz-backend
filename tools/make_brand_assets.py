@@ -228,6 +228,30 @@ def png_icon(path, side, corner_ratio=0.22, ss=4):
     print("wrote", os.path.relpath(path, ROOT), f"{side}x{side}")
 
 
+def png_app_store_icon(path, side=1024, ss=4):
+    """The iOS app icon. Square, full-bleed, and — critically — NO ALPHA.
+
+    App Store Connect rejects an icon with a transparency channel outright, and
+    it also rejects one with the corners pre-rounded: iOS applies its own mask,
+    so a rounded source gets rounded twice and comes out visibly pinched. So
+    this is the same mark as the Play icon with both of those undone, rather
+    than a second design that could drift.
+    """
+    from PIL import Image
+
+    big = side * ss
+    img = _gradient((big, big)).convert("RGBA")
+    _draw_mark(img, (big / 2, big / 2, big * 0.62))
+    img = img.resize((side, side), Image.LANCZOS)
+    # Composite onto opaque ink rather than just dropping the alpha — any
+    # anti-aliased edge pixel would otherwise blend against black.
+    flat = Image.new("RGB", (side, side), _hex(INK))
+    flat.paste(img, (0, 0), img)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    flat.save(path, "PNG")
+    print("wrote", os.path.relpath(path, ROOT), f"{side}x{side} (RGB, no alpha)")
+
+
 def png_feature_graphic(path, w=1024, h=500, ss=2):
     """Play's feature graphic. No text — the mark is the whole composition."""
     from PIL import Image
@@ -255,6 +279,10 @@ def main():
     png_icon(os.path.join(play, "icon-512.png"), 512)
     png_icon(os.path.join(play, "icon-1024.png"), 1024)
     png_feature_graphic(os.path.join(play, "feature-graphic-1024x500.png"))
+
+    png_app_store_icon(os.path.join(
+        ROOT, "ios", "MusicConnectZ", "Assets.xcassets",
+        "AppIcon.appiconset", "icon-1024.png"))
 
 
 if __name__ == "__main__":

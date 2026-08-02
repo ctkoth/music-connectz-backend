@@ -93,6 +93,13 @@ POST /api/auth/oauth/google|github|apple/
 GET  /api/mimez/skillz/profile|drills|badges|leaderboard/   POST /api/mimez/skillz/complete/
 GET  /api/directz/skillz/...                                POST /api/directz/skillz/complete/
 GET  /api/omviardz/tour/                                    POST /api/omviardz/answer/
+GET  /api/economy/personaz/          GET /api/economy/genrez/[?kind=music|screen]
+GET  /api/bodiez/catalog/            GET /api/bodiez/exercises/?equipment=&muscles=
+POST /api/bodiez/routines/ai/        POST /api/bodiez/sessions/<id>/sets/
+GET  /api/bodiez/progress/  /bodymap/  /coach/   GET /api/bodiez/locations/ (Premium)
+POST /api/economy/occ/projects/<id>/agent/   (OCC coding agent — tool loop)
+GET  /api/economy/pod/blanks/        POST /api/economy/pod/listings/<id>/buy/
+POST /api/economy/play/verify/       (Google Play Billing purchase verification)
 GET  /.well-known/assetlinks.json    (Android app <-> site link verification)
 GET  /admin/
 ```
@@ -104,13 +111,137 @@ explains it in his own voice, and it branches on what the member answers. Free �
 no wallet charge, no prompt allowance. Works with no `ANTHROPIC_API_KEY` (every
 option ships written copy in the payload) and gets live Corey when one is set.
 
+The `personaz` and `genrez` steps carry real pickers and ship both catalogs in the
+tour payload, so a member finishes the tour with their skills and genres actually
+set — not just explained.
+
 Client contract, mobile design tokens, and how to add a step: **[OMVIARDZ.md](OMVIARDZ.md)**
+
+## OCC coding agent
+
+OCC can now change code, not just explain it: an agentic tool loop (read, write,
+exact-string edit, search, rename, delete) over a per-member workspace, running
+until it's done or the step cap is hit. Every run is recorded with its tool calls.
+
+A bad run is one call to undo: the workspace is snapshotted before every writing
+run (`POST /occ/projects/<id>/undo/`), and the undo is itself undoable.
+
+It has **no code execution and no shell** — running member code on the API host
+needs container isolation this backend doesn't have, and OCC is told never to
+claim it ran anything. What that gap takes to close, and the full API:
+**[OCC_AGENT.md](OCC_AGENT.md)**
+
+## MerchZ print-on-demand
+
+One design, listed on any of **20 blanks** (tees, tanks, long sleeves, hoodies,
+crewnecks, AOP kimono/bomber/windbreaker, embroidered denim jacket, baseball
+/snapback/trucker caps, beanie, beach towel, tote, mug, posters, stickers),
+produced only when it sells — no inventory. The buyer's exact size gets printed; extended sizes and dark garments
+carry the printer's upcharge, paid by the buyer so the creator's margin is the
+same on every variant.
+
+```bash
+python manage.py seed_pod        # blank catalog (idempotent)
+```
+
+Sellers get invoices (`/pod/orders/<id>/invoice/`), a revenue-ranked "what's
+selling" report with size and colour breakdowns (`/pod/sales/`), and a monthly
+statement (`/pod/statement/`). These are sales records, not tax invoices — no
+sales tax or VAT is calculated or collected.
+
+Sizes, colours, stock-outs, print-method limits, the money split, and provider
+setup: **[MERCH_POD.md](MERCH_POD.md)**
+
+## PersonaZ — the persona/skill catalog
+
+`GET /api/economy/personaz/` serves every persona and its skills, and
+`GET /api/economy/genrez/` the genre list — so the frontend stops carrying its own
+copies. **11 personas, 415 skills, 47 music genres + 30 screen genres.**
+
+The five 2.2 personas and all fifteen 2.2 genres are preserved **verbatim** and
+flagged `since: "2.2"` — nothing that shipped was edited. Built in the same
+paradigm on top: Ghostwriter, Manager, Developer (**top 40 languages**), Mime
+(selfies, lipsync, comedy, drama + every ReelZ/EpisodeZ/MovieZ genre),
+Weightlifter (every equipment type and muscle goal, shared with BodieZ), and A&R
+Scout. The instrument families 2.2 had no home for — wind, brass, electronic/DJ —
+were added to Artist the same way.
+
+`GET /api/economy/genrez/?kind=screen` serves the 30 screen genres on their own;
+`?kind=music` the 47 music ones.
+
+```bash
+python manage.py audit_personaz          # catalog + stored-data audit
+python manage.py audit_personaz --fix    # normalize stored profiles in place
+```
+
+Findings from the 2.2 audit, the paradigm every persona follows, and what the
+frontend needs to change: **[PERSONAZ_AUDIT.md](PERSONAZ_AUDIT.md)**
+
+## BodieZ — training
+
+Jefit's training metrics behind Lilith's project management. Routines and loose
+thoughts move through the same buckets — Inbox 📥 · Today 💪 · Upcoming 📅 ·
+Anytime 🏋️ · Someday 🧠 · Logbook 🧾 · Trash 🚮 — and every other tab is a view
+over that data.
+
+**27 equipment types, 14 muscle groups, 98 exercises.** The member toggles the
+equipment they actually have and the library filters to what they can do today.
+Equipment requirements are **any-of groups**, not a flat AND list: a goblet squat
+takes a kettlebell *or* a dumbbell; a bench press takes a barbell *and* a flat
+*or* incline bench.
+
+Routines carry supersets, rest timers, target weight, target sets and target
+reps. Sessions compute volume, Epley 1RM (capped at 12 reps — above that the
+formula is fiction), progressive-overload verdicts, streaks and a 7-day BodyMap
+where secondary muscles get half credit.
+
+```bash
+python manage.py seed_bodiez     # equipment, muscles, exercise library (idempotent)
+```
+
+**AI coach** writes a real routine from the filtered catalog — anything it
+invents that isn't in the catalog is dropped. Free members spend one of their
+**3 daily prompts**, Premium **10**, StatZ runs it without spending one. StatZ
+also gets other members' public routines (`/routines/?shared=1`); Premium gets
+gym **locations** with per-gym equipment, muscle coverage and gaps.
+
+Blueprint vs. what's built, with the honest gaps: **[BODIEZ_AUDIT.md](BODIEZ_AUDIT.md)**
+
+## iOS app
+
+`ios/` is a **native SwiftUI** app against this same API — deliberately not a
+WebView. Apple's [guideline 4.2](https://developer.apple.com/app-store/review/guidelines/#minimum-functionality)
+rejects repackaged websites, so the Trusted Web Activity trick that works on
+Android has no iOS equivalent.
+
+Built: auth (email/password, and native Sign in with Apple), the OmviardZ tour,
+PersonaZ browsing, the BodieZ library with server-side equipment filtering, and
+in-app account deletion. Tokens live in the Keychain; a 401 triggers exactly one
+refresh-and-retry.
+
+**No Mac needed.** `.github/workflows/ios.yml` builds and tests on a macOS
+runner — the `build` job needs no Apple account at all — and signs in the cloud
+via an App Store Connect API key for TestFlight.
+
+⚠️ Native Sign in with Apple needs `APPLE_OAUTH_BUNDLE_ID=net.musicconnectz.app`
+on Render. Apple mints tokens whose audience is the **Bundle ID** for native
+sign-in and the **Services ID** for web; the backend now accepts both, and fails
+closed if neither is configured.
+
+Setup, TestFlight, and the In-App Purchase question that affects the economy:
+**[IOS_APP.md](IOS_APP.md)**
 
 ## Android app + Google Play
 
 `android/` is a Trusted Web Activity — it opens the site full-screen with no URL
 bar, so the mobile web app is the Android app. Build an APK with no local
 toolchain: GitHub → Actions → **Android APK** → Run workflow.
+
+**Play Billing** (required for digital goods in the Android app) is built:
+`POST /api/economy/play/verify/` checks a purchase token against Google's Play
+Developer API, grants exactly once per token, and refuses a token bound to another
+account. Needs `PLAY_PACKAGE_NAME` + `PLAY_SERVICE_ACCOUNT_JSON`; answers 503
+until then so the client falls back to web checkout.
 
 - **[GOOGLE_PLAY.md](GOOGLE_PLAY.md)** — joining Play, signing, the declarations
   that get checked, the 12-tester closed test, and the three things most likely

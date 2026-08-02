@@ -305,3 +305,67 @@ class AssetLinksTests(TestCase):
         self.assertEqual(payload[0]["target"]["package_name"], "net.musicconnectz.app")
         self.assertEqual(payload[0]["target"]["sha256_cert_fingerprints"], ["AA:BB", "CC:DD"])
         self.assertIn("delegate_permission/common.handle_all_urls", payload[0]["relation"])
+
+
+class CatalogInTourTests(TestCase):
+    """The tour has to carry the real 2.2 skills and genres, not just talk about
+    them — a member should finish it with their personas and genres actually set."""
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_the_tour_ships_the_persona_and_genre_catalogs(self):
+        data = self.client.get("/api/omviardz/tour/").data
+        catalog = data["catalog"]
+        persona_keys = [p["key"] for p in catalog["personaz"]]
+        self.assertIn("artist", persona_keys)
+        self.assertIn("developer", persona_keys)
+        genres = [g["name"] for g in catalog["genrez"]]
+        # 2.2's fifteen, first and in order
+        self.assertEqual(genres[:15],
+                         ["Trap", "Drill", "Cloud Rap", "Boom Bap", "House", "Techno",
+                          "Pop", "Hip Hop", "R&B", "Jazz", "Soul", "Indie",
+                          "Electronic", "Ambient", "Lo-Fi"])
+
+    def test_the_artist_skills_reach_the_tour_intact(self):
+        catalog = self.client.get("/api/omviardz/tour/").data["catalog"]
+        artist = next(p for p in catalog["personaz"] if p["key"] == "artist")
+        skills = {s["key"] for cat in artist["categories"] for s in cat["skills"]}
+        for expected in ("Acoustic Guitar", "Boom Bap", "Soprano", "Saxophone (Tenor)",
+                         "Trumpet", "DJ Decks"):
+            self.assertIn(expected, skills, expected)
+
+    def test_the_persona_step_opens_the_real_picker(self):
+        data = self.client.get("/api/omviardz/tour/").data
+        step = next(s for s in data["steps"] if s["key"] == "personaz")
+        self.assertEqual(step["picker"]["type"], "personaz")
+        self.assertEqual(step["picker"]["endpoint"], "/api/economy/personaz/")
+        self.assertTrue(any(o["opens_picker"] for o in step["options"]))
+
+    def test_there_is_a_genre_step_on_every_track(self):
+        for track in spec.TRACKS:
+            keys = spec.TRACKS[track]
+            self.assertIn("genrez", keys, track)
+
+    def test_the_genre_step_opens_the_real_picker(self):
+        data = self.client.get("/api/omviardz/tour/").data
+        step = next(s for s in data["steps"] if s["key"] == "genrez")
+        self.assertEqual(step["picker"]["type"], "genrez")
+        self.assertEqual(step["picker"]["endpoint"], "/api/economy/genrez/")
+        self.assertTrue(all(o["opens_picker"] for o in step["options"]))
+        self.assertIn("PATCH /api/auth/me/", step["picker"]["saves_to"])
+
+    def test_steps_without_a_picker_say_so_rather_than_omitting_the_key(self):
+        data = self.client.get("/api/omviardz/tour/").data
+        walletz = next(s for s in data["steps"] if s["key"] == "walletz")
+        self.assertIsNone(walletz["picker"])
+        self.assertFalse(any(o["opens_picker"] for o in walletz["options"]))
+
+    def test_answering_the_genre_step_still_advances_the_tour(self):
+        user = User.objects.create_user("g", "g@e.com", "pw12345678")
+        self.client.force_authenticate(user)
+        resp = self.client.post("/api/omviardz/answer/",
+                                {"step": "genrez", "choice": "1"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertIsNotNone(resp.data["next"])
+        self.assertIn("Boom Bap", resp.data["explain"]["text"])

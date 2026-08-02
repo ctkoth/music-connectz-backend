@@ -1,0 +1,284 @@
+name: iOS
+
+# You don't own a Mac, so this workflow IS your Mac. GitHub's macOS runners have
+# Xcode; every build, test and TestFlight upload happens here.
+#
+#   Actions -> iOS -> Run workflow
+#
+# The `build` job needs no secrets at all — it compiles and runs the tests on a
+# simulator, which is the check you want on every push. `testflight` is the one
+# that needs an Apple account, and it skips cleanly until you add the secrets.
+on:
+  push:
+    branches: ["main"]
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  pull_request:
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: "Upload the build to TestFlight"
+        type: boolean
+        default: false
+      screenshots:
+        description: "Capture App Store screenshots from the simulator"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build + test (simulator)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pin to the NEWEST Xcode on the runner, not a fixed version. Homebrew
+      # installs the current XcodeGen, which writes project format 77; an older
+      # pinned Xcode then refuses to open its own generated project with
+      # "a future Xcode project file format". Following the runner keeps the
+      # generator and the compiler on the same side of that line.
+      - name: Select the newest Xcode on the runner
+        run: |
+          latest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$latest" ]; then sudo xcode-select -s "$latest"; fi
+          xcodebuild -version
+
+      # The .xcodeproj is generated, never committed — see ios/project.yml.
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+
+      # Simulator builds are unsigned, which is exactly why this job needs no
+      # Apple account. A compile error shows up here, not at upload time.
+      # Ask the runner what it has, and target the simulator by UUID.
+      #
+      # Naming it went wrong twice: "iPhone 15" isn't guaranteed to exist, and
+      # cutting the name at the first "(" turns "iPhone SE (3rd generation)"
+      # into "iPhone SE", which is not a device. A UUID has no such ambiguity
+      # and needs no OS= qualifier either.
+      - name: Pick an available iPhone simulator
+        run: |
+          xcrun simctl list devices available
+          line=$(xcrun simctl list devices available | grep -E '^[[:space:]]+iPhone' | tail -1)
+          if [ -z "$line" ]; then
+            echo "::error::no iPhone simulator available on this runner"
+            exit 1
+          fi
+          udid=$(printf '%s' "$line" | sed -n 's/.*(\([0-9A-Fa-f-]\{36\}\)).*/\1/p')
+          name=$(printf '%s' "$line" | sed 's/[[:space:]]*(\([0-9A-Fa-f-]\{36\}\)).*//; s/^[[:space:]]*//')
+          if [ -z "$udid" ]; then
+            echo "::error::could not read a simulator UUID from: $line"
+            exit 1
+          fi
+          echo "Using simulator: $name ($udid)"
+          echo "SIM_ID=$udid" >> "$GITHUB_ENV"
+
+      - name: Build and test
+        run: |
+          cd ios
+          xcodebuild test \
+            -project MusicConnectZ.xcodeproj \
+            -scheme MusicConnectZ \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcpretty && exit ${PIPESTATUS[0]}
+
+  screenshots:
+    name: App Store screenshots
+    runs-on: macos-14
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.screenshots
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The simulator device IS the screenshot size. These two are the slots
+          # App Store Connect asks for.
+          - device: "iPhone 11 Pro Max"
+            slot: "6.5-inch"
+            expect: "1242x2688"
+          - device: "iPhone 15 Pro Max"
+            slot: "6.9-inch"
+            expect: "1290x2796"
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pin to the NEWEST Xcode on the runner, not a fixed version. Homebrew
+      # installs the current XcodeGen, which writes project format 77; an older
+      # pinned Xcode then refuses to open its own generated project with
+      # "a future Xcode project file format". Following the runner keeps the
+      # generator and the compiler on the same side of that line.
+      - name: Select the newest Xcode on the runner
+        run: |
+          latest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$latest" ]; then sudo xcode-select -s "$latest"; fi
+          xcodebuild -version
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+
+      # xcparse pulls the attachments out of the .xcresult bundle. Without it the
+      # screenshots exist but stay locked inside a format only Xcode opens.
+      - name: Install xcparse
+        run: brew install chargepoint/xcparse/xcparse
+
+      - name: Run the screenshot pass
+        env:
+          MCZ_UITEST_USER: ${{ secrets.MCZ_UITEST_USER }}
+          MCZ_UITEST_PASSWORD: ${{ secrets.MCZ_UITEST_PASSWORD }}
+        run: |
+          cd ios
+          xcodebuild test \
+            -project MusicConnectZ.xcodeproj \
+            -scheme MusicConnectZScreenshots \
+            -destination "platform=iOS Simulator,name=${{ matrix.device }},OS=latest" \
+            -resultBundlePath "$RUNNER_TEMP/screens.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcpretty && exit ${PIPESTATUS[0]}
+
+      - name: Extract the PNGs
+        run: |
+          mkdir -p "$RUNNER_TEMP/shots"
+          xcparse screenshots --os --test \
+            "$RUNNER_TEMP/screens.xcresult" "$RUNNER_TEMP/shots"
+          find "$RUNNER_TEMP/shots" -name '*.png' -print
+
+      # App Store Connect rejects an off-size upload with an error that doesn't
+      # say which file was wrong. Check here, where the answer is obvious.
+      - name: Verify every shot is exactly ${{ matrix.expect }}
+        run: |
+          bad=0
+          while IFS= read -r png; do
+            w=$(sips -g pixelWidth  "$png" | awk '/pixelWidth/{print $2}')
+            h=$(sips -g pixelHeight "$png" | awk '/pixelHeight/{print $2}')
+            if [ "${w}x${h}" != "${{ matrix.expect }}" ]; then
+              echo "::error::$(basename "$png") is ${w}x${h}, expected ${{ matrix.expect }}"
+              bad=1
+            else
+              echo "ok  $(basename "$png")  ${w}x${h}"
+            fi
+          done < <(find "$RUNNER_TEMP/shots" -name '*.png')
+          exit $bad
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-store-screenshots-${{ matrix.slot }}
+          path: ${{ runner.temp }}/shots/**/*.png
+          if-no-files-found: error
+
+  testflight:
+    name: Archive + upload to TestFlight
+    runs-on: macos-14
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.upload
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pin to the NEWEST Xcode on the runner, not a fixed version. Homebrew
+      # installs the current XcodeGen, which writes project format 77; an older
+      # pinned Xcode then refuses to open its own generated project with
+      # "a future Xcode project file format". Following the runner keeps the
+      # generator and the compiler on the same side of that line.
+      - name: Select the newest Xcode on the runner
+        run: |
+          latest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$latest" ]; then sudo xcode-select -s "$latest"; fi
+          xcodebuild -version
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+
+      # Cloud signing: Xcode creates and downloads the certificate and profile
+      # itself using the App Store Connect API key. That's what makes this work
+      # without a Mac — there are no .p12 files to export from a machine you
+      # don't have.
+      - name: Write the App Store Connect API key
+        env:
+          KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+        run: |
+          if [ -z "$KEY_P8" ]; then
+            echo "::error::APP_STORE_CONNECT_KEY_P8 is not set. See IOS_APP.md §4."
+            exit 1
+          fi
+          mkdir -p ~/private_keys
+          echo "$KEY_P8" | base64 --decode > ~/private_keys/AuthKey.p8
+
+      - name: Build number from the run number
+        run: echo "BUILD_NUMBER=${{ github.run_number }}" >> "$GITHUB_ENV"
+
+      - name: Archive
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          cd ios
+          xcodebuild archive \
+            -project MusicConnectZ.xcodeproj \
+            -scheme MusicConnectZ \
+            -configuration Release \
+            -archivePath "$RUNNER_TEMP/MusicConnectZ.xcarchive" \
+            -destination 'generic/platform=iOS' \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            | xcpretty && exit ${PIPESTATUS[0]}
+
+      - name: Export the .ipa
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>uploadSymbols</key><true/>
+            <key>destination</key><string>export</string>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/MusicConnectZ.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID"
+
+      - name: Upload to TestFlight
+        env:
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          xcrun altool --upload-app -f "$RUNNER_TEMP/export/MusicConnectZ.ipa" \
+            -t ios --apiKey "$KEY_ID" --apiIssuer "$ISSUER_ID"
+
+      # Keep the .ipa even when the upload fails, so a rejected build is still
+      # something you can inspect rather than a run you have to repeat.
+      - name: Keep the build
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MusicConnectZ-ipa
+          path: ${{ runner.temp }}/export/*.ipa
+          if-no-files-found: ignore

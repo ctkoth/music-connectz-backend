@@ -135,16 +135,48 @@ The tests assert every target uses this form; the full list is in
 
 ---
 
+## The tour collects real data, not just explanations
+
+Two steps carry a `picker` and the live catalog, so a member finishes the tour
+with their actual PersonaZ skills and GenreZ set — the difference between a tour
+and a slideshow of tooltips.
+
+```json
+"picker": {"type": "personaz", "endpoint": "/api/economy/personaz/",
+           "saves_to": "PATCH /api/auth/me/ {personas: [...]}", "select": "many"}
+```
+
+| Step | Picker | Collects |
+|---|---|---|
+| `personaz` | `personaz` | 8 personas, 271 skills, with start dates |
+| `genrez` | `genrez` | 47 genres — 2.2's fifteen first |
+
+`GET /api/omviardz/tour/` ships **both catalogs inside the payload** (`catalog.personaz`,
+`catalog.genrez`) so a picker step renders without a second round trip — the tour
+opens on a phone, and a picker that waits on its own request after the member has
+already tapped feels broken.
+
+Options that should open the picker rather than just show Corey's answer carry
+`opens_picker: true`. Steps without one report `picker: null` rather than omitting
+the key, so a client never has to guess.
+
+The skill start date matters and the copy says so: it's the input to
+years-of-experience, and rating 6 in a skill is what unlocks teaching it in
+LessonZ.
+
 ## Tracks
 
 Step one asks why they're here, and the answer picks the route:
 
 | Track | Steps |
 |---|---|
-| `make` | welcome → profilez → personaz → occ → postz → walletz → tierz → safetyz → finish |
-| `discover` | welcome → profilez → personaz → postz → socialz → messagez → tierz → safetyz → finish |
-| `money` | welcome → profilez → walletz → earnz → royaltiez → collabz → sellz → tierz → safetyz → finish |
-| `learn` | welcome → profilez → skillz → occ → sellz → messagez → tierz → safetyz → finish |
+| `make` | welcome → profilez → **personaz** → **genrez** → occ → postz → walletz → tierz → safetyz → finish |
+| `discover` | welcome → profilez → **personaz** → **genrez** → postz → socialz → messagez → tierz → safetyz → finish |
+| `money` | welcome → profilez → **genrez** → walletz → earnz → royaltiez → collabz → sellz → tierz → safetyz → finish |
+| `learn` | welcome → profilez → **personaz** → skillz → **genrez** → occ → sellz → messagez → tierz → safetyz → finish |
+
+`genrez` is on **every** track, including money — a shop with no genre on it is a
+shop nobody browses into.
 
 Switching tracks mid-tour is fine — `progress.done_count` counts only the steps
 on the *current* track, so the bar can't read 7/9 on a route you just started.

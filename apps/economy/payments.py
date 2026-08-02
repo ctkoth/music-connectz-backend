@@ -7,6 +7,8 @@ enforced server-side) and is made idempotent by the unique PaymentIntent
 provider_ref — a replayed Stripe webhook or a double PayPal capture can never
 credit a wallet twice.
 """
+import logging
+
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -24,7 +26,10 @@ from .models import (
 )
 from .serializers import WalletSerializer
 from .models import wallet_for
-from .catalog import FOUNDING_PLANS, FOUNDING_TIER, PREMIUM_PLANS
+from .catalog import (FOUNDING_PLANS, FOUNDING_TIER, PREMIUM_PLANS,
+                       STATZ_PLANS)
+
+logger = logging.getLogger(__name__)
 
 MIN_CENTS = 100          # $1 minimum
 MAX_CENTS = 1_000_000    # $10,000 cap per funding
@@ -40,6 +45,20 @@ def _amount_or_error(request):
     return amount_cents, None
 
 
+def _signature_error():
+    """Stripe's signature exception, wherever this SDK version keeps it.
+
+    `requirements.txt` pins `stripe>=8.0` with no upper bound, and `stripe.error`
+    is a legacy alias the SDK has been moving away from. If a future release
+    drops it, evaluating the old path inside an `except` clause raises
+    AttributeError *while handling a rejected forgery* — turning a clean 400
+    into a 500, which Stripe then retries. Resolve it defensively instead.
+    """
+    import stripe
+    return getattr(stripe, "SignatureVerificationError", None) or \
+        stripe.error.SignatureVerificationError
+
+
 def _downgrade_by_customer(cust):
     """Drop a founding subscriber back to Free when their sub ends/fails
     (never touches lifetime members)."""
@@ -50,6 +69,109 @@ def _downgrade_by_customer(cust):
     if m and m.tier != "free":
         m.tier = "free"
         m.save(update_fields=["tier", "updated_at"])
+
+
+# Stripe subscription statuses that mean "this member is paid up right now".
+# `past_due` is deliberately not here — Stripe is still retrying, and the tier
+# stays until `invoice.payment_failed` says the retries are done.
+_LIVE_SUB_STATUSES = {"active", "trialing"}
+_DEAD_SUB_STATUSES = {"canceled", "unpaid", "incomplete_expired"}
+
+
+def _tier_for_price(sub_obj):
+    """Which tier this subscription's price maps to, or None if we can't tell."""
+    from .catalog import PREMIUM_PLANS, STATZ_PLANS
+
+    kinds = set()
+    for item in (sub_obj.get("items") or {}).get("data") or []:
+        meta = (item.get("price") or {}).get("metadata") or {}
+        if meta.get("kind"):
+            kinds.add(meta["kind"])
+    meta = sub_obj.get("metadata") or {}
+    if meta.get("kind"):
+        kinds.add(meta["kind"])
+    if any(k in {p["kind"] for p in STATZ_PLANS.values()} for k in kinds):
+        return "statz"
+    if any(k in {p["kind"] for p in PREMIUM_PLANS.values()} for k in kinds):
+        return "premium"
+    return None
+
+
+def _apply_subscription_update(sub_obj):
+    """Follow a subscription's status and plan through `customer.subscription.updated`.
+
+    Stripe sends this for plan switches, for recovery from `past_due`, for
+    trial conversion and for cancel-at-period-end. None of it reached us, so a
+    member who fixed their card stayed downgraded and a plan switch left the
+    old tier in place against the new price.
+    """
+    from .models import AutoTopUp, Membership
+
+    sub_id = sub_obj.get("id")
+    status_ = sub_obj.get("status") or ""
+
+    # An auto-top-up subscription is not a tier. Only its liveness matters.
+    ato = AutoTopUp.objects.filter(stripe_subscription_id=sub_id).first()
+    if ato:
+        live = status_ in _LIVE_SUB_STATUSES
+        if ato.active != live:
+            ato.active = live
+            ato.save(update_fields=["active"])
+        return
+
+    m = Membership.objects.filter(stripe_customer_id=sub_obj.get("customer"),
+                                  lifetime=False).first()
+    if not m:
+        return
+    if status_ in _DEAD_SUB_STATUSES:
+        if m.tier != "free":
+            m.tier = "free"
+            m.save(update_fields=["tier", "updated_at"])
+        return
+    if status_ not in _LIVE_SUB_STATUSES:
+        # past_due and friends: leave the tier alone. Stripe is still trying,
+        # and downgrading someone mid-retry punishes an expired card.
+        return
+    tier = _tier_for_price(sub_obj)
+    if tier and m.tier != tier:
+        m.tier = tier
+        m.save(update_fields=["tier", "updated_at"])
+
+
+def _freeze_for_dispute(dispute):
+    """A charge was charged back. Freeze the wallet it funded.
+
+    The balance is not zeroed. Part of it may be money the member genuinely
+    deposited, a dispute is a claim rather than a finding, and `money_cents` is
+    unsigned so a clawback could not be represented anyway. Freezing stops the
+    bleeding — which is the part that cannot be undone later — and leaves the
+    accounting decision to a human.
+    """
+    from django.utils import timezone
+
+    charge = dispute.get("charge")
+    intent = dispute.get("payment_intent")
+    refs = [r for r in (intent, charge) if r]
+    if not refs:
+        return
+    pi = PaymentIntent.objects.filter(provider_ref__in=refs).first()
+    if not pi:
+        # A dispute on a charge we have no record of — a subscription invoice,
+        # say. Nothing to freeze, but it must not pass silently.
+        logger.warning("stripe: dispute %s for unknown charge %s/%s",
+                       dispute.get("id"), intent, charge)
+        return
+    pi.status = PaymentIntent.STATUS_DISPUTED
+    pi.save(update_fields=["status"])
+    w = wallet_for(pi.user)
+    if not w.frozen:
+        w.frozen_reason = (
+            f"A card payment of ${pi.amount_cents / 100:.2f} was disputed. "
+            f"Spending is on hold until it's resolved.")
+        w.frozen_at = timezone.now()
+        w.save(update_fields=["frozen_reason", "frozen_at", "updated_at"])
+    logger.warning("stripe: dispute %s froze wallet for user %s (%sc)",
+                   dispute.get("id"), pi.user_id, pi.amount_cents)
 
 
 def _complete_intent(intent):
@@ -215,6 +337,41 @@ class FoundingCheckoutView(APIView):
         return Response({"url": session.url, "id": session.id, "plan": plan})
 
 
+class StatzCheckoutView(APIView):
+    """Start a Stripe subscription checkout for StatZ. plan = month | year.
+
+    StatZ had no purchase path at all: PREMIUM_PLANS and FOUNDING_PLANS were the
+    only checkouts, so the top tier — and every feature gated to it — could not
+    be bought with money. The webhook (kind=statz_sub) grants the tier.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not settings.STRIPE_SECRET_KEY:
+            return Response({"detail": "Stripe is not configured"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        plan = str(request.data.get("plan", "month")).lower()
+        cfg = STATZ_PLANS.get(plan)
+        if not cfg:
+            return Response({"detail": f"plan must be one of {sorted(STATZ_PLANS)}"}, status=status.HTTP_400_BAD_REQUEST)
+        import stripe
+        stripe.api_key = settings.STRIPE_SECRET_KEY
+        session = stripe.checkout.Session.create(
+            mode=cfg["mode"],
+            line_items=[{"price_data": {
+                "currency": "usd",
+                "product_data": {"name": f"Music ConnectZ — StatZ ({plan})"},
+                "unit_amount": cfg["cents"],
+                "recurring": {"interval": cfg["interval"]},
+            }, "quantity": 1}],
+            success_url=f"{settings.FRONTEND_URL}/?checkout=success&provider=stripe&kind=statz&plan={plan}",
+            cancel_url=f"{settings.FRONTEND_URL}/?checkout=cancel&provider=stripe&kind=statz&plan={plan}",
+            client_reference_id=str(request.user.id),
+            metadata={"kind": "statz_sub", "user_id": str(request.user.id), "plan": plan},
+        )
+        return Response({"url": session.url, "id": session.id, "plan": plan})
+
+
 class PremiumCheckoutView(APIView):
     """Start a Stripe subscription checkout for Premium. plan = month | year.
     The webhook (kind=premium_sub) grants the tier; cancellation downgrades it."""
@@ -324,7 +481,7 @@ class StripeWebhookView(APIView):
         sig = request.META.get("HTTP_STRIPE_SIGNATURE", "")
         try:
             event = stripe.Webhook.construct_event(request.body, sig, settings.STRIPE_WEBHOOK_SECRET)
-        except (ValueError, stripe.error.SignatureVerificationError):
+        except (ValueError, _signature_error()):
             return Response({"detail": "invalid signature"}, status=status.HTTP_400_BAD_REQUEST)
 
         from django.contrib.auth import get_user_model
@@ -372,6 +529,16 @@ class StripeWebhookView(APIView):
                 m.last_payment_ref = obj.get("subscription") or ""
                 m.last_payment_kind = meta.get("plan") or "year"
                 m.save(update_fields=["tier", "founding", "stripe_customer_id", "last_paid_at", "last_payment_ref", "last_payment_kind", "updated_at"])
+            elif kind == "statz_sub" and user:
+                m = membership_for(user)
+                m.tier = "statz"
+                cust = obj.get("customer")
+                if cust:
+                    m.stripe_customer_id = cust
+                m.last_paid_at = timezone.now()
+                m.last_payment_ref = obj.get("subscription") or ""
+                m.last_payment_kind = "statz_" + (meta.get("plan") or "month")
+                m.save(update_fields=["tier", "stripe_customer_id", "last_paid_at", "last_payment_ref", "last_payment_kind", "updated_at"])
             elif kind == "premium_sub" and user:
                 # Premium subscription — grant the tier and remember the Stripe
                 # customer so a cancellation can downgrade the right user.
@@ -390,10 +557,13 @@ class StripeWebhookView(APIView):
                 ).first()
                 if intent:
                     _complete_intent(intent)
-        elif etype == "identity.verification_session.verified":
-            # Stripe Identity confirmed a government ID — set 18+ iff the DOB proves it.
-            from .identity import mark_18plus_from_session
-            mark_18plus_from_session(event["data"]["object"] or {})
+        elif etype.startswith("identity.verification_session."):
+            # Every outcome, not just the happy one. Listening only for
+            # `.verified` meant a failed document, a declined consent or an
+            # under-18 result was dropped on the floor — and the member was left
+            # looking at a screen identical to never having started.
+            from .identity import record_session
+            record_session(event["data"]["object"] or {})
         elif etype in ("invoice.payment_succeeded", "invoice.paid"):
             # A recurring auto-top-up invoice was paid — credit money + tier energy.
             _credit_autotopup_invoice(event["data"]["object"] or {})
@@ -415,6 +585,18 @@ class StripeWebhookView(APIView):
             obj = event["data"]["object"] or {}
             if obj.get("next_payment_attempt") is None:
                 _downgrade_by_customer(obj.get("customer"))
+        elif etype == "customer.subscription.updated":
+            # Plan changes and status transitions never reached us. A member who
+            # fixed their card stayed downgraded until they emailed support, and
+            # somebody switching Premium <-> StatZ kept the old tier while
+            # paying the new price.
+            _apply_subscription_update(event["data"]["object"] or {})
+        elif etype == "charge.dispute.created":
+            # A chargeback. Stripe has already pulled the money; the wallet
+            # freezes now rather than after the dispute resolves, because by
+            # then the balance can have been spent into other members' wallets
+            # and there is nothing left to reverse.
+            _freeze_for_dispute(event["data"]["object"] or {})
         return Response({"received": True})
 
 

@@ -35,6 +35,9 @@ def _option_payload(opt):
         "highlight": opt.get("highlight"),
         "route": opt.get("route"),
         "sets_track": opt.get("sets_track"),
+        # True when tapping this should open the step's picker rather than just
+        # showing Corey's answer.
+        "opens_picker": bool(opt.get("opens_picker")),
     }
 
 
@@ -52,6 +55,8 @@ def _step_payload(step_key, index=None, total=None):
         "blurb": step.get("blurb"),
         "highlight": step.get("highlight"),
         "input": step.get("input", {"kind": "choice"}),
+        # Some steps collect real data rather than just explaining a screen.
+        "picker": step.get("picker"),
         "terminal": bool(step.get("terminal")),
         "options": [_option_payload(o) for o in step.get("options", [])],
     }
@@ -89,6 +94,9 @@ class TourView(APIView):
                 "tracks": spec.TRACK_LABELS,
                 "design": spec.DESIGN,
                 "facts": spec.tier_facts(),
+                # The real PersonaZ skills and GenreZ list, shipped with the tour
+                # so a picker step renders without a second round trip on a phone.
+                "catalog": spec.catalogs(),
                 "steps": _track_payload(track),
                 "resume": resume,
                 "progress": prog.as_dict() if prog else None,

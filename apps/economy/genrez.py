@@ -1,0 +1,223 @@
+"""GenreZ — the canonical genre list.
+
+Transcribed from the 2.2 build, where it lived as a bare array inside
+`openGenreModal()`:
+
+    const genres = ['Trap', 'Drill', 'Cloud Rap', 'Boom Bap', 'House', 'Techno',
+                    'Pop', 'Hip Hop', 'R&B', 'Jazz', 'Soul', 'Indie',
+                    'Electronic', 'Ambient', 'Lo-Fi'];
+
+Fifteen, flat, single-select, and **required** on the Upload Work Example form.
+It was missed in the first pass of the PersonaZ audit — see PERSONAZ_AUDIT.md #13
+— because it wasn't in `instrumentDatabase` with the skills; it was a local
+variable in a modal handler, which is exactly why it needed finding.
+
+Two things worth knowing about the 2.2 list:
+
+* **No emoji.** Unlike every skill label, the genre buttons rendered plain text.
+  `name` here is byte-for-byte what a member saw; `emoji` is separate metadata the
+  UI may use or ignore, so nothing about the original rendering is lost.
+* **Four of them are also Rapping skills** (Trap, Drill, Cloud Rap, Boom Bap).
+  That overlap is real and deliberate in 2.2 — a genre describes the work, a skill
+  describes the person — so both are kept and `also_a_skill` flags them.
+"""
+import re
+
+# Genres exactly as 2.2 shipped them, in the order they were rendered.
+V22_GENRES = ["Trap", "Drill", "Cloud Rap", "Boom Bap", "House", "Techno", "Pop",
+              "Hip Hop", "R&B", "Jazz", "Soul", "Indie", "Electronic", "Ambient",
+              "Lo-Fi"]
+
+# Emoji are additive metadata — the 2.2 buttons had none, and `name` stays plain.
+_EMOJI = {
+    "Trap": "🏚️", "Drill": "⚔️", "Cloud Rap": "☁️", "Boom Bap": "🥁",
+    "House": "🏠", "Techno": "🔊", "Pop": "✨", "Hip Hop": "🎤", "R&B": "💜",
+    "Jazz": "🎷", "Soul": "🕊️", "Indie": "🎸", "Electronic": "🎛️",
+    "Ambient": "🌌", "Lo-Fi": "📻",
+    # 2.4 additions
+    "Rock": "🎸", "Metal": "🤘", "Punk": "🧷", "Alternative": "🌀",
+    "Country": "🤠", "Folk": "🪕", "Blues": "🎺", "Funk": "🕺", "Disco": "🪩",
+    "Gospel": "🙌", "Classical": "🎻", "Orchestral": "🎼", "Reggae": "🌴",
+    "Dancehall": "🔥", "Afrobeats": "🥁", "Amapiano": "🎹", "Reggaeton": "💃",
+    "Latin": "🌶️", "Salsa": "💃", "K-Pop": "🇰🇷", "Drum & Bass": "🥁",
+    "Dubstep": "🛸", "Garage": "🚪", "Trance": "🌠", "Hardstyle": "⚡",
+    "Phonk": "🚗", "Hyperpop": "💊", "Emo": "🖤", "Experimental": "🧪",
+    "World": "🌍", "Instrumental": "🎼", "Spoken Word": "🗣️",
+    # Screen genres (ReelZ / EpisodeZ / MovieZ)
+    "Comedy": "😂", "Drama": "🎭", "Action": "💥", "Thriller": "😰",
+    "Horror": "👻", "Sci-Fi": "🛸", "Fantasy": "🐉", "Romance": "💘",
+    "Mystery": "🕵️", "Crime": "🚔", "True Crime": "🔪", "Adventure": "🗺️",
+    "Documentary": "🎥", "Animation": "✏️", "Anime": "🍥", "Musical": "🎼",
+    "Family": "👨‍👩‍👧", "Reality": "📺", "Sketch": "🎬", "Skit": "🤣",
+    "Vlog": "📹", "Tutorial": "🛠️", "Prank": "🃏", "Challenge": "🏁",
+    "Dance": "💃", "Lip Sync": "💋", "POV": "👁️", "ASMR": "🌙",
+    "Talk Show": "🎙️", "Storytime": "📖",
+}
+
+# Added after the audit. 2.2's fifteen skew heavily to hip-hop and electronic —
+# a rock band, a gospel choir or an afrobeats artist had nowhere to file their
+# work. Added, never edited: every 2.2 entry above is untouched.
+EXTRA_GENRES = ["Rock", "Metal", "Punk", "Alternative", "Country", "Folk",
+                "Blues", "Funk", "Disco", "Gospel", "Classical", "Orchestral",
+                "Reggae", "Dancehall", "Afrobeats", "Amapiano", "Reggaeton",
+                "Latin", "Salsa", "K-Pop", "Drum & Bass", "Dubstep", "Garage",
+                "Trance", "Hardstyle", "Phonk", "Hyperpop", "Emo",
+                "Experimental", "World", "Instrumental", "Spoken Word"]
+
+# Genres that are also skills in the artist PersonaZ. Kept in both on purpose: a
+# genre describes the work, a skill describes the person.
+ALSO_SKILLS = {"Trap", "Drill", "Cloud Rap", "Boom Bap"}
+
+# ReelZ, EpisodeZ and MovieZ are video surfaces, and "Trap" is not a genre of
+# short film. A music genre and a screen genre are different vocabularies used by
+# different apps, so they're separate lists joined by a `kind` — not one flat list
+# that makes a filmmaker scroll past Amapiano.
+SCREEN_GENRES = ["Comedy", "Drama", "Action", "Thriller", "Horror", "Sci-Fi",
+                 "Fantasy", "Romance", "Mystery", "Crime", "True Crime",
+                 "Adventure", "Documentary", "Animation", "Anime", "Musical",
+                 "Family", "Reality", "Sketch", "Skit", "Vlog", "Storytime",
+                 "Tutorial", "Prank", "Challenge", "Dance", "Lip Sync", "POV",
+                 "ASMR", "Talk Show"]
+
+KIND_MUSIC = "music"
+KIND_SCREEN = "screen"
+
+GENRES = V22_GENRES + EXTRA_GENRES + SCREEN_GENRES
+MUSIC_GENRES = V22_GENRES + EXTRA_GENRES
+
+# Everything that isn't a letter or digit — emoji, variation selectors (U+FE0F),
+# zero-width joiners, skin-tone modifiers. Applied after the separator squashing
+# in _squash, by which point spaces and hyphens are already gone.
+_MARKS = re.compile(r"[^0-9a-z]", re.UNICODE)
+
+# {squashed name: canonical name} — built once, so lookup is a dict hit rather
+# than a scan.
+_INDEX = {}
+
+
+def _squash(value):
+    """Lowercase, collapse whitespace, and drop the separators people vary on.
+
+    'R&B', 'r and b', 'RnB' and 'r&b' are one genre. 'Lo-Fi', 'lofi' and
+    'lo fi' are one genre. Members type these by hand and always have.
+    """
+    text = " ".join(str(value or "").split()).lower()
+    text = text.replace(" and ", " & ")
+    text = text.replace("&", "n").replace("-", "").replace(" ", "")
+    # Drop emoji and decoration. The catalog serves every genre with an emoji
+    # ("Trap 🏚️"), the tour ships those labels, and a client that stores what it
+    # displayed sends the decorated form straight back — which matched nothing
+    # at all, so every genre a member had picked was silently dropped. Same
+    # failure the persona keys had.
+    return _MARKS.sub("", text)
+
+
+for _name in GENRES:
+    _INDEX[_squash(_name)] = _name
+# A few spellings that don't fall out of the squash rule.
+_INDEX.update({
+    "rnb": "R&B", "randb": "R&B", "rhythmandblues": "R&B",
+    "hiphop": "Hip Hop", "rap": "Hip Hop",
+    "lofi": "Lo-Fi", "lofihiphop": "Lo-Fi",
+    "dnb": "Drum & Bass", "drumandbass": "Drum & Bass", "drumnbass": "Drum & Bass",
+    "edm": "Electronic", "electronica": "Electronic",
+    "kpop": "K-Pop", "afrobeat": "Afrobeats", "randbsoul": "Soul",
+    "classicalmusic": "Classical",
+})
+
+
+def normalize_genre(value):
+    """Canonical genre name, or None. Accepts any spelling a member might type."""
+    squashed = _squash(value)
+    return _INDEX.get(squashed) if squashed else None
+
+
+def normalize_genres(values, limit=12):
+    """Clean a list of genres: canonical, de-duplicated, order preserved.
+
+    Unknown entries are DROPPED here, unlike persona skills — a genre is a
+    closed vocabulary that drives filtering and discovery, so a free-text one
+    would be a genre nobody can search for. The catalog is the point.
+    """
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, (list, tuple)):
+        return []
+    out = []
+    for raw in values:
+        name = normalize_genre(raw)
+        if name and name not in out:
+            out.append(name)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def is_v22(name):
+    return name in V22_GENRES
+
+
+def kind_of(name):
+    """Which vocabulary a genre belongs to — music, or screen."""
+    return KIND_SCREEN if name in SCREEN_GENRES else KIND_MUSIC
+
+
+def genre_payload(name):
+    return {
+        "key": name,
+        "name": name,          # exactly what 2.2 rendered — no emoji in the name
+        "emoji": _EMOJI.get(name, "🎵"),
+        "since": "2.2" if is_v22(name) else "2.4",
+        "kind": kind_of(name),
+        "also_a_skill": name in ALSO_SKILLS,
+    }
+
+
+def normalize_genres_of_kind(values, kind, limit=12):
+    """Clean a list and keep only the genres belonging to one vocabulary.
+
+    So a MovieZ upload can't be filed under Amapiano, and a track can't be filed
+    under Talk Show.
+    """
+    return [g for g in normalize_genres(values, limit=limit) if kind_of(g) == kind]
+
+
+def catalog_payload(kind=None, since=None):
+    """The whole genre list, 2.2's fifteen first and flagged as such.
+
+    ``kind`` narrows it to one vocabulary — MusicZ surfaces want `music`, the
+    video surfaces (ReelZ / EpisodeZ / MovieZ) want `screen`.
+
+    ``since="2.2"`` serves only the fifteen the 2.2 build shipped, in the order
+    it rendered them.
+    """
+    names = GENRES
+    if kind == KIND_MUSIC:
+        names = MUSIC_GENRES
+    elif kind == KIND_SCREEN:
+        names = SCREEN_GENRES
+    if str(since or "").strip() == "2.2":
+        # 2.2 had no screen genres at all, so a `kind=screen&since=2.2` request
+        # correctly comes back empty rather than inventing history.
+        names = [g for g in V22_GENRES if g in names]
+    return {
+        "genres": [genre_payload(g) for g in names],
+        "kind": kind or "all",
+        "since": since or "all",
+        "kinds": {
+            KIND_MUSIC: len(MUSIC_GENRES),
+            KIND_SCREEN: len(SCREEN_GENRES),
+        },
+        "v22": list(V22_GENRES),
+        "count": len(names),
+        # 2.2 stored `selectedGenre` as a single string and the picker cleared
+        # every other button on click. Stated so a client doesn't have to infer
+        # it from behaviour.
+        "rules": {
+            "select": "one",
+            "required_on_work": True,
+            "max_on_profile": 12,
+            "note": "A work example takes one genre. A profile may list several.",
+            "kinds": "music = MusicZ surfaces; screen = ReelZ / EpisodeZ / MovieZ.",
+        },
+    }

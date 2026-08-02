@@ -46,6 +46,10 @@ INSTALLED_APPS = [
     # third-party
     "corsheaders",
     "rest_framework",
+    # Stores the refresh tokens invalidated by rotation, so a used or revoked
+    # one can be rejected. Without it ROTATE_REFRESH_TOKENS issues new tokens
+    # but the old ones keep working, which is not rotation.
+    "rest_framework_simplejwt.token_blacklist",
     # local — skillz first so its tables migrate before the apps that use it
     "apps.skillz",
     "apps.accounts",
@@ -54,6 +58,12 @@ INSTALLED_APPS = [
     "apps.directz",
     "apps.lessonz",
     "apps.omviardz",
+    "apps.bodiez",
+    "apps.battlez",
+    "apps.collabz",
+    "apps.tabz",
+    "apps.vstz",
+    "apps.mangaz",
 ]
 
 MIDDLEWARE = [
@@ -196,7 +206,35 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.SessionAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    # Renders economy.WalletFrozen as a 403 with a way forward. Without
+    # it, a wallet frozen by a chargeback 500s the moment it tries to
+    # spend, because the raise happens inside pay_between rather than
+    # in any one view.
+    "EXCEPTION_HANDLER": "apps.economy.exceptions.economy_exception_handler",
+    # Only the scopes named below are throttled — there is no global anon rate,
+    # so public catalogs (tabz, personaz, genrez) stay uncapped. These are the
+    # unauthenticated doors: credential guessing on login/reset, and OAuth,
+    # which makes an outbound call to Google/GitHub/Apple per request and would
+    # otherwise let anyone use this server to hammer them.
+    "DEFAULT_THROTTLE_CLASSES": ("rest_framework.throttling.ScopedRateThrottle",),
+    "DEFAULT_THROTTLE_RATES": {
+        "auth-login": os.environ.get("THROTTLE_AUTH_LOGIN", "30/min"),
+        "auth-oauth": os.environ.get("THROTTLE_AUTH_OAUTH", "30/min"),
+        "auth-register": os.environ.get("THROTTLE_AUTH_REGISTER", "20/hour"),
+        "auth-password": os.environ.get("THROTTLE_AUTH_PASSWORD", "10/hour"),
+    },
 }
+
+# Throttle counters live in the cache and persist across test methods, so a
+# suite that legitimately logs in dozens of times would throttle itself. Turn
+# the rates off under `manage.py test` rather than loosening them in production
+# — and note apps/accounts/test_throttle.py switches them back on to prove the
+# throttling actually works, so this doesn't leave the feature untested.
+TESTING = "test" in sys.argv
+if TESTING:
+    REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
+        scope: None for scope in REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]
+    }
 
 from datetime import timedelta  # noqa: E402
 
@@ -204,6 +242,12 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=14),
     "AUTH_HEADER_TYPES": ("Bearer",),
+    # Each refresh returns a NEW refresh token and blacklists the one used.
+    # Without this a stolen refresh token was good for the full fourteen days
+    # and a password change did nothing to it — the one action somebody takes
+    # when they think they've been compromised had no effect at all.
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
 }
 
 # CORS / CSRF — apps.accounts.ready() also sanitizes these at startup so a

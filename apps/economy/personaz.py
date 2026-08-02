@@ -1,0 +1,1150 @@
+"""PersonaZ — the canonical persona and skill catalog.
+
+Until now this lived only in the frontend, as a hand-maintained JavaScript object
+(`instrumentDatabase` in the v2.2/2.3 build). Nothing checked it, so it drifted:
+persona buttons passed keys the database didn't have, two entries were corrupted
+into JavaScript syntax errors, and three personas were named in the UI with no
+skills defined at all. Full findings in PERSONAZ_AUDIT.md.
+
+This module is the fix — one source of truth, served over the API, with tests
+that re-run the audit on every commit.
+
+THE PARADIGM (every persona follows it, old and new):
+
+    persona key -> categories -> {skill key: "Display Label + emoji"}
+
+* Two or more categories. Convention is a *tools* category (what you work in)
+  plus a *craft* category (what you can do) — `artist` instead splits by
+  instrument family, which is the same idea one level finer.
+* Every category opens with an "Any …" wildcard, so a member can claim a
+  category without enumerating it. The client renders these differently (the
+  amber `.any-skill` style) and they must stay first.
+* The label is what a member sees and what gets stored on their profile; the key
+  is the stable identifier. They differ where the brand name is longer than the
+  menu entry ("Photoshop" -> "Adobe Photoshop 🎨").
+
+The five 2.2 personas carry their skills **verbatim** from that build — same
+keys, same labels, same emoji, same order — because members have already picked
+them and stored labels on their profiles. The only edits are the two corrupted
+entries, called out inline.
+"""
+import re
+
+# Skills for the personas that shipped in 2.2, preserved exactly.
+_ARTIST = {
+    "String Instruments": {
+        "Any String": "Any String 🎸",
+        "Acoustic Guitar": "Acoustic Guitar 🎸",
+        "Electric Guitar": "Electric Guitar 🎸",
+        "Bass Guitar": "Bass Guitar 🎸",
+        "Ukulele": "Ukulele 🎸",
+        "Banjo": "Banjo 🎸",
+        "Mandolin": "Mandolin 🎸",
+        "Violin": "Violin 🎻",
+        "Viola": "Viola 🎻",
+        "Cello": "Cello 🎻",
+        "Double Bass": "Double Bass 🎻",
+        "Harp": "Harp 🎵",
+    },
+    "Keyboard Instruments": {
+        "Any Keyboard": "Any Keyboard 🎹",
+        "Acoustic Piano": "Acoustic Piano 🎹",
+        "Digital Piano": "Digital Piano 🎹",
+        "Synthesizer": "Synthesizer 🎹",
+        "Organ": "Organ 🎹",
+        "Harpsichord": "Harpsichord 🎹",
+        "Accordion": "Accordion 🎹",
+    },
+    "Percussion Instruments": {
+        "Any Percussion": "Any Percussion 🥁",
+        "Drums (Snare)": "Drums (Snare) 🥁",
+        "Drums (Bass)": "Drums (Bass) 🥁",
+        "Drums (Bongo)": "Drums (Bongo) 🥁",
+        "Cymbals": "Cymbals 🥁",
+        # Added after the 2.2 audit (#12). The 2.2 list had no full kit and no
+        # hand percussion, so a drummer could register a snare but not the
+        # instrument they actually play. Nothing above was changed or removed.
+        "Full Drum Kit": "Full Drum Kit 🥁",
+        "Hi-Hat": "Hi-Hat 🥁",
+        "Congas": "Congas 🪘",
+        "Djembe": "Djembe 🪘",
+        "Timbales": "Timbales 🥁",
+        "Cajón": "Cajón 🪘",
+        "Tambourine": "Tambourine 🎶",
+        "Shaker": "Shaker 🎶",
+        "Marimba": "Marimba 🎹",
+        "Steel Drum": "Steel Drum 🛢️",
+        "Electronic Drum Pad": "Electronic Drum Pad 🎛️",
+    },
+    # Added after the 2.2 audit (#12). 2.2 covered strings, keys, percussion,
+    # rapping and singing — so a saxophonist, trumpeter or flautist had nowhere
+    # to put their instrument at all. Two new families, same paradigm.
+    "Wind & Woodwind": {
+        "Any Wind": "Any Wind 🎷",
+        "Saxophone (Alto)": "Saxophone (Alto) 🎷",
+        "Saxophone (Tenor)": "Saxophone (Tenor) 🎷",
+        "Saxophone (Soprano)": "Saxophone (Soprano) 🎷",
+        "Saxophone (Baritone)": "Saxophone (Baritone) 🎷",
+        "Flute": "Flute 🪈",
+        "Piccolo": "Piccolo 🪈",
+        "Clarinet": "Clarinet 🎼",
+        "Bass Clarinet": "Bass Clarinet 🎼",
+        "Oboe": "Oboe 🎼",
+        "Bassoon": "Bassoon 🎼",
+        "Recorder": "Recorder 🪈",
+        "Harmonica": "Harmonica 🎵",
+        "Bagpipes": "Bagpipes 🏴",
+        "Pan Flute": "Pan Flute 🪈",
+    },
+    "Brass Instruments": {
+        "Any Brass": "Any Brass 🎺",
+        "Trumpet": "Trumpet 🎺",
+        "Cornet": "Cornet 🎺",
+        "Trombone": "Trombone 🎺",
+        "Bass Trombone": "Bass Trombone 🎺",
+        "French Horn": "French Horn 📯",
+        "Tuba": "Tuba 🎺",
+        "Euphonium": "Euphonium 🎺",
+        "Flugelhorn": "Flugelhorn 🎺",
+        "Sousaphone": "Sousaphone 🎺",
+    },
+    # Producing live is performing. 2.2 had no place for a DJ or a beat-machine
+    # player under `artist` at all — they had to claim the producer persona even
+    # when the skill in question is a stage skill.
+    "Electronic & DJ": {
+        "Any Electronic": "Any Electronic 🎛️",
+        "DJ Decks": "DJ Decks 🎧",
+        "Turntablism": "Turntablism 💿",
+        "Beatboxing": "Beatboxing 🎤",
+        "Drum Machine": "Drum Machine 🥁",
+        "MPC / Sampler": "MPC / Sampler 🎛️",
+        "MIDI Controller": "MIDI Controller 🎹",
+        "Launchpad": "Launchpad 🟩",
+        "Modular Synth": "Modular Synth 🔌",
+        "Vocoder / Talkbox": "Vocoder / Talkbox 🗣️",
+        "Theremin": "Theremin 📡",
+    },
+    "Rapping": {
+        "Any Rapping": "Any Rapping 🎤",
+        "Alternative Rap": "Alternative Rap 🎸",
+        "Boom Bap": "Boom Bap 🥁",
+        "Chopper": "Chopper 🚁",
+        "Cloud Rap": "Cloud Rap ☁️",
+        "Conscious Rap": "Conscious Rap 🧠",
+        "Crunk": "Crunk 🔥",
+        "Drill": "Drill ⚔️",
+        "Emo Rap": "Emo Rap 🖤",
+        "G-Funk": "G-Funk 🌴",
+        "Gangsta Rap": "Gangsta Rap ⛓️",
+        "Hardcore Hip Hop": "Hardcore Hip Hop 🎤",
+        "Jazz Rap": "Jazz Rap 🎷",
+        "Mumble Rap": "Mumble Rap 💤",
+        "Old School": "Old School 📻",
+        "Snap": "Snap 🫰",
+        "Trap": "Trap 🏚️",
+    },
+    "Singing": {
+        "Any Singing": "Any Singing 🎶",
+        "Bass": "Bass 🧔‍♂️",
+        "Baritone": "Baritone 🎙️",
+        "Tenor": "Tenor 🎤",
+        "Countertenor": "Countertenor 🕊️",
+        "Contralto": "Contralto 🎻",
+        "Alto": "Alto 🎶",
+        "Mezzo-Soprano": "Mezzo-Soprano 🌊",
+        "Soprano": "Soprano ☀️",
+    },
+}
+
+# Shared by producer and mix-engineer in 2.2 — the same list, so it lives once.
+#
+# REPAIRED: the mix-engineer copy of this list had `Reaper:'Reaper🪦': 'Azrael☠️'`
+# in it, which is not valid JavaScript — two colons in one entry. It threw a
+# SyntaxError at parse time and took the entire app script down with it. The
+# producer copy was intact, so it is the one reproduced here. Its
+# "Studio One1⃣ 🎛️" typo is corrected too.
+#
+# That broken line was reaching for EITHER Reaper or Azrael and we now carry
+# BOTH, on Corey's call: Reaper is the real product, Azrael is the Music
+# ConnectZ DAW that imitates it, and being skilled in one doesn't mean being
+# skilled in the other.
+_MUSIC_DAWS = {
+    "Any DAW": "Any DAW 🎛️",
+    "Ableton Live": "Ableton Live 🎵",
+    "Adobe Audition": "Adobe Audition 🎙️",
+    "Arsenal": "Arsenal ⚔️",
+    "Audacity": "Audacity 🎧",
+    # The seven Music ConnectZ DAWs from DawZ sit alongside the products they
+    # imitate rather than replacing them: Azrael/Reaper, Arsenal/Pro Tools,
+    # Fruity Möbius/FL Studio, Witchcraft/Mixcraft, Trump Toupee/Bitwig,
+    # Intuition/Logic, FormulaWon/GarageBand. They are separate skills — members
+    # work in these on the platform, and someone who only knows Fruity Möbius
+    # had no way to say so.
+    "Azrael": "Azrael ☠️",
+    "Bitwig Studio": "Bitwig Studio 🎚️",
+    "Cakewalk": "Cakewalk 🎼",
+    "Cubase": "Cubase 🎛️",
+    "FL Studio": "FL Studio 🎚️",
+    "FormulaWon": "FormulaWon 🚦",
+    "Fruity Möbius": "Fruity Möbius 🍑",
+    "GarageBand": "GarageBand 🎵",
+    "Intuition": "Intuition 🤔",
+    "Logic Pro": "Logic Pro 🎵",
+    "Luna": "Luna ☁️",
+    "Mixcraft": "Mixcraft 🎚️",
+    # 2.2 listed this product twice, as "PreSonus Studio One" and "Studio One".
+    # The long form is gone; the short one is the survivor. Anyone who picked
+    # the long form still resolves to it — see SKILL_ALIASES.
+    "Pro Tools": "Pro Tools 🎙️",
+    "Reason": "Reason 🎛️",
+    "Reaper": "Reaper 🔧",
+    "Studio One": "Studio One 🎛️",
+    "Trump Toupee": "Trump Toupee 🤵🏼‍♂️",
+    "Waveform Pro": "Waveform Pro 📊",
+    "Witchcraft": "Witchcraft 🔮",
+}
+
+
+# Skills that were retired from the picker but must still resolve, because
+# members picked them while they were on offer. Dropping a name from the
+# catalog is a UI decision; making a member's saved skill un-readable is data
+# loss, and they are not the same thing.
+#
+#   {retired name: the skill it now means}
+SKILL_ALIASES = {
+    # 2.2 offered PreSonus's DAW under both its full and short names, in the
+    # same category. Only the short one is offered now.
+    "PreSonus Studio One": "Studio One",
+}
+
+
+# ---------------------------------------------------------------- the catalog
+PERSONAZ = {
+    # ------------------------------------------------ shipped in 2.2
+    "artist": {
+        # 2.2 calls this "Independent Artist" on the button and in the collab
+        # filter; the catalog said just "Artist". Same persona, same key — but
+        # a picker that renames what somebody already picked reads like their
+        # choice was lost, so it says what 2.2 says.
+        "name": "Independent Artist",
+        "emoji": "🎤",
+        "since": "2.2",
+        "blurb": "You perform. Instruments, bars, or voice.",
+        "categories": _ARTIST,
+    },
+    "producer": {
+        "name": "Beat Producer",
+        "emoji": "🎚️",
+        "since": "2.2",
+        "blurb": "You build the track — beats, sounds, arrangement.",
+        "categories": {
+            "Music DAWs": _MUSIC_DAWS,
+            "Production Techniques": {
+                "Any Production": "Any Production 🎚️",
+                "Beat Making": "Beat Making 🎚️",
+                "Sampling": "Sampling 🎵",
+                "Sound Design": "Sound Design 🎛️",
+                "Arrangement": "Arrangement 🎼",
+                "Synthesis": "Synthesis 🎹",
+            },
+        },
+    },
+    "mix-engineer": {
+        "name": "Mix Engineer",
+        "emoji": "🎛️",
+        "since": "2.2",
+        "blurb": "You make it sit right — mix, master, the technical ear.",
+        "categories": {
+            "Music DAWs": _MUSIC_DAWS,
+            "Engineering Skills": {
+                "Any Engineering": "Any Engineering 🎛️",
+                "Mixing": "Mixing 🎛️",
+                "Mastering": "Mastering 🎙️",
+                "EQ": "EQ 📊",
+                "Compression": "Compression 🔧",
+                "Reverb/Effects": "Reverb/Effects ✨",
+            },
+        },
+    },
+    "designer": {
+        "name": "Designer",
+        "emoji": "🎨",
+        "since": "2.2",
+        "blurb": "You make it look like something — covers, brand, layout.",
+        "categories": {
+            "Design Software": {
+                "Any Design Software": "Any Design Software 🎨",
+                "Photoshop": "Adobe Photoshop 🎨",
+                "Illustrator": "Adobe Illustrator 🖌️",
+                "Figma": "Figma 🎯",
+                "Canva": "Canva 🌈",
+                "Affinity Designer": "Affinity Designer ✨",
+                "CorelDRAW": "CorelDRAW 🎨",
+                "Sketch": "Sketch 📐",
+                "InDesign": "Adobe InDesign 📄",
+            },
+            "Design Skills": {
+                "Any Design Skill": "Any Design Skill 🎨",
+                "UI/UX Design": "UI/UX Design 🎯",
+                "Graphic Design": "Graphic Design 🖌️",
+                "Branding": "Branding 🏷️",
+                "Layout Design": "Layout Design 📐",
+                "Typography": "Typography 🔤",
+                "Color Theory": "Color Theory 🌈",
+                "Icon Design": "Icon Design 🎭",
+            },
+        },
+    },
+    "videographer": {
+        "name": "Videographer",
+        "emoji": "🎬",
+        "since": "2.2",
+        "blurb": "You shoot and cut it — visuals that move.",
+        "categories": {
+            "Video Software": {
+                "Any Video Software": "Any Video Software 🎬",
+                # Two product names 2.2 got right for its day and that have
+                # since moved on. The KEY stays as 2.2 wrote it, so a member who
+                # already picked one keeps it and the old stored label still
+                # resolves — only what the picker displays is brought current.
+                "Adobe Premiere": "Adobe Premiere Pro 🎬",
+                "DaVinci Resolve": "DaVinci Resolve 🎞️",
+                "Final Cut Pro": "Final Cut Pro 🎥",
+                # Magix bought VEGAS from Sony in 2016; it hasn't been "Sony
+                # Vegas" for a decade.
+                "Sony Vegas": "VEGAS Pro 📹",
+                "Filmora": "Filmora 🎬",
+                "After Effects": "After Effects ✨",
+                "OBS": "OBS Studio 🔴",
+            },
+            "Video Skills": {
+                "Any Video Skill": "Any Video Skill 🎬",
+                "Editing": "Editing 🎬",
+                "Color Grading": "Color Grading 🎨",
+                "Motion Graphics": "Motion Graphics ✨",
+                "Cinematography": "Cinematography 🎥",
+                "Drone Footage": "Drone Footage 🚁",
+                "Lighting": "Lighting 💡",
+                "Sound Design": "Sound Design 🎙️",
+            },
+        },
+    },
+
+    # ------------------------------------------------ named in 2.2 with no
+    # skills defined — the picker opened empty for all three. Built here in the
+    # same paradigm: a tools category plus a craft category, each led by "Any …".
+    "ghostwriter": {
+        "name": "Ghostwriter",
+        "emoji": "👻",
+        "since": "2.4",
+        "blurb": "You write it and someone else says it.",
+        "categories": {
+            "Writing Tools": {
+                "Any Writing Tool": "Any Writing Tool 👻",
+                "Pen & Paper": "Pen & Paper ✍️",
+                "Notes App": "Notes App 📱",
+                "Google Docs": "Google Docs 📄",
+                "Microsoft Word": "Microsoft Word 📝",
+                "Notion": "Notion 🗂️",
+                "Voice Memos": "Voice Memos 🎙️",
+                "Rhyme Dictionary": "Rhyme Dictionary 📖",
+                "Reference Tracks": "Reference Tracks 🎧",
+            },
+            "Writing Skills": {
+                "Any Writing Skill": "Any Writing Skill 👻",
+                "Songwriting": "Songwriting ✍️",
+                "Topline Writing": "Topline Writing 🎶",
+                "Hook Writing": "Hook Writing 🪝",
+                "Verse Writing": "Verse Writing 📜",
+                "Bridge Writing": "Bridge Writing 🌉",
+                "Melody Writing": "Melody Writing 🎵",
+                "Rhyme Schemes": "Rhyme Schemes 🔁",
+                "Wordplay": "Wordplay 🧠",
+                "Punchlines": "Punchlines 👊",
+                "Cadence & Flow": "Cadence & Flow 🌊",
+                "Storytelling": "Storytelling 📖",
+                "Concept Development": "Concept Development 💡",
+                "Editing & Rewrites": "Editing & Rewrites ✂️",
+            },
+        },
+    },
+    "manager": {
+        "name": "Manager",
+        "emoji": "🕴️",
+        "since": "2.4",
+        "blurb": "You run the business so the artist can be an artist.",
+        "categories": {
+            "Management Tools": {
+                "Any Management Tool": "Any Management Tool 🕴️",
+                "Spreadsheets": "Spreadsheets 📊",
+                "Notion": "Notion 🗂️",
+                "Trello": "Trello 📋",
+                "Asana": "Asana ✅",
+                "Airtable": "Airtable 🗄️",
+                "Slack": "Slack 💬",
+                "CRM": "CRM 🤝",
+                "DocuSign": "DocuSign 🖊️",
+                "QuickBooks": "QuickBooks 💵",
+                "Calendly": "Calendly 📅",
+                "Chartmetric": "Chartmetric 📈",
+            },
+            "Management Skills": {
+                "Any Management Skill": "Any Management Skill 🕴️",
+                "Artist Development": "Artist Development 🌱",
+                "Contract Negotiation": "Contract Negotiation ⚖️",
+                "Budgeting": "Budgeting 💵",
+                "Release Planning": "Release Planning 🗓️",
+                "Booking & Touring": "Booking & Touring 🚌",
+                "Marketing Strategy": "Marketing Strategy 📣",
+                "Publicity & PR": "Publicity & PR 📰",
+                "A&R": "A&R 👂",
+                "Royalty Accounting": "Royalty Accounting 🏦",
+                "Brand Partnerships": "Brand Partnerships 🤝",
+                "Team Building": "Team Building 👥",
+                "Analytics & Reporting": "Analytics & Reporting 📈",
+            },
+        },
+    },
+    "developer": {
+        "name": "Developer",
+        "emoji": "👾",
+        "since": "2.4",
+        "blurb": "You build the thing the rest of it runs on.",
+        "categories": {
+            # The top 40 languages by professional use (TIOBE / Stack Overflow
+            # consensus). The first twenty are the ones most people actually
+            # ship; the rest cover the working programmer who is NOT writing
+            # web apps — embedded, data, finance, blockchain, legacy.
+            "Programming Languages": {
+                "Any Language": "Any Language 👾",
+                "Python": "Python 🐍",
+                "JavaScript": "JavaScript 🟨",
+                "TypeScript": "TypeScript 🔷",
+                "Java": "Java ☕",
+                "C": "C 🔩",
+                "C++": "C++ ⚙️",
+                "C#": "C# 🎯",
+                "SQL": "SQL 🗄️",
+                "Go": "Go 🐹",
+                "Rust": "Rust 🦀",
+                "PHP": "PHP 🐘",
+                "Swift": "Swift 🦅",
+                "Kotlin": "Kotlin 🤖",
+                "Ruby": "Ruby 💎",
+                "R": "R 📊",
+                "Dart": "Dart 🎯",
+                "Scala": "Scala 🌀",
+                "MATLAB": "MATLAB 📐",
+                "Perl": "Perl 🐪",
+                "Lua": "Lua 🌙",
+                # 21-40
+                "Shell / Bash": "Shell / Bash 🐚",
+                "PowerShell": "PowerShell 💙",
+                "Assembly": "Assembly 🔬",
+                "Objective-C": "Objective-C 🍏",
+                "Visual Basic": "Visual Basic 🪟",
+                "Groovy": "Groovy 🎩",
+                "Haskell": "Haskell 🎓",
+                "Elixir": "Elixir 💧",
+                "Erlang": "Erlang ☎️",
+                "Clojure": "Clojure 🍃",
+                "F#": "F# 🔷",
+                "Julia": "Julia 🔢",
+                "Fortran": "Fortran 📡",
+                "COBOL": "COBOL 🏦",
+                "Solidity": "Solidity ⛓️",
+                "Zig": "Zig ⚡",
+                "Nim": "Nim 👑",
+                "OCaml": "OCaml 🐫",
+                "Ada": "Ada ✈️",
+                "Prolog": "Prolog 🧩",
+            },
+            "Developer Tools": {
+                "Any Dev Tool": "Any Dev Tool 👾",
+                "VS Code": "VS Code 🔵",
+                "Git & GitHub": "Git & GitHub 🐙",
+                "Terminal & Shell": "Terminal & Shell ⌨️",
+                "Docker": "Docker 🐳",
+                "Kubernetes": "Kubernetes ☸️",
+                "Xcode": "Xcode 🍎",
+                "Android Studio": "Android Studio 🤖",
+                "IntelliJ IDEA": "IntelliJ IDEA 🧠",
+                "Vim / Neovim": "Vim / Neovim 📗",
+                "Jupyter": "Jupyter 📓",
+                "Postman": "Postman 📮",
+            },
+            "Development Skills": {
+                "Any Dev Skill": "Any Dev Skill 👾",
+                "Frontend": "Frontend 🖥️",
+                "Backend": "Backend 🔌",
+                "Mobile Apps": "Mobile Apps 📱",
+                "APIs & Integrations": "APIs & Integrations 🔗",
+                "Databases": "Databases 🗄️",
+                "DevOps & Deploy": "DevOps & Deploy 🚀",
+                "Testing & QA": "Testing & QA 🧪",
+                "Security": "Security 🔐",
+                "AI & Machine Learning": "AI & Machine Learning 🧠",
+                "Audio Programming": "Audio Programming 🎛️",
+                "Game Development": "Game Development 🎮",
+            },
+        },
+    },
+    "mime": {
+        "name": "Mime",
+        "emoji": "🎭",
+        "since": "2.4",
+        "blurb": "You're the one on camera — face, timing, and a phone.",
+        "categories": {
+            "Content Formats": {
+                "Any Format": "Any Format 🎭",
+                "Selfies": "Selfies 🤳",
+                "Lip Sync": "Lip Sync 💋",
+                "ReelZ": "ReelZ 🎞️",
+                "EpisodeZ": "EpisodeZ 📺",
+                "MovieZ": "MovieZ 🎬",
+                "Shorts": "Shorts ⚡",
+                "Skits": "Skits 😂",
+                "Vlogs": "Vlogs 📹",
+                "Duets": "Duets 👯",
+                "Stitch / React": "Stitch / React 🔁",
+                "Green Screen": "Green Screen 🟩",
+                "POV": "POV 👁️",
+                "Storytime": "Storytime 📖",
+                "Transitions": "Transitions ✨",
+                "Dance Challenge": "Dance Challenge 💃",
+                "Behind the Scenes": "Behind the Scenes 🎬",
+            },
+            "Performance Skills": {
+                "Any Performance": "Any Performance 🎭",
+                "Comedy": "Comedy 😂",
+                "Drama": "Drama 🎭",
+                "Comedic Timing": "Comedic Timing ⏱️",
+                "Physical Comedy": "Physical Comedy 🤸",
+                "Improv": "Improv 🎲",
+                "Character Work": "Character Work 🕴️",
+                "Facial Expression": "Facial Expression 😮",
+                "Mime & Gesture": "Mime & Gesture 🤲",
+                "Voice Acting": "Voice Acting 🗣️",
+                "Lip Sync Accuracy": "Lip Sync Accuracy 🎯",
+                "Choreography": "Choreography 🩰",
+                "Prop Comedy": "Prop Comedy 🎩",
+                "Crowd Work": "Crowd Work 🙌",
+                "Monologue": "Monologue 🎙️",
+            },
+            "Camera & Edit": {
+                "Any Camera Skill": "Any Camera Skill 📱",
+                "Phone Camera": "Phone Camera 📱",
+                "Framing": "Framing 🖼️",
+                "Lighting": "Lighting 💡",
+                "Ring Light": "Ring Light ⭕",
+                "Gimbal": "Gimbal 🎥",
+                "Jump Cuts": "Jump Cuts ✂️",
+                "Captions": "Captions 💬",
+                "Trending Audio": "Trending Audio 🔊",
+                "Thumbnail Design": "Thumbnail Design 🖼️",
+                "Hook Writing": "Hook Writing 🪝",
+            },
+        },
+    },
+    "weightlifter": {
+        "name": "Weightlifter",
+        "emoji": "🏋️",
+        "since": "2.4",
+        "blurb": "You train. BodieZ is your room.",
+        "categories": {
+            # Mirrors apps/bodiez/catalog.py EQUIPMENT — the same vocabulary a
+            # routine filters on, so "what I can lift" and "what the gym has"
+            # are one list rather than two that drift.
+            "Equipment": {
+                "Any Equipment": "Any Equipment 🏋️",
+                "Barbell": "Barbell 🏋️",
+                "Dumbbell": "Dumbbell 💪",
+                "Kettlebell": "Kettlebell 🔔",
+                "EZ Bar": "EZ Bar 〰️",
+                "Trap Bar": "Trap Bar ⬡",
+                "Weight Plates": "Weight Plates ⚫",
+                "Flat Bench": "Flat Bench 🛏️",
+                "Incline Bench": "Incline Bench 📐",
+                "Decline Bench": "Decline Bench 📉",
+                "Pulleys / Cables": "Pulleys / Cables 🔗",
+                "Weight Machines": "Weight Machines ⚙️",
+                "Smith Machine": "Smith Machine 🚇",
+                "Squat Rack": "Squat Rack 🔲",
+                "Power Cage": "Power Cage 🗄️",
+                "Leg Press": "Leg Press 🦵",
+                "Pull-Up Bar": "Pull-Up Bar 🙌",
+                "Dip Station": "Dip Station ⬇️",
+                "Resistance Bands": "Resistance Bands 🎗️",
+                "Suspension Trainer": "Suspension Trainer 🪢",
+                "Medicine Ball": "Medicine Ball 🏐",
+                "Landmine": "Landmine 💣",
+                "Sled": "Sled 🛷",
+                "Battle Ropes": "Battle Ropes 🪢",
+                "Jump Rope": "Jump Rope ➰",
+                "Foam Roller": "Foam Roller 🧻",
+                "Bodyweight": "Bodyweight 🧍",
+                "Cardio Machine": "Cardio Machine 🏃",
+            },
+            # The exact muscle groups BodieZ routines target.
+            "Muscle Groups": {
+                "Any Muscle Group": "Any Muscle Group 🎯",
+                "Neck": "Neck 🦒",
+                "Shoulder": "Shoulder 🤷",
+                "Chest": "Chest 🫁",
+                "Bicep": "Bicep 💪",
+                "Tricep": "Tricep 🔺",
+                "Forearm": "Forearm 🦾",
+                "Wrist": "Wrist ⌚",
+                "Back": "Back 🔙",
+                "TrapZ": "TrapZ 🗻",
+                "AbZ": "AbZ 🧊",
+                "Upper Leg": "Upper Leg 🦵",
+                "Lower Leg": "Lower Leg 🦶",
+                "Glutes": "Glutes 🍑",
+                "Full Body": "Full Body 🧍",
+            },
+            "Training Goals": {
+                "Any Goal": "Any Goal 🎯",
+                "Hypertrophy": "Hypertrophy 📈",
+                "Strength": "Strength 🏋️",
+                "Powerlifting": "Powerlifting 🥇",
+                "Olympic Lifting": "Olympic Lifting 🏅",
+                "Bodybuilding": "Bodybuilding 🏆",
+                "Fat Loss": "Fat Loss 🔥",
+                "Endurance": "Endurance 🏃",
+                "Calisthenics": "Calisthenics 🤸",
+                "Mobility": "Mobility 🧘",
+                "Athletic Performance": "Athletic Performance ⚡",
+                "Rehab / Prehab": "Rehab / Prehab 🩹",
+                "General Fitness": "General Fitness ✅",
+            },
+        },
+    },
+    "ar-scout": {
+        "name": "A&R Scout",
+        "emoji": "🔎",
+        "since": "2.4",
+        "blurb": "You find them before anyone else does.",
+        "categories": {
+            "Scouting Tools": {
+                "Any Scouting Tool": "Any Scouting Tool 🔎",
+                "Chartmetric": "Chartmetric 📈",
+                "Spotify for Artists": "Spotify for Artists 🎧",
+                "YouTube Analytics": "YouTube Analytics ▶️",
+                "TikTok Creative Center": "TikTok Creative Center 📱",
+                "Instagram Insights": "Instagram Insights 📸",
+                "SoundCloud": "SoundCloud ☁️",
+                "Bandcamp": "Bandcamp 🎪",
+                "Shazam Charts": "Shazam Charts 🔵",
+                "Playlist Trackers": "Playlist Trackers 📋",
+                "SubmitHub": "SubmitHub 📮",
+                "DISCO": "DISCO 💿",
+            },
+            "A&R Skills": {
+                "Any A&R Skill": "Any A&R Skill 🔎",
+                "Talent Spotting": "Talent Spotting 👀",
+                "Demo Evaluation": "Demo Evaluation 🎧",
+                "Market Analysis": "Market Analysis 📊",
+                "Trend Forecasting": "Trend Forecasting 🔮",
+                "Artist Development": "Artist Development 🌱",
+                "Roster Planning": "Roster Planning 🗂️",
+                "Deal Structuring": "Deal Structuring ⚖️",
+                "Sync Licensing": "Sync Licensing 🎬",
+                "Playlist Pitching": "Playlist Pitching 📣",
+                "Relationship Building": "Relationship Building 🤝",
+                "Budget Planning": "Budget Planning 💵",
+                "Scene Knowledge": "Scene Knowledge 🌍",
+            },
+        },
+    },
+}
+
+
+# Keys that reached production before there was a catalog to check them against.
+# The 2.2 UI passed a different key than its own database held for four of the
+# five personas, so stored profiles contain all of these spellings. Normalising
+# rather than rejecting means nobody loses a persona they already picked.
+PERSONA_ALIASES = {
+    # On the live CollabZ post form and absent from the catalog, so it resolved
+    # to None. A director on a music platform is directing video; mapping it to
+    # videographer beats dropping the member's persona entirely.
+    "director": "videographer",
+    "video director": "videographer",
+    "beat-producer": "producer",
+    "beat producer": "producer",
+    "beatproducer": "producer",
+    "independent artist": "artist",
+    "independent-artist": "artist",
+    "indie artist": "artist",
+    "engineer": "mix-engineer",
+    "mix engineer": "mix-engineer",
+    "mixengineer": "mix-engineer",
+    "mixing engineer": "mix-engineer",
+    "video": "videographer",
+    "videography": "videographer",
+    "dev": "developer",
+    "coder": "developer",
+    "programmer": "developer",
+    "writer": "ghostwriter",
+    "ghost writer": "ghostwriter",
+    "artist manager": "manager",
+    "mimez": "mime",
+    "actor": "mime",
+    "content creator": "mime",
+    "creator": "mime",
+    "lifter": "weightlifter",
+    "weight lifter": "weightlifter",
+    "bodybuilder": "weightlifter",
+    "athlete": "weightlifter",
+    "bodiez": "weightlifter",
+    "a&r": "ar-scout",
+    "anr": "ar-scout",
+    "ar scout": "ar-scout",
+    "scout": "ar-scout",
+    "scoutz": "ar-scout",
+}
+
+
+def _squash(value):
+    """Lowercase, collapse any run of whitespace, strip. Turns 'Independent
+    artist', 'Developer ' and a key split across a line break into one form."""
+    return " ".join(str(value or "").split()).lower()
+
+
+def _is_decoration(ch):
+    """True for emoji and the invisible bits that travel with them.
+
+    The rule is "non-ASCII and not a letter or digit". Two earlier attempts got
+    this wrong in opposite directions:
+
+    * `[^\\w\\s&-]` also dropped `#` and `+`, so "C#🎯" and "C++⚙️" both
+      collapsed to "C" and a developer who picked C# resolved to C. A false
+      match is worse than the miss it was fixing — a miss loses one member's
+      skill, a false match silently rewrites it to a different one.
+    * Unicode category `So/Sk/Cf/Mn` missed emoji that are classified
+      elsewhere: 〰️ (U+3030) is category Po, and it appears in a real label.
+
+    Non-ASCII letters are kept, because they are content: Cajón, Fruity Möbius.
+    """
+    return ord(ch) > 127 and not ch.isalnum()
+
+# A keycap emoji is a plain digit plus a combining mark: "1⃣" is "1" + U+20E3.
+# Stripping only the mark leaves the digit welded to the name — 2.2's
+# 'Studio One1⃣ 🎛️' becomes "Studio One1", which matches nothing. The whole
+# sequence has to go. Matched narrowly rather than dropping every digit,
+# because a digit is real content in names like "808" or "Sound Forge 2".
+_KEYCAP = re.compile(r"[0-9#*]️?⃣", re.UNICODE)
+
+
+def _demoji(value):
+    """Drop emoji and decoration, keeping the words.
+
+    2.2 stores the *decorated label* as the persona, not the key — `personaNames`
+    holds '🎚️Producer' and the collab filter holds '🎤Independent  Artist'. Some
+    of those have a space after the emoji and some don't, so matching on the
+    exact label only ever worked by coincidence. Strip the decoration and match
+    on the words, which is the part that actually carries the meaning.
+
+    Punctuation that carries meaning survives: `#` in C#, `+` in C++, `&` in
+    A&R, `/` in UI/UX. Only emoji-class codepoints go.
+    """
+    text = _KEYCAP.sub(" ", str(value or ""))
+    return _squash("".join(" " if _is_decoration(ch) else ch for ch in text))
+
+
+def normalize_persona_key(value):
+    """Canonical persona key for anything a client might send, or None.
+
+    Handles the exact drift found in 2.2: wrong case, trailing spaces, a double
+    space, a hyphen where there wasn't one, and the old key names.
+    """
+    squashed = _squash(value)
+    if not squashed:
+        return None
+    if squashed in PERSONAZ:
+        return squashed
+    if squashed in PERSONA_ALIASES:
+        return PERSONA_ALIASES[squashed]
+
+    # Retry without emoji. 2.2 stores decorated labels ('🎚️Producer',
+    # '🎤Independent  Artist'), and those reach us verbatim from saved profiles
+    # and from the collab filter — six of them resolved to None, which silently
+    # dropped that member's persona and every skill under it.
+    bare = _demoji(value)
+    if bare and bare != squashed:
+        if bare in PERSONAZ:
+            return bare
+        if bare in PERSONA_ALIASES:
+            return PERSONA_ALIASES[bare]
+        hyphen_bare = bare.replace(" ", "-")
+        if hyphen_bare in PERSONAZ:
+            return hyphen_bare
+        if hyphen_bare in PERSONA_ALIASES:
+            return PERSONA_ALIASES[hyphen_bare]
+        found = _NO_SEPARATOR.get(_strip_separators(bare))
+        if found:
+            return found
+    # "🎤 Artist" / "Mix Engineer" — match on the display name too, since the
+    # frontend has passed labels where keys were expected.
+    for key, persona in PERSONAZ.items():
+        if squashed == _squash(persona["name"]) or squashed == _squash(label_for(key)):
+            return key
+    hyphenated = squashed.replace(" ", "-")
+    if hyphenated in PERSONAZ:
+        return hyphenated
+    if hyphenated in PERSONA_ALIASES:
+        return PERSONA_ALIASES[hyphenated]
+    # Last resort: ignore separators entirely. 2.2's Mix Engineer button held a
+    # raw line break inside the string literal ('E\nngineer'), so the key that
+    # reached this function was broken mid-word.
+    return _NO_SEPARATOR.get(_strip_separators(squashed))
+
+
+_SEPARATORS = re.compile(r"[\s\-_&.]+", re.UNICODE)
+
+
+def _strip_separators(value):
+    """Reduce to letters and digits, for the last-resort match.
+
+    `&` counts as a separator here so "A&R Scout" and the key "ar-scout" both
+    reach "arscout". Without it, "🔎A&R Scout" — the label with the emoji
+    welded on, which is how 2.2 writes them — resolved to nothing while the
+    spaced form worked, purely because the spaced one happened to hit an
+    exact-label comparison further down.
+    """
+    return _SEPARATORS.sub("", _squash(value))
+
+
+# {separator-free spelling: canonical key} — built once, covers both the catalog
+# keys and every alias.
+_NO_SEPARATOR = {
+    **{_strip_separators(k): k for k in PERSONAZ},
+    **{_strip_separators(alias): key for alias, key in PERSONA_ALIASES.items()},
+}
+
+
+def label_for(key):
+    """'🎤 Artist' — emoji then name, the form the UI shows."""
+    persona = PERSONAZ.get(key)
+    return f"{persona['emoji']} {persona['name']}" if persona else ""
+
+
+def skills_for(key):
+    """Flat {skill key: label} across every category of one persona."""
+    persona = PERSONAZ.get(key)
+    if not persona:
+        return {}
+    flat = {}
+    for skills in persona["categories"].values():
+        flat.update(skills)
+    return flat
+
+
+def skill_key_for(persona_key, value):
+    """Canonical skill key from a key OR a stored label, or None.
+
+    Needed because 2.2 stored the *label* ("Acoustic Guitar 🎸") as the skill
+    name, so existing profiles have to be read back through this.
+
+    The emoji does not have to be separated by a space. 2.2 writes both forms —
+    "Acoustic Guitar 🎸" but also "Reaper🪦" and "🎚️Producer" — and matching only
+    the spaced one meant a stored label lost its skill depending on whether
+    whoever typed that catalog entry happened to hit the space bar.
+    """
+    if not value:
+        return None
+    flat = skills_for(persona_key)
+    squashed = _squash(value)
+    for key, label in flat.items():
+        if squashed in (_squash(key), _squash(label)):
+            return key
+    # Retry with the decoration stripped, exactly as normalize_persona_key does.
+    bare = _demoji(value)
+    if bare and bare != squashed:
+        for key, label in flat.items():
+            if bare in (_demoji(key), _demoji(label)):
+                return key
+    # Last: a name that was retired from the picker. Checked after the live
+    # catalog so an alias can never shadow a skill that's actually on offer.
+    for retired, current in SKILL_ALIASES.items():
+        if bare in (_demoji(retired),) or squashed == _squash(retired):
+            if current in flat:
+                return current
+    return None
+
+
+def is_any_skill(skill_key):
+    """True for the wildcard entry that opens each category."""
+    return _squash(skill_key).startswith("any")
+
+
+def normalize_start(value):
+    """A skill start date as YYYY-MM-DD, or None.
+
+    Accepts what 2.2 actually wrote — `M/D/YYYY`, from
+    `${mo}/${day}/${yr}` — as well as the ISO form the rest of the backend
+    reads. Before this, `profile_max_experience` looked for a `start` key in
+    ISO format and found a `startDate` key in slash format, so every member's
+    experience computed as None no matter how long they'd been playing.
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if "/" in raw:
+        parts = raw.split("/")
+        if len(parts) != 3:
+            return None
+        month, day, year = parts
+    elif "-" in raw:
+        parts = raw.split("-")
+        if len(parts) != 3:
+            return None
+        year, month, day = parts
+    else:
+        return None
+    try:
+        y, m, d = int(year), int(month), int(day)
+    except ValueError:
+        return None
+    if not (1 <= m <= 12 and 1 <= d <= 31 and 1000 <= y <= 9999):
+        return None
+    return f"{y:04d}-{m:02d}-{d:02d}"
+
+
+def normalize_skill(persona_key, entry):
+    """One stored skill -> {key, name, start, catalog}. None only if it's empty.
+
+    NOT destructive. A skill the catalog doesn't recognise keeps its name and is
+    marked ``catalog: False`` instead of being dropped — the platform has
+    personas beyond the eight in the picker (MimeZ, DirectZ), and silently
+    deleting a member's skills to satisfy a catalog would be the worse bug.
+    """
+    if isinstance(entry, str):
+        name, start = entry, None
+    elif isinstance(entry, dict):
+        name = entry.get("key") or entry.get("name") or entry.get("skill")
+        # 2.2 wrote `startDate`; the API documents `start`. Accept both.
+        start = entry.get("start") or entry.get("startDate") or entry.get("start_date")
+    else:
+        return None
+
+    name = str(name or "").strip()
+    if not name:
+        return None
+
+    key = skill_key_for(persona_key, name)
+    if key:
+        return {
+            "key": key,
+            "name": skills_for(persona_key)[key],
+            "start": normalize_start(start),
+            "catalog": True,
+        }
+    return {"key": None, "name": name[:80], "start": normalize_start(start), "catalog": False}
+
+
+def normalize_personas(value):
+    """Clean a profile's whole `personas` list into one shape.
+
+    Accepts everything production has produced: bare key strings from before the
+    picker existed, and `{key, name, skills}` dicts from after. Output is always
+    ``[{key, name, label, skills: [...], catalog: bool}]``, deduplicated by
+    persona. Entries the catalog doesn't know are kept with ``catalog: False`` —
+    see ``normalize_skill``.
+    """
+    if not isinstance(value, list):
+        return []
+    out, seen = [], {}
+    for item in value:
+        if isinstance(item, str):
+            raw_key, raw_skills = item, []
+        elif isinstance(item, dict):
+            raw_key = item.get("key") or item.get("name")
+            raw_skills = item.get("skills") or []
+        else:
+            continue
+
+        key = normalize_persona_key(raw_key)
+        known = key is not None
+        if not known:
+            # Keep it, under a tidied key, so nothing is lost.
+            key = _squash(raw_key).replace(" ", "-")
+            if not key:
+                continue
+
+        if key in seen:
+            persona = seen[key]
+        else:
+            persona = {
+                "key": key,
+                "name": PERSONAZ[key]["name"] if known else str(raw_key)[:60],
+                "label": label_for(key) if known else str(raw_key)[:60],
+                "skills": [],
+                "catalog": known,
+            }
+            seen[key] = persona
+            out.append(persona)
+
+        have = {(s["key"], s["name"]) for s in persona["skills"]}
+        for raw in raw_skills if isinstance(raw_skills, list) else []:
+            skill = normalize_skill(key if known else None, raw)
+            if not skill or (skill["key"], skill["name"]) in have:
+                continue
+            have.add((skill["key"], skill["name"]))
+            persona["skills"].append(skill)
+    return out
+
+
+# Exactly what 2.2 shipped, per persona and category — transcribed from
+# `instrumentDatabase` in musicconnectz_code_2.2.docx. 131 skills.
+#
+# This is provenance, not a second catalog: the labels live once, above.
+# Keeping the 2.2 membership here is what lets `catalog_payload(since="2.2")`
+# serve the original build exactly, and lets a test prove every one of them
+# is still present after any addition.
+V22_SKILLS = {
+    "artist": {
+        "String Instruments": (
+            "Any String", "Acoustic Guitar", "Electric Guitar",
+            "Bass Guitar", "Ukulele", "Banjo", "Mandolin", "Violin", "Viola",
+            "Cello", "Double Bass", "Harp",
+        ),
+        "Keyboard Instruments": (
+            "Any Keyboard", "Acoustic Piano", "Digital Piano", "Synthesizer",
+            "Organ", "Harpsichord", "Accordion",
+        ),
+        "Percussion Instruments": (
+            "Any Percussion", "Drums (Snare)", "Drums (Bass)",
+            "Drums (Bongo)", "Cymbals",
+        ),
+        "Rapping": (
+            "Any Rapping", "Alternative Rap", "Boom Bap", "Chopper",
+            "Cloud Rap", "Conscious Rap", "Crunk", "Drill", "Emo Rap",
+            "G-Funk", "Gangsta Rap", "Hardcore Hip Hop", "Jazz Rap",
+            "Mumble Rap", "Old School", "Snap", "Trap",
+        ),
+        "Singing": (
+            "Any Singing", "Bass", "Baritone", "Tenor", "Countertenor",
+            "Contralto", "Alto", "Mezzo-Soprano", "Soprano",
+        ),
+    },
+    "producer": {
+        "Music DAWs": (
+            "Any DAW", "Ableton Live", "Adobe Audition", "Audacity",
+            "Bitwig Studio", "Cakewalk", "Cubase", "FL Studio", "GarageBand",
+            "Logic Pro", "Luna", "Mixcraft", "PreSonus Studio One",
+            "Pro Tools", "Reason", "Reaper", "Studio One", "Waveform Pro",
+        ),
+        "Production Techniques": (
+            "Any Production", "Beat Making", "Sampling", "Sound Design",
+            "Arrangement", "Synthesis",
+        ),
+    },
+    "mix-engineer": {
+        "Music DAWs": (
+            "Any DAW", "Ableton Live", "Adobe Audition", "Audacity",
+            "Bitwig Studio", "Cakewalk", "Cubase", "FL Studio", "GarageBand",
+            "Logic Pro", "Luna", "Mixcraft", "PreSonus Studio One",
+            "Pro Tools", "Reason", "Reaper", "Studio One", "Waveform Pro",
+        ),
+        "Engineering Skills": (
+            "Any Engineering", "Mixing", "Mastering", "EQ", "Compression",
+            "Reverb/Effects",
+        ),
+    },
+    "designer": {
+        "Design Software": (
+            "Any Design Software", "Photoshop", "Illustrator", "Figma",
+            "Canva", "Affinity Designer", "CorelDRAW", "Sketch", "InDesign",
+        ),
+        "Design Skills": (
+            "Any Design Skill", "UI/UX Design", "Graphic Design", "Branding",
+            "Layout Design", "Typography", "Color Theory", "Icon Design",
+        ),
+    },
+    "videographer": {
+        "Video Software": (
+            "Any Video Software", "Adobe Premiere", "DaVinci Resolve",
+            "Final Cut Pro", "Sony Vegas", "Filmora", "After Effects", "OBS",
+        ),
+        "Video Skills": (
+            "Any Video Skill", "Editing", "Color Grading", "Motion Graphics",
+            "Cinematography", "Drone Footage", "Lighting", "Sound Design",
+        ),
+    },
+}
+
+# What 2.2 shipped. This is a historical record and does not shrink when a
+# skill is retired — V22_SKILLS stays the answer to "what did 2.2 have", and
+# the live catalog answers "what can you pick today". Rewriting history to
+# match the present would lose the ability to tell the two apart, which is the
+# whole reason the provenance exists.
+V22_SKILL_COUNT = 131
+
+# 2.2 skills no longer offered in the picker. They still resolve, via
+# SKILL_ALIASES, so nobody loses a skill they picked while it was on offer.
+V22_SKILLS_RETIRED = frozenset(SKILL_ALIASES)
+
+# What `?since=2.2` can actually still serve: 2.2's set minus the retirements.
+V22_SKILL_COUNT_OFFERED = V22_SKILL_COUNT - sum(
+    1 for persona, cats in V22_SKILLS.items() for keys in cats.values()
+    for k in keys if k in V22_SKILLS_RETIRED)
+
+
+def _visible_count(key, persona, only_v22):
+    if not only_v22:
+        return len(skills_for(key))
+    return sum(1 for cat in persona["categories"]
+               for k in V22_SKILLS.get(key, {}).get(cat, ())
+               if k not in V22_SKILLS_RETIRED)
+
+
+def is_v22_skill(persona_key, category, skill_key):
+    """Was this exact skill in the 2.2 build?"""
+    return skill_key in V22_SKILLS.get(persona_key, {}).get(category, ())
+
+
+def catalog_payload(since=None):
+    """The whole catalog, in the order the picker should render it.
+
+    `since="2.2"` serves ONLY what the 2.2 build shipped — the five personas and
+    their 131 skills, nothing added afterwards. It filters rather than storing a
+    second copy, so the two can never disagree about a label.
+    """
+    only_v22 = str(since or "").strip() == "2.2"
+    return {
+        "personas": [
+            {
+                "key": key,
+                "name": persona["name"],
+                "emoji": persona["emoji"],
+                "label": label_for(key),
+                "blurb": persona["blurb"],
+                "since": persona["since"],
+                "skill_count": _visible_count(key, persona, only_v22),
+                "categories": [
+                    {
+                        "name": cat,
+                        "skills": [
+                            {"key": sk, "label": label, "any": is_any_skill(sk)}
+                            for sk, label in skills.items()
+                            if not only_v22 or is_v22_skill(key, cat, sk)
+                        ],
+                    }
+                    for cat, skills in persona["categories"].items()
+                    if not only_v22 or cat in V22_SKILLS.get(key, {})
+                ],
+            }
+            for key, persona in PERSONAZ.items()
+            if not only_v22 or key in V22_SKILLS
+        ],
+        "since": since or "all",
+        "aliases": dict(PERSONA_ALIASES),
+        # The client renders "Any …" entries in the accent colour and treats a
+        # skill date as required — both stated here so it stops being folklore.
+        "rules": {
+            "any_prefix": "Any",
+            "start_date_format": "YYYY-MM-DD",
+            "start_date_required": True,
+        },
+    }

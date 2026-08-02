@@ -146,10 +146,10 @@ def explain(step, option, text="", track=None, facts=None, slang=False, suggest=
 
         system = build_system(step, option, track, facts, slang=slang)
         if suggest:
-            system += (
-                "\n\nEnd with one short '💡 Suggestion' line — the single next move, "
-                "phrased as what to do and why."
-            )
+            # Was "what to do and why" — it silently dropped the How, so the
+            # tour gave two-thirds of a suggestion while OCC gave three.
+            from apps.economy.suggest import SUGGEST_STYLE_SHORT
+            system += f"\n\n{SUGGEST_STYLE_SHORT}"
         client = anthropic.Anthropic()
         resp = _create_with_fallback(
             client,

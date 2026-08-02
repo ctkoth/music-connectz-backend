@@ -209,23 +209,102 @@ STEPS = {
         ),
         "highlight": _h('[data-omviardz="persona-grid"]', "PersonaZ picker"),
         "input": {"kind": "choice", "allow_text": True},
+        # Render the real picker inside this step. The tour isn't a slideshow
+        # about the app — the member should leave it with their actual personas
+        # and skills set, which is the whole difference between a tour and a
+        # tooltip.
+        "picker": {
+            "type": "personaz",
+            "endpoint": "/api/economy/personaz/",
+            "saves_to": "PATCH /api/auth/me/ {personas: [...]}",
+            "select": "many",
+        },
         "options": [
             {
-                "key": "1", "label": "🎛️ Pick one and move",
+                "key": "1", "label": "🎛️ Pick one and add my skills",
                 "highlight": _h('[data-omviardz="persona-card"]', "A PersonaZ card"),
+                "opens_picker": True,
                 "explain": (
-                    "🎛️ Tap it and you're done. It reorders your drawer and colors what SkillZ "
-                    "drills you get — nothing gets locked away. Switch it whenever the work "
-                    "changes. 💪"
+                    "🎛️ Tap the persona, then tick every skill you actually have and set the "
+                    "date you started. That date is what your years-of-experience comes from — "
+                    "it's not decoration. 💪 Instruments, DAWs, rap styles, vocal range, "
+                    "languages if you're a dev: it's all in there. Switch personas whenever "
+                    "the work changes."
                 ),
             },
             {
-                "key": "2", "label": "🤔 Why do I need one?",
+                "key": "2", "label": "🎷 I play something unusual",
+                "highlight": _h('[data-omviardz="persona-grid"]', "PersonaZ picker"),
+                "opens_picker": True,
+                "explain": (
+                    "🎷 Try me. Artist covers strings, keys, percussion, wind and woodwind, "
+                    "brass, electronic and DJ, rapping and singing — 97 skills in eight "
+                    "families. 👀 Sax, trombone, djembe, turntables, all in there. If yours "
+                    "genuinely isn't, use the 'Any …' entry at the top of the closest family "
+                    "and tell me what's missing."
+                ),
+            },
+            {
+                "key": "3", "label": "🤔 Why do I need one?",
                 "highlight": _h('[data-omviardz="persona-grid"]', "PersonaZ picker"),
                 "explain": (
                     "🤔 Fair. Because 'show me everything' is how apps this wide get abandoned "
                     "on day two. 🧠 The persona is a filter, not a permission — you keep every "
-                    "room, you just stop drowning in the ones you don't use."
+                    "room, you just stop drowning in the ones you don't use. And rating 6 in a "
+                    "skill is what unlocks teaching it for money in LessonZ. 💸"
+                ),
+            },
+        ],
+    },
+
+    "genrez": {
+        "screen": "profile",
+        "route": "/profile",
+        "title": "🎵 GenreZ — what do you actually make?",
+        "blurb": (
+            "🎵 One tap. This is how people find you and how your work gets filed — every "
+            "example you upload needs a genre, so you may as well set yours now. 👀"
+        ),
+        "highlight": _h('[data-omviardz="genre-grid"]', "Genre picker"),
+        "input": {"kind": "choice", "allow_text": True,
+                  "placeholder": "or just type what you make…"},
+        "picker": {
+            "type": "genrez",
+            "endpoint": "/api/economy/genrez/",
+            "saves_to": "PATCH /api/auth/me/ {genres: [...]}",
+            # 2.2 picked one genre per work example; a profile can carry several.
+            "select": "many",
+        },
+        "options": [
+            {
+                "key": "1", "label": "🎤 Hip hop side — trap, drill, boom bap…",
+                "highlight": _h('[data-omviardz="genre-grid"]', "Genre picker"),
+                "opens_picker": True,
+                "explain": (
+                    "🎤 Trap, Drill, Cloud Rap, Boom Bap, Hip Hop — all there, and they're the "
+                    "four that double as Rapping skills too. 🧠 That's not a bug: the genre "
+                    "describes the track, the skill describes you. Pick both."
+                ),
+            },
+            {
+                "key": "2", "label": "🎛️ Electronic — house, techno, lo-fi…",
+                "highlight": _h('[data-omviardz="genre-grid"]', "Genre picker"),
+                "opens_picker": True,
+                "explain": (
+                    "🎛️ House, Techno, Electronic, Ambient, Lo-Fi. 🌌 If you make beats to "
+                    "study to, Lo-Fi is a real category with a real audience — don't be shy "
+                    "about claiming it."
+                ),
+            },
+            {
+                "key": "3", "label": "🎸 Something else entirely",
+                "highlight": _h('[data-omviardz="genre-grid"]', "Genre picker"),
+                "opens_picker": True,
+                "explain": (
+                    "🎸 Rock, Metal, Punk, Country, Folk, Blues, Funk, Disco, Gospel, "
+                    "Classical, Reggae, Dancehall, Afrobeats, Amapiano, Reggaeton, K-Pop, "
+                    "Drum & Bass and more. 🌍 Pop, R&B, Jazz, Soul and Indie too. Pick "
+                    "everything that fits — you're not limited to one."
                 ),
             },
         ],
@@ -769,14 +848,16 @@ STEPS = {
 # definitions, different route — a fan shouldn't sit through royalty cashout
 # rates, and a producer shouldn't have to find DistributeZ on their own.
 TRACKS = {
-    TRACK_MAKE: ["welcome", "profilez", "personaz", "occ", "postz", "walletz", "tierz",
-                 "safetyz", "finish"],
-    TRACK_DISCOVER: ["welcome", "profilez", "personaz", "postz", "socialz", "messagez",
-                     "tierz", "safetyz", "finish"],
-    TRACK_MONEY: ["welcome", "profilez", "walletz", "earnz", "royaltiez", "collabz",
-                  "sellz", "tierz", "safetyz", "finish"],
-    TRACK_LEARN: ["welcome", "profilez", "skillz", "occ", "sellz", "messagez", "tierz",
-                  "safetyz", "finish"],
+    TRACK_MAKE: ["welcome", "profilez", "personaz", "genrez", "occ", "postz", "walletz",
+                 "tierz", "safetyz", "finish"],
+    TRACK_DISCOVER: ["welcome", "profilez", "personaz", "genrez", "postz", "socialz",
+                     "messagez", "tierz", "safetyz", "finish"],
+    # Even the money track gets it: a shop with no genre on it is a shop nobody
+    # browses into.
+    TRACK_MONEY: ["welcome", "profilez", "genrez", "walletz", "earnz", "royaltiez",
+                  "collabz", "sellz", "tierz", "safetyz", "finish"],
+    TRACK_LEARN: ["welcome", "profilez", "personaz", "skillz", "genrez", "occ", "sellz",
+                  "messagez", "tierz", "safetyz", "finish"],
 }
 
 
@@ -818,6 +899,29 @@ def get_option(step_key, choice):
         if want == opt["key"].lower() or want == opt["label"].strip().lower():
             return opt
     return None
+
+
+def catalogs():
+    """The live PersonaZ and GenreZ lists, for the steps that collect them.
+
+    Shipped inside the tour payload rather than fetched per step: the tour opens
+    on a phone, and a picker that waits on its own request after the member has
+    already tapped feels broken. Defensive — the tour still renders if the
+    economy app isn't installed, just without the pickers.
+    """
+    try:
+        from apps.economy.genrez import catalog_payload as genre_catalog
+        from apps.economy.personaz import catalog_payload as persona_catalog
+    except Exception:  # pragma: no cover - economy app absent
+        return {}
+    personas = persona_catalog()
+    genres = genre_catalog()
+    return {
+        "personaz": personas["personas"],
+        "personaz_rules": personas["rules"],
+        "genrez": genres["genres"],
+        "genrez_rules": genres["rules"],
+    }
 
 
 def tier_facts():

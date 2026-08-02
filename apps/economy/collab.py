@@ -75,6 +75,63 @@ def maybe_auto_release(deal):
     return release_deal(deal, note="auto-release (window elapsed)")
 
 
+
+def _project_shares(deal):
+    """{user: percent} from the CollabZ project on this deal, or None.
+
+    None — not an empty dict — when there is no project, or when the splits are
+    still all zero. Zero everywhere means "still negotiating", which is exactly
+    when the old escrow list is the right answer.
+    """
+    project = getattr(deal, "collab_project", None)
+    if project is None:
+        return None
+    weights = {m.user: int(m.split_percent or 0)
+               for m in project.members.select_related("user")}
+    return weights if sum(weights.values()) > 0 else None
+
+
+@transaction.atomic
+def _release_by_project_split(deal, weights):
+    """Pay out a deal using the project's agreed percentages."""
+    from .splits import by_weight
+
+    pot = deal.held_cents if deal.currency == CollabDeal.CURRENCY_MONEY else deal.held_spinaz
+    shares = by_weight(pot, weights, fallback=deal.initiator)
+    for user, cents in shares.items():
+        if cents <= 0:
+            continue
+        w = _locked_wallet(user)
+        if deal.currency == CollabDeal.CURRENCY_MONEY:
+            w.money_cents += cents
+            Transaction.objects.create(
+                user=user, kind=Transaction.KIND_REWARD, amount_cents=cents,
+                dev_tax_cents=0,
+                note=f"CollabZ split: {deal.title}"[:200])
+        else:
+            w.spinaz += cents
+        w.save(update_fields=["money_cents", "spinaz", "updated_at"])
+
+    # Stakes come back regardless of how the pot was divided — a good-faith
+    # deposit is not part of the payout.
+    for entry in deal.participants:
+        user = User.objects.filter(username=entry.get("username")).first()
+        stake = int(entry.get("stake_paid") or 0)
+        if user and stake:
+            w = _locked_wallet(user)
+            w.spinaz += stake
+            w.save(update_fields=["spinaz", "updated_at"])
+
+    deal.held_cents = 0
+    deal.held_spinaz = 0
+    deal.held_stake_spinaz = 0
+    deal.status = CollabDeal.STATUS_RELEASED
+    deal.auto_release_at = None
+    deal.save(update_fields=["held_cents", "held_spinaz", "held_stake_spinaz",
+                             "status", "auto_release_at", "updated_at"])
+    return deal
+
+
 @transaction.atomic
 def release_deal(deal, note="collab release"):
     """Pay each recipient their net share from escrow, keep the platform tax
@@ -83,6 +140,17 @@ def release_deal(deal, note="collab release"):
     deal = CollabDeal.objects.select_for_update().get(pk=deal.pk)
     if deal.status not in (CollabDeal.STATUS_FUNDED, CollabDeal.STATUS_DELIVERED):
         return deal
+
+    # A CollabZ PROJECT attached to this deal owns the agreed splits. Those
+    # percentages were validated on the way in (split_error refuses anything
+    # that isn't 0 or 100) and until now nothing ever read them to move money:
+    # a room could agree 60/40, watch it validate, and get paid on a completely
+    # separate list. A number members agreed on that the payout ignores is
+    # worse than no number at all.
+    project_shares = _project_shares(deal)
+    if project_shares:
+        return _release_by_project_split(deal, project_shares)
+
     paid_out = 0
     for entry in deal.participants:
         user = User.objects.filter(username=entry.get("username")).first()

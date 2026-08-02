@@ -40,9 +40,17 @@ def _clean_persona(raw):
 
     Accepts the string form (just a key) and the dict form; always returns a
     dict so downstream code has one shape to reason about. Start dates are the
-    input to profile_max_experience, so they are preserved verbatim when they
-    look like a date and dropped when they don't.
+    input to profile_max_experience, so they are preserved when they look like a
+    date and dropped when they don't.
+
+    The date handling is deliberately generous. The skill picker writes
+    `{name, startDate: "7/4/2020"}` while this only ever looked for a `start` key
+    in ISO form — so every skill was stored undated and profile_max_experience
+    answered None for everybody, no matter how long they'd been playing. Both
+    field names and both formats are accepted now and stored as YYYY-MM-DD.
     """
+    from apps.economy.personaz import normalize_start
+
     if not isinstance(raw, dict):
         return {"key": str(raw)[:60], "name": str(raw)[:60], "skills": []}
 
@@ -50,9 +58,11 @@ def _clean_persona(raw):
     for s in (raw.get("skills") or [])[:100]:
         if isinstance(s, dict):
             name = str(s.get("name", ""))[:80]
-            start = str(s.get("start") or "")[:10]
+            start = normalize_start(
+                s.get("start") or s.get("startDate") or s.get("start_date")
+            )
         else:
-            name, start = str(s)[:80], ""
+            name, start = str(s)[:80], None
         if not name:
             continue
         skills.append({"name": name, "start": start} if start else {"name": name})
@@ -85,7 +95,8 @@ def _user_from_oauth(info):
             raise OAuthError(
                 f"An account already uses {info['email']}. "
                 f"{info['provider'].title()} didn't confirm you own that address, "
-                "so sign in with your original method and link it from there."
+                f"so sign in with your original method, then link "
+                f"{info['provider'].title()} from your account settings."
             )
         user = match
 
@@ -111,6 +122,7 @@ def _user_from_oauth(info):
 
 class RegisterView(APIView):
     permission_classes = [AllowAny]
+    throttle_scope = "auth-register"
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
@@ -125,6 +137,7 @@ class RegisterView(APIView):
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_scope = "auth-login"
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -163,6 +176,12 @@ class MeView(APIView):
             # start dates the whole experience metric is derived from.
             p.personas = [_clean_persona(x) for x in data["personas"]][:50]
             changed.append("personas")
+        if isinstance(data.get("genres"), (list, str)):
+            # Closed vocabulary: unknown genres are dropped rather than stored,
+            # because a genre nobody can search for is not a genre.
+            from apps.economy.genrez import normalize_genres
+            p.genres = normalize_genres(data["genres"])
+            changed.append("genres")
         if isinstance(data.get("nationalities"), list):
             p.nationalities = [str(x)[:60] for x in data["nationalities"]][:30]
             changed.append("nationalities")
@@ -242,38 +261,111 @@ class OAuthLoginView(APIView):
     """POST /api/auth/oauth/<provider>/ — verify provider token, return JWT."""
 
     permission_classes = [AllowAny]
+    # Unauthenticated, and every call reaches out to Google/GitHub/Apple —
+    # without a cap this endpoint is a free proxy for hammering them.
+    throttle_scope = "auth-oauth"
 
     def post(self, request, provider):
-        data = request.data or {}
         try:
-            if provider == "google":
-                info = verify_google(data.get("credential") or data.get("id_token"))
-            elif provider == "github":
-                info = exchange_github(
-                    data.get("code"), data.get("redirect_uri", "")
-                )
-            elif provider == "apple":
-                info = verify_apple(data.get("id_token") or data.get("credential"))
-            elif provider in OAUTH2_PROVIDERS:
-                info = exchange_oauth2(
-                    provider,
-                    data.get("code"),
-                    data.get("redirect_uri", ""),
-                    data.get("code_verifier", ""),
-                )
-            else:
-                return Response(
-                    {"detail": f"Unsupported provider '{provider}'."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+            info = _verify_provider(provider, request.data or {})
             # Linking lives inside the same try so a refused link answers 400
             # with its reason, not a 500.
             user = _user_from_oauth(info)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except OAuthError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         tokens = issue_tokens(user)
         return Response({"user": PublicUserSerializer(user).data, **tokens})
+
+
+def _verify_provider(provider, data):
+    """Run the right verifier for `provider`. Raises OAuthError, or ValueError
+    if we don't support the provider at all."""
+    if provider == "google":
+        return verify_google(data.get("credential") or data.get("id_token"))
+    if provider == "github":
+        return exchange_github(data.get("code"), data.get("redirect_uri", ""))
+    if provider == "apple":
+        return verify_apple(data.get("id_token") or data.get("credential"))
+    if provider in OAUTH2_PROVIDERS:
+        return exchange_oauth2(provider, data.get("code"),
+                               data.get("redirect_uri", ""),
+                               data.get("code_verifier", ""))
+    raise ValueError(f"Unsupported provider '{provider}'.")
+
+
+class OAuthLinkView(APIView):
+    """POST /api/auth/oauth/<provider>/link/ — attach a provider to THIS account.
+
+    The route the collision error has been telling people to use. Somebody who
+    registered with a password and later taps "Sign in with Google" was told to
+    "sign in with your original method and link it from there" — and there was
+    nowhere to do that. Their options were a second account, which splits their
+    wallet, or giving up.
+
+    Authenticated on purpose: you prove who you are with your existing session
+    first, then prove you own the provider account. That ordering is what makes
+    this safe without the provider having verified the email — the account is
+    already yours.
+
+    DELETE unlinks, unless it's the only way you can still get in.
+    """
+
+    permission_classes = [IsAuthenticated]
+    throttle_scope = "auth-oauth"
+
+    def post(self, request, provider):
+        try:
+            info = _verify_provider(provider, request.data or {})
+        except ValueError as exc:
+            return Response({"detail": str(exc)},
+                            status=status.HTTP_400_BAD_REQUEST)
+        except OAuthError as exc:
+            return Response({"detail": str(exc)},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        taken = OAuthIdentity.objects.filter(
+            provider=info["provider"], provider_uid=info["uid"]).first()
+        if taken and taken.user_id != request.user.id:
+            # Silently re-pointing it would move somebody else's sign-in onto
+            # this account — an account takeover with extra steps.
+            return Response(
+                {"detail": f"That {provider.title()} account is already linked "
+                           f"to a different Music ConnectZ account."},
+                status=status.HTTP_409_CONFLICT)
+
+        identity, created = OAuthIdentity.objects.get_or_create(
+            provider=info["provider"], provider_uid=info["uid"],
+            defaults={"user": request.user, "email": info.get("email", "")})
+        return Response({"linked": provider, "already_linked": not created,
+                         "providers": _linked_providers(request.user)},
+                        status=status.HTTP_201_CREATED if created
+                        else status.HTTP_200_OK)
+
+    def delete(self, request, provider):
+        identity = OAuthIdentity.objects.filter(
+            user=request.user, provider=provider).first()
+        if not identity:
+            return Response({"detail": f"{provider.title()} isn't linked."},
+                            status=status.HTTP_404_NOT_FOUND)
+        # Unlinking your last sign-in method locks you out of your own account.
+        others = OAuthIdentity.objects.filter(user=request.user).exclude(
+            pk=identity.pk).exists()
+        if not others and not request.user.has_usable_password():
+            return Response(
+                {"detail": "That's the only way you can sign in. Set a password "
+                           "first, then unlink."},
+                status=status.HTTP_409_CONFLICT)
+        identity.delete()
+        return Response({"unlinked": provider,
+                         "providers": _linked_providers(request.user)})
+
+
+def _linked_providers(user):
+    return sorted(OAuthIdentity.objects.filter(user=user)
+                  .values_list("provider", flat=True))
 
 
 class OAuthConfigView(APIView):

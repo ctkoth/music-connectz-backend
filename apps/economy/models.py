@@ -79,7 +79,18 @@ class Wallet(models.Model):
     # separate and persists.
     prompt_day = models.CharField(max_length=10, blank=True, default="")
     prompts_used_today = models.PositiveIntegerField(default=0)
+    # Set when a card charge that funded this wallet is disputed. Spending is
+    # blocked while it stands; the balance is NOT zeroed, because part of it may
+    # be money the member genuinely deposited and a chargeback is a claim, not
+    # yet a finding. `money_cents` is unsigned, so a clawback could not be
+    # represented as a negative balance even if we wanted to.
+    frozen_reason = models.CharField(max_length=200, blank=True, default="")
+    frozen_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def frozen(self):
+        return bool(self.frozen_reason)
 
     @property
     def money(self):
@@ -170,7 +181,11 @@ class PaymentIntent(models.Model):
 
     STATUS_PENDING = "pending"
     STATUS_COMPLETED = "completed"
-    STATUS_CHOICES = [(STATUS_PENDING, "Pending"), (STATUS_COMPLETED, "Completed")]
+    # The cardholder charged this back. Terminal for our purposes: Stripe has
+    # already pulled the money, whatever the dispute's eventual outcome.
+    STATUS_DISPUTED = "disputed"
+    STATUS_CHOICES = [(STATUS_PENDING, "Pending"), (STATUS_COMPLETED, "Completed"),
+                      (STATUS_DISPUTED, "Disputed")]
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="payment_intents"
@@ -336,12 +351,39 @@ def credit_funds(user, amount_cents, note="Add funds"):
     return dev, net
 
 
+class WalletFrozen(Exception):
+    """Raised when a wallet under a chargeback tries to spend.
+
+    A dispute means the card issuer has already taken the money back. Letting
+    the balance keep moving pays other members out of the platform's float on
+    the strength of a payment that was reversed — and once it has reached a
+    third party's wallet there is nothing left to claw back.
+    """
+
+    def __init__(self, wallet):
+        self.wallet = wallet
+        super().__init__(wallet.frozen_reason or "This wallet is on hold.")
+
+
+def check_spendable(user):
+    """Raise WalletFrozen if this member may not spend. Returns the wallet."""
+    w = wallet_for(user)
+    if w.frozen:
+        raise WalletFrozen(w)
+    return w
+
+
 def pay_between(payer, payee, amount_cents, note=""):
     """Move money payer -> payee, applying the payer's developer tax. The payee
     receives the net; the platform keeps the tax. Caller must ensure the payer
-    has the balance and wrap in a transaction. Returns (dev_cents, net_cents)."""
+    has the balance and wrap in a transaction. Returns (dev_cents, net_cents).
+
+    Refuses outright if the payer's wallet is frozen. This is the single choke
+    point every member-to-member payment goes through, so the check lives here
+    rather than in each of the callers that would otherwise have to remember.
+    """
     m = membership_for(payer)
-    pw = wallet_for(payer)
+    pw = check_spendable(payer)
     rw = wallet_for(payee)
     dev, net = split_cents(amount_cents, m.dev_tax_rate)
     pw.money_cents -= amount_cents
@@ -353,11 +395,22 @@ def pay_between(payer, payee, amount_cents, note=""):
     return dev, net
 
 
-def can_afford_ai(user, cost_cents):
-    """Whether the member can cover an AI action — prepaid PromptZ (1 PromptZ =
-    1¢) plus cash together."""
+def can_afford_ai(user, cost_cents, count_daily=False):
+    """Whether the member can cover an AI action.
+
+    Prepaid PromptZ (1 PromptZ = 1¢) plus cash, and — when `count_daily` is set —
+    today's free allowance as well.
+
+    That flag matters more than it looks. `charge_ai_usage(count_daily=True)`
+    spends a free daily prompt before touching any balance, so a caller that
+    checked affordability WITHOUT it would turn away a free member who has three
+    free prompts and no money, for a run that was going to cost them nothing.
+    The two calls have to agree about what counts.
+    """
     cost_cents = int(cost_cents or 0)
     if cost_cents <= 0:
+        return True
+    if count_daily and daily_prompt_state(user)[2] > 0:
         return True
     w = wallet_for(user)
     return (w.promptz or 0) + (w.money_cents or 0) >= cost_cents
@@ -374,7 +427,12 @@ def award_promptz(user, amount, note="PromptZ"):
 # Free daily prompt allowance by tier. Resets each day — it does NOT stack.
 # Prepaid PromptZ (Wallet.promptz) is separate and persists. Owner/debug is
 # effectively unlimited (their AI runs are already free anyway).
-PROMPT_ALLOWANCE = {"free": 1, "premium": 5, "statz": 20, "debug": 10 ** 6}
+#
+# Free was 1/day, which is enough to try the AI once and conclude it isn't for
+# you. Three is enough to actually use it — and a free member who wants an AI
+# coaching read can spend one on that rather than being locked out of the
+# feature entirely.
+PROMPT_ALLOWANCE = {"free": 3, "premium": 10, "statz": 20, "debug": 10 ** 6}
 
 
 def daily_prompt_state(user):
@@ -452,6 +510,10 @@ class Venue(models.Model):
     host_price_cents = models.PositiveIntegerField(default=0)
     visitor_pay_cents = models.PositiveIntegerField(default=0)
     min_attract = models.PositiveSmallIntegerField(default=0)  # 0-10
+    # The five search ranges, frozen at post time — see economy.searchfilters.
+    # `min_attract` is the old single-ended version of one of them and is kept
+    # in step with it, so an old client that only knows min_attract still works.
+    requirements = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -569,9 +631,17 @@ class Profile(models.Model):
     asexual = models.BooleanField(default=False)
     traits = models.JSONField(default=list, blank=True)
     personas = models.JSONField(default=list, blank=True)
+    # What this member makes. Closed vocabulary from apps/economy/genrez.py —
+    # 2.2 required a genre on every work example but never stored one on the
+    # profile, so there was no way to find "the drill producers".
+    genres = models.JSONField(default=list, blank=True)
     links = models.JSONField(default=list, blank=True)  # [{label, url}] public links
     # Location (opt-in) for in-person CollabZ / VenueZ distance filtering.
     share_location = models.BooleanField(default=False)
+    # What this member charges for their skill, in cents. Zero is a real answer
+    # — plenty of people collaborate for free — so the search price gate treats
+    # it as a value rather than as missing data.
+    skill_price_cents = models.PositiveIntegerField(default=0)
     lat = models.FloatField(null=True, blank=True)
     lng = models.FloatField(null=True, blank=True)
     # Declared external-account followers (sum across connected socials) — feeds
@@ -582,8 +652,44 @@ class Profile(models.Model):
     # adult content. Never trust a self-reported birthday for this.
     verified_18plus = models.BooleanField(default=False, db_index=True)
     verified_18plus_at = models.DateTimeField(null=True, blank=True)
+    # A boolean can only say "verified" or "not verified" — it cannot tell a
+    # member who just finished the flow whether they passed, failed, or are
+    # still being checked. These carry the answer, and the reason for it.
+    VERIFY_UNSTARTED = "unstarted"
+    VERIFY_PROCESSING = "processing"
+    VERIFY_VERIFIED = "verified"
+    VERIFY_FAILED = "failed"
+    VERIFY_CANCELED = "canceled"
+    VERIFY_CHOICES = [
+        (VERIFY_UNSTARTED, "Not started"),
+        (VERIFY_PROCESSING, "Checking"),
+        (VERIFY_VERIFIED, "Verified"),
+        (VERIFY_FAILED, "Failed"),
+        (VERIFY_CANCELED, "Canceled"),
+    ]
+    verification_status = models.CharField(
+        max_length=12, choices=VERIFY_CHOICES, default=VERIFY_UNSTARTED, db_index=True)
+    verification_reason = models.CharField(max_length=64, blank=True, default="")
+    verification_detail = models.CharField(max_length=300, blank=True, default="")
+    verification_session_id = models.CharField(max_length=120, blank=True, default="")
+    verification_updated_at = models.DateTimeField(null=True, blank=True)
+    verification_attempts = models.PositiveIntegerField(default=0)
     # One-time onboarding reward: set when the member finishes the intro flow so
     # the grant (SpinAZ + Energy) can never be claimed twice.
+    # How this member wants links opened: a new tab, a new window, or in place.
+    # A preference rather than a hardcoded target="_blank" — on a phone a new
+    # window is a nuisance, on a desktop losing the page you were reading is,
+    # and only the member knows which they are. Default "tab" because that's
+    # what most of the web does and a default nobody notices is the right one.
+    LINK_TAB = "tab"
+    LINK_WINDOW = "window"
+    LINK_SAME = "same"
+    LINK_TARGET_CHOICES = [
+        (LINK_TAB, "New tab"), (LINK_WINDOW, "New window"),
+        (LINK_SAME, "Same tab"),
+    ]
+    link_target = models.CharField(max_length=8, choices=LINK_TARGET_CHOICES,
+                                   default=LINK_TAB)
     onboarded = models.BooleanField(default=False)
     onboarded_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1340,3 +1446,357 @@ class RewardGrant(models.Model):
     class Meta:
         unique_together = ("provider", "txn_id")
         indexes = [models.Index(fields=["provider", "-created_at"])]
+
+
+# --- OCC coding workspace ---------------------------------------------------
+# Files live in these rows, never on the server's filesystem. That is the whole
+# containment story for the coding agent: there is no path out of a workspace,
+# because the filesystem was never in scope. See apps/economy/occ_tools.py.
+class Project(models.Model):
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="occ_projects")
+    name = models.CharField(max_length=80)
+    description = models.CharField(max_length=500, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("owner", "name")
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"{self.owner}/{self.name}"
+
+
+class ProjectFile(models.Model):
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="files")
+    path = models.CharField(max_length=300)
+    content = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("project", "path")
+        ordering = ["path"]
+
+    def __str__(self):
+        return f"{self.project_id}:{self.path}"
+
+
+class AgentRun(models.Model):
+    """One agentic run: the prompt, every tool call, what changed, what it cost.
+
+    Kept because an agent that edits files without a record is not auditable —
+    a member has to be able to see what OCC actually did, not just what it said.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="occ_runs")
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="runs")
+    prompt = models.TextField(blank=True, default="")
+    reply = models.TextField(blank=True, default="")
+    steps = models.PositiveSmallIntegerField(default=0)
+    tool_calls = models.JSONField(default=list, blank=True)
+    changed = models.JSONField(default=list, blank=True)
+    cost_cents = models.PositiveIntegerField(default=0)
+    stopped = models.CharField(max_length=24, default="done")
+    dry_run = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class ProjectSnapshot(models.Model):
+    """The whole workspace, captured before an agent run touches it.
+
+    OCC has no git, and the reason that matters isn't version history — it's that
+    an agentic run makes several edits and any one of them can be wrong. Without
+    an undo, a bad run leaves a member hand-repairing files an AI broke.
+
+    A snapshot is the full file set as JSON. Crude compared to a diff, and
+    correct: restoring is unambiguous, and a workspace is capped at 2MB of text so
+    the storage cost is bounded and known.
+    """
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="snapshots")
+    run = models.OneToOneField(
+        "AgentRun", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="snapshot",
+    )
+    label = models.CharField(max_length=140, blank=True, default="")
+    files = models.JSONField(default=dict, blank=True)   # {path: content}
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"snap:{self.project_id}@{self.created_at:%Y-%m-%d %H:%M}"
+
+    @property
+    def file_count(self):
+        return len(self.files or {})
+
+
+# --- MerchZ print-on-demand ------------------------------------------------
+# Made-to-order: a creator uploads ONE design, lists it on as many blank
+# products as they like, and nothing is produced until somebody buys. No stock,
+# no upfront spend, no box of unsold shirts in a closet.
+def design_path(instance, filename):
+    return f"merch/designs/{instance.owner_id}/{filename}"
+
+
+class MerchDesign(models.Model):
+    """One piece of artwork, reusable across products.
+
+    The point of separating this from MerchItem: a creator with one good design
+    can list it on a tee, a hoodie and a mug without uploading it three times or
+    keeping three sets of artwork in sync.
+    """
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="merch_designs")
+    title = models.CharField(max_length=120)
+    image = models.ImageField(upload_to=design_path)
+    # Measured once at upload, not read off the file every time a listing renders
+    # — object storage makes that a network round trip per product page.
+    width = models.PositiveIntegerField(default=0)
+    height = models.PositiveIntegerField(default=0)
+    has_alpha = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.owner}/{self.title}"
+
+    @property
+    def shortest_side(self):
+        """What a min-resolution check is actually about — a 6000x400 banner is
+        not a 6000px design."""
+        return min(self.width, self.height) if self.width and self.height else 0
+
+    def check_for(self, product):
+        """(ok, [problems]) — will this artwork print acceptably on that blank?
+
+        Advisory, not enforcement. A warning a creator can override beats a
+        refusal that's wrong: image analysis can't tell a deliberately lo-fi
+        design from a mistake, and a flat two-colour logo genuinely is fine at a
+        size that would ruin a photograph.
+        """
+        rules = product.artwork
+        problems = []
+        if not self.width or not self.height:
+            return True, []          # unmeasured (legacy row) — don't invent a verdict
+        if self.shortest_side < rules["min_px"]:
+            problems.append(
+                f"{product.name} prints with {rules['name']}, which wants at least "
+                f"{rules['min_px']}px on the short side — this is {self.shortest_side}px. "
+                "It will look soft."
+            )
+        # Cut-and-sew only. A poster is full-bleed too, but it isn't sewn, so
+        # aspect ratio and seams are none of its business.
+        if rules.get("cut_and_sew"):
+            ratio = max(self.width, self.height) / max(1, min(self.width, self.height))
+            if ratio > 1.6:
+                problems.append(
+                    f"{product.name} is printed on flat panels that are then cut and sewn, so "
+                    f"artwork should be roughly square — this is {ratio:.1f}:1 and seams will "
+                    "crop it hard."
+                )
+        # Sublimation and AOP have no white ink; paper is already white.
+        if rules.get("no_white_ink") and self.has_alpha:
+            problems.append(
+                f"{product.name} has no white ink — transparent areas come out as bare "
+                "fabric, not white. Flatten the background."
+            )
+        if rules.get("on_garment") and not self.has_alpha:
+            problems.append(
+                f"{product.name} prints the artwork onto the garment, so a transparent "
+                "background usually looks better than a solid rectangle."
+            )
+        if rules["max_colors"]:
+            problems.append(
+                f"{product.name} is {rules['name'].lower()} — {rules['max_colors']} colours "
+                "maximum, no gradients or photographs. Check your design is flat shapes."
+            )
+        return not problems, problems
+
+
+class PrintProduct(models.Model):
+    """A blank a design can be printed on, and what the printer charges.
+
+    Seeded from apps/economy/pod.py. `base_cost_cents` is the print + fulfilment
+    cost that must come out of every sale before anyone is paid — a creator who
+    prices below it would otherwise sell at a loss without being told.
+    """
+    key = models.CharField(max_length=40, unique=True)
+    name = models.CharField(max_length=80)
+    category = models.CharField(max_length=32, default="apparel")
+    base_cost_cents = models.PositiveIntegerField(default=0)
+    shipping_cents = models.PositiveIntegerField(default=0)
+    sizes = models.JSONField(default=list, blank=True)
+    colors = models.JSONField(default=list, blank=True)
+    # Printers charge more for extended sizes (a 3XL garment costs more blank)
+    # and more to print on dark colours (DTG needs a white underbase). Without
+    # these, every big or black shirt would quietly come out of the creator's
+    # margin. {"2XL": 200, "3XL": 400} — extra cents per unit.
+    size_upcharges = models.JSONField(default=dict, blank=True)
+    color_upcharges = models.JSONField(default=dict, blank=True)
+    # Supplier stock-outs. You hold no inventory, but the PRINTER does, and a
+    # blank can run out. Entries are "3XL", "Black", or "3XL|Black".
+    unavailable = models.JSONField(default=list, blank=True)
+    # How the artwork gets onto the blank. This, not the product, is what
+    # constrains a design: embroidery can't do a gradient, sublimation can't do
+    # cotton, and all-over print needs full-bleed artwork rather than a logo.
+    print_method = models.CharField(max_length=16, default="dtg")
+    provider = models.CharField(max_length=24, default="manual")
+    provider_variant = models.CharField(max_length=64, blank=True, default="")
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["category", "base_cost_cents"]
+
+    def __str__(self):
+        return f"{self.key} (${self.base_cost_cents / 100:.2f})"
+
+    @property
+    def landed_cost_cents(self):
+        """Cheapest variant: what the sale has to cover before anyone earns."""
+        return (self.base_cost_cents or 0) + (self.shipping_cents or 0)
+
+    def upcharge_cents(self, size="", color=""):
+        """Extra the printer charges for this exact size/colour, per unit."""
+        return (int((self.size_upcharges or {}).get(size, 0) or 0)
+                + int((self.color_upcharges or {}).get(color, 0) or 0))
+
+    def landed_cost_for(self, size="", color=""):
+        """Print + ship cost for the variant actually being made."""
+        return self.landed_cost_cents + self.upcharge_cents(size, color)
+
+    @property
+    def artwork(self):
+        """What a design has to be to print well on this blank."""
+        from .pod import PRINT_METHODS
+
+        return PRINT_METHODS.get(self.print_method, PRINT_METHODS["dtg"])
+
+    def variant_available(self, size="", color=""):
+        """False when the printer is out of that blank.
+
+        Matches a blocked size, a blocked colour, or a blocked size|colour pair,
+        because suppliers run out at all three granularities.
+        """
+        blocked = {str(x).strip().lower() for x in (self.unavailable or [])}
+        s, c = str(size or "").strip().lower(), str(color or "").strip().lower()
+        if s and s in blocked:
+            return False
+        if c and c in blocked:
+            return False
+        return f"{s}|{c}" not in blocked
+
+
+class PrintListing(models.Model):
+    """A design on a product, at a price the creator set. This is the thing a
+    buyer buys. Made to order — `sold` can rise forever with no inventory."""
+    design = models.ForeignKey(MerchDesign, on_delete=models.CASCADE, related_name="listings")
+    product = models.ForeignKey(PrintProduct, on_delete=models.PROTECT, related_name="listings")
+    seller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="print_listings")
+    title = models.CharField(max_length=120)
+    description = models.CharField(max_length=500, blank=True, default="")
+    price_cents = models.PositiveIntegerField(default=0)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        unique_together = ("design", "product")
+
+    def __str__(self):
+        return f"{self.title} on {self.product.key}"
+
+    @property
+    def margin_cents(self):
+        """What the creator earns per sale, before the developer tax."""
+        return max(0, (self.price_cents or 0) - self.product.landed_cost_cents)
+
+
+class PrintOrder(models.Model):
+    """A made-to-order sale, from paid to delivered.
+
+    Created at purchase and then driven by the provider. `pending` means paid and
+    queued but not yet sent to a printer — which is a legitimate resting state
+    when no provider key is configured, not a failure.
+    """
+    STATUS_PENDING = "pending"
+    STATUS_SUBMITTED = "submitted"
+    STATUS_IN_PRODUCTION = "in_production"
+    STATUS_SHIPPED = "shipped"
+    STATUS_DELIVERED = "delivered"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_FAILED = "failed"
+    STATUSES = [STATUS_PENDING, STATUS_SUBMITTED, STATUS_IN_PRODUCTION,
+                STATUS_SHIPPED, STATUS_DELIVERED, STATUS_CANCELLED, STATUS_FAILED]
+    # Terminal states never move again, so a replayed webhook can't resurrect one.
+    TERMINAL = {STATUS_DELIVERED, STATUS_CANCELLED, STATUS_FAILED}
+
+    listing = models.ForeignKey(PrintListing, on_delete=models.PROTECT, related_name="orders")
+    buyer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="print_orders")
+    seller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="print_sales")
+    size = models.CharField(max_length=16, blank=True, default="")
+    color = models.CharField(max_length=32, blank=True, default="")
+    quantity = models.PositiveSmallIntegerField(default=1)
+    # What the buyer paid on top for an extended size / dark colour, per unit.
+    upcharge_cents = models.PositiveIntegerField(default=0)
+    # On a refund, how much of the seller's credit could NOT be clawed back
+    # because they had already spent it. Wallets are PositiveIntegerFields — they
+    # cannot go negative — so the platform absorbs the difference. Recorded rather
+    # than swallowed: an unrecoverable clawback is an accounting fact somebody has
+    # to be able to see and chase.
+    clawback_shortfall_cents = models.PositiveIntegerField(default=0)
+    # Money is snapshotted: a creator repricing later must not rewrite history.
+    price_cents = models.PositiveIntegerField(default=0)
+    base_cost_cents = models.PositiveIntegerField(default=0)
+    seller_cents = models.PositiveIntegerField(default=0)
+    dev_tax_cents = models.PositiveIntegerField(default=0)
+    ship_to = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=16, default=STATUS_PENDING)
+    provider = models.CharField(max_length=24, default="manual")
+    provider_order_id = models.CharField(max_length=120, blank=True, default="")
+    tracking_url = models.CharField(max_length=300, blank=True, default="")
+    note = models.CharField(max_length=300, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["provider", "provider_order_id"])]
+
+    def __str__(self):
+        return f"order#{self.id} {self.listing_id} {self.status}"
+
+
+class PlayPurchase(models.Model):
+    """One verified Google Play purchase. The unique token is the idempotency key.
+
+    Same shape as RewardGrant, for the same reason: a purchase token can be
+    replayed — by a retrying client, a flaky network, or someone trying it on —
+    and a unique column makes a double grant impossible at the database rather
+    than probable at the application.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="play_purchases")
+    product_id = models.CharField(max_length=120)
+    # Play tokens are long; 191 keeps a unique index valid on MySQL too.
+    purchase_token = models.CharField(max_length=191, unique=True)
+    order_id = models.CharField(max_length=120, blank=True, default="")
+    kind = models.CharField(max_length=16, default="wallet")
+    value_cents = models.PositiveIntegerField(default=0)
+    subscription = models.BooleanField(default=False)
+    granted = models.BooleanField(default=False)
+    acknowledged = models.BooleanField(default=False)
+    detail = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["user", "-created_at"])]
+
+    def __str__(self):
+        return f"play:{self.product_id}·{self.user}"

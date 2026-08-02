@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 
 from .models import MerchItem, MerchPurchase, pay_between, wallet_for
 from .serializers import WalletSerializer
+from .nextstep import not_enough
 
 MIN_PRICE = 100        # $1
 MAX_PRICE = 5_000_00   # $5,000
@@ -90,7 +91,12 @@ class MerchBuyView(APIView):
             return Response({"detail": "you can't buy your own item"}, status=status.HTTP_400_BAD_REQUEST)
         w = wallet_for(request.user)
         if w.money_cents < it.price_cents:
-            return Response({"detail": "insufficient balance"}, status=status.HTTP_402_PAYMENT_REQUIRED)
+            return Response(
+                not_enough(request.user, need_cents=it.price_cents,
+                           feature=it.title,
+                           detail=f"{it.title} costs ${it.price_cents / 100:.2f} — "
+                                  f"you're ${(it.price_cents - w.money_cents) / 100:.2f} short."),
+                status=status.HTTP_402_PAYMENT_REQUIRED)
         with transaction.atomic():
             dev, _net = pay_between(request.user, it.seller, it.price_cents, note=f"MerchZ: {it.title}")
             MerchPurchase.objects.create(buyer=request.user, item=it, price_cents=it.price_cents, dev_tax_cents=dev)
