@@ -5,7 +5,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.economy import searchfilters as sf
-from apps.economy.models import Post
+from apps.economy.models import Post, profile_for
+from apps.economy.nextstep import not_enough, verification_needed
 
 from .models import (CURRENCY_CHOICES, CURRENCY_MONEY, CURRENCY_SPINAZ,
                      FORMAT_CHOICES, FORMAT_1V1, SIDE_A, SIDE_B, STATUS_LIVE,
@@ -211,6 +212,12 @@ class BetsView(APIView):
         check = (money_bet_error if currency == CURRENCY_MONEY else spinaz_bet_error)
         problem = check(b, request.user, side)
         if problem:
+            # "Verify your age in Onboarding" with no route is a dead end —
+            # the member is told what's wrong and left to find the screen.
+            if "verified 18+" in problem:
+                return Response(
+                    verification_needed(profile_for(request.user), problem),
+                    status=status.HTTP_403_FORBIDDEN)
             return Response({"detail": problem},
                             status=status.HTTP_403_FORBIDDEN)
 
@@ -222,8 +229,12 @@ class BetsView(APIView):
 
         failure = take_stake(request.user, currency, amount)
         if failure:
-            return Response({"detail": failure},
-                            status=status.HTTP_402_PAYMENT_REQUIRED)
+            body = (not_enough(request.user, need_cents=amount,
+                               feature="this bet", detail=failure)
+                    if currency == CURRENCY_MONEY
+                    else not_enough(request.user, need_spinaz=amount,
+                                    feature="this bet", detail=failure))
+            return Response(body, status=status.HTTP_402_PAYMENT_REQUIRED)
 
         bet = Bet.objects.create(battle=b, user=request.user, side=side,
                                  currency=currency, amount=amount)

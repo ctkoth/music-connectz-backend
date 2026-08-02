@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import AI_MODEL_COSTS, SPECZ_CATALOG, ai_cost, cashout_rate, limits_for
+from .nextstep import not_enough
 from .models import (
     DEV_TAX,
     MB,
@@ -324,7 +325,13 @@ class SpecZView(APIView):
         w = wallet_for(request.user)
         price = item["price_cents"]
         if w.money_cents < price:
-            return Response({"detail": "insufficient balance"}, status=status.HTTP_402_PAYMENT_REQUIRED)
+            # Was a dead end: no price, no shortfall, nowhere to go. Now it
+            # says what it costs, how far short they are, and every route out.
+            return Response(
+                not_enough(request.user, need_cents=price, feature=item["name"],
+                           detail=f"{item['name']} costs ${price / 100:.2f} — "
+                                  f"you're ${(price - w.money_cents) / 100:.2f} short."),
+                status=status.HTTP_402_PAYMENT_REQUIRED)
         dev, _ = split_cents(price, m.dev_tax_rate)  # developer tax recorded on the sale
         w.money_cents -= price
         w.save(update_fields=["money_cents", "updated_at"])

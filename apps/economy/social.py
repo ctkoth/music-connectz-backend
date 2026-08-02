@@ -43,6 +43,7 @@ from .models import (
     wallet_for,
 )
 from . import agepolicy
+from . import nextstep
 from . import searchfilters as sf
 from .serializers import WalletSerializer
 
@@ -154,7 +155,14 @@ class VenueJoinView(APIView):
 
         vw = wallet_for(request.user)
         if vw.money_cents < venue.host_price_cents:
-            return Response({"detail": "insufficient balance to attend"}, status=status.HTTP_402_PAYMENT_REQUIRED)
+            return Response(
+                nextstep.not_enough(
+                    request.user, need_cents=venue.host_price_cents,
+                    feature=venue.title,
+                    detail=f"{venue.title} costs "
+                           f"${venue.host_price_cents / 100:.2f} to attend — "
+                           f"you're ${(venue.host_price_cents - vw.money_cents) / 100:.2f} short."),
+                status=status.HTTP_402_PAYMENT_REQUIRED)
 
         with transaction.atomic():
             # Visitor pays the host (developer tax enforced).

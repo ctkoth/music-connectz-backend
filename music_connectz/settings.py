@@ -206,6 +206,11 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.SessionAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    # Renders economy.WalletFrozen as a 403 with a way forward. Without
+    # it, a wallet frozen by a chargeback 500s the moment it tries to
+    # spend, because the raise happens inside pay_between rather than
+    # in any one view.
+    "EXCEPTION_HANDLER": "apps.economy.exceptions.economy_exception_handler",
     # Only the scopes named below are throttled — there is no global anon rate,
     # so public catalogs (tabz, personaz, genrez) stay uncapped. These are the
     # unauthenticated doors: credential guessing on login/reset, and OAuth,
