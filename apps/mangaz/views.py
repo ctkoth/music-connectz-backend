@@ -31,14 +31,14 @@ from apps.economy.upgrade import response as upgrade_response
 from .ai import AiUnavailable, write_from_character, write_from_script
 from .art import (ArtNotAllowed, ArtUnavailable, can_generate,
                   draw_from_character)
-from .models import (AI_ROYALTY_RATE, FORMATS, MBTI_TYPES, ROLE_ARTIST,
-                     ROLE_SUPERVISOR, SOURCE_CHARACTER, SOURCE_HUMAN,
-                     SOURCE_SCRIPT, CharacterZ, GuardianConsent, MangaZ, Meet,
-                     MeetAttendee, Page, Room, RoomApproval, RoomMember,
-                     ART_DRAWN, ART_UPLOAD, PASS_HOURS, SALE_OWN,
-                     SALE_PASS, Commission, Sale,
-                     Volume, duration_error, is_minor,
-                     is_verified_adult)
+from .models import (AI_ROYALTY_RATE, ART_DRAWN, ART_UPLOAD, BALLOON_KINDS,
+                     BALLOON_SPEECH, FORMATS, MBTI_TYPES, PASS_HOURS,
+                     ROLE_ARTIST, ROLE_SUPERVISOR, SALE_OWN, SALE_PASS,
+                     SOURCE_CHARACTER, SOURCE_HUMAN, SOURCE_SCRIPT, TAILLESS,
+                     Balloon, CharacterZ, Commission, GuardianConsent, MangaZ,
+                     Meet, MeetAttendee, Page, Room, RoomApproval, RoomMember,
+                     Sale, Volume, duration_error, is_minor,
+                     is_verified_adult, page_script)
 
 User = get_user_model()
 
@@ -926,3 +926,140 @@ class PageArtView(APIView):
         page.art_source = SOURCE_HUMAN
         page.save(update_fields=["art", "art_source"])
         return Response({"page": {"number": page.number, "art": ""}})
+
+
+class BalloonsView(APIView):
+    """Lettering on a page — speech, thought, shout, whisper, caption, SFX.
+
+    Balloons are DATA on top of the art, never burned into the image. That
+    buys translation without redrawing, a screen reader that can read the
+    dialogue, and a typo fix that isn't a repaint.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _page(self, request, pk, number):
+        return Page.objects.filter(
+            manga_id=pk, number=number,
+            manga__room__members__user=request.user).first()
+
+    def get(self, request, pk, number):
+        page = self._page(request, pk, number)
+        if not page:
+            return Response({"detail": "No such page."},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "page": page.number,
+            "reading_order": page.manga.reading_order,
+            "balloons": [b.payload() for b in page.balloons.all()],
+            "kinds": [{"key": k, "label": v, "has_tail": k not in TAILLESS}
+                      for k, v in BALLOON_KINDS],
+            # The dialogue as plain ordered text — what a screen reader reads
+            # and what a translator works from.
+            "script": page_script(page),
+        })
+
+    def post(self, request, pk, number):
+        page = self._page(request, pk, number)
+        if not page:
+            return Response({"detail": "No such page."},
+                            status=status.HTTP_404_NOT_FOUND)
+        unsafe = page.manga.room.supervision_error()
+        if unsafe:
+            return Response({"detail": unsafe},
+                            status=status.HTTP_409_CONFLICT)
+        d = request.data or {}
+
+        def num(key, default):
+            try:
+                return float(d.get(key, default))
+            except (TypeError, ValueError):
+                return default
+
+        speaker = None
+        if d.get("speaker_id"):
+            speaker = CharacterZ.objects.filter(
+                pk=d["speaker_id"]).filter(models_q(request.user)).first()
+            if not speaker:
+                return Response(
+                    {"detail": "Pick one of your characters, or a shared one."},
+                    status=status.HTTP_400_BAD_REQUEST)
+
+        kind = str(d.get("kind", BALLOON_SPEECH))
+        if kind not in dict(BALLOON_KINDS):
+            return Response({"detail": f"Unknown balloon kind {kind!r}.",
+                             "kinds": [k for k, _ in BALLOON_KINDS]},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        b = Balloon(
+            page=page, kind=kind, text=str(d.get("text", ""))[:4000],
+            speaker=speaker,
+            x=num("x", 10), y=num("y", 10),
+            width=num("width", 25), height=num("height", 15),
+            order=int(num("order", page.balloons.count() + 1)) or 1,
+            font_scale=max(0.3, min(num("font_scale", 1.0), 4.0)))
+        if b.has_tail():
+            b.tail_x = d.get("tail_x") and num("tail_x", 0)
+            b.tail_y = d.get("tail_y") and num("tail_y", 0)
+        problem = b.geometry_error()
+        if problem:
+            return Response({"detail": problem},
+                            status=status.HTTP_400_BAD_REQUEST)
+        b.save()
+        body = {"balloon": b.payload()}
+        # Overflow is a warning, not a refusal — truncating dialogue to fit a
+        # box is the one outcome nobody wants.
+        if b.overflow():
+            body["warning"] = (
+                f"That's about {b.overflow()} characters more than fits. "
+                f"Make the balloon bigger or cut the line.")
+        return Response(body, status=status.HTTP_201_CREATED)
+
+
+class BalloonDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _balloon(self, request, pk):
+        return Balloon.objects.filter(
+            pk=pk, page__manga__room__members__user=request.user).first()
+
+    def patch(self, request, pk):
+        b = self._balloon(request, pk)
+        if not b:
+            return Response({"detail": "No such balloon."},
+                            status=status.HTTP_404_NOT_FOUND)
+        d = request.data or {}
+        for field in ("x", "y", "width", "height", "font_scale",
+                      "tail_x", "tail_y"):
+            if field in d:
+                try:
+                    setattr(b, field, float(d[field]))
+                except (TypeError, ValueError):
+                    return Response({"detail": f"{field} must be a number."},
+                                    status=status.HTTP_400_BAD_REQUEST)
+        if "text" in d:
+            b.text = str(d["text"])[:4000]
+        if "order" in d:
+            try:
+                b.order = max(1, int(d["order"]))
+            except (TypeError, ValueError):
+                pass
+        if "kind" in d and d["kind"] in dict(BALLOON_KINDS):
+            b.kind = d["kind"]
+        problem = b.geometry_error()
+        if problem:
+            return Response({"detail": problem},
+                            status=status.HTTP_400_BAD_REQUEST)
+        b.save()
+        body = {"balloon": b.payload()}
+        if b.overflow():
+            body["warning"] = f"About {b.overflow()} characters too many."
+        return Response(body)
+
+    def delete(self, request, pk):
+        b = self._balloon(request, pk)
+        if not b:
+            return Response({"detail": "No such balloon."},
+                            status=status.HTTP_404_NOT_FOUND)
+        b.delete()
+        return Response({"deleted": True})

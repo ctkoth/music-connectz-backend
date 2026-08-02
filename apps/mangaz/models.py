@@ -408,6 +408,10 @@ class MangaZ(models.Model):
     format = models.CharField(max_length=10, choices=FORMAT_CHOICES,
                               default="manga", db_index=True)
     runtime_seconds = models.PositiveIntegerField(null=True, blank=True)
+    # Which way the pages and the balloons are read. Manga is traditionally
+    # right-to-left; a reader handed the panels in the wrong order gets a
+    # different story, so it's the work's choice rather than a global default.
+    reading_order = models.CharField(max_length=3, default="rtl")
     synopsis = models.TextField(blank=True, default="")
     characters = models.ManyToManyField(CharacterZ, blank=True,
                                         related_name="appears_in")
@@ -714,3 +718,151 @@ class Commission(models.Model):
 
     def total_cents(self):
         return self.hours * self.rate_cents
+
+
+# --- lettering ---------------------------------------------------------------
+#
+# Balloons are DATA on top of the art, never burned into the image. That one
+# decision buys a lot:
+#
+#   * the page can be translated without touching the drawing
+#   * a screen reader can read the dialogue
+#   * a typo is a text edit, not a redraw
+#   * renaming a CharacterZ renames every balloon they speak in
+#
+# Burning text into the picture is how a book becomes untranslatable and
+# unreadable to anyone using assistive tech, and it is what most comic tools
+# do by default.
+
+BALLOON_SPEECH = "speech"       # ( ) with a tail
+BALLOON_THOUGHT = "thought"     # cloud, bubble trail
+BALLOON_SHOUT = "shout"         # spiked
+BALLOON_WHISPER = "whisper"     # dashed outline
+BALLOON_CAPTION = "caption"     # narration box, no tail
+BALLOON_SFX = "sfx"             # drawn sound, no container
+BALLOON_KINDS = [
+    (BALLOON_SPEECH, "Speech"), (BALLOON_THOUGHT, "Thought"),
+    (BALLOON_SHOUT, "Shout"), (BALLOON_WHISPER, "Whisper"),
+    (BALLOON_CAPTION, "Caption"), (BALLOON_SFX, "Sound effect"),
+]
+# A tail points at whoever is speaking. Captions and SFX have none.
+TAILLESS = {BALLOON_CAPTION, BALLOON_SFX}
+
+# Roughly how many characters fit in a balloon covering 1% x 1% of the page at
+# a readable size. Used to WARN about overflow, never to truncate — silently
+# clipping somebody's dialogue is worse than letting them see it spill.
+CHARS_PER_PERCENT_AREA = 0.9
+
+READ_LTR = "ltr"
+READ_RTL = "rtl"                # traditional manga: right to left
+READ_ORDERS = [(READ_LTR, "Left to right"), (READ_RTL, "Right to left")]
+
+
+class Balloon(models.Model):
+    """One piece of lettering on a page.
+
+    Position is in PERCENT of the page, not pixels. A page is read on a phone,
+    a laptop and eventually in print, and pixel coordinates drift on every one
+    of them — a balloon pinned at x=340 lands somewhere different on each
+    screen, which is the bug that makes lettering look amateur.
+    """
+
+    page = models.ForeignKey(Page, on_delete=models.CASCADE,
+                             related_name="balloons")
+    kind = models.CharField(max_length=10, choices=BALLOON_KINDS,
+                            default=BALLOON_SPEECH)
+    text = models.TextField(blank=True, default="")
+    # Who's talking. Optional — a caption has no speaker — but when it's set,
+    # renaming the character renames them everywhere they speak.
+    speaker = models.ForeignKey(CharacterZ, on_delete=models.SET_NULL,
+                                null=True, blank=True,
+                                related_name="balloons")
+
+    # Percent of page width/height. 0,0 is top-left.
+    x = models.FloatField(default=10)
+    y = models.FloatField(default=10)
+    width = models.FloatField(default=25)
+    height = models.FloatField(default=15)
+    # Where the tail points, also in percent — usually the speaker's mouth.
+    tail_x = models.FloatField(null=True, blank=True)
+    tail_y = models.FloatField(null=True, blank=True)
+
+    # Reading order within the page. Explicit rather than inferred from
+    # position, because a screen reader and a translator both need the sequence
+    # the author intended, and "top-left first" is wrong for manga.
+    order = models.PositiveIntegerField(default=1)
+
+    font_scale = models.FloatField(default=1.0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["order", "id"]
+
+    def __str__(self):
+        return f"{self.kind} on page {self.page_id}: {self.text[:30]}"
+
+    def has_tail(self):
+        return self.kind not in TAILLESS
+
+    def geometry_error(self):
+        """Why this balloon can't be placed, or None."""
+        for name, value in (("x", self.x), ("y", self.y)):
+            if not 0 <= value <= 100:
+                return f"{name} is a percent of the page — 0 to 100."
+        for name, value in (("width", self.width), ("height", self.height)):
+            if not 0 < value <= 100:
+                return f"{name} is a percent of the page — above 0, up to 100."
+        if self.x + self.width > 100.5 or self.y + self.height > 100.5:
+            return "That balloon runs off the edge of the page."
+        return None
+
+    def capacity(self):
+        """Roughly how many characters fit at this size."""
+        area = self.width * self.height
+        return max(1, int(area * CHARS_PER_PERCENT_AREA / max(0.3, self.font_scale)))
+
+    def overflow(self):
+        """How many characters too long the text is, or 0.
+
+        Reported, never enforced. Truncating somebody's dialogue to fit a box
+        is the one outcome nobody wants; showing them it will spill lets them
+        cut it or make the balloon bigger.
+        """
+        return max(0, len(self.text) - self.capacity())
+
+    def payload(self):
+        return {
+            "id": self.id, "kind": self.kind, "text": self.text,
+            "speaker": self.speaker.name if self.speaker_id else None,
+            "speaker_id": self.speaker_id,
+            "x": self.x, "y": self.y,
+            "width": self.width, "height": self.height,
+            "tail": ({"x": self.tail_x, "y": self.tail_y}
+                     if self.has_tail() and self.tail_x is not None else None),
+            "order": self.order, "font_scale": self.font_scale,
+            "overflow_chars": self.overflow(),
+            "capacity_chars": self.capacity(),
+        }
+
+
+def page_script(page):
+    """The page's dialogue as ordered plain text.
+
+    What a screen reader reads, what a translator works from, and what you'd
+    paste into a script. Only possible because the lettering is data — a page
+    with its words burned into the picture can produce none of this.
+    """
+    lines = []
+    for b in page.balloons.all():
+        if not b.text.strip():
+            continue
+        who = b.speaker.name if b.speaker_id else None
+        if b.kind == "caption":
+            lines.append(f"[{b.text}]")
+        elif b.kind == "sfx":
+            lines.append(f"*{b.text}*")
+        elif who:
+            lines.append(f"{who}: {b.text}")
+        else:
+            lines.append(b.text)
+    return "\n".join(lines)

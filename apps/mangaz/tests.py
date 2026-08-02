@@ -18,7 +18,7 @@ from .ai import AiUnavailable
 from .art import ArtUnavailable
 from .models import (AI_ROYALTY_RATE, SOURCE_CHARACTER, SOURCE_HUMAN,
                      SOURCE_SCRIPT, CharacterZ, MangaZ, Meet, Page, Room,
-                     RoomMember, Sale, Volume, is_minor,
+                     Balloon, RoomMember, Sale, Volume, is_minor,
                      is_verified_adult)
 
 User = get_user_model()
@@ -1131,3 +1131,183 @@ class DrawYourOwnPageTests(TestCase):
         before = wallet_for(self.owner).money_cents
         self.draw()
         self.assertEqual(wallet_for(self.owner).money_cents, before)
+
+
+class LetteringTests(TestCase):
+    """Balloons are data on top of the art, never burned into the image.
+
+    That one decision is what makes a page translatable, readable by a screen
+    reader, and fixable with a text edit instead of a redraw.
+    """
+
+    def setUp(self):
+        self.owner = adult("letterer")
+        self.room = Room.objects.create(title="Studio", owner=self.owner,
+                                        supervisor=self.owner)
+        RoomMember.objects.create(room=self.room, user=self.owner)
+        self.manga = MangaZ.objects.create(title="Book", room=self.room,
+                                           owner=self.owner)
+        self.page = Page.objects.create(manga=self.manga, number=1,
+                                        author=self.owner, source=SOURCE_HUMAN)
+        self.rin = CharacterZ.objects.create(owner=self.owner, name="Rin",
+                                             mbti="INFJ")
+        self.client = APIClient()
+        self.client.force_authenticate(self.owner)
+
+    def url(self):
+        return reverse("mangaz-balloons", args=[self.manga.id, 1])
+
+    def add(self, **over):
+        body = dict({"kind": "speech", "text": "Hey.", "x": 10, "y": 10,
+                     "width": 30, "height": 20}, **over)
+        return self.client.post(self.url(), body, format="json")
+
+    # --- placement -----------------------------------------------------------
+
+    def test_a_speech_balloon_lands_on_the_page(self):
+        r = self.add()
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(r.json()["balloon"]["kind"], "speech")
+
+    def test_every_kind_is_offered(self):
+        kinds = {k["key"] for k in self.client.get(self.url()).json()["kinds"]}
+        self.assertEqual(kinds, {"speech", "thought", "shout", "whisper",
+                                 "caption", "sfx"})
+
+    def test_captions_and_sfx_have_no_tail(self):
+        """A narration box isn't coming out of anyone's mouth."""
+        for kind in ("caption", "sfx"):
+            with self.subTest(kind=kind):
+                r = self.add(kind=kind, tail_x=50, tail_y=50)
+                self.assertIsNone(r.json()["balloon"]["tail"])
+
+    def test_a_speech_balloon_keeps_its_tail(self):
+        r = self.add(tail_x=45, tail_y=60)
+        self.assertEqual(r.json()["balloon"]["tail"], {"x": 45.0, "y": 60.0})
+
+    def test_position_is_percent_so_it_survives_every_screen(self):
+        """A balloon pinned at x=340px lands somewhere different on a phone,
+        a laptop and in print. That's what makes lettering look amateur."""
+        b = self.add(x=25, y=50).json()["balloon"]
+        self.assertEqual((b["x"], b["y"]), (25.0, 50.0))
+
+    def test_a_balloon_off_the_page_is_refused(self):
+        r = self.add(x=90, width=30)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("off the edge", r.json()["detail"])
+
+    def test_nonsense_coordinates_are_refused(self):
+        self.assertEqual(self.add(x=-5).status_code, 400)
+        self.assertEqual(self.add(width=0).status_code, 400)
+
+    def test_an_unknown_kind_lists_the_real_ones(self):
+        r = self.add(kind="hologram")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("speech", r.json()["kinds"])
+
+    # --- overflow ------------------------------------------------------------
+
+    def test_too_much_text_warns_instead_of_truncating(self):
+        """Silently clipping somebody's dialogue is the one outcome nobody
+        wants."""
+        r = self.add(text="x" * 4000, width=10, height=10)
+        self.assertEqual(r.status_code, 201)
+        self.assertIn("warning", r.json())
+        self.assertGreater(r.json()["balloon"]["overflow_chars"], 0)
+
+    def test_text_that_fits_gets_no_warning(self):
+        r = self.add(text="Hey.", width=40, height=30)
+        self.assertNotIn("warning", r.json())
+        self.assertEqual(r.json()["balloon"]["overflow_chars"], 0)
+
+    def test_a_bigger_balloon_holds_more(self):
+        small = self.add(width=10, height=10).json()["balloon"]
+        big = self.add(width=40, height=40, y=40).json()["balloon"]
+        self.assertGreater(big["capacity_chars"], small["capacity_chars"])
+
+    # --- speakers ------------------------------------------------------------
+
+    def test_a_balloon_can_belong_to_a_character(self):
+        r = self.add(speaker_id=self.rin.id)
+        self.assertEqual(r.json()["balloon"]["speaker"], "Rin")
+
+    def test_renaming_the_character_renames_every_balloon_they_speak_in(self):
+        self.add(speaker_id=self.rin.id)
+        self.rin.name = "Rin Okada"
+        self.rin.save(update_fields=["name"])
+        body = self.client.get(self.url()).json()
+        self.assertEqual(body["balloons"][0]["speaker"], "Rin Okada")
+
+    def test_you_cannot_put_words_in_somebody_elses_private_character(self):
+        theirs = CharacterZ.objects.create(owner=adult("someone"),
+                                           name="Theirs", shared=False)
+        self.assertEqual(self.add(speaker_id=theirs.id).status_code, 400)
+
+    # --- reading order -------------------------------------------------------
+
+    def test_manga_reads_right_to_left_by_default(self):
+        """Hand a reader the panels in the wrong order and they get a
+        different story."""
+        self.assertEqual(self.client.get(self.url()).json()["reading_order"],
+                         "rtl")
+
+    def test_order_is_explicit_not_guessed_from_position(self):
+        self.add(text="second", order=2, y=10)
+        self.add(text="first", order=1, y=60)
+        texts = [b["text"] for b in self.client.get(self.url()).json()["balloons"]]
+        self.assertEqual(texts, ["first", "second"])
+
+    # --- the payoff ----------------------------------------------------------
+
+    def test_the_page_exports_as_a_readable_script(self):
+        """What a screen reader reads and a translator works from — only
+        possible because the words aren't burned into the picture."""
+        self.add(kind="caption", text="Later that night.", order=1)
+        self.add(kind="speech", text="You came.", speaker_id=self.rin.id, order=2)
+        self.add(kind="sfx", text="KRAK", order=3, y=50)
+        script = self.client.get(self.url()).json()["script"]
+        self.assertEqual(script,
+                         "[Later that night.]\nRin: You came.\n*KRAK*")
+
+    def test_a_typo_is_a_text_edit_not_a_redraw(self):
+        bid = self.add(text="You cmae.").json()["balloon"]["id"]
+        r = self.client.patch(reverse("mangaz-balloon", args=[bid]),
+                              {"text": "You came."}, format="json")
+        self.assertEqual(r.json()["balloon"]["text"], "You came.")
+
+    def test_a_balloon_can_be_moved(self):
+        bid = self.add().json()["balloon"]["id"]
+        r = self.client.patch(reverse("mangaz-balloon", args=[bid]),
+                              {"x": 60, "y": 70}, format="json")
+        self.assertEqual((r.json()["balloon"]["x"], r.json()["balloon"]["y"]),
+                         (60.0, 70.0))
+
+    def test_moving_it_off_the_page_is_refused(self):
+        bid = self.add().json()["balloon"]["id"]
+        r = self.client.patch(reverse("mangaz-balloon", args=[bid]),
+                              {"x": 95}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_a_balloon_can_be_deleted(self):
+        bid = self.add().json()["balloon"]["id"]
+        self.assertEqual(
+            self.client.delete(reverse("mangaz-balloon", args=[bid])).status_code,
+            200)
+        self.assertEqual(Balloon.objects.count(), 0)
+
+    def test_lettering_costs_nothing_and_is_never_ai(self):
+        self.add(text="mine")
+        self.assertFalse(self.page.ai_assisted)
+        self.assertEqual(self.manga.ai_royalty_cents(10_000), 0)
+
+    def test_outsiders_cannot_letter_your_book(self):
+        outsider = APIClient()
+        outsider.force_authenticate(adult("intruder2"))
+        r = outsider.post(self.url(), {"text": "mine now"}, format="json")
+        self.assertEqual(r.status_code, 404)
+
+    def test_lettering_stops_when_the_room_goes_unsafe(self):
+        RoomMember.objects.create(room=self.room, user=kid("late_one"))
+        self.room.supervisor = None
+        self.room.save(update_fields=["supervisor"])
+        self.assertEqual(self.add().status_code, 409)
