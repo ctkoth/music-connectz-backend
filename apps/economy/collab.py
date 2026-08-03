@@ -238,7 +238,7 @@ class CollabFundView(APIView):
                 if w.money_cents < pays:
                     return Response({"detail": "Not enough balance to fund your share.", "need_cents": pays}, status=status.HTTP_402_PAYMENT_REQUIRED)
                 if w.spinaz < stake:
-                    return Response({"detail": "Not enough SpinAZ for the stake.", "need_spinaz": stake}, status=status.HTTP_402_PAYMENT_REQUIRED)
+                    return Response({"detail": "Not enough SpinaZ 🍥 for the stake.", "need_spinaz": stake}, status=status.HTTP_402_PAYMENT_REQUIRED)
                 w.money_cents -= pays
                 w.spinaz -= stake
                 deal.held_cents += pays
@@ -246,7 +246,7 @@ class CollabFundView(APIView):
                     Transaction.objects.create(user=request.user, kind=Transaction.KIND_SPEND, amount_cents=-pays, dev_tax_cents=0, note=f"CollabZ escrow hold: {deal.title}"[:200])
             else:
                 if w.spinaz < pays + stake:
-                    return Response({"detail": "Not enough SpinAZ to fund your share + stake.", "need_spinaz": pays + stake}, status=status.HTTP_402_PAYMENT_REQUIRED)
+                    return Response({"detail": "Not enough SpinaZ 🍥 to fund your share + stake.", "need_spinaz": pays + stake}, status=status.HTTP_402_PAYMENT_REQUIRED)
                 w.spinaz -= (pays + stake)
                 deal.held_spinaz += pays
             w.save(update_fields=["money_cents", "spinaz", "updated_at"])

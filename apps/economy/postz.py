@@ -275,7 +275,7 @@ class PostJoinView(APIView):
         award_spinaz(p.author, RESTRICTED_JOIN_REWARD_SPINAZ, note=f"Restricted join on '{p.title}'")
         join.rewarded = True
         join.save(update_fields=["rewarded"])
-        notify(p.author, "join", f"@{user.username} joined '{p.title}' — you earned {RESTRICTED_JOIN_REWARD_SPINAZ} SpinAZ 🛑", actor=user, item_id=f"post:{p.id}")
+        notify(p.author, "join", f"@{user.username} joined '{p.title}' — you earned +{RESTRICTED_JOIN_REWARD_SPINAZ} 🍥", actor=user, item_id=f"post:{p.id}")
         return True
 
 
