@@ -42,6 +42,7 @@ from .models import (
     Block,
     wallet_for,
 )
+from .catalog import over_char_limit
 from .serializers import WalletSerializer
 
 User = get_user_model()
@@ -418,7 +419,16 @@ class SocialView(APIView):
                 if value == 1:
                     self._notify_target(item, "like", f"@{request.user.username} liked your post 👍", request.user)
         elif action == "comment":
-            body = str((request.data or {}).get("body", "")).strip()[:500]
+            # Was hardcoded [:500], which silently cut a Premium member's 1,500
+            # characters and refused a StatZ member the unlimited they paid for.
+            body = str((request.data or {}).get("body", "")).strip()
+            cap = over_char_limit(body, membership_for(request.user).tier)
+            if cap:
+                return Response(
+                    {"detail": f"That comment is over your {cap:,}-character limit — upgrade in MembershipZ for more room.",
+                     "char_limit": cap},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             comment_id = (request.data or {}).get("comment_id")
             if comment_id is not None:
                 # Edit your own comment within the tier's edit window.
@@ -484,6 +494,17 @@ class ProfileView(APIView):
     def post(self, request):
         p = profile_for(request.user)
         d = request.data
+        # The bio is covered by the tier character limit. Nothing checked it
+        # before, so on Postgres a Premium member writing their full 1,500
+        # characters into a varchar(500) took a DataError and got a 500.
+        if "bio" in d:
+            cap = over_char_limit(str(d["bio"] or ""), membership_for(request.user).tier)
+            if cap:
+                return Response(
+                    {"detail": f"Your bio is over your {cap:,}-character limit — upgrade in MembershipZ for more room.",
+                     "char_limit": cap},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         for f in PROFILE_FIELDS:
             if f in d:
                 setattr(p, f, d[f])

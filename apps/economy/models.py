@@ -562,7 +562,10 @@ class Profile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="mcz_profile")
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)  # profile picture
     display_name = models.CharField(max_length=80, blank=True, default="")
-    bio = models.CharField(max_length=500, blank=True, default="")
+    # TextField, not CharField(500): the tier char limit runs to 1,500 for
+    # Premium and is unlimited for StatZ, so no column width can express it.
+    # The cap belongs to the tier and is applied on write, not to the storage.
+    bio = models.TextField(blank=True, default="")
     location = models.CharField(max_length=120, blank=True, default="")
     gender = models.CharField(max_length=24, blank=True, default="")
     birthday = models.CharField(max_length=10, blank=True, default="")  # YYYY-MM-DD
@@ -1192,7 +1195,9 @@ def item_rating_median(item_id):
 class SocialComment(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="social_comments")
     item_id = models.CharField(max_length=160, db_index=True)
-    body = models.CharField(max_length=500)
+    # TextField for the same reason as Profile.bio — comments are covered by
+    # the tier char limit, which Premium takes to 1,500 and StatZ removes.
+    body = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(null=True, blank=True)
     edit_history = models.JSONField(default=list, blank=True)  # [{body, at}] prior versions

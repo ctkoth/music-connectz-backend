@@ -40,12 +40,12 @@ class AuthFlowTests(TestCase):
         self.assertEqual(resp.status_code, 200, resp.content)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['access']}")
 
-        # Values longer than the column must be truncated to that column's own
-        # width. Slicing everything to 500 raised a DataError (500) on Postgres.
+        # Short identifier columns are truncated to their own width. Slicing
+        # everything to 500 raised a DataError (500) on Postgres.
         resp = self.client.patch(
             "/api/auth/me/",
             {"display_name": "D" * 400, "location": "L" * 400,
-             "gender": "G" * 400, "bio": "B" * 900},
+             "gender": "G" * 400, "bio": "B" * 300},
             format="json",
         )
         self.assertEqual(resp.status_code, 200, resp.content)
@@ -53,7 +53,30 @@ class AuthFlowTests(TestCase):
         self.assertEqual(len(profile.display_name), 80)
         self.assertEqual(len(profile.location), 120)
         self.assertEqual(len(profile.gender), 24)
-        self.assertEqual(len(profile.bio), 500)
+        # The bio is prose, so it answers to the tier's character limit rather
+        # than a column width — 300 fits even on Free's 400.
+        self.assertEqual(len(profile.bio), 300)
+
+    def test_me_refuses_a_bio_over_the_tier_limit(self):
+        """The bio used to be sliced to the column width here, which silently
+        cut a Premium member. It is now refused with the cap named."""
+        user = User.objects.create_user("bio", "bio@example.com", PASSWORD)
+        self.client.force_authenticate(user)
+        resp = self.client.patch("/api/auth/me/", {"bio": "B" * 900}, format="json")
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertEqual(resp.data["char_limit"], 400)   # Free
+        self.assertEqual(profile_for(user).bio, "")
+
+    def test_me_accepts_a_bio_the_tier_allows(self):
+        from apps.economy.models import TIER_PREMIUM, membership_for
+        user = User.objects.create_user("prem", "prem@example.com", PASSWORD)
+        m = membership_for(user)
+        m.tier = TIER_PREMIUM
+        m.save(update_fields=["tier", "updated_at"])
+        self.client.force_authenticate(user)
+        resp = self.client.patch("/api/auth/me/", {"bio": "B" * 1500}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(len(profile_for(user).bio), 1500)
 
     def test_me_does_not_fan_out_queries(self):
         """The profile/wallet/membership rows behind /api/auth/me/ are read once
