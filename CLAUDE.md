@@ -22,7 +22,7 @@ its resource emoji.
 | Resource | Emoji | Where |
 |---|---|---|
 | Energy | ⚡ | mana; regenerates hourly at reach ÷ tier |
-| SpinaZ | ✦ | coin; earned by rating, referring, AdZ/OfferZ |
+| SpinaZ | 🍥 | coin; earned by rating, referring, AdZ/OfferZ |
 | PromptZ | 🏷️ | prepaid AI credits; daily free allowance is separate |
 | Money | 💵 | real cash balance, in cents server-side |
 | XP | ⭐ | SkillZ progression |
@@ -36,8 +36,8 @@ its resource emoji.
 - If an action can fail, say whether a failed attempt is charged. (It usually
   should not be — see `vocalcoach.py`, which bills only after a usable result
   parses.)
-- Both sides of a two-sided reward get stated: a referral is `+300 ✦` for the
-  referrer and `+100 ✦` for the joinee, and both numbers belong on screen.
+- Both sides of a two-sided reward get stated: a referral is `+300 🍥` for the
+  referrer and `+100 🍥` for the joinee, and both numbers belong on screen.
 
 ### Known violations, not yet fixed
 

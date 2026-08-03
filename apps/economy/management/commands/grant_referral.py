@@ -78,8 +78,8 @@ class Command(BaseCommand):
         if options["dry_run"]:
             self.stdout.write(
                 f"Would credit {referrer.username} → {joinee.username}: "
-                f"+{REFERRAL_REWARD_REFERRER_SPINAZ} SpinaZ to {referrer.username}, "
-                f"+{REFERRAL_REWARD_JOINEE_SPINAZ} SpinaZ to {joinee.username}.")
+                f"+{REFERRAL_REWARD_REFERRER_SPINAZ} 🍥 to {referrer.username}, "
+                f"+{REFERRAL_REWARD_JOINEE_SPINAZ} 🍥 to {joinee.username}.")
             return
 
         if not record_referral(referrer, joinee):
@@ -88,7 +88,7 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(
             f"✓ {referrer.username} → {joinee.username}\n"
-            f"  {referrer.username}: +{REFERRAL_REWARD_REFERRER_SPINAZ} SpinaZ "
+            f"  {referrer.username}: +{REFERRAL_REWARD_REFERRER_SPINAZ} 🍥 "
             f"(now {wallet_for(referrer).spinaz})\n"
-            f"  {joinee.username}: +{REFERRAL_REWARD_JOINEE_SPINAZ} SpinaZ "
+            f"  {joinee.username}: +{REFERRAL_REWARD_JOINEE_SPINAZ} 🍥 "
             f"(now {wallet_for(joinee).spinaz})"))
