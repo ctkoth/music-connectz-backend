@@ -282,22 +282,92 @@ def _avatar_url(p, request):
         return None
 
 
-def _skill_years(start):
-    """Whole years from a YYYY-MM-DD skill start date to today, or None."""
+def _periods_of(skill):
+    """Every stint on a skill, as [(start, end_or_None)].
+
+    Back-compat: the original shape was a single `start` and nothing else, so a
+    skill with no `periods` is read as one still-open stint. Nobody's saved data
+    changes meaning until they add an end date.
+    """
+    if not isinstance(skill, dict):
+        return []
+    periods = skill.get("periods")
+    if isinstance(periods, list) and periods:
+        out = []
+        for pr in periods:
+            if isinstance(pr, dict) and pr.get("start"):
+                out.append((str(pr["start"]), str(pr.get("end") or "") or None))
+        return out
+    return [(str(skill["start"]), None)] if skill.get("start") else []
+
+
+def _as_date(value):
     import datetime
     try:
-        y, m, d = (int(x) for x in str(start).split("-"))
-        today = datetime.date.today()
-        yrs = today.year - y - ((today.month, today.day) < (m, d))
-        return yrs if yrs >= 0 else None
+        y, m, d = (int(x) for x in str(value).split("-"))
+        return datetime.date(y, m, d)
     except (ValueError, TypeError):
         return None
 
 
+def _years_and_days(a, b):
+    """Exact whole calendar years from a to b, plus the leftover days.
+
+    Not `(b - a).days / 365.2425` — that under-reports an exact anniversary,
+    because nine calendar years can be 3287 days and 3287 / 365.2425 is 8.9995.
+    Someone hitting nine years today would have read eight.
+    """
+    years = b.year - a.year - ((b.month, b.day) < (a.month, a.day))
+    try:
+        anniversary = a.replace(year=a.year + years)
+    except ValueError:          # 29 Feb into a non-leap year
+        anniversary = a.replace(year=a.year + years, day=28)
+    return years, (b - anniversary).days
+
+
+def _skill_years(skill):
+    """Whole years actually served on a skill — the SUM of its stints.
+
+    This used to be `today - start`, which is elapsed time, not experience. A
+    member who played 1999-2013 and stopped was credited 26 years instead of
+    14: a number nobody could have earned, printed next to their name.
+    """
+    import datetime
+    today = datetime.date.today()
+    years, days = 0, 0
+    counted = False
+    for start, end in _periods_of(skill):
+        a = _as_date(start)
+        if not a:
+            continue
+        b = _as_date(end) or today
+        if b > today:
+            b = today
+        if b <= a:
+            continue
+        y, d = _years_and_days(a, b)
+        years += y
+        days += d
+        counted = True
+    if not counted:
+        return None
+    return years + days // 365
+
+
+def skill_activity(skill):
+    """(is_active, last_played) — 14 years still going is not 14 years that
+    stopped in 2013, and a collaborator is choosing between those two."""
+    periods = _periods_of(skill)
+    if not periods:
+        return False, None
+    if any(end is None for _, end in periods):
+        return True, None
+    return False, max(end for _, end in periods if end)
+
+
 def profile_max_experience(p):
-    """A member's greatest skill experience in years — max over every persona
-    skill's start date. Skills are `{name, start}` (back-compat: plain strings
-    have no date and don't count). None when nothing is dated."""
+    """A member's greatest skill experience in years — max over every skill's
+    summed stints. None when nothing is dated."""
     best = None
     for persona in (p.personas or []):
         # A persona is either {"key", "name", "skills": [...]} or, from before
@@ -307,9 +377,8 @@ def profile_max_experience(p):
         # member who had picked a PersonaZ answered 500.
         if not isinstance(persona, dict):
             continue
-        for s in (persona.get("skills") or []):
-            start = s.get("start") if isinstance(s, dict) else None
-            yrs = _skill_years(start) if start else None
+        for skill in (persona.get("skills") or []):
+            yrs = _skill_years(skill)
             if yrs is not None and (best is None or yrs > best):
                 best = yrs
     return best
