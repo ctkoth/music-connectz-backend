@@ -89,15 +89,47 @@ AI_MODEL_COSTS = {
 }
 
 
-# Founding StatZ offer: first 50 members get StatZ at 50% off — as a one-time
-# lifetime seat, or grandfathered founding rates by year / month.
+# ---- Subscription pricing.
+#
+# Two rules hold the ladder together, and both are load-bearing:
+#
+#   1. Annual is four months free (33% off) at EVERY tier. One discount to
+#      explain, and the bigger commitment never gets the smaller reward.
+#   2. StatZ is 2.5x Premium. The gap has to be wide enough that Premium is a
+#      real choice — if StatZ costs a couple of dollars more and buys unlimited
+#      characters, the whole AI layer, CallZ and SpecZ, nobody sane picks the
+#      middle tier and it stops earning its place on the page.
+#
+# Everything below is derived, not typed twice, so the two rules can't drift.
+
+# Premium — the mid subscription (lower fees, 2x energy, 5 daily prompts).
+PREMIUM_MONTH_CENTS = 600                            # $6/mo
+PREMIUM_YEAR_CENTS = PREMIUM_MONTH_CENTS * 8         # $48/yr — four months free
+PREMIUM_PLANS = {
+    "year": {"mode": "subscription", "cents": PREMIUM_YEAR_CENTS, "interval": "year", "kind": "premium_sub"},
+    "month": {"mode": "subscription", "cents": PREMIUM_MONTH_CENTS, "interval": "month", "kind": "premium_sub"},
+}
+
+# StatZ — the top subscription (no character limit, the AI layer, CallZ, SpecZ).
+STATZ_MONTH_CENTS = 1500                             # $15/mo
+STATZ_YEAR_CENTS = STATZ_MONTH_CENTS * 8             # $120/yr — four months free
+LIFETIME_PRICE_CENTS = 30000                         # $300 one-time, StatZ forever
+STATZ_PLANS = {
+    "lifetime": {"mode": "payment", "cents": LIFETIME_PRICE_CENTS, "interval": None, "kind": "lifetime"},
+    "year": {"mode": "subscription", "cents": STATZ_YEAR_CENTS, "interval": "year", "kind": "statz_sub"},
+    "month": {"mode": "subscription", "cents": STATZ_MONTH_CENTS, "interval": "month", "kind": "statz_sub"},
+}
+
+# Founding StatZ offer: the first 50 members get StatZ at 50% off — as a
+# one-time lifetime seat, or grandfathered founding rates by year / month.
+# Derived from the StatZ prices above so the discount is always genuinely half.
 FOUNDING_TIER = TIER_STATZ
 FOUNDING_LIMIT = 50
 FOUNDING_DISCOUNT = 0.50              # first 50 pay half
-LIFETIME_PRICE_CENTS = 30000          # $300 full lifetime StatZ
-FOUNDING_PRICE_CENTS = int(LIFETIME_PRICE_CENTS * (1 - FOUNDING_DISCOUNT))  # $150 lifetime
-FOUNDING_YEAR_CENTS = 6000            # $60/yr founding StatZ (50% off full $120/yr)
-FOUNDING_MONTH_CENTS = 750            # $7.50/mo founding StatZ (50% off full $15/mo)
+_half = lambda cents: int(cents * (1 - FOUNDING_DISCOUNT))
+FOUNDING_PRICE_CENTS = _half(LIFETIME_PRICE_CENTS)   # $150 lifetime
+FOUNDING_YEAR_CENTS = _half(STATZ_YEAR_CENTS)        # $60/yr
+FOUNDING_MONTH_CENTS = _half(STATZ_MONTH_CENTS)      # $7.50/mo
 # Plan -> (Stripe mode, unit amount cents, recurring interval or None)
 FOUNDING_PLANS = {
     "lifetime": {"mode": "payment", "cents": FOUNDING_PRICE_CENTS, "interval": None, "kind": "lifetime"},
@@ -105,13 +137,12 @@ FOUNDING_PLANS = {
     "month": {"mode": "subscription", "cents": FOUNDING_MONTH_CENTS, "interval": "month", "kind": "founding_sub"},
 }
 
-# Premium tier — the mid subscription (lower fees, 2x energy, 5 daily prompts).
-PREMIUM_MONTH_CENTS = 600             # $6/mo
-PREMIUM_YEAR_CENTS = 4800            # $48/yr (2 months free)
-PREMIUM_PLANS = {
-    "year": {"mode": "subscription", "cents": PREMIUM_YEAR_CENTS, "interval": "year", "kind": "premium_sub"},
-    "month": {"mode": "subscription", "cents": PREMIUM_MONTH_CENTS, "interval": "month", "kind": "premium_sub"},
-}
+# The founding discount must never price the top tier below the middle one.
+# At Premium $10/mo this assertion fails: founding StatZ is $7.50, so the first
+# 50 members would pay less for more. It is here so that can't ship unnoticed.
+assert FOUNDING_MONTH_CENTS > PREMIUM_MONTH_CENTS, (
+    f"Founding StatZ (${FOUNDING_MONTH_CENTS / 100:.2f}/mo) must cost more than "
+    f"Premium (${PREMIUM_MONTH_CENTS / 100:.2f}/mo) — the ladder is inverted.")
 
 
 def ai_cost(model):

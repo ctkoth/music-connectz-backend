@@ -73,7 +73,7 @@ class Wallet(models.Model):
     energy = models.IntegerField(default=0)
     spinaz = models.IntegerField(default=0)
     promptz = models.IntegerField(default=0)  # prepaid AI credits; 1 PromptZ = 1¢ of AI spend
-    # Free daily prompt allowance by tier (free 1 / premium 5 / statz 20). Resets
+    # Free daily prompt allowance by tier (free 1 / premium 5 / statz 10). Resets
     # each day — it does NOT stack. `prompt_day` is the YYYY-MM-DD the counter
     # belongs to; a new day zeroes `prompts_used_today`. Prepaid promptz above is
     # separate and persists.
@@ -374,7 +374,13 @@ def award_promptz(user, amount, note="PromptZ"):
 # Free daily prompt allowance by tier. Resets each day — it does NOT stack.
 # Prepaid PromptZ (Wallet.promptz) is separate and persists. Owner/debug is
 # effectively unlimited (their AI runs are already free anyway).
-PROMPT_ALLOWANCE = {"free": 1, "premium": 5, "statz": 20, "debug": 10 ** 6}
+#
+# StatZ is 10 rather than 20 because 20 does not pay for itself: at the 3c
+# AI_MODEL_COSTS["standard"] floor, 20/day is $18/mo of model cost against a
+# $15/mo subscription, and $18 against $7.50 for a founding seat. At 10/day it
+# is $9 against $15 — a real margin, and still twice what Premium gets. Anyone
+# who wants more buys prepaid PromptZ, which is priced to cover itself.
+PROMPT_ALLOWANCE = {"free": 1, "premium": 5, "statz": 10, "debug": 10 ** 6}
 
 
 def daily_prompt_state(user):

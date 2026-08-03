@@ -24,7 +24,7 @@ from .models import (
 )
 from .serializers import WalletSerializer
 from .models import wallet_for
-from .catalog import FOUNDING_PLANS, FOUNDING_TIER, PREMIUM_PLANS
+from .catalog import FOUNDING_PLANS, FOUNDING_TIER, PREMIUM_PLANS, STATZ_PLANS
 
 MIN_CENTS = 100          # $1 minimum
 MAX_CENTS = 1_000_000    # $10,000 cap per funding
@@ -246,6 +246,45 @@ class PremiumCheckoutView(APIView):
         return Response({"url": session.url, "id": session.id, "plan": plan})
 
 
+class StatZCheckoutView(APIView):
+    """Start a Stripe checkout for StatZ at the full price. plan = month | year
+    | lifetime. The webhook (kind=statz_sub / lifetime) grants the tier;
+    cancellation downgrades it.
+
+    Without this there is no way to buy StatZ once the 50 founding seats are
+    gone — FoundingCheckoutView 409s on sold_out and nothing else sells the
+    tier, so member 51 hits a ceiling of Premium no matter what they'd pay.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not settings.STRIPE_SECRET_KEY:
+            return Response({"detail": "Stripe is not configured"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        plan = str(request.data.get("plan", "month")).lower()
+        cfg = STATZ_PLANS.get(plan)
+        if not cfg:
+            return Response({"detail": f"plan must be one of {sorted(STATZ_PLANS)}"}, status=status.HTTP_400_BAD_REQUEST)
+        import stripe
+        stripe.api_key = settings.STRIPE_SECRET_KEY
+        price_data = {
+            "currency": "usd",
+            "product_data": {"name": f"Music ConnectZ — StatZ ({plan})"},
+            "unit_amount": cfg["cents"],
+        }
+        if cfg["interval"]:
+            price_data["recurring"] = {"interval": cfg["interval"]}
+        session = stripe.checkout.Session.create(
+            mode=cfg["mode"],
+            line_items=[{"price_data": price_data, "quantity": 1}],
+            success_url=f"{settings.FRONTEND_URL}/?checkout=success&provider=stripe&kind=statz&plan={plan}",
+            cancel_url=f"{settings.FRONTEND_URL}/?checkout=cancel&provider=stripe&kind=statz&plan={plan}",
+            client_reference_id=str(request.user.id),
+            metadata={"kind": cfg["kind"], "user_id": str(request.user.id), "plan": plan},
+        )
+        return Response({"url": session.url, "id": session.id, "plan": plan})
+
+
 class MembershipRefundView(APIView):
     """Downgrade for a refund within the 10-day window.
 
@@ -372,6 +411,19 @@ class StripeWebhookView(APIView):
                 m.last_payment_ref = obj.get("subscription") or ""
                 m.last_payment_kind = meta.get("plan") or "year"
                 m.save(update_fields=["tier", "founding", "stripe_customer_id", "last_paid_at", "last_payment_ref", "last_payment_kind", "updated_at"])
+            elif kind == "statz_sub" and user:
+                # Full-price StatZ subscription. Same shape as founding, minus
+                # the founding flag — these members pay the standing rate and
+                # are not grandfathered if it changes.
+                m = membership_for(user)
+                m.tier = "statz"
+                cust = obj.get("customer")
+                if cust:
+                    m.stripe_customer_id = cust
+                m.last_paid_at = timezone.now()
+                m.last_payment_ref = obj.get("subscription") or ""
+                m.last_payment_kind = "statz_" + (meta.get("plan") or "month")
+                m.save(update_fields=["tier", "stripe_customer_id", "last_paid_at", "last_payment_ref", "last_payment_kind", "updated_at"])
             elif kind == "premium_sub" and user:
                 # Premium subscription — grant the tier and remember the Stripe
                 # customer so a cancellation can downgrade the right user.
@@ -406,7 +458,8 @@ class StripeWebhookView(APIView):
                     ato.active = False
                     ato.save(update_fields=["active"])
             else:
-                # Founding StatZ subscription ended — downgrade to Free (unless lifetime).
+                # A membership subscription ended — founding StatZ, full-price
+                # StatZ or Premium. Downgrade to Free (unless lifetime).
                 _downgrade_by_customer(sub_obj.get("customer"))
         elif etype == "invoice.payment_failed":
             # Renewal failed. If Stripe has no further retry scheduled
