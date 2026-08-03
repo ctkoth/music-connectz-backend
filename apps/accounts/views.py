@@ -39,22 +39,40 @@ def _clean_persona(raw):
     """Normalize one PersonaZ entry, keeping its skills and their start dates.
 
     Accepts the string form (just a key) and the dict form; always returns a
-    dict so downstream code has one shape to reason about. Start dates are the
-    input to profile_max_experience, so they are preserved verbatim when they
-    look like a date and dropped when they don't.
+    dict so downstream code has one shape to reason about. Skill stints are the
+    input to profile_max_experience, so they are preserved verbatim — both the
+    new `periods` list and the legacy single `start`.
     """
     if not isinstance(raw, dict):
         return {"key": str(raw)[:60], "name": str(raw)[:60], "skills": []}
 
     skills = []
     for s in (raw.get("skills") or [])[:100]:
-        if isinstance(s, dict):
-            name = str(s.get("name", ""))[:80]
-            start = str(s.get("start") or "")[:10]
-        else:
-            name, start = str(s)[:80], ""
+        if not isinstance(s, dict):
+            name = str(s)[:80]
+            if name:
+                skills.append({"name": name})
+            continue
+        name = str(s.get("name", ""))[:80]
         if not name:
             continue
+        # Stints. Experience is the SUM of these, so a member who stopped is
+        # not credited for the years they were away. The legacy single `start`
+        # is read as one still-open stint and preserved on the way through —
+        # dropping it here would silently zero somebody's experience.
+        periods = []
+        for pr in (s.get("periods") or [])[:20]:
+            if not isinstance(pr, dict):
+                continue
+            start = str(pr.get("start") or "")[:10]
+            if not start:
+                continue
+            end = str(pr.get("end") or "")[:10]
+            periods.append({"start": start, "end": end} if end else {"start": start})
+        if periods:
+            skills.append({"name": name, "periods": periods})
+            continue
+        start = str(s.get("start") or "")[:10]
         skills.append({"name": name, "start": start} if start else {"name": name})
 
     key = str(raw.get("key") or raw.get("name") or "")[:60]
