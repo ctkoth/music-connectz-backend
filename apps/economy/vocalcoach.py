@@ -29,7 +29,14 @@ from rest_framework.views import APIView
 
 from .catalog import ai_cost
 from .gemini import BASE, _bill, _key
-from .models import TIER_DEBUG, TIER_STATZ, can_afford_ai, membership_for
+from .models import (
+    TIER_DEBUG,
+    TIER_STATZ,
+    can_afford_ai,
+    daily_prompt_state,
+    membership_for,
+    wallet_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,10 +90,40 @@ def _clamp(v, lo=1, hi=10):
 
 
 class SingZCoachView(APIView):
-    """POST multipart {take, genre, range, difficulty} → score + coaching."""
+    """GET → what a take will cost this member. POST multipart
+    {take, genre, range, difficulty} → score + coaching."""
 
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request):
+        """The price, before anyone commits to paying it.
+
+        A cost that only appears in the response is a bill, not a price. This
+        answers what THIS member pays for THIS take right now — whether a free
+        daily prompt covers it, how many they have left, and what it falls back
+        to if not.
+        """
+        tier = membership_for(request.user).tier
+        allowed = tier in (TIER_STATZ, TIER_DEBUG)
+        _, _, daily_left = daily_prompt_state(request.user)
+        w = wallet_for(request.user)
+        cost = ai_cost("standard")
+        return Response({
+            "allowed": allowed,
+            "required_tier": TIER_STATZ,
+            "configured": bool(_key()),
+            "cost_cents": cost,
+            # A free daily prompt covers the whole run before any paid balance.
+            "free_today": daily_left > 0,
+            "daily_remaining": daily_left,
+            "promptz": w.promptz or 0,
+            "money_cents": w.money_cents or 0,
+            # A take the coach can't read is never billed — _bill runs only
+            # after a usable result parses. Worth saying, not just doing.
+            "charged_on_failure": False,
+            "max_mb": MAX_MB,
+        })
 
     def post(self, request):
         # The blueprint lists AI Vocal Coach under StatZ Gated Features.
@@ -161,7 +198,11 @@ class SingZCoachView(APIView):
                             status=status.HTTP_502_BAD_GATEWAY)
 
         # Only bill once a usable result exists — a failed take is not charged.
-        charged = _bill(request.user, note="SingZ Boss Take — AI Vocal Coach")
+        # count_daily: a coached take is a flat text-model run, so the tier's
+        # free daily prompts cover it first. Without it the coach silently
+        # skipped the allowance a StatZ member is told they get and went
+        # straight to their PromptZ and cash.
+        charged = _bill(request.user, note="SingZ Boss Take — AI Vocal Coach", count_daily=True)
 
         listy = lambda v: [str(x)[:300] for x in v][:6] if isinstance(v, list) else []
         return Response({

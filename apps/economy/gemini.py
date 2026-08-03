@@ -26,12 +26,19 @@ def _key():
     return getattr(settings, "GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
 
 
-def _bill(user, note):
-    """Charge the AI minimum (PromptZ→cash) and route it to the owner."""
+def _bill(user, note, count_daily=False):
+    """Charge the AI minimum (PromptZ→cash) and route it to the owner.
+
+    `count_daily` marks this as a genuine prompt run, so the tier's free daily
+    allowance covers it before any paid balance is touched — the same rule
+    AIChargeView applies. It defaults False because image and video generation
+    run far more expensive models than the allowance is priced for; a flat text
+    run like the vocal coach should pass True.
+    """
     cost = ai_cost("standard")
     if not cost:
         return 0
-    remaining = charge_ai_usage(user, cost, note=note)
+    remaining = charge_ai_usage(user, cost, note=note, count_daily=count_daily)
     owner = platform_owner()
     if owner and owner.id != user.id:
         ow = wallet_for(owner)
