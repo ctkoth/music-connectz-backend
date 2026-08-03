@@ -6,7 +6,11 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from apps.economy.models import (TIER_FREE, TIER_PREMIUM, TIER_STATZ,
+from django.utils import timezone
+
+from apps.economy.catalog import ai_cost
+from apps.economy.models import (PROMPT_ALLOWANCE, TIER_FREE, TIER_PREMIUM,
+                                 TIER_STATZ, daily_prompt_state,
                                  membership_for, wallet_for)
 
 User = get_user_model()
@@ -102,3 +106,87 @@ class SingZCoachTests(TestCase):
     @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini({**GOOD, "score": 47}))
     def test_a_wild_score_is_clamped_to_ten(self, _post, _k):
         self.assertEqual(self.client.post(URL, {"take": take()}, format="multipart").data["score"], 10)
+
+
+class CoachPriceTests(TestCase):
+    """The cost has to be knowable before the member commits to paying it.
+
+    A price that only appears in the response is a bill. GET answers what THIS
+    member pays for THIS take right now.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("k", "k@e.com", "pw12345678")
+        self.client.force_authenticate(self.user)
+        m = membership_for(self.user); m.tier = TIER_STATZ; m.save()
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    def test_the_price_is_readable_before_sending_anything(self, _k):
+        resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data["cost_cents"], ai_cost("standard"))
+        self.assertTrue(resp.data["allowed"])
+        self.assertTrue(resp.data["configured"])
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    def test_it_says_a_free_daily_prompt_covers_the_take(self, _k):
+        resp = self.client.get(URL)
+        self.assertTrue(resp.data["free_today"])
+        self.assertEqual(resp.data["daily_remaining"], PROMPT_ALLOWANCE[TIER_STATZ])
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    def test_it_says_a_failed_take_is_not_charged(self, _k):
+        # Stated, not just implemented — _bill runs only after a usable parse.
+        self.assertFalse(self.client.get(URL).data["charged_on_failure"])
+
+    @patch("apps.economy.vocalcoach._key", return_value=None)
+    def test_an_unconfigured_key_is_visible_up_front(self, _k):
+        self.assertFalse(self.client.get(URL).data["configured"])
+
+    def test_a_free_member_is_told_the_gate_without_uploading(self):
+        m = membership_for(self.user); m.tier = TIER_FREE; m.save(update_fields=["tier", "updated_at"])
+        resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertFalse(resp.data["allowed"])
+        self.assertEqual(resp.data["required_tier"], TIER_STATZ)
+
+
+class CoachDailyAllowanceTests(TestCase):
+    """A coached take is a flat text-model run, so the tier's free daily
+    prompts must cover it. _bill skipped the allowance entirely and went
+    straight to PromptZ and cash — charging for something the member was told
+    they already had."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("k", "k@e.com", "pw12345678")
+        self.client.force_authenticate(self.user)
+        m = membership_for(self.user); m.tier = TIER_STATZ; m.save()
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    def test_a_take_spends_a_free_daily_prompt_before_any_balance(self, _post, _k):
+        w = wallet_for(self.user); w.money_cents = 500; w.promptz = 50; w.save()
+        before = daily_prompt_state(self.user)[2]
+        resp = self.client.post(URL, {"take": take()}, format="multipart")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(daily_prompt_state(self.user)[2], before - 1)
+        w.refresh_from_db()
+        self.assertEqual(w.money_cents, 500, "cash was touched while a free prompt remained")
+        self.assertEqual(w.promptz, 50, "PromptZ was spent while a free prompt remained")
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    def test_once_the_allowance_is_gone_it_falls_back_to_promptz(self, _post, _k):
+        w = wallet_for(self.user)
+        w.money_cents = 500
+        w.promptz = 50
+        w.prompts_used_today = PROMPT_ALLOWANCE[TIER_STATZ]
+        w.prompt_day = timezone.now().date()
+        w.save()
+        resp = self.client.post(URL, {"take": take()}, format="multipart")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        w.refresh_from_db()
+        self.assertEqual(w.promptz, 50 - ai_cost("standard"))
+        self.assertEqual(w.money_cents, 500, "cash was spent while PromptZ remained")
