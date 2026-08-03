@@ -23,6 +23,13 @@ except Exception:  # pragma: no cover - never let this take the deploy down
 
 INSTRUMENT_APP_KEYS = ["singz", "rapz"]
 
+# SingZ Boss Take — the blueprint's scored final take, coached by the StatZ AI
+# Vocal Coach. Mounted beside the SkillZ tree the InstrumentZ panel already uses.
+try:
+    from apps.economy.vocalcoach import SingZCoachView
+except Exception:  # pragma: no cover - never take the deploy down
+    SingZCoachView = None
+
 
 def health(_request):
     return JsonResponse(
@@ -57,7 +64,8 @@ urlpatterns = [
 ] + [
     path(f"api/{key}/", include((training_urlpatterns(key), key)))
     for key in INSTRUMENT_APP_KEYS
-]
+] + ([path("api/singz/coach/", SingZCoachView.as_view(), name="singz-coach")]
+     if SingZCoachView else [])
 
 # Serve user uploads. When S3/R2 is configured (S3_BUCKET_NAME), django-storages
 # serves media from the bucket and these URLs are absolute — this route isn't hit.
