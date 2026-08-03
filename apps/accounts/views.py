@@ -151,7 +151,8 @@ class MeView(APIView):
         """Update the member's editable profile fields (personas, birthday →
         drives ZodiacZ + the AdZ age gate, nationalities, and basic display
         bits) on the searchable economy profile. Returns the updated user."""
-        from apps.economy.models import profile_for, zodiac_for
+        from apps.economy.catalog import over_char_limit
+        from apps.economy.models import membership_for, profile_for, zodiac_for
         p = profile_for(request.user)
         data = request.data or {}
         changed = []
@@ -172,10 +173,26 @@ class MeView(APIView):
             p.birthday = bd
             p.sign = zodiac_for(bd)
             changed += ["birthday", "sign"]
-        # Truncate to each column's real width — display_name/location/gender are
-        # much narrower than bio, and overflowing them raises a DataError (500)
-        # on PostgreSQL instead of quietly saving.
-        for f in ("display_name", "bio", "location", "gender"):
+        # The bio is member-authored prose, so its ceiling is the tier's
+        # character limit — not a column width. It used to share the truncation
+        # below, which silently cut a Premium member at the old varchar(500);
+        # now that the column is a TextField, `max_length` is None and slicing
+        # by it would let anyone write without limit. Refuse instead, naming
+        # the cap, the same as ProfileView and MessagesView do.
+        if isinstance(data.get("bio"), str):
+            cap = over_char_limit(data["bio"], membership_for(request.user).tier)
+            if cap:
+                return Response(
+                    {"detail": f"Your bio is over your {cap:,}-character limit — upgrade in MembershipZ for more room.",
+                     "char_limit": cap},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            p.bio = data["bio"]
+            changed.append("bio")
+        # Truncate to each column's real width — display_name/location/gender
+        # are short identifiers, not prose, and overflowing them raises a
+        # DataError (500) on PostgreSQL instead of quietly saving.
+        for f in ("display_name", "location", "gender"):
             if isinstance(data.get(f), str):
                 limit = p._meta.get_field(f).max_length
                 setattr(p, f, data[f][:limit])

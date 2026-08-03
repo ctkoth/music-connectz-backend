@@ -41,6 +41,17 @@ def chars_unlimited(tier):
     return limits_for(tier)["char_limit"] >= UNLIMITED_CHARS
 
 
+def over_char_limit(text, tier):
+    """The cap `text` broke for this tier, or None if it fits.
+
+    Every member-authored text field should run through this rather than
+    hardcoding a number — a literal cap silently cuts a Premium member's 1,500
+    characters and refuses a StatZ member the unlimited writing they paid for.
+    """
+    cap = limits_for(tier)["char_limit"]
+    return None if len(text or "") <= cap else cap
+
+
 # How long after posting a message/comment/post/rating you can still edit it, by
 # tier: Free 4 min, Premium 40 min, StatZ 4 hours. (Owner/debug: no limit.)
 EDIT_WINDOW_SECONDS = {
