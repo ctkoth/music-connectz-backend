@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from apps.economy import catalog
+from apps.economy import catalog, models
 
 User = get_user_model()
 
@@ -41,6 +41,40 @@ class PricingLadderTests(TestCase):
         self.assertEqual(catalog.STATZ_MONTH_CENTS, 1500)      # $15/mo
         self.assertEqual(catalog.STATZ_YEAR_CENTS, 12000)      # $120/yr
         self.assertEqual(catalog.LIFETIME_PRICE_CENTS, 30000)  # $300 once
+
+
+class PromptAllowanceMarginTests(TestCase):
+    """A tier's free prompts must not cost more than the tier charges.
+
+    At 20/day StatZ was $18/mo of model cost against $15/mo of revenue — it
+    lost money on every member who actually used what they paid for.
+    """
+
+    def _monthly_cost_cents(self, tier):
+        # 30 days at the standard model's floor rate.
+        return models.PROMPT_ALLOWANCE[tier] * 30 * catalog.ai_cost("standard")
+
+    def test_statz_allowance_pays_for_itself(self):
+        cost = self._monthly_cost_cents("statz")
+        self.assertLess(cost, catalog.STATZ_MONTH_CENTS,
+                        f"StatZ gives away ${cost / 100:.2f}/mo of AI on a "
+                        f"${catalog.STATZ_MONTH_CENTS / 100:.2f}/mo plan.")
+
+    def test_premium_allowance_pays_for_itself(self):
+        cost = self._monthly_cost_cents("premium")
+        self.assertLess(cost, catalog.PREMIUM_MONTH_CENTS,
+                        f"Premium gives away ${cost / 100:.2f}/mo of AI on a "
+                        f"${catalog.PREMIUM_MONTH_CENTS / 100:.2f}/mo plan.")
+
+    def test_statz_still_gets_meaningfully_more_than_premium(self):
+        # Trimming the allowance must not flatten the tier it belongs to.
+        self.assertGreaterEqual(models.PROMPT_ALLOWANCE["statz"],
+                                models.PROMPT_ALLOWANCE["premium"] * 2)
+
+    def test_the_published_allowances(self):
+        self.assertEqual(models.PROMPT_ALLOWANCE["free"], 1)
+        self.assertEqual(models.PROMPT_ALLOWANCE["premium"], 5)
+        self.assertEqual(models.PROMPT_ALLOWANCE["statz"], 10)
 
 
 class StatZCheckoutTests(TestCase):

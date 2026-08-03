@@ -118,7 +118,7 @@ class StatsView(APIView):
                 "my_energy": w.energy,
                 "my_spinaz": w.spinaz,
                 "my_promptz": w.promptz,  # prepaid AI credits (persist)
-                # Free daily prompts by tier (free 1 / premium 5 / statz 20) — reset daily, don't stack.
+                # Free daily prompts by tier (free 1 / premium 5 / statz 10) — reset daily, don't stack.
                 "my_promptz_daily": prompt_allowance,
                 "my_promptz_daily_used": prompts_used,
                 "my_promptz_daily_remaining": prompts_remaining,
