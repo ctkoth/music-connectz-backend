@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import ai_cost
-from .models import can_afford_ai, charge_ai_usage, wallet_for
+from .models import can_afford_ai, charge_ai_usage, daily_prompt_state, wallet_for
 from .views import platform_owner
 
 BASE = "https://generativelanguage.googleapis.com/v1beta"
@@ -29,6 +29,11 @@ def _key():
 def _bill(user, note, count_daily=False):
     """Charge the AI minimum (PromptZ→cash) and route it to the owner.
 
+    Returns what the member was ACTUALLY charged, which is 0 when a free daily
+    prompt covered the run. It used to return the nominal cost either way, so a
+    take paid for by the allowance still reported "-3 PromptZ spent" — the
+    caller cannot state a price honestly if this lies about it.
+
     `count_daily` marks this as a genuine prompt run, so the tier's free daily
     allowance covers it before any paid balance is touched — the same rule
     AIChargeView applies. It defaults False because image and video generation
@@ -38,7 +43,19 @@ def _bill(user, note, count_daily=False):
     cost = ai_cost("standard")
     if not cost:
         return 0
+    # Read the allowance before spending it: charge_ai_usage returns the same
+    # money balance whether or not a free prompt was consumed.
+    covered_free = False
+    if count_daily:
+        _, _, daily_left = daily_prompt_state(user)
+        covered_free = daily_left > 0
     remaining = charge_ai_usage(user, cost, note=note, count_daily=count_daily)
+    if remaining is None:
+        return None
+    if covered_free:
+        # Nothing left the member's wallet, so nothing may arrive in the
+        # owner's — otherwise the platform mints money out of an allowance.
+        return 0
     owner = platform_owner()
     if owner and owner.id != user.id:
         ow = wallet_for(owner)

@@ -190,3 +190,95 @@ class CoachDailyAllowanceTests(TestCase):
         w.refresh_from_db()
         self.assertEqual(w.promptz, 50 - ai_cost("standard"))
         self.assertEqual(w.money_cents, 500, "cash was spent while PromptZ remained")
+
+
+class InstrumentCoachTests(TestCase):
+    """A take is a take, but the dimensions are not transferable. Scoring a
+    guitar take on "breath" would be a number with nothing behind it — the
+    exact failure the Boss Take exists to avoid."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("k", "k@e.com", "pw12345678")
+        self.client.force_authenticate(self.user)
+        m = membership_for(self.user); m.tier = TIER_STATZ; m.save()
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    def test_rapz_has_its_own_coach_route(self, _k):
+        resp = self.client.get("/api/rapz/coach/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data["app_key"], "rapz")
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    def test_rap_is_not_scored_on_vocal_range(self, _k):
+        scores = self.client.get("/api/rapz/coach/").data["scores"]
+        self.assertIn("flow", scores)
+        self.assertNotIn("range", scores)
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    def test_only_singing_offers_a_range_picker(self, _k):
+        self.assertIsNotNone(self.client.get(URL).data["range_label"])
+        self.assertIsNone(self.client.get("/api/rapz/coach/").data["range_label"])
+        self.assertEqual(len(self.client.get(URL).data["ranges"]), 8)
+        self.assertEqual(self.client.get("/api/rapz/coach/").data["ranges"], [])
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    def test_singz_still_scores_exactly_what_it_did(self, _k):
+        scores = self.client.get(URL).data["scores"]
+        self.assertEqual(set(scores), {"pitch", "tone", "breath", "range", "agility"})
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    def test_the_caveat_names_this_instruments_dimensions(self, _k):
+        self.assertIn("Flow", self.client.get("/api/rapz/coach/").data["caveat"])
+        self.assertIn("Pitch", self.client.get(URL).data["caveat"])
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.vocalcoach.requests.post")
+    def test_the_prompt_asks_for_this_instruments_dimensions(self, post, _k):
+        post.return_value = fake_gemini({**GOOD, "scores": {"flow": 7, "timing": 8, "breath": 6,
+                                                            "clarity": 7, "delivery": 9}})
+        resp = self.client.post("/api/rapz/coach/", {"take": take()}, format="multipart")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        sent = post.call_args.kwargs["json"]["contents"][0]["parts"][0]["text"]
+        self.assertIn("rap coach", sent)
+        self.assertIn('"flow"', sent)
+        self.assertNotIn('"range"', sent)
+        self.assertEqual(set(resp.data["scores"]), {"flow", "timing", "breath", "clarity", "delivery"})
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    def test_a_rap_take_is_gated_and_billed_the_same_way(self, _post, _k):
+        m = membership_for(self.user); m.tier = TIER_FREE; m.save(update_fields=["tier", "updated_at"])
+        resp = self.client.post("/api/rapz/coach/", {"take": take()}, format="multipart")
+        self.assertEqual(resp.status_code, 403, resp.content)
+
+
+class FreePromptCoversTheTakeTests(TestCase):
+    """Billing spends the free daily allowance first, so the affordability gate
+    has to know that. It didn't — a StatZ member with prompts left and an empty
+    wallet was refused a take that would have cost them nothing."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("k", "k@e.com", "pw12345678")
+        self.client.force_authenticate(self.user)
+        m = membership_for(self.user); m.tier = TIER_STATZ; m.save()
+        w = wallet_for(self.user); w.money_cents = 0; w.promptz = 0; w.save()
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    def test_an_empty_wallet_still_gets_a_take_while_free_prompts_remain(self, _post, _k):
+        resp = self.client.post(URL, {"take": take()}, format="multipart")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data["cost_cents"], 0)
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    def test_once_the_allowance_is_gone_an_empty_wallet_is_refused(self, _post, _k):
+        from django.utils import timezone
+        w = wallet_for(self.user)
+        w.prompts_used_today = PROMPT_ALLOWANCE[TIER_STATZ]
+        w.prompt_day = timezone.now().date()
+        w.save()
+        resp = self.client.post(URL, {"take": take()}, format="multipart")
+        self.assertEqual(resp.status_code, 402, resp.content)
