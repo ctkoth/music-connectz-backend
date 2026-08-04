@@ -28,6 +28,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import ai_cost
+from .instruments import DIFFICULTIES, profile_for_app, prompt_for
 from .gemini import BASE, _bill, _key
 from .models import (
     TIER_DEBUG,
@@ -41,33 +42,6 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 MAX_MB = 25
-# Difficulty and the scored dimensions come straight from the blueprint.
-DIFFICULTIES = ["starter", "builder", "performer", "stageboss"]
-SCORES = ["pitch", "tone", "breath", "range", "agility"]
-
-PROMPT = """You are the Music ConnectZ vocal coach. You are listening to one \
-recorded take from a member training in SingZ.
-
-Their context:
-- Genre: {genre}
-- Target vocal range: {range}
-- Difficulty: {difficulty}
-
-Score the take and coach it. Write the way a good engineer talks to an artist \
-in the room: direct, specific, second person, no hedging and no flattery. Name \
-the actual moment something goes wrong rather than describing the category. \
-Never invent detail you cannot hear.
-
-Return ONLY valid JSON, no markdown fence, in exactly this shape:
-{{
-  "score": <overall 1-10 integer>,
-  "scores": {{"pitch": <1-10>, "tone": <1-10>, "breath": <1-10>, "range": <1-10>, "agility": <1-10>}},
-  "verdict": "<one sentence, what this take is>",
-  "strengths": ["<what genuinely worked>", "..."],
-  "fixes": ["<the specific thing to change, and how>", "..."],
-  "next_drill": "<one drill to run before the next take>"
-}}"""
-
 
 def _parse(text):
     """Pull the JSON object out of a model reply that may be fenced."""
@@ -90,11 +64,20 @@ def _clamp(v, lo=1, hi=10):
 
 
 class SingZCoachView(APIView):
-    """GET → what a take will cost this member. POST multipart
-    {take, genre, range, difficulty} → score + coaching."""
+    """The Boss Take coach for any InstrumentZ app.
+
+    GET  → what a take costs this member, plus the dimensions THIS instrument
+           is scored on so the client renders from the server rather than
+           keeping its own copy that can drift.
+    POST → multipart {take, genre, range, difficulty} → score + coaching.
+
+    `app_key` is bound per-route in urls.py; it defaults to singz so the
+    original /api/singz/coach/ keeps behaving exactly as it did.
+    """
 
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
+    app_key = "singz"
 
     def get(self, request):
         """The price, before anyone commits to paying it.
@@ -104,6 +87,7 @@ class SingZCoachView(APIView):
         daily prompt covers it, how many they have left, and what it falls back
         to if not.
         """
+        profile = profile_for_app(self.app_key)
         tier = membership_for(request.user).tier
         allowed = tier in (TIER_STATZ, TIER_DEBUG)
         _, _, daily_left = daily_prompt_state(request.user)
@@ -123,6 +107,16 @@ class SingZCoachView(APIView):
             # after a usable result parses. Worth saying, not just doing.
             "charged_on_failure": False,
             "max_mb": MAX_MB,
+            # The client renders its score chips, range picker and honest-scope
+            # footnote from these, so they cannot disagree with what the model
+            # was actually asked to score.
+            "app_key": self.app_key,
+            "label": profile["label"],
+            "scores": profile["scores"],
+            "range_label": profile["range_label"],
+            "ranges": [{"key": k, "label": l} for k, l in profile["ranges"]],
+            "difficulties": DIFFICULTIES,
+            "caveat": profile["caveat"],
         })
 
     def post(self, request):
@@ -151,16 +145,23 @@ class SingZCoachView(APIView):
             return Response({"detail": "The vocal coach isn't configured — set GEMINI_API_KEY on the backend."},
                             status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
+        # A free daily prompt covers the whole run, so it has to count here
+        # too. Billing spends the allowance first (count_daily below), and this
+        # gate did not know that — a StatZ member with prompts left but an
+        # empty balance was refused a take that would have cost them nothing.
         cost = ai_cost("standard")
-        if cost and not can_afford_ai(request.user, cost):
+        _, _, daily_left = daily_prompt_state(request.user)
+        if cost and not daily_left and not can_afford_ai(request.user, cost):
             return Response({"detail": "Not enough PromptZ / balance for a coached take.", "cost_cents": cost},
                             status=status.HTTP_402_PAYMENT_REQUIRED)
 
         data = request.data
-        prompt = PROMPT.format(
+        difficulty = str(data.get("difficulty", "")).lower()
+        prompt = prompt_for(
+            self.app_key,
             genre=str(data.get("genre", "") or "unspecified")[:60],
-            range=str(data.get("range", "") or "unspecified")[:60],
-            difficulty=(str(data.get("difficulty", "")).lower() if str(data.get("difficulty", "")).lower() in DIFFICULTIES else "builder"),
+            target=str(data.get("range", "") or "unspecified")[:60],
+            difficulty=difficulty if difficulty in DIFFICULTIES else "builder",
         )
 
         model = os.environ.get("GEMINI_AUDIO_MODEL", "gemini-2.5-flash")
@@ -202,12 +203,13 @@ class SingZCoachView(APIView):
         # free daily prompts cover it first. Without it the coach silently
         # skipped the allowance a StatZ member is told they get and went
         # straight to their PromptZ and cash.
-        charged = _bill(request.user, note="SingZ Boss Take — AI Vocal Coach", count_daily=True)
+        charged = _bill(request.user, note=f"{profile_for_app(self.app_key)['label']} Boss Take — AI Coach", count_daily=True)
 
         listy = lambda v: [str(x)[:300] for x in v][:6] if isinstance(v, list) else []
         return Response({
             "score": _clamp(parsed.get("score")),
-            "scores": {k: _clamp((parsed.get("scores") or {}).get(k)) for k in SCORES},
+            "scores": {k: _clamp((parsed.get("scores") or {}).get(k))
+                       for k in profile_for_app(self.app_key)["scores"]},
             "verdict": str(parsed.get("verdict", ""))[:400],
             "strengths": listy(parsed.get("strengths")),
             "fixes": listy(parsed.get("fixes")),
