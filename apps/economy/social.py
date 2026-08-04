@@ -268,6 +268,41 @@ class FaceRateView(APIView):
         return Response({"id": f.id, "median": face_median(f), "count": f.ratings.count(), "my_rating": score})
 
 
+# ---- SubstanceZ stances.
+#
+# "Do you use this" is the wrong question — sometimes and often are different
+# lives, and a member who is sober BY CHOICE is saying something a blank list
+# cannot say. Stored as {key: stance}, which is what the search filter has
+# always read; the UI was sending a bare list of keys, so `subs.get(k)` hit a
+# list and answered AttributeError — a 500 on Social ConnectZ for anyone who
+# had saved SubstanceZ at all.
+STANCES = ("sometimes", "often")
+# Selections made before frequency existed. Kept distinct rather than guessed
+# into a frequency: we know they picked it, we do not know how often.
+STANCE_LEGACY = "yes"
+ACTIVE_STANCES = {"use", "sometimes", "often", STANCE_LEGACY}
+
+
+def clean_substances(value):
+    """Normalize whatever the client sent into {key: stance}.
+
+    Accepts the current dict form and the legacy list form, so an older client
+    keeps working and an already-saved list is repaired on the next write.
+    """
+    if isinstance(value, dict):
+        out = {}
+        for k, v in list(value.items())[:40]:
+            key = str(k)[:40]
+            stance = str(v or "").lower()
+            if not key:
+                continue
+            out[key] = stance if stance in STANCES else STANCE_LEGACY
+        return out
+    if isinstance(value, list):
+        return {str(k)[:40]: STANCE_LEGACY for k in value[:40] if str(k)}
+    return {}
+
+
 # ---- Cross-user profiles ----
 PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign",
                   "nationalities", "regions", "substances", "sober",
@@ -576,7 +611,12 @@ class ProfileView(APIView):
                 )
         for f in PROFILE_FIELDS:
             if f in d:
-                setattr(p, f, d[f])
+                setattr(p, f, clean_substances(d[f]) if f == "substances" else d[f])
+        # Sober by choice is a claim, not the absence of one. It is mutually
+        # exclusive with declaring use — holding both would be incoherent on a
+        # filter somebody relies on to find people living the same way.
+        if p.sober:
+            p.substances = {}
         p.save()
         return Response(_profile_full(p, request))
 
@@ -752,7 +792,6 @@ class MembersView(APIView):
         # A member passes if, on every selected substance, they are NOT active
         # ("use"/"sometimes"). Undeclared counts as sober-friendly.
         substances = multi("substances")
-        active_stances = {"use", "sometimes"}
         sober_only = request.query_params.get("sober") in ("1", "true", "True")
 
         def num(key):
@@ -783,8 +822,9 @@ class MembersView(APIView):
             if sober_only and not p.sober:
                 continue
             if substances:
-                subs = p.substances or {}
-                if any(subs.get(k) in active_stances for k in substances):
+                # Rows saved by the old client hold a list, not a dict.
+                subs = clean_substances(p.substances)
+                if any(subs.get(k) in ACTIVE_STANCES for k in substances):
                     continue
             if age_min is not None or age_max is not None:
                 age = profile_age(p)
