@@ -11,7 +11,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Transaction
+from rest_framework import status
+
+from .features import can_use, feature_map, gate_detail
+from .models import Transaction, membership_for
 
 # The marks from CLAUDE.md. Served with the rows so the client never keeps its
 # own copy — a resource with two symbols is the bug we already fixed once.
@@ -53,6 +56,12 @@ class LogZView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        tier = membership_for(request.user).tier
+        if not can_use(tier, "logz"):
+            # One wording for every gate, naming the tier AND what it buys —
+            # a member is never told "upgrade" without being told to what.
+            return Response(gate_detail("logz"), status=status.HTTP_403_FORBIDDEN)
+
         qs = request.user.transactions.all()
         resource = (request.query_params.get("resource") or "").lower()
         if resource in RESOURCE_EMOJI:
@@ -83,3 +92,16 @@ class LogZView(APIView):
             ],
             "count": qs.count(),
         })
+
+
+class FeaturesView(APIView):
+    """GET → every gated feature and whether THIS member has it.
+
+    The client renders locks from this rather than keeping its own copy of the
+    tier rules, so a gate and the UI advertising it cannot disagree.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response({"features": feature_map(membership_for(request.user).tier)})

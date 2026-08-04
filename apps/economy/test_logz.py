@@ -2,8 +2,10 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from apps.economy.models import (Transaction, award_energy, award_spinaz,
-                                 complete_onboarding, record_referral, wallet_for)
+from apps.economy.features import can_use
+from apps.economy.models import (TIER_FREE, TIER_PREMIUM, TIER_STATZ, Transaction,
+                                 award_energy, award_spinaz, complete_onboarding,
+                                 membership_for, record_referral, wallet_for)
 
 User = get_user_model()
 URL = "/api/economy/logz/"
@@ -56,6 +58,8 @@ class LogZViewTests(TestCase):
         self.client = APIClient()
         self.user = User.objects.create_user("k", "k@e.com", "pw12345678")
         self.client.force_authenticate(self.user)
+        # LogZ is a Premium feature; these cover the ledger, not the gate.
+        m = membership_for(self.user); m.tier = TIER_PREMIUM; m.save(update_fields=["tier", "updated_at"])
 
     def test_it_shows_what_happened_and_when(self):
         award_spinaz(self.user, 300, "referral (referrer)")
@@ -104,3 +108,60 @@ class LogZViewTests(TestCase):
     def test_it_needs_auth(self):
         self.client.force_authenticate(None)
         self.assertIn(self.client.get(URL).status_code, (401, 403))
+
+
+class FeatureGateTests(TestCase):
+    """Gates were written inline — vocalcoach.py hardcodes its own StatZ check —
+    so each new one meant another hand-rolled 403 with its own wording, and the
+    client had to guess what it could offer."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("k", "k@e.com", "pw12345678")
+        self.client.force_authenticate(self.user)
+
+    def _tier(self, t):
+        m = membership_for(self.user); m.tier = t; m.save(update_fields=["tier", "updated_at"])
+
+    def test_logz_is_a_premium_feature(self):
+        self._tier(TIER_FREE)
+        resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 403, resp.content)
+        self.assertEqual(resp.data["required_tier"], TIER_PREMIUM)
+        self.assertEqual(resp.data["feature"], "logz")
+
+    def test_the_403_says_what_the_tier_buys(self):
+        self._tier(TIER_FREE)
+        body = self.client.get(URL).data
+        self.assertIn("LogZ", body["detail"])
+        self.assertTrue(body["blurb"], "a gate must say what it unlocks, not just 'upgrade'")
+
+    def test_premium_and_statz_both_open_it(self):
+        for t in (TIER_PREMIUM, TIER_STATZ):
+            self._tier(t)
+            self.assertEqual(self.client.get(URL).status_code, 200)
+
+    def test_can_use_is_a_ladder_not_an_equality(self):
+        # StatZ must open everything Premium opens.
+        self.assertTrue(can_use(TIER_STATZ, "logz"))
+        self.assertTrue(can_use(TIER_STATZ, "automationz"))
+        self.assertFalse(can_use(TIER_PREMIUM, "automationz"))
+
+    def test_an_unknown_feature_is_open_not_locked(self):
+        # A typo in a key must never silently lock somebody out of what they paid for.
+        self.assertTrue(can_use(TIER_FREE, "not_a_real_feature"))
+
+    def test_the_feature_map_says_what_this_member_has(self):
+        self._tier(TIER_PREMIUM)
+        feats = {f["key"]: f for f in self.client.get("/api/economy/features/").data["features"]}
+        self.assertTrue(feats["logz"]["unlocked"])
+        self.assertTrue(feats["tellz"]["unlocked"])
+        self.assertTrue(feats["suggestionz"]["unlocked"])
+        self.assertFalse(feats["automationz"]["unlocked"], "AutomationZ is StatZ-only")
+        self.assertFalse(feats["gitz"]["unlocked"], "GitZ is StatZ-only")
+
+    def test_every_feature_carries_a_label_emoji_and_blurb(self):
+        feats = self.client.get("/api/economy/features/").data["features"]
+        self.assertTrue(feats)
+        for f in feats:
+            self.assertTrue(f["label"] and f["emoji"] and f["blurb"], f)
