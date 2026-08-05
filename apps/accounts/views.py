@@ -69,11 +69,24 @@ def _clean_persona(raw):
                 continue
             end = str(pr.get("end") or "")[:10]
             periods.append({"start": start, "end": end} if end else {"start": start})
+        # Hourly rate, in cents. The blueprint prices CallZ by "the other
+        # member's skill rate per hour" and nothing stored one, so the price
+        # range had no metric to gate on.
+        try:
+            rate = max(0, int(s.get("rate_cents") or 0))
+        except (TypeError, ValueError):
+            rate = 0
+        entry = {"name": name}
         if periods:
-            skills.append({"name": name, "periods": periods})
-            continue
-        start = str(s.get("start") or "")[:10]
-        skills.append({"name": name, "start": start} if start else {"name": name})
+            entry["periods"] = periods
+        else:
+            start = str(s.get("start") or "")[:10]
+            if start:
+                entry["start"] = start
+        if rate:
+            entry["rate_cents"] = rate
+        skills.append(entry)
+        continue
 
     key = str(raw.get("key") or raw.get("name") or "")[:60]
     return {"key": key, "name": str(raw.get("name") or key)[:60], "skills": skills}

@@ -43,6 +43,7 @@ from .models import (
     wallet_for,
 )
 from .catalog import over_char_limit
+from .gates import GATE_KEYS, clean_gates, failing_gate, member_metrics, refusal
 from .serializers import WalletSerializer
 
 User = get_user_model()
@@ -61,6 +62,7 @@ def _venue_dict(v, request):
         "host_price_cents": v.host_price_cents,
         "visitor_pay_cents": v.visitor_pay_cents,
         "min_attract": v.min_attract,
+        "gates": v.gates or {},
         "attending": v.attendances.filter(visitor=request.user).exists(),
         "created_at": v.created_at,
     }
@@ -93,6 +95,7 @@ class VenuesView(APIView):
             host_price_cents=cents("host_price_cents"),
             visitor_pay_cents=cents("visitor_pay_cents") if mode == Venue.MODE_COLLAB else 0,
             min_attract=min(10, max(0, cents("min_attract"))),
+            gates=clean_gates(d.get("gates")),
         )
         return Response({"venue": _venue_dict(v, request)}, status=status.HTTP_201_CREATED)
 
@@ -107,7 +110,18 @@ class VenueJoinView(APIView):
         if venue.host_id == request.user.id:
             return Response({"detail": "you can't attend your own venue"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Scalable attractiveness gate — rated visitors below the bar are blocked.
+        # All five ranges, evaluated exactly as search evaluates them, so what
+        # a host advertises and what the door enforces cannot diverge.
+        if venue.gates:
+            me = profile_for(request.user)
+            host_p = profile_for(venue.host)
+            origin = ((host_p.lat, host_p.lng)
+                      if (host_p.share_location and host_p.lat is not None) else (None, None))
+            failed = failing_gate(member_metrics(me, origin), venue.gates)
+            if failed:
+                return Response(refusal(failed, venue.gates), status=status.HTTP_403_FORBIDDEN)
+
+        # Legacy attractiveness gate — rated visitors below the bar are blocked.
         if venue.min_attract > 0:
             med = attractiveness_median(request.user)
             if med is not None and med < venue.min_attract:
@@ -398,6 +412,25 @@ def skill_activity(skill):
     if any(end is None for _, end in periods):
         return True, None
     return False, max(end for _, end in periods if end)
+
+
+def profile_skill_rate(p, pick=min):
+    """The member's hourly skill rate in cents, across every dated skill.
+
+    `min` by default: a price gate asks "can I afford this person", and the
+    honest answer is their cheapest skill, not their dearest.
+    """
+    rates = []
+    for persona in (p.personas or []):
+        if not isinstance(persona, dict):
+            continue
+        for s in (persona.get("skills") or []):
+            if isinstance(s, dict) and s.get("rate_cents"):
+                try:
+                    rates.append(int(s["rate_cents"]))
+                except (TypeError, ValueError):
+                    pass
+    return pick(rates) if rates else None
 
 
 def profile_max_experience(p):
@@ -802,10 +835,17 @@ class MembersView(APIView):
 
         # Range gates. When a min/max is set, members outside it (or with no
         # value for that metric) are excluded — the range "gates exclusive".
-        age_min, age_max = num("age_min"), num("age_max")
-        attr_min, attr_max = num("attr_min"), num("attr_max")
+        # All five ranges through one spec, so search and a gated post agree
+        # about what "outside the range" means. Skill rating and skill price
+        # were missing entirely.
+        gates = clean_gates({
+            "rating": [num("rating_min"), num("rating_max")],
+            "price": [num("price_min"), num("price_max")],
+            "attract": [num("attr_min"), num("attr_max")],
+            "age": [num("age_min"), num("age_max")],
+            "km": [None, num("max_km")],
+        })
         exp_min, exp_max = num("exp_min"), num("exp_max")  # years-of-experience range
-        max_km = num("max_km")  # distance range: within N km of the searcher
 
         me = profile_for(request.user)
         origin = (me.lat, me.lng) if (me.share_location and me.lat is not None) else (None, None)
@@ -826,26 +866,16 @@ class MembersView(APIView):
                 subs = clean_substances(p.substances)
                 if any(subs.get(k) in ACTIVE_STANCES for k in substances):
                     continue
-            if age_min is not None or age_max is not None:
-                age = profile_age(p)
-                if age is None or (age_min is not None and age < age_min) or (age_max is not None and age > age_max):
-                    continue
-            if attr_min is not None or attr_max is not None:
-                a = attractiveness_median(p.user)
-                if a is None or (attr_min is not None and a < attr_min) or (attr_max is not None and a > attr_max):
-                    continue
+            metrics = member_metrics(p, origin)
+            if gates and failing_gate(metrics, gates):
+                continue
             if exp_min is not None or exp_max is not None:
-                exp = profile_max_experience(p)
+                exp = metrics.get("exp")
                 if exp is None or (exp_min is not None and exp < exp_min) or (exp_max is not None and exp > exp_max):
                     continue
-            dist = None
-            if origin[0] is not None and p.share_location and p.lat is not None:
-                dist = haversine_km(origin[0], origin[1], p.lat, p.lng)
-                if max_km is not None and (dist is None or dist > max_km):
-                    continue
-            elif max_km is not None:
-                # Distance filter requested but no shared location on one side → exclude.
-                continue
+            # The distance GATE lives in the spec above; this is the number
+            # shown on the card. Computed once in member_metrics either way.
+            dist = metrics.get("km")
             card = _profile_card(p, request)
             card["distance_km"] = dist
             results.append(card)

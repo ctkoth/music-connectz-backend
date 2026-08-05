@@ -12,6 +12,8 @@ All money moves run inside a single transaction with the wallets locked
 from datetime import timedelta
 
 from django.conf import settings
+
+from .gates import clean_gates, failing_gate, member_metrics, refusal
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
@@ -47,6 +49,7 @@ def deal_dict(deal, me=None):
         "currency": deal.currency,
         "status": deal.status,
         "stake_spinaz": deal.stake_spinaz,
+        "gates": deal.gates or {},
         "initiator": deal.initiator.username,
         "mine": bool(me and deal.initiator_id == me.id),
         "participants": deal.participants,
@@ -199,6 +202,7 @@ class CollabDealsView(APIView):
         deal = CollabDeal.objects.create(
             initiator=request.user, title=title, currency=currency,
             stake_spinaz=stake, participants=settled, status=CollabDeal.STATUS_DRAFT,
+            gates=clean_gates(d.get("gates")),
         )
         return Response(deal_dict(deal, request.user), status=status.HTTP_201_CREATED)
 

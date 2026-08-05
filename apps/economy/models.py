@@ -470,7 +470,11 @@ class Venue(models.Model):
     custom_name = models.CharField(max_length=60, blank=True, default="")
     host_price_cents = models.PositiveIntegerField(default=0)
     visitor_pay_cents = models.PositiveIntegerField(default=0)
-    min_attract = models.PositiveSmallIntegerField(default=0)  # 0-10
+    min_attract = models.PositiveSmallIntegerField(default=0)  # 0-10, legacy
+    # All five range gates: {"rating": [lo, hi], "price": [...], "attract": ...,
+    # "age": ..., "km": [None, hi]}. Exclusive — no value for a gated metric
+    # means excluded. min_attract above is kept so old venues keep working.
+    gates = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -1360,6 +1364,7 @@ class CollabDeal(models.Model):
     held_cents = models.PositiveIntegerField(default=0)
     held_spinaz = models.PositiveIntegerField(default=0)
     held_stake_spinaz = models.PositiveIntegerField(default=0)
+    gates = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
