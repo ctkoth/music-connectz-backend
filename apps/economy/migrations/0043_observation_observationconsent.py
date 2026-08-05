@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("economy", "0041_alter_profile_bio_alter_socialcomment_body"),
+        ("economy", "0042_transaction_amount_transaction_resource"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

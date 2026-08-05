@@ -107,10 +107,23 @@ class Transaction(models.Model):
         (KIND_SPEND, "Spend"),
     ]
 
+    # Which resource moved. Money was the only thing ever recorded, so SpinaZ
+    # and Energy — the two things members actually earn — left no trace at all
+    # and "did my referral pay?" was unanswerable except by watching a balance.
+    RES_MONEY, RES_SPINAZ, RES_ENERGY, RES_PROMPTZ, RES_XP = "money", "spinaz", "energy", "promptz", "xp"
+    RESOURCE_CHOICES = [
+        (RES_MONEY, "Money"), (RES_SPINAZ, "SpinaZ"), (RES_ENERGY, "Energy"),
+        (RES_PROMPTZ, "PromptZ"), (RES_XP, "XP"),
+    ]
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="transactions"
     )
     kind = models.CharField(max_length=16, choices=KIND_CHOICES)
+    resource = models.CharField(max_length=12, choices=RESOURCE_CHOICES, default=RES_MONEY)
+    # Signed, in the resource's own unit: cents for money, whole SpinaZ/Energy.
+    # amount_cents stays authoritative for money so nothing that reads it moves.
+    amount = models.IntegerField(default=0)
     amount_cents = models.IntegerField(help_text="Signed: positive credit, negative debit")
     dev_tax_cents = models.PositiveIntegerField(default=0)
     note = models.CharField(max_length=200, blank=True, default="")
@@ -777,19 +790,48 @@ class LinkClick(models.Model):
 
 
 def award_spinaz(user, amount, note=""):
-    """Credit SpinAZ to a user's wallet (best-effort, idempotent per caller)."""
+    """Credit SpinAZ to a user's wallet and record it.
+
+    The `note` every caller already passes used to be accepted and thrown
+    away, so a member could watch their balance change and never learn what
+    moved it or when.
+    """
     w = wallet_for(user)
     w.spinaz = (w.spinaz or 0) + int(amount)
     w.save(update_fields=["spinaz", "updated_at"])
+    log_resource(user, Transaction.RES_SPINAZ, int(amount), note or "SpinaZ")
     return w.spinaz
 
 
 def award_energy(user, amount, note=""):
-    """Credit Energy to a user's wallet."""
+    """Credit Energy to a user's wallet, and record it."""
     w = wallet_for(user)
     w.energy = (w.energy or 0) + int(amount)
     w.save(update_fields=["energy", "updated_at"])
+    log_resource(user, Transaction.RES_ENERGY, int(amount), note or "Energy")
     return w.energy
+
+
+def log_resource(user, resource, amount, note=""):
+    """One line in LogZ: what moved, which way, and when.
+
+    Best-effort — a ledger write must never be the reason a reward fails to
+    land. The balance is the truth; this is the account of how it got there.
+    """
+    if not user or not amount:
+        return None
+    try:
+        return Transaction.objects.create(
+            user=user,
+            kind=Transaction.KIND_REWARD if amount > 0 else Transaction.KIND_SPEND,
+            resource=resource,
+            amount=int(amount),
+            amount_cents=int(amount) if resource == Transaction.RES_MONEY else 0,
+            dev_tax_cents=0,
+            note=str(note)[:200],
+        )
+    except Exception:  # pragma: no cover - never break a reward over its log
+        return None
 
 
 # ---- Referrals (two-sided) — inviting a new member rewards both people once.
