@@ -131,7 +131,10 @@ class WalletView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        w = wallet_for(request.user)
+        # Pay what's owed BEFORE reporting the balance, or the wallet screen is
+        # the one place that shows a stale number.
+        from .models import settle_energy
+        w = settle_energy(request.user)
         recent = request.user.transactions.all()[:50]
         return Response({"wallet": WalletSerializer(w).data, "transactions": TransactionSerializer(recent, many=True).data})
 

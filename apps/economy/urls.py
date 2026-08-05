@@ -11,6 +11,7 @@ from .rewards import (AdmobConfigView, AdmobSsvView, OfferzView,
 from .translate import TranslateView
 from .gemini import GeminiImageView, GeminiVideoView, GeminiVideoStatusView
 from .notifications import NotificationsView
+from .earn import EarnView
 from .moderation import ReportView, BlockView
 from .account import AccountExportView, AccountDeleteView
 from .messages_view import MessagesView
@@ -80,6 +81,7 @@ from .views import (
 
 urlpatterns = [
     path("wallet/", WalletView.as_view(), name="economy-wallet"),
+    path("earn/", EarnView.as_view(), name="economy-earn"),
     path("wallet/add/", AddFundsView.as_view(), name="economy-wallet-add"),
     path("membership/", MembershipView.as_view(), name="economy-membership"),
     path("membership/refund/", MembershipRefundView.as_view(), name="economy-membership-refund"),

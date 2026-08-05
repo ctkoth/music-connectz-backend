@@ -79,6 +79,11 @@ class Wallet(models.Model):
     # separate and persists.
     prompt_day = models.CharField(max_length=10, blank=True, default="")
     prompts_used_today = models.PositiveIntegerField(default=0)
+    # Up to when passive Energy has been paid. Settled lazily on read, the same
+    # way the daily prompt counter rolls over — there is no scheduler on Render
+    # and a resource that only accrues while a cron is healthy is a resource
+    # that silently stops.
+    energy_accrued_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     @property
@@ -872,6 +877,34 @@ def record_referral(referrer, joinee):
 
 
 # ---- Onboarding — a one-time reward for finishing the intro flow.
+# Rating pays. The working notes have said so from the start — "+1 ⚡ on a
+# rating is the reason people rate" — and no rating view ever awarded anything,
+# so the single most common action in the app paid nothing at all.
+#
+# Only a NEW rating pays (changing your mind is free but not profitable), and a
+# daily cap keeps it from being a faucet somebody can sit on.
+RATING_REWARD_ENERGY = 1
+RATING_REWARD_DAILY_CAP = 20
+RATING_NOTE = "Rating"
+
+
+def reward_for_rating(user, what=""):
+    """Credit the rating reward, respecting the daily cap. Returns what landed."""
+    from datetime import timedelta
+    if not user:
+        return 0
+    day_ago = timezone.now() - timedelta(hours=24)
+    paid = Transaction.objects.filter(
+        user=user, resource=Transaction.RES_ENERGY,
+        note__startswith=RATING_NOTE, created_at__gte=day_ago,
+    ).count()
+    if paid >= RATING_REWARD_DAILY_CAP:
+        return 0
+    note = f"{RATING_NOTE} — {what}" if what else RATING_NOTE
+    award_energy(user, RATING_REWARD_ENERGY, note)
+    return RATING_REWARD_ENERGY
+
+
 ONBOARD_REWARD_SPINAZ = 150
 ONBOARD_REWARD_ENERGY = 50
 
@@ -1110,6 +1143,49 @@ def energy_rate_per_hour(user):
     m = membership_for(user)
     divisor = {TIER_FREE: 10, TIER_PREMIUM: 5, TIER_STATZ: 1, TIER_DEBUG: 1}.get(m.tier, 10)
     return reach // divisor
+
+
+# Being away shouldn't bank Energy forever — it regenerates like mana, it is
+# not a savings account. A member gone a week comes back to a day's worth.
+ENERGY_CATCHUP_HOURS = 24
+
+
+def settle_energy(user):
+    """Pay the passive Energy owed since the last settlement. Returns the wallet.
+
+    `energy_rate_per_hour` has been published on the profile since reach
+    shipped and NOTHING EVER PAID IT — the app stated an hourly rate and the
+    wallet never moved, so every member's passive income was a number on a
+    screen. This is the other half of that promise.
+
+    Whole hours only, with the remainder left on the clock: a member who
+    refreshes every ten minutes must earn exactly what one who refreshes once a
+    day earns. Advancing the clock to `now` would round their partial hour away
+    on every single page load, which is worse than not accruing at all.
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    w = wallet_for(user)
+    now = timezone.now()
+    # First ever settlement starts the clock rather than back-paying to signup.
+    if w.energy_accrued_at is None:
+        w.energy_accrued_at = now
+        w.save(update_fields=["energy_accrued_at", "updated_at"])
+        return w
+    hours = int((now - w.energy_accrued_at).total_seconds() // 3600)
+    if hours <= 0:
+        return w
+    w.energy_accrued_at = w.energy_accrued_at + timedelta(hours=hours)
+    w.save(update_fields=["energy_accrued_at", "updated_at"])
+    granted = energy_rate_per_hour(user) * min(hours, ENERGY_CATCHUP_HOURS)
+    if granted:
+        # Through award_energy so it lands in LogZ. A balance that changes
+        # while you were away, with no line saying why, reads as a bug.
+        award_energy(user, granted, f"Passive Energy — {min(hours, ENERGY_CATCHUP_HOURS)}h at reach")
+        w.refresh_from_db()
+    return w
 
 
 def relationship(me, other):

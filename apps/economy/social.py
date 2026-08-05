@@ -37,6 +37,7 @@ from .models import (
     relationship,
     energy_rate_per_hour,
     notify,
+    reward_for_rating,
     Post,
     blocked_user_ids,
     Block,
@@ -194,11 +195,13 @@ class AttractivenessRateView(APIView):
         if target.id == request.user.id:
             return Response({"detail": "can't rate yourself"}, status=status.HTTP_400_BAD_REQUEST)
 
-        AttractivenessRating.objects.update_or_create(
+        _, created = AttractivenessRating.objects.update_or_create(
             rater=request.user, target=target, defaults={"score": score}
         )
+        earned = reward_for_rating(request.user, f"@{target.username}") if created else 0
         m = membership_for(target)
         return Response({
+            "earned_energy": earned,
             "target": target.username,
             "median": attractiveness_median(target) if m.attractiveness_public else None,
             "public": m.attractiveness_public,
@@ -278,8 +281,10 @@ class FaceRateView(APIView):
             return Response({"detail": "score (1-10) required"}, status=status.HTTP_400_BAD_REQUEST)
         if not (1 <= score <= 10):
             return Response({"detail": "score must be 1-10"}, status=status.HTTP_400_BAD_REQUEST)
-        FaceRating.objects.update_or_create(rater=request.user, face=f, defaults={"score": score})
-        return Response({"id": f.id, "median": face_median(f), "count": f.ratings.count(), "my_rating": score})
+        _, created = FaceRating.objects.update_or_create(rater=request.user, face=f, defaults={"score": score})
+        earned = reward_for_rating(request.user, "FaceZ") if created else 0
+        return Response({"id": f.id, "median": face_median(f), "count": f.ratings.count(),
+                         "my_rating": score, "earned_energy": earned})
 
 
 # ---- SubstanceZ stances.
@@ -600,6 +605,7 @@ class SocialView(APIView):
                 existing = ItemRating.objects.filter(user=request.user, item_id=item).first()
                 if existing is None:
                     ItemRating.objects.create(user=request.user, item_id=item, score=score)
+                    reward_for_rating(request.user, item)
                     self._notify_target(item, "rate", f"@{request.user.username} rated your post {score}/10 ⭐", request.user)
                 else:
                     # Changing your rating is an edit — only within the tier's window.
@@ -720,8 +726,10 @@ class ProfileRateView(APIView):
             return Response({"detail": "can't rate yourself"}, status=status.HTTP_400_BAD_REQUEST)
 
         model = OverallRating if dimension == "overall" else AttractivenessRating
-        model.objects.update_or_create(rater=request.user, target=target, defaults={"score": score})
+        _, created = model.objects.update_or_create(rater=request.user, target=target, defaults={"score": score})
+        earned = reward_for_rating(request.user, f"@{target.username}") if created else 0
         return Response({
+            "earned_energy": earned,
             "target": target.username,
             "dimension": dimension,
             "overall": overall_median(target),

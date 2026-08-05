@@ -110,5 +110,8 @@ class DirectZRateView(APIView):
             return Response({"detail": "work not found"}, status=status.HTTP_404_NOT_FOUND)
         if w.owner_id == request.user.id:
             return Response({"detail": "can't rate your own work"}, status=status.HTTP_400_BAD_REQUEST)
-        DirectZRating.objects.update_or_create(rater=request.user, work=w, defaults={"score": score})
+        _, created = DirectZRating.objects.update_or_create(rater=request.user, work=w, defaults={"score": score})
+        if created:
+            from .models import reward_for_rating
+            reward_for_rating(request.user, "DirectZ")
         return Response(_work_dict(w, request))

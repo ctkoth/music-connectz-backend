@@ -69,7 +69,10 @@ class PublicUserSerializer(serializers.ModelSerializer):
         return self._economy(obj, "wallet").spinaz
 
     def get_energy(self, obj):
-        return self._economy(obj, "wallet").energy
+        # Settling here is what makes passive Energy real: /api/auth/me/ is hit
+        # on every page load, so the balance is current wherever it's shown.
+        from apps.economy.models import settle_energy
+        return settle_energy(obj).energy
 
     def get_onboarded(self, obj):
         return self._economy(obj, "profile").onboarded
