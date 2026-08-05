@@ -2,6 +2,7 @@ from django.urls import path
 
 from .directz_app import DirectZWorksView, DirectZRateView
 from .postz import PostsView, PostJoinView, PostShareView, SubmissionsView
+from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .distributez import TranscodeView, LyricsView
 from .adz import AdzView, AdDetailView, AdRewardView
@@ -139,6 +140,9 @@ urlpatterns = [
     path("members/", MembersView.as_view(), name="economy-members"),
     path("members/<str:username>/", MemberProfileView.as_view(), name="economy-member"),
     path("postz/", PostsView.as_view(), name="economy-postz"),
+    # No account needed — a public post by link, and the author behind it.
+    path("postz/<int:pk>/", PublicPostView.as_view(), name="economy-postz-public"),
+    path("public/members/<str:username>/", PublicProfileView.as_view(), name="economy-public-member"),
     path("postz/<int:pk>/join/", PostJoinView.as_view(), name="economy-postz-join"),
     path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
     path("submissions/", SubmissionsView.as_view(), name="economy-submissions"),

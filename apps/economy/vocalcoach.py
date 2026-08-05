@@ -63,6 +63,71 @@ def _clamp(v, lo=1, hi=10):
         return None
 
 
+def score_take(app_key, f, content_type, *, genre, target, difficulty):
+    """Send one take to the model. Returns (payload, error) — exactly one is None.
+
+    Shared by the member coach and the no-account trial, deliberately: a trial
+    that grades on an easier rubric is a lie about the product, and the first
+    real take would contradict it.
+    """
+    key = _key()
+    if not key:
+        return None, (
+            {"detail": "The vocal coach isn't configured — set GEMINI_API_KEY on the backend."},
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    difficulty = str(difficulty or "").lower()
+    prompt = prompt_for(
+        app_key,
+        genre=str(genre or "unspecified")[:60],
+        target=str(target or "unspecified")[:60],
+        difficulty=difficulty if difficulty in DIFFICULTIES else "builder",
+    )
+    model = os.environ.get("GEMINI_AUDIO_MODEL", "gemini-2.5-flash")
+    unreadable = ({"detail": "The coach couldn't process that take."}, status.HTTP_502_BAD_GATEWAY)
+    try:
+        resp = requests.post(
+            f"{BASE}/models/{model}:generateContent?key={key}",
+            json={"contents": [{"parts": [
+                {"text": prompt},
+                {"inline_data": {"mime_type": content_type,
+                                 "data": base64.b64encode(f.read()).decode()}},
+            ]}]},
+            timeout=90,
+        )
+    except requests.RequestException:
+        logger.exception("SingZ coach: could not reach Gemini")
+        return None, ({"detail": "Couldn't reach the coach. Try that take again."},
+                      status.HTTP_502_BAD_GATEWAY)
+
+    if resp.status_code != 200:
+        logger.error("SingZ coach: Gemini returned %s — %s", resp.status_code, resp.text[:300])
+        return None, unreadable
+    try:
+        text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError, ValueError):
+        logger.error("SingZ coach: unexpected Gemini shape")
+        return None, unreadable
+
+    parsed = _parse(text)
+    if not parsed or _clamp(parsed.get("score")) is None:
+        logger.error("SingZ coach: unparseable reply — %s", text[:300])
+        return None, ({"detail": "The coach's reply didn't come back readable. Try again."},
+                      status.HTTP_502_BAD_GATEWAY)
+
+    listy = lambda v: [str(x)[:300] for x in v][:6] if isinstance(v, list) else []
+    return {
+        "score": _clamp(parsed.get("score")),
+        "scores": {k: _clamp((parsed.get("scores") or {}).get(k))
+                   for k in profile_for_app(app_key)["scores"]},
+        "verdict": str(parsed.get("verdict", ""))[:400],
+        "strengths": listy(parsed.get("strengths")),
+        "fixes": listy(parsed.get("fixes")),
+        "next_drill": str(parsed.get("next_drill", ""))[:300],
+    }, None
+
+
 class SingZCoachView(APIView):
     """The Boss Take coach for any InstrumentZ app.
 
@@ -156,47 +221,14 @@ class SingZCoachView(APIView):
                             status=status.HTTP_402_PAYMENT_REQUIRED)
 
         data = request.data
-        difficulty = str(data.get("difficulty", "")).lower()
-        prompt = prompt_for(
-            self.app_key,
-            genre=str(data.get("genre", "") or "unspecified")[:60],
-            target=str(data.get("range", "") or "unspecified")[:60],
-            difficulty=difficulty if difficulty in DIFFICULTIES else "builder",
+        payload, err = score_take(
+            self.app_key, f, content_type,
+            genre=data.get("genre"), target=data.get("range"),
+            difficulty=data.get("difficulty"),
         )
-
-        model = os.environ.get("GEMINI_AUDIO_MODEL", "gemini-2.5-flash")
-        try:
-            resp = requests.post(
-                f"{BASE}/models/{model}:generateContent?key={key}",
-                json={"contents": [{"parts": [
-                    {"text": prompt},
-                    {"inline_data": {"mime_type": content_type,
-                                     "data": base64.b64encode(f.read()).decode()}},
-                ]}]},
-                timeout=90,
-            )
-        except requests.RequestException:
-            logger.exception("SingZ coach: could not reach Gemini")
-            return Response({"detail": "Couldn't reach the coach. Try that take again."},
-                            status=status.HTTP_502_BAD_GATEWAY)
-
-        if resp.status_code != 200:
-            logger.error("SingZ coach: Gemini returned %s — %s", resp.status_code, resp.text[:300])
-            return Response({"detail": "The coach couldn't process that take."},
-                            status=status.HTTP_502_BAD_GATEWAY)
-
-        try:
-            text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-        except (KeyError, IndexError, ValueError):
-            logger.error("SingZ coach: unexpected Gemini shape")
-            return Response({"detail": "The coach couldn't process that take."},
-                            status=status.HTTP_502_BAD_GATEWAY)
-
-        parsed = _parse(text)
-        if not parsed or _clamp(parsed.get("score")) is None:
-            logger.error("SingZ coach: unparseable reply — %s", text[:300])
-            return Response({"detail": "The coach's reply didn't come back readable. Try again."},
-                            status=status.HTTP_502_BAD_GATEWAY)
+        if err:
+            body, code = err
+            return Response(body, status=code)
 
         # Only bill once a usable result exists — a failed take is not charged.
         # count_daily: a coached take is a flat text-model run, so the tier's
@@ -204,15 +236,4 @@ class SingZCoachView(APIView):
         # skipped the allowance a StatZ member is told they get and went
         # straight to their PromptZ and cash.
         charged = _bill(request.user, note=f"{profile_for_app(self.app_key)['label']} Boss Take — AI Coach", count_daily=True)
-
-        listy = lambda v: [str(x)[:300] for x in v][:6] if isinstance(v, list) else []
-        return Response({
-            "score": _clamp(parsed.get("score")),
-            "scores": {k: _clamp((parsed.get("scores") or {}).get(k))
-                       for k in profile_for_app(self.app_key)["scores"]},
-            "verdict": str(parsed.get("verdict", ""))[:400],
-            "strengths": listy(parsed.get("strengths")),
-            "fixes": listy(parsed.get("fixes")),
-            "next_drill": str(parsed.get("next_drill", ""))[:300],
-            "cost_cents": charged,
-        })
+        return Response({**payload, "cost_cents": charged})

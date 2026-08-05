@@ -97,6 +97,9 @@ class RegisterSerializer(serializers.Serializer):
     birthday = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
     # Inviter's referral code (their username). Credits both sides once on join.
     ref = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
+    # Token from a no-account trial Boss Take. Signing up with it attaches that
+    # take to the new account, so the thing they made at the door isn't lost.
+    trial_token = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
 
     def validate_username(self, value):
         value = value.strip()
@@ -143,6 +146,12 @@ class RegisterSerializer(serializers.Serializer):
             referrer = User.objects.filter(username__iexact=code).first()
             if referrer:
                 record_referral(referrer, user)
+        # Claim the trial take, if they came in through one. Best-effort by
+        # design — a stale token must never cost somebody their registration.
+        token = (validated.get("trial_token") or "").strip()
+        if token:
+            from apps.economy.models import claim_trial_take
+            claim_trial_take(user, token)
         return user
 
 

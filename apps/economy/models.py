@@ -1496,3 +1496,67 @@ def record_observation(user, kind, key, label="", app_key="", target=""):
 # How many repeats before it is worth telling somebody about. Twice is a
 # coincidence; this is the line where "you keep doing this" stops being noise.
 SIGNIFICANT_AT = 3
+
+
+# ---- Trial Boss Take (no account required) ----
+#
+# A stranger records one take, gets it scored, and is handed a token. Signing up
+# with that token attaches the take to the new account, so the trial is not a
+# dead end — the thing they made in the door opens inside SingZ/RapZ.
+#
+# It costs real money to run (Gemini), and an unauthenticated endpoint that
+# spends money is a bill anybody with curl can run up. Hence both caps below.
+TRIAL_MAX_MB = 8
+TRIAL_PER_IP_HOURS = 24          # one free scored take per address per day
+TRIAL_CLAIM_DAYS = 30            # a token stays claimable this long
+
+
+def trial_daily_cap():
+    """Global ceiling on trial takes per day. Tunable without a deploy."""
+    import os
+    try:
+        return max(0, int(os.environ.get("TRIAL_TAKES_PER_DAY", "200")))
+    except (TypeError, ValueError):
+        return 200
+
+
+class TrialTake(models.Model):
+    """One Boss Take scored for somebody who has no account yet."""
+    token = models.CharField(max_length=64, unique=True, db_index=True)
+    app_key = models.CharField(max_length=32, default="singz")
+    ip = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    result = models.JSONField(default=dict, blank=True)
+    claimed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        null=True, blank=True, related_name="trial_takes",
+    )
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.app_key} trial {self.token[:8]}"
+
+
+def claim_trial_take(user, token):
+    """Attach a trial take to a brand-new account. Returns it, or None.
+
+    Idempotent and best-effort: a bad or expired token must never be the reason
+    a registration fails.
+    """
+    from datetime import timedelta
+    token = str(token or "").strip()[:64]
+    if not token:
+        return None
+    cutoff = timezone.now() - timedelta(days=TRIAL_CLAIM_DAYS)
+    take = TrialTake.objects.filter(
+        token=token, claimed_by__isnull=True, created_at__gte=cutoff
+    ).first()
+    if not take:
+        return None
+    take.claimed_by = user
+    take.claimed_at = timezone.now()
+    take.save(update_fields=["claimed_by", "claimed_at"])
+    return take

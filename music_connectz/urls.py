@@ -32,6 +32,14 @@ try:
 except Exception:  # pragma: no cover - never take the deploy down
     SingZCoachView = None
 
+# The no-account trial take, and the public share endpoint the client has been
+# calling at this exact path since before it existed.
+try:
+    from apps.economy.publicz import PublicPostView
+    from apps.economy.trial import TrialCoachView, TrialTakeDetailView
+except Exception:  # pragma: no cover - never take the deploy down
+    PublicPostView = TrialCoachView = TrialTakeDetailView = None
+
 
 def health(_request):
     return JsonResponse(
@@ -63,10 +71,20 @@ urlpatterns = [
     # Android app <-> site link verification. Must sit at the domain root, not
     # under /api/ — Google fetches this exact path over https.
     path(".well-known/assetlinks.json", AssetLinksView.as_view(), name="assetlinks"),
-] + [
+] + ([
+    # `/p/<id>` share links resolve here without a session. Mounted at the root
+    # because that is where the shipped client asks for it; the same view is
+    # also reachable at /api/economy/postz/<id>/ with the rest of PostZ.
+    path("api/postz/<int:pk>/", PublicPostView.as_view(), name="postz-public"),
+] if PublicPostView else []) + ([
+    path("api/trial/<str:token>/", TrialTakeDetailView.as_view(), name="trial-take"),
+] if TrialTakeDetailView else []) + [
     path(f"api/{key}/", include((training_urlpatterns(key), key)))
     for key in INSTRUMENT_APP_KEYS
 ] + ([
+    path(f"api/{key}/trial/", TrialCoachView.as_view(app_key=key), name=f"{key}-trial")
+    for key in INSTRUMENT_APP_KEYS
+] if TrialCoachView else []) + ([
     path(f"api/{key}/coach/", SingZCoachView.as_view(app_key=key), name=f"{key}-coach")
     for key in INSTRUMENT_APP_KEYS
 ] if SingZCoachView else [])
