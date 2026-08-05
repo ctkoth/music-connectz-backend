@@ -1393,3 +1393,101 @@ class RewardGrant(models.Model):
     class Meta:
         unique_together = ("provider", "txn_id")
         indexes = [models.Index(fields=["provider", "-created_at"])]
+
+
+# ---- ObservationZ — HabitZ 🫠 / CodeZ 🧩 / PathZ 🛤️ / MistakeZ 😢
+#
+# Four tabs, one shape: notice something happen, tally it, surface what repeats
+# enough to matter. Building them separately would mean four slightly different
+# tally semantics, the way the char limit ended up in nine places.
+#
+# These record what a member types and where they go, which is surveillance
+# unless they asked for it. Nothing is recorded without an explicit opt-in per
+# kind, and every kind can be wiped. Consent bolted on afterwards leaves you
+# holding data you were never allowed to keep.
+OBS_HABIT, OBS_CODE, OBS_PATH, OBS_MISTAKE = "habit", "code", "path", "mistake"
+OBSERVATION_KINDS = [
+    (OBS_HABIT, "HabitZ"), (OBS_CODE, "CodeZ"),
+    (OBS_PATH, "PathZ"), (OBS_MISTAKE, "MistakeZ"),
+]
+
+
+class ObservationConsent(models.Model):
+    """Per-kind opt-in. Absent means off — never on by default."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="observation_consents")
+    kind = models.CharField(max_length=12, choices=OBSERVATION_KINDS)
+    enabled = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "kind")
+
+
+class Observation(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="observations")
+    kind = models.CharField(max_length=12, choices=OBSERVATION_KINDS, db_index=True)
+    # Stable identity of the thing repeating — a slug, a route, an error code.
+    key = models.CharField(max_length=160)
+    # What to show a human. The key is for matching, this is for reading.
+    label = models.CharField(max_length=200, blank=True, default="")
+    # Cross-pollination: nothing is a dead end. Whatever noticed this records
+    # WHERE it happened, so the row can open in that app to be edited or
+    # analysed rather than being a fact you can only read.
+    app_key = models.CharField(max_length=32, blank=True, default="")
+    target = models.CharField(max_length=160, blank=True, default="")
+    count = models.PositiveIntegerField(default=0)
+    first_seen = models.DateTimeField(auto_now_add=True)
+    last_seen = models.DateTimeField(auto_now=True)
+    # Member said "this isn't a habit" — kept so it stops being re-surfaced,
+    # rather than deleted and immediately re-learned.
+    dismissed = models.BooleanField(default=False, db_index=True)
+
+    class Meta:
+        unique_together = ("user", "kind", "key")
+        ordering = ["-count", "-last_seen"]
+
+    def __str__(self):
+        return f"{self.kind}:{self.key} x{self.count}"
+
+
+def observing(user, kind):
+    """Whether this member asked to be observed for this kind. Default: no."""
+    if not user or not getattr(user, "is_authenticated", True):
+        return False
+    c = ObservationConsent.objects.filter(user=user, kind=kind).first()
+    return bool(c and c.enabled)
+
+
+def record_observation(user, kind, key, label="", app_key="", target=""):
+    """Tally one occurrence. Silent no-op without consent.
+
+    Best-effort: noticing a habit must never be the reason the thing the member
+    was actually doing fails.
+    """
+    key = str(key or "").strip()[:160]
+    if not key or not observing(user, kind):
+        return None
+    try:
+        obs, made = Observation.objects.get_or_create(
+            user=user, kind=kind, key=key,
+            defaults={"label": str(label or key)[:200], "count": 0,
+                      "app_key": str(app_key or "")[:32], "target": str(target or "")[:160]},
+        )
+        obs.count = (obs.count or 0) + 1
+        if label and not obs.label:
+            obs.label = str(label)[:200]
+        if app_key and not obs.app_key:
+            obs.app_key = str(app_key)[:32]
+        if target and not obs.target:
+            obs.target = str(target)[:160]
+        obs.save(update_fields=["count", "label", "app_key", "target", "last_seen"])
+        return obs
+    except Exception:  # pragma: no cover - never break the caller
+        return None
+
+
+# How many repeats before it is worth telling somebody about. Twice is a
+# coincidence; this is the line where "you keep doing this" stops being noise.
+SIGNIFICANT_AT = 3

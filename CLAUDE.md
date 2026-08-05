@@ -50,6 +50,36 @@ its resource emoji.
 
 ---
 
+## Cross-pollination (Corey's crux — applies to everything)
+
+**Nothing is a dead end.** Something created, recorded or noticed in one app
+opens in another to edit or analyse. A member should never hit a screen that
+shows them a fact and gives them nowhere to take it.
+
+In practice, anything that stores a thing also stores WHERE it came from:
+
+```python
+Observation(kind=..., key=..., app_key="singz", target="singz:coach")
+```
+
+and every row it serves carries `open_in` so the client can offer the jump.
+`goto.js` (`goToSpot(tab, target)`) already lands on the exact control, so the
+handoff is one call — not a tab switch that dumps you at the top of an app.
+
+Existing examples to follow:
+
+- OnboardZ steps link to the control that completes them, not just the tab.
+- A Boss Take is scored in SingZ and its dimensions come from that app's
+  profile, so the same recorder serves RapZ without inventing scores.
+- LogZ rows carry the reason a resource moved, so a balance leads back to
+  the action that changed it.
+
+When adding a screen, ask what a member would want to DO with each row, and
+give them the link. A read-only surface is usually an unfinished one.
+
+
+---
+
 ## Deployment
 
 - Backend is on Render with **auto-deploy OFF**. Every backend change needs a

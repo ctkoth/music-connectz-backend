@@ -14,6 +14,7 @@ from .moderation import ReportView, BlockView
 from .account import AccountExportView, AccountDeleteView
 from .messages_view import MessagesView
 from .logz import FeaturesView, LogZView
+from .observationz import ObservationConsentView, ObservationZView
 from .social_verify import SocialVerifyView
 from .parcel import ParcelCampaignView
 from .autotopup import AutoTopUpView, AutoTopUpCancelView
@@ -124,6 +125,8 @@ urlpatterns = [
     path("messages/", MessagesView.as_view(), name="economy-messages"),
     path("logz/", LogZView.as_view(), name="economy-logz"),
     path("features/", FeaturesView.as_view(), name="economy-features"),
+    path("observationz/", ObservationZView.as_view(), name="economy-observationz"),
+    path("observationz/consent/", ObservationConsentView.as_view(), name="economy-observationz-consent"),
     path("report/", ReportView.as_view(), name="economy-report"),
     path("block/", BlockView.as_view(), name="economy-block"),
     path("account/export/", AccountExportView.as_view(), name="economy-account-export"),
