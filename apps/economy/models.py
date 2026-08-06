@@ -1480,6 +1480,12 @@ class CollabDeal(models.Model):
     held_spinaz = models.PositiveIntegerField(default=0)
     held_stake_spinaz = models.PositiveIntegerField(default=0)
     gates = models.JSONField(default=dict, blank=True)
+    # PostZ is for show; CollabZ is for collaboration. This is the seam between
+    # them: the post somebody heard and then wanted to work on. SET_NULL because
+    # deleting the showcase must never delete the deal — money is escrowed
+    # against it.
+    source_post = models.ForeignKey(Post, on_delete=models.SET_NULL, null=True,
+                                    blank=True, related_name="collab_deals")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     delivered_at = models.DateTimeField(null=True, blank=True)

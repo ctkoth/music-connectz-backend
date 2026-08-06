@@ -24,10 +24,13 @@ from rest_framework.views import APIView
 
 from .models import (
     CollabDeal,
+    Post,
     Transaction,
     Wallet,
+    can_view_post,
     collab_settlement,
     membership_for,
+    notify,
     wallet_for,
 )
 from .views import is_owner
@@ -50,6 +53,15 @@ def deal_dict(deal, me=None):
         "status": deal.status,
         "stake_spinaz": deal.stake_spinaz,
         "gates": deal.gates or {},
+        # Where it came from. A deal that can't point back at the post it grew
+        # out of is a dead end in the direction people actually travel.
+        "source_post": ({
+            "id": deal.source_post_id,
+            "title": deal.source_post.title,
+            "author": deal.source_post.author.username,
+            "open_in": "social:post",
+            "url": f"/p/{deal.source_post_id}" if deal.source_post.visibility == "public" else "",
+        } if deal.source_post_id and deal.source_post else None),
         "initiator": deal.initiator.username,
         "mine": bool(me and deal.initiator_id == me.id),
         "participants": deal.participants,
@@ -171,13 +183,38 @@ class CollabDealsView(APIView):
         d = request.data or {}
         title = str(d.get("title", "")).strip()[:160]
         currency = str(d.get("currency", "money")).lower()
+
+        # PostZ → CollabZ. A post is a showcase; this is the move from "I heard
+        # it" to "let's make something". The post seeds the title and puts its
+        # author in the room, so the handoff is one call rather than a form the
+        # member has to retype from the thing they were just looking at.
+        source_post = None
+        if d.get("from_post"):
+            source_post = Post.objects.select_related("author").filter(pk=d["from_post"]).first()
+            if not source_post:
+                return Response({"detail": "That post doesn't exist."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if not can_view_post(source_post, request.user):
+                return Response({"detail": "You can't start a collab from a post you can't view."},
+                                status=status.HTTP_403_FORBIDDEN)
+            if not title:
+                title = f"Collab on '{source_post.title}'"[:160]
         if currency not in (CollabDeal.CURRENCY_MONEY, CollabDeal.CURRENCY_SPINAZ):
             return Response({"detail": "currency must be money|spinaz"}, status=status.HTTP_400_BAD_REQUEST)
         try:
             stake = max(0, int(d.get("stake_spinaz", settings.COLLAB_DEFAULT_STAKE_SPINAZ) or 0))
         except (TypeError, ValueError):
             stake = 0
-        raw = d.get("participants") or []
+        raw = list(d.get("participants") or [])
+        # Seeded from a post: the author is in the room by definition, and the
+        # initiator too — otherwise "start a collab on this" would refuse for
+        # want of the two people it obviously means.
+        if source_post:
+            named = {str((x or {}).get("username", "")).lower() for x in raw}
+            for who in (source_post.author.username, request.user.username):
+                if who.lower() not in named:
+                    raw.append({"username": who, "worth_cents": 0})
+                    named.add(who.lower())
         # Resolve every participant to a real member — escrow needs real wallets.
         parts = []
         for p in raw:
@@ -202,8 +239,12 @@ class CollabDealsView(APIView):
         deal = CollabDeal.objects.create(
             initiator=request.user, title=title, currency=currency,
             stake_spinaz=stake, participants=settled, status=CollabDeal.STATUS_DRAFT,
-            gates=clean_gates(d.get("gates")),
+            gates=clean_gates(d.get("gates")), source_post=source_post,
         )
+        if source_post and source_post.author_id != request.user.id:
+            notify(source_post.author, "system",
+                   f"@{request.user.username} started a CollabZ deal on '{source_post.title}' 🤝",
+                   actor=request.user, item_id=f"post:{source_post.id}")
         return Response(deal_dict(deal, request.user), status=status.HTTP_201_CREATED)
 
 
@@ -345,3 +386,35 @@ class CollabRefundView(APIView):
         new_status = CollabDeal.STATUS_CANCELLED if deal.status in (CollabDeal.STATUS_DRAFT, CollabDeal.STATUS_FUNDED) and not deal.delivered_at else CollabDeal.STATUS_REFUNDED
         deal = refund_deal(deal, new_status=new_status)
         return Response(deal_dict(deal, request.user))
+
+
+class PostCollabsView(APIView):
+    """GET /api/economy/postz/<pk>/collabs/ — the deals this post started.
+
+    The other direction of the same seam. A post card can say "3 collabs came
+    from this"; this is how you open them, so the count is a door rather than a
+    statistic.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        post = Post.objects.filter(pk=pk).first()
+        if not post or not can_view_post(post, request.user):
+            return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+        deals = (CollabDeal.objects
+                 .filter(source_post=post)
+                 .select_related("initiator", "source_post", "source_post__author")
+                 .order_by("-created_at")[:100])
+        me = request.user
+        # A draft deal is somebody's private working-out. Only the people in it
+        # need to see it; everyone else sees the ones that actually happened.
+        visible = [d for d in deals
+                   if d.status != CollabDeal.STATUS_DRAFT
+                   or d.initiator_id == me.id
+                   or any(p.get("username") == me.username for p in d.participants)]
+        return Response({
+            "post": post.title,
+            "post_id": post.id,
+            "deals": [deal_dict(d, me) for d in visible],
+        })

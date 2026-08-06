@@ -26,6 +26,7 @@ from .parcel import ParcelCampaignView
 from .autotopup import AutoTopUpView, AutoTopUpCancelView
 from .identity import IdentityView
 from .collab import (
+    PostCollabsView,
     CollabDealsView,
     CollabDetailView,
     CollabFundView,
@@ -151,6 +152,7 @@ urlpatterns = [
     path("public/members/<str:username>/", PublicProfileView.as_view(), name="economy-public-member"),
     path("postz/<int:pk>/join/", PostJoinView.as_view(), name="economy-postz-join"),
     path("postz/<int:pk>/playlists/", PostPlaylistAppearancesView.as_view(), name="economy-postz-playlists"),
+    path("postz/<int:pk>/collabs/", PostCollabsView.as_view(), name="economy-postz-collabs"),
     path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
     path("submissions/", SubmissionsView.as_view(), name="economy-submissions"),
     # PlaylistZ — Music ConnectZ posts and outside distro links in one order.

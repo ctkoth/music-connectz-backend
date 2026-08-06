@@ -11,10 +11,11 @@ from rest_framework.views import APIView
 
 from datetime import timedelta
 
-from django.db.models import Case, IntegerField, Sum, When
+from django.db.models import Case, Count, IntegerField, Sum, When
 from django.utils import timezone
 
 from .models import (
+    CollabDeal,
     POST_COMMENT_UNLOCK_SEC,
     POST_RATE_UNLOCK_SEC,
     Post,
@@ -76,7 +77,7 @@ def _reactions_for(post_ids):
     return out
 
 
-def _post_dict(p, request, up=0, down=0):
+def _post_dict(p, request, up=0, down=0, collabs=None):
     vibe = up - down
     flagged = down >= HIDE_FLAG_MIN_DOWN and down >= up * HIDE_FLAG_RATIO
     return {
@@ -99,6 +100,11 @@ def _post_dict(p, request, up=0, down=0):
         "age_sec": int((timezone.now() - p.created_at).total_seconds()),
         "rate_unlock_sec": POST_RATE_UNLOCK_SEC,
         "comment_unlock_sec": POST_COMMENT_UNLOCK_SEC,
+        # PostZ is for show, CollabZ is for collaboration — this is the count
+        # of times somebody moved from one to the other on this post, and where
+        # the client sends them to do it again.
+        "collab_count": p.collab_deals.count() if collabs is None else collabs,
+        "open_in": "collabz",
         "skill_cost_cents": p.skill_cost_cents,
         "joins": p.joins.count() if p.visibility == "restricted" else 0,
         "shares": p.shares.count(),
@@ -136,7 +142,15 @@ class PostsView(APIView):
         mine = Post.objects.filter(author=request.user, visibility="private")
         visible = [p for p in list(qs) + list(mine) if can_view_post(p, request.user)]
         reactions = _reactions_for([p.id for p in visible])
-        posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0))) for p in visible]
+        # Counted in ONE query rather than one per card — the feed serves up to
+        # 100 posts and this is the third per-row count on it.
+        deals = dict(
+            CollabDeal.objects.filter(source_post_id__in=[p.id for p in visible])
+            .values_list("source_post_id")
+            .annotate(n=Count("id"))
+        )
+        posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
+                            collabs=deals.get(p.id, 0)) for p in visible]
 
         now = timezone.now()
 
