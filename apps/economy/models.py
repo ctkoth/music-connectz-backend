@@ -1819,3 +1819,70 @@ def can_add_to_playlist(pl, user):
     if pl.owner_id == user.id:
         return True
     return PlaylistCollaborator.objects.filter(playlist=pl, user=user).exists()
+
+
+# ---- KeyConnectZ ----
+#
+# The keyboard. Two halves, gated differently on purpose:
+#
+#   * The WALLPAPER is Premium. It is decoration — pure want, no utility lost
+#     by not having it — which makes it exactly the right thing to sell.
+#   * TRANSLATE is free for every member, in any direction. Being understood is
+#     not a luxury. A Free member typing to somebody in another language is the
+#     single most useful thing this keyboard does, and charging for it would
+#     price the app out of the rooms it exists to open.
+#
+# Free doesn't mean uncapped: it runs a real model and an unmetered LLM call is
+# a bill anybody can run up. The cap is per member per day and is published by
+# the API before anyone types, not discovered by hitting it.
+KEY_WALLPAPER_MAX_MB = 8
+KEY_TRANSLATE_DAILY_CHARS = 20_000       # per member, per day — ~40 messages
+KEY_TRANSLATE_MAX_CHARS = 2_000          # per single translation
+
+
+class KeyboardSkin(models.Model):
+    """A member's KeyConnectZ look. One row per member."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name="keyboard_skin")
+    wallpaper = models.ImageField(upload_to="keyboards/", blank=True, null=True)
+    # Falls back to a flat colour when there's no wallpaper, so a Free member
+    # still gets a keyboard that looks like a choice rather than a default.
+    accent = models.CharField(max_length=9, blank=True, default="")     # #rrggbb
+    key_opacity = models.PositiveSmallIntegerField(default=85)          # 0-100
+    dark_keys = models.BooleanField(default=True)
+    # Last language pair used, so the keyboard opens where it was left.
+    source_lang = models.CharField(max_length=12, blank=True, default="auto")
+    target_lang = models.CharField(max_length=12, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+def keyboard_skin_for(user):
+    return KeyboardSkin.objects.get_or_create(user=user)[0]
+
+
+class KeyTranslation(models.Model):
+    """One translation run, for the daily allowance and for LogZ-style honesty
+    about what the keyboard has been doing."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="key_translations")
+    source_lang = models.CharField(max_length=12, blank=True, default="")
+    target_lang = models.CharField(max_length=12, blank=True, default="")
+    chars = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+
+def key_translate_used_today(user):
+    """Characters translated in the last 24h."""
+    from datetime import timedelta
+    rows = KeyTranslation.objects.filter(
+        user=user, created_at__gte=timezone.now() - timedelta(hours=24))
+    return sum(rows.values_list("chars", flat=True))
+
+
+def key_translate_state(user):
+    """(used, cap, remaining) — published BEFORE anyone types, not on refusal."""
+    used = key_translate_used_today(user)
+    return used, KEY_TRANSLATE_DAILY_CHARS, max(0, KEY_TRANSLATE_DAILY_CHARS - used)

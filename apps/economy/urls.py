@@ -12,6 +12,7 @@ from .translate import TranslateView
 from .gemini import GeminiImageView, GeminiVideoView, GeminiVideoStatusView
 from .notifications import NotificationsView
 from .earn import EarnView
+from .keyconnectz import KeyboardView, KeyTranslateView
 from .playlistz import (PlaylistCollaboratorsView, PlaylistDetailView,
                         PlaylistItemDetailView, PlaylistItemsView,
                         PlaylistReorderView, PlaylistsView,
@@ -87,6 +88,9 @@ from .views import (
 urlpatterns = [
     path("wallet/", WalletView.as_view(), name="economy-wallet"),
     path("earn/", EarnView.as_view(), name="economy-earn"),
+    # KeyConnectZ — the keyboard. Wallpaper is Premium; translate is free.
+    path("keyz/", KeyboardView.as_view(), name="economy-keyz"),
+    path("keyz/translate/", KeyTranslateView.as_view(), name="economy-keyz-translate"),
     path("wallet/add/", AddFundsView.as_view(), name="economy-wallet-add"),
     path("membership/", MembershipView.as_view(), name="economy-membership"),
     path("membership/refund/", MembershipRefundView.as_view(), name="economy-membership-refund"),
