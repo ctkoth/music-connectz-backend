@@ -29,31 +29,39 @@ from rest_framework.views import APIView
 
 from .catalog import over_char_limit
 from .links import safe_browsing_check
+from django.contrib.auth import get_user_model
+
 from .models import (
     PLAYLIST_MAX_ITEMS,
     LinkCounter,
     Playlist,
+    PlaylistCollaborator,
     PlaylistItem,
     Post,
     blocked_user_ids,
+    can_add_to_playlist,
     can_view_post,
     item_rating_median,
     link_provider,
     membership_for,
+    notify,
 )
+
+User = get_user_model()
 
 VISIBILITIES = {"public", "restricted", "private"}
 
 
 def can_view_playlist(pl, user):
-    """Mirrors can_view_post exactly — one visibility rule, not two."""
+    """Mirrors can_view_post, plus: a collaborator can always see the list they
+    were invited onto, even when it is private."""
     if pl.owner_id == getattr(user, "id", None):
         return True
     if pl.visibility == "public":
         return True
     if pl.visibility == "restricted":
         return bool(user and user.is_authenticated)
-    return False
+    return can_add_to_playlist(pl, user)
 
 
 def item_dict(it, request=None):
@@ -62,14 +70,21 @@ def item_dict(it, request=None):
     A playlist that shows you a track and gives you no way to open it is a
     read-only surface, which is an unfinished one.
     """
+    user = getattr(request, "user", None)
     out = {
         "id": it.id,
         "position": it.position,
         "kind": it.kind,
         "title": it.title,
         "artist": it.artist,
+        # Who put it in. On a shared list this is the answer to "who added
+        # this?", and it's what decides who may take it back out.
+        "added_by": it.added_by.username if it.added_by else "",
         "added_at": it.added_at.isoformat(),
     }
+    if user is not None and getattr(user, "is_authenticated", False):
+        out["can_remove"] = (it.playlist.owner_id == user.id
+                             or (it.added_by_id == user.id))
     if it.kind == PlaylistItem.KIND_POST:
         post = it.post
         out.update({
@@ -119,6 +134,13 @@ def playlist_dict(pl, request=None, with_items=True):
         "link_count": (len(items) - posts) if with_items else None,
         "created_at": pl.created_at.isoformat(),
         "updated_at": pl.updated_at.isoformat(),
+        "collaborators": [c.user.username for c in
+                          pl.collaborators.select_related("user")],
+        # The owner sequences; a collaborator contributes. Two people fighting
+        # over the running order means last-save-wins on somebody's set list.
+        "can_add": can_add_to_playlist(pl, user),
+        "can_reorder": bool(user and getattr(user, "is_authenticated", False)
+                            and pl.owner_id == user.id),
     }
     if with_items:
         out["items"] = [item_dict(i, request) for i in items]
@@ -141,8 +163,12 @@ class PlaylistsView(APIView):
               .exclude(owner_id__in=blocked)
               .exclude(visibility="private")[:200])
         mine = Playlist.objects.select_related("owner").filter(owner=request.user)
+        # A private list you were invited onto is one of YOUR playlists too —
+        # it would be absurd to be a collaborator on something you can't find.
+        joined = (Playlist.objects.select_related("owner")
+                  .filter(collaborators__user=request.user))
         seen, out = set(), []
-        for pl in list(mine) + list(qs):
+        for pl in list(mine) + list(joined) + list(qs):
             if pl.id in seen or not can_view_playlist(pl, request.user):
                 continue
             seen.add(pl.id)
@@ -223,9 +249,12 @@ class PlaylistItemsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        pl = Playlist.objects.filter(pk=pk, owner=request.user).first()
-        if not pl:
+        pl = Playlist.objects.select_related("owner").filter(pk=pk).first()
+        if not pl or not can_view_playlist(pl, request.user):
             return Response({"detail": "playlist not found"}, status=status.HTTP_404_NOT_FOUND)
+        if not can_add_to_playlist(pl, request.user):
+            return Response({"detail": "You're not a collaborator on this playlist."},
+                            status=status.HTTP_403_FORBIDDEN)
         if pl.items.count() >= PLAYLIST_MAX_ITEMS:
             return Response({"detail": f"A playlist holds {PLAYLIST_MAX_ITEMS} tracks. Start another one.",
                              "max_items": PLAYLIST_MAX_ITEMS},
@@ -252,7 +281,7 @@ class PlaylistItemsView(APIView):
                 return Response({"detail": "You can't add a post you can't view."},
                                 status=status.HTTP_403_FORBIDDEN)
             item = PlaylistItem.objects.create(
-                playlist=pl, position=nxt, kind=kind, post=post,
+                playlist=pl, position=nxt, kind=kind, post=post, added_by=request.user,
                 title=title or post.title, artist=artist or post.author.username,
             )
         else:
@@ -272,11 +301,15 @@ class PlaylistItemsView(APIView):
                 defaults={"safe": safe, "scanned": bool(threat) or safe, "threat": threat},
             )
             item = PlaylistItem.objects.create(
-                playlist=pl, position=nxt, kind=kind, url=url,
+                playlist=pl, position=nxt, kind=kind, url=url, added_by=request.user,
                 provider=link_provider(url), title=title, artist=artist,
             )
 
         pl.save(update_fields=["updated_at"])
+        if pl.owner_id != request.user.id:
+            notify(pl.owner, "system",
+                   f"@{request.user.username} added a track to '{pl.title}' 🎵",
+                   actor=request.user, item_id=pl.item_key)
         return Response({"item": item_dict(item, request), "count": pl.items.count()},
                         status=status.HTTP_201_CREATED)
 
@@ -285,12 +318,18 @@ class PlaylistItemDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, pk, item_pk):
-        pl = Playlist.objects.filter(pk=pk, owner=request.user).first()
-        if not pl:
+        pl = Playlist.objects.select_related("owner").filter(pk=pk).first()
+        if not pl or not can_view_playlist(pl, request.user):
             return Response({"detail": "playlist not found"}, status=status.HTTP_404_NOT_FOUND)
         item = pl.items.filter(pk=item_pk).first()
         if not item:
             return Response({"detail": "track not found"}, status=status.HTTP_404_NOT_FOUND)
+        # The owner can remove anything on their list; a collaborator can take
+        # back what they put in and nothing else. Letting a collaborator delete
+        # someone else's track makes a shared list a place to be sabotaged.
+        if pl.owner_id != request.user.id and item.added_by_id != request.user.id:
+            return Response({"detail": "Only the owner can remove someone else's track."},
+                            status=status.HTTP_403_FORBIDDEN)
         item.delete()
         pl.save(update_fields=["updated_at"])
         return Response({"count": pl.items.count()})
@@ -351,3 +390,72 @@ class PublicPlaylistView(APIView):
         data.pop("mine", None)
         data["public"] = True
         return Response(data)
+
+
+class PlaylistCollaboratorsView(APIView):
+    """Who else can add to this playlist.
+
+    Invite-only. POST {username} adds a seat, DELETE {username} takes it back —
+    and a collaborator can DELETE themselves, because being stuck on somebody
+    else's list with no way off is not a feature.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        pl = Playlist.objects.select_related("owner").filter(pk=pk).first()
+        if not pl or not can_view_playlist(pl, request.user):
+            return Response({"detail": "playlist not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "owner": pl.owner.username,
+            "collaborators": [
+                {"username": c.user.username,
+                 "invited_by": c.invited_by.username if c.invited_by else "",
+                 "added_at": c.added_at.isoformat()}
+                for c in pl.collaborators.select_related("user", "invited_by")
+            ],
+        })
+
+    def post(self, request, pk):
+        pl = Playlist.objects.select_related("owner").filter(pk=pk, owner=request.user).first()
+        if not pl:
+            return Response({"detail": "playlist not found"}, status=status.HTTP_404_NOT_FOUND)
+        username = str((request.data or {}).get("username", "")).strip()
+        user = User.objects.filter(username__iexact=username).first()
+        if not user:
+            return Response({"detail": f"No member called '{username}'."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if user.id == pl.owner_id:
+            return Response({"detail": "You already own this playlist."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if user.id in blocked_user_ids(request.user):
+            return Response({"detail": "You can't collaborate with that member."},
+                            status=status.HTTP_403_FORBIDDEN)
+        _, created = PlaylistCollaborator.objects.get_or_create(
+            playlist=pl, user=user, defaults={"invited_by": request.user})
+        if created:
+            # An invitation nobody is told about is not an invitation.
+            notify(user, "system",
+                   f"@{request.user.username} added you to the playlist '{pl.title}' 🎵",
+                   actor=request.user, item_id=pl.item_key)
+        return Response(playlist_dict(pl, request), status=status.HTTP_201_CREATED)
+
+    def delete(self, request, pk):
+        pl = Playlist.objects.select_related("owner").filter(pk=pk).first()
+        if not pl:
+            return Response({"detail": "playlist not found"}, status=status.HTTP_404_NOT_FOUND)
+        username = str((request.data or {}).get("username", "")
+                       or request.query_params.get("username", "")).strip()
+        # No username given means "take me off this list".
+        target = (User.objects.filter(username__iexact=username).first()
+                  if username else request.user)
+        if not target:
+            return Response({"detail": "unknown member"}, status=status.HTTP_400_BAD_REQUEST)
+        if pl.owner_id != request.user.id and target.id != request.user.id:
+            return Response({"detail": "Only the owner can remove another collaborator."},
+                            status=status.HTTP_403_FORBIDDEN)
+        PlaylistCollaborator.objects.filter(playlist=pl, user=target).delete()
+        # Their tracks stay. They contributed them to this set, and pulling the
+        # set apart because somebody left is the owner's call, not a side
+        # effect — the rows are still individually removable.
+        return Response(playlist_dict(pl, request))

@@ -1736,6 +1736,11 @@ class PlaylistItem(models.Model):
     provider = models.CharField(max_length=24, blank=True, default="")
     title = models.CharField(max_length=200, blank=True, default="")
     artist = models.CharField(max_length=160, blank=True, default="")
+    # Who put it in. On a collaborative list this decides two things: whose
+    # reach an outside link's clicks feed, and who is allowed to take it back
+    # out. Null on rows added before playlists were collaborative.
+    added_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                 null=True, blank=True, related_name="playlist_rows")
     added_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -1743,3 +1748,29 @@ class PlaylistItem(models.Model):
 
     def __str__(self):
         return self.title or self.url or f"item {self.pk}"
+
+
+class PlaylistCollaborator(models.Model):
+    """Someone the owner let add to their playlist.
+
+    Invite-only, deliberately. An open playlist anybody can append to is a spam
+    target with the owner's name on it.
+    """
+    playlist = models.ForeignKey(Playlist, on_delete=models.CASCADE, related_name="collaborators")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="playlist_seats")
+    invited_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                   null=True, blank=True, related_name="playlist_invites_sent")
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("playlist", "user")
+        ordering = ("added_at",)
+
+
+def can_add_to_playlist(pl, user):
+    """Owner or invited collaborator."""
+    if not user or not user.is_authenticated:
+        return False
+    if pl.owner_id == user.id:
+        return True
+    return PlaylistCollaborator.objects.filter(playlist=pl, user=user).exists()

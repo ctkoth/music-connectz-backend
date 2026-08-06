@@ -12,8 +12,9 @@ from .translate import TranslateView
 from .gemini import GeminiImageView, GeminiVideoView, GeminiVideoStatusView
 from .notifications import NotificationsView
 from .earn import EarnView
-from .playlistz import (PlaylistDetailView, PlaylistItemDetailView,
-                        PlaylistItemsView, PlaylistReorderView, PlaylistsView)
+from .playlistz import (PlaylistCollaboratorsView, PlaylistDetailView,
+                        PlaylistItemDetailView, PlaylistItemsView,
+                        PlaylistReorderView, PlaylistsView)
 from .moderation import ReportView, BlockView
 from .account import AccountExportView, AccountDeleteView
 from .messages_view import MessagesView
@@ -156,6 +157,7 @@ urlpatterns = [
     path("playlistz/<int:pk>/items/", PlaylistItemsView.as_view(), name="economy-playlist-items"),
     path("playlistz/<int:pk>/items/<int:item_pk>/", PlaylistItemDetailView.as_view(), name="economy-playlist-item"),
     path("playlistz/<int:pk>/reorder/", PlaylistReorderView.as_view(), name="economy-playlist-reorder"),
+    path("playlistz/<int:pk>/collaborators/", PlaylistCollaboratorsView.as_view(), name="economy-playlist-collaborators"),
     path("link/click/", LinkClickView.as_view(), name="economy-link-click"),
     path("link/tallies/", LinkTalliesView.as_view(), name="economy-link-tallies"),
     path("distributez/transcode/", TranscodeView.as_view(), name="economy-distributez-transcode"),
