@@ -107,6 +107,26 @@ class SpecTests(TestCase):
         self.assertEqual(len(tabs), 22)
         self.assertTrue(tabs["workz"]["allowed"])
 
+    def test_every_tab_keeps_an_emoji_even_when_it_has_artwork(self):
+        # The emoji is the fallback, so it is never optional. The frontend
+        # deploys itself and the backend doesn't: a tab whose art hasn't
+        # shipped yet must still render something that means the right thing.
+        for tab in self.spec()["tabs"]:
+            self.assertTrue(tab["emoji"], tab)
+            if "icon" in tab:
+                self.assertTrue(tab["icon"].endswith((".png", ".jpg", ".webp")), tab)
+
+    def test_the_tabs_with_their_own_artwork_name_it(self):
+        tabs = {t["key"]: t for t in self.spec()["tabs"]}
+        self.assertEqual(tabs["workz"]["icon"], "workz.png")
+        self.assertEqual(tabs["gitz"]["icon"], "gitz.png")
+        # Pick ConnectZ's art is filed under the shorter name it was drawn as.
+        self.assertEqual(tabs["pickconnectz"]["icon"], "pickconz.png")
+        # And a tab with no art of its own doesn't borrow a neighbour's — a
+        # picture of the wrong thing is worse than the emoji it replaced.
+        self.assertNotIn("icon", tabs["mistakez"])
+        self.assertNotIn("icon", tabs["characterz"])
+
     def test_the_gates_move_with_the_tier(self):
         as_tier(self.user, TIER_STATZ)
         tabs = {t["key"]: t for t in self.spec()["tabs"]}

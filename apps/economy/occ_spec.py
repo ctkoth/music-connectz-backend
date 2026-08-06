@@ -31,6 +31,20 @@ def tier_at_least(tier, needed):
 # The tabs, in the order the spec lists them. `needs` is the tier gate;
 # `builds` says honestly what stands behind the tab today, because a menu that
 # offers twenty tabs and delivers three is worse than a menu that offers three.
+#
+# `icon` names the platform artwork a tab wants; `emoji` is what it falls back
+# to. Both are always sent, and that is the point — the client uses the icon
+# only if its own registry actually has that file, so a tab whose art hasn't
+# shipped to the frontend yet shows its emoji rather than a generic logo. (The
+# frontend deploys itself and the backend does not, so the two WILL be out of
+# step, and the failure has to degrade to something that still means the right
+# thing.)
+#
+# A tab only gets an icon when the artwork genuinely belongs to it. Borrowing a
+# neighbouring app's icon — BugZ's bug for MistakeZ, PersonaZ's face for
+# CharacterZ — would put a picture of the wrong thing on the tab, which is
+# worse than the emoji it replaced. Those keep their emoji until they have art
+# of their own.
 OCC_TABS = [
     {"key": "editor", "name": "Code editor", "emoji": "👁️‍🗨️", "needs": TIER_FREE,
      "desc": "Write and edit your files.", "builds": "editor"},
@@ -41,50 +55,50 @@ OCC_TABS = [
     # can't be shown, rated or carried anywhere is a dead end, and nothing here
     # is allowed to be one. WorkZ is where what you gave OCC and what it gave
     # back are kept, in the PostZ format, ready to post.
-    {"key": "workz", "name": "WorkZ", "emoji": "🧾", "needs": TIER_FREE,
+    {"key": "workz", "icon": "workz.png", "name": "WorkZ", "emoji": "🧾", "needs": TIER_FREE,
      "desc": "What you gave OCC and what it gave back — post it, rate it, or take it "
              "into another app.", "builds": "workz"},
     {"key": "codez", "name": "CodeZ", "emoji": "🧩", "needs": TIER_FREE,
      "desc": "Your acronyms, typos and slang — what you meant, and how often you've typed it.",
      "builds": "codez"},
-    {"key": "pathz", "name": "PathZ", "emoji": "🛤️", "needs": TIER_PREMIUM,
+    {"key": "pathz", "icon": "pathz.png", "name": "PathZ", "emoji": "🛤️", "needs": TIER_PREMIUM,
      "desc": "Your paths across devices.", "builds": "pathz"},
     {"key": "mistakez", "name": "MistakeZ", "emoji": "❌", "needs": TIER_FREE,
      "desc": "Errors the AI made here, kept so it doesn't make them twice.",
      "builds": "mistakez"},
-    {"key": "habitz", "name": "HabitZ", "emoji": "🎂", "needs": TIER_FREE,
+    {"key": "habitz", "icon": "habitz.png", "name": "HabitZ", "emoji": "🎂", "needs": TIER_FREE,
      "desc": "Something you repeat, noticed and kept.", "builds": "habitz"},
     {"key": "characterz", "name": "CharacterZ", "emoji": "🤔", "needs": TIER_PREMIUM,
      "desc": "MBTI characters attached to a FaceZ face, with a story and a voice.",
      "builds": "characterz"},
-    {"key": "settings", "name": "Settings", "emoji": "⚙️", "needs": TIER_FREE,
+    {"key": "settings", "icon": "preferencez.png", "name": "Settings", "emoji": "⚙️", "needs": TIER_FREE,
      "desc": "AutomationZ and SuggestionZ live here.", "builds": "settings"},
     {"key": "console", "name": "Output / Console", "emoji": "🖥️", "needs": TIER_FREE,
      "desc": "What OCC printed.", "builds": "console"},
-    {"key": "callz", "name": "CallZ", "emoji": "📞", "needs": TIER_STATZ,
+    {"key": "callz", "icon": "callz.png", "name": "CallZ", "emoji": "📞", "needs": TIER_STATZ,
      "desc": "Talk it through.", "builds": "callz"},
     {"key": "search", "name": "Search", "emoji": "🔍", "needs": TIER_FREE,
      "desc": "Across every tab.", "builds": "search"},
-    {"key": "tellz", "name": "TellZ", "emoji": "🗣️", "needs": TIER_PREMIUM,
+    {"key": "tellz", "icon": "tellz.png", "name": "TellZ", "emoji": "🗣️", "needs": TIER_PREMIUM,
      "desc": "What you prompted or posted, per tab or across all of them.",
      "builds": "tellz"},
-    {"key": "logz", "name": "LogZ", "emoji": "🪵", "needs": TIER_PREMIUM,
+    {"key": "logz", "icon": "logz.png", "name": "LogZ", "emoji": "🪵", "needs": TIER_PREMIUM,
      "desc": "What was DONE, by day, week, month or a range you pick.",
      "builds": "logz"},
-    {"key": "pickconnectz", "name": "Pick ConnectZ", "emoji": "📌", "needs": TIER_FREE,
+    {"key": "pickconnectz", "icon": "pickconz.png", "name": "Pick ConnectZ", "emoji": "📌", "needs": TIER_FREE,
      "desc": "Pin your favourites to the footer.", "builds": "pickconnectz"},
-    {"key": "filez", "name": "FileZ", "emoji": "📁", "needs": TIER_FREE,
+    {"key": "filez", "icon": "filez.png", "name": "FileZ", "emoji": "📁", "needs": TIER_FREE,
      "desc": "Files and uploads.", "builds": "filez"},
-    {"key": "gitz", "name": "GitZ", "emoji": "🔀", "needs": TIER_STATZ,
+    {"key": "gitz", "icon": "gitz.png", "name": "GitZ", "emoji": "🔀", "needs": TIER_STATZ,
      "desc": "Branches, commits and pushes — every one of them a TaskZ task.",
      "builds": "gitz"},
-    {"key": "gamez", "name": "GameZ", "emoji": "🎮", "needs": TIER_PREMIUM,
+    {"key": "gamez", "icon": "gamez.png", "name": "GameZ", "emoji": "🎮", "needs": TIER_PREMIUM,
      "desc": "Games you built here, by genre.", "builds": "gamez"},
-    {"key": "spinaz", "name": "SpinaZ", "emoji": "🍥", "needs": TIER_FREE,
+    {"key": "spinaz", "icon": "spinaz.png", "name": "SpinaZ", "emoji": "🍥", "needs": TIER_FREE,
      "desc": "How you earned and spent it.", "builds": "spinaz"},
-    {"key": "energy", "name": "Energy", "emoji": "⚡", "needs": TIER_FREE,
+    {"key": "energy", "icon": "energy.png", "name": "Energy", "emoji": "⚡", "needs": TIER_FREE,
      "desc": "How you earned and spent it.", "builds": "energy"},
-    {"key": "facez", "name": "FaceZ", "emoji": "🙄", "needs": TIER_FREE,
+    {"key": "facez", "icon": "facez.png", "name": "FaceZ", "emoji": "🙄", "needs": TIER_FREE,
      "desc": "Faces available to AI images and video, taggable to a profile.",
      "builds": "facez"},
     {"key": "welcome", "name": "Welcome", "emoji": "👋", "needs": TIER_FREE,
