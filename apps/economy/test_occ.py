@@ -102,7 +102,10 @@ class SpecTests(TestCase):
         self.assertFalse(tabs["gitz"]["allowed"])
         self.assertFalse(tabs["logz"]["allowed"])
         self.assertTrue(tabs["taskz"]["allowed"])
-        self.assertEqual(len(tabs), 21)
+        # 21 from the spec + WorkZ, which the spec's own rule (nothing is a
+        # dead end) demanded once OCC started producing things.
+        self.assertEqual(len(tabs), 22)
+        self.assertTrue(tabs["workz"]["allowed"])
 
     def test_the_gates_move_with_the_tier(self):
         as_tier(self.user, TIER_STATZ)

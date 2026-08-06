@@ -2183,3 +2183,67 @@ class OccSettings(models.Model):
 
 def occ_settings_for(user):
     return OccSettings.objects.get_or_create(user=user)[0]
+
+
+class OccOutput(models.Model):
+    """A piece of work OCC took in and handed back — in the PostZ format.
+
+    Two halves, deliberately kept apart:
+
+    * **What went in** — `input_text` and `input_items`, the prompt and the
+      attachments the member gave OCC. Kept because "what did I ask for" is the
+      first question anyone has when they look at an output a week later.
+    * **What came out** — the PostZ field names exactly: title, description,
+      media_type/media_url, image_url, lyrics, items. Same names as `Post` and
+      `CollabDeal` so a share is a copy, not a translation. Three composers
+      accepting three shapes is how they drift.
+
+    An output is the member's private working material until they share it.
+    Sharing creates a real `Post`, and from then on the output's `item_key` IS
+    that post's key — ratings, likes and comments land on the one surface other
+    members can actually see. A second rateable item space that nothing renders
+    would be exactly the kind of number-with-no-data-behind-it this app keeps
+    having to fix.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="occ_outputs")
+    # Which task produced it, when one did. SET_NULL because deleting the task
+    # log shouldn't take the work with it.
+    task = models.ForeignKey("OccTask", on_delete=models.SET_NULL, null=True, blank=True,
+                             related_name="outputs")
+    tab = models.CharField(max_length=32, blank=True, default="")   # the OCC tab it came from
+
+    # ---- what went in
+    input_text = models.TextField(blank=True, default="")
+    input_items = models.JSONField(default=list, blank=True)   # [{url, type, title, lyrics}]
+
+    # ---- what came out, in the PostZ format
+    title = models.CharField(max_length=160)
+    description = models.TextField(blank=True, default="")
+    media_type = models.CharField(max_length=24, blank=True, default="")
+    media_url = models.CharField(max_length=500, blank=True, default="")
+    image_url = models.CharField(max_length=500, blank=True, default="")
+    lyrics = models.TextField(blank=True, default="")
+    items = models.JSONField(default=list, blank=True)
+    genre = models.CharField(max_length=40, blank=True, default="")
+    skills_used = models.JSONField(default=list, blank=True)
+    # Posting charges energy equal to the combined skill price, so the output
+    # carries it and the share button can state the cost BEFORE it's pressed.
+    skill_cost_cents = models.PositiveIntegerField(default=0)
+
+    shared_post = models.ForeignKey("Post", on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name="occ_outputs")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    @property
+    def item_key(self):
+        """Where this work is rated, liked and commented — or None.
+
+        Not `occ:<id>`: until it's shared there is no screen another member
+        could open, and an item key nobody can reach collects nothing.
+        """
+        return f"post:{self.shared_post_id}" if self.shared_post_id else None

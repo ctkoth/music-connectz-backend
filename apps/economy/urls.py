@@ -43,6 +43,8 @@ from .merch import MerchBuyView, MerchDetailView, MerchView
 from .occ import OccChatView
 from .occ_taskz import (OccSettingsView, OccSpecView, OccTaskDetailView,
                         OccTaskUndoView, OccTasksView)
+from .occ_workz import (OccWorkDetailView, OccWorkShareView, OccWorkUnshareView,
+                        OccWorkzView, PostOccWorkView)
 from .payments import (
     CheckoutConfigView,
     MembershipRefundView,
@@ -119,6 +121,11 @@ urlpatterns = [
     path("occ/taskz/", OccTasksView.as_view(), name="economy-occ-taskz"),
     path("occ/taskz/<int:pk>/", OccTaskDetailView.as_view(), name="economy-occ-task"),
     path("occ/taskz/<int:pk>/undo/", OccTaskUndoView.as_view(), name="economy-occ-task-undo"),
+    # WorkZ — what went into OCC, what came out, and where it goes next.
+    path("occ/workz/", OccWorkzView.as_view(), name="economy-occ-workz"),
+    path("occ/workz/<int:pk>/", OccWorkDetailView.as_view(), name="economy-occ-work"),
+    path("occ/workz/<int:pk>/share/", OccWorkShareView.as_view(), name="economy-occ-work-share"),
+    path("occ/workz/<int:pk>/unshare/", OccWorkUnshareView.as_view(), name="economy-occ-work-unshare"),
     path("translate/", TranslateView.as_view(), name="economy-translate"),
     path("gemini/image/", GeminiImageView.as_view(), name="economy-gemini-image"),
     path("gemini/video/", GeminiVideoView.as_view(), name="economy-gemini-video"),
@@ -177,6 +184,8 @@ urlpatterns = [
     path("postz/<int:pk>/join/", PostJoinView.as_view(), name="economy-postz-join"),
     path("postz/<int:pk>/playlists/", PostPlaylistAppearancesView.as_view(), name="economy-postz-playlists"),
     path("postz/<int:pk>/collabs/", PostCollabsView.as_view(), name="economy-postz-collabs"),
+    # The return leg: a post made in OCC opens back in OCC with its prompt.
+    path("postz/<int:pk>/occ/", PostOccWorkView.as_view(), name="economy-postz-occ"),
     path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
     path("submissions/", SubmissionsView.as_view(), name="economy-submissions"),
     # PlaylistZ — Music ConnectZ posts and outside distro links in one order.

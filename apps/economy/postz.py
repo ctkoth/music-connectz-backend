@@ -117,6 +117,77 @@ def _post_dict(p, request, up=0, down=0, collabs=None):
     }
 
 
+def clean_items(raw):
+    """Album entries, sanitized. One definition — CollabZ and OCC use it too."""
+    out = []
+    for it in (raw if isinstance(raw, list) else [])[:50]:
+        if not isinstance(it, dict):
+            continue
+        out.append({
+            "url": str(it.get("url", ""))[:500],
+            "type": str(it.get("type", ""))[:24],
+            "title": str(it.get("title", ""))[:160],
+            "lyrics": str(it.get("lyrics", ""))[:8000],
+        })
+    return out
+
+
+def create_post(user, d):
+    """Make a post from a PostZ payload. Returns (post, info, error).
+
+    Lifted out of the view so anything that publishes work — the composer, and
+    now an OCC output being shared — goes through the SAME daily cap, the same
+    energy charge and the same sanitizing. A second creation path is how one
+    surface quietly stops charging for what the other charges for.
+
+    `error` is a (payload, status) pair, or None.
+    """
+    title = str(d.get("title", "")).strip()[:160]
+    if not title:
+        return None, {}, ({"detail": "title required"}, status.HTTP_400_BAD_REQUEST)
+    vis = str(d.get("visibility", "public")).lower()
+    if vis not in {"public", "restricted", "private"}:
+        vis = "public"
+    cost = max(0, int(d.get("skill_cost_cents") or 0))
+    media_url = str(d.get("media_url", "")).strip()[:500]
+    media_type = str(d.get("media_type", "")).strip()[:24]
+    score = d.get("score") if isinstance(d.get("score"), dict) else {}
+    items = clean_items(d.get("items"))
+    is_album = bool(d.get("is_album")) or len(items) > 1
+    # A scored/recorded take (score payload or media) counts against the tier's
+    # daily submission cap (Free 5 · Premium 15 · StatZ 50).
+    is_submission = bool(score) or bool(media_url) or bool(items)
+    if is_submission:
+        cap = submission_cap_for(user)
+        used = submissions_used_today(user)
+        if used >= cap:
+            return None, {}, (
+                {"detail": f"Daily submission limit reached ({used}/{cap}). Upgrade for more.",
+                 "used": used, "cap": cap},
+                status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+    # Posting costs energy = combined skill price (cents). Deduct what's there.
+    w = wallet_for(user)
+    charged = min(cost, max(0, w.energy))
+    if charged:
+        w.energy -= charged
+        w.save(update_fields=["energy", "updated_at"])
+    p = Post.objects.create(
+        author=user, title=title,
+        description=str(d.get("description", ""))[:4000],
+        links=d.get("links") or [], media_type=media_type, media_url=media_url,
+        is_album=is_album, items=items,
+        score=score, visibility=vis, skill_cost_cents=cost,
+        genre=str(d.get("genre", ""))[:40],
+        skills_used=[str(x)[:60] for x in (d.get("skills_used") or [])
+                     if isinstance(x, (str, int))][:40],
+        allow_in_playlists=bool(d.get("allow_in_playlists", True)),
+    )
+    if is_submission:
+        record_submission(user)
+    return p, {"energy_charged": charged, "energy": w.energy}, None
+
+
 class SubmissionsView(APIView):
     """How many scored/creator submissions the member has left today."""
 
@@ -176,62 +247,10 @@ class PostsView(APIView):
         edit_id = d.get("edit_id")
         if edit_id is not None:
             return self._edit(request, edit_id, d)
-        title = str(d.get("title", "")).strip()[:160]
-        if not title:
-            return Response({"detail": "title required"}, status=status.HTTP_400_BAD_REQUEST)
-        vis = str(d.get("visibility", "public")).lower()
-        if vis not in {"public", "restricted", "private"}:
-            vis = "public"
-        cost = max(0, int(d.get("skill_cost_cents") or 0))
-        media_url = str(d.get("media_url", "")).strip()[:500]
-        media_type = str(d.get("media_type", "")).strip()[:24]
-        score = d.get("score") if isinstance(d.get("score"), dict) else {}
-        # Album: a list of media items [{url, type, title, lyrics}]. Cap the count
-        # and sanitize each entry so the payload can't balloon.
-        raw_items = d.get("items") if isinstance(d.get("items"), list) else []
-        items = []
-        for it in raw_items[:50]:
-            if not isinstance(it, dict):
-                continue
-            items.append({
-                "url": str(it.get("url", ""))[:500],
-                "type": str(it.get("type", ""))[:24],
-                "title": str(it.get("title", ""))[:160],
-                "lyrics": str(it.get("lyrics", ""))[:8000],
-            })
-        is_album = bool(d.get("is_album")) or len(items) > 1
-        # A scored/recorded take (score payload or media) counts against the tier's
-        # daily submission cap (Free 5 · Premium 15 · StatZ 50).
-        is_submission = bool(score) or bool(media_url) or bool(items)
-        if is_submission:
-            cap = submission_cap_for(request.user)
-            used = submissions_used_today(request.user)
-            if used >= cap:
-                return Response(
-                    {"detail": f"Daily submission limit reached ({used}/{cap}). Upgrade for more.",
-                     "used": used, "cap": cap},
-                    status=status.HTTP_429_TOO_MANY_REQUESTS,
-                )
-        # Posting costs energy = combined skill price (cents). Deduct what's there.
-        w = wallet_for(request.user)
-        charged = min(cost, max(0, w.energy))
-        if charged:
-            w.energy -= charged
-            w.save(update_fields=["energy", "updated_at"])
-        p = Post.objects.create(
-            author=request.user, title=title,
-            description=str(d.get("description", ""))[:4000],
-            links=d.get("links") or [], media_type=media_type, media_url=media_url,
-            is_album=is_album, items=items,
-            score=score, visibility=vis, skill_cost_cents=cost,
-            genre=str(d.get("genre", ""))[:40],
-            skills_used=[str(x)[:60] for x in (d.get("skills_used") or [])
-                         if isinstance(x, (str, int))][:40],
-            allow_in_playlists=bool(d.get("allow_in_playlists", True)),
-        )
-        if is_submission:
-            record_submission(request.user)
-        return Response({**_post_dict(p, request), "energy_charged": charged, "energy": w.energy}, status=status.HTTP_201_CREATED)
+        p, info, err = create_post(request.user, d)
+        if err:
+            return Response(err[0], status=err[1])
+        return Response({**_post_dict(p, request), **info}, status=status.HTTP_201_CREATED)
 
     def _edit(self, request, edit_id, d):
         """Edit your own post's title/description within the tier's edit window."""

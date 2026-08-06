@@ -215,4 +215,28 @@ class OccChatView(APIView):
                 ow.money_cents = (ow.money_cents or 0) + cost
                 ow.save(update_fields=["money_cents", "updated_at"])
         money = round((remaining if remaining is not None else wallet_for(request.user).money_cents) / 100, 2)
-        return Response({"text": text, "model": model_voice, "cost_cents": cost, "money": money})
+        out = {"text": text, "model": model_voice, "cost_cents": cost, "money": money}
+
+        # A reply you can't take anywhere is a dead end with a scrollbar. Asked
+        # to, OCC keeps the exchange as WorkZ — in the PostZ format — so it can
+        # be shared, rated, commented on, or carried into another app.
+        if data.get("save_work"):
+            from .models import OccOutput
+            from .occ_workz import output_dict
+            work = OccOutput.objects.create(
+                user=request.user,
+                tab=str(data.get("tab", "occ") or "occ")[:32],
+                input_text=prompt,
+                input_items=([{"url": "", "type": "image", "title": "prompt image", "lyrics": ""}]
+                             if image else []),
+                title=(prompt.strip().splitlines() or ["OCC reply"])[0][:160],
+                description=text[:20000],
+                media_type="document",
+            )
+            out["work"] = output_dict(work, request)
+        else:
+            # Even when it isn't kept, say where it COULD go rather than
+            # leaving the member to guess that saving is possible at all.
+            out["can_save_work"] = {"app": "occ", "target": "occ:workz",
+                                    "label": "Keep this as WorkZ"}
+        return Response(out)

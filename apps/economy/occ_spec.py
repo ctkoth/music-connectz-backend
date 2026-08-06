@@ -37,6 +37,13 @@ OCC_TABS = [
     {"key": "taskz", "name": "TaskZ", "emoji": "📑", "needs": TIER_FREE,
      "desc": "Tasks OCC has been set, with live status, an ETA, and an undo window.",
      "builds": "taskz"},
+    # Not in the original list of twenty-one: added because an OCC result that
+    # can't be shown, rated or carried anywhere is a dead end, and nothing here
+    # is allowed to be one. WorkZ is where what you gave OCC and what it gave
+    # back are kept, in the PostZ format, ready to post.
+    {"key": "workz", "name": "WorkZ", "emoji": "🧾", "needs": TIER_FREE,
+     "desc": "What you gave OCC and what it gave back — post it, rate it, or take it "
+             "into another app.", "builds": "workz"},
     {"key": "codez", "name": "CodeZ", "emoji": "🧩", "needs": TIER_FREE,
      "desc": "Your acronyms, typos and slang — what you meant, and how often you've typed it.",
      "builds": "codez"},
