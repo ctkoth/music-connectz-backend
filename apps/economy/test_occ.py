@@ -116,16 +116,23 @@ class SpecTests(TestCase):
             if "icon" in tab:
                 self.assertTrue(tab["icon"].endswith((".png", ".jpg", ".webp")), tab)
 
-    def test_the_tabs_with_their_own_artwork_name_it(self):
+    def test_every_tab_names_its_own_artwork(self):
         tabs = {t["key"]: t for t in self.spec()["tabs"]}
         self.assertEqual(tabs["workz"]["icon"], "workz.png")
         self.assertEqual(tabs["gitz"]["icon"], "gitz.png")
         # Pick ConnectZ's art is filed under the shorter name it was drawn as.
         self.assertEqual(tabs["pickconnectz"]["icon"], "pickconz.png")
-        # And a tab with no art of its own doesn't borrow a neighbour's — a
-        # picture of the wrong thing is worse than the emoji it replaced.
-        self.assertNotIn("icon", tabs["mistakez"])
-        self.assertNotIn("icon", tabs["characterz"])
+        # Reserved names — the art doesn't exist yet. Naming it anyway is what
+        # makes dropping the file the entire job later.
+        self.assertEqual(tabs["mistakez"]["icon"], "mistakez.png")
+        self.assertEqual(tabs["characterz"]["icon"], "characterz.png")
+        self.assertTrue(all("icon" in t for t in tabs.values()))
+
+    def test_no_tab_borrows_another_tabs_artwork(self):
+        # A picture of the wrong thing is worse than the emoji it replaced, so
+        # two tabs sharing one icon has to be impossible rather than unlikely.
+        icons = [t["icon"] for t in self.spec()["tabs"]]
+        self.assertEqual(len(icons), len(set(icons)))
 
     def test_the_gates_move_with_the_tier(self):
         as_tier(self.user, TIER_STATZ)

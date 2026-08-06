@@ -40,15 +40,18 @@ def tier_at_least(tier, needed):
 # step, and the failure has to degrade to something that still means the right
 # thing.)
 #
-# A tab only gets an icon when the artwork genuinely belongs to it. Borrowing a
-# neighbouring app's icon — BugZ's bug for MistakeZ, PersonaZ's face for
-# CharacterZ — would put a picture of the wrong thing on the tab, which is
-# worse than the emoji it replaced. Those keep their emoji until they have art
-# of their own.
+# Every tab names the art that belongs to IT — never a neighbour's. BugZ's bug
+# on MistakeZ or PersonaZ's face on CharacterZ would be a picture of the wrong
+# thing, which is worse than the emoji it replaced.
+#
+# Eight of these names are RESERVED: the artwork doesn't exist yet, and naming
+# it here is what makes dropping the file into the frontend's public/icons/ the
+# entire job. Until the file lands it 404s and the client shows the emoji, so
+# reserving a name costs a member nothing and saves a code change later.
 OCC_TABS = [
-    {"key": "editor", "name": "Code editor", "emoji": "👁️‍🗨️", "needs": TIER_FREE,
+    {"key": "editor", "icon": "editor.png", "name": "Code editor", "emoji": "👁️‍🗨️", "needs": TIER_FREE,
      "desc": "Write and edit your files.", "builds": "editor"},
-    {"key": "taskz", "name": "TaskZ", "emoji": "📑", "needs": TIER_FREE,
+    {"key": "taskz", "icon": "taskz.png", "name": "TaskZ", "emoji": "📑", "needs": TIER_FREE,
      "desc": "Tasks OCC has been set, with live status, an ETA, and an undo window.",
      "builds": "taskz"},
     # Not in the original list of twenty-one: added because an OCC result that
@@ -58,26 +61,26 @@ OCC_TABS = [
     {"key": "workz", "icon": "workz.png", "name": "WorkZ", "emoji": "🧾", "needs": TIER_FREE,
      "desc": "What you gave OCC and what it gave back — post it, rate it, or take it "
              "into another app.", "builds": "workz"},
-    {"key": "codez", "name": "CodeZ", "emoji": "🧩", "needs": TIER_FREE,
+    {"key": "codez", "icon": "codez.png", "name": "CodeZ", "emoji": "🧩", "needs": TIER_FREE,
      "desc": "Your acronyms, typos and slang — what you meant, and how often you've typed it.",
      "builds": "codez"},
     {"key": "pathz", "icon": "pathz.png", "name": "PathZ", "emoji": "🛤️", "needs": TIER_PREMIUM,
      "desc": "Your paths across devices.", "builds": "pathz"},
-    {"key": "mistakez", "name": "MistakeZ", "emoji": "❌", "needs": TIER_FREE,
+    {"key": "mistakez", "icon": "mistakez.png", "name": "MistakeZ", "emoji": "❌", "needs": TIER_FREE,
      "desc": "Errors the AI made here, kept so it doesn't make them twice.",
      "builds": "mistakez"},
     {"key": "habitz", "icon": "habitz.png", "name": "HabitZ", "emoji": "🎂", "needs": TIER_FREE,
      "desc": "Something you repeat, noticed and kept.", "builds": "habitz"},
-    {"key": "characterz", "name": "CharacterZ", "emoji": "🤔", "needs": TIER_PREMIUM,
+    {"key": "characterz", "icon": "characterz.png", "name": "CharacterZ", "emoji": "🤔", "needs": TIER_PREMIUM,
      "desc": "MBTI characters attached to a FaceZ face, with a story and a voice.",
      "builds": "characterz"},
     {"key": "settings", "icon": "preferencez.png", "name": "Settings", "emoji": "⚙️", "needs": TIER_FREE,
      "desc": "AutomationZ and SuggestionZ live here.", "builds": "settings"},
-    {"key": "console", "name": "Output / Console", "emoji": "🖥️", "needs": TIER_FREE,
+    {"key": "console", "icon": "console.png", "name": "Output / Console", "emoji": "🖥️", "needs": TIER_FREE,
      "desc": "What OCC printed.", "builds": "console"},
     {"key": "callz", "icon": "callz.png", "name": "CallZ", "emoji": "📞", "needs": TIER_STATZ,
      "desc": "Talk it through.", "builds": "callz"},
-    {"key": "search", "name": "Search", "emoji": "🔍", "needs": TIER_FREE,
+    {"key": "search", "icon": "search.png", "name": "Search", "emoji": "🔍", "needs": TIER_FREE,
      "desc": "Across every tab.", "builds": "search"},
     {"key": "tellz", "icon": "tellz.png", "name": "TellZ", "emoji": "🗣️", "needs": TIER_PREMIUM,
      "desc": "What you prompted or posted, per tab or across all of them.",
@@ -101,7 +104,7 @@ OCC_TABS = [
     {"key": "facez", "icon": "facez.png", "name": "FaceZ", "emoji": "🙄", "needs": TIER_FREE,
      "desc": "Faces available to AI images and video, taggable to a profile.",
      "builds": "facez"},
-    {"key": "welcome", "name": "Welcome", "emoji": "👋", "needs": TIER_FREE,
+    {"key": "welcome", "icon": "welcome.png", "name": "Welcome", "emoji": "👋", "needs": TIER_FREE,
      "desc": "Start here.", "builds": "welcome"},
 ]
 
