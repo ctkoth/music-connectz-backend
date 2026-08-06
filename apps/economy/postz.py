@@ -93,6 +93,7 @@ def _post_dict(p, request, up=0, down=0, collabs=None):
         "items": p.items or [],
         "score": p.score or {},
         "genre": p.genre,
+        "skills_used": p.skills_used or [],
         "visibility": p.visibility,
         "allow_in_playlists": p.allow_in_playlists,
         # Age from the SERVER's clock, so the client's unlock countdowns can't
@@ -224,6 +225,8 @@ class PostsView(APIView):
             is_album=is_album, items=items,
             score=score, visibility=vis, skill_cost_cents=cost,
             genre=str(d.get("genre", ""))[:40],
+            skills_used=[str(x)[:60] for x in (d.get("skills_used") or [])
+                         if isinstance(x, (str, int))][:40],
             allow_in_playlists=bool(d.get("allow_in_playlists", True)),
         )
         if is_submission:

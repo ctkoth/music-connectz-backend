@@ -766,6 +766,10 @@ class Post(models.Model):
     # on the way in, so every post in the app is genreless and ChartZ has
     # nothing to slice by.
     genre = models.CharField(max_length=40, blank=True, default="")
+    # Which skills went into it — 2.2 required this on every example, and it is
+    # what makes a post matchable to the people who have those skills and
+    # priceable against their rates. A post without it is a file with a caption.
+    skills_used = models.JSONField(default=list, blank=True)
     # May other members put this in THEIR playlists? Default yes — being in
     # someone else's set is reach, and a public post is already public. This is
     # the author's off switch for the case where it isn't welcome.
