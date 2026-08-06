@@ -12,7 +12,9 @@ from .translate import TranslateView
 from .gemini import GeminiImageView, GeminiVideoView, GeminiVideoStatusView
 from .notifications import NotificationsView
 from .earn import EarnView
-from .battlez import BattlesView, BattleDetailView, BattleEnterView
+from .battlez import (BattlesView, BattleChallengeView, BattleDetailView,
+                      BattleEnterView, BattleRespondView, BattleSettleView,
+                      BattleWagerView, MoneyBattleVoteView)
 from .keyconnectz import KeyboardView, KeyTranslateView
 from .playlistz import (PlaylistCollaboratorsView, PlaylistDetailView,
                         PlaylistItemDetailView, PlaylistItemsView,
@@ -91,7 +93,12 @@ urlpatterns = [
     path("earn/", EarnView.as_view(), name="economy-earn"),
     # BattleZ — a challenge, gated by the same five ranges as everything else.
     path("battlez/", BattlesView.as_view(), name="economy-battlez"),
+    path("battlez/challenge/", BattleChallengeView.as_view(), name="economy-battle-challenge"),
+    path("battlez/moneyvote/", MoneyBattleVoteView.as_view(), name="economy-battle-moneyvote"),
     path("battlez/<int:pk>/", BattleDetailView.as_view(), name="economy-battle"),
+    path("battlez/<int:pk>/respond/", BattleRespondView.as_view(), name="economy-battle-respond"),
+    path("battlez/<int:pk>/wager/", BattleWagerView.as_view(), name="economy-battle-wager"),
+    path("battlez/<int:pk>/settle/", BattleSettleView.as_view(), name="economy-battle-settle"),
     path("battlez/<int:pk>/enter/", BattleEnterView.as_view(), name="economy-battle-enter"),
     # KeyConnectZ — the keyboard. Wallpaper is Premium; translate is free.
     path("keyz/", KeyboardView.as_view(), name="economy-keyz"),

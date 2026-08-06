@@ -1953,9 +1953,30 @@ def key_translate_state(user):
 # promise with nothing to enforce. This is the smallest honest version: a
 # challenge that carries the work in the PostZ format, gates who may enter, and
 # is judged by the same RateZ item space everything else is judged by.
+# A contestant needs a real number of judges before a win means anything. Same
+# figure as the CollabZ rating split — three is where "somebody liked it" turns
+# into "people thought so".
+BATTLE_MIN_RATINGS = 3
+BATTLE_WINDOW_HOURS = 48
+
+
 class Battle(models.Model):
-    STATUS_OPEN, STATUS_CLOSED = "open", "closed"
-    STATUS_CHOICES = [(STATUS_OPEN, "Open"), (STATUS_CLOSED, "Closed")]
+    # 1v1 is the shape people actually mean by a battle: you name somebody, they
+    # accept, you both put a take up, the room decides. `open` is the
+    # host-a-challenge variant where anyone may enter.
+    MODE_1V1, MODE_OPEN = "1v1", "open"
+    MODE_CHOICES = [(MODE_1V1, "1v1"), (MODE_OPEN, "Open challenge")]
+
+    STATUS_PENDING = "pending"      # challenged, not answered
+    STATUS_OPEN = "open"            # live — takes and ratings accepted
+    STATUS_DECLINED = "declined"
+    STATUS_SETTLED = "settled"
+    STATUS_CLOSED = "closed"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"), (STATUS_OPEN, "Open"),
+        (STATUS_DECLINED, "Declined"), (STATUS_SETTLED, "Settled"),
+        (STATUS_CLOSED, "Closed"),
+    ]
 
     host = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
                              related_name="battles")
@@ -1971,7 +1992,24 @@ class Battle(models.Model):
     # host advertises and what the door enforces cannot diverge.
     gates = models.JSONField(default=dict, blank=True)
     entry_spinaz = models.PositiveIntegerField(default=0)
-    status = models.CharField(max_length=8, choices=STATUS_CHOICES, default=STATUS_OPEN)
+    # Defaults to OPEN: a battle created without an opponent has nobody to
+    # face, and calling that a 1v1 is a state that should not exist. The
+    # challenge endpoint sets 1v1 explicitly, alongside the opponent.
+    mode = models.CharField(max_length=8, choices=MODE_CHOICES, default=MODE_OPEN)
+    kind = models.CharField(max_length=16, blank=True, default="1v1")   # 1v1 | freestyle | cypher
+
+    # 1v1 only. Null on an open challenge.
+    opponent = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                 null=True, blank=True, related_name="battles_faced")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_OPEN)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    ends_at = models.DateTimeField(null=True, blank=True)
+    winner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                               null=True, blank=True, related_name="battles_won")
+    settled_at = models.DateTimeField(null=True, blank=True)
+    # SpinaZ held from spectators until the result is in. Held, not spent — a
+    # battle that never settles must give every wager back.
+    held_wager_spinaz = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1981,6 +2019,49 @@ class Battle(models.Model):
     @property
     def item_key(self):
         return f"battle:{self.id}"
+
+    @property
+    def contestants(self):
+        """The two people whose work is being judged. Nobody else may wager."""
+        return [u for u in (self.host, self.opponent) if u]
+
+
+class BattleWager(models.Model):
+    """A spectator's SpinaZ on one side.
+
+    The stake leaves their wallet the moment it's placed and is HELD by the
+    battle — the same escrow shape CollabZ uses, for the same reason: a promise
+    to pay later is not a wager, and a pool that only exists on paper can't be
+    paid out.
+    """
+    SIDE_HOST, SIDE_OPPONENT = "host", "opponent"
+    SIDE_CHOICES = [(SIDE_HOST, "Host"), (SIDE_OPPONENT, "Opponent")]
+
+    battle = models.ForeignKey(Battle, on_delete=models.CASCADE, related_name="wagers")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="battle_wagers")
+    side = models.CharField(max_length=8, choices=SIDE_CHOICES)
+    amount = models.PositiveIntegerField(default=0)
+    paid_out = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # One wager per person per battle. Letting somebody stack both sides
+        # turns a bet into a no-op with extra steps.
+        unique_together = ("battle", "user")
+        ordering = ("created_at",)
+
+
+class MoneyBattleVote(models.Model):
+    """"Should real-money battles exist?" — one vote per member.
+
+    Real-money wagering is regulated gambling in most places, so this stays a
+    signal rather than a switch. Counting who wants it is honest; shipping it
+    on a show of hands would not be.
+    """
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name="money_battle_vote")
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 class BattleEntry(models.Model):
