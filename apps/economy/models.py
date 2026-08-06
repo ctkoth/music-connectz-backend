@@ -2087,3 +2087,99 @@ class BattleEntry(models.Model):
     @property
     def item_key(self):
         return f"battle:{self.battle_id}:entry:{self.id}"
+
+
+# ---- OCC: TaskZ ----
+#
+# The spec's own priority: "prioritize git integration synchronous with taskz
+# because git integration becomes a task". So a git action is not a side
+# channel — it is a TaskZ row like any other, with the same status, the same
+# live updates, and the same undo window. One list, one truth about what OCC
+# is doing to your code.
+OCC_UNDO_SECONDS = {TIER_FREE: 4 * 60, TIER_PREMIUM: 40 * 60,
+                    TIER_STATZ: 4 * 3600, TIER_DEBUG: 10 ** 9}
+
+
+def occ_undo_window(tier):
+    """How long a task stays undoable. Deliberately the same ladder as the edit
+    window — "how long can I take it back" should not mean two different things
+    in two parts of the same app."""
+    return OCC_UNDO_SECONDS.get(tier, OCC_UNDO_SECONDS[TIER_FREE])
+
+
+class OccTask(models.Model):
+    """One thing OCC has been asked to do."""
+    STATUS_SUGGESTED = "suggested"   # SuggestionZ proposed it; not started
+    STATUS_QUEUED = "queued"
+    STATUS_RUNNING = "running"
+    STATUS_DONE = "done"
+    STATUS_FAILED = "failed"
+    STATUS_UNDONE = "undone"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (STATUS_SUGGESTED, "Suggested"), (STATUS_QUEUED, "Queued"),
+        (STATUS_RUNNING, "Running"), (STATUS_DONE, "Done"),
+        (STATUS_FAILED, "Failed"), (STATUS_UNDONE, "Undone"),
+        (STATUS_CANCELLED, "Cancelled"),
+    ]
+
+    KIND_EDIT, KIND_GIT, KIND_BUILD, KIND_EXPORT, KIND_OTHER = (
+        "edit", "git", "build", "export", "other")
+    KIND_CHOICES = [(KIND_EDIT, "Edit"), (KIND_GIT, "Git"), (KIND_BUILD, "Build"),
+                    (KIND_EXPORT, "Export"), (KIND_OTHER, "Other")]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="occ_tasks")
+    title = models.CharField(max_length=200)
+    kind = models.CharField(max_length=8, choices=KIND_CHOICES, default=KIND_OTHER)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_QUEUED)
+    # SuggestionZ must explain itself before anything runs — the spec is explicit
+    # that "what, why and how must be explained to the user". A suggestion
+    # missing any of the three is refused rather than shown half-argued.
+    what = models.TextField(blank=True, default="")
+    why = models.TextField(blank=True, default="")
+    how = models.TextField(blank=True, default="")
+    progress = models.PositiveSmallIntegerField(default=0)      # 0-100
+    eta_seconds = models.PositiveIntegerField(default=0)
+    detail = models.TextField(blank=True, default="")
+    # Git, when this task IS a git action.
+    git_repo = models.CharField(max_length=200, blank=True, default="")
+    git_branch = models.CharField(max_length=120, blank=True, default="")
+    git_ref = models.CharField(max_length=80, blank=True, default="")    # commit sha
+    # Enough to put back what was changed. Without it "undo" is a button that
+    # lies, so a task that can't describe its own reversal says undoable=False.
+    undo_payload = models.JSONField(default=dict, blank=True)
+    automated = models.BooleanField(default=False)   # ran with no confirmation
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def undo_deadline(self, tier):
+        base = self.finished_at or self.created_at
+        from datetime import timedelta
+        return base + timedelta(seconds=occ_undo_window(tier))
+
+    def can_undo(self, tier):
+        if self.status != self.STATUS_DONE or not self.undo_payload:
+            return False
+        return timezone.now() <= self.undo_deadline(tier)
+
+
+class OccSettings(models.Model):
+    """The two toggles the spec puts front and centre, per member."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name="occ_settings")
+    # AutomationZ runs without asking. It is StatZ-gated and OFF by default —
+    # a setting that acts on your code unasked is not one to inherit silently.
+    automation = models.BooleanField(default=False)
+    suggestionz = models.BooleanField(default=True)
+    pinned_tabs = models.JSONField(default=list, blank=True)   # Pick ConnectZ
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+def occ_settings_for(user):
+    return OccSettings.objects.get_or_create(user=user)[0]

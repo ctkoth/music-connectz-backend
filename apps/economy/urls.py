@@ -41,6 +41,8 @@ from .collab import (
 )
 from .merch import MerchBuyView, MerchDetailView, MerchView
 from .occ import OccChatView
+from .occ_taskz import (OccSettingsView, OccSpecView, OccTaskDetailView,
+                        OccTaskUndoView, OccTasksView)
 from .payments import (
     CheckoutConfigView,
     MembershipRefundView,
@@ -111,6 +113,12 @@ urlpatterns = [
     path("ai/charge/", AIChargeView.as_view(), name="economy-ai-charge"),
     path("promptz/buy/", PromptzBuyView.as_view(), name="economy-promptz-buy"),
     path("ai/occ/", OccChatView.as_view(), name="economy-ai-occ"),
+    # OCC — Ocular Code ConnectZ.
+    path("occ/spec/", OccSpecView.as_view(), name="economy-occ-spec"),
+    path("occ/settings/", OccSettingsView.as_view(), name="economy-occ-settings"),
+    path("occ/taskz/", OccTasksView.as_view(), name="economy-occ-taskz"),
+    path("occ/taskz/<int:pk>/", OccTaskDetailView.as_view(), name="economy-occ-task"),
+    path("occ/taskz/<int:pk>/undo/", OccTaskUndoView.as_view(), name="economy-occ-task-undo"),
     path("translate/", TranslateView.as_view(), name="economy-translate"),
     path("gemini/image/", GeminiImageView.as_view(), name="economy-gemini-image"),
     path("gemini/video/", GeminiVideoView.as_view(), name="economy-gemini-video"),
