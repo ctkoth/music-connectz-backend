@@ -1636,3 +1636,110 @@ def claim_trial_take(user, token):
     take.claimed_at = timezone.now()
     take.save(update_fields=["claimed_by", "claimed_at"])
     return take
+
+
+# ---- PlaylistZ ----
+#
+# A playlist mixes what lives HERE with what lives everywhere else: a member's
+# Music ConnectZ posts sitting in the same running order as their Spotify,
+# YouTube, SoundCloud and Bandcamp links. That mix is the point. A member's work
+# is scattered across half a dozen distributors and no single page has ever been
+# able to say "this is the set, in this order" without picking one platform and
+# abandoning the rest.
+#
+# Every row knows where it came from and where it opens, so a playlist is a
+# junction rather than a terminus: a post row opens the post, a link row opens
+# the distributor AND tallies through the same LinkCounter a profile link does.
+PLAYLIST_MAX_ITEMS = 200
+
+# Host → provider key. Matched on the registrable suffix, so
+# `open.spotify.com` and `play.spotify.com` are both spotify.
+LINK_PROVIDERS = [
+    ("spotify.com", "spotify"),
+    ("youtube.com", "youtube"),
+    ("youtu.be", "youtube"),
+    ("music.apple.com", "apple"),
+    ("apple.com", "apple"),
+    ("soundcloud.com", "soundcloud"),
+    ("bandcamp.com", "bandcamp"),
+    ("tidal.com", "tidal"),
+    ("deezer.com", "deezer"),
+    ("audiomack.com", "audiomack"),
+    ("music.amazon.com", "amazon"),
+    ("pandora.com", "pandora"),
+    ("audius.co", "audius"),
+    ("mixcloud.com", "mixcloud"),
+    ("bandlab.com", "bandlab"),
+    ("distrokid.com", "distrokid"),
+    ("tiktok.com", "tiktok"),
+    ("instagram.com", "instagram"),
+]
+
+
+def link_provider(url):
+    """Which distributor a URL points at, or "" when it's nobody we know.
+
+    An unknown host is still a perfectly good playlist row — it just renders
+    without a badge. Guessing a provider we can't identify would be worse than
+    saying nothing.
+    """
+    from urllib.parse import urlparse
+    try:
+        host = (urlparse(str(url or "")).hostname or "").lower()
+    except ValueError:
+        return ""
+    if host.startswith("www."):
+        host = host[4:]
+    for suffix, key in LINK_PROVIDERS:
+        if host == suffix or host.endswith("." + suffix):
+            return key
+    return ""
+
+
+class Playlist(models.Model):
+    """An ordered set that may mix Music ConnectZ posts and outside links."""
+    VIS_CHOICES = [("public", "Public"), ("restricted", "Restricted"), ("private", "Private")]
+
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="playlists")
+    title = models.CharField(max_length=160)
+    description = models.TextField(blank=True, default="")
+    cover_url = models.CharField(max_length=600, blank=True, default="")
+    visibility = models.CharField(max_length=12, choices=VIS_CHOICES, default="public")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def item_key(self):
+        """The id RateZ / comments / reactions already key off. A playlist gets
+        ratings and a comment thread for free by reusing SocialView's item
+        space rather than growing a second one beside it."""
+        return f"playlist:{self.id}"
+
+
+class PlaylistItem(models.Model):
+    KIND_POST, KIND_LINK = "post", "link"
+    KIND_CHOICES = [(KIND_POST, "Music ConnectZ post"), (KIND_LINK, "Outside link")]
+
+    playlist = models.ForeignKey(Playlist, on_delete=models.CASCADE, related_name="items")
+    position = models.PositiveIntegerField(default=0)
+    kind = models.CharField(max_length=8, choices=KIND_CHOICES, default=KIND_LINK)
+    # SET_NULL, not CASCADE: a deleted post should leave a gap the owner can see
+    # and remove, not silently reshuffle a set list they curated.
+    post = models.ForeignKey(Post, on_delete=models.SET_NULL, null=True, blank=True, related_name="playlist_items")
+    url = models.CharField(max_length=600, blank=True, default="")
+    provider = models.CharField(max_length=24, blank=True, default="")
+    title = models.CharField(max_length=200, blank=True, default="")
+    artist = models.CharField(max_length=160, blank=True, default="")
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("position", "id")
+
+    def __str__(self):
+        return self.title or self.url or f"item {self.pk}"

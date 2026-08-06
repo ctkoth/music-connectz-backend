@@ -35,10 +35,11 @@ except Exception:  # pragma: no cover - never take the deploy down
 # The no-account trial take, and the public share endpoint the client has been
 # calling at this exact path since before it existed.
 try:
+    from apps.economy.playlistz import PublicPlaylistView
     from apps.economy.publicz import PublicPostView
     from apps.economy.trial import TrialCoachView, TrialTakeDetailView
 except Exception:  # pragma: no cover - never take the deploy down
-    PublicPostView = TrialCoachView = TrialTakeDetailView = None
+    PublicPostView = TrialCoachView = TrialTakeDetailView = PublicPlaylistView = None
 
 
 def health(_request):
@@ -77,6 +78,9 @@ urlpatterns = [
     # also reachable at /api/economy/postz/<id>/ with the rest of PostZ.
     path("api/postz/<int:pk>/", PublicPostView.as_view(), name="postz-public"),
 ] if PublicPostView else []) + ([
+    # A shared playlist opens for anyone, same rule as a shared post.
+    path("api/playlistz/<int:pk>/", PublicPlaylistView.as_view(), name="playlistz-public"),
+] if PublicPlaylistView else []) + ([
     path("api/trial/<str:token>/", TrialTakeDetailView.as_view(), name="trial-take"),
 ] if TrialTakeDetailView else []) + [
     path(f"api/{key}/", include((training_urlpatterns(key), key)))

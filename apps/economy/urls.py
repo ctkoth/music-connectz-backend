@@ -12,6 +12,8 @@ from .translate import TranslateView
 from .gemini import GeminiImageView, GeminiVideoView, GeminiVideoStatusView
 from .notifications import NotificationsView
 from .earn import EarnView
+from .playlistz import (PlaylistDetailView, PlaylistItemDetailView,
+                        PlaylistItemsView, PlaylistReorderView, PlaylistsView)
 from .moderation import ReportView, BlockView
 from .account import AccountExportView, AccountDeleteView
 from .messages_view import MessagesView
@@ -148,6 +150,12 @@ urlpatterns = [
     path("postz/<int:pk>/join/", PostJoinView.as_view(), name="economy-postz-join"),
     path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
     path("submissions/", SubmissionsView.as_view(), name="economy-submissions"),
+    # PlaylistZ — Music ConnectZ posts and outside distro links in one order.
+    path("playlistz/", PlaylistsView.as_view(), name="economy-playlistz"),
+    path("playlistz/<int:pk>/", PlaylistDetailView.as_view(), name="economy-playlist"),
+    path("playlistz/<int:pk>/items/", PlaylistItemsView.as_view(), name="economy-playlist-items"),
+    path("playlistz/<int:pk>/items/<int:item_pk>/", PlaylistItemDetailView.as_view(), name="economy-playlist-item"),
+    path("playlistz/<int:pk>/reorder/", PlaylistReorderView.as_view(), name="economy-playlist-reorder"),
     path("link/click/", LinkClickView.as_view(), name="economy-link-click"),
     path("link/tallies/", LinkTalliesView.as_view(), name="economy-link-tallies"),
     path("distributez/transcode/", TranscodeView.as_view(), name="economy-distributez-transcode"),
