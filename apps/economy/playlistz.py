@@ -84,21 +84,31 @@ def item_dict(it, request=None):
     }
     if user is not None and getattr(user, "is_authenticated", False):
         out["can_remove"] = (it.playlist.owner_id == user.id
-                             or (it.added_by_id == user.id))
+                             or it.added_by_id == user.id
+                             or bool(it.post_id and it.post and it.post.author_id == user.id))
     if it.kind == PlaylistItem.KIND_POST:
         post = it.post
+        # A public playlist can hold a members-only post, and the row copied
+        # that post's TITLE at add time — so a restricted post's name was
+        # readable by anyone with the share link. The row still holds its place
+        # in the running order; it just stops saying what it is.
+        readable = bool(post) and can_view_post(post, user)
         out.update({
             "post_id": it.post_id,
             # A post can be deleted out from under a playlist. Say so rather
             # than rendering a blank row the owner can't explain.
             "available": bool(post),
-            "author": post.author.username if post else "",
-            "media_type": post.media_type if post else "",
-            "media_url": post.media_url if post else "",
-            "rating": item_rating_median(f"post:{post.id}") if post else None,
+            "readable": readable,
+            "author": post.author.username if readable else "",
+            "media_type": post.media_type if readable else "",
+            "media_url": post.media_url if readable else "",
+            "rating": item_rating_median(f"post:{post.id}") if readable else None,
             "open_in": "social:post",
-            "url": f"/p/{it.post_id}" if post and post.visibility == "public" else "",
+            "url": f"/p/{it.post_id}" if readable and post.visibility == "public" else "",
         })
+        if post and not readable:
+            out["title"] = "Members-only track"
+            out["artist"] = ""
     else:
         counter = LinkCounter.objects.filter(url=it.url).first()
         out.update({
@@ -280,6 +290,11 @@ class PlaylistItemsView(APIView):
                 # You can't smuggle a post you can't see into a public playlist.
                 return Response({"detail": "You can't add a post you can't view."},
                                 status=status.HTTP_403_FORBIDDEN)
+            if post.author_id != request.user.id and not post.allow_in_playlists:
+                return Response(
+                    {"detail": f"@{post.author.username} has this track switched off for other people's playlists."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
             item = PlaylistItem.objects.create(
                 playlist=pl, position=nxt, kind=kind, post=post, added_by=request.user,
                 title=title or post.title, artist=artist or post.author.username,
@@ -310,6 +325,13 @@ class PlaylistItemsView(APIView):
             notify(pl.owner, "system",
                    f"@{request.user.username} added a track to '{pl.title}' 🎵",
                    actor=request.user, item_id=pl.item_key)
+        # Being picked up for someone else's set is reach. It is also how an
+        # author learns the remove lever exists, which is the whole reason
+        # opt-out works without an approval queue nobody would ever drain.
+        if item.post_id and item.post.author_id != request.user.id:
+            notify(item.post.author, "system",
+                   f"@{request.user.username} added '{item.post.title}' to the playlist '{pl.title}' 🎵",
+                   actor=request.user, item_id=pl.item_key)
         return Response({"item": item_dict(item, request), "count": pl.items.count()},
                         status=status.HTTP_201_CREATED)
 
@@ -324,11 +346,17 @@ class PlaylistItemDetailView(APIView):
         item = pl.items.filter(pk=item_pk).first()
         if not item:
             return Response({"detail": "track not found"}, status=status.HTTP_404_NOT_FOUND)
-        # The owner can remove anything on their list; a collaborator can take
-        # back what they put in and nothing else. Letting a collaborator delete
-        # someone else's track makes a shared list a place to be sabotaged.
-        if pl.owner_id != request.user.id and item.added_by_id != request.user.id:
-            return Response({"detail": "Only the owner can remove someone else's track."},
+        # Three people may remove a row, and only three:
+        #   the playlist owner   — it's their list
+        #   whoever added it     — they can take back what they put in
+        #   the post's author    — their work, wherever it ended up
+        # A collaborator deleting somebody else's track would make a shared
+        # list a place to be sabotaged.
+        allowed = {pl.owner_id, item.added_by_id}
+        if item.post_id and item.post:
+            allowed.add(item.post.author_id)
+        if request.user.id not in allowed:
+            return Response({"detail": "Only the playlist owner or the person who added it can remove this."},
                             status=status.HTTP_403_FORBIDDEN)
         item.delete()
         pl.save(update_fields=["updated_at"])
@@ -459,3 +487,77 @@ class PlaylistCollaboratorsView(APIView):
         # set apart because somebody left is the owner's call, not a side
         # effect — the rows are still individually removable.
         return Response(playlist_dict(pl, request))
+
+
+class PostPlaylistAppearancesView(APIView):
+    """GET /api/economy/postz/<pk>/playlists/ — where my post ended up.
+
+    An author who can switch appearances off, and remove individual rows, still
+    needs to be able to SEE where their work is. A control you can't aim is not
+    control.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        post = Post.objects.filter(pk=pk, author=request.user).first()
+        if not post:
+            return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+        rows = (PlaylistItem.objects
+                .filter(post=post)
+                .select_related("playlist", "playlist__owner", "added_by"))
+        out = []
+        for it in rows:
+            pl = it.playlist
+            if pl.owner_id == request.user.id:
+                continue        # my own lists aren't "appearances"
+            out.append({
+                "item_id": it.id,
+                "playlist_id": pl.id,
+                "playlist": pl.title,
+                "owner": pl.owner.username,
+                "visibility": pl.visibility,
+                "added_by": it.added_by.username if it.added_by else "",
+                "added_at": it.added_at.isoformat(),
+                # Where to go pull it, using the same endpoint the owner uses.
+                "remove_url": f"/api/economy/playlistz/{pl.id}/items/{it.id}/",
+            })
+        return Response({
+            "post": post.title,
+            "allow_in_playlists": post.allow_in_playlists,
+            "appearances": out,
+        })
+
+
+class MyAppearancesView(APIView):
+    """GET /api/economy/playlistz/appearances/ — every playlist of someone
+    else's that any of my posts is in, in one call.
+
+    Per-post lookups would make this N requests for a member with a catalogue,
+    and a panel nobody loads is a control nobody uses.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        rows = (PlaylistItem.objects
+                .filter(post__author=request.user)
+                .exclude(playlist__owner=request.user)
+                .select_related("playlist", "playlist__owner", "post", "added_by")
+                .order_by("-added_at")[:200])
+        out = []
+        for it in rows:
+            pl = it.playlist
+            out.append({
+                "item_id": it.id,
+                "post_id": it.post_id,
+                "post": it.post.title,
+                "allow_in_playlists": it.post.allow_in_playlists,
+                "playlist_id": pl.id,
+                "playlist": pl.title,
+                "owner": pl.owner.username,
+                "visibility": pl.visibility,
+                "added_by": it.added_by.username if it.added_by else "",
+                "added_at": it.added_at.isoformat(),
+            })
+        return Response({"appearances": out})

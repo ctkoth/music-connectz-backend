@@ -691,6 +691,10 @@ class Post(models.Model):
     # Optional scored-take payload (e.g. RapZ/SingZ lab result) for context on the post.
     score = models.JSONField(default=dict, blank=True)
     visibility = models.CharField(max_length=12, choices=VIS_CHOICES, default="public")
+    # May other members put this in THEIR playlists? Default yes — being in
+    # someone else's set is reach, and a public post is already public. This is
+    # the author's off switch for the case where it isn't welcome.
+    allow_in_playlists = models.BooleanField(default=True)
     skill_cost_cents = models.PositiveIntegerField(default=0)  # combined skill price of what's used
     created_at = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(null=True, blank=True)

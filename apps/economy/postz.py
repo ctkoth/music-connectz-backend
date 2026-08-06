@@ -90,6 +90,7 @@ def _post_dict(p, request, up=0, down=0):
         "items": p.items or [],
         "score": p.score or {},
         "visibility": p.visibility,
+        "allow_in_playlists": p.allow_in_playlists,
         "skill_cost_cents": p.skill_cost_cents,
         "joins": p.joins.count() if p.visibility == "restricted" else 0,
         "shares": p.shares.count(),
@@ -200,6 +201,7 @@ class PostsView(APIView):
             links=d.get("links") or [], media_type=media_type, media_url=media_url,
             is_album=is_album, items=items,
             score=score, visibility=vis, skill_cost_cents=cost,
+            allow_in_playlists=bool(d.get("allow_in_playlists", True)),
         )
         if is_submission:
             record_submission(request.user)
@@ -212,6 +214,14 @@ class PostsView(APIView):
         p = Post.objects.filter(pk=edit_id, author=request.user).first()
         if not p:
             return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+        # Playlist consent is a SETTING, not content, so it is not held to the
+        # tier's edit window. Locking an author out of withdrawing their work
+        # four minutes after posting would make the switch useless.
+        if "allow_in_playlists" in d:
+            p.allow_in_playlists = bool(d["allow_in_playlists"])
+            p.save(update_fields=["allow_in_playlists"])
+            if len(d) <= 2:            # edit_id + the flag: nothing else to do
+                return Response(_post_dict(p, request))
         window = edit_window_for(membership_for(request.user).tier)
         if timezone.now() > p.created_at + timedelta(seconds=window):
             return Response({"detail": "edit_window_passed", "window_seconds": window}, status=status.HTTP_403_FORBIDDEN)

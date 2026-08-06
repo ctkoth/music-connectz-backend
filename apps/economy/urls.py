@@ -14,7 +14,8 @@ from .notifications import NotificationsView
 from .earn import EarnView
 from .playlistz import (PlaylistCollaboratorsView, PlaylistDetailView,
                         PlaylistItemDetailView, PlaylistItemsView,
-                        PlaylistReorderView, PlaylistsView)
+                        PlaylistReorderView, PlaylistsView,
+                        MyAppearancesView, PostPlaylistAppearancesView)
 from .moderation import ReportView, BlockView
 from .account import AccountExportView, AccountDeleteView
 from .messages_view import MessagesView
@@ -149,10 +150,12 @@ urlpatterns = [
     path("postz/<int:pk>/", PublicPostView.as_view(), name="economy-postz-public"),
     path("public/members/<str:username>/", PublicProfileView.as_view(), name="economy-public-member"),
     path("postz/<int:pk>/join/", PostJoinView.as_view(), name="economy-postz-join"),
+    path("postz/<int:pk>/playlists/", PostPlaylistAppearancesView.as_view(), name="economy-postz-playlists"),
     path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
     path("submissions/", SubmissionsView.as_view(), name="economy-submissions"),
     # PlaylistZ — Music ConnectZ posts and outside distro links in one order.
     path("playlistz/", PlaylistsView.as_view(), name="economy-playlistz"),
+    path("playlistz/appearances/", MyAppearancesView.as_view(), name="economy-playlist-appearances"),
     path("playlistz/<int:pk>/", PlaylistDetailView.as_view(), name="economy-playlist"),
     path("playlistz/<int:pk>/items/", PlaylistItemsView.as_view(), name="economy-playlist-items"),
     path("playlistz/<int:pk>/items/<int:item_pk>/", PlaylistItemDetailView.as_view(), name="economy-playlist-item"),
