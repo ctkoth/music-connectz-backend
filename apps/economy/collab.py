@@ -13,7 +13,7 @@ from datetime import timedelta
 
 from django.conf import settings
 
-from .gates import clean_gates, failing_gate, member_metrics, refusal
+from .gates import clean_gates, describe, failing_gate, member_metrics, refusal
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
@@ -23,19 +23,45 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
+    RATING_SPLIT_MIN_RATERS,
+    Battle,
     CollabDeal,
+    ItemRating,
     Post,
     Transaction,
     Wallet,
     can_view_post,
     collab_settlement,
+    contributor_item_key,
     membership_for,
     notify,
+    profile_for,
     wallet_for,
 )
 from .views import is_owner
 
 User = get_user_model()
+
+
+def _origin_for(user):
+    """Distance origin for the gate check — the deal starter's shared location."""
+    p = profile_for(user)
+    return (p.lat, p.lng) if (p.share_location and p.lat is not None) else (None, None)
+
+
+def _clean_items(raw):
+    """Album entries, sanitized exactly as PostZ sanitizes its own."""
+    out = []
+    for it in (raw if isinstance(raw, list) else [])[:50]:
+        if not isinstance(it, dict):
+            continue
+        out.append({
+            "url": str(it.get("url", ""))[:500],
+            "type": str(it.get("type", ""))[:24],
+            "title": str(it.get("title", ""))[:160],
+            "lyrics": str(it.get("lyrics", ""))[:8000],
+        })
+    return out
 
 
 def _locked_wallet(user):
@@ -53,6 +79,19 @@ def deal_dict(deal, me=None):
         "status": deal.status,
         "stake_spinaz": deal.stake_spinaz,
         "gates": deal.gates or {},
+        # The work itself, in the PostZ format.
+        "description": deal.description,
+        "media_type": deal.media_type,
+        "media_url": deal.media_url,
+        "image_url": deal.image_url,
+        "lyrics": deal.lyrics,
+        "items": deal.items or [],
+        "split_mode": deal.split_mode,
+        "split_snapshot": deal.split_snapshot or {},
+        # Where each contributor is rated — the same item space RateZ serves.
+        "rating_keys": {p.get("username"): contributor_item_key(deal.id, p.get("username"))
+                        for p in deal.participants},
+        "rating_min_raters": RATING_SPLIT_MIN_RATERS,
         # Where it came from. A deal that can't point back at the post it grew
         # out of is a dead end in the direction people actually travel.
         "source_post": ({
@@ -90,6 +129,90 @@ def maybe_auto_release(deal):
     return release_deal(deal, note="auto-release (window elapsed)")
 
 
+def rating_split(deal):
+    """Re-cut the pot by what the community thought each contributor did.
+
+    Returns (participants, snapshot). The snapshot always explains itself —
+    including when the split did NOT happen, because "why did I get the agreed
+    amount and not the rated one" has to be answerable without reading code.
+
+    Only ratings from people NOT on the deal count. Below
+    RATING_SPLIT_MIN_RATERS distinct raters it falls back to the agreed worth:
+    two opinions are not a mandate to move somebody's money.
+    """
+    members = {p.get("username") for p in deal.participants}
+    keys = {p.get("username"): contributor_item_key(deal.id, p.get("username"))
+            for p in deal.participants}
+    rows = (ItemRating.objects
+            .filter(item_id__in=list(keys.values()))
+            .exclude(user__username__in=members)
+            .select_related("user"))
+
+    scores, raters = {}, set()
+    for r in rows:
+        scores.setdefault(r.item_id, []).append(r.score)
+        raters.add(r.user_id)
+
+    def median(values):
+        if not values:
+            return None
+        v = sorted(values)
+        n = len(v)
+        return v[n // 2] if n % 2 else (v[n // 2 - 1] + v[n // 2]) / 2
+
+    medians = {u: median(scores.get(k, [])) for u, k in keys.items()}
+    snapshot = {
+        "mode": deal.split_mode,
+        "raters": len(raters),
+        "min_raters": RATING_SPLIT_MIN_RATERS,
+        "ratings": {u: m for u, m in medians.items()},
+        "at": timezone.now().isoformat(),
+    }
+
+    pot = sum(int(p.get("receives_cents") or 0) for p in deal.participants)
+    rated = {u: m for u, m in medians.items() if m}
+    if len(raters) < RATING_SPLIT_MIN_RATERS or not rated or not pot:
+        snapshot["applied"] = False
+        snapshot["reason"] = (
+            f"Fewer than {RATING_SPLIT_MIN_RATERS} people outside the deal rated it — "
+            "paid on the agreed worth instead."
+            if len(raters) < RATING_SPLIT_MIN_RATERS else
+            "Nothing to re-cut — paid on the agreed worth."
+        )
+        return deal.participants, snapshot
+
+    total = sum(rated.values())
+    out, handed = [], 0
+    # Largest share last, so the rounding remainder lands there rather than
+    # being lost — the pot must come out exactly, to the cent.
+    order = sorted(deal.participants,
+                   key=lambda p: rated.get(p.get("username")) or 0)
+    for i, p in enumerate(order):
+        entry = dict(p)
+        who = entry.get("username")
+        if who in rated:
+            if i == len(order) - 1:
+                share = pot - handed
+            else:
+                share = int(pot * (rated[who] / total))
+                handed += share
+            entry["receives_cents"] = share
+        else:
+            # Unrated on a rated split gets nothing from the re-cut — the whole
+            # point is that the pot follows what people judged was contributed.
+            entry["receives_cents"] = 0
+        out.append(entry)
+
+    by_name = {e["username"]: e for e in out}
+    snapshot["applied"] = True
+    snapshot["reason"] = f"Split by contribution rating across {len(raters)} raters."
+    snapshot["before"] = {p["username"]: int(p.get("receives_cents") or 0)
+                          for p in deal.participants}
+    snapshot["after"] = {u: int(e.get("receives_cents") or 0) for u, e in by_name.items()}
+    # Preserve the original participant order — the client renders it.
+    return [by_name[p["username"]] for p in deal.participants], snapshot
+
+
 @transaction.atomic
 def release_deal(deal, note="collab release"):
     """Pay each recipient their net share from escrow, keep the platform tax
@@ -98,6 +221,10 @@ def release_deal(deal, note="collab release"):
     deal = CollabDeal.objects.select_for_update().get(pk=deal.pk)
     if deal.status not in (CollabDeal.STATUS_FUNDED, CollabDeal.STATUS_DELIVERED):
         return deal
+    # Freeze the split HERE, at the moment the money moves. Reading ratings
+    # later would mean somebody's share kept changing after they agreed to it.
+    if deal.split_mode == CollabDeal.SPLIT_RATING:
+        deal.participants, deal.split_snapshot = rating_split(deal)
     paid_out = 0
     for entry in deal.participants:
         user = User.objects.filter(username=entry.get("username")).first()
@@ -126,7 +253,8 @@ def release_deal(deal, note="collab release"):
     deal.held_stake_spinaz = 0
     deal.status = CollabDeal.STATUS_RELEASED
     deal.auto_release_at = None
-    deal.save(update_fields=["held_cents", "held_spinaz", "held_stake_spinaz", "status", "auto_release_at", "updated_at"])
+    deal.save(update_fields=["held_cents", "held_spinaz", "held_stake_spinaz", "status",
+                             "auto_release_at", "participants", "split_snapshot", "updated_at"])
     return deal
 
 
@@ -232,6 +360,20 @@ class CollabDealsView(APIView):
         if not any(p["username"] == request.user.username for p in parts):
             return Response({"detail": "you must be one of the collaborators"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # The gates a deal advertises now decide who may be ON it. Storing them
+        # and checking nothing made "CollabZ carries the range gates" a label.
+        gates = clean_gates(d.get("gates"))
+        if gates:
+            origin = _origin_for(request.user)
+            for entry in parts:
+                who = User.objects.filter(username=entry["username"]).first()
+                failed = failing_gate(member_metrics(profile_for(who), origin), gates)
+                if failed:
+                    body = refusal(failed, gates)
+                    body["detail"] = f"@{who.username} is outside this deal's range — {describe(failed, gates)}."
+                    body["username"] = who.username
+                    return Response(body, status=status.HTTP_403_FORBIDDEN)
+
         settled = collab_settlement(parts, currency=currency)
         for entry in settled:
             entry["funded"] = False
@@ -239,7 +381,16 @@ class CollabDealsView(APIView):
         deal = CollabDeal.objects.create(
             initiator=request.user, title=title, currency=currency,
             stake_spinaz=stake, participants=settled, status=CollabDeal.STATUS_DRAFT,
-            gates=clean_gates(d.get("gates")), source_post=source_post,
+            gates=gates, source_post=source_post,
+            description=str(d.get("description", "") or ""),
+            media_type=str(d.get("media_type", "") or "")[:24],
+            media_url=str(d.get("media_url", "") or "")[:500],
+            image_url=str(d.get("image_url", "") or "")[:500],
+            lyrics=str(d.get("lyrics", "") or ""),
+            items=_clean_items(d.get("items")),
+            split_mode=(CollabDeal.SPLIT_RATING
+                        if str(d.get("split_mode", "")).lower() == CollabDeal.SPLIT_RATING
+                        else CollabDeal.SPLIT_WORTH),
         )
         if source_post and source_post.author_id != request.user.id:
             notify(source_post.author, "system",

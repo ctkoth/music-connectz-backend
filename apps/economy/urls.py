@@ -12,6 +12,7 @@ from .translate import TranslateView
 from .gemini import GeminiImageView, GeminiVideoView, GeminiVideoStatusView
 from .notifications import NotificationsView
 from .earn import EarnView
+from .battlez import BattlesView, BattleDetailView, BattleEnterView
 from .keyconnectz import KeyboardView, KeyTranslateView
 from .playlistz import (PlaylistCollaboratorsView, PlaylistDetailView,
                         PlaylistItemDetailView, PlaylistItemsView,
@@ -88,6 +89,10 @@ from .views import (
 urlpatterns = [
     path("wallet/", WalletView.as_view(), name="economy-wallet"),
     path("earn/", EarnView.as_view(), name="economy-earn"),
+    # BattleZ — a challenge, gated by the same five ranges as everything else.
+    path("battlez/", BattlesView.as_view(), name="economy-battlez"),
+    path("battlez/<int:pk>/", BattleDetailView.as_view(), name="economy-battle"),
+    path("battlez/<int:pk>/enter/", BattleEnterView.as_view(), name="economy-battle-enter"),
     # KeyConnectZ — the keyboard. Wallpaper is Premium; translate is free.
     path("keyz/", KeyboardView.as_view(), name="economy-keyz"),
     path("keyz/translate/", KeyTranslateView.as_view(), name="economy-keyz-translate"),

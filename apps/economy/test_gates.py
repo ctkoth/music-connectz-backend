@@ -307,8 +307,11 @@ class VenueGateTests(TestCase):
 class CollabGateTests(TestCase):
     def setUp(self):
         self.client = APIClient()
-        self.me = User.objects.create_user("initiator", "i@e.com", PW)
-        self.mate = User.objects.create_user("mate", "m@e.com", PW)
+        # Both priced, because a deal's gates are now ENFORCED on the people
+        # named on it — storing them and checking nothing made "CollabZ carries
+        # the range gates" a label. See test_collab_split for the refusals.
+        self.me = make_member("initiator", rates=(2500,))
+        self.mate = make_member("mate", rates=(2500,))
         self.client.force_authenticate(self.me)
 
     def test_a_deal_carries_its_gates(self):

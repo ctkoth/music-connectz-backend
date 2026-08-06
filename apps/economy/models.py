@@ -673,6 +673,29 @@ def haversine_km(lat1, lng1, lat2, lng2):
 # ---- PostZ (cross-user posts with visibility + restricted-join rewards) ----
 RESTRICTED_JOIN_REWARD_SPINAZ = 300
 
+# --- Rating-based CollabZ splits.
+#
+# Three questions had to be answered before money could move on a number
+# strangers control, and each answer is a rule below.
+#
+# WHOSE RATING? Each contributor's rating ON THIS WORK — `collab:<id>:<user>` in
+# the same item space RateZ already serves. Not their global reputation: rating
+# the person hands the biggest cut to the most famous name regardless of what
+# they actually did on this track.
+#
+# MEASURED WHEN? Frozen at release. A live split means your share changes after
+# you agreed to it.
+#
+# WHAT STOPS FARMING? Nobody on the deal may rate it, and below a real number of
+# distinct raters the split falls back to the agreed worth. Two opinions are not
+# a mandate to move somebody's money.
+RATING_SPLIT_MIN_RATERS = 3
+
+
+def contributor_item_key(deal_id, username):
+    return f"collab:{deal_id}:{username}"
+
+
 # The composer has promised these two numbers from day one — "rating unlocks 30s
 # after posting, comments 60s" — and NOTHING ENFORCED THEM. A rule stated on
 # screen and checked nowhere is not a rule; anyone calling the API directly
@@ -684,10 +707,27 @@ POST_COMMENT_UNLOCK_SEC = 60
 def post_interaction_block(item_id, user, kind):
     """Why `user` may not rate/comment on `item_id` yet, or None if they may.
 
-    Only speaks about posts — every other item id in the shared space (a
-    playlist, a face, a work) has no author and no unlock timer.
+    Speaks about posts (unlock timers, no self-rating) and about CollabZ
+    contributor ratings (nobody on the deal may rate it). Every other id in the
+    shared space — a playlist, a face, a work — has no author and no timer.
     """
-    if not str(item_id or "").startswith("post:"):
+    item_id = str(item_id or "")
+
+    # collab:<deal>:<username> — the ratings a rating-split pays out on. Money
+    # moves on these, so the people it moves between must not be voting.
+    if kind == "rate" and item_id.startswith("collab:"):
+        bits = item_id.split(":")
+        if len(bits) == 3:
+            try:
+                deal = CollabDeal.objects.only("id", "participants").get(pk=int(bits[1]))
+            except (ValueError, CollabDeal.DoesNotExist):
+                return None
+            username = getattr(user, "username", "")
+            if any(p.get("username") == username for p in deal.participants):
+                return {"detail": "You're on this deal — you can't rate its contributors."}
+        return None
+
+    if not item_id.startswith("post:"):
         return None
     try:
         post = Post.objects.only("id", "author_id", "created_at").get(
@@ -1486,6 +1526,24 @@ class CollabDeal(models.Model):
     # against it.
     source_post = models.ForeignKey(Post, on_delete=models.SET_NULL, null=True,
                                     blank=True, related_name="collab_deals")
+    # A deal carries the WORK, in the same shape a post does: record or upload
+    # audio/video, an image, and the lyrics or script. Without it a deal is a
+    # settlement about something nobody in it can actually hear.
+    description = models.TextField(blank=True, default="")
+    media_type = models.CharField(max_length=24, blank=True, default="")
+    media_url = models.CharField(max_length=500, blank=True, default="")
+    image_url = models.CharField(max_length=500, blank=True, default="")
+    lyrics = models.TextField(blank=True, default="")
+    items = models.JSONField(default=list, blank=True)   # album: [{url,type,title,lyrics}]
+    # How the pot is divided at release. "worth" is the agreed settlement;
+    # "rating" re-cuts it by what the community thought each person contributed.
+    SPLIT_WORTH, SPLIT_RATING = "worth", "rating"
+    SPLIT_CHOICES = [(SPLIT_WORTH, "By agreed worth"), (SPLIT_RATING, "By contribution rating")]
+    split_mode = models.CharField(max_length=8, choices=SPLIT_CHOICES, default=SPLIT_WORTH)
+    # What the ratings were AT RELEASE, and why the split came out as it did.
+    # Frozen deliberately: a live split means your cut changes after you agreed
+    # to it, and money that moves under you is not a deal.
+    split_snapshot = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
@@ -1886,3 +1944,61 @@ def key_translate_state(user):
     """(used, cap, remaining) — published BEFORE anyone types, not on refusal."""
     used = key_translate_used_today(user)
     return used, KEY_TRANSLATE_DAILY_CHARS, max(0, KEY_TRANSLATE_DAILY_CHARS - used)
+
+
+# ---- BattleZ ----
+#
+# BattleZ has been named in the app since the tab bar was written and has never
+# had a single row behind it — so "BattleZ carries the range gates" was a
+# promise with nothing to enforce. This is the smallest honest version: a
+# challenge that carries the work in the PostZ format, gates who may enter, and
+# is judged by the same RateZ item space everything else is judged by.
+class Battle(models.Model):
+    STATUS_OPEN, STATUS_CLOSED = "open", "closed"
+    STATUS_CHOICES = [(STATUS_OPEN, "Open"), (STATUS_CLOSED, "Closed")]
+
+    host = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="battles")
+    title = models.CharField(max_length=160)
+    description = models.TextField(blank=True, default="")
+    # The work, same shape as a post.
+    media_type = models.CharField(max_length=24, blank=True, default="")
+    media_url = models.CharField(max_length=500, blank=True, default="")
+    image_url = models.CharField(max_length=500, blank=True, default="")
+    lyrics = models.TextField(blank=True, default="")
+    genre = models.CharField(max_length=40, blank=True, default="")
+    # The same five exclusive ranges search and VenueZ use. One spec, so what a
+    # host advertises and what the door enforces cannot diverge.
+    gates = models.JSONField(default=dict, blank=True)
+    entry_spinaz = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=8, choices=STATUS_CHOICES, default=STATUS_OPEN)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    @property
+    def item_key(self):
+        return f"battle:{self.id}"
+
+
+class BattleEntry(models.Model):
+    """One member's answer to the challenge — again in the PostZ format."""
+    battle = models.ForeignKey(Battle, on_delete=models.CASCADE, related_name="entries")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="battle_entries")
+    title = models.CharField(max_length=160, blank=True, default="")
+    media_type = models.CharField(max_length=24, blank=True, default="")
+    media_url = models.CharField(max_length=500, blank=True, default="")
+    image_url = models.CharField(max_length=500, blank=True, default="")
+    lyrics = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("battle", "user")
+        ordering = ("created_at",)
+
+    @property
+    def item_key(self):
+        return f"battle:{self.battle_id}:entry:{self.id}"
