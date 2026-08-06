@@ -241,6 +241,17 @@ APPLE_OAUTH_CLIENT_ID = os.environ.get("APPLE_OAUTH_CLIENT_ID", "")
 # Set GEMINI_API_KEY on Render; endpoints 503 cleanly until then.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
+# Modal — the sandbox OCC runs code in. This is the one thing OCC could never
+# do: execute a member's code. It needs a container per run, which is real
+# infrastructure with a real bill, so it stays off until BOTH tokens are set.
+# Get them at modal.com → Settings → API Tokens (or `modal token new`).
+#
+# Until they're set, /occ/spec/ reports can_execute=False and says exactly why.
+# Nothing offers a Run button that does nothing.
+MODAL_TOKEN_ID = os.environ.get("MODAL_TOKEN_ID", "")
+MODAL_TOKEN_SECRET = os.environ.get("MODAL_TOKEN_SECRET", "")
+MODAL_APP_NAME = os.environ.get("MODAL_APP_NAME", "music-connectz-occ")
+
 # Payments (wallet funding). Each provider activates only when its keys are set;
 # otherwise the checkout endpoints report it as unavailable and the client hides
 # the button. Where the frontend lives, for building return URLs.

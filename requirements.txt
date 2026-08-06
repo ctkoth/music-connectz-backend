@@ -21,3 +21,7 @@ stripe>=8.0
 # OCC's real LLM backend (Corey GPT). Active only when ANTHROPIC_API_KEY is set;
 # otherwise OCC falls back to its built-in templated replies.
 anthropic>=0.40
+# The sandbox OCC runs code in. Active only when MODAL_TOKEN_ID and
+# MODAL_TOKEN_SECRET are set; until then the run endpoint 503s with the reason
+# and /occ/spec/ reports can_execute=False.
+modal>=1.5

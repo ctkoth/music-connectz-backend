@@ -43,6 +43,7 @@ from .merch import MerchBuyView, MerchDetailView, MerchView
 from .occ import OccChatView
 from .occ_taskz import (OccSettingsView, OccSpecView, OccTaskDetailView,
                         OccTaskUndoView, OccTasksView)
+from .occ_run import OccRunView
 from .occ_workz import (OccWorkDetailView, OccWorkShareView, OccWorkUnshareView,
                         OccWorkzView, PostOccWorkView)
 from .payments import (
@@ -122,6 +123,8 @@ urlpatterns = [
     path("occ/taskz/<int:pk>/", OccTaskDetailView.as_view(), name="economy-occ-task"),
     path("occ/taskz/<int:pk>/undo/", OccTaskUndoView.as_view(), name="economy-occ-task-undo"),
     # WorkZ — what went into OCC, what came out, and where it goes next.
+    # The sandbox. Off, and saying why, until the Modal tokens are set.
+    path("occ/run/", OccRunView.as_view(), name="economy-occ-run"),
     path("occ/workz/", OccWorkzView.as_view(), name="economy-occ-workz"),
     path("occ/workz/<int:pk>/", OccWorkDetailView.as_view(), name="economy-occ-work"),
     path("occ/workz/<int:pk>/share/", OccWorkShareView.as_view(), name="economy-occ-work-share"),

@@ -54,6 +54,7 @@ def task_dict(t, tier):
         "eta_seconds": t.eta_seconds,
         "detail": t.detail,
         "automated": t.automated,
+        "run_seconds": t.run_seconds,
         "git": ({"repo": t.git_repo, "branch": t.git_branch, "ref": t.git_ref}
                 if t.kind == OccTask.KIND_GIT else None),
         # Computed, never assumed — see the module docstring.
@@ -80,7 +81,16 @@ class OccSpecView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        # Imported here: occ_run imports occ_workz, which imports postz — a
+        # module-level import would make that a cycle.
+        from .modal_sandbox import NEEDS_TIER as SANDBOX_TIER
+        from .modal_sandbox import configured as sandbox_configured
+        from .modal_sandbox import unavailable_reason
+        from .occ_run import run_status
+
         tier = membership_for(request.user).tier
+        sandbox_ready = sandbox_configured() and not unavailable_reason()
+        sandbox_why = unavailable_reason()
         allowed_langs, locked_langs = languages_for(tier)
         return Response({
             "tier": tier,
@@ -94,13 +104,20 @@ class OccSpecView(APIView):
             "image_exports": OCC_IMAGE_EXPORTS,
             "export_routes": EXPORT_ROUTES,
             "undo_window_seconds": occ_undo_window(tier),
-            # Said once, plainly, rather than discovered by pressing a button
-            # that does nothing: OCC edits and version-controls code. Running it
-            # needs a sandbox per member, which is infrastructure, not a toggle.
-            "can_execute": False,
-            "execute_note": "OCC edits, tracks and version-controls your code. "
-                            "Running or compiling it needs a sandbox per member — "
-                            "that's infrastructure, and it isn't built yet.",
+            # Answered from the configuration, never asserted. When the sandbox
+            # tokens are set this flips to True by itself; until then it stays
+            # False and `execute_note` says exactly why, because a Run button
+            # that does nothing is worse than no Run button.
+            "can_execute": bool(sandbox_ready and tier_at_least(tier, SANDBOX_TIER)),
+            "execute_note": (
+                sandbox_why or
+                ("OCC runs your code in a sandbox — a fresh container per run, no "
+                 "network, charged by the second."
+                 if tier_at_least(tier, SANDBOX_TIER) else
+                 "Running code is a StatZ feature — it's a container per run, and "
+                 "that's what the tier pays for.")
+            ),
+            "execute": run_status(request.user),
         })
 
 

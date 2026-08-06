@@ -2150,6 +2150,10 @@ class OccTask(models.Model):
     # lies, so a task that can't describe its own reversal says undoable=False.
     undo_payload = models.JSONField(default=dict, blank=True)
     automated = models.BooleanField(default=False)   # ran with no confirmation
+    # Sandbox seconds this task actually consumed. Kept on the task rather than
+    # in a second table because a run IS a task — the spec's own rule is one
+    # list and one truth — and the daily ceiling is summed from here.
+    run_seconds = models.PositiveIntegerField(default=0)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
