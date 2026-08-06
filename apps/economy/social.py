@@ -37,6 +37,7 @@ from .models import (
     relationship,
     energy_rate_per_hour,
     notify,
+    post_interaction_block,
     reward_for_rating,
     Post,
     blocked_user_ids,
@@ -592,6 +593,9 @@ class SocialView(APIView):
                 return Response(self._payload(item, request))
             if not body:
                 return Response({"detail": "body required"}, status=status.HTTP_400_BAD_REQUEST)
+            blocked = post_interaction_block(item, request.user, "comment")
+            if blocked:
+                return Response(blocked, status=status.HTTP_403_FORBIDDEN)
             SocialComment.objects.create(user=request.user, item_id=item, body=body)
             self._notify_target(item, "comment", f"@{request.user.username} commented on your post 💬", request.user)
         elif action == "rate":
@@ -602,6 +606,9 @@ class SocialView(APIView):
             if score == 0:
                 ItemRating.objects.filter(user=request.user, item_id=item).delete()
             elif 1 <= score <= 10:
+                blocked = post_interaction_block(item, request.user, "rate")
+                if blocked:
+                    return Response(blocked, status=status.HTTP_403_FORBIDDEN)
                 existing = ItemRating.objects.filter(user=request.user, item_id=item).first()
                 if existing is None:
                     ItemRating.objects.create(user=request.user, item_id=item, score=score)

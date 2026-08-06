@@ -15,6 +15,8 @@ from django.db.models import Case, IntegerField, Sum, When
 from django.utils import timezone
 
 from .models import (
+    POST_COMMENT_UNLOCK_SEC,
+    POST_RATE_UNLOCK_SEC,
     Post,
     PostJoin,
     PostShare,
@@ -89,8 +91,14 @@ def _post_dict(p, request, up=0, down=0):
         "is_album": p.is_album,
         "items": p.items or [],
         "score": p.score or {},
+        "genre": p.genre,
         "visibility": p.visibility,
         "allow_in_playlists": p.allow_in_playlists,
+        # Age from the SERVER's clock, so the client's unlock countdowns can't
+        # drift from the checks the API actually runs.
+        "age_sec": int((timezone.now() - p.created_at).total_seconds()),
+        "rate_unlock_sec": POST_RATE_UNLOCK_SEC,
+        "comment_unlock_sec": POST_COMMENT_UNLOCK_SEC,
         "skill_cost_cents": p.skill_cost_cents,
         "joins": p.joins.count() if p.visibility == "restricted" else 0,
         "shares": p.shares.count(),
@@ -201,6 +209,7 @@ class PostsView(APIView):
             links=d.get("links") or [], media_type=media_type, media_url=media_url,
             is_album=is_album, items=items,
             score=score, visibility=vis, skill_cost_cents=cost,
+            genre=str(d.get("genre", ""))[:40],
             allow_in_playlists=bool(d.get("allow_in_playlists", True)),
         )
         if is_submission:

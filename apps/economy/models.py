@@ -673,6 +673,37 @@ def haversine_km(lat1, lng1, lat2, lng2):
 # ---- PostZ (cross-user posts with visibility + restricted-join rewards) ----
 RESTRICTED_JOIN_REWARD_SPINAZ = 300
 
+# The composer has promised these two numbers from day one — "rating unlocks 30s
+# after posting, comments 60s" — and NOTHING ENFORCED THEM. A rule stated on
+# screen and checked nowhere is not a rule; anyone calling the API directly
+# could rate a post the instant it landed, and rate their own.
+POST_RATE_UNLOCK_SEC = 30
+POST_COMMENT_UNLOCK_SEC = 60
+
+
+def post_interaction_block(item_id, user, kind):
+    """Why `user` may not rate/comment on `item_id` yet, or None if they may.
+
+    Only speaks about posts — every other item id in the shared space (a
+    playlist, a face, a work) has no author and no unlock timer.
+    """
+    if not str(item_id or "").startswith("post:"):
+        return None
+    try:
+        post = Post.objects.only("id", "author_id", "created_at").get(
+            pk=int(str(item_id).split(":", 1)[1]))
+    except (ValueError, Post.DoesNotExist):
+        return None
+    if kind == "rate" and post.author_id == getattr(user, "id", None):
+        return {"detail": "You can't rate your own post."}
+    unlock = POST_RATE_UNLOCK_SEC if kind == "rate" else POST_COMMENT_UNLOCK_SEC
+    age = (timezone.now() - post.created_at).total_seconds()
+    if age < unlock:
+        left = int(unlock - age) + 1
+        return {"detail": f"{'Rating' if kind == 'rate' else 'Commenting'} opens {unlock}s after a post lands — {left}s to go.",
+                "unlock_seconds": unlock, "seconds_left": left}
+    return None
+
 
 class Post(models.Model):
     """A member post. Visibility gates who sees it; restricted posts reward the
@@ -691,6 +722,10 @@ class Post(models.Model):
     # Optional scored-take payload (e.g. RapZ/SingZ lab result) for context on the post.
     score = models.JSONField(default=dict, blank=True)
     visibility = models.CharField(max_length=12, choices=VIS_CHOICES, default="public")
+    # The composer has always shown a genre picker and the value was discarded
+    # on the way in, so every post in the app is genreless and ChartZ has
+    # nothing to slice by.
+    genre = models.CharField(max_length=40, blank=True, default="")
     # May other members put this in THEIR playlists? Default yes — being in
     # someone else's set is reach, and a public post is already public. This is
     # the author's off switch for the case where it isn't welcome.
