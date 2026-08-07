@@ -59,3 +59,11 @@ services:
         sync: false
       - key: PAYPAL_MODE
         sync: false
+      # Modal — the sandbox OCC runs code in. Both are required together; with
+      # either missing, /occ/spec/ reports can_execute=false and the Run panel
+      # renders the reason instead of a button. Get them from
+      # modal.com -> Settings -> API Tokens.
+      - key: MODAL_TOKEN_ID
+        sync: false
+      - key: MODAL_TOKEN_SECRET
+        sync: false
