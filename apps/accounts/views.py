@@ -340,12 +340,30 @@ class OAuthConfigView(APIView):
         from django.conf import settings
 
         cfg = {
-            "google": getattr(settings, "GOOGLE_OAUTH_CLIENT_ID", "") or "",
-            "github": getattr(settings, "GITHUB_OAUTH_CLIENT_ID", "") or "",
-            "apple": getattr(settings, "APPLE_OAUTH_CLIENT_ID", "") or "",
+            "google": (getattr(settings, "GOOGLE_OAUTH_CLIENT_ID", "") or "").strip(),
+            "github": (getattr(settings, "GITHUB_OAUTH_CLIENT_ID", "") or "").strip(),
+            "apple": (getattr(settings, "APPLE_OAUTH_CLIENT_ID", "") or "").strip(),
         }
         # Generic code-flow providers advertise their PUBLIC client id from env;
         # a provider stays hidden/disabled on the client until its id is present.
         for provider in OAUTH2_PROVIDERS:
             cfg[provider] = os.environ.get(f"{provider.upper()}_OAUTH_CLIENT_ID", "").strip()
-        return Response(cfg)
+
+        # A configured-but-wrong key is the hardest OAuth failure to diagnose,
+        # because Google's button does not error — it just never renders, and
+        # every screen stays silent about why. So say it here. Client IDs are
+        # public, so naming the shape gives nothing away.
+        warnings = []
+        g = cfg["google"]
+        if g and not g.endswith(".apps.googleusercontent.com"):
+            warnings.append(
+                "GOOGLE_OAUTH_CLIENT_ID doesn't look like a Google client ID — those "
+                "end in .apps.googleusercontent.com. Check you pasted the client ID "
+                "and not the client secret."
+            )
+        if cfg["apple"] and "." not in cfg["apple"]:
+            warnings.append(
+                "APPLE_OAUTH_CLIENT_ID should be the Services ID (a reverse-domain "
+                "string), not the Team ID."
+            )
+        return Response({**cfg, "warnings": warnings})

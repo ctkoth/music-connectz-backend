@@ -232,10 +232,17 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
 ]
 
 # OAuth provider config (set as Render env vars)
-GOOGLE_OAUTH_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
-GITHUB_OAUTH_CLIENT_ID = os.environ.get("GITHUB_OAUTH_CLIENT_ID", "")
-GITHUB_OAUTH_CLIENT_SECRET = os.environ.get("GITHUB_OAUTH_CLIENT_SECRET", "")
-APPLE_OAUTH_CLIENT_ID = os.environ.get("APPLE_OAUTH_CLIENT_ID", "")
+# .strip() is not cosmetic here. `oauth.py` strips before verifying a token,
+# and this did not, so a client ID pasted with a trailing space or newline —
+# which is what happens when you copy one out of the Google console on a phone —
+# left the two paths disagreeing: the ID handed to the sign-in button carried
+# the whitespace and Google refused to render it, while the verifier would have
+# accepted the very same key. A button that silently never appears, and no error
+# anywhere. Both sides strip now.
+GOOGLE_OAUTH_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+GITHUB_OAUTH_CLIENT_ID = os.environ.get("GITHUB_OAUTH_CLIENT_ID", "").strip()
+GITHUB_OAUTH_CLIENT_SECRET = os.environ.get("GITHUB_OAUTH_CLIENT_SECRET", "").strip()
+APPLE_OAUTH_CLIENT_ID = os.environ.get("APPLE_OAUTH_CLIENT_ID", "").strip()
 
 # Google Gemini — powers Image ConnectZ (image gen) + Video ConnectZ (Veo).
 # Set GEMINI_API_KEY on Render; endpoints 503 cleanly until then.
