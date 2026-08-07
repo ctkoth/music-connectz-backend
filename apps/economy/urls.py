@@ -48,6 +48,7 @@ from .releasez import (CollabDistributeView, PostDistributeView, ReleaseDetailVi
                        ReleaseSubmitView, ReleasesView)
 from .collab_files import CollabFileDetailView, CollabFilesView
 from .collab_post import CollabNeedsView, CollabPostView
+from .badgez import BadgeGiftView, BadgezView
 from .ratez import RatezView, RatingKindsView
 from .occ_workz import (OccWorkDetailView, OccWorkShareView, OccWorkUnshareView,
                         OccWorkzView, PostOccWorkView)
@@ -188,6 +189,9 @@ urlpatterns = [
     path("members/", MembersView.as_view(), name="economy-members"),
     path("members/<str:username>/", MemberProfileView.as_view(), name="economy-member"),
     # RateZ — every rating, classified for what it actually measures.
+    # BadgeZ — a title you wear and an effect you feel.
+    path("badgez/", BadgezView.as_view(), name="economy-badgez"),
+    path("badgez/gift/", BadgeGiftView.as_view(), name="economy-badgez-gift"),
     path("ratez/", RatezView.as_view(), name="economy-ratez"),
     path("ratez/kinds/", RatingKindsView.as_view(), name="economy-ratez-kinds"),
     path("postz/", PostsView.as_view(), name="economy-postz"),

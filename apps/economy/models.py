@@ -600,6 +600,9 @@ class Profile(models.Model):
     asexual = models.BooleanField(default=False)
     traits = models.JSONField(default=list, blank=True)
     personas = models.JSONField(default=list, blank=True)
+    # The title being worn, from a badge held AND shown. Stored rather than
+    # derived so a member with several can choose which one they lead with.
+    badge_title = models.CharField(max_length=60, blank=True, default="")
     links = models.JSONField(default=list, blank=True)  # [{label, url}] public links
     # Location (opt-in) for in-person CollabZ / VenueZ distance filtering.
     share_location = models.BooleanField(default=False)
@@ -994,7 +997,8 @@ def reward_for_rating(user, what=""):
         user=user, resource=Transaction.RES_ENERGY,
         note__startswith=RATING_NOTE, created_at__gte=day_ago,
     ).count()
-    if paid >= RATING_REWARD_DAILY_CAP:
+    cap = RATING_REWARD_DAILY_CAP + badge_effects(user).get("rating_cap_bonus", 0)
+    if paid >= cap:
         return 0
     note = f"{RATING_NOTE} — {what}" if what else RATING_NOTE
     award_energy(user, RATING_REWARD_ENERGY, note)
@@ -1252,7 +1256,11 @@ def energy_rate_per_hour(user):
     reach = reach_median(user)
     m = membership_for(user)
     divisor = {TIER_FREE: 10, TIER_PREMIUM: 5, TIER_STATZ: 1, TIER_DEBUG: 1}.get(m.tier, 10)
-    return reach // divisor
+    base = reach // divisor
+    # BadgeZ effects are read HERE, by the thing they affect. A badge whose
+    # multiplier lived only in its description would be a sticker.
+    mult = badge_effects(user).get("energy_multiplier", 1.0)
+    return int(base * mult)
 
 
 # Being away shouldn't bank Energy forever — it regenerates like mana, it is
@@ -2241,6 +2249,194 @@ RATING_KINDS = [
      "desc": "Kept apart from everything else on purpose — it is not a "
              "judgement of anybody's work."},
 ]
+
+
+# ---- BadgeZ ----
+#
+# A badge that only looks nice is a sticker. Every one of these changes a number
+# the member can point at, and every effect is READ by the system it affects
+# rather than described in copy nobody enforces.
+#
+# `check` is what makes a badge earned rather than claimed: it reads evidence
+# already in the database. A badge with no check is `gifted` and says so.
+FOUNDING_SEATS = 50
+
+
+def _shipped_collabs(user):
+    return Post.objects.filter(contributor_rows__user=user).count()
+
+
+def _ratings_given(user):
+    return ItemRating.objects.filter(user=user).count()
+
+
+def _verified_sources(user):
+    p = getattr(user, "mcz_profile", None)
+    return sum(1 for l in (getattr(p, "links", None) or [])
+               if isinstance(l, dict) and l.get("verified"))
+
+
+def _clean_deals(user):
+    """Deals released with this member on them, and never disputed."""
+    done = CollabDeal.objects.filter(status=CollabDeal.STATUS_RELEASED)
+    n = 0
+    for d in done[:500]:
+        if any(p.get("username") == user.username for p in (d.participants or [])):
+            n += 1
+    disputed = CollabDeal.objects.filter(status=CollabDeal.STATUS_DISPUTED)
+    for d in disputed[:500]:
+        if any(p.get("username") == user.username for p in (d.participants or [])):
+            return 0        # one open dispute and the badge isn't yours yet
+    return n
+
+
+BADGES = {
+    # ---- gifted ----
+    "owner": {
+        "name": "Owner", "emoji": "👑", "title": "Owner", "gifted": True,
+        "desc": "This is whose app it is.",
+        "how": "Held by the platform owner.",
+        "effects": {"tier": "statz", "dev_tax_share": 1.0, "intelligence_royalties": True},
+        "effect_note": "StatZ for life, the developer tax, and the intelligence royalties.",
+    },
+    "founding": {
+        "name": "Founding Fifty", "emoji": "🏛️", "title": "Founding Fifty", "gifted": True,
+        "desc": f"One of the first {FOUNDING_SEATS} members to pay for this.",
+        "how": f"The first {FOUNDING_SEATS} paid memberships. When they're gone they're gone.",
+        "effects": {"lifetime_discount_pct": 50, "energy_multiplier": 1.25},
+        "effect_note": "Half price for as long as you keep it, and a quarter more Energy.",
+    },
+    # ---- earned ----
+    "verified_reach": {
+        "name": "Verified Reach", "emoji": "📡", "title": "Verified", "gifted": False,
+        "desc": "An outside audience, proven rather than typed.",
+        "how": "Verify one social account in SocialZ.",
+        "effects": {"energy_multiplier": 1.25},
+        "effect_note": "+25% passive Energy.",
+        "check": lambda u: _verified_sources(u) >= 1,
+    },
+    "collaborator": {
+        "name": "Collaborator", "emoji": "🤝", "title": "Collaborator", "gifted": False,
+        "desc": "Ten pieces of work shipped with other people on them.",
+        "how": "Be credited on 10 posts that came out of a CollabZ deal.",
+        "effects": {"submission_bonus": 5, "needs_priority": True},
+        "effect_note": "+5 submissions a day, and your open needs list first.",
+        "check": lambda u: _shipped_collabs(u) >= 10,
+    },
+    "straight_shooter": {
+        "name": "Straight Shooter", "emoji": "🎯", "title": "Straight Shooter", "gifted": False,
+        "desc": "Ten deals delivered and not one dispute.",
+        "how": "Release 10 CollabZ deals with no dispute open against you.",
+        # Reputation buying lower friction is the honest opposite of punishing
+        # flakes: it can't be aimed at anybody, so nobody can weaponise it.
+        "effects": {"stake_waived": True},
+        "effect_note": "No good-faith stake — your record is the stake.",
+        "check": lambda u: _clean_deals(u) >= 10,
+    },
+    "ear": {
+        "name": "The Ear", "emoji": "👂", "title": "The Ear", "gifted": False,
+        "desc": "A hundred ratings given. Somebody has to do the listening.",
+        "how": "Rate 100 things.",
+        "effects": {"rating_cap_bonus": 20},
+        "effect_note": "+20 paid ratings a day — the cap that pays, raised.",
+        "check": lambda u: _ratings_given(u) >= 100,
+    },
+    "bug_hunter": {
+        "name": "Bug Hunter", "emoji": "🐛", "title": "Bug Hunter", "gifted": True,
+        "desc": "Found something broken and said so.",
+        "how": "Gifted when a BugZ report is accepted.",
+        "effects": {"promptz_grant": 50},
+        "effect_note": "+50 🏷️ PromptZ, once.",
+    },
+}
+
+
+class Badge(models.Model):
+    """A badge a member holds. The catalogue itself lives in BADGES."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="badges")
+    key = models.CharField(max_length=40)
+    # Per-badge privacy. An achievement is also a disclosure — "Straight
+    # Shooter" tells the room about your deal history — so showing it is the
+    # member's call. The EFFECT applies either way: hiding a badge must never
+    # cost somebody the thing they earned.
+    visible = models.BooleanField(default=True)
+    awarded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                   null=True, blank=True, related_name="badges_given")
+    awarded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "key")
+        ordering = ("awarded_at",)
+
+
+def badges_for(user, only_visible=False):
+    qs = Badge.objects.filter(user=user)
+    if only_visible:
+        qs = qs.filter(visible=True)
+    return [b for b in qs if b.key in BADGES]
+
+
+def badge_effects(user):
+    """Every effect the member's badges add up to.
+
+    Multipliers multiply, bonuses add, flags OR together. Computed rather than
+    stored so revoking a badge takes its effect with it — a stored copy is how
+    an effect outlives the thing that justified it.
+    """
+    out = {}
+    for b in badges_for(user):
+        for k, v in BADGES[b.key].get("effects", {}).items():
+            if isinstance(v, bool):
+                out[k] = out.get(k, False) or v
+            elif k.endswith("_multiplier"):
+                # Multiplied at full precision and rounded once at the end —
+                # rounding at each step compounds the error as badges stack.
+                out[k] = out.get(k, 1.0) * float(v)
+            elif isinstance(v, (int, float)):
+                out[k] = out.get(k, 0) + v
+            else:
+                out[k] = v
+    return {k: (round(v, 4) if k.endswith("_multiplier") else v)
+            for k, v in out.items()}
+
+
+def grant_badge(user, key, by=None):
+    """Give a badge. Returns (badge, created)."""
+    badge, created = Badge.objects.get_or_create(
+        user=user, key=key, defaults={"awarded_by": by})
+    if created:
+        spec = BADGES.get(key, {})
+        # A badge granting a tier applies it immediately — a tier that only
+        # takes effect on the next unrelated save is a promise with a delay
+        # nobody explained.
+        tier = spec.get("effects", {}).get("tier")
+        if tier:
+            m = membership_for(user)
+            if m.tier != tier:
+                m.tier = tier
+                m.save(update_fields=["tier", "updated_at"])
+        notify(user, "badge",
+               f"{spec.get('emoji', '🏅')} You earned {spec.get('name', key)} — "
+               f"{spec.get('effect_note', '')}".strip(), actor=by)
+    return badge, created
+
+
+def recheck_badges(user):
+    """Award every earned badge whose evidence is now there. Returns new keys."""
+    have = {b.key for b in Badge.objects.filter(user=user)}
+    won = []
+    for key, spec in BADGES.items():
+        check = spec.get("check")
+        if not check or key in have:
+            continue
+        try:
+            if check(user):
+                grant_badge(user, key)
+                won.append(key)
+        except Exception:      # a broken check must never block a page load
+            continue
+    return won
 
 
 class SocialReview(models.Model):
