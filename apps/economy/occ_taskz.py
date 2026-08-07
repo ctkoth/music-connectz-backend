@@ -9,8 +9,8 @@ Two toggles decide how a task starts:
 
 * **SuggestionZ** (Premium) proposes tasks and must explain WHAT, WHY and HOW
   before anything runs. All three or it isn't a suggestion, it's an assertion.
-* **AutomationZ** (StatZ) runs them with no confirmation and tells you in LogZ
-  as it happens. Off by default — a setting that acts on your code unasked is
+* **AutomationZ** (StatZ) runs them with no confirmation and NOTIFIES you as it
+  happens. Off by default — a setting that acts on your code unasked is
   not one to inherit silently.
 
 A task is only undoable if it can describe its own reversal. "Undo" that can't
@@ -25,7 +25,7 @@ from rest_framework.views import APIView
 
 from .models import (
     OccTask,
-    log_resource,
+    notify,
     membership_for,
     occ_settings_for,
     occ_undo_window,
@@ -264,7 +264,8 @@ class OccTasksView(APIView):
         if automated:
             # AutomationZ says so in LogZ as it happens, which is the promise
             # the toggle makes in exchange for not asking.
-            log_resource(request.user, "xp", 0, f"OCC ran '{task.title}' automatically")
+            notify(request.user, "occ",
+                   f"🤖 OCC ran '{task.title}' automatically. Undo it in TaskZ.")
         return Response(task_dict(task, tier), status=status.HTTP_201_CREATED)
 
 
@@ -349,5 +350,5 @@ class OccTaskUndoView(APIView):
             )
         t.status = OccTask.STATUS_UNDONE
         t.save(update_fields=["status", "updated_at"])
-        log_resource(request.user, "xp", 0, f"OCC undid '{t.title}'")
+        notify(request.user, "occ", f"↩️ OCC undid '{t.title}'.")
         return Response(task_dict(t, tier))

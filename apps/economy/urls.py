@@ -44,6 +44,7 @@ from .occ import OccChatView
 from .occ_taskz import (OccSettingsView, OccSpecView, OccTaskDetailView,
                         OccTaskUndoView, OccTasksView)
 from .occ_run import OccRunView
+from .occ_suggest import OccSuggestView
 from .releasez import (CollabDistributeView, PostDistributeView, ReleaseDetailView,
                        ReleaseSubmitView, ReleasesView)
 from .collab_files import CollabFileDetailView, CollabFilesView
@@ -132,6 +133,8 @@ urlpatterns = [
     # WorkZ — what went into OCC, what came out, and where it goes next.
     # The sandbox. Off, and saying why, until the Modal tokens are set.
     path("occ/run/", OccRunView.as_view(), name="economy-occ-run"),
+    # SuggestionZ proposes and waits; AutomationZ drops the tap on what's safe.
+    path("occ/suggest/", OccSuggestView.as_view(), name="economy-occ-suggest"),
     path("occ/workz/", OccWorkzView.as_view(), name="economy-occ-workz"),
     path("occ/workz/<int:pk>/", OccWorkDetailView.as_view(), name="economy-occ-work"),
     path("occ/workz/<int:pk>/share/", OccWorkShareView.as_view(), name="economy-occ-work-share"),
