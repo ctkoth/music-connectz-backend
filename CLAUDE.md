@@ -82,11 +82,26 @@ give them the link. A read-only surface is usually an unfinished one.
 
 ## Deployment
 
-- Backend is on Render with **auto-deploy OFF**. Every backend change needs a
-  **Manual Deploy**, and any change with a migration needs `migrate` run too.
-- Frontend deploys itself (Vercel / Cloudflare Pages). This means a frontend
-  change can go live before the backend it depends on — sequence deploys so the
-  UI never promises what the API cannot do yet.
+**Both repos auto-deploy from `main`. Merging to `main` IS the deploy.**
+
+- Backend is on Render with **auto-deploy ON**. A push to `main` builds and
+  ships by itself — no Manual Deploy to press, and none to forget.
+- **`build.sh` runs `migrate --no-input` on every deploy**, so a merge to
+  `main` migrates production unattended. `render.yaml`'s `startCommand` runs
+  gunicorn directly and never touches `start.sh`, which is why the build is the
+  only reliable place to migrate. Nothing else runs it.
+- **So develop on a branch, always.** The deliberate act is the merge, not a
+  button afterwards. Anything sitting on `main` is either live or about to be.
+- Frontend deploys itself too (Vercel / Cloudflare Pages), which means a
+  frontend change can go live before the backend it depends on. When the UI
+  needs a new endpoint, **merge the backend first** — the API may exist before
+  anything calls it, but never the reverse.
+- A failed build never replaces the running process, so a broken deploy leaves
+  the previous version serving. There is nothing to roll back by hand.
+- The tests run on SQLite and production is Postgres (see Testing below). With
+  migrations now applying unattended, that gap is the one to respect: a
+  migration touching field widths gets checked against real Postgres BEFORE it
+  reaches `main`, not after.
 
 ## Testing
 
