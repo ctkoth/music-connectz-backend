@@ -186,6 +186,48 @@ def one_of_each(items):
     return items, None
 
 
+def skill_prices(user):
+    """{skill name: rate_cents} from the member's own PersonaZ skills."""
+    from .models import profile_for
+    out = {}
+    for persona in (profile_for(user).personas or []):
+        if not isinstance(persona, dict):
+            continue
+        for s in (persona.get("skills") or []):
+            if not isinstance(s, dict):
+                continue
+            name = str(s.get("name", "")).strip()
+            try:
+                rate = int(s.get("rate_cents") or 0)
+            except (TypeError, ValueError):
+                rate = 0
+            if name and rate > 0:
+                out[name] = max(out.get(name, 0), rate)
+    return out
+
+
+def post_cost_cents(user, skills_used):
+    """What posting this costs: the combined price of the skills that went in.
+
+    Computed HERE, from the member's own rates, never taken from the request.
+    The composer sent no cost at all, so every post in the app has been free
+    while the screen implied otherwise — and a client-supplied price is a price
+    the client can set to zero anyway.
+
+    Returns (total_cents, breakdown) so the cost can be SHOWN before the button
+    rather than discovered by pressing it.
+    """
+    prices = skill_prices(user)
+    lines, total = [], 0
+    for name in (skills_used or [])[:40]:
+        if not isinstance(name, str):
+            continue
+        cents = prices.get(name.strip(), 0)
+        lines.append({"skill": name.strip(), "cents": cents})
+        total += cents
+    return total, lines
+
+
 def create_post(user, d):
     """Make a post from a PostZ payload. Returns (post, info, error).
 
@@ -202,7 +244,11 @@ def create_post(user, d):
     vis = str(d.get("visibility", "public")).lower()
     if vis not in {"public", "restricted", "private"}:
         vis = "public"
-    cost = max(0, int(d.get("skill_cost_cents") or 0))
+    # The price of the skills the member put on it, from THEIR rates. Taking
+    # this from the request meant the composer's zero was the real price.
+    skills = [str(x)[:60] for x in (d.get("skills_used") or [])
+              if isinstance(x, (str, int))][:40]
+    cost, _lines = post_cost_cents(user, skills)
     media_url = str(d.get("media_url", "")).strip()[:500]
     media_type = str(d.get("media_type", "")).strip()[:24]
     score = d.get("score") if isinstance(d.get("score"), dict) else {}
@@ -244,13 +290,41 @@ def create_post(user, d):
         is_album=is_album, items=items,
         score=score, visibility=vis, skill_cost_cents=cost,
         genre=str(d.get("genre", ""))[:40],
-        skills_used=[str(x)[:60] for x in (d.get("skills_used") or [])
-                     if isinstance(x, (str, int))][:40],
+        skills_used=skills,
         allow_in_playlists=bool(d.get("allow_in_playlists", True)),
     )
     if is_submission:
         record_submission(user)
     return p, {"energy_charged": charged, "energy": w.energy}, None
+
+
+class PostCostView(APIView):
+    """GET /api/economy/postz/cost/?skills=a,b — what posting this will cost.
+
+    Exists so the composer can state the price ON the button. The rule is that
+    a cost is announced before it is paid; a post that charges you and tells
+    you afterwards has sent a bill, not quoted a price.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        raw = request.query_params.get("skills", "")
+        skills = [s for s in (x.strip() for x in raw.split(",")) if s]
+        total, lines = post_cost_cents(request.user, skills)
+        w = wallet_for(request.user)
+        return Response({
+            "cost": {"resource": "energy", "amount": total},
+            "lines": lines,
+            "energy": w.energy,
+            # What actually comes off. Energy never goes negative — the post is
+            # made either way, so say that rather than implying a refusal.
+            "charged": min(total, max(0, w.energy)),
+            "affordable": w.energy >= total,
+            "priced_skills": sorted(skill_prices(request.user)),
+            "note": "Posting costs the combined price of the skills you put on "
+                    "it. Skills you haven't priced cost nothing.",
+        })
 
 
 class SubmissionsView(APIView):

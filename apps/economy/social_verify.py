@@ -25,7 +25,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import profile_for, reach_median, social_sources
+from django.utils import timezone
+
+from .models import SocialReview, profile_for, reach_median, social_sources
 
 VERIFY_MODEL = "claude-opus-4-8"
 CODE_PREFIX = "MCZ"
@@ -112,6 +114,70 @@ def _ai_verify(page_text, code):
     return bool(data.get("code_present")), followers, None
 
 
+def _ai_identity(page_text, user, profile):
+    """Is this profile the same person as this member?
+
+    Corey's rule: same name or same email means the same person. The model is
+    asked for a verdict AND its reasoning, because "no" here sends a member to
+    a queue and an unexplained refusal is not something anyone can act on.
+
+    Deliberately NOT a yes/no: an artist whose stage name differs from their
+    legal name is the normal case, and forcing a binary would make the model
+    guess. `unsure` is a real answer and it routes to a human.
+    """
+    try:
+        import anthropic
+    except ImportError:
+        return None, "", "verification backend unavailable"
+    known = {
+        "username": user.username,
+        "display_name": getattr(profile, "display_name", "") or "",
+        "email": (user.email or ""),
+        "links": [l.get("url") for l in (profile.links or []) if isinstance(l, dict)][:10],
+    }
+    prompt = (
+        "You are checking whether a public social profile belongs to a Music ConnectZ "
+        "member, so their follower count can count toward their reach.\n\n"
+        "Say YES only when the profile plausibly belongs to this person — a matching "
+        "name, stage name, handle, or email. An artist's stage name differing from "
+        "their username is COMMON and is not by itself a reason to say no. Say NO when "
+        "it clearly belongs to somebody else (a different well-known person, a brand "
+        "unrelated to them). Say UNSURE when there isn't enough to tell.\n\n"
+        "Answer STRICTLY as JSON:\n"
+        '  "same_person": "yes" | "no" | "unsure"\n'
+        '  "reason": a short sentence a human reviewer can act on\n'
+        '  "followers": integer or null (expand 1.2k=1200, 3.4M=3400000)\n'
+        '  "handle": string or null\n'
+        "Return ONLY the JSON object.\n\n"
+        f"MEMBER: {known}\n\nPROFILE TEXT:\n{page_text}"
+    )
+    try:
+        client = anthropic.Anthropic()
+        resp = client.messages.create(model=VERIFY_MODEL, max_tokens=400,
+                                      messages=[{"role": "user", "content": prompt}])
+        raw = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
+    except Exception as exc:
+        return None, "", f"verification error: {exc}"[:160]
+    import json
+    m = re.search(r"\{.*\}", raw, re.S)
+    if not m:
+        return None, "", "couldn't read the profile"
+    try:
+        data = json.loads(m.group(0))
+    except ValueError:
+        return None, "", "couldn't read the profile"
+    verdict = str(data.get("same_person", "")).lower()
+    if verdict not in ("yes", "no", "unsure"):
+        verdict = "unsure"
+    followers = data.get("followers")
+    try:
+        followers = int(followers) if followers is not None else None
+    except (TypeError, ValueError):
+        followers = None
+    return {"verdict": verdict, "followers": followers,
+            "handle": str(data.get("handle") or "")[:120]}, str(data.get("reason") or "")[:500], None
+
+
 class SocialVerifyView(APIView):
     """POST /api/economy/social/verify/
 
@@ -175,7 +241,6 @@ class SocialVerifyView(APIView):
                     "detail": f"Couldn't find {code} on that profile yet. Add it to your bio and try again.",
                     "verified": False,
                 }, status=status.HTTP_400_BAD_REQUEST)
-            from django.utils import timezone
             link["verified"] = True
             link["verified_at"] = timezone.now().isoformat()
             if followers is not None:
@@ -190,4 +255,148 @@ class SocialVerifyView(APIView):
                 "reach_median": reach_median(request.user),
             })
 
-        return Response({"detail": "action must be start|check"}, status=status.HTTP_400_BAD_REQUEST)
+        if action == "match":
+            # The quick route: no code to paste. The model reads the public page
+            # and says whether it's the same person. A `no` or an `unsure` does
+            # NOT refuse — it queues for a human, because most artists' stage
+            # names don't match their legal names and refusing would strand them.
+            page_text, err = _fetch_public_page(url)
+            if err:
+                return Response({
+                    "detail": err, "verified": False,
+                    "hint": "Some platforms block automated checks — use the code-in-bio route instead.",
+                }, status=status.HTTP_502_BAD_GATEWAY)
+            result, reason, err = _ai_identity(page_text, request.user, p)
+            if err:
+                return Response({"detail": err, "verified": False},
+                                status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+            if result["verdict"] == "yes":
+                link["verified"] = True
+                link["verified_at"] = timezone.now().isoformat()
+                link["verified_by"] = "identity-match"
+                if result["followers"] is not None:
+                    link["verified_count"] = result["followers"]
+                    link["followers"] = result["followers"]
+                p.links = links
+                p.save(update_fields=["links", "updated_at"])
+                SocialReview.objects.filter(user=request.user, url=url).delete()
+                return Response({
+                    "verified": True, "verdict": "yes", "reason": reason,
+                    "followers": result["followers"],
+                    "sources": social_sources(request.user),
+                    "reach_median": reach_median(request.user),
+                })
+
+            # Flagged. Saved unverified so it shows on the profile without
+            # counting toward reach — being in the queue must not pay.
+            link["verified"] = False
+            link["review"] = "pending"
+            p.links = links
+            p.save(update_fields=["links", "updated_at"])
+            SocialReview.objects.update_or_create(
+                user=request.user, url=url,
+                defaults={"handle": result["handle"],
+                          "claimed_followers": result["followers"] or 0,
+                          "ai_verdict": result["verdict"], "ai_reason": reason,
+                          "status": SocialReview.STATUS_PENDING, "decided_at": None},
+            )
+            return Response({
+                "verified": False, "verdict": result["verdict"], "reason": reason,
+                "review": "pending",
+                "detail": "We couldn't confirm that account is yours, so it's gone to a "
+                          "person to check. It doesn't count toward your reach until it "
+                          "clears.",
+                "faster": "Or paste our code in that profile's bio and verify instantly — "
+                          "start the code route and it settles in a minute.",
+                "sources": social_sources(request.user),
+                "reach_median": reach_median(request.user),
+            }, status=status.HTTP_202_ACCEPTED)
+
+        return Response({"detail": "action must be start|check|match"},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+
+class SocialReviewQueueView(APIView):
+    """The manual verification queue — owner only.
+
+    GET  lists what the model couldn't confirm, each with its reasoning.
+    POST {id, decision: approve|reject, note} settles one.
+
+    Approving marks the link verified, which is what lets its followers count
+    toward reach and therefore toward Energy. That is the whole reason this
+    queue exists rather than an auto-approve: reach pays, so a claim on
+    somebody else's audience has to be somebody's decision.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _is_owner(self, user):
+        from .views import is_owner
+        return is_owner(user)
+
+    def get(self, request):
+        if not self._is_owner(request.user):
+            # A member sees their OWN pending reviews — waiting without being
+            # able to see that you're waiting is its own small cruelty.
+            mine = SocialReview.objects.filter(user=request.user)[:50]
+            return Response({"mine": [self._row(r) for r in mine], "queue": None})
+        qs = SocialReview.objects.filter(status=SocialReview.STATUS_PENDING)
+        return Response({"queue": [self._row(r) for r in qs[:200]],
+                         "pending": qs.count()})
+
+    def _row(self, r):
+        return {
+            "id": r.id, "username": r.user.username, "url": r.url,
+            "handle": r.handle, "claimed_followers": r.claimed_followers,
+            "ai_verdict": r.ai_verdict, "ai_reason": r.ai_reason,
+            "status": r.status, "note": r.note,
+            "created_at": r.created_at.isoformat(),
+            "decided_at": r.decided_at.isoformat() if r.decided_at else None,
+        }
+
+    def post(self, request):
+        if not self._is_owner(request.user):
+            return Response({"detail": "Only the platform owner reviews these."},
+                            status=status.HTTP_403_FORBIDDEN)
+        d = request.data or {}
+        r = SocialReview.objects.filter(pk=d.get("id")).select_related("user").first()
+        if not r:
+            return Response({"detail": "review not found"}, status=status.HTTP_404_NOT_FOUND)
+        decision = str(d.get("decision", "")).lower()
+        if decision not in ("approve", "reject"):
+            return Response({"detail": "decision must be approve|reject"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        p = profile_for(r.user)
+        links = list(p.links or [])
+        link = _find_link(links, r.url)
+        if link is not None:
+            link.pop("review", None)
+            if decision == "approve":
+                link["verified"] = True
+                link["verified_at"] = timezone.now().isoformat()
+                link["verified_by"] = "manual"
+                if r.claimed_followers:
+                    link["verified_count"] = r.claimed_followers
+                    link["followers"] = r.claimed_followers
+            else:
+                link["verified"] = False
+            p.links = links
+            p.save(update_fields=["links", "updated_at"])
+
+        r.status = (SocialReview.STATUS_APPROVED if decision == "approve"
+                    else SocialReview.STATUS_REJECTED)
+        r.reviewer = request.user
+        r.note = str(d.get("note", ""))[:500]
+        r.decided_at = timezone.now()
+        r.save(update_fields=["status", "reviewer", "note", "decided_at"])
+
+        from .models import notify
+        notify(r.user, "verify",
+               (f"Your {r.handle or 'social'} account was verified — its followers now "
+                "count toward your reach ⚡" if decision == "approve"
+                else f"We couldn't verify that account as yours. {r.note}".strip()),
+               actor=request.user)
+        return Response({"review": self._row(r),
+                         "reach_median": reach_median(r.user)})

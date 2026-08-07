@@ -2243,6 +2243,45 @@ RATING_KINDS = [
 ]
 
 
+class SocialReview(models.Model):
+    """A social account the AI could not confirm belongs to this member.
+
+    Corey's rule: match the name or the email and it's the same person; if it
+    isn't, flag it for manual verification rather than refusing. A refusal
+    strands anyone whose stage name differs from their legal name — which is
+    most artists — while an auto-approve would let anyone paste a stranger's
+    big account and mint Energy off their reach.
+
+    So a `no`/`unsure` becomes a QUEUE, not a wall. The member is told it's
+    being looked at and offered the code-in-bio route, which settles it in a
+    minute without waiting for anyone.
+    """
+    STATUS_PENDING, STATUS_APPROVED, STATUS_REJECTED = "pending", "approved", "rejected"
+    STATUS_CHOICES = [(STATUS_PENDING, "Pending"), (STATUS_APPROVED, "Approved"),
+                      (STATUS_REJECTED, "Rejected")]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="social_reviews")
+    url = models.CharField(max_length=500)
+    handle = models.CharField(max_length=120, blank=True, default="")
+    claimed_followers = models.PositiveIntegerField(default=0)
+    # What the model thought and WHY, kept so a human reviewing it is reading a
+    # judgement with its reasoning rather than a verdict with none.
+    ai_verdict = models.CharField(max_length=12, blank=True, default="")   # yes|no|unsure
+    ai_reason = models.TextField(blank=True, default="")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES,
+                              default=STATUS_PENDING, db_index=True)
+    reviewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                 null=True, blank=True, related_name="social_reviews_done")
+    note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        unique_together = ("user", "url")
+
+
 class PostContributor(models.Model):
     """A real row per person on a collab post.
 

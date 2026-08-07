@@ -1,7 +1,7 @@
 from django.urls import path
 
 from .directz_app import DirectZWorksView, DirectZRateView
-from .postz import PostsView, PostJoinView, PostShareView, SubmissionsView
+from .postz import PostCostView, PostsView, PostJoinView, PostShareView, SubmissionsView
 from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .distributez import TranscodeView, LyricsView
@@ -25,7 +25,7 @@ from .account import AccountExportView, AccountDeleteView
 from .messages_view import MessagesView
 from .logz import FeaturesView, LogZView
 from .observationz import ObservationConsentView, ObservationZView
-from .social_verify import SocialVerifyView
+from .social_verify import SocialReviewQueueView, SocialVerifyView
 from .parcel import ParcelCampaignView
 from .autotopup import AutoTopUpView, AutoTopUpCancelView
 from .identity import IdentityView
@@ -183,12 +183,16 @@ urlpatterns = [
     path("social/comment/", SocialView.as_view(), {"action": "comment"}, name="economy-social-comment"),
     path("social/rate/", SocialView.as_view(), {"action": "rate"}, name="economy-social-rate"),
     path("social/verify/", SocialVerifyView.as_view(), name="economy-social-verify"),
+    # What the AI couldn't confirm goes to a person, not to a wall.
+    path("social/reviews/", SocialReviewQueueView.as_view(), name="economy-social-reviews"),
     path("members/", MembersView.as_view(), name="economy-members"),
     path("members/<str:username>/", MemberProfileView.as_view(), name="economy-member"),
     # RateZ — every rating, classified for what it actually measures.
     path("ratez/", RatezView.as_view(), name="economy-ratez"),
     path("ratez/kinds/", RatingKindsView.as_view(), name="economy-ratez-kinds"),
     path("postz/", PostsView.as_view(), name="economy-postz"),
+    # The price before the button, never after it.
+    path("postz/cost/", PostCostView.as_view(), name="economy-postz-cost"),
     # No account needed — a public post by link, and the author behind it.
     path("postz/<int:pk>/", PublicPostView.as_view(), name="economy-postz-public"),
     path("public/members/<str:username>/", PublicProfileView.as_view(), name="economy-public-member"),
