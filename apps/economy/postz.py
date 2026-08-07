@@ -77,6 +77,21 @@ def _reactions_for(post_ids):
     return out
 
 
+def media_slots(p):
+    """The post's attachments as one-per-kind, for a client that renders all of
+    them. Merges the primary media slot with the album entries, so a caller
+    never has to know that a post keeps its first attachment in two places."""
+    slots = {k: "" for k in MEDIA_SLOTS}
+    if p.media_url and p.media_type in slots:
+        slots[p.media_type] = p.media_url
+    for it in (p.items or []):
+        kind = (it.get("type") or "").lower()
+        if kind not in slots or slots[kind]:
+            continue
+        slots[kind] = it.get("lyrics") if kind == "text" else it.get("url")
+    return {k: v or "" for k, v in slots.items()}
+
+
 def _post_dict(p, request, up=0, down=0, collabs=None):
     vibe = up - down
     flagged = down >= HIDE_FLAG_MIN_DOWN and down >= up * HIDE_FLAG_RATIO
@@ -91,6 +106,10 @@ def _post_dict(p, request, up=0, down=0, collabs=None):
         "media_url": p.media_url,
         "is_album": p.is_album,
         "items": p.items or [],
+        # One of each, resolved for the client so it renders every attachment
+        # rather than only the primary one.
+        "media": media_slots(p),
+        "slots": list(MEDIA_SLOTS),
         "score": p.score or {},
         "genre": p.genre,
         "skills_used": p.skills_used or [],
@@ -132,6 +151,36 @@ def clean_items(raw):
     return out
 
 
+# What a post can carry: one of each. Not one attachment — one AUDIO, one
+# VIDEO, one IMAGE and one SCRIPT, together, because a track with its video,
+# its cover and its lyrics is one piece of work and was always meant to post as
+# one thing. The composer used to make audio and video overwrite each other.
+#
+# An ALBUM is the deliberate exception and the only way to carry several of a
+# kind. It has to be asked for (`is_album`) rather than inferred, which is the
+# bug this replaces: `len(items) > 1` quietly turned "a track plus its cover"
+# into an album nobody asked for.
+MEDIA_SLOTS = ("audio", "video", "image", "text")
+SLOT_LABEL = {"audio": "audio track", "video": "video", "image": "image",
+              "text": "script"}
+
+
+def one_of_each(items):
+    """Enforce the slot rule. Returns (items, offending_type or None).
+
+    Refuses rather than silently keeping the first — a member who attached two
+    images should be told which one wasn't going to make it, not discover the
+    loss later on their own post.
+    """
+    seen = set()
+    for it in items:
+        kind = (it.get("type") or "").lower()
+        if kind in seen:
+            return items, kind
+        seen.add(kind)
+    return items, None
+
+
 def create_post(user, d):
     """Make a post from a PostZ payload. Returns (post, info, error).
 
@@ -153,7 +202,18 @@ def create_post(user, d):
     media_type = str(d.get("media_type", "")).strip()[:24]
     score = d.get("score") if isinstance(d.get("score"), dict) else {}
     items = clean_items(d.get("items"))
-    is_album = bool(d.get("is_album")) or len(items) > 1
+    # An album is asked for, never inferred from the count. Otherwise a track
+    # posted with its cover art became "an album" of two.
+    is_album = bool(d.get("is_album"))
+    if not is_album:
+        items, dup = one_of_each(items)
+        if dup:
+            return None, {}, (
+                {"detail": f"A post carries one {SLOT_LABEL.get(dup, dup)} — you attached two. "
+                           "Tick album if you meant several.",
+                 "duplicate_type": dup, "slots": list(MEDIA_SLOTS)},
+                status.HTTP_400_BAD_REQUEST,
+            )
     # A scored/recorded take (score payload or media) counts against the tier's
     # daily submission cap (Free 5 · Premium 15 · StatZ 50).
     is_submission = bool(score) or bool(media_url) or bool(items)
