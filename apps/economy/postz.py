@@ -28,6 +28,7 @@ from .models import (
     SHARE_MIN_ACTIVE_SECONDS,
     award_spinaz,
     can_view_post,
+    owns_post,
     item_rating_median,
     notify,
     record_submission,
@@ -98,7 +99,11 @@ def _post_dict(p, request, up=0, down=0, collabs=None):
     return {
         "id": p.id,
         "author": p.author.username,
-        "mine": p.author_id == request.user.id,
+        # True for everyone credited, not just whoever pressed post — a
+        # collab post belongs to all of them.
+        "mine": owns_post(p, request.user),
+        "contributors": p.contributors or [],
+        "co_owned": bool(p.contributors),
         "title": p.title,
         "description": p.description,
         "links": p.links,
@@ -272,7 +277,22 @@ class PostsView(APIView):
         sort = (request.query_params.get("sort") or "hot").lower()
         qs = Post.objects.select_related("author").exclude(visibility="private").order_by("-created_at")[:300]
         mine = Post.objects.filter(author=request.user, visibility="private")
-        visible = [p for p in list(qs) + list(mine) if can_view_post(p, request.user)]
+        # A collab post belongs to its contributors too, so a private one has
+        # to reach them — `can_view_post` already allows it, but the query never
+        # fetched it, and a post you may see that is never selected is invisible
+        # either way.
+        #
+        # One indexed join through PostContributor. Reaching it through the
+        # deal's participants JSON instead cost two extra queries on every feed
+        # load, which the query-count test below caught immediately.
+        ours = Post.objects.filter(visibility="private",
+                                   contributor_rows__user=request.user)
+        seen_ids, visible = set(), []
+        for p in list(qs) + list(mine) + list(ours):
+            if p.id in seen_ids or not can_view_post(p, request.user):
+                continue
+            seen_ids.add(p.id)
+            visible.append(p)
         reactions = _reactions_for([p.id for p in visible])
         # Counted in ONE query rather than one per card — the feed serves up to
         # 100 posts and this is the third per-row count on it.

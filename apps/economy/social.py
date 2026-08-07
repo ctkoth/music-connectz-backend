@@ -13,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
+    apply_post_rating,
     AttractivenessRating,
     Face,
     FaceRating,
@@ -535,6 +536,20 @@ class SocialView(APIView):
             return Response({"detail": "item required"}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self._payload(item, request))
 
+    def _rate_skills(self, item, rater, score):
+        """A post rating is also a rating of every skill that made the post.
+
+        Only posts: `battle:…`, `playlist:…` and `collab:…` items are rated as
+        themselves and have no skill behind them to credit.
+        """
+        if not item.startswith("post:"):
+            return []
+        try:
+            post = Post.objects.select_related("author").get(pk=int(item.split(":", 1)[1]))
+        except (ValueError, Post.DoesNotExist):
+            return []
+        return apply_post_rating(rater, post, score)
+
     def _notify_target(self, item, kind, text, actor):
         """If the item is a post, tell its author about the interaction."""
         if not item.startswith("post:"):
@@ -613,6 +628,7 @@ class SocialView(APIView):
                 if existing is None:
                     ItemRating.objects.create(user=request.user, item_id=item, score=score)
                     reward_for_rating(request.user, item)
+                    self._rate_skills(item, request.user, score)
                     self._notify_target(item, "rate", f"@{request.user.username} rated your post {score}/10 ⭐", request.user)
                 else:
                     # Changing your rating is an edit — only within the tier's window.
@@ -628,6 +644,9 @@ class SocialView(APIView):
                         existing.score = score
                         existing.edited_at = timezone.now()
                         existing.save(update_fields=["score", "edit_history", "edited_at"])
+                        # Changing your mind has to move the skill ratings it
+                        # fed too, or the two disagree from then on.
+                        self._rate_skills(item, request.user, score)
             else:
                 return Response({"detail": "score must be 1-10 (or 0 to clear)"}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self._payload(item, request))

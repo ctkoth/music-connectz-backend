@@ -47,6 +47,8 @@ from .occ_run import OccRunView
 from .releasez import (CollabDistributeView, PostDistributeView, ReleaseDetailView,
                        ReleaseSubmitView, ReleasesView)
 from .collab_files import CollabFileDetailView, CollabFilesView
+from .collab_post import CollabNeedsView, CollabPostView
+from .ratez import RatezView, RatingKindsView
 from .occ_workz import (OccWorkDetailView, OccWorkShareView, OccWorkUnshareView,
                         OccWorkzView, PostOccWorkView)
 from .payments import (
@@ -183,6 +185,9 @@ urlpatterns = [
     path("social/verify/", SocialVerifyView.as_view(), name="economy-social-verify"),
     path("members/", MembersView.as_view(), name="economy-members"),
     path("members/<str:username>/", MemberProfileView.as_view(), name="economy-member"),
+    # RateZ — every rating, classified for what it actually measures.
+    path("ratez/", RatezView.as_view(), name="economy-ratez"),
+    path("ratez/kinds/", RatingKindsView.as_view(), name="economy-ratez-kinds"),
     path("postz/", PostsView.as_view(), name="economy-postz"),
     # No account needed — a public post by link, and the author behind it.
     path("postz/<int:pk>/", PublicPostView.as_view(), name="economy-postz-public"),
@@ -210,6 +215,10 @@ urlpatterns = [
     # A collab is where the finished master usually lands, so it releases too.
     path("collab/<int:pk>/distribute/", CollabDistributeView.as_view(), name="economy-collab-distribute"),
     # The work going back and forth: v1 down, v2 up.
+    # A finished collab becomes ONE post, owned by everyone who made it.
+    path("collab/<int:pk>/post/", CollabPostView.as_view(), name="economy-collab-post"),
+    # What the deal is looking for, so the right person can find it.
+    path("collab/<int:pk>/needs/", CollabNeedsView.as_view(), name="economy-collab-needs"),
     path("collab/<int:pk>/files/", CollabFilesView.as_view(), name="economy-collab-files"),
     path("collab/<int:pk>/files/<int:file_id>/", CollabFileDetailView.as_view(), name="economy-collab-file"),
     path("distributez/releases/", ReleasesView.as_view(), name="economy-releases"),

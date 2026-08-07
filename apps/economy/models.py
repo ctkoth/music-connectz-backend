@@ -770,6 +770,19 @@ class Post(models.Model):
     # what makes a post matchable to the people who have those skills and
     # priceable against their rates. A post without it is a file with a caption.
     skills_used = models.JSONField(default=list, blank=True)
+    # Everyone this post belongs to, and what each of them brought:
+    # [{username, slot, role}]. `author` is only whoever pressed post.
+    #
+    # This is the point of a collab. An artist arrives with a song and needs a
+    # cover and a video; the designer and the videographer put theirs up; the
+    # finished thing is ONE post that belongs to all three. Crediting it to
+    # whoever happened to publish it would be the same erasure the escrow
+    # exists to prevent, one step later.
+    contributors = models.JSONField(default=list, blank=True)
+    # The deal it came out of, when it came out of one. SET_NULL so deleting a
+    # deal never takes the published work with it.
+    source_deal = models.ForeignKey("CollabDeal", on_delete=models.SET_NULL, null=True,
+                                    blank=True, related_name="posts")
     # May other members put this in THEIR playlists? Default yes — being in
     # someone else's set is reach, and a public post is already public. This is
     # the author's off switch for the case where it isn't welcome.
@@ -1044,10 +1057,24 @@ class AdView(models.Model):
 AD_REWARD_DAILY_CAP_PER_USER = 30  # total rewarded ad views per viewer per day (anti-farm)
 
 
+def owns_post(post, user):
+    """The author OR anyone credited on it.
+
+    A collab post belongs to everyone who put something into it, so every
+    check that used to mean "is this yours" has to mean that too — otherwise
+    the designer whose cover is on the post can't see their own private work.
+    """
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    if post.author_id == user.id:
+        return True
+    return any(c.get("username") == user.username for c in (post.contributors or []))
+
+
 def can_view_post(post, user):
     if post.visibility == "public":
         return True
-    if post.author_id == getattr(user, "id", None):
+    if owns_post(post, user):
         return True
     if post.visibility == "restricted":
         return bool(user and user.is_authenticated)  # members only
@@ -1530,6 +1557,11 @@ class CollabDeal(models.Model):
     # against it.
     source_post = models.ForeignKey(Post, on_delete=models.SET_NULL, null=True,
                                     blank=True, related_name="collab_deals")
+    # What this deal is LOOKING FOR: [{slot, skill}]. An artist arrives with a
+    # song and needs a cover and a video — saying which slots are open, and
+    # what skill fills them, is what turns a deal into something findable by
+    # the designer who can take it.
+    needs = models.JSONField(default=list, blank=True)
     # A deal carries the WORK, in the same shape a post does: record or upload
     # audio/video, an image, and the lyrics or script. Without it a deal is a
     # settlement about something nobody in it can actually hear.
@@ -2187,6 +2219,135 @@ class OccSettings(models.Model):
 
 def occ_settings_for(user):
     return OccSettings.objects.get_or_create(user=user)[0]
+
+
+RATING_KINDS = [
+    {"key": "post", "name": "Post rating", "of": "the work",
+     "scale": "1-10", "how": "given directly on a post",
+     "desc": "What people thought of this piece of work."},
+    {"key": "skill", "name": "Skill rating", "of": "a skill you used",
+     "scale": "1-10", "how": "derived from the posts that used it",
+     "desc": "Nobody rates a skill directly. Rating a post rates every skill "
+             "that went into it, for the person who brought it."},
+    {"key": "contribution", "name": "Contribution rating", "of": "your part of a deal",
+     "scale": "1-10", "how": "given on a CollabZ deal, by people not on it",
+     "desc": "What the room thought each collaborator did — and what re-cuts "
+             "the split when a deal pays on rating."},
+    {"key": "overall", "name": "Overall rating", "of": "you",
+     "scale": "1-10", "how": "given directly on a profile",
+     "desc": "The member, not any one thing they made."},
+    {"key": "attractiveness", "name": "Attractiveness", "of": "you",
+     "scale": "1-10", "how": "given directly on a profile or a face",
+     "desc": "Kept apart from everything else on purpose — it is not a "
+             "judgement of anybody's work."},
+]
+
+
+class PostContributor(models.Model):
+    """A real row per person on a collab post.
+
+    `Post.contributors` is the JSON the client renders; this is the same fact
+    as an indexed foreign key so it can be QUERIED. The feed has to find the
+    private posts a member is credited on, and doing that by scanning the deal
+    table cost two extra queries per page load — a regression the feed's own
+    query-count test caught. JSON for display, a table for lookups.
+    """
+    post = models.ForeignKey("Post", on_delete=models.CASCADE, related_name="contributor_rows")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="post_contributions")
+    slot = models.CharField(max_length=16, blank=True, default="")
+
+    class Meta:
+        unique_together = ("post", "user")
+        indexes = [models.Index(fields=["user"])]
+
+
+class SkillRating(models.Model):
+    """A post rating, landed on the skills that made the post.
+
+    Corey's rule: every rating affects the skill used AND the post's overall
+    rating. Before this a rating went to the post and stopped there, so a mix
+    engineer with forty well-rated posts had no rated skill to show for it, and
+    the skill price they charge was backed by nothing.
+
+    Nothing is rated directly here — a row exists only because somebody rated a
+    piece of work that used the skill. That is what stops a skill rating from
+    being an opinion about a person: it is the median of what their work scored.
+
+    On a collab post each contributor is credited for the skill their SLOT
+    implies (cover art → Designer, video → Videographer), so a rating of the
+    whole work does not credit the designer for the mixing.
+    """
+    rater = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="skill_ratings_given")
+    subject = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name="skill_ratings_received")
+    skill = models.CharField(max_length=60)
+    # Where it came from, so a skill rating can always be traced to the work
+    # that earned it and recomputed if that work is edited or removed.
+    item_id = models.CharField(max_length=160, db_index=True)
+    score = models.PositiveSmallIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("rater", "subject", "skill", "item_id")
+        indexes = [models.Index(fields=["subject", "skill"])]
+
+
+def skill_rating_median(user, skill):
+    """What this member's work scored when they used this skill."""
+    scores = list(SkillRating.objects.filter(subject=user, skill=skill)
+                  .values_list("score", flat=True))
+    if not scores:
+        return None
+    scores.sort()
+    n = len(scores)
+    return scores[n // 2] if n % 2 else round((scores[n // 2 - 1] + scores[n // 2]) / 2, 1)
+
+
+def skills_for_post(post):
+    """[(user, skill)] — who gets rated for what when this post is rated.
+
+    A solo post credits its author with every skill it declares. A collab post
+    credits each contributor with the skill their slot implies, because rating
+    the whole work is not a rating of everyone for everything.
+    """
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    pairs = []
+    contributors = post.contributors or []
+    if contributors:
+        slot_skill = {"audio": "Independent Artist", "image": "Designer",
+                      "video": "Videographer", "text": "Ghost Writer"}
+        for c in contributors:
+            u = User.objects.filter(username=c.get("username")).first()
+            skill = slot_skill.get(c.get("slot") or "")
+            if u and skill:
+                pairs.append((u, skill))
+        return pairs
+    for skill in (post.skills_used or [])[:40]:
+        if isinstance(skill, str) and skill.strip():
+            pairs.append((post.author, skill.strip()[:60]))
+    return pairs
+
+
+def apply_post_rating(rater, post, score):
+    """Land a post rating on every skill that earned it. Returns what was set.
+
+    Self-rating is excluded: a skill rating you gave yourself would make the
+    number meaningless, and the post rating already refuses it elsewhere.
+    """
+    out = []
+    for user, skill in skills_for_post(post):
+        if user.id == rater.id:
+            continue
+        SkillRating.objects.update_or_create(
+            rater=rater, subject=user, skill=skill, item_id=f"post:{post.id}",
+            defaults={"score": score},
+        )
+        out.append({"username": user.username, "skill": skill,
+                    "rating": skill_rating_median(user, skill)})
+    return out
 
 
 class CollabFile(models.Model):
