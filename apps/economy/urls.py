@@ -44,6 +44,9 @@ from .occ import OccChatView
 from .occ_taskz import (OccSettingsView, OccSpecView, OccTaskDetailView,
                         OccTaskUndoView, OccTasksView)
 from .occ_run import OccRunView
+from .releasez import (CollabDistributeView, PostDistributeView, ReleaseDetailView,
+                       ReleaseSubmitView, ReleasesView)
+from .collab_files import CollabFileDetailView, CollabFilesView
 from .occ_workz import (OccWorkDetailView, OccWorkShareView, OccWorkUnshareView,
                         OccWorkzView, PostOccWorkView)
 from .payments import (
@@ -189,6 +192,9 @@ urlpatterns = [
     path("postz/<int:pk>/collabs/", PostCollabsView.as_view(), name="economy-postz-collabs"),
     # The return leg: a post made in OCC opens back in OCC with its prompt.
     path("postz/<int:pk>/occ/", PostOccWorkView.as_view(), name="economy-postz-occ"),
+    # A post populates a release: the song, the video, the cover and the lyrics
+    # are already the four assets a distributor asks for.
+    path("postz/<int:pk>/distribute/", PostDistributeView.as_view(), name="economy-postz-distribute"),
     path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
     path("submissions/", SubmissionsView.as_view(), name="economy-submissions"),
     # PlaylistZ — Music ConnectZ posts and outside distro links in one order.
@@ -201,6 +207,14 @@ urlpatterns = [
     path("playlistz/<int:pk>/collaborators/", PlaylistCollaboratorsView.as_view(), name="economy-playlist-collaborators"),
     path("link/click/", LinkClickView.as_view(), name="economy-link-click"),
     path("link/tallies/", LinkTalliesView.as_view(), name="economy-link-tallies"),
+    # A collab is where the finished master usually lands, so it releases too.
+    path("collab/<int:pk>/distribute/", CollabDistributeView.as_view(), name="economy-collab-distribute"),
+    # The work going back and forth: v1 down, v2 up.
+    path("collab/<int:pk>/files/", CollabFilesView.as_view(), name="economy-collab-files"),
+    path("collab/<int:pk>/files/<int:file_id>/", CollabFileDetailView.as_view(), name="economy-collab-file"),
+    path("distributez/releases/", ReleasesView.as_view(), name="economy-releases"),
+    path("distributez/releases/<int:pk>/", ReleaseDetailView.as_view(), name="economy-release"),
+    path("distributez/releases/<int:pk>/submit/", ReleaseSubmitView.as_view(), name="economy-release-submit"),
     path("distributez/transcode/", TranscodeView.as_view(), name="economy-distributez-transcode"),
     path("distributez/lyrics/", LyricsView.as_view(), name="economy-distributez-lyrics"),
     path("adz/", AdzView.as_view(), name="economy-adz"),

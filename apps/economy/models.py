@@ -2189,6 +2189,112 @@ def occ_settings_for(user):
     return OccSettings.objects.get_or_create(user=user)[0]
 
 
+class CollabFile(models.Model):
+    """A version of the work passing between the people on a deal.
+
+    A collab is a file going back and forth. The starter puts up v1; the
+    collaborator downloads it, does their part, and puts up v2. Before this,
+    a deal carried exactly one `media_url` and no way to hand anything back —
+    so the actual work happened in DMs and the deal only held the money.
+
+    Versions are never overwritten. The whole point of an escrowed collab is
+    being able to show what was delivered and when, and a v2 that replaced v1
+    in place would destroy the only record of that.
+    """
+    deal = models.ForeignKey("CollabDeal", on_delete=models.CASCADE, related_name="files")
+    uploader = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                 related_name="collab_files")
+    version = models.PositiveIntegerField(default=1)
+    url = models.CharField(max_length=500)
+    name = models.CharField(max_length=255, blank=True, default="")
+    media_type = models.CharField(max_length=24, blank=True, default="")
+    note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("version", "id")
+        unique_together = ("deal", "version")
+
+
+class Release(models.Model):
+    """A post, ready to distribute.
+
+    The four things a post carries — the song, the music video, the cover art
+    and the lyrics — are exactly the four assets a distributor asks for. So a
+    release is not a form to retype: it is populated FROM the post, and the only
+    fields left are the ones a post genuinely doesn't know (the release date,
+    the ISRC, whether it's explicit).
+
+    `missing()` is the honest half. A release says what it still needs BEFORE
+    anyone tries to send it, rather than being refused at the far end by a
+    distributor's validator with a message nobody here wrote.
+    """
+    STATUS_DRAFT, STATUS_READY, STATUS_SUBMITTED = "draft", "ready", "submitted"
+    STATUS_CHOICES = [(STATUS_DRAFT, "Draft"), (STATUS_READY, "Ready"),
+                      (STATUS_SUBMITTED, "Submitted")]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="releases")
+    # One release per post. Pressing Distribute twice returns the release you
+    # already started rather than quietly making a second one.
+    source_post = models.OneToOneField("Post", on_delete=models.SET_NULL, null=True,
+                                       blank=True, related_name="release")
+    # A collab is the other thing that becomes a release — more often, in fact,
+    # since a deal is where the finished master usually lands.
+    source_deal = models.OneToOneField("CollabDeal", on_delete=models.SET_NULL, null=True,
+                                       blank=True, related_name="release")
+
+    title = models.CharField(max_length=160, blank=True, default="")
+    artist_name = models.CharField(max_length=120, blank=True, default="")
+    genre = models.CharField(max_length=40, blank=True, default="")
+
+    # The four assets, in the post's own slot names so the copy is a copy.
+    audio_url = models.CharField(max_length=500, blank=True, default="")     # the song
+    video_url = models.CharField(max_length=500, blank=True, default="")     # music video
+    artwork_url = models.CharField(max_length=500, blank=True, default="")   # cover image
+    lyrics = models.TextField(blank=True, default="")                        # txt lyrics
+
+    # What a post can't know.
+    release_date = models.DateField(null=True, blank=True)
+    isrc = models.CharField(max_length=15, blank=True, default="")
+    explicit = models.BooleanField(default=False)
+
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_DRAFT)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    # What a distributor will not take a release without. Artwork is on this
+    # list because every store rejects a release that has none, and finding
+    # that out after submitting is the worst place to learn it.
+    REQUIRED = (("title", "a title"), ("artist_name", "an artist name"),
+                ("audio_url", "the song itself"), ("artwork_url", "cover art"))
+
+    # Editable after it has gone out — which is most of it. Stores take an
+    # updated cover, a new video, corrected lyrics and a fixed explicit flag
+    # long after release, so refusing every edit would be stricter than the
+    # shops we're sending to.
+    #
+    # The two that are NOT here identify the recording itself: swapping the
+    # master or the ISRC under a live release makes it a different record
+    # wearing the same name. Those need a new release, and the refusal says so.
+    LOCKED_ONCE_SUBMITTED = {"audio_url": "the master audio", "isrc": "the ISRC"}
+
+    def missing(self):
+        return [label for field, label in self.REQUIRED if not getattr(self, field)]
+
+    def refresh_status(self):
+        """Draft until it's complete, ready once it is. Never downgrades a
+        release that has already gone out."""
+        if self.status == self.STATUS_SUBMITTED:
+            return self.status
+        self.status = self.STATUS_DRAFT if self.missing() else self.STATUS_READY
+        return self.status
+
+
 class OccOutput(models.Model):
     """A piece of work OCC took in and handed back — in the PostZ format.
 
