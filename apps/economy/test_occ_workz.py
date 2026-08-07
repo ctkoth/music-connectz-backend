@@ -22,6 +22,7 @@ from apps.economy.models import (
     Reaction,
     SocialComment,
     membership_for,
+    profile_for,
     wallet_for,
 )
 
@@ -129,18 +130,33 @@ class PriceUpFrontTests(WorkzBase):
     """A price discovered by paying it is not a price, it's a bill."""
 
     def test_the_share_cost_is_on_the_row_before_the_button(self):
-        w = self.make(skill_cost_cents=40)
+        p = profile_for(self.user)
+        p.personas = [{"key": "x", "name": "x", "skills": [
+            {"name": "Beat Producer", "rate_cents": 40}]}]
+        p.save(update_fields=["personas"])
+        w = self.make(skills_used=["Beat Producer"])
         self.assertEqual(w["share_cost"], {"resource": "energy", "amount": 40})
 
     def test_sharing_charges_exactly_what_it_advertised(self):
+        # The quote and the charge come from one function, so they cannot
+        # disagree — the price is priced from the member's own skill rates.
+        p = profile_for(self.user)
+        p.personas = [{"key": "producer", "name": "Beat Producer", "skills": [
+            {"name": "Beat Producer", "rate_cents": 40}]}]
+        p.save(update_fields=["personas"])
         wallet = wallet_for(self.user)
         wallet.energy = 100
         wallet.save(update_fields=["energy"])
-        w = self.make(skill_cost_cents=40)
+        w = self.make(skills_used=["Beat Producer"])
+        self.assertEqual(w["share_cost"]["amount"], 40)
         resp = self.client.post(f"{WORKZ}{w['id']}/share/", {}, format="json")
         self.assertEqual(resp.status_code, 201, resp.data)
         self.assertEqual(resp.data["energy_charged"], w["share_cost"]["amount"])
         self.assertEqual(wallet_for(self.user).energy, 60)
+
+    def test_an_unpriced_work_is_free_to_share(self):
+        w = self.make(skills_used=["Beat Producer"])   # no rate set
+        self.assertEqual(w["share_cost"]["amount"], 0)
 
 
 class ShareTests(WorkzBase):

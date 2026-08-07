@@ -40,7 +40,7 @@ from .models import (
     membership_for,
 )
 from .occ_spec import EXPORT_ROUTES
-from .postz import clean_items, create_post
+from .postz import clean_items, create_post, post_cost_cents
 
 # What OCC hands back when it hands back a file. Anything else routes as a
 # document, because text is a document and pretending otherwise sends a written
@@ -121,7 +121,12 @@ def output_dict(o, request=None):
         "post_url": (f"/p/{o.shared_post_id}"
                      if shared and o.shared_post and o.shared_post.visibility == "public" else ""),
         # ---- the price, before the button
-        "share_cost": {"resource": "energy", "amount": o.skill_cost_cents},
+        # Quoted by the SAME function that charges it. This used to read the
+        # stored skill_cost_cents while create_post priced from the member's
+        # PersonaZ rates, so WorkZ advertised one number and the post took
+        # another — two sources of truth for one price.
+        "share_cost": {"resource": "energy",
+                       "amount": post_cost_cents(o.user, o.skills_used or [])[0]},
         "share_gain": {"resource": "spinaz", "note": "Restricted posts pay you per join; "
                                                      "ratings and comments arrive on the post."},
         # ---- where it goes next
@@ -315,7 +320,6 @@ class OccWorkShareView(APIView):
             "items": items,
             "genre": d.get("genre", o.genre),
             "skills_used": d.get("skills_used", o.skills_used),
-            "skill_cost_cents": o.skill_cost_cents,
             "visibility": d.get("visibility", "public"),
             "allow_in_playlists": d.get("allow_in_playlists", True),
             # Where it came from, on the post itself — so a member reading the
