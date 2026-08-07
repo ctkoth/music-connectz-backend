@@ -18,6 +18,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
+    recheck_badges as _recheck_badges,
     AutoTopUp, PaymentIntent, Transaction, credit_funds, energy_for_topup,
     grant_lifetime, founding_status, membership_for,
     refund_window, REFUND_WINDOW_DAYS,
@@ -410,6 +411,9 @@ class StripeWebhookView(APIView):
                 m.last_paid_at = timezone.now()
                 m.last_payment_ref = obj.get("subscription") or ""
                 m.last_payment_kind = meta.get("plan") or "year"
+                # Founding Fifty lands with the subscription for the same
+                # reason it lands with the lifetime seat.
+                _recheck_badges(user)
                 m.save(update_fields=["tier", "founding", "stripe_customer_id", "last_paid_at", "last_payment_ref", "last_payment_kind", "updated_at"])
             elif kind == "statz_sub" and user:
                 # Full-price StatZ subscription. Same shape as founding, minus

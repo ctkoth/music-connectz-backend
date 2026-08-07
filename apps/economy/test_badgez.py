@@ -56,6 +56,11 @@ class EveryBadgeDoesSomethingTests(BadgeBase):
             # Earned badges carry a check; gifted ones say they're gifted.
             self.assertTrue(spec.get("check") or spec.get("gifted"), key)
 
+    def test_the_seat_count_has_one_source(self):
+        from apps.economy.catalog import FOUNDING_LIMIT
+        from apps.economy.models import FOUNDING_SEATS
+        self.assertIs(FOUNDING_SEATS, FOUNDING_LIMIT)
+
     def test_effects_add_up_across_badges(self):
         grant_badge(self.user, "verified_reach")     # ×1.25
         grant_badge(self.user, "founding")           # ×1.25
@@ -149,21 +154,49 @@ class EarnedNotClaimedTests(BadgeBase):
         self.assertEqual(r.status_code, 403)
 
     def test_the_owner_can_gift_a_gifted_badge(self):
-        r = self.oc.post(GIFT, {"key": "founding", "username": "maker"}, format="json")
+        r = self.oc.post(GIFT, {"key": "bug_hunter", "username": "maker"}, format="json")
         self.assertEqual(r.status_code, 201, r.data)
-        self.assertTrue(Badge.objects.filter(user=self.user, key="founding").exists())
+        self.assertTrue(Badge.objects.filter(user=self.user, key="bug_hunter").exists())
 
     def test_gifting_twice_does_not_duplicate(self):
-        self.oc.post(GIFT, {"key": "founding", "username": "maker"}, format="json")
-        again = self.oc.post(GIFT, {"key": "founding", "username": "maker"}, format="json")
+        self.oc.post(GIFT, {"key": "bug_hunter", "username": "maker"}, format="json")
+        again = self.oc.post(GIFT, {"key": "bug_hunter", "username": "maker"}, format="json")
         self.assertEqual(again.status_code, 200)
         self.assertEqual(Badge.objects.filter(user=self.user).count(), 1)
+
+    def test_a_founding_seat_cannot_be_handed_out(self):
+        # The seat is real — 50 of them, priced in catalog.FOUNDING_PLANS and
+        # recorded on Membership. A badge gifted by hand would say somebody
+        # holds one when the record says they don't.
+        r = self.oc.post(GIFT, {"key": "founding", "username": "maker"}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_claiming_a_seat_grants_the_badge_there_and_then(self):
+        # Waiting to be noticed is a poor way to be told you got the thing you
+        # just paid for.
+        from apps.economy.models import grant_lifetime
+        grant_lifetime(self.user)
+        self.assertTrue(Badge.objects.filter(user=self.user, key="founding").exists())
+
+    def test_the_founding_badge_follows_the_membership_record(self):
+        self.assertNotIn("founding", recheck_badges(self.user))
+        m = membership_for(self.user)
+        m.founding = True
+        m.save(update_fields=["founding"])
+        self.assertIn("founding", recheck_badges(self.user))
+
+    def test_the_founding_badge_does_not_claim_to_own_the_discount(self):
+        # The half-price lives in catalog.FOUNDING_PLANS. A badge asserting a
+        # second version of it is two sources of truth for one fact.
+        self.assertNotIn("lifetime_discount_pct", BADGES["founding"]["effects"])
 
     def test_the_member_is_told_what_it_does(self):
         grant_badge(self.user, "founding")
         note = self.user.notifications.first()
         self.assertIn("Founding Fifty", note.text)
-        self.assertIn("Half price", note.text)
+        # What the BADGE adds — not the seat's discount, which the badge
+        # deliberately no longer claims to own.
+        self.assertIn("+25% Energy", note.text)
 
 
 class TitlesAndPrivacyTests(BadgeBase):

@@ -324,6 +324,9 @@ def grant_lifetime(user):
         m.founding = True
         m.tier = FOUNDING_TIER
         m.save(update_fields=["lifetime", "founding", "tier", "updated_at"])
+    # The badge arrives with the seat, not on the member's next visit. Waiting
+    # to be noticed is a poor way to be told you got the thing you just paid for.
+    recheck_badges(m.user)
     return m
 
 
@@ -2259,7 +2262,7 @@ RATING_KINDS = [
 #
 # `check` is what makes a badge earned rather than claimed: it reads evidence
 # already in the database. A badge with no check is `gifted` and says so.
-FOUNDING_SEATS = 50
+from .catalog import FOUNDING_LIMIT as FOUNDING_SEATS   # one seat count, not two
 
 
 def _shipped_collabs(user):
@@ -2299,12 +2302,24 @@ BADGES = {
         "effects": {"tier": "statz", "dev_tax_share": 1.0, "intelligence_royalties": True},
         "effect_note": "StatZ for life, the developer tax, and the intelligence royalties.",
     },
+    # NOT gifted, and it does NOT own the discount. A founding seat is already a
+    # real thing — catalog.FOUNDING_PLANS prices it, payments.py claims it, and
+    # Membership.founding records it. This badge REFLECTS that record; it must
+    # never assert a second version of it.
+    #
+    # It shipped for one commit claiming `lifetime_discount_pct: 50`, which
+    # nothing read, while the actual half-price lived in FOUNDING_PLANS. Two
+    # sources of truth for "am I founding" is the exact drift this codebase
+    # keeps closing, and I introduced it. The badge now adds only what is
+    # genuinely its own: the Energy.
     "founding": {
-        "name": "Founding Fifty", "emoji": "🏛️", "title": "Founding Fifty", "gifted": True,
+        "name": "Founding Fifty", "emoji": "🏛️", "title": "Founding Fifty", "gifted": False,
         "desc": f"One of the first {FOUNDING_SEATS} members to pay for this.",
-        "how": f"The first {FOUNDING_SEATS} paid memberships. When they're gone they're gone.",
-        "effects": {"lifetime_discount_pct": 50, "energy_multiplier": 1.25},
-        "effect_note": "Half price for as long as you keep it, and a quarter more Energy.",
+        "how": f"Claim a founding seat in MembershipZ — {FOUNDING_SEATS} of them, "
+               "at half price, and when they're gone they're gone.",
+        "effects": {"energy_multiplier": 1.25},
+        "effect_note": "+25% Energy, on top of the half-price seat itself.",
+        "check": lambda u: membership_for(u).founding,
     },
     # ---- earned ----
     "verified_reach": {
