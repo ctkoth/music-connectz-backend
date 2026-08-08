@@ -63,9 +63,34 @@ class EveryBadgeDoesSomethingTests(BadgeBase):
 
     def test_effects_add_up_across_badges(self):
         grant_badge(self.user, "verified_reach")     # ×1.25
-        grant_badge(self.user, "founding")           # ×1.25
-        # 1.25 × 1.25 exactly — multiplied at full precision, rounded once.
-        self.assertEqual(badge_effects(self.user)["energy_multiplier"], 1.5625)
+        grant_badge(self.user, "founding")           # ×2
+        # Multiplied at full precision and rounded once, not at each step.
+        self.assertEqual(badge_effects(self.user)["energy_multiplier"], 2.5)
+
+    def test_a_paid_seat_outranks_a_looks_rating(self):
+        # A member who paid $150 for one of fifty scarce seats earning less
+        # than a member the room rated attractive reads badly, and it is the
+        # founder who would notice.
+        self.assertGreaterEqual(BADGES["founding"]["effects"]["energy_multiplier"],
+                                BADGES["sexy"]["effects"]["energy_multiplier"])
+        paid_and_proven = (BADGES["founding"]["effects"]["energy_multiplier"]
+                           * BADGES["verified_reach"]["effects"]["energy_multiplier"])
+        self.assertGreater(paid_and_proven, BADGES["sexy"]["effects"]["energy_multiplier"])
+
+    def test_the_energy_stack_has_a_ceiling(self):
+        # Multipliers compound. Without a cap the maximum is whatever badges
+        # happen to exist rather than something anybody chose.
+        from apps.economy.models import MAX_ENERGY_MULTIPLIER
+        for key in ("founding", "verified_reach", "sexy"):
+            grant_badge(self.user, key)
+        raw = 2.0 * 1.25 * 2.0
+        self.assertGreater(raw, MAX_ENERGY_MULTIPLIER)      # the cap binds
+        self.assertEqual(badge_effects(self.user)["energy_multiplier"],
+                         MAX_ENERGY_MULTIPLIER)
+
+    def test_the_cap_does_not_touch_a_stack_below_it(self):
+        grant_badge(self.user, "founding")
+        self.assertEqual(badge_effects(self.user)["energy_multiplier"], 2.0)
 
     def test_effects_are_computed_not_stored(self):
         # A stored copy is how an effect outlives the badge that justified it.
@@ -86,7 +111,7 @@ class TheEffectsActuallyBiteTests(BadgeBase):
         self.assertGreater(before, 0)
         grant_badge(self.user, "founding")
         self.assertEqual(energy_rate_per_hour(User.objects.get(pk=self.user.pk)),
-                         int(before * 1.25))
+                         int(before * 2.0))
 
     def test_the_rating_cap_bonus_raises_the_cap_that_pays(self):
         from apps.economy.models import Transaction, reward_for_rating
@@ -196,7 +221,7 @@ class EarnedNotClaimedTests(BadgeBase):
         self.assertIn("Founding Fifty", note.text)
         # What the BADGE adds — not the seat's discount, which the badge
         # deliberately no longer claims to own.
-        self.assertIn("+25% Energy", note.text)
+        self.assertIn("Double Energy", note.text)
 
 
 class TitlesAndPrivacyTests(BadgeBase):

@@ -2264,6 +2264,12 @@ RATING_KINDS = [
 # already in the database. A badge with no check is `gifted` and says so.
 from .catalog import FOUNDING_LIMIT as FOUNDING_SEATS   # one seat count, not two
 
+# The most Energy any stack of badges can earn. Multipliers compound, so
+# without this the ceiling is whatever badges happen to exist rather than
+# something anybody chose. Today's maximum is 2 x 1.25 x 2 = 5.0, so this
+# binds — which is the point of setting it before it's an accident.
+MAX_ENERGY_MULTIPLIER = 3.0
+
 
 def _post_rating_median(user):
     """The median of what this member's own posts scored. None if unrated."""
@@ -2332,8 +2338,15 @@ BADGES = {
         "desc": f"One of the first {FOUNDING_SEATS} members to pay for this.",
         "how": f"Claim a founding seat in MembershipZ — {FOUNDING_SEATS} of them, "
                "at half price, and when they're gone they're gone.",
-        "effects": {"energy_multiplier": 1.25},
-        "effect_note": "+25% Energy, on top of the half-price seat itself.",
+        # x2, matching Sexy on its own and clearing it once you have also
+        # proven an audience (x1.25 -> 2.5). A member who paid $150 for one of
+        # fifty scarce seats should not earn LESS than a member the room rated
+        # attractive; the founder is exactly who would notice.
+        #
+        # x1.5 was the first attempt and it did not work: 1.5 x 1.25 = 1.875,
+        # still under Sexy's 2.0. The test that pins the ordering caught it.
+        "effects": {"energy_multiplier": 2.0},
+        "effect_note": "Double Energy, on top of the half-price seat itself.",
         "check": lambda u: membership_for(u).founding,
     },
     # ---- earned ----
@@ -2457,7 +2470,8 @@ def badge_effects(user):
                 out[k] = out.get(k, 0) + v
             else:
                 out[k] = v
-    return {k: (round(v, 4) if k.endswith("_multiplier") else v)
+    return {k: (min(round(v, 4), MAX_ENERGY_MULTIPLIER) if k == "energy_multiplier"
+                else round(v, 4) if k.endswith("_multiplier") else v)
             for k, v in out.items()}
 
 
