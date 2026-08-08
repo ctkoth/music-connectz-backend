@@ -41,7 +41,19 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
-MAX_MB = 25
+# The take rides to Gemini as inline_data — base64 inside the request body —
+# and that path caps the WHOLE request at 20MB. Base64 inflates by 4/3, so the
+# real ceiling on the file is about 15MB, not 25.
+#
+# 25 was the stated limit and it could not be honoured: a 22MB take passed our
+# own check, blew Gemini's, and came back as "The coach couldn't process that
+# take" — a limit the app advertised and then refused, with a message that
+# blamed the take. 14 leaves headroom for the prompt and the JSON envelope.
+#
+# It is enough for what a Boss Take is: ~15 minutes of 128kbps audio, or about
+# a minute of video at the bitrate the recorder asks for. Anything longer than
+# that is not one take.
+MAX_MB = 14
 
 def _parse(text):
     """Pull the JSON object out of a model reply that may be fenced."""
@@ -198,8 +210,13 @@ class SingZCoachView(APIView):
         if not f:
             return Response({"detail": "Record or attach a take first."}, status=status.HTTP_400_BAD_REQUEST)
         content_type = (getattr(f, "content_type", "") or "").lower()
+        # Video has always been accepted here — the model watches the take as
+        # well as hearing it, which is worth real marks on delivery and breath.
+        # The refusal copy said "isn't audio" and contradicted the check, which
+        # is how the file picker ended up audio-only for a year.
         if not (content_type.startswith("audio/") or content_type.startswith("video/")):
-            return Response({"detail": "That file isn't audio. Record a take or attach an audio file."},
+            return Response({"detail": "That isn't audio or video. Record a take, or attach an "
+                                       "audio or video file."},
                             status=status.HTTP_400_BAD_REQUEST)
         if f.size > MAX_MB * 1024 * 1024:
             return Response({"detail": f"That take is too big — keep it under {MAX_MB}MB."},

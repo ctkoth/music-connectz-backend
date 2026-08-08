@@ -282,3 +282,92 @@ class FreePromptCoversTheTakeTests(TestCase):
         w.save()
         resp = self.client.post(URL, {"take": take()}, format="multipart")
         self.assertEqual(resp.status_code, 402, resp.content)
+
+
+class VideoTakesTests(TestCase):
+    """The coach watches as well as listens.
+
+    Video has always been accepted server-side — the model marks delivery,
+    posture and breath from it, which sound alone can't show. The refusal copy
+    said "isn't audio" and the file picker was `accept="audio/*"`, so a feature
+    the backend supported was unreachable from the app.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("v", "v@e.com", "pw12345678")
+        self.client.force_authenticate(self.user)
+        m = membership_for(self.user); m.tier = TIER_STATZ; m.save()
+        w = wallet_for(self.user); w.money_cents = 100000; w.save()
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    def test_a_video_take_is_scored_like_an_audio_one(self, _post, _k):
+        resp = self.client.post(
+            URL, {"take": take("take.mp4", "video/mp4"), "genre": "Rap"}, format="multipart")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["score"], GOOD["score"])
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    def test_the_video_goes_up_with_its_own_mime_type(self, post, _k):
+        # Sent as-is, not relabelled as audio — the model needs to know it can
+        # look at the picture.
+        self.client.post(URL, {"take": take("t.webm", "video/webm")}, format="multipart")
+        parts = post.call_args.kwargs["json"]["contents"][0]["parts"]
+        inline = [p for p in parts if "inline_data" in p][0]["inline_data"]
+        self.assertEqual(inline["mime_type"], "video/webm")
+
+    def test_the_refusal_names_both_kinds(self):
+        resp = self.client.post(URL, {"take": take("notes.txt", "text/plain")}, format="multipart")
+        self.assertEqual(resp.status_code, 400)
+        # It used to say "isn't audio" while accepting video — copy that
+        # contradicts the check is how the picker ended up audio-only.
+        self.assertIn("video", resp.data["detail"].lower())
+
+
+class TheSizeCapIsOneWeCanHonourTests(TestCase):
+    """A limit the app states has to be a limit the app can actually serve.
+
+    The take rides to Gemini as base64 inside the request body, and that path
+    caps the whole request at 20MB. Base64 inflates by 4/3, so a file cap above
+    ~15MB is a promise the upstream breaks — and it broke it as "The coach
+    couldn't process that take", which blames the take rather than the size.
+    """
+
+    GEMINI_INLINE_LIMIT_MB = 20
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("s", "s@e.com", "pw12345678")
+        self.client.force_authenticate(self.user)
+        m = membership_for(self.user); m.tier = TIER_STATZ; m.save()
+        w = wallet_for(self.user); w.money_cents = 100000; w.save()
+
+    def test_a_take_at_the_cap_still_fits_the_request(self):
+        from apps.economy.vocalcoach import MAX_MB
+        self.assertLess(MAX_MB * 4 / 3, self.GEMINI_INLINE_LIMIT_MB,
+                        f"{MAX_MB}MB base64-encodes to "
+                        f"{MAX_MB * 4 / 3:.1f}MB and the inline path caps at "
+                        f"{self.GEMINI_INLINE_LIMIT_MB}MB — the app is advertising "
+                        "a size it cannot send")
+
+    def test_the_trial_cap_fits_too(self):
+        from apps.economy.models import TRIAL_MAX_MB
+        self.assertLess(TRIAL_MAX_MB * 4 / 3, self.GEMINI_INLINE_LIMIT_MB)
+
+    def test_the_cap_is_published_so_the_client_can_stop_it_early(self):
+        # The client checks against this before uploading, so an oversize take
+        # is refused in the browser rather than after a slow upload.
+        from apps.economy.vocalcoach import MAX_MB
+        with patch("apps.economy.vocalcoach._key", return_value="test-key"):
+            self.assertEqual(self.client.get(URL).data["max_mb"], MAX_MB)
+
+    def test_over_the_cap_is_refused_before_any_model_run(self):
+        from apps.economy.vocalcoach import MAX_MB
+        big = SimpleUploadedFile(
+            "long.webm", b"0" * int((MAX_MB + 1) * 1024 * 1024), content_type="video/webm")
+        with patch("apps.economy.vocalcoach.requests.post") as post:
+            resp = self.client.post(URL, {"take": big}, format="multipart")
+        self.assertEqual(resp.status_code, 413)
+        post.assert_not_called()

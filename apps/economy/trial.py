@@ -112,7 +112,8 @@ class TrialCoachView(APIView):
                             status=status.HTTP_400_BAD_REQUEST)
         content_type = (getattr(f, "content_type", "") or "").lower()
         if not (content_type.startswith("audio/") or content_type.startswith("video/")):
-            return Response({"detail": "That file isn't audio. Record a take or attach an audio file."},
+            return Response({"detail": "That isn't audio or video. Record a take, or attach an "
+                                       "audio or video file."},
                             status=status.HTTP_400_BAD_REQUEST)
         if f.size > TRIAL_MAX_MB * 1024 * 1024:
             return Response({"detail": f"That take is too big for a free run — keep it under {TRIAL_MAX_MB}MB."},
