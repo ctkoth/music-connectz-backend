@@ -69,13 +69,19 @@ class SingZCoachTests(TestCase):
         self.assertIn("alto", sent)
         self.assertIn("stageboss", sent)
 
-    def test_free_and_premium_are_refused_per_the_blueprint_gate(self):
-        for tier in (TIER_FREE, TIER_PREMIUM):
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    def test_every_tier_can_have_a_take_scored(self, _post, _k):
+        # This replaces a test that pinned the blueprint's StatZ gate. The gate
+        # was removed on purpose, not by accident: the no-account trial door
+        # already gives a stranger a full scored take once a day, so refusing a
+        # paying Premium member had the ladder upside down.
+        for tier in (TIER_FREE, TIER_PREMIUM, TIER_STATZ):
             with self.subTest(tier=tier):
                 self._tier(tier)
                 resp = self.client.post(URL, {"take": take()}, format="multipart")
-                self.assertEqual(resp.status_code, 403)
-                self.assertEqual(resp.data["required_tier"], TIER_STATZ)
+                self.assertEqual(resp.status_code, 200, resp.data)
+                self.assertEqual(resp.data["score"], GOOD["score"])
 
     def test_a_missing_or_non_audio_take_is_refused(self):
         self.assertEqual(self.client.post(URL, {}, format="multipart").status_code, 400)
@@ -144,12 +150,23 @@ class CoachPriceTests(TestCase):
     def test_an_unconfigured_key_is_visible_up_front(self, _k):
         self.assertFalse(self.client.get(URL).data["configured"])
 
-    def test_a_free_member_is_told_the_gate_without_uploading(self):
+    def test_a_free_member_is_not_gated_out(self):
         m = membership_for(self.user); m.tier = TIER_FREE; m.save(update_fields=["tier", "updated_at"])
         resp = self.client.get(URL)
         self.assertEqual(resp.status_code, 200, resp.content)
-        self.assertFalse(resp.data["allowed"])
-        self.assertEqual(resp.data["required_tier"], TIER_STATZ)
+        self.assertFalse(resp.data["gated"])
+        self.assertIsNone(resp.data["required_tier"])
+        # One free take a day, same as the anonymous trial door gives — so
+        # signing up keeps what hooked them instead of taking it away.
+        self.assertEqual(resp.data["daily_allowance"], PROMPT_ALLOWANCE[TIER_FREE])
+
+    def test_the_upsell_is_frequency_and_it_is_stated(self):
+        # The tier still sells something; it sells how OFTEN, and says so on the
+        # screen rather than by refusing at the end.
+        ladder = self.client.get(URL).data["allowance_ladder"]
+        self.assertEqual([r["daily"] for r in ladder],
+                         [PROMPT_ALLOWANCE[t] for t in (TIER_FREE, TIER_PREMIUM, TIER_STATZ)])
+        self.assertEqual(sorted(r["daily"] for r in ladder), [r["daily"] for r in ladder])
 
 
 class CoachDailyAllowanceTests(TestCase):
@@ -247,10 +264,18 @@ class InstrumentCoachTests(TestCase):
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
     @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
-    def test_a_rap_take_is_gated_and_billed_the_same_way(self, _post, _k):
+    def test_a_rap_take_is_billed_the_same_way(self, _post, _k):
+        # Was "gated and billed the same way" — RapZ proved it matched SingZ by
+        # sharing its StatZ refusal. The gate is gone, so it proves the same
+        # point the way that still holds: a Free member gets the take, and the
+        # day's free prompt covers it before any balance is touched.
         m = membership_for(self.user); m.tier = TIER_FREE; m.save(update_fields=["tier", "updated_at"])
+        w = wallet_for(self.user); w.money_cents = 0; w.promptz = 0
+        w.save(update_fields=["money_cents", "promptz"])
         resp = self.client.post("/api/rapz/coach/", {"take": take()}, format="multipart")
-        self.assertEqual(resp.status_code, 403, resp.content)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data["cost_cents"], 0)
+        self.assertEqual(daily_prompt_state(self.user)[2], PROMPT_ALLOWANCE[TIER_FREE] - 1)
 
 
 class FreePromptCoversTheTakeTests(TestCase):

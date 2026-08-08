@@ -1,8 +1,13 @@
 """SingZ Boss Take — record a take, get it scored and coached.
 
 The blueprint's Boss Take ("user records one scored final take, exercise pass,
-or song section") plus the StatZ-gated AI Vocal Coach ("deeper feedback on why
-notes, transitions, tone, or breath control are weak").
+or song section") plus the AI Vocal Coach ("deeper feedback on why notes,
+transitions, tone, or breath control are weak").
+
+Open to every tier, priced per take. The blueprint filed the coach under StatZ
+Gated Features; that was reconsidered once the no-account trial door shipped,
+because gating members harder than strangers put the ladder upside down. A tier
+now buys FREQUENCY — 1 / 5 / 10 free takes a day — not permission.
 
 A take is sent to Gemini as inline audio along with the member's genre, target
 range and difficulty, and comes back as a score out of 10 plus advice in the
@@ -31,7 +36,9 @@ from .catalog import ai_cost
 from .instruments import DIFFICULTIES, profile_for_app, prompt_for
 from .gemini import BASE, _bill, _key
 from .models import (
-    TIER_DEBUG,
+    PROMPT_ALLOWANCE,
+    TIER_FREE,
+    TIER_PREMIUM,
     TIER_STATZ,
     can_afford_ai,
     daily_prompt_state,
@@ -166,18 +173,34 @@ class SingZCoachView(APIView):
         """
         profile = profile_for_app(self.app_key)
         tier = membership_for(request.user).tier
-        allowed = tier in (TIER_STATZ, TIER_DEBUG)
-        _, _, daily_left = daily_prompt_state(request.user)
+        allowance, _, daily_left = daily_prompt_state(request.user)
         w = wallet_for(request.user)
         cost = ai_cost("standard")
+        # "Allowed" now means CAN YOU TAKE ONE RIGHT NOW — configured, and either
+        # a free prompt left or the balance to cover it. It used to mean "are you
+        # StatZ", which was a less useful answer to the only question the screen
+        # is actually asking.
+        allowed = bool(_key()) and (daily_left > 0 or can_afford_ai(request.user, cost))
         return Response({
             "allowed": allowed,
-            "required_tier": TIER_STATZ,
+            # Nothing tier-locks a take any more. The tier decides HOW MANY come
+            # free per day, not whether you may have one — see the ladder below.
+            "gated": False,
+            "required_tier": None,
             "configured": bool(_key()),
             "cost_cents": cost,
             # A free daily prompt covers the whole run before any paid balance.
             "free_today": daily_left > 0,
             "daily_remaining": daily_left,
+            "daily_allowance": allowance,
+            "tier": tier,
+            # What more would buy: frequency, not access. Stated so the upsell is
+            # present and honest without being a wall in front of the feature.
+            "allowance_ladder": [
+                {"tier": t, "daily": PROMPT_ALLOWANCE[t]}
+                for t in (TIER_FREE, TIER_PREMIUM, TIER_STATZ)
+            ],
+            "open_in": "membershipz",
             "promptz": w.promptz or 0,
             "money_cents": w.money_cents or 0,
             # A take the coach can't read is never billed — _bill runs only
@@ -197,15 +220,16 @@ class SingZCoachView(APIView):
         })
 
     def post(self, request):
-        # The blueprint lists AI Vocal Coach under StatZ Gated Features.
-        tier = membership_for(request.user).tier
-        if tier not in (TIER_STATZ, TIER_DEBUG):
-            return Response(
-                {"detail": "The AI Vocal Coach is a StatZ feature. Upgrade in MembershipZ to have your takes scored.",
-                 "required_tier": TIER_STATZ},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
+        # No tier gate. The blueprint filed the AI coach under StatZ Gated
+        # Features and that was reconsidered on purpose: the trial door already
+        # hands an anonymous visitor a full scored take, one per address per
+        # day, so gating members harder than non-members had the ladder upside
+        # down — a Premium member paying every month got less than a stranger.
+        #
+        # A take still costs a prompt, and the tier still decides how many come
+        # free each day (PROMPT_ALLOWANCE: 1 / 5 / 10). Frequency is the honest
+        # difference between somebody tracking daily and somebody curious once a
+        # month; access was charging twice for the same thing.
         f = request.FILES.get("take")
         if not f:
             return Response({"detail": "Record or attach a take first."}, status=status.HTTP_400_BAD_REQUEST)
