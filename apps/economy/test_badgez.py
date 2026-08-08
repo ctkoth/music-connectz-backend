@@ -470,3 +470,190 @@ class TemporaryBadgesTests(BadgeBase):
         row = [b for b in self.client.get(BADGEZ).data["badges"] if b["key"] == "sexy"][0]
         self.assertTrue(row["temporary"])
         self.assertEqual(row["icon"], "badge_sexy.png")
+
+
+class PolyglotTests(BadgeBase):
+    """Fifty translations lifts the daily character allowance.
+
+    The badge's own wording is "translation stops costing", and translation
+    already costs no 💵 and no 🏷️ — it's free at every tier on purpose. What it
+    actually costs is the daily allowance, so that is what has to move. A badge
+    removing a price nobody was charged would be the sticker this catalogue
+    doesn't ship.
+    """
+
+    def translate_times(self, n, chars=10):
+        from apps.economy.models import KeyTranslation
+        for _ in range(n):
+            KeyTranslation.objects.create(user=self.user, source_lang="en",
+                                          target_lang="es", chars=chars)
+
+    def test_fifty_translations_earns_it(self):
+        self.translate_times(50)
+        self.assertIn("polyglot", recheck_badges(self.user))
+
+    def test_forty_nine_does_not(self):
+        self.translate_times(49)
+        self.assertNotIn("polyglot", recheck_badges(self.user))
+
+    def test_the_allowance_stops_applying(self):
+        from apps.economy.models import KEY_TRANSLATE_DAILY_CHARS, key_translate_state
+        used, cap, left = key_translate_state(self.user)
+        self.assertEqual(cap, KEY_TRANSLATE_DAILY_CHARS)
+        grant_badge(self.user, "polyglot")
+        used, cap, left = key_translate_state(User.objects.get(pk=self.user.pk))
+        # None, not a very large number: a made-up ceiling printed on screen is
+        # a limit pretending somebody chose it.
+        self.assertIsNone(cap)
+        self.assertIsNone(left)
+
+    def test_the_keyboard_says_so_before_anyone_types(self):
+        resp = self.client.get("/api/economy/keyz/")
+        self.assertFalse(resp.data["translate_uncapped"])
+        grant_badge(self.user, "polyglot")
+        resp = self.client.get("/api/economy/keyz/")
+        self.assertTrue(resp.data["translate_uncapped"])
+        self.assertIsNone(resp.data["translate_daily_chars"])
+
+    def test_a_spent_allowance_no_longer_refuses_the_holder(self):
+        from apps.economy.models import KEY_TRANSLATE_DAILY_CHARS
+        self.translate_times(1, chars=KEY_TRANSLATE_DAILY_CHARS)
+        resp = self.client.post("/api/economy/keyz/translate/",
+                                {"text": "hola", "target_lang": "en"}, format="json")
+        self.assertEqual(resp.status_code, 429)
+        grant_badge(self.user, "polyglot")
+        resp = self.client.post("/api/economy/keyz/translate/",
+                                {"text": "hola", "target_lang": "en"}, format="json")
+        # It gets past the allowance. Whether the model answers is the
+        # translator's problem, not the badge's.
+        self.assertNotEqual(resp.status_code, 429)
+
+    def test_it_is_not_temporary(self):
+        # Fifty translations happened. Unlike a live median, that can't un-happen.
+        self.assertFalse(BADGES["polyglot"].get("temporary"))
+
+
+class PatronTests(BadgeBase):
+    """Five clean deals you BANKROLLED shortens escrow on deals you fund.
+
+    The effect spends the holder's own protection and nobody else's — the
+    auto-release window is each payer's last chance to open a dispute. That is
+    the whole reason it's safe to hand out, and the reason every payer on a
+    deal has to hold it before it applies.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from apps.economy.collab import escrow_release_days
+        from django.conf import settings
+        self.escrow_release_days = escrow_release_days
+        self.base = settings.ESCROW_AUTO_RELEASE_DAYS
+        self.floor = settings.ESCROW_MIN_RELEASE_DAYS
+
+    def deal(self, status, payers=(("maker", True),), **over):
+        from apps.economy.models import CollabDeal
+        return CollabDeal.objects.create(
+            initiator=self.user, title="EP", status=status,
+            participants=[{"username": n, "pays_cents": 1000, "funded": f,
+                           "receives_cents": 0} for n, f in payers],
+            **over)
+
+    # --- earning it ---
+    def test_five_funded_clean_releases_earns_it(self):
+        for _ in range(5):
+            self.deal("released")
+        self.assertIn("patron", recheck_badges(self.user))
+
+    def test_four_does_not(self):
+        for _ in range(4):
+            self.deal("released")
+        self.assertNotIn("patron", recheck_badges(self.user))
+
+    def test_being_on_a_deal_is_not_funding_one(self):
+        # Credited but never paid in. Straight Shooter counts that; this doesn't.
+        for _ in range(5):
+            self.deal("released", payers=(("maker", False),))
+        self.assertNotIn("patron", recheck_badges(self.user))
+
+    def test_a_refunded_deal_is_not_a_clean_release(self):
+        for _ in range(5):
+            self.deal("refunded")
+        self.assertNotIn("patron", recheck_badges(self.user))
+
+    def test_one_open_dispute_and_it_is_not_yours(self):
+        for _ in range(5):
+            self.deal("released")
+        self.deal("disputed")
+        self.assertNotIn("patron", recheck_badges(self.user))
+
+    # --- the effect ---
+    def test_without_it_the_window_is_the_default(self):
+        d = self.deal("funded")
+        self.assertEqual(self.escrow_release_days(d), self.base)
+
+    def test_with_it_the_window_shortens(self):
+        grant_badge(self.user, "patron")
+        d = self.deal("funded")
+        self.assertEqual(self.escrow_release_days(d),
+                         max(self.floor, self.base - 7))
+
+    def test_it_never_goes_below_the_floor(self):
+        # The window is the payer's safety rail. A badge that could drive it to
+        # zero would be a badge for skipping one.
+        grant_badge(self.user, "patron")
+        d = self.deal("funded")
+        self.assertGreaterEqual(self.escrow_release_days(d), self.floor)
+
+    def test_one_patron_cannot_shorten_a_co_payers_window(self):
+        # The thing being spent is protection. Spending your own is generous;
+        # spending somebody else's is a badge aimed at a person.
+        mate = User.objects.create_user(username="mate", password=PW)
+        membership_for(mate)
+        grant_badge(self.user, "patron")
+        d = self.deal("funded", payers=(("maker", True), ("mate", True)))
+        self.assertEqual(self.escrow_release_days(d), self.base)
+
+    def test_both_holding_it_does_shorten(self):
+        mate = User.objects.create_user(username="mate", password=PW)
+        membership_for(mate)
+        grant_badge(self.user, "patron")
+        grant_badge(mate, "patron")
+        d = self.deal("funded", payers=(("maker", True), ("mate", True)))
+        self.assertEqual(self.escrow_release_days(d), max(self.floor, self.base - 7))
+
+    def test_an_unknown_payer_is_never_assumed_to_have_agreed(self):
+        grant_badge(self.user, "patron")
+        d = self.deal("funded", payers=(("maker", True), ("ghost", True)))
+        self.assertEqual(self.escrow_release_days(d), self.base)
+
+    def test_the_window_is_published_before_anybody_funds(self):
+        # Cost/gain: a payer is told how long their money sits BEFORE it does.
+        from apps.economy.collab import deal_dict
+        grant_badge(self.user, "patron")
+        d = self.deal("draft")
+        row = deal_dict(d, self.user)
+        self.assertEqual(row["auto_release_days"], max(self.floor, self.base - 7))
+        self.assertEqual(row["auto_release_default_days"], self.base)
+
+    def test_funding_the_deal_uses_the_shortened_window(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from apps.economy.models import CollabDeal, wallet_for
+        mate = User.objects.create_user(username="mate", password=PW)
+        membership_for(mate)
+        grant_badge(self.user, "patron")
+        w = wallet_for(self.user)
+        w.spinaz = 10_000
+        w.save(update_fields=["spinaz"])
+        deal = CollabDeal.objects.create(
+            initiator=self.user, title="EP", status=CollabDeal.STATUS_DRAFT,
+            currency=CollabDeal.CURRENCY_SPINAZ,
+            participants=[{"username": "maker", "pays_cents": 100, "funded": False,
+                           "receives_cents": 0},
+                          {"username": "mate", "pays_cents": 0, "funded": False,
+                           "receives_cents": 100}])
+        resp = self.client.post(f"/api/economy/collab/{deal.id}/fund/", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        deal.refresh_from_db()
+        want = timezone.now() + timedelta(days=max(self.floor, self.base - 7))
+        self.assertLess(abs((deal.auto_release_at - want).total_seconds()), 120)

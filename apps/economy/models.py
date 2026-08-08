@@ -1988,8 +1988,16 @@ def key_translate_used_today(user):
 
 
 def key_translate_state(user):
-    """(used, cap, remaining) — published BEFORE anyone types, not on refusal."""
+    """(used, cap, remaining) — published BEFORE anyone types, not on refusal.
+
+    `cap` and `remaining` come back as None for a member whose badges lift the
+    cap. None rather than a very large number on purpose: a screen that reads
+    the number would print "999,999,999 characters left", which is a limit
+    nobody set pretending to be one somebody did.
+    """
     used = key_translate_used_today(user)
+    if badge_effects(user).get("translate_uncapped"):
+        return used, None, None
     return used, KEY_TRANSLATE_DAILY_CHARS, max(0, KEY_TRANSLATE_DAILY_CHARS - used)
 
 
@@ -2314,6 +2322,30 @@ def _clean_deals(user):
     return n
 
 
+def _funded_clean_deals(user):
+    """Deals this member PUT MONEY INTO that released without a dispute.
+
+    Deliberately narrower than `_clean_deals`: being credited on a deal and
+    bankrolling one are different acts, and this badge is for the second. The
+    `funded` flag survives release and is cleared by `refund_deal`, so a
+    refunded deal never counts — money that came back was never spent.
+    """
+    n = 0
+    for d in CollabDeal.objects.filter(status=CollabDeal.STATUS_RELEASED)[:500]:
+        if any(p.get("username") == user.username and p.get("funded")
+               and int(p.get("pays_cents") or 0) > 0
+               for p in (d.participants or [])):
+            n += 1
+    for d in CollabDeal.objects.filter(status=CollabDeal.STATUS_DISPUTED)[:500]:
+        if any(p.get("username") == user.username for p in (d.participants or [])):
+            return 0        # same rule as Straight Shooter: one open dispute, no badge
+    return n
+
+
+def _translations_done(user):
+    return KeyTranslation.objects.filter(user=user).count()
+
+
 BADGES = {
     # ---- gifted ----
     "owner": {
@@ -2383,6 +2415,38 @@ BADGES = {
         "effects": {"rating_cap_bonus": 20},
         "effect_note": "+20 paid ratings a day — the cap that pays, raised.",
         "check": lambda u: _ratings_given(u) >= 100,
+    },
+    # "Translation stops costing" needed one honest translation itself, because
+    # translation already costs no 💵 and no 🏷️ — keyconnectz.py gives it away
+    # at every tier on purpose. What it DOES cost is the daily character
+    # allowance, so that is the thing this badge lifts. Anything else would be
+    # a badge removing a price that was never charged.
+    "polyglot": {
+        "icon": "badge_polyglot.png", "name": "Polyglot", "emoji": "🗺️",
+        "title": "Polyglot", "gifted": False,
+        "desc": "Fifty translations. You talk to rooms this app couldn't reach without you.",
+        "how": "Run 50 KeyConnectZ translations.",
+        "effects": {"translate_uncapped": True},
+        "effect_note": f"No daily limit on KeyConnectZ translation — the "
+                       f"{KEY_TRANSLATE_DAILY_CHARS:,}-character allowance stops applying to you.",
+        "check": lambda u: _translations_done(u) >= 50,
+    },
+    # The effect costs the holder their own protection and nobody else's, which
+    # is what makes it safe to hand out: the auto-release window is the payer's
+    # last moment to open a dispute, so shortening it is a Patron saying "pay
+    # them sooner, I don't need the extra week." collab.escrow_release_days
+    # only applies it when EVERY payer on the deal holds it.
+    "patron": {
+        "icon": "badge_patron.png", "name": "Patron", "emoji": "💸",
+        "title": "Patron", "gifted": False,
+        "desc": "Five deals you bankrolled, and every one released clean.",
+        "how": "Fund 5 CollabZ deals that release with no dispute against you.",
+        "effects": {"escrow_days_off": 7},
+        "effect_note": f"Escrow on deals you fund releases in "
+                       f"{max(settings.ESCROW_MIN_RELEASE_DAYS, settings.ESCROW_AUTO_RELEASE_DAYS - 7)} "
+                       f"days instead of {settings.ESCROW_AUTO_RELEASE_DAYS} — "
+                       "your collaborators get paid sooner for working with you.",
+        "check": lambda u: _funded_clean_deals(u) >= 5,
     },
     "gifted": {
         "name": "Gifted", "emoji": "🎁", "title": "Gifted", "gifted": False,

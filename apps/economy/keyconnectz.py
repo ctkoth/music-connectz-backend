@@ -110,8 +110,12 @@ class KeyboardView(APIView):
             "translate_free": True,
             "translate_cost_cents": 0,
             "translate_used_today": used,
+            # None on both when the Polyglot badge has lifted the cap. The
+            # client shows "no daily limit" rather than a number, because a
+            # made-up large number is a limit pretending to be real.
             "translate_daily_chars": cap,
             "translate_remaining": left,
+            "translate_uncapped": cap is None,
             "translate_max_chars": KEY_TRANSLATE_MAX_CHARS,
             "languages": [{"key": k, "label": v} for k, v in LANGUAGES],
         })
@@ -238,7 +242,8 @@ class KeyTranslateView(APIView):
             )
 
         used, cap, left = key_translate_state(request.user)
-        if len(text) > left:
+        # `left is None` is Polyglot: no allowance to run out of.
+        if left is not None and len(text) > left:
             return Response(
                 {"detail": f"You've used your {cap:,} free characters for today — {left:,} left. "
                            "It resets on a rolling 24 hours.",
@@ -308,4 +313,5 @@ class KeyTranslateView(APIView):
             "translate_used_today": used,
             "translate_daily_chars": cap,
             "translate_remaining": left,
+            "translate_uncapped": cap is None,
         })
