@@ -249,3 +249,38 @@ class TranslateTests(TestCase):
         free_cap = self.client.get("/api/economy/keyz/").data["translate_daily_chars"]
         as_tier(self.user, TIER_STATZ)
         self.assertEqual(self.client.get("/api/economy/keyz/").data["translate_daily_chars"], free_cap)
+
+
+class WhatTheKeyboardCostsUsTests(TestCase):
+    """Translation is free to the member, which makes it our bill, not theirs.
+
+    A free surface with no ceiling is the one that has to be cheap to run.
+    Charging a PromptZ was the other way to close that gap and it was rejected
+    on purpose: every other AI surface here produces an artifact you keep, and
+    this one produces a message you send. A price per message is a price per
+    sentence, and people stop mid-conversation rather than spend it.
+    """
+
+    def test_the_keyboard_translates_on_a_small_model(self):
+        from apps.economy.keyconnectz import TRANSLATE_MODEL
+        # Translation is transformation, not reasoning. The small model is
+        # indistinguishable here and roughly a fifth of the price.
+        self.assertIn("haiku", TRANSLATE_MODEL)
+
+    def test_the_paid_batch_translator_is_a_different_decision(self):
+        # TranslateZ charges, transcreates rather than translates, and carries
+        # brand rules. It keeps the bigger model on purpose — this test exists
+        # so nobody "tidies" the two into one constant.
+        from apps.economy.translate import TRANSLATE_MODEL as BATCH_MODEL
+        from apps.economy.keyconnectz import TRANSLATE_MODEL as KEY_MODEL
+        self.assertNotEqual(BATCH_MODEL, KEY_MODEL)
+        self.assertNotIn("haiku", BATCH_MODEL)
+
+    def test_the_keyboard_still_charges_nothing(self):
+        # The whole point of the model swap: the fix was on the supply side, so
+        # the member's side did not change.
+        u = User.objects.create_user("cheap", "c@e.com", PW)
+        c = APIClient(); c.force_authenticate(u)
+        d = c.get("/api/economy/keyz/").data
+        self.assertTrue(d["translate_free"])
+        self.assertEqual(d["translate_cost_cents"], 0)
