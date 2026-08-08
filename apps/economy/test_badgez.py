@@ -285,7 +285,7 @@ class GiftedAndSexyTests(BadgeBase):
         discounted, _ = post_cost_cents(self.user, ["Beat Producer"])
         self.assertEqual(discounted, 30)          # 25% off, on the button
 
-    def test_sexy_lands_at_eight(self):
+    def test_sexy_lands_above_eight(self):
         from apps.economy.models import AttractivenessRating
         from django.contrib.auth import get_user_model
         U = get_user_model()
@@ -294,25 +294,26 @@ class GiftedAndSexyTests(BadgeBase):
             AttractivenessRating.objects.create(rater=rater, target=self.user, score=9)
         self.assertIn("sexy", recheck_badges(self.user))
 
-    def test_sexy_touches_nothing_in_the_work_economy(self):
-        # The whole design decision, pinned. Attractiveness is kept apart from
-        # work everywhere else; a badge that paid Energy for it would undo that.
-        fx = BADGES["sexy"]["effects"]
-        for economic in ("energy_multiplier", "post_discount_pct", "rating_cap_bonus",
-                         "submission_bonus", "lifetime_discount_pct", "tier"):
-            self.assertNotIn(economic, fx)
-        self.assertEqual(fx, {"social_boost": True})
+    def test_exactly_eight_is_not_above_eight(self):
+        from apps.economy.models import AttractivenessRating
+        from django.contrib.auth import get_user_model
+        U = get_user_model()
+        for i in range(3):
+            rater = U.objects.create_user(username=f"b{i}", password=PW)
+            AttractivenessRating.objects.create(rater=rater, target=self.user, score=8)
+        self.assertNotIn("sexy", recheck_badges(self.user))
 
-    def test_sexy_says_out_loud_what_it_does_not_do(self):
-        self.assertIn("Nothing in the work economy", BADGES["sexy"]["effect_note"])
-
-    def test_the_boost_never_outranks_distance(self):
-        # "Who is near me" is a real need; being rated attractive is not a
-        # reason to bury somebody closer.
-        import inspect
-        from apps.economy import social
-        src = inspect.getsource(social.MembersView.get)
-        self.assertLess(src.index("origin[0] is not None"), src.index("sexy"))
+    def test_sexy_doubles_the_energy_rate(self):
+        # Corey's call. I argued for keeping attractiveness out of the economy;
+        # he decided ⚡×2, and it's temporary, which is most of what worried me.
+        p = profile_for(self.user)
+        p.links = [{"label": "IG", "url": "https://x.test", "verified": True,
+                    "followers": 1000, "verified_count": 1000}]
+        p.save(update_fields=["links"])
+        before = energy_rate_per_hour(User.objects.get(pk=self.user.pk))
+        grant_badge(self.user, "sexy")
+        self.assertEqual(energy_rate_per_hour(User.objects.get(pk=self.user.pk)),
+                         before * 2)
 
 
 class ArtworkTests(BadgeBase):
@@ -334,3 +335,113 @@ class ArtworkTests(BadgeBase):
     def test_no_two_badges_share_artwork(self):
         icons = [s["icon"] for s in BADGES.values() if s.get("icon")]
         self.assertEqual(len(icons), len(set(icons)))
+
+
+class TemporaryBadgesTests(BadgeBase):
+    """A badge tracking a live median has to be able to lapse.
+
+    Otherwise the first member to touch 8 keeps the effect forever and the
+    number stops meaning anything.
+    """
+
+    def rate_me(self, score, n=3):
+        from apps.economy.models import AttractivenessRating
+        from django.contrib.auth import get_user_model
+        U = get_user_model()
+        AttractivenessRating.objects.filter(target=self.user).delete()
+        for i in range(n):
+            rater = U.objects.filter(username=f"a{i}").first() or \
+                U.objects.create_user(username=f"a{i}", password=PW)
+            AttractivenessRating.objects.create(rater=rater, target=self.user, score=score)
+
+    def test_sexy_lands_above_eight(self):
+        self.rate_me(9)
+        self.assertIn("sexy", recheck_badges(self.user))
+
+    def test_exactly_eight_is_not_above_eight(self):
+        self.rate_me(8)
+        self.assertNotIn("sexy", recheck_badges(self.user))
+
+    def test_sexy_doubles_energy_while_you_hold_it(self):
+        p = profile_for(self.user)
+        p.links = [{"label": "IG", "url": "https://x.test", "verified": True,
+                    "followers": 1000, "verified_count": 1000}]
+        p.save(update_fields=["links"])
+        before = energy_rate_per_hour(User.objects.get(pk=self.user.pk))
+        grant_badge(self.user, "sexy")
+        self.assertEqual(energy_rate_per_hour(User.objects.get(pk=self.user.pk)),
+                         before * 2)
+
+    def test_it_is_taken_back_when_the_median_falls(self):
+        self.rate_me(9)
+        recheck_badges(self.user)
+        self.assertTrue(Badge.objects.filter(user=self.user, key="sexy").exists())
+        self.rate_me(4)
+        recheck_badges(User.objects.get(pk=self.user.pk))
+        self.assertFalse(Badge.objects.filter(user=self.user, key="sexy").exists())
+
+    def test_losing_it_takes_the_effect_with_it(self):
+        self.rate_me(9)
+        recheck_badges(self.user)
+        self.assertIn("energy_multiplier", badge_effects(self.user))
+        self.rate_me(3)
+        recheck_badges(User.objects.get(pk=self.user.pk))
+        self.assertNotIn("energy_multiplier", badge_effects(self.user))
+
+    def test_losing_it_is_never_silent(self):
+        # The member's Energy rate changes; nothing else would explain why.
+        self.rate_me(9)
+        recheck_badges(self.user)
+        self.user.notifications.all().delete()
+        self.rate_me(2)
+        recheck_badges(User.objects.get(pk=self.user.pk))
+        note = self.user.notifications.first()
+        self.assertIn("lapsed", note.text)
+        self.assertIn("returns by itself", note.text)
+
+    def test_losing_it_takes_the_title_down_too(self):
+        self.rate_me(9)
+        recheck_badges(self.user)
+        self.client.patch(BADGEZ, {"title": "Sexy"}, format="json")
+        self.assertEqual(profile_for(self.user).badge_title, "Sexy")
+        self.rate_me(2)
+        recheck_badges(User.objects.get(pk=self.user.pk))
+        self.assertEqual(profile_for(self.user).badge_title, "")
+
+    def test_gifted_lapses_when_the_work_stops_scoring(self):
+        from django.contrib.auth import get_user_model
+        U = get_user_model()
+        posts = []
+        for i in range(5):
+            post = Post.objects.create(author=self.user, title=f"p{i}")
+            posts.append(post)
+            rater = U.objects.create_user(username=f"g{i}", password=PW)
+            ItemRating.objects.create(user=rater, item_id=f"post:{post.id}", score=9)
+        self.assertIn("gifted", recheck_badges(self.user))
+        ItemRating.objects.filter(item_id__in=[f"post:{p.id}" for p in posts]).update(score=4)
+        recheck_badges(self.user)
+        self.assertFalse(Badge.objects.filter(user=self.user, key="gifted").exists())
+
+    def test_a_permanent_badge_is_never_taken_back(self):
+        # A shipped collab HAPPENED. No later state undoes it.
+        for i in range(10):
+            post = Post.objects.create(author=self.owner, title=f"c{i}")
+            PostContributor.objects.create(post=post, user=self.user, slot="image")
+        self.assertIn("collaborator", recheck_badges(self.user))
+        PostContributor.objects.filter(user=self.user).delete()
+        recheck_badges(self.user)
+        self.assertTrue(Badge.objects.filter(user=self.user, key="collaborator").exists())
+
+    def test_only_the_median_badges_are_temporary(self):
+        temp = {k for k, s in BADGES.items() if s.get("temporary")}
+        self.assertEqual(temp, {"gifted", "sexy"})
+
+    def test_a_row_says_whether_it_can_lapse(self):
+        # The condition has to be MET, not just the badge granted: reading the
+        # list re-checks, and a temporary badge whose condition is false is
+        # revoked on the spot. That's the feature working.
+        self.rate_me(9)
+        recheck_badges(self.user)
+        row = [b for b in self.client.get(BADGEZ).data["badges"] if b["key"] == "sexy"][0]
+        self.assertTrue(row["temporary"])
+        self.assertEqual(row["icon"], "badge_sexy.png")

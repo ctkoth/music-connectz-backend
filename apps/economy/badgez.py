@@ -52,6 +52,13 @@ def badge_dict(b, mine=False):
         "desc": spec.get("desc", ""),
         "how": spec.get("how", ""),
         "gifted": spec.get("gifted", False),
+        # A badge that can lapse says so. Losing one you thought was
+        # permanent is a worse surprise than knowing it tracks a live number.
+        "temporary": spec.get("temporary", False),
+        # A temporary badge tracks a live median and can lapse. Saying
+        # so on the row is the difference between losing it and being
+        # blindsided by losing it.
+        "temporary": spec.get("temporary", False),
         "effects": spec.get("effects", {}),
         "effect_note": spec.get("effect_note", ""),
         "awarded_at": b.awarded_at.isoformat(),

@@ -2373,9 +2373,10 @@ BADGES = {
     },
     "gifted": {
         "name": "Gifted", "emoji": "🎁", "title": "Gifted", "gifted": False,
-        "icon": "badge_gifted.png",
+        "icon": "badge_gifted.png", "temporary": True,
         "desc": "Your work scores 8+. Posting costs you less.",
-        "how": "Hold a median rating of 8 or better across at least 5 rated posts.",
+        "how": "Hold a median rating of 8+ across at least 5 rated posts. It "
+               "lapses if the median falls.",
         # Rewards the WORK, which is the thing this economy is supposed to
         # price. It reads through post_cost_cents, so the discount is on the
         # button before the post is made.
@@ -2384,25 +2385,21 @@ BADGES = {
         "check": lambda u: (_rated_posts(u) >= 5
                             and (_post_rating_median(u) or 0) >= 8),
     },
+    # Corey's call: attractiveness 8+ doubles Energy. I argued for keeping
+    # attractiveness out of the economy entirely and he decided otherwise, so
+    # it's ⚡×2 — and it is TEMPORARY, which is most of what worried me. It
+    # tracks a live median rather than being a permanent advantage: the room
+    # can take it back, and does, the moment the median drops.
     "sexy": {
         "name": "Sexy", "emoji": "🔥", "title": "Sexy", "gifted": False,
-        "desc": "The room rates you 8+.",
-        "how": "Hold an attractiveness median of 8 or better.",
-        # DELIBERATELY not economic. Attractiveness is kept apart from work
-        # everywhere else in this app — RateZ says so in as many words — and a
-        # badge that turned it into Energy, cheaper posts or better prices
-        # would quietly undo that, paying people for their face in the same
-        # currency it pays them for their music.
-        #
-        # So the effect lives where attractiveness legitimately belongs: being
-        # found by people looking for people. It ranks you higher in the
-        # members list when there's no distance to sort by — and never above
-        # "who is near me", because that is a real need and this isn't.
-        "effects": {"social_boost": True},
-        "effect_note": "You surface higher in member discovery. Nothing in the "
-                       "work economy — no Energy, no cheaper posts, no better "
-                       "prices. Your face is not your craft.",
-        "check": lambda u: (attractiveness_median(u) or 0) >= 8,
+        "icon": "badge_sexy.png", "temporary": True,
+        "desc": "The room rates you above 8.",
+        "how": "Hold an attractiveness median above 8. Drops below and the "
+               "badge goes with it.",
+        "effects": {"energy_multiplier": 2.0, "social_boost": True},
+        "effect_note": "⚡×2 while you hold it, and you surface higher in "
+                       "member discovery.",
+        "check": lambda u: (attractiveness_median(u) or 0) > 8,
     },
     "bug_hunter": {
         "name": "Bug Hunter", "emoji": "🐛", "title": "Bug Hunter", "gifted": True,
@@ -2485,20 +2482,56 @@ def grant_badge(user, key, by=None):
     return badge, created
 
 
+def revoke_badge(user, key):
+    """Take a temporary badge back, and say so.
+
+    Losing a badge in silence is worse than never holding one: the member's
+    Energy rate changes and nothing explains why. So the notification is part
+    of the revocation, not an afterthought.
+    """
+    n, _ = Badge.objects.filter(user=user, key=key).delete()
+    if not n:
+        return False
+    spec = BADGES.get(key, {})
+    # The title goes with it — wearing a title for a badge you no longer hold
+    # would be the badge outliving its own condition.
+    p = getattr(user, "mcz_profile", None) or profile_for(user)
+    if p.badge_title and p.badge_title == spec.get("title"):
+        p.badge_title = ""
+        p.save(update_fields=["badge_title", "updated_at"])
+    notify(user, "badge",
+           f"{spec.get('emoji', '🏅')} {spec.get('name', key)} has lapsed — "
+           f"{spec.get('how', '')} Earn it back and it returns by itself.".strip())
+    return True
+
+
 def recheck_badges(user):
-    """Award every earned badge whose evidence is now there. Returns new keys."""
+    """Grant what's now earned, take back what's no longer true.
+
+    TEMPORARY badges track a live median (Gifted on work ratings, Sexy on
+    attractiveness) rather than marking a milestone. A median can fall, so the
+    badge has to be able to fall with it — otherwise the first member to touch
+    8 keeps the effect forever and the number stops meaning anything.
+
+    Permanent badges are never revoked here. A shipped collab or a founding
+    seat is a thing that HAPPENED; no later state undoes it.
+    """
     have = {b.key for b in Badge.objects.filter(user=user)}
-    won = []
+    won, lost = [], []
     for key, spec in BADGES.items():
         check = spec.get("check")
-        if not check or key in have:
+        if not check:
             continue
         try:
-            if check(user):
-                grant_badge(user, key)
-                won.append(key)
+            passes = bool(check(user))
         except Exception:      # a broken check must never block a page load
             continue
+        if passes and key not in have:
+            grant_badge(user, key)
+            won.append(key)
+        elif not passes and key in have and spec.get("temporary"):
+            if revoke_badge(user, key):
+                lost.append(key)
     return won
 
 
