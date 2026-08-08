@@ -606,6 +606,11 @@ class Profile(models.Model):
     # The title being worn, from a badge held AND shown. Stored rather than
     # derived so a member with several can choose which one they lead with.
     badge_title = models.CharField(max_length=60, blank=True, default="")
+    # Which AI engine this member's paid AI actions run on. Blank means "never
+    # chose" — resolved at read time to the best rung their tier owns, so the
+    # default follows an upgrade or a lapse without anything having to migrate
+    # the stored value. Always read it through catalog.ai_model_for().
+    ai_model = models.CharField(max_length=16, blank=True, default="")
     links = models.JSONField(default=list, blank=True)  # [{label, url}] public links
     # Location (opt-in) for in-person CollabZ / VenueZ distance filtering.
     share_location = models.BooleanField(default=False)

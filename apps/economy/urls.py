@@ -49,6 +49,7 @@ from .releasez import (CollabDistributeView, PostDistributeView, ReleaseDetailVi
                        ReleaseSubmitView, ReleasesView)
 from .collab_files import CollabFileDetailView, CollabFilesView
 from .collab_post import CollabNeedsView, CollabPostView
+from .ai_models import AiModelView
 from .badgez import BadgeGiftView, BadgezView
 from .logicz import LogicZView
 from .ratez import RatezView, RatingKindsView
@@ -196,6 +197,7 @@ urlpatterns = [
     # BadgeZ — a title you wear and an effect you feel.
     # LogicZ — every tab has an address, an icon, and something it says.
     path("logicz/", LogicZView.as_view(), name="economy-logicz"),
+    path("ai/models/", AiModelView.as_view(), name="economy-ai-models"),
     path("badgez/", BadgezView.as_view(), name="economy-badgez"),
     path("badgez/gift/", BadgeGiftView.as_view(), name="economy-badgez-gift"),
     path("ratez/", RatezView.as_view(), name="economy-ratez"),

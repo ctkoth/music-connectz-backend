@@ -10,21 +10,35 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import ai_cost
-from .models import charge_ai_usage, can_afford_ai, wallet_for
+from .catalog import AI_MODELS, AI_MODEL_ORDER, ai_model_for
+from .models import (
+    can_afford_ai,
+    charge_ai_usage,
+    daily_prompt_state,
+    membership_for,
+    profile_for,
+    wallet_for,
+)
 from .views import is_owner, platform_owner
 
-# House model per OCC voice. The "voice" shapes the system prompt/tone + price;
-# Corey GPT runs on Fable 5, the other voices on flagship Opus 4.8.
-OCC_LLM_MODEL = "claude-opus-4-8"
-MODEL_BY_VOICE = {"corey-gpt": "claude-fable-5"}
+# The voice shapes the system prompt and nothing else. Which ENGINE runs it is
+# the member's own choice, gated by tier and priced by what it actually costs —
+# see catalog.AI_MODELS. Voice used to carry the price too, which is how the
+# "cheapest" voice ended up on the most expensive model in the catalogue.
 
 
 def _create_with_fallback(client, primary, fallback, **kwargs):
-    """Generate with `primary`, but if that model isn't available on this
-    account/region fall back to `fallback` — so Corey speaks in Fable when it's
-    there and only drops to Opus if it isn't. Only availability errors trigger
-    the retry; auth / rate-limit / billing errors propagate unchanged."""
+    """Generate with `primary`, falling back to `fallback` if that model isn't
+    available on this account or region.
+
+    Callers pass a fallback at or BELOW the primary's price. The member is
+    billed for the engine they chose either way, so substituting something
+    dearer would have the platform quietly paying the difference for a swap
+    nobody asked for.
+
+    Only availability errors trigger the retry; auth, rate-limit and billing
+    errors propagate unchanged — those are not something a cheaper model fixes.
+    """
     try:
         return client.messages.create(model=primary, **kwargs)
     except Exception as exc:
@@ -127,13 +141,34 @@ class OccChatView(APIView):
         acronyms = data.get("acronyms") or []     # [{term, means}] the member's CodeZ shorthand
 
         # OCC works like Claude Code: everyone — owners included — pays the model
-        # minimum to cover the run (Corey GPT is the cheapest voice). The charge is
-        # then routed to the platform owner as revenue.
-        cost = ai_cost(model_voice)
+        # minimum to cover the run. The charge is then routed to the platform
+        # owner as revenue.
+        #
+        # The ENGINE is what costs, not the voice. Corey / standard / technical
+        # are system prompts; a tone has no per-token price, and charging for one
+        # is how the cheapest voice ended up running the priciest model. The
+        # member's engine choice is gated by tier and resolved here so a lapsed
+        # subscription falls back rather than 402s.
+        tier = membership_for(request.user).tier
+        model_key, model_spec = ai_model_for(profile_for(request.user).ai_model, tier)
+        cost = model_spec["cost_cents"]
+
+        # The day's free prompts cover a run before any balance is touched —
+        # OCC is a genuine prompt run, which is exactly what that allowance is
+        # for. It was never wired in here, so a member whose whole AI budget was
+        # the free allowance couldn't open the app's main AI screen at all; the
+        # vocal coach and the Gemini surfaces have honoured it all along.
+        # Read before spending, because charge_ai_usage consumes it.
+        _, _, daily_left = daily_prompt_state(request.user)
+        covered_free = bool(cost) and daily_left > 0
+
         # Check affordability up front so we don't call the model then fail to bill.
-        if cost and not can_afford_ai(request.user, cost):
+        if cost and not daily_left and not can_afford_ai(request.user, cost):
             return Response(
-                {"detail": "Not enough balance for this model.", "cost_cents": cost},
+                {"detail": f"{model_spec['emoji']} {model_spec['name']} costs "
+                           f"{cost} 🏷️ a message and today's free prompts are spent.",
+                 "cost_cents": cost, "engine": model_key,
+                 "open_in": "modelz"},
                 status=status.HTTP_402_PAYMENT_REQUIRED,
             )
 
@@ -187,10 +222,13 @@ class OccChatView(APIView):
 
         try:
             client = anthropic.Anthropic()
-            # Vision needs a flagship model; Corey's Fable voice is text-only.
-            primary = OCC_LLM_MODEL if image else MODEL_BY_VOICE.get(model_voice, OCC_LLM_MODEL)  # Corey → Fable 5, others → Opus 4.8
+            # The member's chosen engine, falling back DOWN the ladder if it
+            # isn't available on this account. Down rather than to a fixed
+            # flagship: the member is billed for what they picked either way, so
+            # a fallback that costs more than their choice is the platform
+            # paying the difference for a substitution nobody asked for.
             resp = _create_with_fallback(
-                client, primary, OCC_LLM_MODEL,  # Corey speaks in Fable when available, Opus only if not
+                client, model_spec["id"], AI_MODELS[AI_MODEL_ORDER[0]]["id"],
                 max_tokens=3072,       # fuller Corey answers (was 1024)
                 system=system,
                 messages=messages,
@@ -205,17 +243,34 @@ class OccChatView(APIView):
         if not text:
             return Response({"detail": "Empty response."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
-        remaining = charge_ai_usage(request.user, cost, note=f"OCC {model_voice}")
+        # The note names the ENGINE as well as the voice, because the engine is
+        # what the money went on. A LogZ row reading "OCC corey-gpt · 15c" with
+        # no way to tell which model ran is a balance that can't be explained.
+        remaining = charge_ai_usage(
+            request.user, cost, note=f"OCC {model_voice} · {model_spec['name']}",
+            count_daily=True)
         # Route the model charge to the platform owner as revenue ("pay Corey"),
-        # keeping money conserved — unless the payer *is* the owner (self-neutral).
-        if cost:
+        # keeping money conserved — unless the payer *is* the owner (self-neutral),
+        # or a free daily prompt covered it. Nothing left the member's wallet in
+        # that case, so nothing may arrive in the owner's: paying the owner out
+        # of an allowance is the platform minting money from itself.
+        if cost and not covered_free:
             owner = platform_owner()
             if owner and owner.id != request.user.id:
                 ow = wallet_for(owner)
                 ow.money_cents = (ow.money_cents or 0) + cost
                 ow.save(update_fields=["money_cents", "updated_at"])
         money = round((remaining if remaining is not None else wallet_for(request.user).money_cents) / 100, 2)
-        out = {"text": text, "model": model_voice, "cost_cents": cost, "money": money}
+        allowance, _, daily_now = daily_prompt_state(request.user)
+        out = {"text": text, "model": model_voice, "cost_cents": cost, "money": money,
+               # Which engine ran and what it cost, so the reply can say it
+               # rather than the member inferring it from a balance.
+               "engine": model_key, "engine_name": model_spec["name"],
+               "engine_emoji": model_spec["emoji"],
+               # A run that cost nothing has to say so, or the member assumes
+               # they were charged and stops asking.
+               "free_prompt": covered_free,
+               "daily_prompts_left": daily_now, "daily_prompts": allowance}
 
         # A reply you can't take anywhere is a dead end with a scrollbar. Asked
         # to, OCC keeps the exchange as WorkZ — in the PostZ format — so it can
