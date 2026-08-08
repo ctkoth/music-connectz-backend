@@ -46,6 +46,8 @@ def badge_dict(b, mine=False):
         "key": b.key,
         "name": spec.get("name", b.key),
         "emoji": spec.get("emoji", "🏅"),
+        # Real artwork where it exists; the emoji carries the rest.
+        "icon": spec.get("icon", ""),
         "title": spec.get("title", ""),
         "desc": spec.get("desc", ""),
         "how": spec.get("how", ""),

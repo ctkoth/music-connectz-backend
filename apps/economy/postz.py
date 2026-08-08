@@ -225,6 +225,12 @@ def post_cost_cents(user, skills_used):
         cents = prices.get(name.strip(), 0)
         lines.append({"skill": name.strip(), "cents": cents})
         total += cents
+    # BadgeZ reads here, where the price is decided — the Gifted badge's
+    # discount would be a sticker anywhere else.
+    from .models import badge_effects
+    off = badge_effects(user).get("post_discount_pct", 0)
+    if off and total:
+        total = max(0, total - int(total * off / 100))
     return total, lines
 
 

@@ -913,7 +913,14 @@ class MembersView(APIView):
             card = _profile_card(p, request)
             card["distance_km"] = dist
             results.append(card)
-        # Nearest first when a distance origin exists.
+        # Nearest first when a distance origin exists. Distance WINS over the
+        # Sexy badge's boost on purpose: "who is near me" is a real need, and
+        # being rated attractive is not a reason to bury someone closer.
         if origin[0] is not None:
             results.sort(key=lambda c: (c.get("distance_km") is None, c.get("distance_km") or 0))
+        else:
+            from .models import Badge
+            boosted = set(Badge.objects.filter(key="sexy", visible=True)
+                          .values_list("user__username", flat=True))
+            results.sort(key=lambda c: c.get("username") not in boosted)
         return Response({"members": results[:100], "origin_shared": origin[0] is not None})

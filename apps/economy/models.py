@@ -2265,6 +2265,21 @@ RATING_KINDS = [
 from .catalog import FOUNDING_LIMIT as FOUNDING_SEATS   # one seat count, not two
 
 
+def _post_rating_median(user):
+    """The median of what this member's own posts scored. None if unrated."""
+    keys = [f"post:{pid}" for pid in
+            Post.objects.filter(author=user).values_list("id", flat=True)[:200]]
+    scores = list(ItemRating.objects.filter(item_id__in=keys)
+                  .values_list("score", flat=True))
+    return _median(scores)
+
+
+def _rated_posts(user):
+    keys = [f"post:{pid}" for pid in
+            Post.objects.filter(author=user).values_list("id", flat=True)[:200]]
+    return ItemRating.objects.filter(item_id__in=keys).values("item_id").distinct().count()
+
+
 def _shipped_collabs(user):
     return Post.objects.filter(contributor_rows__user=user).count()
 
@@ -2296,7 +2311,7 @@ def _clean_deals(user):
 BADGES = {
     # ---- gifted ----
     "owner": {
-        "name": "Owner", "emoji": "👑", "title": "Owner", "gifted": True,
+        "icon": "badge_owner.png", "name": "Owner", "emoji": "👑", "title": "Owner", "gifted": True,
         "desc": "This is whose app it is.",
         "how": "Held by the platform owner.",
         "effects": {"tier": "statz", "dev_tax_share": 1.0, "intelligence_royalties": True},
@@ -2313,7 +2328,7 @@ BADGES = {
     # keeps closing, and I introduced it. The badge now adds only what is
     # genuinely its own: the Energy.
     "founding": {
-        "name": "Founding Fifty", "emoji": "🏛️", "title": "Founding Fifty", "gifted": False,
+        "icon": "badge_founding.png", "name": "Founding Fifty", "emoji": "🏛️", "title": "Founding Fifty", "gifted": False,
         "desc": f"One of the first {FOUNDING_SEATS} members to pay for this.",
         "how": f"Claim a founding seat in MembershipZ — {FOUNDING_SEATS} of them, "
                "at half price, and when they're gone they're gone.",
@@ -2355,6 +2370,39 @@ BADGES = {
         "effects": {"rating_cap_bonus": 20},
         "effect_note": "+20 paid ratings a day — the cap that pays, raised.",
         "check": lambda u: _ratings_given(u) >= 100,
+    },
+    "gifted": {
+        "name": "Gifted", "emoji": "🎁", "title": "Gifted", "gifted": False,
+        "icon": "badge_gifted.png",
+        "desc": "Your work scores 8+. Posting costs you less.",
+        "how": "Hold a median rating of 8 or better across at least 5 rated posts.",
+        # Rewards the WORK, which is the thing this economy is supposed to
+        # price. It reads through post_cost_cents, so the discount is on the
+        # button before the post is made.
+        "effects": {"post_discount_pct": 25},
+        "effect_note": "25% off the Energy every post costs you.",
+        "check": lambda u: (_rated_posts(u) >= 5
+                            and (_post_rating_median(u) or 0) >= 8),
+    },
+    "sexy": {
+        "name": "Sexy", "emoji": "🔥", "title": "Sexy", "gifted": False,
+        "desc": "The room rates you 8+.",
+        "how": "Hold an attractiveness median of 8 or better.",
+        # DELIBERATELY not economic. Attractiveness is kept apart from work
+        # everywhere else in this app — RateZ says so in as many words — and a
+        # badge that turned it into Energy, cheaper posts or better prices
+        # would quietly undo that, paying people for their face in the same
+        # currency it pays them for their music.
+        #
+        # So the effect lives where attractiveness legitimately belongs: being
+        # found by people looking for people. It ranks you higher in the
+        # members list when there's no distance to sort by — and never above
+        # "who is near me", because that is a real need and this isn't.
+        "effects": {"social_boost": True},
+        "effect_note": "You surface higher in member discovery. Nothing in the "
+                       "work economy — no Energy, no cheaper posts, no better "
+                       "prices. Your face is not your craft.",
+        "check": lambda u: (attractiveness_median(u) or 0) >= 8,
     },
     "bug_hunter": {
         "name": "Bug Hunter", "emoji": "🐛", "title": "Bug Hunter", "gifted": True,
