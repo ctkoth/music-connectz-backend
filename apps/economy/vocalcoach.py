@@ -62,6 +62,53 @@ logger = logging.getLogger(__name__)
 # that is not one take.
 MAX_MB = 14
 
+# What Gemini will actually accept as inline media. Anything outside these two
+# sets is refused by the API, not by us — and the refusal arrives as a plain
+# non-200 that we used to surface as "The coach couldn't process that take",
+# which blamed the performance for a container problem.
+_GEMINI_AUDIO = {"audio/wav", "audio/mp3", "audio/mpeg", "audio/aiff",
+                 "audio/aac", "audio/ogg", "audio/flac"}
+_GEMINI_VIDEO = {"video/mp4", "video/mpeg", "video/mov", "video/quicktime",
+                 "video/avi", "video/x-flv", "video/mpg", "video/webm",
+                 "video/wmv", "video/3gpp"}
+
+# Browsers record into containers Gemini names under `video/` even when the
+# recording is audio-only. Same bytes, same container — only the label differs,
+# so relabel rather than refuse a take we can obviously send.
+_RELABEL = {
+    "audio/webm": "video/webm",        # Chrome / Edge / Android default
+    "audio/x-matroska": "video/webm",
+    "audio/mp4": "video/mp4",          # Safari / iOS default
+    "audio/x-m4a": "video/mp4",
+    "audio/m4a": "video/mp4",
+    "audio/3gpp": "video/3gpp",
+    "audio/vorbis": "audio/ogg",
+    "audio/opus": "audio/ogg",
+    "audio/x-wav": "audio/wav",
+    "audio/wave": "audio/wav",
+    "audio/x-aiff": "audio/aiff",
+}
+
+
+def gemini_mime(content_type):
+    """The mime type to hand Gemini for this upload, or None if it can't take it.
+
+    Two things go wrong between a browser and this call, and both were live:
+
+    1. `MediaRecorder.mimeType` is a FULL media type — Chrome hands back
+       `audio/webm;codecs=opus`. The parameter rides through the Blob, the
+       multipart upload and Django untouched, and Gemini rejects the whole
+       request over it. Strip to the bare type.
+    2. `audio/webm` is not on Gemini's audio list at all, though `video/webm`
+       is. A browser-recorded take was therefore unscoreable on the two
+       biggest browsers — which is exactly the "couldn't process that take"
+       people were seeing on a perfectly good performance.
+    """
+    base = (content_type or "").split(";")[0].strip().lower()
+    base = _RELABEL.get(base, base)
+    return base if base in _GEMINI_AUDIO or base in _GEMINI_VIDEO else None
+
+
 def _parse(text):
     """Pull the JSON object out of a model reply that may be fenced."""
     if not text:
@@ -103,6 +150,18 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty):
         target=str(target or "unspecified")[:60],
         difficulty=difficulty if difficulty in DIFFICULTIES else "builder",
     )
+    # Normalise BEFORE the call. An unsupported container is a refusal we can
+    # give instantly and explain, rather than a round trip that comes back as a
+    # generic failure the member reads as "my take was bad".
+    mime = gemini_mime(content_type)
+    if not mime:
+        return None, (
+            {"detail": f"The coach can't read {content_type or 'that format'}. "
+                       "Record in the app, or attach an m4a, mp3, wav, ogg or mp4.",
+             "content_type": content_type},
+            status.HTTP_400_BAD_REQUEST,
+        )
+
     model = os.environ.get("GEMINI_AUDIO_MODEL", "gemini-2.5-flash")
     unreadable = ({"detail": "The coach couldn't process that take."}, status.HTTP_502_BAD_GATEWAY)
     try:
@@ -110,7 +169,7 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty):
             f"{BASE}/models/{model}:generateContent?key={key}",
             json={"contents": [{"parts": [
                 {"text": prompt},
-                {"inline_data": {"mime_type": content_type,
+                {"inline_data": {"mime_type": mime,
                                  "data": base64.b64encode(f.read()).decode()}},
             ]}]},
             timeout=90,
@@ -121,7 +180,11 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty):
                       status.HTTP_502_BAD_GATEWAY)
 
     if resp.status_code != 200:
-        logger.error("SingZ coach: Gemini returned %s — %s", resp.status_code, resp.text[:300])
+        # Log what we SENT as well as what came back. Without the mime type and
+        # model in the line, a container rejection and a bad API key look
+        # identical in the logs, which is how this one stayed hidden.
+        logger.error("%s coach: Gemini %s for mime=%s model=%s — %s",
+                     app_key, resp.status_code, mime, model, resp.text[:300])
         return None, unreadable
     try:
         text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]

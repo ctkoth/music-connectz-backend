@@ -777,6 +777,12 @@ class Post(models.Model):
     # on the way in, so every post in the app is genreless and ChartZ has
     # nothing to slice by.
     genre = models.CharField(max_length=40, blank=True, default="")
+    # 🆓 Freestyle — off the top, unwritten. Deliberately NOT a genre: a
+    # freestyle is a way of making the thing, not a kind of music, so a freestyle
+    # Trap verse and a freestyle Jazz solo are both freestyles and both keep
+    # their own genre. Putting it in the genre list would have forced a choice
+    # between the two and split the tag across every family in it.
+    freestyle = models.BooleanField(default=False)
     # Which skills went into it — 2.2 required this on every example, and it is
     # what makes a post matchable to the people who have those skills and
     # priceable against their rates. A post without it is a file with a caption.
@@ -1111,6 +1117,78 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ("-created_at",)
+
+
+# ---- BugZ 🐞 — find something broken, say so, get paid when it's fixed.
+#
+# The screen has existed and called /api/bugz/ since it shipped; nothing served
+# it, so every report 404'd and the 200 SpinaZ bounty on the page was a promise
+# with no code behind it. This is that code.
+#
+# A report carries an optional screenshot or screen recording, because "it
+# looked wrong" is the hardest kind of bug to write down and the easiest to
+# photograph. Evidence is what makes a report actionable — half of triage is
+# working out what the reporter actually saw.
+BUG_BOUNTY_SPINAZ = 200
+BUG_MAX_MB = 25
+
+
+def bug_shot_path(instance, filename):
+    return f"bugz/{instance.reporter_id}/{filename}"
+
+
+class BugReport(models.Model):
+    STATUS_OPEN, STATUS_IN_PROGRESS, STATUS_SQUASHED, STATUS_DECLINED = (
+        "open", "in_progress", "squashed", "declined")
+    STATUS_CHOICES = [
+        (STATUS_OPEN, "Open"), (STATUS_IN_PROGRESS, "In progress"),
+        (STATUS_SQUASHED, "Squashed"), (STATUS_DECLINED, "Declined"),
+    ]
+    reporter = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                 related_name="bug_reports")
+    title = models.CharField(max_length=200)
+    body = models.TextField(blank=True, default="")
+    # A screenshot or a screen recording. One field, either kind — a bug is one
+    # piece of evidence, and making the reporter pick the right slot first is
+    # friction on the one screen that exists to reduce friction.
+    shot = models.FileField(upload_to=bug_shot_path, blank=True, null=True)
+    shot_type = models.CharField(max_length=24, blank=True, default="")   # image | video
+    # Where the reporter was standing. Cross-pollination: a report that knows
+    # its app opens back on the screen that broke.
+    app_key = models.CharField(max_length=32, blank=True, default="")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OPEN)
+    # Paid once, recorded here, so a report reopened and re-squashed can never
+    # pay the bounty twice.
+    paid_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["status", "-created_at"])]
+
+    def __str__(self):
+        return f"BugReport<{self.id}> {self.status} {self.title[:40]}"
+
+
+def pay_bug_bounty(bug, by=None):
+    """Pay the reporter once, and hand them the Bug Hunter badge.
+
+    Returns True if this call paid. Idempotent on purpose: the bounty is
+    advertised on the screen as a fixed 200, so paying it twice would be the
+    platform inventing SpinaZ, and paying it zero times would be the screen
+    lying.
+    """
+    if bug.paid_at or bug.status != BugReport.STATUS_SQUASHED:
+        return False
+    award_spinaz(bug.reporter, BUG_BOUNTY_SPINAZ, note=f"BugZ bounty: {bug.title}"[:200])
+    grant_badge(bug.reporter, "bug_hunter", by=by)
+    bug.paid_at = timezone.now()
+    bug.save(update_fields=["paid_at", "updated_at"])
+    notify(bug.reporter, "bugz",
+           f"🐞 Squashed — {bug.title[:80]}. +{BUG_BOUNTY_SPINAZ} 🍥 and the Bug Hunter badge.",
+           actor=by)
+    return True
 
 
 def notify(user, kind, text, actor=None, item_id=""):

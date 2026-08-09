@@ -51,6 +51,7 @@ from .collab_files import CollabFileDetailView, CollabFilesView
 from .collab_post import CollabNeedsView, CollabPostView
 from .ai_models import AiModelView
 from .badgez import BadgeGiftView, BadgezView
+from .bugz import BugTriageView, BugzView
 from .logicz import LogicZView
 from .ratez import RatezView, RatingKindsView
 from .occ_workz import (OccWorkDetailView, OccWorkShareView, OccWorkUnshareView,
@@ -199,6 +200,8 @@ urlpatterns = [
     path("logicz/", LogicZView.as_view(), name="economy-logicz"),
     path("ai/models/", AiModelView.as_view(), name="economy-ai-models"),
     path("badgez/", BadgezView.as_view(), name="economy-badgez"),
+    path("bugz/", BugzView.as_view(), name="economy-bugz"),
+    path("bugz/<int:pk>/", BugTriageView.as_view(), name="economy-bugz-triage"),
     path("badgez/gift/", BadgeGiftView.as_view(), name="economy-badgez-gift"),
     path("ratez/", RatezView.as_view(), name="economy-ratez"),
     path("ratez/kinds/", RatingKindsView.as_view(), name="economy-ratez-kinds"),

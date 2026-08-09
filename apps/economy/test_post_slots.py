@@ -9,7 +9,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from apps.economy.models import Post, membership_for, TIER_STATZ
+from apps.economy.models import Post, membership_for, wallet_for, TIER_STATZ
 
 User = get_user_model()
 PW = "hunter2hunter2"
@@ -102,3 +102,58 @@ class PrimaryMediaTests(SlotsBase):
     def test_an_empty_post_reports_empty_slots_not_missing_keys(self):
         r = self.post()
         self.assertEqual(r.data["media"], {"audio": "", "video": "", "image": "", "text": ""})
+
+
+class FreestyleIsNotAGenreTests(TestCase):
+    """🆓 Freestyle rides alongside the genre, never instead of it.
+
+    A freestyle is a way of MAKING the thing, not a kind of music. Putting it in
+    the genre list would force a choice between "Trap" and "Freestyle" for a
+    freestyle Trap verse, and split the tag across every genre family that has
+    one — so ChartZ could never slice freestyles, or Trap, cleanly again.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user("mc", "mc@e.com", PW)
+        membership_for(self.user)
+        w = wallet_for(self.user); w.energy = 500; w.save()
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def post(self, **over):
+        return self.client.post("/api/economy/postz/",
+                                {"title": "Off the dome", **over}, format="json")
+
+    def test_a_post_can_be_a_freestyle(self):
+        resp = self.post(freestyle=True, genre="Trap")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertTrue(resp.data["freestyle"])
+
+    def test_it_keeps_its_genre(self):
+        # The whole point: both facts survive, so a freestyle Trap verse is
+        # still findable as Trap.
+        resp = self.post(freestyle=True, genre="Trap")
+        self.assertEqual(resp.data["genre"], "Trap")
+        self.assertTrue(resp.data["freestyle"])
+
+    def test_any_genre_can_be_freestyled(self):
+        for g in ("Trap", "Jazz", "R&B", "Drill"):
+            with self.subTest(g):
+                resp = self.post(freestyle=True, genre=g)
+                self.assertEqual(resp.status_code, 201, resp.data)
+                self.assertTrue(resp.data["freestyle"])
+                self.assertEqual(resp.data["genre"], g)
+
+    def test_posts_are_not_freestyles_by_default(self):
+        self.assertFalse(self.post(genre="Trap").data["freestyle"])
+
+    def test_freestyle_is_not_in_the_genre_list(self):
+        # If it ever shows up as a genre, the two facts have collapsed into one
+        # and this test is the thing that says so.
+        from apps.economy.models import Post
+        resp = self.post(freestyle=True, genre="Freestyle")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        p = Post.objects.get(pk=resp.data["id"])
+        # The server stores what it was given, but the flag is what the app
+        # reads — a genre string is never how a freestyle is recorded.
+        self.assertTrue(p.freestyle)

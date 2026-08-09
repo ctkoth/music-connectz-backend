@@ -117,6 +117,9 @@ def _post_dict(p, request, up=0, down=0, collabs=None):
         "slots": list(MEDIA_SLOTS),
         "score": p.score or {},
         "genre": p.genre,
+        # A flag beside the genre, never instead of it — a freestyle Trap verse
+        # is still Trap, and ChartZ must still be able to slice it as Trap.
+        "freestyle": p.freestyle,
         "skills_used": p.skills_used or [],
         "visibility": p.visibility,
         "allow_in_playlists": p.allow_in_playlists,
@@ -262,6 +265,8 @@ def create_post(user, d):
     # An album is asked for, never inferred from the count. Otherwise a track
     # posted with its cover art became "an album" of two.
     is_album = bool(d.get("is_album"))
+    # Rides alongside the genre rather than replacing it — see Post.freestyle.
+    freestyle = bool(d.get("freestyle"))
     if not is_album:
         items, dup = one_of_each(items)
         if dup:
@@ -296,6 +301,7 @@ def create_post(user, d):
         is_album=is_album, items=items,
         score=score, visibility=vis, skill_cost_cents=cost,
         genre=str(d.get("genre", ""))[:40],
+        freestyle=freestyle,
         skills_used=skills,
         allow_in_playlists=bool(d.get("allow_in_playlists", True)),
     )

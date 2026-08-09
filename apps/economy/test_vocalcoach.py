@@ -396,3 +396,77 @@ class TheSizeCapIsOneWeCanHonourTests(TestCase):
             resp = self.client.post(URL, {"take": big}, format="multipart")
         self.assertEqual(resp.status_code, 413)
         post.assert_not_called()
+
+
+class TheContainerTheBrowserActuallyRecordsTests(TestCase):
+    """The bug behind "The coach couldn't process that take."
+
+    A real 1:07 RapZ take failed on a perfectly good performance. Two things
+    were wrong and both were in the mime type:
+
+    * `MediaRecorder.mimeType` is a full media type — Chrome hands back
+      `audio/webm;codecs=opus`. That parameter rode all the way to Gemini's
+      `mime_type` field, which takes a bare type, and the request was refused.
+    * `audio/webm` is not on Gemini's audio list at all. `video/webm` is —
+      same container, different label — so a browser-recorded take was
+      unscoreable on Chrome, Edge and Android.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("m", "m@e.com", "pw12345678")
+        self.client.force_authenticate(self.user)
+        m = membership_for(self.user); m.tier = TIER_STATZ; m.save()
+        w = wallet_for(self.user); w.money_cents = 100000; w.save()
+
+    def test_codec_parameters_are_stripped(self):
+        from apps.economy.vocalcoach import gemini_mime
+        # The exact string Chrome produces.
+        self.assertEqual(gemini_mime("audio/webm;codecs=opus"), "video/webm")
+        self.assertEqual(gemini_mime("video/webm;codecs=vp8,opus"), "video/webm")
+        self.assertEqual(gemini_mime("audio/ogg; codecs=opus"), "audio/ogg")
+
+    def test_the_containers_browsers_record_are_all_accepted(self):
+        from apps.economy.vocalcoach import gemini_mime
+        for browser_type in ("audio/webm;codecs=opus",    # Chrome, Edge, Android
+                             "audio/mp4",                  # Safari, iOS
+                             "audio/ogg;codecs=opus",      # Firefox
+                             "video/webm;codecs=vp8,opus",
+                             "video/mp4"):
+            with self.subTest(browser_type):
+                self.assertIsNotNone(gemini_mime(browser_type),
+                                     f"{browser_type} is a container a browser records into")
+
+    def test_something_genuinely_unreadable_is_refused_and_explained(self):
+        from apps.economy.vocalcoach import gemini_mime
+        self.assertIsNone(gemini_mime("audio/x-weird"))
+        self.assertIsNone(gemini_mime(""))
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    def test_a_chrome_recording_reaches_gemini_with_a_type_it_takes(self, post, _k):
+        resp = self.client.post(
+            URL, {"take": take("take.webm", "audio/webm;codecs=opus")}, format="multipart")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        parts = post.call_args.kwargs["json"]["contents"][0]["parts"]
+        sent = [p for p in parts if "inline_data" in p][0]["inline_data"]["mime_type"]
+        self.assertEqual(sent, "video/webm")
+        self.assertNotIn(";", sent)
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    def test_an_unreadable_container_never_reaches_the_model(self, _k):
+        # Refused here, instantly, and named — rather than a round trip that
+        # comes back as a generic failure the member reads as "my take was bad".
+        with patch("apps.economy.vocalcoach.requests.post") as post:
+            resp = self.client.post(
+                URL, {"take": take("take.xyz", "audio/x-weird")}, format="multipart")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("x-weird", resp.data["detail"])
+        post.assert_not_called()
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    def test_an_unreadable_container_is_not_billed(self, _k):
+        before = daily_prompt_state(self.user)[2]
+        with patch("apps.economy.vocalcoach.requests.post"):
+            self.client.post(URL, {"take": take("t.xyz", "audio/x-weird")}, format="multipart")
+        self.assertEqual(daily_prompt_state(self.user)[2], before)
