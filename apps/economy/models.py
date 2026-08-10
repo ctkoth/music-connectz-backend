@@ -606,6 +606,11 @@ class Profile(models.Model):
     # The title being worn, from a badge held AND shown. Stored rather than
     # derived so a member with several can choose which one they lead with.
     badge_title = models.CharField(max_length=60, blank=True, default="")
+    # Which AI engine this member's paid AI actions run on. Blank means "never
+    # chose" — resolved at read time to the best rung their tier owns, so the
+    # default follows an upgrade or a lapse without anything having to migrate
+    # the stored value. Always read it through catalog.ai_model_for().
+    ai_model = models.CharField(max_length=16, blank=True, default="")
     links = models.JSONField(default=list, blank=True)  # [{label, url}] public links
     # Location (opt-in) for in-person CollabZ / VenueZ distance filtering.
     share_location = models.BooleanField(default=False)
@@ -649,6 +654,61 @@ _ZODIAC_CUTOFFS = [
     (922, "Virgo"), (1022, "Libra"), (1121, "Scorpio"), (1221, "Sagittarius"),
     (1231, "Capricorn"),
 ]
+
+
+# ---- The age wall.
+#
+# Two surfaces in this app are adult-only under Play's Families policy: rating
+# people on looks, and collecting sexual orientation. The app also carries a
+# "Teen-safe" badge on the InstrumentZ screens, so teens are an intended
+# audience — and a label is not a boundary.
+#
+# `Profile.verified_18plus` already existed, is already set properly by Stripe
+# Identity from a government ID, and its own comment claimed it "gates money
+# betting + adult content". It gated nothing: thirteen references across the
+# codebase, every one of them setting it or displaying it, none consulting it
+# before allowing anything. This is where it starts being read.
+#
+# Corey's call on the unknown case: a member with no birthday and no
+# verification is treated as an ADULT. Most of the existing user base has
+# neither, and locking them out of what they use today to satisfy a form would
+# punish real people for a gap in our own data. What we wall is what we
+# actually know — a stated age of 13-17.
+TEEN_MIN_AGE, ADULT_AGE = 13, 18
+
+
+def profile_is_minor(p):
+    """The wall, evaluated against a Profile — including one not yet saved.
+
+    Takes the profile rather than the user so a save can be judged on the state
+    it is ABOUT to have. Reading the stored row instead let a member set a teen
+    birthday and an orientation in the same request and keep both, because at
+    the top of that request they were still an unknown age.
+    """
+    if p.verified_18plus:
+        return False
+    age = profile_age(p)
+    return age is not None and TEEN_MIN_AGE <= age < ADULT_AGE
+
+
+def is_minor(user):
+    """True only when we KNOW this member is under 18.
+
+    Knowing means a stated birthday in the teen range. Absence of information is
+    not evidence of youth, so an unknown age is not a minor — see the note
+    above. ID verification always wins over a self-reported birthday, in the
+    permissive direction only: a verified adult is an adult whatever the
+    birthday field says, because the ID outranks the typing.
+    """
+    return profile_is_minor(getattr(user, "mcz_profile", None) or profile_for(user))
+
+
+def adult_only_reason(user):
+    """Why this surface is closed to them, in words, or "" when it's open."""
+    if not is_minor(user):
+        return ""
+    return ("This part of Music ConnectZ is 18+. Everything else — posting, "
+            "collabs, BattleZ, the coach, getting paid — stays open.")
 
 
 def zodiac_for(birthday):
@@ -772,6 +832,12 @@ class Post(models.Model):
     # on the way in, so every post in the app is genreless and ChartZ has
     # nothing to slice by.
     genre = models.CharField(max_length=40, blank=True, default="")
+    # 🆓 Freestyle — off the top, unwritten. Deliberately NOT a genre: a
+    # freestyle is a way of making the thing, not a kind of music, so a freestyle
+    # Trap verse and a freestyle Jazz solo are both freestyles and both keep
+    # their own genre. Putting it in the genre list would have forced a choice
+    # between the two and split the tag across every family in it.
+    freestyle = models.BooleanField(default=False)
     # Which skills went into it — 2.2 required this on every example, and it is
     # what makes a post matchable to the people who have those skills and
     # priceable against their rates. A post without it is a file with a caption.
@@ -1106,6 +1172,78 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ("-created_at",)
+
+
+# ---- BugZ 🐞 — find something broken, say so, get paid when it's fixed.
+#
+# The screen has existed and called /api/bugz/ since it shipped; nothing served
+# it, so every report 404'd and the 200 SpinaZ bounty on the page was a promise
+# with no code behind it. This is that code.
+#
+# A report carries an optional screenshot or screen recording, because "it
+# looked wrong" is the hardest kind of bug to write down and the easiest to
+# photograph. Evidence is what makes a report actionable — half of triage is
+# working out what the reporter actually saw.
+BUG_BOUNTY_SPINAZ = 200
+BUG_MAX_MB = 25
+
+
+def bug_shot_path(instance, filename):
+    return f"bugz/{instance.reporter_id}/{filename}"
+
+
+class BugReport(models.Model):
+    STATUS_OPEN, STATUS_IN_PROGRESS, STATUS_SQUASHED, STATUS_DECLINED = (
+        "open", "in_progress", "squashed", "declined")
+    STATUS_CHOICES = [
+        (STATUS_OPEN, "Open"), (STATUS_IN_PROGRESS, "In progress"),
+        (STATUS_SQUASHED, "Squashed"), (STATUS_DECLINED, "Declined"),
+    ]
+    reporter = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                 related_name="bug_reports")
+    title = models.CharField(max_length=200)
+    body = models.TextField(blank=True, default="")
+    # A screenshot or a screen recording. One field, either kind — a bug is one
+    # piece of evidence, and making the reporter pick the right slot first is
+    # friction on the one screen that exists to reduce friction.
+    shot = models.FileField(upload_to=bug_shot_path, blank=True, null=True)
+    shot_type = models.CharField(max_length=24, blank=True, default="")   # image | video
+    # Where the reporter was standing. Cross-pollination: a report that knows
+    # its app opens back on the screen that broke.
+    app_key = models.CharField(max_length=32, blank=True, default="")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OPEN)
+    # Paid once, recorded here, so a report reopened and re-squashed can never
+    # pay the bounty twice.
+    paid_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["status", "-created_at"])]
+
+    def __str__(self):
+        return f"BugReport<{self.id}> {self.status} {self.title[:40]}"
+
+
+def pay_bug_bounty(bug, by=None):
+    """Pay the reporter once, and hand them the Bug Hunter badge.
+
+    Returns True if this call paid. Idempotent on purpose: the bounty is
+    advertised on the screen as a fixed 200, so paying it twice would be the
+    platform inventing SpinaZ, and paying it zero times would be the screen
+    lying.
+    """
+    if bug.paid_at or bug.status != BugReport.STATUS_SQUASHED:
+        return False
+    award_spinaz(bug.reporter, BUG_BOUNTY_SPINAZ, note=f"BugZ bounty: {bug.title}"[:200])
+    grant_badge(bug.reporter, "bug_hunter", by=by)
+    bug.paid_at = timezone.now()
+    bug.save(update_fields=["paid_at", "updated_at"])
+    notify(bug.reporter, "bugz",
+           f"🐞 Squashed — {bug.title[:80]}. +{BUG_BOUNTY_SPINAZ} 🍥 and the Bug Hunter badge.",
+           actor=by)
+    return True
 
 
 def notify(user, kind, text, actor=None, item_id=""):
@@ -1988,8 +2126,16 @@ def key_translate_used_today(user):
 
 
 def key_translate_state(user):
-    """(used, cap, remaining) — published BEFORE anyone types, not on refusal."""
+    """(used, cap, remaining) — published BEFORE anyone types, not on refusal.
+
+    `cap` and `remaining` come back as None for a member whose badges lift the
+    cap. None rather than a very large number on purpose: a screen that reads
+    the number would print "999,999,999 characters left", which is a limit
+    nobody set pretending to be one somebody did.
+    """
     used = key_translate_used_today(user)
+    if badge_effects(user).get("translate_uncapped"):
+        return used, None, None
     return used, KEY_TRANSLATE_DAILY_CHARS, max(0, KEY_TRANSLATE_DAILY_CHARS - used)
 
 
@@ -2314,6 +2460,30 @@ def _clean_deals(user):
     return n
 
 
+def _funded_clean_deals(user):
+    """Deals this member PUT MONEY INTO that released without a dispute.
+
+    Deliberately narrower than `_clean_deals`: being credited on a deal and
+    bankrolling one are different acts, and this badge is for the second. The
+    `funded` flag survives release and is cleared by `refund_deal`, so a
+    refunded deal never counts — money that came back was never spent.
+    """
+    n = 0
+    for d in CollabDeal.objects.filter(status=CollabDeal.STATUS_RELEASED)[:500]:
+        if any(p.get("username") == user.username and p.get("funded")
+               and int(p.get("pays_cents") or 0) > 0
+               for p in (d.participants or [])):
+            n += 1
+    for d in CollabDeal.objects.filter(status=CollabDeal.STATUS_DISPUTED)[:500]:
+        if any(p.get("username") == user.username for p in (d.participants or [])):
+            return 0        # same rule as Straight Shooter: one open dispute, no badge
+    return n
+
+
+def _translations_done(user):
+    return KeyTranslation.objects.filter(user=user).count()
+
+
 BADGES = {
     # ---- gifted ----
     "owner": {
@@ -2383,6 +2553,38 @@ BADGES = {
         "effects": {"rating_cap_bonus": 20},
         "effect_note": "+20 paid ratings a day — the cap that pays, raised.",
         "check": lambda u: _ratings_given(u) >= 100,
+    },
+    # "Translation stops costing" needed one honest translation itself, because
+    # translation already costs no 💵 and no 🏷️ — keyconnectz.py gives it away
+    # at every tier on purpose. What it DOES cost is the daily character
+    # allowance, so that is the thing this badge lifts. Anything else would be
+    # a badge removing a price that was never charged.
+    "polyglot": {
+        "icon": "badge_polyglot.png", "name": "Polyglot", "emoji": "🗺️",
+        "title": "Polyglot", "gifted": False,
+        "desc": "Fifty translations. You talk to rooms this app couldn't reach without you.",
+        "how": "Run 50 KeyConnectZ translations.",
+        "effects": {"translate_uncapped": True},
+        "effect_note": f"No daily limit on KeyConnectZ translation — the "
+                       f"{KEY_TRANSLATE_DAILY_CHARS:,}-character allowance stops applying to you.",
+        "check": lambda u: _translations_done(u) >= 50,
+    },
+    # The effect costs the holder their own protection and nobody else's, which
+    # is what makes it safe to hand out: the auto-release window is the payer's
+    # last moment to open a dispute, so shortening it is a Patron saying "pay
+    # them sooner, I don't need the extra week." collab.escrow_release_days
+    # only applies it when EVERY payer on the deal holds it.
+    "patron": {
+        "icon": "badge_patron.png", "name": "Patron", "emoji": "💸",
+        "title": "Patron", "gifted": False,
+        "desc": "Five deals you bankrolled, and every one released clean.",
+        "how": "Fund 5 CollabZ deals that release with no dispute against you.",
+        "effects": {"escrow_days_off": 7},
+        "effect_note": f"Escrow on deals you fund releases in "
+                       f"{max(settings.ESCROW_MIN_RELEASE_DAYS, settings.ESCROW_AUTO_RELEASE_DAYS - 7)} "
+                       f"days instead of {settings.ESCROW_AUTO_RELEASE_DAYS} — "
+                       "your collaborators get paid sooner for working with you.",
+        "check": lambda u: _funded_clean_deals(u) >= 5,
     },
     "gifted": {
         "name": "Gifted", "emoji": "🎁", "title": "Gifted", "gifted": False,

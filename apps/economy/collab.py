@@ -30,6 +30,7 @@ from .models import (
     Post,
     Transaction,
     Wallet,
+    badge_effects,
     can_view_post,
     collab_settlement,
     contributor_item_key,
@@ -71,7 +72,7 @@ def _locked_wallet(user):
     return Wallet.objects.select_for_update().get(user=user)
 
 
-def deal_dict(deal, me=None):
+def deal_dict(deal, me=None, days_cache=None):
     return {
         "id": deal.id,
         "title": deal.title,
@@ -109,6 +110,11 @@ def deal_dict(deal, me=None):
         "created_at": deal.created_at.isoformat(),
         "delivered_at": deal.delivered_at.isoformat() if deal.delivered_at else None,
         "auto_release_at": deal.auto_release_at.isoformat() if deal.auto_release_at else None,
+        # Stated before anyone funds, not discovered when the money moves. On a
+        # deal that isn't funded yet this is the window that WILL apply, which
+        # is the only version of it worth showing a payer.
+        "auto_release_days": escrow_release_days(deal, days_cache),
+        "auto_release_default_days": settings.ESCROW_AUTO_RELEASE_DAYS,
         "i_am_participant": bool(me and any(p.get("username") == me.username for p in deal.participants)),
         "i_am_payer": bool(me and any(p.get("username") == me.username and int(p.get("pays_cents") or 0) > 0 for p in deal.participants)),
     }
@@ -116,6 +122,39 @@ def deal_dict(deal, me=None):
 
 def _entry_for(deal, username):
     return next((p for p in deal.participants if p.get("username") == username), None)
+
+
+def escrow_release_days(deal, cache=None):
+    """How many days the pot sits before it releases itself.
+
+    The Patron badge shortens this, and the rule for applying it is narrow on
+    purpose: the window is each PAYER's own last chance to open a dispute
+    before the money goes, so shortening it spends the payer's protection.
+    A Patron spending their own is a Patron saying "pay them sooner, I don't
+    need the extra week." A Patron spending a co-payer's would be a badge
+    aimed at somebody, which is the one thing this catalogue doesn't do.
+
+    So every payer has to hold it, and the shortest window any of them earns
+    is still floored at ESCROW_MIN_RELEASE_DAYS.
+
+    `cache` is a username -> days-off dict shared across a list of deals, so
+    rendering someone's whole DealZ tab doesn't re-read the same badges once
+    per card.
+    """
+    base = settings.ESCROW_AUTO_RELEASE_DAYS
+    names = [p.get("username") for p in deal.payers() if p.get("username")]
+    if not names:
+        return base
+    if cache is None:
+        cache = {}
+    missing = [n for n in names if n not in cache]
+    if missing:
+        # A payer we can't resolve to an account contributes 0 — an unknown
+        # payer is never assumed to have agreed to anything.
+        cache.update({n: 0 for n in missing})
+        for u in User.objects.filter(username__in=missing):
+            cache[u.username] = int(badge_effects(u).get("escrow_days_off", 0) or 0)
+    return max(settings.ESCROW_MIN_RELEASE_DAYS, base - min(cache[n] for n in names))
 
 
 def maybe_auto_release(deal):
@@ -304,7 +343,8 @@ class CollabDealsView(APIView):
             d for d in CollabDeal.objects.exclude(id__in=seen).order_by("-created_at")[:300]
             if any(p.get("username") == me.username for p in d.participants)
         ][:100]
-        out = [deal_dict(maybe_auto_release(d), me) for d in list(deals) + extra]
+        days = {}   # one badge read per payer across the whole list, not per card
+        out = [deal_dict(maybe_auto_release(d), me, days) for d in list(deals) + extra]
         return Response({"deals": out})
 
     def post(self, request):
@@ -451,7 +491,7 @@ class CollabFundView(APIView):
             entry["stake_paid"] = stake
             if deal.all_funded():
                 deal.status = CollabDeal.STATUS_FUNDED
-                deal.auto_release_at = timezone.now() + timedelta(days=settings.ESCROW_AUTO_RELEASE_DAYS)
+                deal.auto_release_at = timezone.now() + timedelta(days=escrow_release_days(deal))
             deal.save(update_fields=["held_cents", "held_spinaz", "held_stake_spinaz", "participants", "status", "auto_release_at", "updated_at"])
             return Response(deal_dict(deal, request.user))
 
@@ -564,8 +604,9 @@ class PostCollabsView(APIView):
                    if d.status != CollabDeal.STATUS_DRAFT
                    or d.initiator_id == me.id
                    or any(p.get("username") == me.username for p in d.participants)]
+        days = {}
         return Response({
             "post": post.title,
             "post_id": post.id,
-            "deals": [deal_dict(d, me) for d in visible],
+            "deals": [deal_dict(d, me, days) for d in visible],
         })

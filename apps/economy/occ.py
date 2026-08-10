@@ -10,21 +10,50 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import ai_cost
-from .models import charge_ai_usage, can_afford_ai, wallet_for
+from .catalog import (
+    AI_MODELS,
+    AI_MODEL_ORDER,
+    OCC_MAX_ACRONYM_CHARS,
+    OCC_MAX_ACRONYMS,
+    OCC_MAX_HISTORY_CHARS,
+    OCC_IMAGE_TYPES,
+    OCC_MAX_IMAGE_B64,
+    OCC_MAX_HISTORY_TURNS,
+    OCC_MAX_KNOWLEDGE_CHARS,
+    OCC_MAX_KNOWLEDGE_ITEMS,
+    OCC_MAX_PROMPT_CHARS,
+    OCC_MAX_TOTAL_CHARS,
+    ai_model_for,
+    occ_limits,
+)
+from .models import (
+    can_afford_ai,
+    charge_ai_usage,
+    daily_prompt_state,
+    membership_for,
+    profile_for,
+    wallet_for,
+)
 from .views import is_owner, platform_owner
 
-# House model per OCC voice. The "voice" shapes the system prompt/tone + price;
-# Corey GPT runs on Fable 5, the other voices on flagship Opus 4.8.
-OCC_LLM_MODEL = "claude-opus-4-8"
-MODEL_BY_VOICE = {"corey-gpt": "claude-fable-5"}
+# The voice shapes the system prompt and nothing else. Which ENGINE runs it is
+# the member's own choice, gated by tier and priced by what it actually costs —
+# see catalog.AI_MODELS. Voice used to carry the price too, which is how the
+# "cheapest" voice ended up on the most expensive model in the catalogue.
 
 
 def _create_with_fallback(client, primary, fallback, **kwargs):
-    """Generate with `primary`, but if that model isn't available on this
-    account/region fall back to `fallback` — so Corey speaks in Fable when it's
-    there and only drops to Opus if it isn't. Only availability errors trigger
-    the retry; auth / rate-limit / billing errors propagate unchanged."""
+    """Generate with `primary`, falling back to `fallback` if that model isn't
+    available on this account or region.
+
+    Callers pass a fallback at or BELOW the primary's price. The member is
+    billed for the engine they chose either way, so substituting something
+    dearer would have the platform quietly paying the difference for a swap
+    nobody asked for.
+
+    Only availability errors trigger the retry; auth, rate-limit and billing
+    errors propagate unchanged — those are not something a cheaper model fixes.
+    """
     try:
         return client.messages.create(model=primary, **kwargs)
     except Exception as exc:
@@ -96,6 +125,14 @@ SUGGEST_STYLE = (
     "or two). Keep it tight and actionable, never generic."
 )
 
+# The framing around the member's own additions. Named so their length can be
+# counted against the budget — leaving them out of the arithmetic is how the
+# first version of this cap came in 100 characters over.
+ACRO_INTRO = ("\n\nYou remember these shorthands the member uses and may use them "
+              "naturally in this chat (never in formal documents): ")
+TAUGHT_INTRO = ("\n\nThe member has taught you the following — treat it as authoritative "
+                "and lead with it when relevant:\n")
+
 COURSES = (
     "You have been taught four college-level courses and can teach them on request: "
     "Digital Art (color, composition, tools, cover art, AI-art ethics), "
@@ -116,7 +153,17 @@ class OccChatView(APIView):
 
     def post(self, request):
         data = request.data or {}
+        # Every field below is capped. The per-message price assumes a turn of
+        # about 10,000 input tokens and nothing used to hold it to that — see
+        # catalog.OCC_MAX_TOTAL_CHARS for why that was expensive.
         prompt = str(data.get("prompt", "")).strip()
+        if len(prompt) > OCC_MAX_PROMPT_CHARS:
+            return Response(
+                {"detail": f"That message is {len(prompt):,} characters — keep it under "
+                           f"{OCC_MAX_PROMPT_CHARS:,}. Send the long part as a file or "
+                           "split it across turns.",
+                 "limits": occ_limits()},
+                status=status.HTTP_400_BAD_REQUEST)
         if not prompt:
             return Response({"detail": "prompt is required."}, status=status.HTTP_400_BAD_REQUEST)
         model_voice = str(data.get("model", "corey-gpt")).lower()
@@ -127,13 +174,34 @@ class OccChatView(APIView):
         acronyms = data.get("acronyms") or []     # [{term, means}] the member's CodeZ shorthand
 
         # OCC works like Claude Code: everyone — owners included — pays the model
-        # minimum to cover the run (Corey GPT is the cheapest voice). The charge is
-        # then routed to the platform owner as revenue.
-        cost = ai_cost(model_voice)
+        # minimum to cover the run. The charge is then routed to the platform
+        # owner as revenue.
+        #
+        # The ENGINE is what costs, not the voice. Corey / standard / technical
+        # are system prompts; a tone has no per-token price, and charging for one
+        # is how the cheapest voice ended up running the priciest model. The
+        # member's engine choice is gated by tier and resolved here so a lapsed
+        # subscription falls back rather than 402s.
+        tier = membership_for(request.user).tier
+        model_key, model_spec = ai_model_for(profile_for(request.user).ai_model, tier)
+        cost = model_spec["cost_cents"]
+
+        # The day's free prompts cover a run before any balance is touched —
+        # OCC is a genuine prompt run, which is exactly what that allowance is
+        # for. It was never wired in here, so a member whose whole AI budget was
+        # the free allowance couldn't open the app's main AI screen at all; the
+        # vocal coach and the Gemini surfaces have honoured it all along.
+        # Read before spending, because charge_ai_usage consumes it.
+        _, _, daily_left = daily_prompt_state(request.user)
+        covered_free = bool(cost) and daily_left > 0
+
         # Check affordability up front so we don't call the model then fail to bill.
-        if cost and not can_afford_ai(request.user, cost):
+        if cost and not daily_left and not can_afford_ai(request.user, cost):
             return Response(
-                {"detail": "Not enough balance for this model.", "cost_cents": cost},
+                {"detail": f"{model_spec['emoji']} {model_spec['name']} costs "
+                           f"{cost} 🏷️ a message and today's free prompts are spent.",
+                 "cost_cents": cost, "engine": model_key,
+                 "open_in": "modelz"},
                 status=status.HTTP_402_PAYMENT_REQUIRED,
             )
 
@@ -142,41 +210,84 @@ class OccChatView(APIView):
         except ImportError:
             return Response({"detail": "LLM backend unavailable."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
-        system = f"{VOICE_STYLE.get(model_voice, VOICE_STYLE['corey-gpt'])}\n\n{COURSES}"
+        # The system prompt is assembled from parts rather than concatenated as
+        # it goes, because the TOTAL has to fit a budget and you cannot trim a
+        # string you have already joined. Fixed parts first (the voice and the
+        # courses are what OCC *is*), then the member's own additions, which are
+        # what gets shortened when the budget bites.
+        fixed = f"{VOICE_STYLE.get(model_voice, VOICE_STYLE['corey-gpt'])}\n\n{COURSES}"
         # AAVE colloquialisms only apply to the Corey voice, and only when opted in.
         if slang and model_voice == "corey-gpt":
-            system += f"\n\n{AAVE_STYLE}"
+            fixed += f"\n\n{AAVE_STYLE}"
         if suggest:
-            system += f"\n\n{SUGGEST_STYLE}"
+            fixed += f"\n\n{SUGGEST_STYLE}"
+
         acro = ", ".join(
-            f"{a.get('term')}={a.get('means')}" for a in acronyms if a.get("term")
+            f"{str(a.get('term'))[:OCC_MAX_ACRONYM_CHARS]}="
+            f"{str(a.get('means', ''))[:OCC_MAX_ACRONYM_CHARS]}"
+            for a in acronyms[:OCC_MAX_ACRONYMS] if a.get("term")
         )
-        if acro:
-            system += (
-                "\n\nYou remember these shorthands the member uses and may use them "
-                f"naturally in this chat (never in formal documents): {acro}"
-            )
         taught = "\n".join(
-            f"- ({k.get('course', 'general')}) {k.get('text', '')}"
-            for k in knowledge if k.get("text")
+            f"- ({str(k.get('course', 'general'))[:60]}) "
+            f"{str(k.get('text', ''))[:OCC_MAX_KNOWLEDGE_CHARS]}"
+            for k in knowledge[:OCC_MAX_KNOWLEDGE_ITEMS] if k.get("text")
         )
-        if taught:
-            system += (
-                "\n\nThe member has taught you the following — treat it as authoritative "
-                f"and lead with it when relevant:\n{taught}"
-            )
 
         messages = []
-        for turn in history[-8:]:
+        for turn in history[-OCC_MAX_HISTORY_TURNS:]:
             role = "assistant" if turn.get("role") == "occ" else "user"
-            text = str(turn.get("text", "")).strip()
+            text = str(turn.get("text", "")).strip()[:OCC_MAX_HISTORY_CHARS]
             if text:
                 messages.append({"role": role, "content": text})
+
+        # The per-field caps stop any ONE runaway value; this stops them adding
+        # up. Twenty taught items at their own cap is 40,000 characters on its
+        # own, which is the whole budget before the voice prompt is even counted
+        # — so a cap per field was never going to be enough by itself.
+        #
+        # Trimmed in order of what costs the member least: the oldest turns of a
+        # conversation they can still see on screen, then the taught knowledge
+        # they can re-teach, then the shorthand. The message they just typed is
+        # never touched — it is the thing they asked for.
+        trimmed = 0
+        room = (OCC_MAX_TOTAL_CHARS - len(fixed) - len(prompt)
+                - len(ACRO_INTRO) - len(TAUGHT_INTRO))
+        while messages and sum(len(m["content"]) for m in messages) + len(acro) + len(taught) > room:
+            messages.pop(0)
+            trimmed += 1
+        spare = room - sum(len(m["content"]) for m in messages)
+        if len(acro) + len(taught) > spare:
+            taught = taught[:max(0, spare - len(acro))]
+        if len(acro) > spare:
+            acro = acro[:max(0, spare)]
+            taught = ""
+
+        system = fixed
+        if acro:
+            system += ACRO_INTRO + acro
+        if taught:
+            system += TAUGHT_INTRO + taught
+
         # Optional image (a data URL) for vision tasks — e.g. "detect gym gear from a photo".
         image = data.get("image")
         if isinstance(image, str) and image.startswith("data:") and "," in image:
             header, b64 = image.split(",", 1)
             media_type = header.split(";")[0].split(":")[-1] or "image/jpeg"
+            # Both checks are the same lesson twice: a client-supplied size with
+            # no ceiling is a bill, and a client-supplied media type passed
+            # straight to an API is a rejection you can't read. Refuse here,
+            # by name, before the model runs and before anything is charged.
+            if len(b64) > OCC_MAX_IMAGE_B64:
+                return Response(
+                    {"detail": "That image is too big — send one under about "
+                               f"{OCC_MAX_IMAGE_B64 // 1_000_000}MB.",
+                     "limits": occ_limits()},
+                    status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+            if media_type not in OCC_IMAGE_TYPES:
+                return Response(
+                    {"detail": f"OCC can't read {media_type} — send a JPEG, PNG, GIF or WebP.",
+                     "limits": occ_limits()},
+                    status=status.HTTP_400_BAD_REQUEST)
             messages.append({"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
                 {"type": "text", "text": prompt},
@@ -187,10 +298,13 @@ class OccChatView(APIView):
 
         try:
             client = anthropic.Anthropic()
-            # Vision needs a flagship model; Corey's Fable voice is text-only.
-            primary = OCC_LLM_MODEL if image else MODEL_BY_VOICE.get(model_voice, OCC_LLM_MODEL)  # Corey → Fable 5, others → Opus 4.8
+            # The member's chosen engine, falling back DOWN the ladder if it
+            # isn't available on this account. Down rather than to a fixed
+            # flagship: the member is billed for what they picked either way, so
+            # a fallback that costs more than their choice is the platform
+            # paying the difference for a substitution nobody asked for.
             resp = _create_with_fallback(
-                client, primary, OCC_LLM_MODEL,  # Corey speaks in Fable when available, Opus only if not
+                client, model_spec["id"], AI_MODELS[AI_MODEL_ORDER[0]]["id"],
                 max_tokens=3072,       # fuller Corey answers (was 1024)
                 system=system,
                 messages=messages,
@@ -205,17 +319,39 @@ class OccChatView(APIView):
         if not text:
             return Response({"detail": "Empty response."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
-        remaining = charge_ai_usage(request.user, cost, note=f"OCC {model_voice}")
+        # The note names the ENGINE as well as the voice, because the engine is
+        # what the money went on. A LogZ row reading "OCC corey-gpt · 15c" with
+        # no way to tell which model ran is a balance that can't be explained.
+        remaining = charge_ai_usage(
+            request.user, cost, note=f"OCC {model_voice} · {model_spec['name']}",
+            count_daily=True)
         # Route the model charge to the platform owner as revenue ("pay Corey"),
-        # keeping money conserved — unless the payer *is* the owner (self-neutral).
-        if cost:
+        # keeping money conserved — unless the payer *is* the owner (self-neutral),
+        # or a free daily prompt covered it. Nothing left the member's wallet in
+        # that case, so nothing may arrive in the owner's: paying the owner out
+        # of an allowance is the platform minting money from itself.
+        if cost and not covered_free:
             owner = platform_owner()
             if owner and owner.id != request.user.id:
                 ow = wallet_for(owner)
                 ow.money_cents = (ow.money_cents or 0) + cost
                 ow.save(update_fields=["money_cents", "updated_at"])
         money = round((remaining if remaining is not None else wallet_for(request.user).money_cents) / 100, 2)
-        out = {"text": text, "model": model_voice, "cost_cents": cost, "money": money}
+        allowance, _, daily_now = daily_prompt_state(request.user)
+        out = {"text": text, "model": model_voice, "cost_cents": cost, "money": money,
+               # Which engine ran and what it cost, so the reply can say it
+               # rather than the member inferring it from a balance.
+               "engine": model_key, "engine_name": model_spec["name"],
+               "engine_emoji": model_spec["emoji"],
+               # A run that cost nothing has to say so, or the member assumes
+               # they were charged and stops asking.
+               "free_prompt": covered_free,
+               # Say when history was dropped to stay inside the size budget.
+               # Silently forgetting the start of a conversation is worse than
+               # forgetting it out loud.
+               **({"history_trimmed": trimmed} if trimmed else {}),
+               "limits": occ_limits(),
+               "daily_prompts_left": daily_now, "daily_prompts": allowance}
 
         # A reply you can't take anywhere is a dead end with a scrollbar. Asked
         # to, OCC keeps the exchange as WorkZ — in the PostZ format — so it can

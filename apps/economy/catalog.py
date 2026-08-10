@@ -158,3 +158,151 @@ assert FOUNDING_MONTH_CENTS > PREMIUM_MONTH_CENTS, (
 
 def ai_cost(model):
     return AI_MODEL_COSTS.get(model, AI_MODEL_COSTS["corey-gpt"])
+
+
+# ---- Which engine runs the AI, who may pick it, and what it costs.
+#
+# The bill for every model run in this app lands on ONE Anthropic account — the
+# platform's. A member spending their PromptZ is reimbursing that account, so a
+# per-message price below the real cost is the platform paying people to use it.
+#
+# Two things were tangled together before this and are now separate:
+#
+#   * VOICE is tone. Corey / standard / technical are system prompts. Tone is
+#     free — a Free member gets the founder's voice, same as anyone.
+#   * MODEL is the engine. It has a real per-token price, so it is what gets
+#     charged for and what tier gates.
+#
+# Keeping them tangled is how Corey GPT — the cheapest voice at 1c — ended up
+# running on Fable 5, the most expensive model in the catalogue. The app was
+# losing money fastest on the option it advertised as the value pick.
+#
+# `cost_cents` is the per-message minimum for a TYPICAL OCC turn: about 10,000
+# input tokens (voice prompt + courses + eight turns of history) and about 800
+# output. Published per-million rates, rounded up, because history grows:
+#
+#     Haiku 4.5   $1/$5    ->  1.0c + 0.4c  =  1.4c  ->  2c
+#     Sonnet 5    $3/$15   ->  3.0c + 1.2c  =  4.2c  ->  5c
+#     Opus 5      $5/$25   ->  5.0c + 2.0c  =  7.0c  ->  8c
+#     Fable 5     $10/$50  -> 10.0c + 4.0c  = 14.0c  -> 15c
+#
+# These are minimums to cover a run, not a margin. If the model prices move,
+# this table moves — it is the only place they are written down.
+AI_MODELS = {
+    "haiku": {
+        "id": "claude-haiku-4-5", "name": "Haiku", "emoji": "⚡",
+        "tier": TIER_FREE, "cost_cents": 2,
+        "blurb": "Fast and cheap. Plenty for chat, translation and quick answers.",
+    },
+    "sonnet": {
+        "id": "claude-sonnet-5", "name": "Sonnet", "emoji": "🎼",
+        "tier": TIER_PREMIUM, "cost_cents": 5,
+        "blurb": "The balanced one. Near-flagship work at a fraction of the price.",
+    },
+    "opus": {
+        "id": "claude-opus-5", "name": "Opus", "emoji": "🎹",
+        "tier": TIER_PREMIUM, "cost_cents": 8,
+        "blurb": "Flagship. Long-horizon work, code, and anything that has to be right.",
+    },
+    "fable": {
+        "id": "claude-fable-5", "name": "Fable", "emoji": "📖",
+        "tier": TIER_STATZ, "cost_cents": 15,
+        "blurb": "The most capable model there is. The hardest problems, at the highest price.",
+    },
+}
+
+# Cheapest first — the order the picker renders, and the order a fallback walks.
+AI_MODEL_ORDER = ("haiku", "sonnet", "opus", "fable")
+
+# Which tiers can reach which rung. A tier gets its own rung and every rung
+# below it, so upgrading only ever adds.
+_TIER_RANK = {TIER_FREE: 0, TIER_PREMIUM: 1, TIER_STATZ: 2, TIER_DEBUG: 3}
+
+
+def ai_models_for(tier):
+    """The model keys this tier may pick, cheapest first."""
+    rank = _TIER_RANK.get(tier, 0)
+    return [k for k in AI_MODEL_ORDER
+            if _TIER_RANK.get(AI_MODELS[k]["tier"], 0) <= rank]
+
+
+def default_ai_model(tier):
+    """What a member gets before they choose: the best rung their tier owns.
+
+    The top rung rather than the bottom because the tier was paid for. A StatZ
+    member who never opens the picker should not be quietly served Haiku.
+    """
+    allowed = ai_models_for(tier)
+    return allowed[-1] if allowed else "haiku"
+
+
+def ai_model_for(key, tier):
+    """Resolve a member's stored choice against what their tier can reach.
+
+    Returns (key, spec). A choice above the member's tier falls back rather than
+    refusing — a lapsed StatZ member's saved 'fable' becomes their best current
+    rung instead of an error on a screen they didn't come to fix.
+    """
+    allowed = ai_models_for(tier)
+    if key not in allowed:
+        key = default_ai_model(tier)
+    return key, AI_MODELS[key]
+
+
+def ai_model_cost(key, tier):
+    """What one message on this member's model costs them, in cents."""
+    return ai_model_for(key, tier)[1]["cost_cents"]
+
+
+# ---- How big one AI message is allowed to be.
+#
+# These are the other half of the prices above, and without them those prices
+# are fiction. `cost_cents` is worked out for a turn of roughly 10,000 input
+# tokens; nothing enforced that, so every field the client sends — the prompt,
+# the taught knowledge, the CodeZ acronyms, the conversation history — went into
+# the model unbounded while the charge stayed flat.
+#
+# The ceiling that existed was Django's default 2.5MB request body. At Fable's
+# $10 per million input tokens that is about $6 of tokens for a 15c charge, on
+# the platform's own Anthropic account, repeatable by anyone with a login.
+#
+# So: a cap per field for sanity, and a TOTAL budget that holds the price
+# honest. ~4 characters to a token, so 40,000 characters is the ~10,000 the
+# prices were built on.
+OCC_MAX_PROMPT_CHARS = 8_000        # one message from the member
+OCC_MAX_KNOWLEDGE_ITEMS = 20        # things they've taught OCC
+OCC_MAX_KNOWLEDGE_CHARS = 2_000     # per taught item
+OCC_MAX_ACRONYMS = 60               # CodeZ shorthand entries
+OCC_MAX_ACRONYM_CHARS = 120         # per entry
+OCC_MAX_HISTORY_TURNS = 8           # turns of conversation carried back
+OCC_MAX_HISTORY_CHARS = 4_000       # per turn
+OCC_MAX_TOTAL_CHARS = 40_000        # the whole assembled prompt
+# The vision image, as base64 inside a data URL. Missed on the first pass of
+# this cap and found while writing the tests for it — same hole, different
+# field. ~1.5MB of base64 is a ~1.1MB image, more than enough for a photo of a
+# pedalboard or a screenshot.
+OCC_MAX_IMAGE_B64 = 1_500_000
+# What the model will actually accept. The media type used to be whatever the
+# client wrote in its own data URL header and it went straight through to the
+# API — the same passthrough that made the coach refuse every Chrome recording.
+OCC_IMAGE_TYPES = ("image/jpeg", "image/png", "image/gif", "image/webp")
+
+
+def occ_limits():
+    """Published so the composer can stop a member BEFORE they lose the typing.
+
+    A cap discovered by hitting it is the same mistake as a price discovered by
+    paying it.
+    """
+    return {
+        "prompt_chars": OCC_MAX_PROMPT_CHARS,
+        "knowledge_items": OCC_MAX_KNOWLEDGE_ITEMS,
+        "knowledge_chars": OCC_MAX_KNOWLEDGE_CHARS,
+        "acronyms": OCC_MAX_ACRONYMS,
+        "acronym_chars": OCC_MAX_ACRONYM_CHARS,
+        "history_turns": OCC_MAX_HISTORY_TURNS,
+        "history_chars": OCC_MAX_HISTORY_CHARS,
+        "total_chars": OCC_MAX_TOTAL_CHARS,
+        "image_b64": OCC_MAX_IMAGE_B64,
+        "image_types": list(OCC_IMAGE_TYPES),
+    }

@@ -42,6 +42,21 @@ from .models import (
 
 WALLPAPER_TIERS = (TIER_PREMIUM, TIER_STATZ, TIER_DEBUG)
 
+# Haiku, not Opus, and the reason is the same one that keeps translate free.
+#
+# The keyboard is the only AI surface in this app that charges nothing, so it is
+# the only one whose bill has no ceiling but the daily character allowance. On
+# Opus that allowance is worth about 19c a day per member who spends all of it;
+# on Haiku it is about 4c. Five times cheaper is the difference between "we can
+# afford to give this away" and "we have to start charging for it" — and
+# translation is the classic task where the small model is indistinguishable,
+# because it is transformation, not reasoning.
+#
+# TranslateZ (translate.py) stays on Opus deliberately: it transcreates UI and
+# content in batches, it is a paid action, and it has brand rules to get right.
+# That is a different job than turning one message into another language.
+TRANSLATE_MODEL = "claude-haiku-4-5"
+
 # Enough to cover the rooms this app is actually in, with `auto` on the source
 # side so nobody has to name the language they're already typing.
 LANGUAGES = [
@@ -110,8 +125,12 @@ class KeyboardView(APIView):
             "translate_free": True,
             "translate_cost_cents": 0,
             "translate_used_today": used,
+            # None on both when the Polyglot badge has lifted the cap. The
+            # client shows "no daily limit" rather than a number, because a
+            # made-up large number is a limit pretending to be real.
             "translate_daily_chars": cap,
             "translate_remaining": left,
+            "translate_uncapped": cap is None,
             "translate_max_chars": KEY_TRANSLATE_MAX_CHARS,
             "languages": [{"key": k, "label": v} for k, v in LANGUAGES],
         })
@@ -238,7 +257,8 @@ class KeyTranslateView(APIView):
             )
 
         used, cap, left = key_translate_state(request.user)
-        if len(text) > left:
+        # `left is None` is Polyglot: no allowance to run out of.
+        if left is not None and len(text) > left:
             return Response(
                 {"detail": f"You've used your {cap:,} free characters for today — {left:,} left. "
                            "It resets on a rolling 24 hours.",
@@ -262,7 +282,7 @@ class KeyTranslateView(APIView):
         try:
             client = anthropic.Anthropic()
             resp = client.messages.create(
-                model="claude-opus-4-8",
+                model=TRANSLATE_MODEL,
                 max_tokens=2048,
                 system=_system("" if source == "auto" else LANG_NAME.get(source, source),
                                LANG_NAME.get(target, target)),
@@ -308,4 +328,5 @@ class KeyTranslateView(APIView):
             "translate_used_today": used,
             "translate_daily_chars": cap,
             "translate_remaining": left,
+            "translate_uncapped": cap is None,
         })

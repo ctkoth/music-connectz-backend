@@ -1,8 +1,13 @@
 """SingZ Boss Take — record a take, get it scored and coached.
 
 The blueprint's Boss Take ("user records one scored final take, exercise pass,
-or song section") plus the StatZ-gated AI Vocal Coach ("deeper feedback on why
-notes, transitions, tone, or breath control are weak").
+or song section") plus the AI Vocal Coach ("deeper feedback on why notes,
+transitions, tone, or breath control are weak").
+
+Open to every tier, priced per take. The blueprint filed the coach under StatZ
+Gated Features; that was reconsidered once the no-account trial door shipped,
+because gating members harder than strangers put the ladder upside down. A tier
+now buys FREQUENCY — 1 / 5 / 10 free takes a day — not permission.
 
 A take is sent to Gemini as inline audio along with the member's genre, target
 range and difficulty, and comes back as a score out of 10 plus advice in the
@@ -31,7 +36,9 @@ from .catalog import ai_cost
 from .instruments import DIFFICULTIES, profile_for_app, prompt_for
 from .gemini import BASE, _bill, _key
 from .models import (
-    TIER_DEBUG,
+    PROMPT_ALLOWANCE,
+    TIER_FREE,
+    TIER_PREMIUM,
     TIER_STATZ,
     can_afford_ai,
     daily_prompt_state,
@@ -41,7 +48,66 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
-MAX_MB = 25
+# The take rides to Gemini as inline_data — base64 inside the request body —
+# and that path caps the WHOLE request at 20MB. Base64 inflates by 4/3, so the
+# real ceiling on the file is about 15MB, not 25.
+#
+# 25 was the stated limit and it could not be honoured: a 22MB take passed our
+# own check, blew Gemini's, and came back as "The coach couldn't process that
+# take" — a limit the app advertised and then refused, with a message that
+# blamed the take. 14 leaves headroom for the prompt and the JSON envelope.
+#
+# It is enough for what a Boss Take is: ~15 minutes of 128kbps audio, or about
+# a minute of video at the bitrate the recorder asks for. Anything longer than
+# that is not one take.
+MAX_MB = 14
+
+# What Gemini will actually accept as inline media. Anything outside these two
+# sets is refused by the API, not by us — and the refusal arrives as a plain
+# non-200 that we used to surface as "The coach couldn't process that take",
+# which blamed the performance for a container problem.
+_GEMINI_AUDIO = {"audio/wav", "audio/mp3", "audio/mpeg", "audio/aiff",
+                 "audio/aac", "audio/ogg", "audio/flac"}
+_GEMINI_VIDEO = {"video/mp4", "video/mpeg", "video/mov", "video/quicktime",
+                 "video/avi", "video/x-flv", "video/mpg", "video/webm",
+                 "video/wmv", "video/3gpp"}
+
+# Browsers record into containers Gemini names under `video/` even when the
+# recording is audio-only. Same bytes, same container — only the label differs,
+# so relabel rather than refuse a take we can obviously send.
+_RELABEL = {
+    "audio/webm": "video/webm",        # Chrome / Edge / Android default
+    "audio/x-matroska": "video/webm",
+    "audio/mp4": "video/mp4",          # Safari / iOS default
+    "audio/x-m4a": "video/mp4",
+    "audio/m4a": "video/mp4",
+    "audio/3gpp": "video/3gpp",
+    "audio/vorbis": "audio/ogg",
+    "audio/opus": "audio/ogg",
+    "audio/x-wav": "audio/wav",
+    "audio/wave": "audio/wav",
+    "audio/x-aiff": "audio/aiff",
+}
+
+
+def gemini_mime(content_type):
+    """The mime type to hand Gemini for this upload, or None if it can't take it.
+
+    Two things go wrong between a browser and this call, and both were live:
+
+    1. `MediaRecorder.mimeType` is a FULL media type — Chrome hands back
+       `audio/webm;codecs=opus`. The parameter rides through the Blob, the
+       multipart upload and Django untouched, and Gemini rejects the whole
+       request over it. Strip to the bare type.
+    2. `audio/webm` is not on Gemini's audio list at all, though `video/webm`
+       is. A browser-recorded take was therefore unscoreable on the two
+       biggest browsers — which is exactly the "couldn't process that take"
+       people were seeing on a perfectly good performance.
+    """
+    base = (content_type or "").split(";")[0].strip().lower()
+    base = _RELABEL.get(base, base)
+    return base if base in _GEMINI_AUDIO or base in _GEMINI_VIDEO else None
+
 
 def _parse(text):
     """Pull the JSON object out of a model reply that may be fenced."""
@@ -84,6 +150,18 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty):
         target=str(target or "unspecified")[:60],
         difficulty=difficulty if difficulty in DIFFICULTIES else "builder",
     )
+    # Normalise BEFORE the call. An unsupported container is a refusal we can
+    # give instantly and explain, rather than a round trip that comes back as a
+    # generic failure the member reads as "my take was bad".
+    mime = gemini_mime(content_type)
+    if not mime:
+        return None, (
+            {"detail": f"The coach can't read {content_type or 'that format'}. "
+                       "Record in the app, or attach an m4a, mp3, wav, ogg or mp4.",
+             "content_type": content_type},
+            status.HTTP_400_BAD_REQUEST,
+        )
+
     model = os.environ.get("GEMINI_AUDIO_MODEL", "gemini-2.5-flash")
     unreadable = ({"detail": "The coach couldn't process that take."}, status.HTTP_502_BAD_GATEWAY)
     try:
@@ -91,7 +169,7 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty):
             f"{BASE}/models/{model}:generateContent?key={key}",
             json={"contents": [{"parts": [
                 {"text": prompt},
-                {"inline_data": {"mime_type": content_type,
+                {"inline_data": {"mime_type": mime,
                                  "data": base64.b64encode(f.read()).decode()}},
             ]}]},
             timeout=90,
@@ -102,7 +180,11 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty):
                       status.HTTP_502_BAD_GATEWAY)
 
     if resp.status_code != 200:
-        logger.error("SingZ coach: Gemini returned %s — %s", resp.status_code, resp.text[:300])
+        # Log what we SENT as well as what came back. Without the mime type and
+        # model in the line, a container rejection and a bad API key look
+        # identical in the logs, which is how this one stayed hidden.
+        logger.error("%s coach: Gemini %s for mime=%s model=%s — %s",
+                     app_key, resp.status_code, mime, model, resp.text[:300])
         return None, unreadable
     try:
         text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
@@ -154,18 +236,34 @@ class SingZCoachView(APIView):
         """
         profile = profile_for_app(self.app_key)
         tier = membership_for(request.user).tier
-        allowed = tier in (TIER_STATZ, TIER_DEBUG)
-        _, _, daily_left = daily_prompt_state(request.user)
+        allowance, _, daily_left = daily_prompt_state(request.user)
         w = wallet_for(request.user)
         cost = ai_cost("standard")
+        # "Allowed" now means CAN YOU TAKE ONE RIGHT NOW — configured, and either
+        # a free prompt left or the balance to cover it. It used to mean "are you
+        # StatZ", which was a less useful answer to the only question the screen
+        # is actually asking.
+        allowed = bool(_key()) and (daily_left > 0 or can_afford_ai(request.user, cost))
         return Response({
             "allowed": allowed,
-            "required_tier": TIER_STATZ,
+            # Nothing tier-locks a take any more. The tier decides HOW MANY come
+            # free per day, not whether you may have one — see the ladder below.
+            "gated": False,
+            "required_tier": None,
             "configured": bool(_key()),
             "cost_cents": cost,
             # A free daily prompt covers the whole run before any paid balance.
             "free_today": daily_left > 0,
             "daily_remaining": daily_left,
+            "daily_allowance": allowance,
+            "tier": tier,
+            # What more would buy: frequency, not access. Stated so the upsell is
+            # present and honest without being a wall in front of the feature.
+            "allowance_ladder": [
+                {"tier": t, "daily": PROMPT_ALLOWANCE[t]}
+                for t in (TIER_FREE, TIER_PREMIUM, TIER_STATZ)
+            ],
+            "open_in": "membershipz",
             "promptz": w.promptz or 0,
             "money_cents": w.money_cents or 0,
             # A take the coach can't read is never billed — _bill runs only
@@ -185,21 +283,27 @@ class SingZCoachView(APIView):
         })
 
     def post(self, request):
-        # The blueprint lists AI Vocal Coach under StatZ Gated Features.
-        tier = membership_for(request.user).tier
-        if tier not in (TIER_STATZ, TIER_DEBUG):
-            return Response(
-                {"detail": "The AI Vocal Coach is a StatZ feature. Upgrade in MembershipZ to have your takes scored.",
-                 "required_tier": TIER_STATZ},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
+        # No tier gate. The blueprint filed the AI coach under StatZ Gated
+        # Features and that was reconsidered on purpose: the trial door already
+        # hands an anonymous visitor a full scored take, one per address per
+        # day, so gating members harder than non-members had the ladder upside
+        # down — a Premium member paying every month got less than a stranger.
+        #
+        # A take still costs a prompt, and the tier still decides how many come
+        # free each day (PROMPT_ALLOWANCE: 1 / 5 / 10). Frequency is the honest
+        # difference between somebody tracking daily and somebody curious once a
+        # month; access was charging twice for the same thing.
         f = request.FILES.get("take")
         if not f:
             return Response({"detail": "Record or attach a take first."}, status=status.HTTP_400_BAD_REQUEST)
         content_type = (getattr(f, "content_type", "") or "").lower()
+        # Video has always been accepted here — the model watches the take as
+        # well as hearing it, which is worth real marks on delivery and breath.
+        # The refusal copy said "isn't audio" and contradicted the check, which
+        # is how the file picker ended up audio-only for a year.
         if not (content_type.startswith("audio/") or content_type.startswith("video/")):
-            return Response({"detail": "That file isn't audio. Record a take or attach an audio file."},
+            return Response({"detail": "That isn't audio or video. Record a take, or attach an "
+                                       "audio or video file."},
                             status=status.HTTP_400_BAD_REQUEST)
         if f.size > MAX_MB * 1024 * 1024:
             return Response({"detail": f"That take is too big — keep it under {MAX_MB}MB."},

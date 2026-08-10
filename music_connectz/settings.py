@@ -321,6 +321,11 @@ EMAIL_BACKEND = (
 # dispute window (from funding) freezes auto-release when a dispute is opened.
 ESCROW_AUTO_RELEASE_DAYS = int(os.environ.get("ESCROW_AUTO_RELEASE_DAYS", "10"))
 ESCROW_DISPUTE_DAYS = int(os.environ.get("ESCROW_DISPUTE_DAYS", "10"))
+# The floor a badge can shorten the auto-release window to. The window is the
+# payer's own last chance to open a dispute before the pot goes, so it is worth
+# something even to somebody who has never needed it — a badge that could drive
+# it to zero would be a badge for skipping the safety rail.
+ESCROW_MIN_RELEASE_DAYS = int(os.environ.get("ESCROW_MIN_RELEASE_DAYS", "3"))
 COLLAB_DEFAULT_STAKE_SPINAZ = int(os.environ.get("COLLAB_DEFAULT_STAKE_SPINAZ", "0"))
 
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")

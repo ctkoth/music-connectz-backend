@@ -142,7 +142,8 @@ def explain(step, option, text="", track=None, facts=None, slang=False, suggest=
     try:
         import anthropic
 
-        from apps.economy.occ import MODEL_BY_VOICE, OCC_LLM_MODEL, _create_with_fallback
+        from apps.economy.catalog import AI_MODELS
+        from apps.economy.occ import _create_with_fallback
 
         system = build_system(step, option, track, facts, slang=slang)
         if suggest:
@@ -151,10 +152,15 @@ def explain(step, option, text="", track=None, facts=None, slang=False, suggest=
                 "phrased as what to do and why."
             )
         client = anthropic.Anthropic()
+        # Free surface, so it runs on the cheapest engine — same call as the
+        # keyboard. Guidance is one short answer about the screen you're on; it
+        # was on Fable 5, the priciest model in the catalogue, charging nothing.
+        # A free surface on a flagship is a bill with no ceiling and no payer.
+        engine = AI_MODELS["haiku"]["id"]
         resp = _create_with_fallback(
             client,
-            MODEL_BY_VOICE.get("corey-gpt", OCC_LLM_MODEL),
-            OCC_LLM_MODEL,
+            engine,
+            engine,
             max_tokens=MAX_TOKENS,
             system=system,
             messages=[{"role": "user", "content": prompt}],
