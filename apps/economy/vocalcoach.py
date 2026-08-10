@@ -185,7 +185,29 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty):
         # identical in the logs, which is how this one stayed hidden.
         logger.error("%s coach: Gemini %s for mime=%s model=%s — %s",
                      app_key, resp.status_code, mime, model, resp.text[:300])
-        return None, unreadable
+        # And say it on the SCREEN. "The coach couldn't process that take" was
+        # true of a bad key, a retired model, a spent quota and an unreadable
+        # container alike — one sentence for four different problems, none of
+        # them the member's, all of them reading like the take was bad.
+        #
+        # The upstream body is deliberately NOT forwarded: it is a third party's
+        # error text, and it is not ours to put in front of a member. The status
+        # plus our own reading of it is the useful part.
+        why = {
+            400: "that take's format wasn't accepted",
+            403: "the coach's API key was refused",
+            404: "the coach's model isn't available",
+            429: "the coach has hit its limit for now — try again shortly",
+        }.get(resp.status_code,
+              "the coach is having a moment" if resp.status_code >= 500
+              else "the coach refused that one")
+        return None, ({"detail": f"The coach couldn't read that take — {why}.",
+                       # Enough for you to diagnose from a screenshot, and
+                       # nothing that identifies the key or the account.
+                       "upstream_status": resp.status_code,
+                       "sent_mime": mime,
+                       "model": model},
+                      status.HTTP_502_BAD_GATEWAY)
     try:
         text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError, ValueError):

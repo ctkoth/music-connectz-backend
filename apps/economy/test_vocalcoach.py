@@ -26,6 +26,10 @@ GOOD = {"score": 7, "scores": {"pitch": 8, "tone": 7, "breath": 5, "range": 6, "
 def fake_gemini(payload=GOOD, status_code=200):
     class R:
         status_code = 200
+        # `text` is what a real requests.Response carries and what the error
+        # path logs. The double didn't have it, so the first non-200 test hit
+        # an AttributeError instead of the code being tested.
+        text = '{"error": {"message": "fake upstream error"}}'
         def json(self):
             return {"candidates": [{"content": {"parts": [{"text": json.dumps(payload)}]}}]}
     R.status_code = status_code
@@ -469,4 +473,55 @@ class TheContainerTheBrowserActuallyRecordsTests(TestCase):
         before = daily_prompt_state(self.user)[2]
         with patch("apps.economy.vocalcoach.requests.post"):
             self.client.post(URL, {"take": take("t.xyz", "audio/x-weird")}, format="multipart")
+        self.assertEqual(daily_prompt_state(self.user)[2], before)
+
+
+class TheFailureSaysWhichFailureItWasTests(TestCase):
+    """One sentence for four different problems is not an error message.
+
+    "The coach couldn't process that take" was returned for a refused API key,
+    a retired model, a spent quota and an unreadable container alike — none of
+    them the member's fault, all of them reading like the take was bad. It also
+    left me guessing from a screenshot.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("d", "d@e.com", "pw12345678")
+        self.client.force_authenticate(self.user)
+        m = membership_for(self.user); m.tier = TIER_STATZ; m.save()
+        w = wallet_for(self.user); w.money_cents = 100000; w.save()
+
+    def send(self, status_code):
+        with patch("apps.economy.vocalcoach._key", return_value="k"), \
+             patch("apps.economy.vocalcoach.requests.post",
+                   return_value=fake_gemini(status_code=status_code)):
+            return self.client.post(URL, {"take": take()}, format="multipart")
+
+    def test_each_upstream_status_gets_its_own_reason(self):
+        for code, phrase in ((400, "format"), (403, "key"),
+                             (404, "model"), (429, "limit")):
+            with self.subTest(code=code):
+                resp = self.send(code)
+                self.assertEqual(resp.status_code, 502)
+                self.assertIn(phrase, resp.data["detail"].lower())
+
+    def test_the_status_and_what_we_sent_come_back_for_diagnosis(self):
+        resp = self.send(429)
+        self.assertEqual(resp.data["upstream_status"], 429)
+        self.assertEqual(resp.data["sent_mime"], "video/webm")
+        self.assertIn("model", resp.data)
+
+    def test_a_server_side_wobble_does_not_blame_the_take(self):
+        self.assertIn("moment", self.send(503).data["detail"].lower())
+
+    def test_the_upstream_body_is_never_forwarded(self):
+        # It is a third party's error text and not ours to put in front of a
+        # member — the status plus our own reading of it is the useful part.
+        resp = self.send(400)
+        self.assertNotIn("candidates", str(resp.data))
+
+    def test_a_failed_take_is_still_not_billed(self):
+        before = daily_prompt_state(self.user)[2]
+        self.send(429)
         self.assertEqual(daily_prompt_state(self.user)[2], before)
