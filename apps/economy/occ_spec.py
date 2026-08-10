@@ -49,62 +49,62 @@ def tier_at_least(tier, needed):
 # entire job. Until the file lands it 404s and the client shows the emoji, so
 # reserving a name costs a member nothing and saves a code change later.
 OCC_TABS = [
-    {"key": "editor", "icon": "editor.png", "name": "Code editor", "emoji": "👁️‍🗨️", "needs": TIER_FREE,
+    {"key": "editor", "open_in": "occ", "icon": "editor.png", "name": "Code editor", "emoji": "👁️‍🗨️", "needs": TIER_FREE,
      "desc": "Write and edit your files.", "builds": "editor"},
-    {"key": "taskz", "icon": "taskz.png", "name": "TaskZ", "emoji": "📑", "needs": TIER_FREE,
+    {"key": "taskz", "open_in": "occ", "icon": "taskz.png", "name": "TaskZ", "emoji": "📑", "needs": TIER_FREE,
      "desc": "Tasks OCC has been set, with live status, an ETA, and an undo window.",
      "builds": "taskz"},
     # Not in the original list of twenty-one: added because an OCC result that
     # can't be shown, rated or carried anywhere is a dead end, and nothing here
     # is allowed to be one. WorkZ is where what you gave OCC and what it gave
     # back are kept, in the PostZ format, ready to post.
-    {"key": "workz", "icon": "workz.png", "name": "WorkZ", "emoji": "🧾", "needs": TIER_FREE,
+    {"key": "workz", "open_in": "occ", "icon": "workz.png", "name": "WorkZ", "emoji": "🧾", "needs": TIER_FREE,
      "desc": "What you gave OCC and what it gave back — post it, rate it, or take it "
              "into another app.", "builds": "workz"},
-    {"key": "codez", "icon": "codez.png", "name": "CodeZ", "emoji": "🧩", "needs": TIER_FREE,
+    {"key": "codez", "open_in": "habitz", "icon": "codez.png", "name": "CodeZ", "emoji": "🧩", "needs": TIER_FREE,
      "desc": "Your acronyms, typos and slang — what you meant, and how often you've typed it.",
      "builds": "codez"},
-    {"key": "pathz", "icon": "pathz.png", "name": "PathZ", "emoji": "🛤️", "needs": TIER_PREMIUM,
+    {"key": "pathz", "open_in": "habitz", "icon": "pathz.png", "name": "PathZ", "emoji": "🛤️", "needs": TIER_PREMIUM,
      "desc": "Your paths across devices.", "builds": "pathz"},
-    {"key": "mistakez", "icon": "mistakez.png", "name": "MistakeZ", "emoji": "❌", "needs": TIER_FREE,
+    {"key": "mistakez", "open_in": "habitz", "icon": "mistakez.png", "name": "MistakeZ", "emoji": "❌", "needs": TIER_FREE,
      "desc": "Errors the AI made here, kept so it doesn't make them twice.",
      "builds": "mistakez"},
-    {"key": "habitz", "icon": "habitz.png", "name": "HabitZ", "emoji": "🎂", "needs": TIER_FREE,
+    {"key": "habitz", "open_in": "habitz", "icon": "habitz.png", "name": "HabitZ", "emoji": "🎂", "needs": TIER_FREE,
      "desc": "Something you repeat, noticed and kept.", "builds": "habitz"},
     {"key": "characterz", "icon": "characterz.png", "name": "CharacterZ", "emoji": "🤔", "needs": TIER_PREMIUM,
      "desc": "MBTI characters attached to a FaceZ face, with a story and a voice.",
      "builds": "characterz"},
-    {"key": "settings", "icon": "preferencez.png", "name": "Settings", "emoji": "⚙️", "needs": TIER_FREE,
+    {"key": "settings", "open_in": "occ", "icon": "preferencez.png", "name": "Settings", "emoji": "⚙️", "needs": TIER_FREE,
      "desc": "AutomationZ and SuggestionZ live here.", "builds": "settings"},
-    {"key": "console", "icon": "console.png", "name": "Output / Console", "emoji": "🖥️", "needs": TIER_FREE,
+    {"key": "console", "open_in": "occ", "icon": "console.png", "name": "Output / Console", "emoji": "🖥️", "needs": TIER_FREE,
      "desc": "What OCC printed.", "builds": "console"},
     {"key": "callz", "icon": "callz.png", "name": "CallZ", "emoji": "📞", "needs": TIER_STATZ,
      "desc": "Talk it through.", "builds": "callz"},
-    {"key": "search", "icon": "search.png", "name": "Search", "emoji": "🔍", "needs": TIER_FREE,
+    {"key": "search", "open_in": "social", "icon": "search.png", "name": "Search", "emoji": "🔍", "needs": TIER_FREE,
      "desc": "Across every tab.", "builds": "search"},
     {"key": "tellz", "icon": "tellz.png", "name": "TellZ", "emoji": "🗣️", "needs": TIER_PREMIUM,
      "desc": "What you prompted or posted, per tab or across all of them.",
      "builds": "tellz"},
-    {"key": "logz", "icon": "logz.png", "name": "LogZ", "emoji": "🪵", "needs": TIER_PREMIUM,
+    {"key": "logz", "open_in": "logz", "icon": "logz.png", "name": "LogZ", "emoji": "🪵", "needs": TIER_PREMIUM,
      "desc": "What was DONE, by day, week, month or a range you pick.",
      "builds": "logz"},
     {"key": "pickconnectz", "icon": "pickconz.png", "name": "Pick ConnectZ", "emoji": "📌", "needs": TIER_FREE,
      "desc": "Pin your favourites to the footer.", "builds": "pickconnectz"},
-    {"key": "filez", "icon": "filez.png", "name": "FileZ", "emoji": "📁", "needs": TIER_FREE,
+    {"key": "filez", "open_in": "occ", "icon": "filez.png", "name": "FileZ", "emoji": "📁", "needs": TIER_FREE,
      "desc": "Files and uploads.", "builds": "filez"},
     {"key": "gitz", "icon": "gitz.png", "name": "GitZ", "emoji": "🔀", "needs": TIER_STATZ,
      "desc": "Branches, commits and pushes — every one of them a TaskZ task.",
      "builds": "gitz"},
     {"key": "gamez", "icon": "gamez.png", "name": "GameZ", "emoji": "🎮", "needs": TIER_PREMIUM,
      "desc": "Games you built here, by genre.", "builds": "gamez"},
-    {"key": "spinaz", "icon": "spinaz.png", "name": "SpinaZ", "emoji": "🍥", "needs": TIER_FREE,
+    {"key": "spinaz", "open_in": "logz", "icon": "spinaz.png", "name": "SpinaZ", "emoji": "🍥", "needs": TIER_FREE,
      "desc": "How you earned and spent it.", "builds": "spinaz"},
-    {"key": "energy", "icon": "energy.png", "name": "Energy", "emoji": "⚡", "needs": TIER_FREE,
+    {"key": "energy", "open_in": "logz", "icon": "energy.png", "name": "Energy", "emoji": "⚡", "needs": TIER_FREE,
      "desc": "How you earned and spent it.", "builds": "energy"},
-    {"key": "facez", "icon": "facez.png", "name": "FaceZ", "emoji": "🙄", "needs": TIER_FREE,
+    {"key": "facez", "open_in": "profilez", "icon": "facez.png", "name": "FaceZ", "emoji": "🙄", "needs": TIER_FREE,
      "desc": "Faces available to AI images and video, taggable to a profile.",
      "builds": "facez"},
-    {"key": "welcome", "icon": "welcome.png", "name": "Welcome", "emoji": "👋", "needs": TIER_FREE,
+    {"key": "welcome", "open_in": "occ", "icon": "welcome.png", "name": "Welcome", "emoji": "👋", "needs": TIER_FREE,
      "desc": "Start here.", "builds": "welcome"},
 ]
 
@@ -137,6 +137,21 @@ OCC_LANGUAGES = [
     {"key": "cpp", "name": "C++ (Unreal)", "needs": TIER_STATZ},
     {"key": "c", "name": "C", "needs": TIER_STATZ},
 ]
+
+def languages_with_run_status():
+    """OCC_LANGUAGES, each marked with whether the sandbox can actually run it.
+
+    Seventeen languages are advertised and twelve have a runner — C# (Unity),
+    GDScript (Godot), Swift, Haxe and GML have none. That is not a lie (OCC can
+    WRITE Unity C# perfectly well without executing it) but nothing on screen
+    drew the line, and the pills sit directly above a Run panel offering twelve.
+
+    Derived from RUNNERS rather than typed twice, so adding a runner updates the
+    list by itself and the two can never disagree again.
+    """
+    from .modal_sandbox import RUNNERS
+    return [{**lang, "runs": lang["key"] in RUNNERS} for lang in OCC_LANGUAGES]
+
 
 # Every image type OCC exports, .ico included as the spec calls out.
 OCC_IMAGE_EXPORTS = [
@@ -250,7 +265,9 @@ def languages_for(tier):
     """The languages this member may build in, and the ones they can see but
     not use — stated rather than hidden, so the upgrade has a reason."""
     allowed, locked = [], []
-    for lang in OCC_LANGUAGES:
+    # Carries `runs` so the client can say which of these the sandbox actually
+    # executes — five of the seventeen it can only write.
+    for lang in languages_with_run_status():
         (allowed if tier_at_least(tier, lang["needs"]) else locked).append(lang)
     return allowed, locked
 
@@ -259,4 +276,9 @@ def tabs_for(tier):
     """Every tab, each marked with whether this member may open it. The locked
     ones are RETURNED, not filtered out: a member should know what the tier
     above them has, and a menu that silently shrinks teaches nothing."""
+    # `builds` stays in the response. It was put there on purpose — "a menu that
+    # offers twenty tabs and delivers three is worse than a menu that offers
+    # three" — and the client simply never read it, which is the same failure
+    # one layer up. It is read now, alongside `open_in`, so the list says both
+    # what stands behind a tab and where that tab opens.
     return [{**tab, "allowed": tier_at_least(tier, tab["needs"])} for tab in OCC_TABS]

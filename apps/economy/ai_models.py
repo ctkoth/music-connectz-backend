@@ -38,6 +38,7 @@ from .catalog import (
     ai_model_for,
     ai_models_for,
     default_ai_model,
+    occ_limits,
 )
 from .models import membership_for, profile_for
 
@@ -75,6 +76,10 @@ def model_state(user):
         "chosen": bool(p.ai_model) and p.ai_model in allowed,
         "default": default_ai_model(tier),
         "models": [model_row(k, allowed, current) for k in AI_MODEL_ORDER],
+        # How big one message may be. Published here because it is the other
+        # half of the prices above — a per-message price only means anything
+        # alongside the size it was worked out for.
+        "limits": occ_limits(),
         # Where a locked row leads. Nothing is a dead end.
         "open_in": "membershipz",
     }

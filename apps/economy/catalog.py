@@ -252,3 +252,57 @@ def ai_model_for(key, tier):
 def ai_model_cost(key, tier):
     """What one message on this member's model costs them, in cents."""
     return ai_model_for(key, tier)[1]["cost_cents"]
+
+
+# ---- How big one AI message is allowed to be.
+#
+# These are the other half of the prices above, and without them those prices
+# are fiction. `cost_cents` is worked out for a turn of roughly 10,000 input
+# tokens; nothing enforced that, so every field the client sends — the prompt,
+# the taught knowledge, the CodeZ acronyms, the conversation history — went into
+# the model unbounded while the charge stayed flat.
+#
+# The ceiling that existed was Django's default 2.5MB request body. At Fable's
+# $10 per million input tokens that is about $6 of tokens for a 15c charge, on
+# the platform's own Anthropic account, repeatable by anyone with a login.
+#
+# So: a cap per field for sanity, and a TOTAL budget that holds the price
+# honest. ~4 characters to a token, so 40,000 characters is the ~10,000 the
+# prices were built on.
+OCC_MAX_PROMPT_CHARS = 8_000        # one message from the member
+OCC_MAX_KNOWLEDGE_ITEMS = 20        # things they've taught OCC
+OCC_MAX_KNOWLEDGE_CHARS = 2_000     # per taught item
+OCC_MAX_ACRONYMS = 60               # CodeZ shorthand entries
+OCC_MAX_ACRONYM_CHARS = 120         # per entry
+OCC_MAX_HISTORY_TURNS = 8           # turns of conversation carried back
+OCC_MAX_HISTORY_CHARS = 4_000       # per turn
+OCC_MAX_TOTAL_CHARS = 40_000        # the whole assembled prompt
+# The vision image, as base64 inside a data URL. Missed on the first pass of
+# this cap and found while writing the tests for it — same hole, different
+# field. ~1.5MB of base64 is a ~1.1MB image, more than enough for a photo of a
+# pedalboard or a screenshot.
+OCC_MAX_IMAGE_B64 = 1_500_000
+# What the model will actually accept. The media type used to be whatever the
+# client wrote in its own data URL header and it went straight through to the
+# API — the same passthrough that made the coach refuse every Chrome recording.
+OCC_IMAGE_TYPES = ("image/jpeg", "image/png", "image/gif", "image/webp")
+
+
+def occ_limits():
+    """Published so the composer can stop a member BEFORE they lose the typing.
+
+    A cap discovered by hitting it is the same mistake as a price discovered by
+    paying it.
+    """
+    return {
+        "prompt_chars": OCC_MAX_PROMPT_CHARS,
+        "knowledge_items": OCC_MAX_KNOWLEDGE_ITEMS,
+        "knowledge_chars": OCC_MAX_KNOWLEDGE_CHARS,
+        "acronyms": OCC_MAX_ACRONYMS,
+        "acronym_chars": OCC_MAX_ACRONYM_CHARS,
+        "history_turns": OCC_MAX_HISTORY_TURNS,
+        "history_chars": OCC_MAX_HISTORY_CHARS,
+        "total_chars": OCC_MAX_TOTAL_CHARS,
+        "image_b64": OCC_MAX_IMAGE_B64,
+        "image_types": list(OCC_IMAGE_TYPES),
+    }

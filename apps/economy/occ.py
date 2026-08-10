@@ -10,7 +10,22 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import AI_MODELS, AI_MODEL_ORDER, ai_model_for
+from .catalog import (
+    AI_MODELS,
+    AI_MODEL_ORDER,
+    OCC_MAX_ACRONYM_CHARS,
+    OCC_MAX_ACRONYMS,
+    OCC_MAX_HISTORY_CHARS,
+    OCC_IMAGE_TYPES,
+    OCC_MAX_IMAGE_B64,
+    OCC_MAX_HISTORY_TURNS,
+    OCC_MAX_KNOWLEDGE_CHARS,
+    OCC_MAX_KNOWLEDGE_ITEMS,
+    OCC_MAX_PROMPT_CHARS,
+    OCC_MAX_TOTAL_CHARS,
+    ai_model_for,
+    occ_limits,
+)
 from .models import (
     can_afford_ai,
     charge_ai_usage,
@@ -110,6 +125,14 @@ SUGGEST_STYLE = (
     "or two). Keep it tight and actionable, never generic."
 )
 
+# The framing around the member's own additions. Named so their length can be
+# counted against the budget — leaving them out of the arithmetic is how the
+# first version of this cap came in 100 characters over.
+ACRO_INTRO = ("\n\nYou remember these shorthands the member uses and may use them "
+              "naturally in this chat (never in formal documents): ")
+TAUGHT_INTRO = ("\n\nThe member has taught you the following — treat it as authoritative "
+                "and lead with it when relevant:\n")
+
 COURSES = (
     "You have been taught four college-level courses and can teach them on request: "
     "Digital Art (color, composition, tools, cover art, AI-art ethics), "
@@ -130,7 +153,17 @@ class OccChatView(APIView):
 
     def post(self, request):
         data = request.data or {}
+        # Every field below is capped. The per-message price assumes a turn of
+        # about 10,000 input tokens and nothing used to hold it to that — see
+        # catalog.OCC_MAX_TOTAL_CHARS for why that was expensive.
         prompt = str(data.get("prompt", "")).strip()
+        if len(prompt) > OCC_MAX_PROMPT_CHARS:
+            return Response(
+                {"detail": f"That message is {len(prompt):,} characters — keep it under "
+                           f"{OCC_MAX_PROMPT_CHARS:,}. Send the long part as a file or "
+                           "split it across turns.",
+                 "limits": occ_limits()},
+                status=status.HTTP_400_BAD_REQUEST)
         if not prompt:
             return Response({"detail": "prompt is required."}, status=status.HTTP_400_BAD_REQUEST)
         model_voice = str(data.get("model", "corey-gpt")).lower()
@@ -177,41 +210,84 @@ class OccChatView(APIView):
         except ImportError:
             return Response({"detail": "LLM backend unavailable."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
-        system = f"{VOICE_STYLE.get(model_voice, VOICE_STYLE['corey-gpt'])}\n\n{COURSES}"
+        # The system prompt is assembled from parts rather than concatenated as
+        # it goes, because the TOTAL has to fit a budget and you cannot trim a
+        # string you have already joined. Fixed parts first (the voice and the
+        # courses are what OCC *is*), then the member's own additions, which are
+        # what gets shortened when the budget bites.
+        fixed = f"{VOICE_STYLE.get(model_voice, VOICE_STYLE['corey-gpt'])}\n\n{COURSES}"
         # AAVE colloquialisms only apply to the Corey voice, and only when opted in.
         if slang and model_voice == "corey-gpt":
-            system += f"\n\n{AAVE_STYLE}"
+            fixed += f"\n\n{AAVE_STYLE}"
         if suggest:
-            system += f"\n\n{SUGGEST_STYLE}"
+            fixed += f"\n\n{SUGGEST_STYLE}"
+
         acro = ", ".join(
-            f"{a.get('term')}={a.get('means')}" for a in acronyms if a.get("term")
+            f"{str(a.get('term'))[:OCC_MAX_ACRONYM_CHARS]}="
+            f"{str(a.get('means', ''))[:OCC_MAX_ACRONYM_CHARS]}"
+            for a in acronyms[:OCC_MAX_ACRONYMS] if a.get("term")
         )
-        if acro:
-            system += (
-                "\n\nYou remember these shorthands the member uses and may use them "
-                f"naturally in this chat (never in formal documents): {acro}"
-            )
         taught = "\n".join(
-            f"- ({k.get('course', 'general')}) {k.get('text', '')}"
-            for k in knowledge if k.get("text")
+            f"- ({str(k.get('course', 'general'))[:60]}) "
+            f"{str(k.get('text', ''))[:OCC_MAX_KNOWLEDGE_CHARS]}"
+            for k in knowledge[:OCC_MAX_KNOWLEDGE_ITEMS] if k.get("text")
         )
-        if taught:
-            system += (
-                "\n\nThe member has taught you the following — treat it as authoritative "
-                f"and lead with it when relevant:\n{taught}"
-            )
 
         messages = []
-        for turn in history[-8:]:
+        for turn in history[-OCC_MAX_HISTORY_TURNS:]:
             role = "assistant" if turn.get("role") == "occ" else "user"
-            text = str(turn.get("text", "")).strip()
+            text = str(turn.get("text", "")).strip()[:OCC_MAX_HISTORY_CHARS]
             if text:
                 messages.append({"role": role, "content": text})
+
+        # The per-field caps stop any ONE runaway value; this stops them adding
+        # up. Twenty taught items at their own cap is 40,000 characters on its
+        # own, which is the whole budget before the voice prompt is even counted
+        # — so a cap per field was never going to be enough by itself.
+        #
+        # Trimmed in order of what costs the member least: the oldest turns of a
+        # conversation they can still see on screen, then the taught knowledge
+        # they can re-teach, then the shorthand. The message they just typed is
+        # never touched — it is the thing they asked for.
+        trimmed = 0
+        room = (OCC_MAX_TOTAL_CHARS - len(fixed) - len(prompt)
+                - len(ACRO_INTRO) - len(TAUGHT_INTRO))
+        while messages and sum(len(m["content"]) for m in messages) + len(acro) + len(taught) > room:
+            messages.pop(0)
+            trimmed += 1
+        spare = room - sum(len(m["content"]) for m in messages)
+        if len(acro) + len(taught) > spare:
+            taught = taught[:max(0, spare - len(acro))]
+        if len(acro) > spare:
+            acro = acro[:max(0, spare)]
+            taught = ""
+
+        system = fixed
+        if acro:
+            system += ACRO_INTRO + acro
+        if taught:
+            system += TAUGHT_INTRO + taught
+
         # Optional image (a data URL) for vision tasks — e.g. "detect gym gear from a photo".
         image = data.get("image")
         if isinstance(image, str) and image.startswith("data:") and "," in image:
             header, b64 = image.split(",", 1)
             media_type = header.split(";")[0].split(":")[-1] or "image/jpeg"
+            # Both checks are the same lesson twice: a client-supplied size with
+            # no ceiling is a bill, and a client-supplied media type passed
+            # straight to an API is a rejection you can't read. Refuse here,
+            # by name, before the model runs and before anything is charged.
+            if len(b64) > OCC_MAX_IMAGE_B64:
+                return Response(
+                    {"detail": "That image is too big — send one under about "
+                               f"{OCC_MAX_IMAGE_B64 // 1_000_000}MB.",
+                     "limits": occ_limits()},
+                    status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+            if media_type not in OCC_IMAGE_TYPES:
+                return Response(
+                    {"detail": f"OCC can't read {media_type} — send a JPEG, PNG, GIF or WebP.",
+                     "limits": occ_limits()},
+                    status=status.HTTP_400_BAD_REQUEST)
             messages.append({"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
                 {"type": "text", "text": prompt},
@@ -270,6 +346,11 @@ class OccChatView(APIView):
                # A run that cost nothing has to say so, or the member assumes
                # they were charged and stops asking.
                "free_prompt": covered_free,
+               # Say when history was dropped to stay inside the size budget.
+               # Silently forgetting the start of a conversation is worse than
+               # forgetting it out loud.
+               **({"history_trimmed": trimmed} if trimmed else {}),
+               "limits": occ_limits(),
                "daily_prompts_left": daily_now, "daily_prompts": allowance}
 
         # A reply you can't take anywhere is a dead end with a scrollbar. Asked
