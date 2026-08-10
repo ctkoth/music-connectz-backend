@@ -656,6 +656,61 @@ _ZODIAC_CUTOFFS = [
 ]
 
 
+# ---- The age wall.
+#
+# Two surfaces in this app are adult-only under Play's Families policy: rating
+# people on looks, and collecting sexual orientation. The app also carries a
+# "Teen-safe" badge on the InstrumentZ screens, so teens are an intended
+# audience — and a label is not a boundary.
+#
+# `Profile.verified_18plus` already existed, is already set properly by Stripe
+# Identity from a government ID, and its own comment claimed it "gates money
+# betting + adult content". It gated nothing: thirteen references across the
+# codebase, every one of them setting it or displaying it, none consulting it
+# before allowing anything. This is where it starts being read.
+#
+# Corey's call on the unknown case: a member with no birthday and no
+# verification is treated as an ADULT. Most of the existing user base has
+# neither, and locking them out of what they use today to satisfy a form would
+# punish real people for a gap in our own data. What we wall is what we
+# actually know — a stated age of 13-17.
+TEEN_MIN_AGE, ADULT_AGE = 13, 18
+
+
+def profile_is_minor(p):
+    """The wall, evaluated against a Profile — including one not yet saved.
+
+    Takes the profile rather than the user so a save can be judged on the state
+    it is ABOUT to have. Reading the stored row instead let a member set a teen
+    birthday and an orientation in the same request and keep both, because at
+    the top of that request they were still an unknown age.
+    """
+    if p.verified_18plus:
+        return False
+    age = profile_age(p)
+    return age is not None and TEEN_MIN_AGE <= age < ADULT_AGE
+
+
+def is_minor(user):
+    """True only when we KNOW this member is under 18.
+
+    Knowing means a stated birthday in the teen range. Absence of information is
+    not evidence of youth, so an unknown age is not a minor — see the note
+    above. ID verification always wins over a self-reported birthday, in the
+    permissive direction only: a verified adult is an adult whatever the
+    birthday field says, because the ID outranks the typing.
+    """
+    return profile_is_minor(getattr(user, "mcz_profile", None) or profile_for(user))
+
+
+def adult_only_reason(user):
+    """Why this surface is closed to them, in words, or "" when it's open."""
+    if not is_minor(user):
+        return ""
+    return ("This part of Music ConnectZ is 18+. Everything else — posting, "
+            "collabs, BattleZ, the coach, getting paid — stays open.")
+
+
 def zodiac_for(birthday):
     """Western zodiac sign from a YYYY-MM-DD birthday, or "" if unparseable."""
     try:

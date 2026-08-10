@@ -15,6 +15,9 @@ from rest_framework.views import APIView
 from .models import (
     apply_post_rating,
     AttractivenessRating,
+    adult_only_reason,
+    is_minor,
+    profile_is_minor,
     Face,
     FaceRating,
     OverallRating,
@@ -196,6 +199,14 @@ class AttractivenessRateView(APIView):
             return Response({"detail": "unknown user"}, status=status.HTTP_404_NOT_FOUND)
         if target.id == request.user.id:
             return Response({"detail": "can't rate yourself"}, status=status.HTTP_400_BAD_REQUEST)
+        # Both ends of the transaction have to be adults. A minor must not rate
+        # anyone on looks, and a minor must not BE rated — the second is the one
+        # that matters most and the one a rater-only check would miss.
+        for who in (request.user, target):
+            reason = adult_only_reason(who)
+            if reason:
+                return Response({"detail": reason, "adult_only": True},
+                                status=status.HTTP_403_FORBIDDEN)
 
         _, created = AttractivenessRating.objects.update_or_create(
             rater=request.user, target=target, defaults={"score": score}
@@ -325,6 +336,10 @@ def clean_substances(value):
 
 
 # ---- Cross-user profiles ----
+# Adult-only under Play's Families policy. Kept next to PROFILE_FIELDS so a new
+# sensitive field is added one line above the list that decides who may set it.
+ADULT_ONLY_PROFILE_FIELDS = ("attracted_to", "asexual")
+
 PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign",
                   "nationalities", "regions", "substances", "sober",
                   "attracted_to", "asexual", "traits", "personas", "links",
@@ -674,16 +689,35 @@ class ProfileView(APIView):
                      "char_limit": cap},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+        # Sexual orientation is the other adult-only surface. A minor is not
+        # refused the whole profile save over it — that would lose everything
+        # else they just typed — the two fields are simply dropped, and the
+        # response says so rather than pretending they were stored.
+        # Write first, judge after. The wall has to be evaluated against the
+        # profile as it WILL be saved: judging the stored row let a member set a
+        # teen birthday and an orientation in one request and keep both, because
+        # at the top of that request their age was still unknown.
         for f in PROFILE_FIELDS:
             if f in d:
                 setattr(p, f, clean_substances(d[f]) if f == "substances" else d[f])
+        minor = profile_is_minor(p)
+        blocked = [f for f in ADULT_ONLY_PROFILE_FIELDS if minor and f in d]
+        if minor:
+            # Clear anything set before the wall existed, or before a birthday
+            # was filled in. Leaving it stored would mean the disclosure on the
+            # Play form is still true for accounts we now say it isn't.
+            p.attracted_to, p.asexual = [], False
         # Sober by choice is a claim, not the absence of one. It is mutually
         # exclusive with declaring use — holding both would be incoherent on a
         # filter somebody relies on to find people living the same way.
         if p.sober:
             p.substances = {}
         p.save()
-        return Response(_profile_full(p, request))
+        out = _profile_full(p, request)
+        if blocked:
+            out["not_saved"] = blocked
+            out["not_saved_reason"] = adult_only_reason(request.user)
+        return Response(out)
 
 
 class ProfileAvatarView(APIView):
@@ -750,6 +784,16 @@ class ProfileRateView(APIView):
             return Response({"detail": "unknown user"}, status=status.HTTP_404_NOT_FOUND)
         if target.id == request.user.id:
             return Response({"detail": "can't rate yourself"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Same wall, second door. This endpoint takes a `dimension` and quietly
+        # reaches the same table — a check on the other view alone would have
+        # been a lock on the front door with the back one open.
+        if dimension != "overall":
+            for who in (request.user, target):
+                reason = adult_only_reason(who)
+                if reason:
+                    return Response({"detail": reason, "adult_only": True},
+                                    status=status.HTTP_403_FORBIDDEN)
 
         model = OverallRating if dimension == "overall" else AttractivenessRating
         _, created = model.objects.update_or_create(rater=request.user, target=target, defaults={"score": score})
