@@ -3155,3 +3155,119 @@ class OccFile(models.Model):
 
     def __str__(self):
         return f"{self.project}/{self.path}"
+
+
+# ---------------------------------------------------------------------------
+# GameZ — games built here, playable here
+# ---------------------------------------------------------------------------
+
+def game_bundle_path(instance, filename):
+    """Built games are namespaced per member, like every other upload."""
+    return f"games/{instance.user_id}/{instance.id or 'new'}/{filename}"
+
+
+class Game(models.Model):
+    """A game a member built in OCC, and the bundle you can actually play.
+
+    GameZ has been a tab in `occ_spec.py` and a routing-table entry
+    (`EXPORT_ROUTES["game"] -> gamez:mine`) with nothing behind either of them.
+    This is the thing they were pointing at.
+
+    Web games, deliberately — the code lives in an `OccFile` project, the build
+    runs in the sandbox, and the output is static files served in a sandboxed
+    frame. Unity and Unreal need licence seats and toolchains measured in tens of
+    gigabytes, which is a different product; a game nobody can play without
+    leaving the app is the dead end this codebase keeps closing.
+
+    Assets are `Upload` rows via `GameAsset` rather than a second file system,
+    so a member's sprites and audio count against the storage quota they already
+    have and `storage_used_bytes` keeps telling the truth.
+    """
+    STATUS_DRAFT = "draft"          # code exists, never built
+    STATUS_BUILDING = "building"
+    STATUS_PLAYABLE = "playable"    # a bundle exists and can be served
+    STATUS_FAILED = "failed"        # the build ran and didn't produce one
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "Draft"), (STATUS_BUILDING, "Building"),
+        (STATUS_PLAYABLE, "Playable"), (STATUS_FAILED, "Failed"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="games")
+    title = models.CharField(max_length=160)
+    # Validated against occ_spec.GAME_GENRES rather than a choices= list, so the
+    # taxonomy stays in the one file that already defines it. A second copy here
+    # is how 17 advertised languages ended up with 12 runners.
+    genre = models.CharField(max_length=40, blank=True, default="")
+    subgenre = models.CharField(max_length=80, blank=True, default="")
+    description = models.TextField(blank=True, default="")
+
+    # Which OCC project holds the source. A name, matching OccFile.project —
+    # the code is those rows, and the game is what a build turns them into.
+    project = models.CharField(max_length=80, default="main")
+
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES,
+                              default=STATUS_DRAFT)
+    # The built bundle: a zip of static files. Stored rather than rebuilt on
+    # demand because a build costs sandbox seconds and a play should not.
+    bundle = models.FileField(upload_to=game_bundle_path, blank=True, null=True)
+    bundle_bytes = models.PositiveBigIntegerField(default=0)
+    entry = models.CharField(max_length=200, default="index.html")
+    build_detail = models.TextField(blank=True, default="")
+    built_at = models.DateTimeField(null=True, blank=True)
+
+    plays = models.PositiveIntegerField(default=0)
+    # Private until the member says otherwise — the same rule OccOutput follows.
+    shared_post = models.ForeignKey("Post", on_delete=models.SET_NULL, null=True,
+                                    blank=True, related_name="games")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+        indexes = [models.Index(fields=["user", "status"])]
+
+    def __str__(self):
+        return f"{self.title} <{self.user}>"
+
+    @property
+    def playable(self):
+        """Whether there is actually something to play.
+
+        Computed from the bundle, never from `status` alone — a status that says
+        playable with no file behind it is a Play button that lies, which is the
+        failure this whole tab is being built to stop repeating.
+        """
+        return bool(self.status == self.STATUS_PLAYABLE and self.bundle)
+
+    @property
+    def item_key(self):
+        """Where the game is rated and commented — or None until it's shared."""
+        return f"post:{self.shared_post_id}" if self.shared_post_id else None
+
+
+class GameAsset(models.Model):
+    """One binary asset belonging to a game — a sprite, a sound, a font.
+
+    A join rather than a second file model. `Upload` already has the FileField,
+    the size accounting and the per-member namespacing, and `storage_used_bytes`
+    already sums it; a parallel table would mean a member's game assets did not
+    count against the quota their tier actually sells them.
+    """
+    game = models.ForeignKey(Game, on_delete=models.CASCADE, related_name="assets")
+    upload = models.ForeignKey(Upload, on_delete=models.CASCADE,
+                               related_name="game_assets")
+    # Where it lands in the built game, relative to the bundle root. Normalised
+    # through the same gate as OccFile — this becomes a real path at build time.
+    path = models.CharField(max_length=200)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("path",)
+        constraints = [
+            models.UniqueConstraint(fields=["game", "path"],
+                                    name="game_asset_unique_path"),
+        ]
+
+    def __str__(self):
+        return f"{self.game_id}:{self.path}"

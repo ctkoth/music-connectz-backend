@@ -45,6 +45,7 @@ from .occ_taskz import (OccSettingsView, OccSpecView, OccTaskDetailView,
                         OccTaskUndoView, OccTasksView)
 from .occ_run import OccRunView
 from .occ_agent_view import OccAgentView
+from .gamez import GameAssetView, GameDetailView, GamezView
 from .occ_suggest import OccSuggestView
 from .releasez import (CollabDistributeView, PostDistributeView, ReleaseDetailView,
                        ReleaseSubmitView, ReleasesView)
@@ -139,6 +140,11 @@ urlpatterns = [
     # The agent loop — OCC reading and changing a project, not describing it.
     # GET states the ceiling before POST spends anything.
     path("occ/agent/", OccAgentView.as_view(), name="economy-occ-agent"),
+    # GameZ — the tab occ_spec has advertised, and EXPORT_ROUTES has pointed
+    # at, since before anything served either.
+    path("gamez/", GamezView.as_view(), name="economy-gamez"),
+    path("gamez/<int:pk>/", GameDetailView.as_view(), name="economy-game"),
+    path("gamez/<int:pk>/assets/", GameAssetView.as_view(), name="economy-game-assets"),
     # SuggestionZ proposes and waits; AutomationZ drops the tap on what's safe.
     path("occ/suggest/", OccSuggestView.as_view(), name="economy-occ-suggest"),
     path("occ/workz/", OccWorkzView.as_view(), name="economy-occ-workz"),
