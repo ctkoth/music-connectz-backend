@@ -219,6 +219,30 @@ class BillingIsHonest(Base):
         self.assertGreater(out["cost_cents"], 0)
         self.assertEqual(wallet_for(self.user).promptz, before - out["cost_cents"])
 
+    def test_the_wallet_is_debited_the_price_not_the_cost(self):
+        # The distinction that stops a 20% loss: what Anthropic billed and what
+        # the member pays are two numbers, and the wallet must see the second.
+        from apps.economy.catalog import ai_run_charge_cents, ai_run_cost_cents
+        before = wallet_for(self.user).promptz
+        out = self.run_with([reply([text_block("done")], tokens=1_000_000)])
+        spent = before - wallet_for(self.user).promptz
+        self.assertEqual(spent, out["cost_cents"])
+        self.assertGreater(spent, out["served_cents"])
+        self.assertEqual(out["served_cents"],
+                         ai_run_cost_cents(out["engine"], out["usage"]))
+        self.assertEqual(spent, ai_run_charge_cents(out["engine"], out["usage"]))
+
+    def test_the_budget_gate_measures_what_the_member_pays(self):
+        # If the gate watched cost while the button promised charge, a run could
+        # bill past the ceiling the member was shown.
+        from apps.economy.catalog import ai_run_charge_cents
+        huge = reply([tool_block("glob", {})], stop_reason="tool_use",
+                     tokens=100_000_000)
+        out = self.run_with([huge, reply([text_block("more")])])
+        self.assertEqual(out["stopped"], "budget")
+        self.assertGreaterEqual(
+            ai_run_charge_cents(out["engine"], out["usage"]), out["max_cents"])
+
     def test_a_run_that_reached_nothing_is_not_billed(self):
         # Same rule vocalcoach.py bills on: no usable result, no charge.
         before = wallet_for(self.user).promptz

@@ -272,8 +272,14 @@ class PromptzBuyView(APIView):
         if w.money_cents < pay_cents:
             return Response({"detail": "Not enough balance — add funds first.", "cost_cents": pay_cents},
                             status=status.HTTP_402_PAYMENT_REQUIRED)
+        from .catalog import PROMPTZ_BONUS
+
         w.money_cents -= pay_cents
-        granted = round(pay_cents * 1.25)  # buy at 80% of face value
+        # Buy at 80% of face value. The rate is named in catalog.py rather than
+        # written here, because it is what makes pass-through AI pricing a loss
+        # — and a pricing relationship only one file can see is one nothing else
+        # can price against.
+        granted = round(pay_cents * PROMPTZ_BONUS)
         w.promptz = (w.promptz or 0) + granted
         w.save(update_fields=["money_cents", "promptz", "updated_at"])
         Transaction.objects.create(

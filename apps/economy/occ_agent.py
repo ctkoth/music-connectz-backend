@@ -40,6 +40,7 @@ import logging
 from .catalog import (
     ai_model_for,
     ai_run_budget,
+    ai_run_charge_cents,
     ai_run_cost_cents,
 )
 from .models import (
@@ -167,7 +168,9 @@ def run_agent(user, prompt, *, project="main", model_key=None,
     text = ""
 
     while turns < MAX_TURNS:
-        spent = ai_run_cost_cents(model_key, total)
+        # Charged, not cost. The ceiling is the number on the button, so the gate
+        # has to measure the same thing the member's wallet will.
+        spent = ai_run_charge_cents(model_key, total)
         if spent >= max_cents:
             # Checked BEFORE the call, the way the API's own session budgets
             # work: the ceiling bounds new work, so the last call completes and
@@ -251,16 +254,20 @@ def run_agent(user, prompt, *, project="main", model_key=None,
     else:
         stopped = "max_turns"
 
+    # Two numbers on purpose. `cost` is what Anthropic billed the platform;
+    # `price` is what the member pays for it. The member is charged the price;
+    # the cost is kept so a run can be audited against the real bill later.
     cost = ai_run_cost_cents(model_key, total)
+    price = ai_run_charge_cents(model_key, total)
     charged = 0
-    if cost:
+    if price:
         remaining = charge_ai_usage(
-            user, cost, note=f"OCC agent · {spec['name']} · {turns} turns",
+            user, price, note=f"OCC agent · {spec['name']} · {turns} turns",
             count_daily=False)
         # None means they couldn't cover it. The work is already done and the
         # tokens are already spent, so the honest thing is to record it and say
         # so rather than pretend the run didn't happen.
-        charged = cost if remaining is not None else 0
+        charged = price if remaining is not None else 0
 
     task.status = OccTask.STATUS_DONE if stopped in ("end_turn", "budget") else OccTask.STATUS_FAILED
     task.progress = 100 if stopped == "end_turn" else task.progress
@@ -274,7 +281,12 @@ def run_agent(user, prompt, *, project="main", model_key=None,
         "stopped": stopped,
         "turns": turns,
         "changed": sorted(p for p in changed if p),
+        # What left the member's wallet. Named `cost_cents` because every other
+        # AI surface in this app reports it under that key and the client reads
+        # one shape — but it is the PRICE, and `served_cents` beside it is what
+        # the run actually cost to serve.
         "cost_cents": charged,
+        "served_cents": cost,
         "max_cents": max_cents,
         "engine": model_key,
         "engine_name": spec["name"],

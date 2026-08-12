@@ -246,13 +246,44 @@ CACHE_WRITE_MULTIPLIER = 1.25
 # Cheapest first — the order the picker renders, and the order a fallback walks.
 AI_MODEL_ORDER = ("haiku", "sonnet", "opus", "fable")
 
-# The most a single agent run may spend, by tier, in PromptZ (1 PromptZ = 1c).
+# PromptZ are sold at a bonus: `pay_cents * PROMPTZ_BONUS` credits. It lived as a
+# bare 1.25 inside PromptzBuyView, which is how its effect on agent pricing went
+# unnoticed — a pricing relationship nobody could see from the code that priced
+# against it. Named here so the two can be reasoned about together.
+PROMPTZ_BONUS = 1.25
+
+# What one PromptZ actually cost the member, in cents. The number that makes
+# pass-through pricing a loss: sell at 0.8c, owe Anthropic 1c.
+PROMPTZ_CENTS_PER_UNIT = 1 / PROMPTZ_BONUS
+
+# What an agent run is CHARGED, as a multiple of what it COST to serve.
+#
+# This exists because pass-through pricing loses money here, and it took the
+# arithmetic to see it. PromptZ are sold at a 25% bonus — `PromptzBuyView` grants
+# `pay_cents * 1.25`, so 80c buys 100 PromptZ. Charge a run its raw cost and the
+# platform collects 80c for every 100c it owes Anthropic: a 20% loss that grows
+# with usage, which is precisely backwards.
+#
+# So 1.25 is BREAK-EVEN, not margin — it recovers the bonus and funds nothing.
+# 1.6 collects 128c per 100c of cost (1.6 x 0.8), a ~28% net margin, which is
+# what pays for the platform's own runs rather than merely surviving members'.
+#
+# The rest of the AI surface — chat, translation, the small per-message actions —
+# keeps the plain bonus and stays pass-through. This multiplier applies to agent
+# runs only, because agent runs are the only place where one action can cost
+# real money.
+AGENT_PRICE_MULTIPLIER = 1.6
+
+# The most a single agent run may CHARGE, by tier, in PromptZ (1 PromptZ = 1c).
 #
 # This is a CEILING the member is told before they press anything — not an
 # estimate. An estimate of a thing nobody can predict (how many turns a task
 # takes) is a guess wearing a number's clothes; a ceiling is a promise. The run
 # stops when it reaches this, and the member is charged what it actually used,
 # which is nearly always less.
+#
+# Charged, not cost: this is the number on the button, so it has to be the number
+# that leaves the member's wallet.
 AI_RUN_BUDGET_CENTS = {
     TIER_FREE: 25,          # a small fix, or a look around a project
     TIER_PREMIUM: 200,
@@ -298,8 +329,26 @@ def ai_run_cost_cents(model_key, usage):
     return max(1, math.ceil(cents))
 
 
+def ai_run_charge_cents(model_key, usage):
+    """What the member PAYS for a run, in whole cents — cost plus margin.
+
+    Deliberately a second function rather than a parameter on the first. Cost is
+    a fact about what Anthropic billed; charge is a decision about what to sell
+    it for. Collapsing the two into one number is exactly how a 25% PromptZ bonus
+    quietly turned every agent run into a 20% loss — nothing in the code
+    distinguished the money owed from the money taken, so nothing could disagree.
+
+    Never less than the cost. A run cheap enough to round to nothing still can't
+    charge below what it cost to serve.
+    """
+    cost = ai_run_cost_cents(model_key, usage)
+    if cost <= 0:
+        return 0
+    return max(cost, math.ceil(cost * AGENT_PRICE_MULTIPLIER))
+
+
 def ai_run_budget(tier):
-    """The spend ceiling for this tier's agent runs."""
+    """The charge ceiling for this tier's agent runs."""
     return {"max_cents": AI_RUN_BUDGET_CENTS.get(tier, AI_RUN_BUDGET_CENTS[TIER_FREE])}
 
 

@@ -14,11 +14,14 @@ from types import SimpleNamespace
 from django.test import TestCase
 
 from apps.economy.catalog import (
+    AGENT_PRICE_MULTIPLIER,
     AI_MODELS,
     AI_MODEL_ORDER,
     AI_RUN_BUDGET_CENTS,
     CACHE_READ_MULTIPLIER,
+    PROMPTZ_CENTS_PER_UNIT,
     ai_run_budget,
+    ai_run_charge_cents,
     ai_run_cost_cents,
 )
 from apps.economy.models import TIER_FREE, TIER_PREMIUM, TIER_STATZ
@@ -121,6 +124,80 @@ class TheArithmeticIsRight(TestCase):
         # Same rule as ai_model_for: a lapsed or renamed model must not 500.
         self.assertGreater(
             ai_run_cost_cents("no-such-model", usage(input_tokens=1_000_000)), 0)
+
+
+class ARunPaysForItself(TestCase):
+    """The tests that would have caught a 20% loss on every agent run.
+
+    PromptZ sell at a 25% bonus (`PromptzBuyView`: 80c buys 100), so charging a
+    run its raw cost collects 80c for every 100c owed to Anthropic. Nothing in
+    the code distinguished the money owed from the money taken, so nothing could
+    disagree with it.
+    """
+
+    def test_a_run_never_charges_less_than_it_cost_to_serve(self):
+        work = usage(input_tokens=500_000, cache_read_input_tokens=200_000,
+                     output_tokens=40_000)
+        for key in AI_MODEL_ORDER:
+            with self.subTest(model=key):
+                self.assertGreater(ai_run_charge_cents(key, work),
+                                   ai_run_cost_cents(key, work))
+
+    def test_the_margin_actually_clears_the_promptz_bonus(self):
+        # 1.25 is BREAK-EVEN, not margin: 0.8 x 1.25 = 1.0 recovers the bonus
+        # and funds nothing. Anything at or below it is the bug again.
+        self.assertGreater(AGENT_PRICE_MULTIPLIER, 1.25)
+
+    def test_the_platform_takes_more_than_it_owes(self):
+        # The arithmetic that matters, end to end: a member buys PromptZ at 80c
+        # per 100, spends them on a run, and the platform must come out ahead of
+        # what Anthropic charged.
+        work = usage(input_tokens=1_000_000, output_tokens=100_000)
+        cost = ai_run_cost_cents("opus", work)
+        promptz_charged = ai_run_charge_cents("opus", work)
+        cash_received = promptz_charged * PROMPTZ_CENTS_PER_UNIT
+        self.assertGreater(cash_received, cost,
+                           "the platform is paying to serve this run")
+
+    def test_a_run_that_cost_nothing_charges_nothing(self):
+        self.assertEqual(ai_run_charge_cents("opus", usage()), 0)
+
+    def test_the_charge_is_a_whole_number_of_promptz(self):
+        work = usage(input_tokens=12_345, output_tokens=678)
+        charge = ai_run_charge_cents("opus", work)
+        self.assertIsInstance(charge, int)
+        self.assertGreaterEqual(charge, 1)
+
+    def test_an_unknown_model_still_charges_above_cost(self):
+        work = usage(input_tokens=1_000_000)
+        self.assertGreater(ai_run_charge_cents("no-such-model", work),
+                           ai_run_cost_cents("no-such-model", work))
+
+
+class TheBonusStillWorks(TestCase):
+    """The 1.25 moved out of PromptzBuyView into catalog.py. It has to still buy
+    what it bought — a refactor that quietly changed a price would be worse than
+    the bug it was clearing up after."""
+
+    def test_eighty_cents_still_buys_a_hundred_promptz(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+
+        from apps.economy.models import membership_for, wallet_for
+
+        user = get_user_model().objects.create_user("buyer", "b@e.com", "hunter2hunter2")
+        membership_for(user)
+        w = wallet_for(user)
+        w.money_cents = 1_000
+        w.save()
+        client = APIClient()
+        client.force_authenticate(user)
+        resp = client.post("/api/economy/promptz/buy/", {"cents": 80}, format="json")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["granted"], 100)
+
+    def test_the_named_rate_matches_what_a_promptz_costs(self):
+        self.assertAlmostEqual(PROMPTZ_CENTS_PER_UNIT, 0.8)
 
 
 class TheCeilingIsARealOne(TestCase):
