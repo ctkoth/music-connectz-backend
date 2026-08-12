@@ -46,6 +46,7 @@ from .occ_taskz import (OccSettingsView, OccSpecView, OccTaskDetailView,
 from .occ_run import OccRunView
 from .occ_agent_view import OccAgentView
 from .gamez import GameAssetView, GameDetailView, GamezView
+from .gamez_build import GameBuildView, GamePlayView
 from .occ_suggest import OccSuggestView
 from .releasez import (CollabDistributeView, PostDistributeView, ReleaseDetailView,
                        ReleaseSubmitView, ReleasesView)
@@ -145,6 +146,11 @@ urlpatterns = [
     path("gamez/", GamezView.as_view(), name="economy-gamez"),
     path("gamez/<int:pk>/", GameDetailView.as_view(), name="economy-game"),
     path("gamez/<int:pk>/assets/", GameAssetView.as_view(), name="economy-game-assets"),
+    path("gamez/<int:pk>/build/", GameBuildView.as_view(), name="economy-game-build"),
+    # The bundle. Every response carries a CSP sandbox — see gamez_build.py.
+    path("gamez/<int:pk>/play/", GamePlayView.as_view(), name="economy-game-play"),
+    path("gamez/<int:pk>/play/<path:path>", GamePlayView.as_view(),
+         name="economy-game-play-file"),
     # SuggestionZ proposes and waits; AutomationZ drops the tap on what's safe.
     path("occ/suggest/", OccSuggestView.as_view(), name="economy-occ-suggest"),
     path("occ/workz/", OccWorkzView.as_view(), name="economy-occ-workz"),

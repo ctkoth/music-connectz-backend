@@ -3206,6 +3206,12 @@ class Game(models.Model):
     # the code is those rows, and the game is what a build turns them into.
     project = models.CharField(max_length=80, default="main")
 
+    # Blank means "there is nothing to build" — the project's files ARE the
+    # game, which is true of most small web games (an index.html, a main.js and
+    # some sprites). That case is zipped directly and costs nothing. A command
+    # here means a real build, which needs the sandbox and is charged for it.
+    build_command = models.CharField(max_length=200, blank=True, default="")
+
     status = models.CharField(max_length=10, choices=STATUS_CHOICES,
                               default=STATUS_DRAFT)
     # The built bundle: a zip of static files. Stored rather than rebuilt on
