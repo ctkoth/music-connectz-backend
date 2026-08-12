@@ -703,6 +703,30 @@ def is_minor(user):
     return profile_is_minor(getattr(user, "mcz_profile", None) or profile_for(user))
 
 
+def third_party_ads_allowed(user):
+    """Whether this member may be shown a third-party ad frame.
+
+    The DECISION, deliberately, not the input. Nothing outside this function
+    needs to know a member's age to answer it, and a client that re-derives
+    "under 18" for itself is a second copy of a policy rule that Google audits
+    — the kind that drifts and is only noticed when an app is pulled.
+
+    Why the rule exists: `play/data-safety.md` answers "Committed to the Play
+    Families Policy: Yes", and that answer was earned by hard-walling the adult
+    surfaces. Teens are an intended audience (RapZ carries a "Teen-safe" badge),
+    and the Families Policy requires ads shown to them to come from a
+    Play-certified SDK. An arbitrary third-party frame is not one and cannot
+    attest to being one, so it is not shown to anyone we know to be a minor.
+
+    Unknown age counts as an adult here, matching `is_minor` and the decision
+    recorded in `play/data-safety.md`. That is the one line to tighten if the
+    Families exposure ever needs to be reduced further — and tightening it here
+    changes every surface at once, which is the whole point of it living in one
+    function.
+    """
+    return not is_minor(user)
+
+
 def adult_only_reason(user):
     """Why this surface is closed to them, in words, or "" when it's open."""
     if not is_minor(user):
@@ -1474,7 +1498,22 @@ class DirectZWork(models.Model):
     media_url = models.CharField(max_length=500, blank=True, default="")   # uploaded video
     media_type = models.CharField(max_length=60, blank=True, default="")
     contributors = models.JSONField(default=list, blank=True)  # [{name, tier, skills:[{name, price}]}]
-    ai_rating = models.FloatField(default=0)                    # 0-10 AI seed
+    # NULL means "not rated", and that is a real state rather than a gap.
+    #
+    # This used to default to 0 and be filled by `directz_ai_rating`, which
+    # called itself a craft estimate and measured contributor count, description
+    # length and money spent. It taught members to pad the form. It is gone; the
+    # score now comes from a model that watches the video (`directz_craft.py`).
+    #
+    # When the video can't be watched — no key, an unreadable container, or a
+    # MovieZ far past the 14MB the inline path can carry — the work keeps NO
+    # rating and `rating_note` says why. An empty rating invites a real one from
+    # members; a fabricated one ends the question.
+    ai_rating = models.FloatField(null=True, blank=True)
+    # The dimensions behind the score — framing, editing, lighting, sound,
+    # story — plus the verdict and what to fix. See directz_craft.CRAFT_SCORES.
+    craft = models.JSONField(default=dict, blank=True)
+    rating_note = models.CharField(max_length=200, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -1508,8 +1547,19 @@ def directz_band_for(sec):
 
 
 def directz_ai_rating(work):
-    """A deterministic AI craft estimate (0-10) from how complete & staffed the
-    work is: contributor breadth, skills brought, description, and duration fit."""
+    """DEPRECATED — do not call this for a rating. See `directz_craft.py`.
+
+    It called itself "a deterministic AI craft estimate" and measured contributor
+    count, skills listed, description length, money spent and duration fit. None
+    of that is craft: a weak video with five contributors and a padded
+    description scored ~8, a good one-person video with a terse description
+    scored ~4. It taught members to pad the form, which is the failure
+    `CLAUDE.md`'s third rule names.
+
+    Kept only because a handful of old rows were seeded by it and the number is
+    still on them; nothing should produce a NEW one. A work whose video cannot be
+    watched now carries no rating at all, which is the honest answer.
+    """
     contribs = work.get("contributors") if isinstance(work, dict) else work.contributors
     desc = work.get("description") if isinstance(work, dict) else work.description
     dur = work.get("duration_sec") if isinstance(work, dict) else work.duration_sec
@@ -1532,13 +1582,21 @@ def directz_ai_rating(work):
 
 
 def directz_display_rating(work):
-    """Real-user median once >=3 rate; otherwise the AI seed. Returns
-    {rating, source, ai_rating, user_median, count}."""
+    """Real-user median once >=3 rate; otherwise the AI score, if there is one.
+
+    Three states rather than two, because "nobody has rated this and the model
+    couldn't watch it" is a real answer and it used to be reported as a number.
+    `source` is "users", "ai", or None — and when it is None, `rating` is None
+    too. Callers must render the absence rather than reaching for a zero.
+    """
     scores = list(work.ratings.values_list("score", flat=True))
     user_median = _median(scores)
+    ai = round(work.ai_rating, 1) if work.ai_rating is not None else None
     if len(scores) >= DIRECTZ_MIN_RATERS:
-        return {"rating": user_median, "source": "users", "ai_rating": round(work.ai_rating, 1), "user_median": user_median, "count": len(scores)}
-    return {"rating": round(work.ai_rating, 1), "source": "ai", "ai_rating": round(work.ai_rating, 1), "user_median": user_median, "count": len(scores)}
+        return {"rating": user_median, "source": "users", "ai_rating": ai,
+                "user_median": user_median, "count": len(scores)}
+    return {"rating": ai, "source": "ai" if ai is not None else None,
+            "ai_rating": ai, "user_median": user_median, "count": len(scores)}
 
 
 # ---- Universal social layer (cross-user reactions + comments) ----
@@ -3065,3 +3123,215 @@ class OccOutput(models.Model):
         could open, and an item key nobody can reach collects nothing.
         """
         return f"post:{self.shared_post_id}" if self.shared_post_id else None
+
+
+# ---------------------------------------------------------------------------
+# FileZ — the filesystem OCC can hold between turns
+# ---------------------------------------------------------------------------
+
+def normalize_occ_path(raw):
+    """A member- or model-supplied path, reduced to a safe relative one — or None.
+
+    This is the single gate every file operation goes through, and it returns
+    None rather than raising so a bad path from the MODEL is an error the model
+    reads and retries, not a 500 the member sees.
+
+    What it refuses, and why each one is here rather than assumed:
+
+    * ``..`` anywhere — the whole point. These paths become real files inside a
+      sandbox in Phase 1, so a stored ``../../etc/passwd`` is a traversal that
+      was written to the database weeks earlier and fired later.
+    * Absolute paths and Windows drive letters — they escape the project root
+      the moment they are joined to it.
+    * Backslashes — normalised to ``/`` rather than rejected, because a member
+      pasting a Windows path means the same file, but a separator we don't
+      understand is a segment check we didn't really do.
+    * NUL bytes — they truncate paths in C-level filesystem calls, so a name
+      that looks safe in Python can be a different name on disk.
+    * ``.`` and empty segments — harmless individually, but they mean two rows
+      can name one file, and a uniqueness constraint that can be sidestepped by
+      writing ``src//main.py`` is not a constraint.
+    """
+    from .catalog import OCC_MAX_PATH_CHARS
+
+    text = str(raw or "").strip().replace("\\", "/")
+    if not text or "\x00" in text:
+        return None
+    # Drive letters escape before any segment logic gets a chance.
+    if len(text) > 1 and text[1] == ":":
+        return None
+    segments = []
+    for segment in text.split("/"):
+        if segment in ("", "."):
+            continue            # collapse, don't reject — "src//main.py" is one file
+        if segment == "..":
+            return None         # never resolvable to something inside the root
+        segments.append(segment)
+    if not segments:
+        return None
+    path = "/".join(segments)
+    return path if len(path) <= OCC_MAX_PATH_CHARS else None
+
+
+class OccFile(models.Model):
+    """One file in one of a member's OCC projects.
+
+    Rows rather than real files on purpose. The sandbox is created and destroyed
+    per session, Render's disk is ephemeral, and the frontend deploys itself —
+    so the only place a project can actually live between turns is the database
+    the rest of the app already trusts.
+
+    `path` is always relative and always normalised (see `normalize_occ_path`);
+    it is the join key the sandbox materialises from, so an unchecked one here
+    is a traversal there.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="occ_files")
+    # A plain name, not a foreign key. A project is a namespace, not a thing
+    # with its own settings — and a table whose only column is a name is a table
+    # that has to be kept in step with this one for no gain.
+    project = models.CharField(max_length=80, default="main")
+    path = models.CharField(max_length=200)
+    content = models.TextField(blank=True, default="")
+    # Which task last wrote it, when one did. SET_NULL so pruning the task log
+    # never deletes a member's source.
+    task = models.ForeignKey("OccTask", on_delete=models.SET_NULL, null=True, blank=True,
+                             related_name="files")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("project", "path")
+        constraints = [
+            # One row per file. Without this, two writes racing on the same path
+            # leave two rows and `read` returns whichever the ordering happens
+            # to pick — a file that changes when nobody wrote to it.
+            models.UniqueConstraint(fields=["user", "project", "path"],
+                                    name="occ_file_unique_path"),
+        ]
+        indexes = [models.Index(fields=["user", "project"])]
+
+    def __str__(self):
+        return f"{self.project}/{self.path}"
+
+
+# ---------------------------------------------------------------------------
+# GameZ — games built here, playable here
+# ---------------------------------------------------------------------------
+
+def game_bundle_path(instance, filename):
+    """Built games are namespaced per member, like every other upload."""
+    return f"games/{instance.user_id}/{instance.id or 'new'}/{filename}"
+
+
+class Game(models.Model):
+    """A game a member built in OCC, and the bundle you can actually play.
+
+    GameZ has been a tab in `occ_spec.py` and a routing-table entry
+    (`EXPORT_ROUTES["game"] -> gamez:mine`) with nothing behind either of them.
+    This is the thing they were pointing at.
+
+    Web games, deliberately — the code lives in an `OccFile` project, the build
+    runs in the sandbox, and the output is static files served in a sandboxed
+    frame. Unity and Unreal need licence seats and toolchains measured in tens of
+    gigabytes, which is a different product; a game nobody can play without
+    leaving the app is the dead end this codebase keeps closing.
+
+    Assets are `Upload` rows via `GameAsset` rather than a second file system,
+    so a member's sprites and audio count against the storage quota they already
+    have and `storage_used_bytes` keeps telling the truth.
+    """
+    STATUS_DRAFT = "draft"          # code exists, never built
+    STATUS_BUILDING = "building"
+    STATUS_PLAYABLE = "playable"    # a bundle exists and can be served
+    STATUS_FAILED = "failed"        # the build ran and didn't produce one
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "Draft"), (STATUS_BUILDING, "Building"),
+        (STATUS_PLAYABLE, "Playable"), (STATUS_FAILED, "Failed"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="games")
+    title = models.CharField(max_length=160)
+    # Validated against occ_spec.GAME_GENRES rather than a choices= list, so the
+    # taxonomy stays in the one file that already defines it. A second copy here
+    # is how 17 advertised languages ended up with 12 runners.
+    genre = models.CharField(max_length=40, blank=True, default="")
+    subgenre = models.CharField(max_length=80, blank=True, default="")
+    description = models.TextField(blank=True, default="")
+
+    # Which OCC project holds the source. A name, matching OccFile.project —
+    # the code is those rows, and the game is what a build turns them into.
+    project = models.CharField(max_length=80, default="main")
+
+    # Blank means "there is nothing to build" — the project's files ARE the
+    # game, which is true of most small web games (an index.html, a main.js and
+    # some sprites). That case is zipped directly and costs nothing. A command
+    # here means a real build, which needs the sandbox and is charged for it.
+    build_command = models.CharField(max_length=200, blank=True, default="")
+
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES,
+                              default=STATUS_DRAFT)
+    # The built bundle: a zip of static files. Stored rather than rebuilt on
+    # demand because a build costs sandbox seconds and a play should not.
+    bundle = models.FileField(upload_to=game_bundle_path, blank=True, null=True)
+    bundle_bytes = models.PositiveBigIntegerField(default=0)
+    entry = models.CharField(max_length=200, default="index.html")
+    build_detail = models.TextField(blank=True, default="")
+    built_at = models.DateTimeField(null=True, blank=True)
+
+    plays = models.PositiveIntegerField(default=0)
+    # Private until the member says otherwise — the same rule OccOutput follows.
+    shared_post = models.ForeignKey("Post", on_delete=models.SET_NULL, null=True,
+                                    blank=True, related_name="games")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+        indexes = [models.Index(fields=["user", "status"])]
+
+    def __str__(self):
+        return f"{self.title} <{self.user}>"
+
+    @property
+    def playable(self):
+        """Whether there is actually something to play.
+
+        Computed from the bundle, never from `status` alone — a status that says
+        playable with no file behind it is a Play button that lies, which is the
+        failure this whole tab is being built to stop repeating.
+        """
+        return bool(self.status == self.STATUS_PLAYABLE and self.bundle)
+
+    @property
+    def item_key(self):
+        """Where the game is rated and commented — or None until it's shared."""
+        return f"post:{self.shared_post_id}" if self.shared_post_id else None
+
+
+class GameAsset(models.Model):
+    """One binary asset belonging to a game — a sprite, a sound, a font.
+
+    A join rather than a second file model. `Upload` already has the FileField,
+    the size accounting and the per-member namespacing, and `storage_used_bytes`
+    already sums it; a parallel table would mean a member's game assets did not
+    count against the quota their tier actually sells them.
+    """
+    game = models.ForeignKey(Game, on_delete=models.CASCADE, related_name="assets")
+    upload = models.ForeignKey(Upload, on_delete=models.CASCADE,
+                               related_name="game_assets")
+    # Where it lands in the built game, relative to the bundle root. Normalised
+    # through the same gate as OccFile — this becomes a real path at build time.
+    path = models.CharField(max_length=200)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("path",)
+        constraints = [
+            models.UniqueConstraint(fields=["game", "path"],
+                                    name="game_asset_unique_path"),
+        ]
+
+    def __str__(self):
+        return f"{self.game_id}:{self.path}"

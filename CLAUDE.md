@@ -50,6 +50,52 @@ its resource emoji.
 
 ---
 
+## Substance before the game layer (Corey's third rule)
+
+**Every skill, score and rating must measure the real thing.** The game layer —
+XP, badges, ⭐, medians, leaderboards — is a way of SHOWING reality, never a
+substitute for measuring it. Gamified reality, not gamified nothing.
+
+The test for any number this app displays: **could a member get a good one
+without getting good?** If yes, it is decoration wearing a measurement's
+clothes, and it will be found out by the first person who tries.
+
+Two things in this codebase, doing the opposite of each other:
+
+- **`vocalcoach.py` — substance.** The take is sent to a model that actually
+  listens, and comes back scored on pitch, timing and tone. The number moves
+  because the singing moved. The dimensions come from the instrument's own
+  profile, so a drummer isn't scored on breath.
+- **`models.directz_ai_rating` — the failure.** It calls itself "a deterministic
+  AI craft estimate" and measures contributor count, how many skills were
+  listed, description length, sum of skill prices, and whether the duration fits
+  the band. **None of that is craft.** A bad video with five contributors and a
+  long description scores ~8; a brilliant one-person video with a terse
+  description scores ~4. `directz_display_rating` then shows it as the rating
+  until three real members rate it.
+
+So the rule, in practice:
+
+- A score derived from **form completeness** is not a score. Count of fields
+  filled, length of text, number of collaborators, money spent — none of these
+  are quality, and a rating built on them teaches members to pad.
+- If the real thing genuinely cannot be measured yet, **say what the number is**
+  rather than dressing it up. "Seeded from how staffed this work is" is honest;
+  "AI craft estimate" is not.
+- Prefer no number to a fake one. An empty rating invites a real one; a fake one
+  ends the question.
+- **XP and badges may reward effort. Ratings and skill levels may not.** Turning
+  up is worth something; it is not worth being called good.
+
+### Known violation, not yet fixed
+
+- **`directz_ai_rating`** — see above. It had never run in production because
+  nothing posted to DirectZ; the composer added in `claude/occ-agent-loop` means
+  it now will, at scale. Either it measures the video or it stops calling itself
+  craft.
+
+---
+
 ## Cross-pollination (Corey's crux — applies to everything)
 
 **Nothing is a dead end.** Something created, recorded or noticed in one app

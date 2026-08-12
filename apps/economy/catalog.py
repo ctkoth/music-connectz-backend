@@ -1,4 +1,6 @@
 """Static economy config: SpecZ marketplace, per-tier limits, royalty cashout."""
+import math
+
 from .models import TIER_FREE, TIER_PREMIUM, TIER_STATZ, TIER_DEBUG
 
 # SpecZ marketplace — StatZ-only purchasable metadata/UGC. Prices in cents.
@@ -188,31 +190,167 @@ def ai_cost(model):
 #
 # These are minimums to cover a run, not a margin. If the model prices move,
 # this table moves — it is the only place they are written down.
+# `cost_cents` is the flat price of one CHAT message — a single call, where a
+# fixed price is close enough and simple to state.
+#
+# `in_cents_mtok` / `out_cents_mtok` are the real API rates, in cents per
+# million tokens, and they are what an AGENT RUN is billed on. A run is 20-80
+# calls with a project in context; a flat per-message price there is a promise
+# the data doesn't support, which is the exact failure this codebase keeps
+# having to fix. See `ai_run_cost_cents`.
 AI_MODELS = {
     "haiku": {
         "id": "claude-haiku-4-5", "name": "Haiku", "emoji": "⚡",
         "tier": TIER_FREE, "cost_cents": 2,
+        "in_cents_mtok": 100, "out_cents_mtok": 500,       # $1 / $5
+        # Haiku 4.5 predates both controls and returns 400 for either. Declared
+        # per model rather than assumed, because "every model takes effort" is
+        # true of the three below and false of the one the FREE tier uses — so
+        # assuming it would break the agent for exactly the members least able
+        # to work around it.
+        "effort": False, "task_budget": False,
         "blurb": "Fast and cheap. Plenty for chat, translation and quick answers.",
     },
     "sonnet": {
         "id": "claude-sonnet-5", "name": "Sonnet", "emoji": "🎼",
         "tier": TIER_PREMIUM, "cost_cents": 5,
+        # List price, not the introductory rate. The intro expires and a price
+        # built on it would quietly start losing money on the day it does.
+        "in_cents_mtok": 300, "out_cents_mtok": 1500,      # $3 / $15
+        "effort": True, "task_budget": True,
         "blurb": "The balanced one. Near-flagship work at a fraction of the price.",
     },
     "opus": {
         "id": "claude-opus-5", "name": "Opus", "emoji": "🎹",
         "tier": TIER_PREMIUM, "cost_cents": 8,
+        "in_cents_mtok": 500, "out_cents_mtok": 2500,      # $5 / $25
+        "effort": True, "task_budget": True,
         "blurb": "Flagship. Long-horizon work, code, and anything that has to be right.",
     },
     "fable": {
         "id": "claude-fable-5", "name": "Fable", "emoji": "📖",
         "tier": TIER_STATZ, "cost_cents": 15,
+        "in_cents_mtok": 1000, "out_cents_mtok": 5000,     # $10 / $50
+        "effort": True, "task_budget": True,
         "blurb": "The most capable model there is. The hardest problems, at the highest price.",
     },
 }
 
+# What the API charges for cached input, as a multiple of the normal input rate.
+# Worth modelling rather than ignoring: an agent re-sends the whole project on
+# every turn, so most of a run's input is a cache READ at a tenth of the price.
+# Billing those at full rate would overcharge a long run by roughly ten times.
+CACHE_READ_MULTIPLIER = 0.1
+CACHE_WRITE_MULTIPLIER = 1.25
+
 # Cheapest first — the order the picker renders, and the order a fallback walks.
 AI_MODEL_ORDER = ("haiku", "sonnet", "opus", "fable")
+
+# PromptZ are sold at a bonus: `pay_cents * PROMPTZ_BONUS` credits. It lived as a
+# bare 1.25 inside PromptzBuyView, which is how its effect on agent pricing went
+# unnoticed — a pricing relationship nobody could see from the code that priced
+# against it. Named here so the two can be reasoned about together.
+PROMPTZ_BONUS = 1.25
+
+# What one PromptZ actually cost the member, in cents. The number that makes
+# pass-through pricing a loss: sell at 0.8c, owe Anthropic 1c.
+PROMPTZ_CENTS_PER_UNIT = 1 / PROMPTZ_BONUS
+
+# What an agent run is CHARGED, as a multiple of what it COST to serve.
+#
+# This exists because pass-through pricing loses money here, and it took the
+# arithmetic to see it. PromptZ are sold at a 25% bonus — `PromptzBuyView` grants
+# `pay_cents * 1.25`, so 80c buys 100 PromptZ. Charge a run its raw cost and the
+# platform collects 80c for every 100c it owes Anthropic: a 20% loss that grows
+# with usage, which is precisely backwards.
+#
+# So 1.25 is BREAK-EVEN, not margin — it recovers the bonus and funds nothing.
+# 1.6 collects 128c per 100c of cost (1.6 x 0.8), a ~28% net margin, which is
+# what pays for the platform's own runs rather than merely surviving members'.
+#
+# The rest of the AI surface — chat, translation, the small per-message actions —
+# keeps the plain bonus and stays pass-through. This multiplier applies to agent
+# runs only, because agent runs are the only place where one action can cost
+# real money.
+AGENT_PRICE_MULTIPLIER = 1.6
+
+# The most a single agent run may CHARGE, by tier, in PromptZ (1 PromptZ = 1c).
+#
+# This is a CEILING the member is told before they press anything — not an
+# estimate. An estimate of a thing nobody can predict (how many turns a task
+# takes) is a guess wearing a number's clothes; a ceiling is a promise. The run
+# stops when it reaches this, and the member is charged what it actually used,
+# which is nearly always less.
+#
+# Charged, not cost: this is the number on the button, so it has to be the number
+# that leaves the member's wallet.
+AI_RUN_BUDGET_CENTS = {
+    TIER_FREE: 25,          # a small fix, or a look around a project
+    TIER_PREMIUM: 200,
+    TIER_STATZ: 1_000,
+    TIER_DEBUG: 100_000,
+}
+
+def ai_run_cost_cents(model_key, usage):
+    """What one agent run actually cost, in whole cents, rounded up.
+
+    `usage` is the accumulated token counts for the WHOLE run — every call in
+    the loop added together — not one message. Rounding once at the end matters:
+    rounding each of forty turns up to a cent would bill 40c for a run that
+    genuinely cost 8.
+
+    Accepts either an Anthropic usage object or a plain dict, because the tests
+    use dicts and the loop passes the real thing.
+    """
+    spec = AI_MODELS.get(model_key) or AI_MODELS[AI_MODEL_ORDER[0]]
+
+    def field(name):
+        value = (usage.get(name) if isinstance(usage, dict)
+                 else getattr(usage, name, 0))
+        return int(value or 0)
+
+    fresh_in = field("input_tokens")
+    cache_read = field("cache_read_input_tokens")
+    cache_write = field("cache_creation_input_tokens")
+    out = field("output_tokens")
+
+    micros = (
+        fresh_in * spec["in_cents_mtok"]
+        + cache_read * spec["in_cents_mtok"] * CACHE_READ_MULTIPLIER
+        + cache_write * spec["in_cents_mtok"] * CACHE_WRITE_MULTIPLIER
+        + out * spec["out_cents_mtok"]
+    )
+    cents = micros / 1_000_000
+    if cents <= 0:
+        return 0
+    # Round UP, so a run that cost a fraction of a cent still costs something —
+    # a free tier of tiny runs is a hole somebody eventually drives a loop
+    # through. One cent is the smallest honest charge.
+    return max(1, math.ceil(cents))
+
+
+def ai_run_charge_cents(model_key, usage):
+    """What the member PAYS for a run, in whole cents — cost plus margin.
+
+    Deliberately a second function rather than a parameter on the first. Cost is
+    a fact about what Anthropic billed; charge is a decision about what to sell
+    it for. Collapsing the two into one number is exactly how a 25% PromptZ bonus
+    quietly turned every agent run into a 20% loss — nothing in the code
+    distinguished the money owed from the money taken, so nothing could disagree.
+
+    Never less than the cost. A run cheap enough to round to nothing still can't
+    charge below what it cost to serve.
+    """
+    cost = ai_run_cost_cents(model_key, usage)
+    if cost <= 0:
+        return 0
+    return max(cost, math.ceil(cost * AGENT_PRICE_MULTIPLIER))
+
+
+def ai_run_budget(tier):
+    """The charge ceiling for this tier's agent runs."""
+    return {"max_cents": AI_RUN_BUDGET_CENTS.get(tier, AI_RUN_BUDGET_CENTS[TIER_FREE])}
+
 
 # Which tiers can reach which rung. A tier gets its own rung and every rung
 # below it, so upgrading only ever adds.
@@ -286,6 +424,48 @@ OCC_MAX_IMAGE_B64 = 1_500_000
 # client wrote in its own data URL header and it went straight through to the
 # API — the same passthrough that made the coach refuse every Chrome recording.
 OCC_IMAGE_TYPES = ("image/jpeg", "image/png", "image/gif", "image/webp")
+
+# ---- FileZ: what OCC may keep between turns ----
+#
+# The editor held one string in React state, so nothing OCC wrote survived the
+# reply that wrote it. These are the caps on the store that replaces it.
+#
+# A path cap and a per-file cap stop one runaway write; the per-project counts
+# stop a thousand small ones, which is the same lesson the prompt budget above
+# had to learn twice. Files are member-authored text, so the CONTENT cap is the
+# only one that scales with tier — a Free member gets fewer files, not shorter
+# lines, because a 400-character source file is not a source file.
+OCC_MAX_PATH_CHARS = 200            # "src/apps/BossTake.jsx" and then some
+OCC_MAX_FILE_CHARS = 200_000        # one file; matches modal_sandbox.MAX_SOURCE_CHARS
+OCC_MAX_PROJECT_NAME_CHARS = 80
+OCC_PROJECT_FILES = {               # files per project, by tier
+    TIER_FREE: 40,
+    TIER_PREMIUM: 400,
+    TIER_STATZ: 4_000,
+    TIER_DEBUG: 40_000,
+}
+OCC_PROJECTS = {                    # projects per member, by tier
+    TIER_FREE: 3,
+    TIER_PREMIUM: 20,
+    TIER_STATZ: 200,
+    TIER_DEBUG: 2_000,
+}
+
+
+def occ_file_limits(tier):
+    """The FileZ ceilings for a tier, published so the client states them first.
+
+    Returned per-tier rather than as one table because the member only needs
+    their own numbers, and a screen that renders every tier's limits next to a
+    Save button is telling them about a purchase, not about their file.
+    """
+    return {
+        "path_chars": OCC_MAX_PATH_CHARS,
+        "file_chars": OCC_MAX_FILE_CHARS,
+        "project_name_chars": OCC_MAX_PROJECT_NAME_CHARS,
+        "files_per_project": OCC_PROJECT_FILES.get(tier, OCC_PROJECT_FILES[TIER_FREE]),
+        "projects": OCC_PROJECTS.get(tier, OCC_PROJECTS[TIER_FREE]),
+    }
 
 
 def occ_limits():

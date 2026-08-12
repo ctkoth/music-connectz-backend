@@ -44,6 +44,9 @@ from .occ import OccChatView
 from .occ_taskz import (OccSettingsView, OccSpecView, OccTaskDetailView,
                         OccTaskUndoView, OccTasksView)
 from .occ_run import OccRunView
+from .occ_agent_view import OccAgentView
+from .gamez import GameAssetView, GameDetailView, GamezView
+from .gamez_build import GameBuildView, GamePlayView
 from .occ_suggest import OccSuggestView
 from .releasez import (CollabDistributeView, PostDistributeView, ReleaseDetailView,
                        ReleaseSubmitView, ReleasesView)
@@ -135,6 +138,19 @@ urlpatterns = [
     # WorkZ — what went into OCC, what came out, and where it goes next.
     # The sandbox. Off, and saying why, until the Modal tokens are set.
     path("occ/run/", OccRunView.as_view(), name="economy-occ-run"),
+    # The agent loop — OCC reading and changing a project, not describing it.
+    # GET states the ceiling before POST spends anything.
+    path("occ/agent/", OccAgentView.as_view(), name="economy-occ-agent"),
+    # GameZ — the tab occ_spec has advertised, and EXPORT_ROUTES has pointed
+    # at, since before anything served either.
+    path("gamez/", GamezView.as_view(), name="economy-gamez"),
+    path("gamez/<int:pk>/", GameDetailView.as_view(), name="economy-game"),
+    path("gamez/<int:pk>/assets/", GameAssetView.as_view(), name="economy-game-assets"),
+    path("gamez/<int:pk>/build/", GameBuildView.as_view(), name="economy-game-build"),
+    # The bundle. Every response carries a CSP sandbox — see gamez_build.py.
+    path("gamez/<int:pk>/play/", GamePlayView.as_view(), name="economy-game-play"),
+    path("gamez/<int:pk>/play/<path:path>", GamePlayView.as_view(),
+         name="economy-game-play-file"),
     # SuggestionZ proposes and waits; AutomationZ drops the tap on what's safe.
     path("occ/suggest/", OccSuggestView.as_view(), name="economy-occ-suggest"),
     path("occ/workz/", OccWorkzView.as_view(), name="economy-occ-workz"),
