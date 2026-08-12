@@ -4,20 +4,24 @@ Each work names its contributors and the skills they bring (their worth), so the
 CollabZ "everyone paid their worth" settlement applies. On submit the work gets
 an AI craft rating; once 3+ real members rate it, their median takes over.
 """
+import logging
+
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .directz_craft import CRAFT_SCORES
 from .models import (
     DirectZWork,
     DirectZRating,
     DIRECTZ_BANDS,
-    directz_ai_rating,
     directz_band_for,
     directz_display_rating,
     membership_for,
 )
+
+logger = logging.getLogger(__name__)
 
 VALID_FMT = {"reelz", "episodez", "moviez"}
 
@@ -84,6 +88,75 @@ def directz_formats():
     ]
 
 
+def _find_upload(user, media_url):
+    """The member's own Upload row behind a media URL, or None.
+
+    Scoped to `user` deliberately. The URL arrives from the client, and a lookup
+    that searched every Upload would let somebody rate — and read — a file
+    belonging to another member by pasting its address.
+    """
+    from .models import Upload
+
+    url = str(media_url or "").strip()
+    if not url:
+        return None
+    # Match on the stored path's tail rather than the full URL: MEDIA_URL
+    # differs between local, Render and any CDN in front of it, so comparing
+    # whole URLs would work in exactly one environment.
+    tail = url.split("?")[0].rsplit("/", 1)[-1]
+    if not tail:
+        return None
+    return Upload.objects.filter(user=user, file__endswith=tail).order_by("-id").first()
+
+
+def _apply_craft_rating(work, user):
+    """Watch the work's video and store the score, or store why we couldn't.
+
+    Never raises: a rating that fails is a work with no rating, not a failed
+    post. The member's video is already saved by the time this runs, and losing
+    it because a third-party API was slow would be the worse outcome by far.
+    """
+    from .directz_craft import rate_video, too_big
+
+    upload = _find_upload(user, work.media_url)
+    if upload is None:
+        note = "no video attached" if not work.media_url else "the video couldn't be found"
+    elif too_big(upload.size_bytes):
+        # Said plainly rather than worked around. A MovieZ is one to three hours
+        # and will not fit the inline path — and rating a three-hour film from
+        # its metadata is the exact thing this replaced.
+        from .vocalcoach import MAX_MB
+        note = (f"that video is {upload.size_bytes / (1024 * 1024):.0f}MB — over the "
+                f"{MAX_MB}MB the rater can watch in one go")
+    else:
+        try:
+            upload.file.open("rb")
+            payload, why = rate_video(
+                upload.file, upload.content_type,
+                fmt=work.fmt, genre=work.genre,
+                length=f"{work.duration_sec}s" if work.duration_sec else "")
+        except Exception:                                    # pragma: no cover
+            logger.exception("DirectZ craft: rating %s failed", work.pk)
+            payload, why = None, "the rater couldn't read that file"
+        finally:
+            try:
+                upload.file.close()
+            except Exception:                                # pragma: no cover
+                pass
+        if payload:
+            work.ai_rating = payload["score"]
+            work.craft = payload
+            work.rating_note = ""
+            work.save(update_fields=["ai_rating", "craft", "rating_note"])
+            return
+        note = why
+
+    work.ai_rating = None
+    work.craft = {}
+    work.rating_note = str(note)[:200]
+    work.save(update_fields=["ai_rating", "craft", "rating_note"])
+
+
 def _work_dict(w, request):
     disp = directz_display_rating(w)
     my = DirectZRating.objects.filter(rater=request.user, work=w).values_list("score", flat=True).first()
@@ -103,7 +176,14 @@ def _work_dict(w, request):
         "contributors": w.contributors,
         "created_at": w.created_at.isoformat(),
         "my_rating": my,
-        **disp,  # rating, source (ai|users), ai_rating, user_median, count
+        # What the score is actually made of — framing, editing, lighting, sound,
+        # story — so a member can see it was earned rather than assigned.
+        "craft": w.craft or {},
+        "craft_scores": CRAFT_SCORES,
+        # Why there is no rating, when there isn't. The screen shows this
+        # instead of a number rather than beside one.
+        "rating_note": w.rating_note,
+        **disp,  # rating, source (ai|users|None), ai_rating, user_median, count
     }
 
 
@@ -161,7 +241,11 @@ class DirectZWorksView(APIView):
             "media_type": str(d.get("media_type", "")).strip()[:60],
             "contributors": contributors,
         }
-        w = DirectZWork.objects.create(owner=request.user, ai_rating=directz_ai_rating(payload), **payload)
+        w = DirectZWork.objects.create(owner=request.user, **payload)
+        # The rating comes from watching the video, never from the form. Where
+        # it can't be watched the work simply has no rating — see
+        # `directz_craft` for why that is the answer rather than a fallback.
+        _apply_craft_rating(w, request.user)
         return Response(_work_dict(w, request), status=status.HTTP_201_CREATED)
 
 

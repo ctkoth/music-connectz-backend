@@ -1498,7 +1498,22 @@ class DirectZWork(models.Model):
     media_url = models.CharField(max_length=500, blank=True, default="")   # uploaded video
     media_type = models.CharField(max_length=60, blank=True, default="")
     contributors = models.JSONField(default=list, blank=True)  # [{name, tier, skills:[{name, price}]}]
-    ai_rating = models.FloatField(default=0)                    # 0-10 AI seed
+    # NULL means "not rated", and that is a real state rather than a gap.
+    #
+    # This used to default to 0 and be filled by `directz_ai_rating`, which
+    # called itself a craft estimate and measured contributor count, description
+    # length and money spent. It taught members to pad the form. It is gone; the
+    # score now comes from a model that watches the video (`directz_craft.py`).
+    #
+    # When the video can't be watched — no key, an unreadable container, or a
+    # MovieZ far past the 14MB the inline path can carry — the work keeps NO
+    # rating and `rating_note` says why. An empty rating invites a real one from
+    # members; a fabricated one ends the question.
+    ai_rating = models.FloatField(null=True, blank=True)
+    # The dimensions behind the score — framing, editing, lighting, sound,
+    # story — plus the verdict and what to fix. See directz_craft.CRAFT_SCORES.
+    craft = models.JSONField(default=dict, blank=True)
+    rating_note = models.CharField(max_length=200, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -1532,8 +1547,19 @@ def directz_band_for(sec):
 
 
 def directz_ai_rating(work):
-    """A deterministic AI craft estimate (0-10) from how complete & staffed the
-    work is: contributor breadth, skills brought, description, and duration fit."""
+    """DEPRECATED — do not call this for a rating. See `directz_craft.py`.
+
+    It called itself "a deterministic AI craft estimate" and measured contributor
+    count, skills listed, description length, money spent and duration fit. None
+    of that is craft: a weak video with five contributors and a padded
+    description scored ~8, a good one-person video with a terse description
+    scored ~4. It taught members to pad the form, which is the failure
+    `CLAUDE.md`'s third rule names.
+
+    Kept only because a handful of old rows were seeded by it and the number is
+    still on them; nothing should produce a NEW one. A work whose video cannot be
+    watched now carries no rating at all, which is the honest answer.
+    """
     contribs = work.get("contributors") if isinstance(work, dict) else work.contributors
     desc = work.get("description") if isinstance(work, dict) else work.description
     dur = work.get("duration_sec") if isinstance(work, dict) else work.duration_sec
@@ -1556,13 +1582,21 @@ def directz_ai_rating(work):
 
 
 def directz_display_rating(work):
-    """Real-user median once >=3 rate; otherwise the AI seed. Returns
-    {rating, source, ai_rating, user_median, count}."""
+    """Real-user median once >=3 rate; otherwise the AI score, if there is one.
+
+    Three states rather than two, because "nobody has rated this and the model
+    couldn't watch it" is a real answer and it used to be reported as a number.
+    `source` is "users", "ai", or None — and when it is None, `rating` is None
+    too. Callers must render the absence rather than reaching for a zero.
+    """
     scores = list(work.ratings.values_list("score", flat=True))
     user_median = _median(scores)
+    ai = round(work.ai_rating, 1) if work.ai_rating is not None else None
     if len(scores) >= DIRECTZ_MIN_RATERS:
-        return {"rating": user_median, "source": "users", "ai_rating": round(work.ai_rating, 1), "user_median": user_median, "count": len(scores)}
-    return {"rating": round(work.ai_rating, 1), "source": "ai", "ai_rating": round(work.ai_rating, 1), "user_median": user_median, "count": len(scores)}
+        return {"rating": user_median, "source": "users", "ai_rating": ai,
+                "user_median": user_median, "count": len(scores)}
+    return {"rating": ai, "source": "ai" if ai is not None else None,
+            "ai_rating": ai, "user_median": user_median, "count": len(scores)}
 
 
 # ---- Universal social layer (cross-user reactions + comments) ----
