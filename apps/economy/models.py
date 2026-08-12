@@ -703,6 +703,30 @@ def is_minor(user):
     return profile_is_minor(getattr(user, "mcz_profile", None) or profile_for(user))
 
 
+def third_party_ads_allowed(user):
+    """Whether this member may be shown a third-party ad frame.
+
+    The DECISION, deliberately, not the input. Nothing outside this function
+    needs to know a member's age to answer it, and a client that re-derives
+    "under 18" for itself is a second copy of a policy rule that Google audits
+    — the kind that drifts and is only noticed when an app is pulled.
+
+    Why the rule exists: `play/data-safety.md` answers "Committed to the Play
+    Families Policy: Yes", and that answer was earned by hard-walling the adult
+    surfaces. Teens are an intended audience (RapZ carries a "Teen-safe" badge),
+    and the Families Policy requires ads shown to them to come from a
+    Play-certified SDK. An arbitrary third-party frame is not one and cannot
+    attest to being one, so it is not shown to anyone we know to be a minor.
+
+    Unknown age counts as an adult here, matching `is_minor` and the decision
+    recorded in `play/data-safety.md`. That is the one line to tighten if the
+    Families exposure ever needs to be reduced further — and tightening it here
+    changes every surface at once, which is the whole point of it living in one
+    function.
+    """
+    return not is_minor(user)
+
+
 def adult_only_reason(user):
     """Why this surface is closed to them, in words, or "" when it's open."""
     if not is_minor(user):

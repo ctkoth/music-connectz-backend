@@ -290,12 +290,14 @@ class PromptzBuyView(APIView):
 
 
 class LimitsView(APIView):
-    """Per-tier caps for the client to enforce (char/upload/storage)."""
+    """Per-tier caps for the client to enforce (char/upload/storage), plus the
+    one policy answer the client can't work out for itself."""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         from .catalog import chars_unlimited
+        from .models import third_party_ads_allowed
 
         m = membership_for(request.user)
         lim = dict(limits_for(m.tier))
@@ -304,6 +306,18 @@ class LimitsView(APIView):
         lim["char_limit_unlimited"] = chars_unlimited(m.tier)
         lim["dev_tax_rate"] = m.dev_tax_rate
         lim["storage_used_mb"] = round(storage_used_bytes(request.user) / MB, 2)
+        # Whether a third-party ad frame may be rendered for this member.
+        #
+        # Answered here rather than by the client, because the client would have
+        # to be told an age to work it out — and an age sent purely so the
+        # browser can decide whether to show an advert is more of a member's
+        # birthday travelling further than it needs to, not less. The server
+        # knows; it can just say yes or no.
+        #
+        # `play/data-safety.md` answers "Committed to the Play Families Policy:
+        # Yes". Third-party ads to a member we know to be 13-17 would make that
+        # answer untrue.
+        lim["third_party_ads"] = third_party_ads_allowed(request.user)
         return Response(lim)
 
 
