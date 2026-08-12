@@ -75,12 +75,25 @@ CSP_SANDBOX = "sandbox allow-scripts allow-pointer-lock"
 
 
 def bundle_csp():
-    """The policy every served game file carries."""
-    return (f"{CSP_SANDBOX}; default-src 'none'; "
-            "script-src 'unsafe-inline' 'unsafe-eval' blob: data:; "
-            "style-src 'unsafe-inline' data:; "
-            "img-src data: blob:; media-src data: blob:; font-src data:; "
-            "connect-src blob: data:; frame-ancestors 'self'")
+    """The policy every served game file carries.
+
+    Deliberately just the sandbox and a framing rule. An earlier version of this
+    added `default-src 'none'` with a hand-written allowlist, which would have
+    blocked essentially every real game: a game's own `<script src="main.js">`
+    is a subresource of a document the sandbox has already put in an OPAQUE
+    origin, so `'self'` is not a source expression that can be relied on to
+    match it. The result would have been a strict-looking header and a blank
+    screen.
+
+    The isolation that matters does not come from the resource directives
+    anyway — it comes from `sandbox`. An opaque origin cannot read our cookies,
+    our `localStorage`, or the parent document, and requests it makes to our own
+    API are cross-origin without credentials. A game can still talk to the
+    internet, which is the member's own code doing the member's own business;
+    what it cannot do is reach another member's session, and that is the line
+    this is drawn on.
+    """
+    return f"{CSP_SANDBOX}; frame-ancestors 'self'"
 
 
 def _safe_members(names):

@@ -227,6 +227,18 @@ class ServingIsSandboxed(Base):
         self.assertIn("allow-scripts", bundle_csp())
         self.assertNotIn("allow-same-origin", bundle_csp())
 
+    def test_the_policy_does_not_block_a_games_own_files(self):
+        # An earlier version added `default-src 'none'` with a hand-written
+        # allowlist. Under `sandbox` the document is in an OPAQUE origin, so
+        # `'self'` cannot be relied on to match the game's own main.js — the
+        # header would have looked strict and rendered a blank screen.
+        policy = bundle_csp()
+        self.assertNotIn("default-src", policy)
+        self.assertNotIn("script-src", policy)
+
+    def test_the_game_cannot_be_framed_by_another_site(self):
+        self.assertIn("frame-ancestors 'self'", bundle_csp())
+
     def test_the_policy_is_on_the_response_not_just_an_iframe_attribute(self):
         # An iframe attribute protects the frame our app renders and does
         # nothing when somebody opens the bundle URL directly. This test IS
