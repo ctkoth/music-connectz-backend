@@ -3065,3 +3065,93 @@ class OccOutput(models.Model):
         could open, and an item key nobody can reach collects nothing.
         """
         return f"post:{self.shared_post_id}" if self.shared_post_id else None
+
+
+# ---------------------------------------------------------------------------
+# FileZ — the filesystem OCC can hold between turns
+# ---------------------------------------------------------------------------
+
+def normalize_occ_path(raw):
+    """A member- or model-supplied path, reduced to a safe relative one — or None.
+
+    This is the single gate every file operation goes through, and it returns
+    None rather than raising so a bad path from the MODEL is an error the model
+    reads and retries, not a 500 the member sees.
+
+    What it refuses, and why each one is here rather than assumed:
+
+    * ``..`` anywhere — the whole point. These paths become real files inside a
+      sandbox in Phase 1, so a stored ``../../etc/passwd`` is a traversal that
+      was written to the database weeks earlier and fired later.
+    * Absolute paths and Windows drive letters — they escape the project root
+      the moment they are joined to it.
+    * Backslashes — normalised to ``/`` rather than rejected, because a member
+      pasting a Windows path means the same file, but a separator we don't
+      understand is a segment check we didn't really do.
+    * NUL bytes — they truncate paths in C-level filesystem calls, so a name
+      that looks safe in Python can be a different name on disk.
+    * ``.`` and empty segments — harmless individually, but they mean two rows
+      can name one file, and a uniqueness constraint that can be sidestepped by
+      writing ``src//main.py`` is not a constraint.
+    """
+    from .catalog import OCC_MAX_PATH_CHARS
+
+    text = str(raw or "").strip().replace("\\", "/")
+    if not text or "\x00" in text:
+        return None
+    # Drive letters escape before any segment logic gets a chance.
+    if len(text) > 1 and text[1] == ":":
+        return None
+    segments = []
+    for segment in text.split("/"):
+        if segment in ("", "."):
+            continue            # collapse, don't reject — "src//main.py" is one file
+        if segment == "..":
+            return None         # never resolvable to something inside the root
+        segments.append(segment)
+    if not segments:
+        return None
+    path = "/".join(segments)
+    return path if len(path) <= OCC_MAX_PATH_CHARS else None
+
+
+class OccFile(models.Model):
+    """One file in one of a member's OCC projects.
+
+    Rows rather than real files on purpose. The sandbox is created and destroyed
+    per session, Render's disk is ephemeral, and the frontend deploys itself —
+    so the only place a project can actually live between turns is the database
+    the rest of the app already trusts.
+
+    `path` is always relative and always normalised (see `normalize_occ_path`);
+    it is the join key the sandbox materialises from, so an unchecked one here
+    is a traversal there.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="occ_files")
+    # A plain name, not a foreign key. A project is a namespace, not a thing
+    # with its own settings — and a table whose only column is a name is a table
+    # that has to be kept in step with this one for no gain.
+    project = models.CharField(max_length=80, default="main")
+    path = models.CharField(max_length=200)
+    content = models.TextField(blank=True, default="")
+    # Which task last wrote it, when one did. SET_NULL so pruning the task log
+    # never deletes a member's source.
+    task = models.ForeignKey("OccTask", on_delete=models.SET_NULL, null=True, blank=True,
+                             related_name="files")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("project", "path")
+        constraints = [
+            # One row per file. Without this, two writes racing on the same path
+            # leave two rows and `read` returns whichever the ordering happens
+            # to pick — a file that changes when nobody wrote to it.
+            models.UniqueConstraint(fields=["user", "project", "path"],
+                                    name="occ_file_unique_path"),
+        ]
+        indexes = [models.Index(fields=["user", "project"])]
+
+    def __str__(self):
+        return f"{self.project}/{self.path}"
