@@ -218,6 +218,53 @@ OAUTH2_PROVIDERS = {
 }
 
 
+# --------------------------------------------------- What each one needs ----
+# Every env var a provider must have before a sign-in can COMPLETE. This exists
+# because the login screen and the verifiers had no shared idea of "configured":
+# the screen enabled a button on a client ID alone, while `exchange_oauth2`
+# refuses without the SECRET too. A provider in that half-set state sent the
+# member off to Spotify, took their consent, and failed on the way back with
+# "not configured on the server" — a price discovered by paying it.
+#
+# So one table, read by both. A button appears when the sign-in behind it can
+# finish, and never before.
+def provider_requirements():
+    needs = {
+        "google": ("GOOGLE_OAUTH_CLIENT_ID",),          # ID token, verified by audience
+        "apple": ("APPLE_OAUTH_CLIENT_ID",),            # Services ID = the audience
+        "github": ("GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET"),
+    }
+    for name in OAUTH2_PROVIDERS:
+        needs[name] = (f"{name.upper()}_OAUTH_CLIENT_ID",
+                       f"{name.upper()}_OAUTH_CLIENT_SECRET")
+    return needs
+
+
+def provider_status(value=None):
+    """Per-provider config state: {"client_id", "ready", "missing"}.
+
+    `value(env_name) -> str` so callers can look somewhere other than the
+    environment; defaults to the same stripped env read the verifiers use.
+    `client_id` is blank unless the provider is ready, because a client ID the
+    server can't complete against is worse than none — it renders a button.
+    """
+    read = value or _env
+    out = {}
+    for name, required in provider_requirements().items():
+        found = {var: (read(var) or "").strip() for var in required}
+        missing = [var for var in required if not found[var]]
+        client_id = found[required[0]]
+        out[name] = {
+            "client_id": "" if missing else client_id,
+            # Kept separately: a half-configured provider has an ID to complain
+            # about, and the complaint is the whole point.
+            "client_id_set": bool(client_id),
+            "ready": not missing,
+            "missing": missing,
+        }
+    return out
+
+
 def exchange_oauth2(provider: str, code: str, redirect_uri: str = "", code_verifier: str = ""):
     """Swap an authorization `code` for an access token, then load + normalize
     the member's profile. Used for every standard code-flow provider."""

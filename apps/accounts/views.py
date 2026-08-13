@@ -330,7 +330,14 @@ class OAuthConfigView(APIView):
     relying on build-time VITE_* vars. Client IDs are public; secrets stay here.
     Covers every provider the backend can complete a sign-in for — the id_token
     verifiers (google/apple), GitHub, and the generic code-flow providers
-    (spotify/microsoft/facebook/soundcloud/twitter)."""
+    (spotify/microsoft/facebook/soundcloud/twitter).
+
+    This is also the only diagnostic for "every button says it isn't available".
+    It is deliberately open: the login screen is signed-out, so it cannot need
+    auth, and everything here — client IDs, env var NAMES — is public by
+    definition. No secret, and no secret's presence, is reported beyond the
+    single bit of whether it is set.
+    """
 
     permission_classes = [AllowAny]
 
@@ -339,15 +346,19 @@ class OAuthConfigView(APIView):
 
         from django.conf import settings
 
-        cfg = {
-            "google": (getattr(settings, "GOOGLE_OAUTH_CLIENT_ID", "") or "").strip(),
-            "github": (getattr(settings, "GITHUB_OAUTH_CLIENT_ID", "") or "").strip(),
-            "apple": (getattr(settings, "APPLE_OAUTH_CLIENT_ID", "") or "").strip(),
-        }
-        # Generic code-flow providers advertise their PUBLIC client id from env;
-        # a provider stays hidden/disabled on the client until its id is present.
-        for provider in OAUTH2_PROVIDERS:
-            cfg[provider] = os.environ.get(f"{provider.upper()}_OAUTH_CLIENT_ID", "").strip()
+        from .oauth import provider_status
+
+        # Prefer settings for the three that have named settings entries (which
+        # is also what makes them overridable in tests), then fall back to the
+        # environment the verifiers themselves read.
+        def value(name):
+            got = getattr(settings, name, None)
+            return os.environ.get(name, "") if got is None else (got or "")
+
+        status_by_provider = provider_status(value)
+
+        cfg = {name: s["client_id"] for name, s in status_by_provider.items()}
+        needs = {name: s["missing"] for name, s in status_by_provider.items() if s["missing"]}
 
         # A configured-but-wrong key is the hardest OAuth failure to diagnose,
         # because Google's button does not error — it just never renders, and
@@ -366,4 +377,14 @@ class OAuthConfigView(APIView):
                 "APPLE_OAUTH_CLIENT_ID should be the Services ID (a reverse-domain "
                 "string), not the Team ID."
             )
-        return Response({**cfg, "warnings": warnings})
+        # Half-configured is a mistake; unconfigured is a choice. Only the first
+        # one gets a warning — and it needs one, because the ID being present
+        # makes it look done from every side except the one that fails.
+        for name, s in sorted(status_by_provider.items()):
+            if s["client_id_set"] and s["missing"]:
+                warnings.append(
+                    f"{name.title()} has a client ID but no {', '.join(s['missing'])}. "
+                    f"The button stays hidden rather than sending members to "
+                    f"{name.title()} and failing on the way back."
+                )
+        return Response({**cfg, "warnings": warnings, "needs": needs})

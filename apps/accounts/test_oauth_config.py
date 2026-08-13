@@ -54,6 +54,74 @@ class OAuthConfigTests(TestCase):
         self.assertEqual(APIClient().get(URL).status_code, 200)
 
 
+class HalfConfiguredTests(TestCase):
+    """A client ID without its secret.
+
+    This is the state that produced "all of them say they are unavailable":
+    the screen enabled a button on the ID alone, and the exchange refused
+    without the secret. The refusal landed AFTER the member had been sent to
+    the provider and consented — the worst possible moment to learn a thing
+    isn't set up. The config endpoint now reports what a sign-in needs to
+    finish, not what it needs to start.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+
+    @override_settings(GITHUB_OAUTH_CLIENT_ID="Iv1.abc123", GITHUB_OAUTH_CLIENT_SECRET="")
+    def test_a_client_id_with_no_secret_is_not_advertised(self):
+        r = self.client.get(URL)
+        self.assertEqual(r.data["github"], "")
+        self.assertEqual(r.data["needs"]["github"], ["GITHUB_OAUTH_CLIENT_SECRET"])
+
+    @override_settings(GITHUB_OAUTH_CLIENT_ID="Iv1.abc123", GITHUB_OAUTH_CLIENT_SECRET="")
+    def test_half_configured_says_which_var_is_missing(self):
+        # Naming the env var is the whole value: without it the only way to
+        # learn what's missing is to read the source.
+        w = self.client.get(URL).data["warnings"]
+        self.assertTrue(any("GITHUB_OAUTH_CLIENT_SECRET" in x for x in w), w)
+
+    @override_settings(GITHUB_OAUTH_CLIENT_ID="Iv1.abc123", GITHUB_OAUTH_CLIENT_SECRET="s3cret")
+    def test_both_halves_present_serves_the_id_with_no_complaint(self):
+        r = self.client.get(URL)
+        self.assertEqual(r.data["github"], "Iv1.abc123")
+        self.assertEqual(r.data["warnings"], [])
+        self.assertNotIn("github", r.data["needs"])
+
+    @override_settings(GITHUB_OAUTH_CLIENT_ID="", GITHUB_OAUTH_CLIENT_SECRET="")
+    def test_nothing_set_is_listed_under_needs_but_is_not_a_warning(self):
+        r = self.client.get(URL)
+        self.assertEqual(r.data["warnings"], [])
+        self.assertEqual(
+            r.data["needs"]["github"],
+            ["GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET"],
+        )
+
+    def test_every_provider_the_backend_can_complete_is_answered_for(self):
+        # The button grid is built from this map. A provider missing from it
+        # reads as "no client ID" on the client, which is indistinguishable
+        # from unconfigured — so absence must not be how a provider drops out.
+        from apps.accounts.oauth import OAUTH2_PROVIDERS
+
+        r = self.client.get(URL)
+        for name in ("google", "apple", "github", *OAUTH2_PROVIDERS):
+            self.assertIn(name, r.data, name)
+
+    def test_a_code_flow_provider_configured_only_in_env_is_served(self):
+        # spotify/microsoft/facebook/soundcloud/twitter have no settings entry
+        # — they are read straight off the environment, same as the exchange
+        # reads them.
+        import os
+        from unittest import mock
+
+        env = {"SPOTIFY_OAUTH_CLIENT_ID": " spot-id ",
+               "SPOTIFY_OAUTH_CLIENT_SECRET": "spot-secret"}
+        with mock.patch.dict(os.environ, env):
+            r = self.client.get(URL)
+        self.assertEqual(r.data["spotify"], "spot-id")
+        self.assertNotIn("spotify", r.data["needs"])
+
+
 class SettingsStripTests(TestCase):
     def test_settings_strips_what_render_hands_it(self):
         # Both paths have to agree. oauth.py has always stripped; settings did
