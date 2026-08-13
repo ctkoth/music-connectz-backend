@@ -18,6 +18,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.economy import directz_app, directz_craft
@@ -26,8 +27,11 @@ from apps.economy.models import (
     MB,
     DirectZWork,
     Upload,
+    award_promptz,
     directz_display_rating,
+    daily_prompt_state,
     membership_for,
+    wallet_for,
 )
 from apps.economy.vocalcoach import MAX_MB
 
@@ -48,6 +52,11 @@ class Base(TestCase):
     def setUp(self):
         self.user = User.objects.create_user("director", "d@e.com", PW)
         membership_for(self.user)
+        # A craft rating costs a prompt, and the free tier's daily allowance is
+        # one. Without a balance the SECOND post in a test silently gets no
+        # rating — which is the gate working, but it makes every test about the
+        # rating quietly a test about affordability instead.
+        award_promptz(self.user, 1_000)
         self.client = APIClient()
         self.client.force_authenticate(self.user)
 
@@ -59,7 +68,8 @@ class Base(TestCase):
     def post(self, media_url="", **body):
         return self.client.post(
             URL, {"title": "Take One", "fmt": "reelz", "duration_sec": 60,
-                  "media_url": media_url, **body}, format="json")
+                  "media_url": media_url, "craft_rating": True, **body},
+            format="json")
 
 
 class TheScoreComesFromWatching(Base):
@@ -143,6 +153,87 @@ class WhenItCannotWatchThereIsNoNumber(Base):
         self.assertIsNone(disp["rating"])
         self.assertIsNone(disp["source"])
         self.assertNotEqual(disp["rating"], 0)
+
+
+class TheRatingIsAskedForAndPricedFirst(Base):
+    """It shipped free and silent — unbounded Gemini spend on the platform's
+    key, by the code that enforces the cost/gain rule everywhere else."""
+
+    def test_posting_does_not_rate_unless_asked(self):
+        # Otherwise posting quietly becomes a paid action.
+        up = self.upload()
+        with patch.object(directz_craft, "rate_video",
+                          return_value=(GOOD, None)) as rater:
+            resp = self.client.post(
+                URL, {"title": "Take", "fmt": "reelz", "duration_sec": 60,
+                      "media_url": up.file.url}, format="json")
+        rater.assert_not_called()
+        self.assertIsNone(resp.json()["rating"])
+        self.assertIn("no craft rating", resp.json()["rating_note"])
+
+    def test_posting_without_a_rating_costs_nothing(self):
+        before = wallet_for(self.user).promptz
+        up = self.upload()
+        self.client.post(URL, {"title": "T", "fmt": "reelz", "duration_sec": 60,
+                               "media_url": up.file.url}, format="json")
+        self.assertEqual(wallet_for(self.user).promptz, before)
+
+    def test_the_feed_states_the_price_before_the_box_that_spends_it(self):
+        d = self.client.get(URL).json()
+        self.assertGreater(d["craft"]["cost_cents"], 0)
+        self.assertIn("cost_cents", d["craft"])
+        self.assertIn("affordable", d["craft"])
+        self.assertEqual(set(d["craft"]["scores"]), set(CRAFT_SCORES))
+
+    def test_a_rating_is_billed_once_a_usable_result_exists(self):
+        up = self.upload()
+        before = wallet_for(self.user).promptz
+        with patch.object(directz_craft, "rate_video", return_value=(GOOD, None)):
+            self.post(media_url=up.file.url)
+        # The daily allowance covers the first one, so either the free prompt
+        # went or PromptZ did — never both, and never nothing.
+        _, _, left = daily_prompt_state(self.user)
+        spent = before - wallet_for(self.user).promptz
+        self.assertTrue(spent > 0 or left < 1)
+
+    def test_a_video_the_rater_could_not_read_is_never_billed(self):
+        # The rule vocalcoach.py bills on.
+        up = self.upload()
+        before = wallet_for(self.user).promptz
+        with patch.object(directz_craft, "rate_video",
+                          return_value=(None, "the rater is having a moment")):
+            self.post(media_url=up.file.url)
+        self.assertEqual(wallet_for(self.user).promptz, before)
+
+    def test_a_video_too_big_to_watch_is_never_billed(self):
+        before = wallet_for(self.user).promptz
+        up = self.upload(size=int((MAX_MB + 5) * MB))
+        self.post(media_url=up.file.url)
+        self.assertEqual(wallet_for(self.user).promptz, before)
+
+    def test_a_member_who_cannot_afford_it_still_gets_their_post(self):
+        # A rating is a bonus, not the post. Refusing the whole thing would lose
+        # a member's video over a number.
+        #
+        # The allowance is spent directly rather than by posting: a post with no
+        # video is never billed, so five of them leave the allowance untouched —
+        # which is right, and made an earlier version of this test measure
+        # nothing at all.
+        w = wallet_for(self.user)
+        w.promptz = 0
+        w.money_cents = 0
+        w.prompts_used_today = 10_000
+        w.prompt_day = timezone.now().strftime("%Y-%m-%d")
+        w.save()
+        up = self.upload()
+        with patch.object(directz_craft, "rate_video",
+                          return_value=(GOOD, None)) as rater:
+            resp = self.post(media_url=up.file.url)
+        self.assertEqual(resp.status_code, 201)
+        # Never bought a rating we couldn't bill for.
+        rater.assert_not_called()
+        self.assertIn("🏷️", resp.json()["rating_note"])
+        self.assertIsNone(resp.json()["rating"])
 
 
 class MembersStillOutrankTheModel(Base):

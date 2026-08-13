@@ -109,14 +109,57 @@ def _find_upload(user, media_url):
     return Upload.objects.filter(user=user, file__endswith=tail).order_by("-id").first()
 
 
+def craft_price(user):
+    """What a craft rating costs this member, and whether they can have one.
+
+    Priced like a Boss Take, because it is the same thing: a member's own media
+    sent to a model that judges it. `ai_cost("standard")` is the coach's rate,
+    reused rather than a second number.
+    """
+    from .catalog import ai_cost
+    from .directz_craft import _key
+    from .models import can_afford_ai, daily_prompt_state
+
+    cost = ai_cost("standard")
+    allowance, _, daily_left = daily_prompt_state(user)
+    return {
+        "cost_cents": cost,
+        "daily_prompts": allowance,
+        "daily_prompts_left": daily_left,
+        # A free daily prompt covers it before any balance is touched, so
+        # affordability has to know about the allowance — the coach's own gate
+        # was refusing members who had prompts left and an empty wallet.
+        "free_today": bool(cost) and daily_left > 0,
+        "affordable": bool(not cost or daily_left > 0 or can_afford_ai(user, cost)),
+        "configured": bool(_key()),
+    }
+
+
 def _apply_craft_rating(work, user):
     """Watch the work's video and store the score, or store why we couldn't.
 
     Never raises: a rating that fails is a work with no rating, not a failed
     post. The member's video is already saved by the time this runs, and losing
     it because a third-party API was slow would be the worse outcome by far.
+
+    Charged on the coach's terms — only once a usable result exists, and the
+    day's free prompts first. When it shipped this cost nothing and said
+    nothing, which is unbounded Gemini spend on the platform's key and the
+    cost/gain rule broken by the code that enforces it everywhere else.
     """
     from .directz_craft import rate_video, too_big
+    from .models import charge_ai_usage
+
+    price = craft_price(user)
+    if not price["affordable"]:
+        # Checked BEFORE the call, so we never buy a rating we can't bill for.
+        # The work still posts — a rating is a bonus, not the post.
+        work.ai_rating = None
+        work.craft = {}
+        work.rating_note = (f"a craft rating costs {price['cost_cents']} 🏷️ and "
+                            "today's free prompts are spent")
+        work.save(update_fields=["ai_rating", "craft", "rating_note"])
+        return
 
     upload = _find_upload(user, work.media_url)
     if upload is None:
@@ -144,8 +187,15 @@ def _apply_craft_rating(work, user):
             except Exception:                                # pragma: no cover
                 pass
         if payload:
+            # Billed only now — a video the rater couldn't read is never
+            # charged, the same rule vocalcoach.py bills on. count_daily,
+            # because this is a flat model run and the tier's free prompts are
+            # exactly what that allowance is for.
+            charged = charge_ai_usage(
+                user, price["cost_cents"],
+                note=f"DirectZ craft rating — {work.fmt}", count_daily=True)
             work.ai_rating = payload["score"]
-            work.craft = payload
+            work.craft = {**payload, "cost_cents": 0 if charged is None else price["cost_cents"]}
             work.rating_note = ""
             work.save(update_fields=["ai_rating", "craft", "rating_note"])
             return
@@ -203,6 +253,16 @@ class DirectZWorksView(APIView):
             "formats": directz_formats(),
             "genres": DIRECTZ_GENRES,
             "video_types": DIRECTZ_VIDEO_TYPES,
+            # The price of a craft rating, before the box that asks for one.
+            # It shipped costing nothing and saying nothing, which is the
+            # cost/gain rule broken by the app that enforces it.
+            "craft": {
+                **craft_price(request.user),
+                "scores": CRAFT_SCORES,
+                "note": ("A craft rating sends your video to a model that watches "
+                         "it and scores framing, editing, lighting, sound and "
+                         "storytelling. A video it can't read isn't charged."),
+            },
         })
 
     def post(self, request):
@@ -242,10 +302,15 @@ class DirectZWorksView(APIView):
             "contributors": contributors,
         }
         w = DirectZWork.objects.create(owner=request.user, **payload)
-        # The rating comes from watching the video, never from the form. Where
-        # it can't be watched the work simply has no rating — see
-        # `directz_craft` for why that is the answer rather than a fallback.
-        _apply_craft_rating(w, request.user)
+        # Opt-in, and off by default. The rating comes from watching the video
+        # — which costs real money on the platform's key — so posting must not
+        # quietly become a paid action. A member who wants one asks for one,
+        # having been shown the price by the GET above.
+        if d.get("craft_rating"):
+            _apply_craft_rating(w, request.user)
+        else:
+            w.rating_note = "no craft rating asked for"
+            w.save(update_fields=["rating_note"])
         return Response(_work_dict(w, request), status=status.HTTP_201_CREATED)
 
 
