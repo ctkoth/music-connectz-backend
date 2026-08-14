@@ -17,7 +17,14 @@ django-storages>=1.14
 boto3>=1.34
 # Payments — Stripe SDK (PayPal uses the REST API via requests). Only exercised
 # when the provider keys are configured.
-stripe>=8.0
+#
+# Upper bound deliberate. This was `>=8.0`, and somewhere past 8 StripeObject
+# stopped being a dict subclass — it kept `__getitem__` and dropped `.get()`,
+# which turned every webhook handler into a 500 on a deploy that changed no
+# code of ours. The webhook no longer touches those objects (payments.py reads
+# the verified JSON body instead), but the checkout and Identity calls still
+# do, so a major bump is a thing to test rather than to receive.
+stripe>=15.3,<16
 # OCC's real LLM backend (Corey GPT). Active only when ANTHROPIC_API_KEY is set;
 # otherwise OCC falls back to its built-in templated replies.
 anthropic>=0.40
