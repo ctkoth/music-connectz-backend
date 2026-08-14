@@ -657,3 +657,219 @@ class PatronTests(BadgeBase):
         deal.refresh_from_db()
         want = timezone.now() + timedelta(days=max(self.floor, self.base - 7))
         self.assertLess(abs((deal.auto_release_at - want).total_seconds()), 120)
+
+
+class BadgesOnProfileZTests(BadgeBase):
+    """A badge nobody can see is a database row. ProfileZ is where it's worn.
+
+    The BadgeZ tab is where a badge is explained and switched; the profile is
+    where it does its job — telling the room something true about the member
+    before they've said a word.
+    """
+
+    PROFILE = "/api/economy/profile/"
+
+    def member(self, username):
+        return f"/api/economy/members/{username}/"
+
+    def test_your_own_profile_wears_your_badges(self):
+        grant_badge(self.user, "owner")
+        row = self.client.get(self.PROFILE).data["badges"][0]
+        self.assertEqual(row["key"], "owner")
+        self.assertEqual(row["emoji"], "👑")
+        self.assertEqual(row["icon"], "badge_owner.png")
+        # What it DOES travels with it. A badge on a card that explains
+        # nothing is the sticker this whole file refuses to be.
+        self.assertTrue(row["effect_note"])
+        # And it's a door, not a dead end.
+        self.assertEqual(row["open_in"], "badgez")
+
+    def test_another_member_sees_the_badge_too(self):
+        grant_badge(self.user, "ear")
+        d = self.oc.get(self.member("maker")).data
+        self.assertEqual([b["key"] for b in d["badges"]], ["ear"])
+
+    def test_a_hidden_badge_is_not_on_the_profile(self):
+        # The privacy switch in BadgeZ is only worth anything if the surface
+        # it's meant to control actually honours it.
+        grant_badge(self.user, "ear")
+        Badge.objects.filter(user=self.user, key="ear").update(visible=False)
+        self.assertEqual(self.oc.get(self.member("maker")).data["badges"], [])
+        mine = self.client.get(self.PROFILE).data
+        self.assertEqual(mine["badges"], [])
+        # You can see THAT you're hiding one. Naming it here would undo it.
+        self.assertEqual(mine["badges_hidden"], 1)
+
+    def test_the_worn_title_is_on_the_card(self):
+        grant_badge(self.user, "straight_shooter")
+        p = profile_for(self.user)
+        p.badge_title = "Straight Shooter"
+        p.save(update_fields=["badge_title"])
+        self.assertEqual(self.oc.get(self.member("maker")).data["badge_title"],
+                         "Straight Shooter")
+
+    def test_the_effect_total_is_yours_alone(self):
+        # An effect total is a read of somebody's economy, not a fact to
+        # publish about them. The badge is public; the arithmetic isn't.
+        grant_badge(self.user, "verified_reach")
+        self.assertEqual(self.client.get(self.PROFILE).data["badge_effects"]
+                         ["energy_multiplier"], 1.25)
+        self.assertEqual(self.oc.get(self.member("maker")).data["badge_effects"], {})
+        self.assertEqual(self.oc.get(self.member("maker")).data["badges_hidden"], 0)
+
+    def test_opening_your_own_profile_grants_what_you_earned(self):
+        p = profile_for(self.user)
+        p.links = [{"label": "IG", "url": "https://x.test", "verified": True,
+                    "followers": 500}]
+        p.save(update_fields=["links"])
+        self.assertEqual([b["key"] for b in self.client.get(self.PROFILE).data["badges"]],
+                         ["verified_reach"])
+
+    def test_looking_at_somebody_else_does_not_move_their_badges(self):
+        # Re-checking a stranger's badges on read would let anybody grant or
+        # lapse somebody else's by opening their card.
+        grant_badge(self.user, "sexy")          # temporary, and no median backs it
+        self.assertEqual([b["key"] for b in self.oc.get(self.member("maker")).data["badges"]],
+                         ["sexy"])
+        self.assertTrue(Badge.objects.filter(user=self.user, key="sexy").exists())
+
+    def test_a_lapsed_badge_leaves_the_profile_with_its_title(self):
+        grant_badge(self.user, "sexy")          # nothing supports the median
+        p = profile_for(self.user)
+        p.badge_title = "Sexy"
+        p.save(update_fields=["badge_title"])
+        d = self.client.get(self.PROFILE).data
+        self.assertEqual(d["badges"], [])
+        # The title went with it. Wearing a title for a badge you no longer
+        # hold is the badge outliving its own condition.
+        self.assertEqual(d["badge_title"], "")
+
+    def test_member_search_wears_badges_in_one_query(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        for i in range(4):
+            other = User.objects.create_user(username=f"m{i}", password=PW)
+            membership_for(other)
+            profile_for(other)
+            grant_badge(other, "ear")
+        with CaptureQueriesContext(connection) as ctx:
+            d = self.client.get("/api/economy/members/").data
+        self.assertTrue(any(b["key"] == "ear"
+                            for card in d["members"] for b in card["badges"]))
+        badge_queries = [q for q in ctx.captured_queries
+                         if "economy_badge" in q["sql"] and "economy_badge_" not in q["sql"]]
+        # One for the whole page. Per-card would put a query per member behind
+        # a search that already does enough work.
+        self.assertLessEqual(len(badge_queries), 2, badge_queries)
+
+
+class PublicCardWearsBadgesTests(BadgeBase):
+    """A shared profile is somebody's proof they're worth hiring."""
+
+    def public(self, username):
+        return f"/api/economy/public/members/{username}/"
+
+    def test_the_public_card_carries_the_badge(self):
+        profile_for(self.user)
+        grant_badge(self.user, "straight_shooter")
+        anon = APIClient()
+        d = anon.get(self.public("maker")).data
+        row = d["badges"][0]
+        self.assertEqual(row["key"], "straight_shooter")
+        self.assertEqual(row["emoji"], "🎯")
+        # What it took to get one — that's the part a stranger came to find out.
+        self.assertTrue(row["how"])
+
+    def test_the_public_card_does_not_carry_what_the_badge_pays(self):
+        # Effects are a read of somebody's economy and belong behind the login.
+        profile_for(self.user)
+        grant_badge(self.user, "straight_shooter")
+        row = APIClient().get(self.public("maker")).data["badges"][0]
+        self.assertNotIn("effect_note", row)
+        self.assertNotIn("open_in", row)
+
+    def test_a_hidden_badge_stays_hidden_from_the_open_web(self):
+        profile_for(self.user)
+        grant_badge(self.user, "straight_shooter")
+        Badge.objects.filter(user=self.user).update(visible=False)
+        self.assertEqual(APIClient().get(self.public("maker")).data["badges"], [])
+
+
+class TheOwnerHoldsTheOwnerBadgeTests(TestCase):
+    """"This is whose app it is" is a fact the server already knows.
+
+    Leaving it to a gift POST would mean the owner has to hand it to
+    themselves, and would leave it missing on every account promoted before
+    BadgeZ existed.
+    """
+
+    def owner_user(self, **kw):
+        return User.objects.create_user(password=PW, **kw)
+
+    def test_the_configured_owner_lands_with_the_badge(self):
+        from apps.economy.views import ensure_owner
+        with self.settings(OWNER_EMAILS=["boss@test.test"], OWNER_USERNAMES=[]):
+            u = self.owner_user(username="boss", email="boss@test.test")
+            ensure_owner(User.objects.get(pk=u.pk))
+        self.assertTrue(Badge.objects.filter(user=u, key="owner").exists())
+        self.assertEqual(membership_for(u).tier, TIER_STATZ)
+        fx = badge_effects(u)
+        self.assertEqual(fx["dev_tax_share"], 1.0)
+        self.assertTrue(fx["intelligence_royalties"])
+
+    def test_it_lands_by_username_too(self):
+        from apps.economy.views import ensure_owner
+        with self.settings(OWNER_EMAILS=[], OWNER_USERNAMES=["K-Oth"]):
+            u = self.owner_user(username="K-Oth", email="")
+            ensure_owner(User.objects.get(pk=u.pk))
+        self.assertTrue(Badge.objects.filter(user=u, key="owner").exists())
+
+    def test_stats_hands_it_over_on_the_way_in(self):
+        # The self-heal path: the owner never has to do anything.
+        from rest_framework.test import APIClient
+        with self.settings(OWNER_EMAILS=["boss@test.test"], OWNER_USERNAMES=[]):
+            u = self.owner_user(username="boss", email="boss@test.test")
+            membership_for(u)
+            c = APIClient(); c.force_authenticate(u)
+            self.assertTrue(c.get("/api/auth/stats/").data["is_owner"])
+        self.assertTrue(Badge.objects.filter(user=u, key="owner").exists())
+
+    def test_nobody_else_gets_it(self):
+        from apps.economy.views import ensure_owner
+        with self.settings(OWNER_EMAILS=["boss@test.test"], OWNER_USERNAMES=[]):
+            u = self.owner_user(username="rando", email="rando@test.test")
+            ensure_owner(User.objects.get(pk=u.pk))
+        self.assertFalse(Badge.objects.filter(user=u, key="owner").exists())
+
+    def test_a_deliberate_debug_switch_outranks_the_badge(self):
+        # The badge applies StatZ when it lands. Debug is god-mode chosen on
+        # purpose, and this function has never overridden it.
+        from apps.economy.models import TIER_DEBUG
+        from apps.economy.views import ensure_owner
+        with self.settings(OWNER_EMAILS=["boss@test.test"], OWNER_USERNAMES=[]):
+            u = self.owner_user(username="boss", email="boss@test.test")
+            m = membership_for(u)
+            m.tier = TIER_DEBUG
+            m.save(update_fields=["tier"])
+            ensure_owner(User.objects.get(pk=u.pk))
+        self.assertEqual(membership_for(u).tier, TIER_DEBUG)
+        self.assertTrue(Badge.objects.filter(user=u, key="owner").exists())
+
+    def test_make_owner_grants_it_too(self):
+        from django.core.management import call_command
+        from io import StringIO
+        u = self.owner_user(username="boss", email="boss@test.test")
+        membership_for(u)
+        out = StringIO()
+        call_command("make_owner", "boss@test.test", stdout=out)
+        self.assertTrue(Badge.objects.filter(user=u, key="owner").exists())
+        self.assertTrue(User.objects.get(pk=u.pk).is_superuser)
+        self.assertIn("👑", out.getvalue())
+
+    def test_it_is_idempotent(self):
+        from apps.economy.views import ensure_owner
+        with self.settings(OWNER_EMAILS=["boss@test.test"], OWNER_USERNAMES=[]):
+            u = self.owner_user(username="boss", email="boss@test.test")
+            for _ in range(3):
+                ensure_owner(User.objects.get(pk=u.pk))
+        self.assertEqual(Badge.objects.filter(user=u, key="owner").count(), 1)

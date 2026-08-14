@@ -1,4 +1,4 @@
-"""Promote a user to platform owner (staff + superuser + StatZ) on demand.
+"""Promote a user to platform owner (staff + superuser + StatZ + 👑) on demand.
 
     python manage.py make_owner ctkoth@gmail.com
     python manage.py make_owner K-Oth            # by username
@@ -11,7 +11,14 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 
-from apps.economy.models import TIER_FREE, TIER_PREMIUM, TIER_STATZ, membership_for
+from apps.economy.models import (
+    TIER_DEBUG,
+    TIER_FREE,
+    TIER_PREMIUM,
+    TIER_STATZ,
+    grant_badge,
+    membership_for,
+)
 
 User = get_user_model()
 
@@ -45,8 +52,17 @@ class Command(BaseCommand):
                 user.is_staff = True
                 user.is_superuser = True
                 user.save(update_fields=["is_staff", "is_superuser"])
+            # The Owner badge is part of being the owner, so it lands here too
+            # — same as views.ensure_owner does on login.
+            tier_before = membership_for(user).tier
+            _, gave_badge = grant_badge(user, "owner")
             m = membership_for(user)
+            if tier_before == TIER_DEBUG and m.tier != TIER_DEBUG:
+                m.tier = TIER_DEBUG          # a deliberate Debug switch outranks the badge
+                m.save(update_fields=["tier", "updated_at"])
             if m.tier in (TIER_FREE, TIER_PREMIUM):
                 m.tier = TIER_STATZ
                 m.save(update_fields=["tier", "updated_at"])
-            self.stdout.write(self.style.SUCCESS(f"✓ {user.username} <{user.email}> → owner + {m.tier}"))
+            badge = "👑 granted" if gave_badge else "👑 already held"
+            self.stdout.write(self.style.SUCCESS(
+                f"✓ {user.username} <{user.email}> → owner + {m.tier} ({badge})"))

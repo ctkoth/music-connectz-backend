@@ -52,12 +52,9 @@ def badge_dict(b, mine=False):
         "desc": spec.get("desc", ""),
         "how": spec.get("how", ""),
         "gifted": spec.get("gifted", False),
-        # A badge that can lapse says so. Losing one you thought was
-        # permanent is a worse surprise than knowing it tracks a live number.
-        "temporary": spec.get("temporary", False),
-        # A temporary badge tracks a live median and can lapse. Saying
-        # so on the row is the difference between losing it and being
-        # blindsided by losing it.
+        # A temporary badge tracks a live median and can lapse. Saying so on
+        # the row is the difference between losing it and being blindsided by
+        # losing it.
         "temporary": spec.get("temporary", False),
         "effects": spec.get("effects", {}),
         "effect_note": spec.get("effect_note", ""),
@@ -66,6 +63,68 @@ def badge_dict(b, mine=False):
         # Privacy is per badge and only the holder sees the switch.
         **({"visible": b.visible} if mine else {}),
     }
+
+
+def badge_chip(b):
+    """A badge as it is WORN — the compact form ProfileZ puts on a member card.
+
+    A chip carries the art, the title, and what the badge DOES. That last one
+    is the point: a badge on a profile that explains nothing is the sticker
+    this file exists to refuse, and the member reading somebody else's card is
+    exactly the person deciding whether one is worth going after. `open_in`
+    makes it a door into BadgeZ rather than a fact with nowhere to take it.
+    """
+    spec = BADGES.get(b.key, {})
+    return {
+        "key": b.key,
+        "name": spec.get("name", b.key),
+        "emoji": spec.get("emoji", "🏅"),
+        "icon": spec.get("icon", ""),
+        "title": spec.get("title", ""),
+        "desc": spec.get("desc", ""),
+        "how": spec.get("how", ""),
+        "gifted": spec.get("gifted", False),
+        "temporary": spec.get("temporary", False),
+        "effect_note": spec.get("effect_note", ""),
+        "awarded_at": b.awarded_at.isoformat() if b.awarded_at else "",
+        "open_in": "badgez",
+    }
+
+
+def worn_badges(user, rows=None):
+    """The badges a member has chosen to SHOW, ready to sit on their profile.
+
+    Only visible ones, always — a profile card must never be the place a
+    hidden badge leaks out of, or the privacy switch in BadgeZ is decoration.
+    `rows` lets a listing hand over badges it has already loaded.
+    """
+    return [badge_chip(b) for b in
+            (badges_for(user, only_visible=True) if rows is None else rows)]
+
+
+def worn_badges_by_user(user_ids):
+    """{user_id: [Badge, ...]} for a whole page of profiles, in one query.
+
+    Member search builds up to a hundred cards. Asking per card would put a
+    hundred queries behind a search that already does enough work.
+    """
+    out = {}
+    for b in (Badge.objects.filter(user_id__in=list(user_ids), visible=True)
+              .order_by("awarded_at")):
+        if b.key in BADGES:
+            out.setdefault(b.user_id, []).append(b)
+    return out
+
+
+def public_badge_chip(b):
+    """What a logged-out visitor sees on a shared profile.
+
+    The badge and what it took to get one; not what it pays. Effects are a
+    read of somebody's economy and belong behind the login — the catalogue
+    inside the app already explains them to anyone who can act on them.
+    """
+    chip = badge_chip(b)
+    return {k: chip[k] for k in ("key", "name", "emoji", "icon", "title", "desc", "how")}
 
 
 class BadgezView(APIView):
