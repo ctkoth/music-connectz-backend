@@ -7,6 +7,8 @@ enforced server-side) and is made idempotent by the unique PaymentIntent
 provider_ref — a replayed Stripe webhook or a double PayPal capture can never
 credit a wallet twice.
 """
+import json
+
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -68,12 +70,34 @@ def _complete_intent(intent):
     return pi
 
 
+def _invoice_subscription_id(invoice):
+    """The subscription an invoice belongs to, whichever API version sent it.
+
+    Stripe moved this off the Invoice root in API version 2025-03-31.basil, and
+    our webhook destination is pinned past it — so the old read came back None
+    and every recurring top-up was charged and never credited. Both locations
+    are checked, because a replayed or long-queued event can still carry the
+    old shape.
+
+    `subscription` is an ExpandableField: an id string normally, the whole
+    object when expanded. Take the id either way.
+    """
+    def _id(value):
+        if isinstance(value, dict):
+            return value.get("id") or ""
+        return value or ""
+
+    parent = invoice.get("parent") or {}
+    details = parent.get("subscription_details") or {}
+    return _id(details.get("subscription")) or _id(invoice.get("subscription"))
+
+
 def _credit_autotopup_invoice(invoice):
     """Credit money + tier Energy for one paid auto-top-up invoice, exactly once.
     Idempotent per invoice id via the unique PaymentIntent.provider_ref, and both
     the money and energy grant happen inside the same status-guarded lock so a
     replayed webhook can never double-credit either."""
-    sub_id = invoice.get("subscription")
+    sub_id = _invoice_subscription_id(invoice)
     inv_id = invoice.get("id")
     if not sub_id or not inv_id:
         return
@@ -363,9 +387,25 @@ class StripeWebhookView(APIView):
         import stripe
         sig = request.META.get("HTTP_STRIPE_SIGNATURE", "")
         try:
-            event = stripe.Webhook.construct_event(request.body, sig, settings.STRIPE_WEBHOOK_SECRET)
+            stripe.Webhook.construct_event(request.body, sig, settings.STRIPE_WEBHOOK_SECRET)
         except (ValueError, stripe.error.SignatureVerificationError):
             return Response({"detail": "invalid signature"}, status=status.HTTP_400_BAD_REQUEST)
+        # Signature verified — now read the body ourselves rather than using
+        # what construct_event returned.
+        #
+        # It returns a StripeObject, which WAS a dict subclass when this was
+        # written and is not one in stripe-python 15. It kept `__getitem__` and
+        # lost `.get()`, so every `obj.get("metadata")` below raised
+        # AttributeError and this endpoint answered 500 to every event it
+        # actually handles — wallet fundings, tier grants, cancellations and
+        # 18+ verifications alike. Nothing in the app could see it: the failure
+        # was entirely on Stripe's side of the call, and `requirements.txt`
+        # floated at `stripe>=8.0`, so it arrived on a deploy that changed no
+        # code of ours.
+        #
+        # Plain JSON is the shape the handlers below were written against and
+        # the one Stripe documents. It cannot drift with the library again.
+        event = json.loads(request.body)
 
         from django.contrib.auth import get_user_model
         etype = event["type"]
@@ -470,7 +510,16 @@ class StripeWebhookView(APIView):
             # (next_payment_attempt is null), the sub is effectively dead now —
             # downgrade immediately instead of waiting for the eventual delete.
             obj = event["data"]["object"] or {}
-            if obj.get("next_payment_attempt") is None:
+            # An auto-top-up is not a membership. `_downgrade_by_customer`
+            # matches on the Stripe customer alone, and a member's wallet
+            # top-up rides the same customer as their subscription — so a
+            # declined $5 top-up card would drop a paying StatZ member to Free.
+            # The customer.subscription.deleted branch above already draws this
+            # distinction; this one matched on customer and never asked.
+            sub_id = _invoice_subscription_id(obj)
+            is_topup = sub_id and AutoTopUp.objects.filter(
+                stripe_subscription_id=sub_id).exists()
+            if obj.get("next_payment_attempt") is None and not is_topup:
                 _downgrade_by_customer(obj.get("customer"))
         return Response({"received": True})
 
