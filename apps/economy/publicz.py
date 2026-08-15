@@ -24,9 +24,11 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .badgez import public_badge_chip
 from .models import (
     Post,
     Profile,
+    badges_for,
     can_view_post,
     item_rating_median,
 )
@@ -85,6 +87,12 @@ def public_profile_dict(p):
         "display_name": p.display_name or p.user.username,
         "bio": p.bio or "",
         "personas": personas,
+        # BadgeZ travels with the card. A shared profile is somebody's proof
+        # they are worth hiring, and "ten deals, no dispute" is exactly the
+        # part of that a stranger came to find out. Only badges the member
+        # chose to show, and only what the badge is — never what it pays.
+        "badge_title": p.badge_title,
+        "badges": [public_badge_chip(b) for b in badges_for(p.user, only_visible=True)],
         "links": p.links or [],
         "public": True,
     }

@@ -72,16 +72,29 @@ def is_owner_candidate(user):
 
 def ensure_owner(user):
     """Bootstrap the platform owner by email/username (settings.OWNER_EMAILS /
-    OWNER_USERNAMES). Promotes the account to staff+superuser and keeps it at
-    StatZ (bumping Free/Premium), never overriding a deliberate Debug switch."""
-    from .models import TIER_FREE, TIER_PREMIUM
+    OWNER_USERNAMES). Promotes the account to staff+superuser, hands over the
+    Owner badge, and keeps it at StatZ (bumping Free/Premium), never overriding
+    a deliberate Debug switch."""
+    from .models import TIER_FREE, TIER_PREMIUM, grant_badge
     if not is_owner_candidate(user):
         return
     if not (user.is_staff and user.is_superuser):
         user.is_staff = True
         user.is_superuser = True
         user.save(update_fields=["is_staff", "is_superuser"])
+    # The Owner badge lands here rather than being gifted by hand. It is the
+    # one badge whose condition is "this is whose app it is", and that is a
+    # fact this function already knows — leaving it to a POST would mean the
+    # owner has to gift it to themselves, and would leave the badge missing
+    # on any account that got promoted before BadgeZ existed.
+    tier_before = membership_for(user).tier
+    grant_badge(user, "owner")
     m = membership_for(user)
+    if tier_before == TIER_DEBUG and m.tier != TIER_DEBUG:
+        # The badge applies StatZ the moment it lands. A deliberate Debug
+        # switch outranks it, which has always been this function's rule.
+        m.tier = TIER_DEBUG
+        m.save(update_fields=["tier", "updated_at"])
     if m.tier in (TIER_FREE, TIER_PREMIUM):
         m.tier = TIER_STATZ
         m.save(update_fields=["tier", "updated_at"])

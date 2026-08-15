@@ -47,7 +47,11 @@ from .models import (
     blocked_user_ids,
     Block,
     wallet_for,
+    Badge,
+    badge_effects,
+    recheck_badges,
 )
+from .badgez import worn_badges, worn_badges_by_user
 from .catalog import over_char_limit
 from .gates import GATE_KEYS, clean_gates, failing_gate, member_metrics, refusal
 from .serializers import WalletSerializer
@@ -474,8 +478,12 @@ def profile_max_experience(p):
     return best
 
 
-def _profile_card(p, request=None):
-    """Compact card for search results."""
+def _profile_card(p, request=None, badges=None):
+    """Compact card for search results.
+
+    `badges` lets a listing pass in rows it has already loaded in bulk; left
+    alone, the card fetches its own.
+    """
     m = getattr(p.user, "membership", None)
     return {
         "username": p.user.username,
@@ -496,22 +504,53 @@ def _profile_card(p, request=None):
         "founding": bool(m and m.founding),
         "lifetime": bool(m and m.lifetime),
         "experience_years": profile_max_experience(p),
+        # BadgeZ, worn. The title is the one this member picked out of the
+        # badges they hold; the chips are the badges they chose to show. Both
+        # come off the instant they flip the switch in BadgeZ, because the
+        # profile is the surface that switch exists to control.
+        "badge_title": p.badge_title,
+        "badges": worn_badges(p.user, badges),
         **follow_counts(p.user),
     }
 
 
-def _profile_full(p, request):
+def _profile_full(p, request, recheck=False):
+    """The whole profile. `recheck` re-runs the badge checks first.
+
+    Opening your own ProfileZ is the moment to find out you earned something,
+    so the badge is on the card when you arrive rather than the next time some
+    unrelated code path happens to run. Only ever for your own profile —
+    re-checking a stranger's would let anybody move somebody else's badges by
+    looking at them.
+    """
+    mine = p.user_id == request.user.id
+    if mine and recheck:
+        recheck_badges(p.user)
+        # A lapsed badge takes its title down with it, and that happens on a
+        # different Profile instance to this one. Read the row back or the
+        # card shows a title the member no longer holds.
+        p.refresh_from_db()
     card = _profile_card(p, request)
     card.update({
         "bio": p.bio, "location": p.location, "birthday": p.birthday,
         "substances": p.substances, "asexual": p.asexual, "traits": p.traits,
-        "personas": p.personas, "links": p.links, "mine": p.user_id == request.user.id,
+        "personas": p.personas, "links": p.links, "mine": mine,
         "my_attractiveness": AttractivenessRating.objects.filter(rater=request.user, target=p.user).values_list("score", flat=True).first(),
         "my_overall": OverallRating.objects.filter(rater=request.user, target=p.user).values_list("score", flat=True).first(),
         "overall_count": OverallRating.objects.filter(target=p.user).count(),
         "relationship": relationship(request.user, p.user),
-        "energy_per_hour": energy_rate_per_hour(p.user) if p.user_id == request.user.id else None,
+        "energy_per_hour": energy_rate_per_hour(p.user) if mine else None,
         "verified_18plus": p.verified_18plus,
+        # What the badges on this card add up to — yours only. An effect total
+        # is a read of somebody's economy, not a thing to publish about them.
+        "badge_effects": badge_effects(p.user) if mine else {},
+        # You should be able to see that you're hiding something. The count
+        # only: naming the hidden badge here would undo the hiding.
+        "badges_hidden": (Badge.objects.filter(user=p.user, visible=False).count()
+                          if mine else 0),
+        # Cross-pollination: the badges are shown here and changed in BadgeZ,
+        # so the card carries the way there.
+        "badges_open_in": "badgez",
     })
     return card
 
@@ -673,7 +712,9 @@ class ProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response(_profile_full(profile_for(request.user), request))
+        # Your own ProfileZ re-checks your badges on the way in, so the tab
+        # that displays them is also the tab that notices you earned one.
+        return Response(_profile_full(profile_for(request.user), request, recheck=True))
 
     def post(self, request):
         p = profile_for(request.user)
@@ -880,7 +921,8 @@ class MemberProfileView(APIView):
         if not user:
             return Response({"detail": "profile not found"}, status=status.HTTP_404_NOT_FOUND)
         p = profile_for(user)
-        return Response(_profile_full(p, request))
+        # recheck only bites on your own profile; _profile_full enforces that.
+        return Response(_profile_full(p, request, recheck=True))
 
 
 class MembersView(APIView):
@@ -929,7 +971,10 @@ class MembersView(APIView):
         origin = (me.lat, me.lng) if (me.share_location and me.lat is not None) else (None, None)
 
         results = []
-        qs = Profile.objects.exclude(user=request.user).exclude(user_id__in=blocked_user_ids(request.user)).select_related("user")[:500]
+        qs = list(Profile.objects.exclude(user=request.user).exclude(user_id__in=blocked_user_ids(request.user)).select_related("user")[:500])
+        # Every card wears its badges, so load them for the whole page in one
+        # query. Per-card would be five hundred of them behind one search.
+        worn = worn_badges_by_user(p.user_id for p in qs)
         for p in qs:
             if regions and not (set(regions) & set(p.regions or [])):
                 continue
@@ -954,7 +999,7 @@ class MembersView(APIView):
             # The distance GATE lives in the spec above; this is the number
             # shown on the card. Computed once in member_metrics either way.
             dist = metrics.get("km")
-            card = _profile_card(p, request)
+            card = _profile_card(p, request, badges=worn.get(p.user_id, []))
             card["distance_km"] = dist
             results.append(card)
         # Nearest first when a distance origin exists. Distance WINS over the
