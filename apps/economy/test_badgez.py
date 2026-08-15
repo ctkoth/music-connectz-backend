@@ -129,11 +129,28 @@ class TheEffectsActuallyBiteTests(BadgeBase):
         grant_badge(self.user, "owner")
         self.assertEqual(membership_for(self.user).tier, TIER_STATZ)
 
-    def test_the_owner_badge_carries_the_tax_and_the_royalties(self):
+    def test_the_owner_badge_claims_only_what_it_actually_applies(self):
+        # It used to declare `dev_tax_share` and `intelligence_royalties`, and
+        # nothing read either. Both facts are real and neither is the badge's
+        # doing — the royalties are paid by platform_owner(), and the developer
+        # tax is received by never being credited at all. A badge that names
+        # them as effects is a second source of truth for where money goes.
         grant_badge(self.user, "owner")
         fx = badge_effects(self.user)
-        self.assertEqual(fx["dev_tax_share"], 1.0)
-        self.assertTrue(fx["intelligence_royalties"])
+        self.assertNotIn("dev_tax_share", fx)
+        self.assertNotIn("intelligence_royalties", fx)
+        # What it does do, it still does.
+        self.assertEqual(BADGES["owner"]["effects"], {"tier": "statz"})
+        self.assertEqual(membership_for(self.user).tier, TIER_STATZ)
+
+    def test_no_badge_moves_money_by_being_held(self):
+        # The rule the owner badge broke, asserted for the whole catalogue.
+        # An effect that decides where revenue goes puts a deletable row in
+        # charge of a payout.
+        banned = {"dev_tax_share", "intelligence_royalties", "revenue_share",
+                  "payout_share"}
+        for key, spec in BADGES.items():
+            self.assertFalse(banned & set(spec.get("effects", {})), key)
 
 
 class EarnedNotClaimedTests(BadgeBase):
@@ -813,9 +830,7 @@ class TheOwnerHoldsTheOwnerBadgeTests(TestCase):
             ensure_owner(User.objects.get(pk=u.pk))
         self.assertTrue(Badge.objects.filter(user=u, key="owner").exists())
         self.assertEqual(membership_for(u).tier, TIER_STATZ)
-        fx = badge_effects(u)
-        self.assertEqual(fx["dev_tax_share"], 1.0)
-        self.assertTrue(fx["intelligence_royalties"])
+        self.assertEqual(badge_effects(u), {"tier": "statz"})
 
     def test_it_lands_by_username_too(self):
         from apps.economy.views import ensure_owner
@@ -873,3 +888,73 @@ class TheOwnerHoldsTheOwnerBadgeTests(TestCase):
             for _ in range(3):
                 ensure_owner(User.objects.get(pk=u.pk))
         self.assertEqual(Badge.objects.filter(user=u, key="owner").count(), 1)
+
+
+class OwnerRevenueReadOutTests(TestCase):
+    """What the platform has actually taken, said out loud.
+
+    The developer tax and the intelligence royalties were true and invisible,
+    and an unseen fact reads as an unimplemented one — which is how they ended
+    up written down as badge effects in the first place. Showing them is the
+    fix; crediting them would be a second bug.
+    """
+
+    URL = "/api/economy/owner/revenue/"
+
+    def setUp(self):
+        from apps.economy.models import Transaction
+        self.T = Transaction
+        self.owner = User.objects.create_user(username="boss", password=PW,
+                                              is_staff=True, is_superuser=True)
+        self.member = User.objects.create_user(username="member", password=PW)
+        for u in (self.owner, self.member):
+            membership_for(u)
+        self.oc = APIClient(); self.oc.force_authenticate(self.owner)
+        self.mc = APIClient(); self.mc.force_authenticate(self.member)
+
+    def test_only_the_owner_sees_it(self):
+        self.assertEqual(self.mc.get(self.URL).status_code, 403)
+        self.assertEqual(self.oc.get(self.URL).status_code, 200)
+
+    def test_it_totals_the_tax_the_ledger_recorded(self):
+        self.T.objects.create(user=self.member, kind=self.T.KIND_ADD,
+                              amount_cents=900, dev_tax_cents=100, note="a")
+        self.T.objects.create(user=self.member, kind=self.T.KIND_SPEND,
+                              amount_cents=-500, dev_tax_cents=50, note="b")
+        d = self.oc.get(self.URL).data
+        self.assertEqual(d["dev_tax_collected_cents"], 150)
+        self.assertEqual(d["dev_tax_by_kind"][self.T.KIND_ADD], 100)
+        self.assertEqual(d["dev_tax_taxed_movements"], 2)
+
+    def test_it_is_summed_from_rows_not_stored(self):
+        # A stored total is how a number outlives the rows that justify it.
+        self.T.objects.create(user=self.member, kind=self.T.KIND_ADD,
+                              amount_cents=900, dev_tax_cents=100, note="a")
+        self.assertEqual(self.oc.get(self.URL).data["dev_tax_collected_cents"], 100)
+        self.T.objects.all().delete()
+        self.assertEqual(self.oc.get(self.URL).data["dev_tax_collected_cents"], 0)
+
+    def test_the_tax_is_never_credited_to_the_owner_wallet(self):
+        # The whole reason this is a read-out. A member's balance is a
+        # liability against cash already held, so the tax not becoming a
+        # balance IS the platform keeping it. Crediting it books it twice.
+        from apps.economy.models import credit_funds, wallet_for
+        before = wallet_for(self.owner).money_cents
+        dev, net = credit_funds(self.member, 10_000, note="top-up")
+        self.assertGreater(dev, 0)
+        self.assertEqual(wallet_for(self.member).money_cents, net)
+        self.assertEqual(wallet_for(self.owner).money_cents, before)
+        # And it shows up in the read-out instead.
+        self.assertEqual(self.oc.get(self.URL).data["dev_tax_collected_cents"], dev)
+
+    def test_royalties_report_no_number_rather_than_a_fake_one(self):
+        # They are paid, but as a bare wallet bump with no Transaction behind
+        # them, so there is nothing to total. Reading the owner's balance and
+        # calling it royalties would be a fake number — that balance holds
+        # everything else too.
+        d = self.oc.get(self.URL).data
+        self.assertIsNone(d["intelligence_royalties_cents"])
+        self.assertTrue(d["intelligence_royalties_note"])
+
+    def test_the_total_leads_back_to_the_rows(self):
+        self.assertEqual(self.oc.get(self.URL).data["open_in"], "logz")
