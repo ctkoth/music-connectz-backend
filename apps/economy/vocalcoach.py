@@ -21,7 +21,6 @@ from one clip.
 import base64
 import json
 import logging
-import os
 import re
 
 import requests
@@ -34,7 +33,7 @@ from rest_framework.views import APIView
 
 from .catalog import ai_cost
 from .instruments import DIFFICULTIES, profile_for_app, prompt_for
-from .gemini import BASE, _bill, _key
+from .gemini import _bill, _key, generate_content
 from .models import (
     PROMPT_ALLOWANCE,
     TIER_FREE,
@@ -162,22 +161,24 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty):
             status.HTTP_400_BAD_REQUEST,
         )
 
-    model = os.environ.get("GEMINI_AUDIO_MODEL", "gemini-2.5-flash")
     unreadable = ({"detail": "The coach couldn't process that take."}, status.HTTP_502_BAD_GATEWAY)
+    # Read the take ONCE. The chain below may try several models, and a file
+    # object read a second time hands the next attempt an empty take — which
+    # would come back as "the coach couldn't read that" about a take we never
+    # actually sent.
+    body = {"contents": [{"parts": [
+        {"text": prompt},
+        {"inline_data": {"mime_type": mime, "data": base64.b64encode(f.read()).decode()}},
+    ]}]}
     try:
-        resp = requests.post(
-            f"{BASE}/models/{model}:generateContent?key={key}",
-            json={"contents": [{"parts": [
-                {"text": prompt},
-                {"inline_data": {"mime_type": mime,
-                                 "data": base64.b64encode(f.read()).decode()}},
-            ]}]},
-            timeout=90,
-        )
+        resp, tried = generate_content("text", body, key=key, timeout=90,
+                                       env_vars=("GEMINI_AUDIO_MODEL",),
+                                       label=f"{app_key} coach")
     except requests.RequestException:
         logger.exception("SingZ coach: could not reach Gemini")
         return None, ({"detail": "Couldn't reach the coach. Try that take again."},
                       status.HTTP_502_BAD_GATEWAY)
+    model = ", ".join(tried)
 
     if resp.status_code != 200:
         # Log what we SENT as well as what came back. Without the mime type and
@@ -196,7 +197,7 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty):
         why = {
             400: "that take's format wasn't accepted",
             403: "the coach's API key was refused",
-            404: "the coach's model isn't available",
+            404: "the coach can't reach a model right now — we're on it",
             429: "the coach has hit its limit for now — try again shortly",
         }.get(resp.status_code,
               "the coach is having a moment" if resp.status_code >= 500

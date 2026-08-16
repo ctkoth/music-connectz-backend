@@ -40,12 +40,12 @@ metadata is precisely the thing this module exists to stop doing.
 import base64
 import json
 import logging
-import os
 import re
 
 import requests
 
-from .vocalcoach import BASE, MAX_MB, _key, gemini_mime
+from .gemini import generate_content
+from .vocalcoach import MAX_MB, _key, gemini_mime
 
 logger = logging.getLogger(__name__)
 
@@ -128,23 +128,26 @@ def rate_video(fileobj, content_type, *, fmt="reelz", genre="", length=""):
     if not mime:
         return None, f"the rater can't read {content_type or 'that format'}"
 
-    model = os.environ.get("GEMINI_VIDEO_MODEL",
-                           os.environ.get("GEMINI_AUDIO_MODEL", "gemini-2.5-flash"))
     prompt = PROMPT.format(fmt=fmt, length=length or "unspecified length",
                            genre=genre or "unspecified")
+    # Read the video ONCE — the chain may try more than one model, and a file
+    # object read twice sends the second attempt nothing.
+    body = {"contents": [{"parts": [
+        {"text": prompt},
+        {"inline_data": {"mime_type": mime, "data": base64.b64encode(fileobj.read()).decode()}},
+    ]}]}
     try:
-        resp = requests.post(
-            f"{BASE}/models/{model}:generateContent?key={key}",
-            json={"contents": [{"parts": [
-                {"text": prompt},
-                {"inline_data": {"mime_type": mime,
-                                 "data": base64.b64encode(fileobj.read()).decode()}},
-            ]}]},
+        # Same chain the coach walks, so a retired model name can't take the
+        # rater down on its own — see gemini.MODEL_CHAINS.
+        resp, tried = generate_content(
+            "text", body, key=key,
             timeout=180,     # a video is a longer watch than a vocal take
-        )
+            env_vars=("GEMINI_VIDEO_MODEL", "GEMINI_AUDIO_MODEL"),
+            label="DirectZ craft")
     except requests.RequestException:
         logger.exception("DirectZ craft: could not reach Gemini")
         return None, "couldn't reach the rater"
+    model = ", ".join(tried)
 
     if resp.status_code != 200:
         # The mime and model in the line, for the same reason the coach logs
@@ -155,7 +158,7 @@ def rate_video(fileobj, content_type, *, fmt="reelz", genre="", length=""):
         return None, {
             400: "that video's format wasn't accepted",
             403: "the rater's API key was refused",
-            404: "the rater's model isn't available",
+            404: "the rater can't reach a model right now",
             429: "the rater has hit its limit for now",
         }.get(resp.status_code,
               "the rater is having a moment" if resp.status_code >= 500

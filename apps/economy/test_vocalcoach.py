@@ -1,4 +1,5 @@
 import json
+import os
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -8,6 +9,7 @@ from rest_framework.test import APIClient
 
 from django.utils import timezone
 
+from apps.economy import gemini
 from apps.economy.catalog import ai_cost
 from apps.economy.models import (PROMPT_ALLOWANCE, TIER_FREE, TIER_PREMIUM,
                                  TIER_STATZ, daily_prompt_state,
@@ -36,6 +38,17 @@ def fake_gemini(payload=GOOD, status_code=200):
     return R()
 
 
+def fake_list_models(names):
+    """A ListModels reply. `names` are full resource names, as Google sends them."""
+    class R:
+        status_code = 200
+        text = "{}"
+        def json(self):
+            return {"models": [{"name": n, "supportedGenerationMethods": ["generateContent"]}
+                               for n in names]}
+    return R()
+
+
 def take(name="take.webm", ct="audio/webm", size=1000):
     return SimpleUploadedFile(name, b"0" * size, content_type=ct)
 
@@ -52,7 +65,7 @@ class SingZCoachTests(TestCase):
         m = membership_for(self.user); m.tier = t; m.save(update_fields=["tier", "updated_at"])
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_a_take_comes_back_scored_and_coached(self, _post, _k):
         resp = self.client.post(URL, {"take": take(), "genre": "R&B",
                                       "range": "tenor", "difficulty": "builder"}, format="multipart")
@@ -64,7 +77,7 @@ class SingZCoachTests(TestCase):
         self.assertTrue(resp.data["next_drill"])
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_the_genre_and_range_reach_the_model(self, post, _k):
         self.client.post(URL, {"take": take(), "genre": "Drill", "range": "alto",
                                "difficulty": "stageboss"}, format="multipart")
@@ -74,7 +87,7 @@ class SingZCoachTests(TestCase):
         self.assertIn("stageboss", sent)
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_every_tier_can_have_a_take_scored(self, _post, _k):
         # This replaces a test that pinned the blueprint's StatZ gate. The gate
         # was removed on purpose, not by accident: the no-account trial door
@@ -104,7 +117,7 @@ class SingZCoachTests(TestCase):
         self.assertIn("GEMINI_API_KEY", resp.data["detail"])
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini({"nonsense": True}))
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini({"nonsense": True}))
     @patch("apps.economy.vocalcoach._bill")
     def test_an_unusable_reply_is_not_billed(self, bill, _post, _k):
         """A take the coach couldn't read must not cost the member a prompt."""
@@ -113,7 +126,7 @@ class SingZCoachTests(TestCase):
         bill.assert_not_called()
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini({**GOOD, "score": 47}))
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini({**GOOD, "score": 47}))
     def test_a_wild_score_is_clamped_to_ten(self, _post, _k):
         self.assertEqual(self.client.post(URL, {"take": take()}, format="multipart").data["score"], 10)
 
@@ -186,7 +199,7 @@ class CoachDailyAllowanceTests(TestCase):
         m = membership_for(self.user); m.tier = TIER_STATZ; m.save()
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_a_take_spends_a_free_daily_prompt_before_any_balance(self, _post, _k):
         w = wallet_for(self.user); w.money_cents = 500; w.promptz = 50; w.save()
         before = daily_prompt_state(self.user)[2]
@@ -198,7 +211,7 @@ class CoachDailyAllowanceTests(TestCase):
         self.assertEqual(w.promptz, 50, "PromptZ was spent while a free prompt remained")
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_once_the_allowance_is_gone_it_falls_back_to_promptz(self, _post, _k):
         w = wallet_for(self.user)
         w.money_cents = 500
@@ -254,7 +267,7 @@ class InstrumentCoachTests(TestCase):
         self.assertIn("Pitch", self.client.get(URL).data["caveat"])
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post")
+    @patch("apps.economy.gemini.requests.post")
     def test_the_prompt_asks_for_this_instruments_dimensions(self, post, _k):
         post.return_value = fake_gemini({**GOOD, "scores": {"flow": 7, "timing": 8, "breath": 6,
                                                             "clarity": 7, "delivery": 9}})
@@ -267,7 +280,7 @@ class InstrumentCoachTests(TestCase):
         self.assertEqual(set(resp.data["scores"]), {"flow", "timing", "breath", "clarity", "delivery"})
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_a_rap_take_is_billed_the_same_way(self, _post, _k):
         # Was "gated and billed the same way" — RapZ proved it matched SingZ by
         # sharing its StatZ refusal. The gate is gone, so it proves the same
@@ -295,14 +308,14 @@ class FreePromptCoversTheTakeTests(TestCase):
         w = wallet_for(self.user); w.money_cents = 0; w.promptz = 0; w.save()
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_an_empty_wallet_still_gets_a_take_while_free_prompts_remain(self, _post, _k):
         resp = self.client.post(URL, {"take": take()}, format="multipart")
         self.assertEqual(resp.status_code, 200, resp.content)
         self.assertEqual(resp.data["cost_cents"], 0)
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_once_the_allowance_is_gone_an_empty_wallet_is_refused(self, _post, _k):
         from django.utils import timezone
         w = wallet_for(self.user)
@@ -330,7 +343,7 @@ class VideoTakesTests(TestCase):
         w = wallet_for(self.user); w.money_cents = 100000; w.save()
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_a_video_take_is_scored_like_an_audio_one(self, _post, _k):
         resp = self.client.post(
             URL, {"take": take("take.mp4", "video/mp4"), "genre": "Rap"}, format="multipart")
@@ -338,7 +351,7 @@ class VideoTakesTests(TestCase):
         self.assertEqual(resp.data["score"], GOOD["score"])
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_the_video_goes_up_with_its_own_mime_type(self, post, _k):
         # Sent as-is, not relabelled as audio — the model needs to know it can
         # look at the picture.
@@ -396,7 +409,7 @@ class TheSizeCapIsOneWeCanHonourTests(TestCase):
         from apps.economy.vocalcoach import MAX_MB
         big = SimpleUploadedFile(
             "long.webm", b"0" * int((MAX_MB + 1) * 1024 * 1024), content_type="video/webm")
-        with patch("apps.economy.vocalcoach.requests.post") as post:
+        with patch("apps.economy.gemini.requests.post") as post:
             resp = self.client.post(URL, {"take": big}, format="multipart")
         self.assertEqual(resp.status_code, 413)
         post.assert_not_called()
@@ -447,7 +460,7 @@ class TheContainerTheBrowserActuallyRecordsTests(TestCase):
         self.assertIsNone(gemini_mime(""))
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_a_chrome_recording_reaches_gemini_with_a_type_it_takes(self, post, _k):
         resp = self.client.post(
             URL, {"take": take("take.webm", "audio/webm;codecs=opus")}, format="multipart")
@@ -461,7 +474,7 @@ class TheContainerTheBrowserActuallyRecordsTests(TestCase):
     def test_an_unreadable_container_never_reaches_the_model(self, _k):
         # Refused here, instantly, and named — rather than a round trip that
         # comes back as a generic failure the member reads as "my take was bad".
-        with patch("apps.economy.vocalcoach.requests.post") as post:
+        with patch("apps.economy.gemini.requests.post") as post:
             resp = self.client.post(
                 URL, {"take": take("take.xyz", "audio/x-weird")}, format="multipart")
         self.assertEqual(resp.status_code, 400)
@@ -471,7 +484,7 @@ class TheContainerTheBrowserActuallyRecordsTests(TestCase):
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
     def test_an_unreadable_container_is_not_billed(self, _k):
         before = daily_prompt_state(self.user)[2]
-        with patch("apps.economy.vocalcoach.requests.post"):
+        with patch("apps.economy.gemini.requests.post"):
             self.client.post(URL, {"take": take("t.xyz", "audio/x-weird")}, format="multipart")
         self.assertEqual(daily_prompt_state(self.user)[2], before)
 
@@ -491,10 +504,19 @@ class TheFailureSaysWhichFailureItWasTests(TestCase):
         self.client.force_authenticate(self.user)
         m = membership_for(self.user); m.tier = TIER_STATZ; m.save()
         w = wallet_for(self.user); w.money_cents = 100000; w.save()
+        gemini._proven.clear()
+        gemini._catalogue = None
+        self.addCleanup(gemini._proven.clear)
+        self.addCleanup(setattr, gemini, "_catalogue", None)
 
     def send(self, status_code):
+        # ListModels is stubbed as well as generateContent: a 404 walks the
+        # whole chain and then asks the API what it has, and a test that
+        # reaches the real internet to find out is a test that fails on a
+        # train.
         with patch("apps.economy.vocalcoach._key", return_value="k"), \
-             patch("apps.economy.vocalcoach.requests.post",
+             patch("apps.economy.gemini.requests.get", return_value=fake_list_models([])), \
+             patch("apps.economy.gemini.requests.post",
                    return_value=fake_gemini(status_code=status_code)):
             return self.client.post(URL, {"take": take()}, format="multipart")
 
@@ -525,3 +547,116 @@ class TheFailureSaysWhichFailureItWasTests(TestCase):
         before = daily_prompt_state(self.user)[2]
         self.send(429)
         self.assertEqual(daily_prompt_state(self.user)[2], before)
+
+
+class ARetiredModelDoesNotTakeTheCoachDownTests(TestCase):
+    """The take was fine. The model name wasn't.
+
+    `models/<name>:generateContent` answers 404 when the key has no such model,
+    and Google retires names on its own schedule. Pinned to one name, the coach
+    went dark mid-promotion and told members "the coach couldn't read that take"
+    about takes it never got to hear.
+
+    404 is therefore the one upstream status worth retrying, because it is the
+    only one that is a fact about OUR configuration rather than about the take.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("k", "k@e.com", "pw12345678")
+        self.client.force_authenticate(self.user)
+        m = membership_for(self.user); m.tier = TIER_STATZ; m.save()
+        w = wallet_for(self.user); w.money_cents = 100000; w.save()
+        gemini._proven.clear()
+        gemini._catalogue = None
+        self.addCleanup(gemini._proven.clear)
+        self.addCleanup(setattr, gemini, "_catalogue", None)
+
+    def models_asked(self, post):
+        return [c.args[0].rsplit("/", 1)[-1].split(":")[0] for c in post.call_args_list]
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post")
+    def test_a_404_falls_through_to_the_next_model_and_the_take_is_scored(self, post, _k):
+        post.side_effect = [fake_gemini(status_code=404), fake_gemini()]
+        resp = self.client.post(URL, {"take": take()}, format="multipart")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["score"], GOOD["score"])
+        self.assertEqual(post.call_count, 2)
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post")
+    def test_the_second_model_gets_the_take_not_an_empty_file(self, post, _k):
+        """The file is read once, before the walk.
+
+        Reading it again on the retry sends the next model nothing, and an
+        empty take comes back unscoreable — a fallback that always fails is
+        worse than no fallback, because it looks like it tried.
+        """
+        post.side_effect = [fake_gemini(status_code=404), fake_gemini()]
+        self.client.post(URL, {"take": take(size=2048)}, format="multipart")
+        for call in post.call_args_list:
+            sent = call.kwargs["json"]["contents"][0]["parts"][1]["inline_data"]["data"]
+            self.assertTrue(sent, "a retry was sent an empty take")
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post")
+    def test_a_real_refusal_is_not_asked_four_times(self, post, _k):
+        """429 is an answer about the request. Re-asking it doesn't change it."""
+        post.return_value = fake_gemini(status_code=429)
+        resp = self.client.post(URL, {"take": take()}, format="multipart")
+        self.assertEqual(resp.status_code, 502)
+        self.assertEqual(post.call_count, 1)
+        self.assertIn("hit its limit", resp.data["detail"])
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post")
+    def test_a_model_that_answered_is_tried_first_next_time(self, post, _k):
+        post.side_effect = [fake_gemini(status_code=404), fake_gemini(), fake_gemini()]
+        self.client.post(URL, {"take": take()}, format="multipart")
+        winner = self.models_asked(post)[1]
+        self.client.post(URL, {"take": take()}, format="multipart")
+        self.assertEqual(post.call_count, 3, "the second take re-walked the 404")
+        self.assertEqual(self.models_asked(post)[2], winner)
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch.dict(os.environ, {"GEMINI_AUDIO_MODEL": "gemini-1.0-retired"})
+    @patch("apps.economy.gemini.requests.post")
+    def test_a_stale_env_override_is_tried_first_but_not_alone(self, post, _k):
+        """Setting the env var stays a deliberate choice — it just isn't a cliff.
+
+        A GEMINI_AUDIO_MODEL set a year ago used to be a single point of
+        failure with no way back short of a deploy.
+        """
+        post.side_effect = [fake_gemini(status_code=404), fake_gemini()]
+        resp = self.client.post(URL, {"take": take()}, format="multipart")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(self.models_asked(post)[0], "gemini-1.0-retired")
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.get")
+    @patch("apps.economy.gemini.requests.post")
+    def test_when_every_shipped_name_is_gone_it_asks_the_api_what_it_has(self, post, get, _k):
+        """Every name we ship is a guess about someone else's catalogue.
+
+        ListModels is the one source that can't be out of date, so when the
+        guesses run out, ask instead of giving up.
+        """
+        get.return_value = fake_list_models(["models/gemini-99-flash", "models/text-embedding-004"])
+        post.side_effect = ([fake_gemini(status_code=404)] * len(gemini.MODEL_CHAINS["text"])
+                            + [fake_gemini()])
+        resp = self.client.post(URL, {"take": take()}, format="multipart")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(self.models_asked(post)[-1], "gemini-99-flash")
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.get")
+    @patch("apps.economy.gemini.requests.post")
+    @patch("apps.economy.vocalcoach._bill")
+    def test_a_take_no_model_could_read_is_still_not_billed(self, bill, post, get, _k):
+        get.return_value = fake_list_models([])
+        post.return_value = fake_gemini(status_code=404)
+        resp = self.client.post(URL, {"take": take()}, format="multipart")
+        self.assertEqual(resp.status_code, 502)
+        bill.assert_not_called()
+        self.assertNotIn("test-key", json.dumps(resp.data))
