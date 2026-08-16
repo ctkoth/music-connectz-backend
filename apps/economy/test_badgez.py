@@ -947,14 +947,124 @@ class OwnerRevenueReadOutTests(TestCase):
         # And it shows up in the read-out instead.
         self.assertEqual(self.oc.get(self.URL).data["dev_tax_collected_cents"], dev)
 
-    def test_royalties_report_no_number_rather_than_a_fake_one(self):
-        # They are paid, but as a bare wallet bump with no Transaction behind
-        # them, so there is nothing to total. Reading the owner's balance and
-        # calling it royalties would be a fake number — that balance holds
-        # everything else too.
+    def test_royalties_are_summed_from_rows_not_from_the_wallet(self):
+        # They used to report None, because they arrived as a bare wallet bump
+        # with nothing to total. `credit_owner` writes a row now — but the
+        # total still must not be read off the balance, which holds everything
+        # else the owner has too.
+        from apps.economy.models import wallet_for
+        w = wallet_for(self.owner)
+        w.money_cents = 123_456
+        w.save(update_fields=["money_cents"])
         d = self.oc.get(self.URL).data
-        self.assertIsNone(d["intelligence_royalties_cents"])
+        self.assertEqual(d["intelligence_royalties_cents"], 0)
+        self.assertEqual(d["intelligence_royalties_runs"], 0)
+        # And with no rows there is no horizon to report.
+        self.assertIsNone(d["intelligence_royalties_since"])
         self.assertTrue(d["intelligence_royalties_note"])
 
     def test_the_total_leads_back_to_the_rows(self):
         self.assertEqual(self.oc.get(self.URL).data["open_in"], "logz")
+
+
+class OwnerCreditsLeaveARowTests(TestCase):
+    """Money arriving in the owner's wallet has to say where it came from.
+
+    Four call sites used to bump `money_cents` directly. The balance moved and
+    nothing anywhere explained it — the exact thing LogZ exists to prevent —
+    and it was also why the intelligence royalties could not be totalled even
+    though they were genuinely being paid.
+    """
+
+    URL = "/api/economy/owner/revenue/"
+    CHARGE = "/api/economy/ai/charge/"
+
+    def setUp(self):
+        from apps.economy.models import Transaction, wallet_for
+        self.T = Transaction
+        self.wallet_for = wallet_for
+        self.owner = User.objects.create_user(username="boss", password=PW,
+                                              email="boss@test.test",
+                                              is_staff=True, is_superuser=True)
+        self.member = User.objects.create_user(username="member", password=PW)
+        for u in (self.owner, self.member):
+            membership_for(u)
+        w = wallet_for(self.member)
+        w.money_cents = 50_000
+        w.save(update_fields=["money_cents"])
+        self.oc = APIClient(); self.oc.force_authenticate(self.owner)
+        self.mc = APIClient(); self.mc.force_authenticate(self.member)
+
+    def rows(self):
+        return self.T.objects.filter(user=self.owner, kind=self.T.KIND_INTELLIGENCE)
+
+    def test_the_credit_writes_a_row_that_names_the_engine(self):
+        from apps.economy.views import credit_owner
+        with self.settings(OWNER_USERNAMES=["boss"], OWNER_EMAILS=[]):
+            credit_owner(self.member, 15, "OCC corey-gpt · Opus")
+        row = self.rows().get()
+        self.assertEqual(row.amount_cents, 15)
+        self.assertEqual(row.resource, self.T.RES_MONEY)
+        self.assertIn("Opus", row.note)
+
+    def test_money_is_conserved(self):
+        from apps.economy.views import credit_owner
+        before = self.wallet_for(self.owner).money_cents
+        with self.settings(OWNER_USERNAMES=["boss"], OWNER_EMAILS=[]):
+            credit_owner(self.member, 15, "OCC")
+        self.assertEqual(self.wallet_for(self.owner).money_cents, before + 15)
+
+    def test_the_owner_paying_themselves_moves_nothing_and_says_nothing(self):
+        # A ledger row for money that didn't move is its own kind of lie.
+        from apps.economy.views import credit_owner
+        before = self.wallet_for(self.owner).money_cents
+        with self.settings(OWNER_USERNAMES=["boss"], OWNER_EMAILS=[]):
+            self.assertEqual(credit_owner(self.owner, 15, "OCC"), 0)
+        self.assertEqual(self.wallet_for(self.owner).money_cents, before)
+        self.assertEqual(self.rows().count(), 0)
+
+    def test_a_free_prompt_credits_nothing(self):
+        # Nothing left the member's wallet, so nothing may arrive in the
+        # owner's — paying the owner out of an allowance mints money.
+        from apps.economy.views import credit_owner
+        with self.settings(OWNER_USERNAMES=["boss"], OWNER_EMAILS=[]):
+            self.assertEqual(credit_owner(self.member, 0, "OCC"), 0)
+        self.assertEqual(self.rows().count(), 0)
+
+    def test_the_charge_endpoint_leaves_the_row(self):
+        with self.settings(OWNER_USERNAMES=["boss"], OWNER_EMAILS=[]):
+            resp = self.mc.post(self.CHARGE, {"model": "corey-gpt", "cents": 25,
+                                              "note": "OCC run"}, format="json")
+            self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(self.rows().get().amount_cents, 25)
+
+    def test_the_read_out_totals_them(self):
+        from apps.economy.views import credit_owner
+        with self.settings(OWNER_USERNAMES=["boss"], OWNER_EMAILS=[]):
+            for _ in range(3):
+                credit_owner(self.member, 10, "OCC")
+            d = self.oc.get(self.URL).data
+        self.assertEqual(d["intelligence_royalties_cents"], 30)
+        self.assertEqual(d["intelligence_royalties_runs"], 3)
+        # Rows only exist from when they started being written, and the
+        # read-out says so rather than reporting a total that reconciles short.
+        self.assertIsNotNone(d["intelligence_royalties_since"])
+
+    def test_a_royalty_cashout_is_not_an_intelligence_royalty(self):
+        # The whole reason this got its own kind. One bucket for both would
+        # make either one impossible to total.
+        self.T.objects.create(user=self.owner, kind=self.T.KIND_ROYALTY,
+                              amount_cents=9_999, note="Royalty cashout")
+        with self.settings(OWNER_USERNAMES=["boss"], OWNER_EMAILS=[]):
+            d = self.oc.get(self.URL).data
+        self.assertEqual(d["intelligence_royalties_cents"], 0)
+
+    def test_no_direct_wallet_bump_survives_outside_the_helper(self):
+        # The regression this closes: a fifth call site added later that
+        # credits the owner without leaving a row.
+        import pathlib
+        base = pathlib.Path(__file__).resolve().parent
+        offenders = [f.name for f in base.glob("*.py")
+                     if f.name != "views.py" and not f.name.startswith("test_")
+                     and "ow.money_cents" in f.read_text()]
+        self.assertEqual(offenders, [], f"credit the owner via credit_owner(): {offenders}")

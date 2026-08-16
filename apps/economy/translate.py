@@ -16,7 +16,7 @@ from rest_framework.views import APIView
 
 from .catalog import ai_cost
 from .models import charge_ai_usage, can_afford_ai, wallet_for
-from .views import platform_owner
+from .views import credit_owner
 
 TRANSLATE_MODEL = "claude-opus-4-8"
 MAX_TEXTS = 60
@@ -105,11 +105,6 @@ class TranslateView(APIView):
         out = [str(x) for x in out]
 
         remaining = charge_ai_usage(request.user, cost, note=f"TranslateZ {target_lang}")
-        if cost:
-            owner = platform_owner()
-            if owner and owner.id != request.user.id:
-                ow = wallet_for(owner)
-                ow.money_cents = (ow.money_cents or 0) + cost
-                ow.save(update_fields=["money_cents", "updated_at"])
+        credit_owner(request.user, cost, f"TranslateZ {target_lang}")
         money = round((remaining if remaining is not None else wallet_for(request.user).money_cents) / 100, 2)
         return Response({"translations": out, "cost_cents": cost, "money": money})

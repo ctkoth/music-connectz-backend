@@ -101,6 +101,37 @@ def ensure_owner(user):
     return m
 
 
+def credit_owner(payer, cost_cents, note):
+    """Pay the platform owner for an AI run — and say so in the ledger.
+
+    Four call sites used to bump `money_cents` directly. The money arrived and
+    nothing anywhere said why, which is the exact thing LogZ exists to prevent:
+    a balance that changed with no row leading back to the action that changed
+    it. It is also why the intelligence royalties could not be totalled despite
+    being genuinely paid — there was nothing to add up.
+
+    Self-neutral: an owner running their own model charge moves nothing, so no
+    row is written either. A ledger entry for money that didn't move would be
+    its own kind of lie.
+
+    Returns the cents credited (0 when there was nobody else to pay).
+    """
+    if not cost_cents:
+        return 0
+    owner = platform_owner()
+    if not owner or owner.id == payer.id:
+        return 0
+    ow = wallet_for(owner)
+    ow.money_cents = (ow.money_cents or 0) + cost_cents
+    ow.save(update_fields=["money_cents", "updated_at"])
+    Transaction.objects.create(
+        user=owner, kind=Transaction.KIND_INTELLIGENCE,
+        resource=Transaction.RES_MONEY,
+        amount=cost_cents, amount_cents=cost_cents, note=note[:200],
+    )
+    return cost_cents
+
+
 class OwnerRevenueView(APIView):
     """GET /api/economy/owner/revenue/ — what the platform has actually taken.
 
@@ -130,6 +161,8 @@ class OwnerRevenueView(APIView):
                             status=status.HTTP_403_FORBIDDEN)
         rows = Transaction.objects.exclude(dev_tax_cents=0)
         owner = platform_owner()
+        royalties = Transaction.objects.filter(
+            user=owner, kind=Transaction.KIND_INTELLIGENCE) if owner else Transaction.objects.none()
         return Response({
             "owner": owner.username if owner else "",
             # Every taxed movement already records what it took. Summing the
@@ -145,16 +178,23 @@ class OwnerRevenueView(APIView):
                 "against cash already held, so the tax never becoming a balance is "
                 "the platform keeping it. It is deliberately not credited anywhere."
             ),
-            # No number rather than a fake one. The AI charges genuinely land in
-            # the owner's wallet, but they land as a bare balance bump with no
-            # Transaction behind them, so there is no ledger to total. Saying so
-            # is honest; inventing a figure from the wallet balance would not be,
-            # because that balance holds everything else too.
-            "intelligence_royalties_cents": None,
+            # Real now. `credit_owner` writes a row for every AI charge routed
+            # here, so this is a sum of the ledger rather than a read of the
+            # wallet — that balance holds everything else too and would have
+            # been a fake number dressed as this one.
+            "intelligence_royalties_cents": royalties.aggregate(
+                n=Sum("amount_cents"))["n"] or 0,
+            "intelligence_royalties_runs": royalties.count(),
+            # Rows only exist from the day they started being written. A total
+            # that silently omits the credits made before that is a number
+            # somebody would reconcile against Stripe and find short.
+            "intelligence_royalties_since": (
+                royalties.order_by("created_at").values_list("created_at", flat=True).first()
+            ),
             "intelligence_royalties_note": (
-                "Paid, but not itemised. AI model charges are credited straight to "
-                "the owner's wallet without a LogZ row, so there is nothing to add "
-                "up yet."
+                "Summed from the ledger, and only from when the rows began. AI "
+                "charges credited before that arrived without one and are not in "
+                "this figure."
             ),
             # Cross-pollination: the total leads back to the rows that made it.
             "open_in": "logz",
@@ -320,13 +360,9 @@ class AIChargeView(APIView):
                 {"detail": "Not enough balance for this model.", "cost_cents": cost, "money_cents": w.money_cents},
                 status=status.HTTP_402_PAYMENT_REQUIRED,
             )
-        # Route the charge to the platform owner as revenue (money conserved).
-        if cost:
-            owner = platform_owner()
-            if owner and owner.id != request.user.id:
-                ow = wallet_for(owner)
-                ow.money_cents = (ow.money_cents or 0) + cost
-                ow.save(update_fields=["money_cents", "updated_at"])
+        # Route the charge to the platform owner as revenue (money conserved),
+        # with a row saying where it came from.
+        credit_owner(request.user, cost, note)
         return Response({"model": model, "cost_cents": cost, "money_cents": remaining, "money": round(remaining / 100, 2)})
 
 
