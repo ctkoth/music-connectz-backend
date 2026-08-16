@@ -34,7 +34,7 @@ from .models import (
     profile_for,
     wallet_for,
 )
-from .views import is_owner, platform_owner
+from .views import credit_owner, is_owner
 
 # The voice shapes the system prompt and nothing else. Which ENGINE runs it is
 # the member's own choice, gated by tier and priced by what it actually costs —
@@ -331,11 +331,10 @@ class OccChatView(APIView):
         # that case, so nothing may arrive in the owner's: paying the owner out
         # of an allowance is the platform minting money from itself.
         if cost and not covered_free:
-            owner = platform_owner()
-            if owner and owner.id != request.user.id:
-                ow = wallet_for(owner)
-                ow.money_cents = (ow.money_cents or 0) + cost
-                ow.save(update_fields=["money_cents", "updated_at"])
+            # Same note the member's own row carries, so both ends of the
+            # movement name the engine the money went on.
+            credit_owner(request.user, cost,
+                         f"OCC {model_voice} · {model_spec['name']}")
         money = round((remaining if remaining is not None else wallet_for(request.user).money_cents) / 100, 2)
         allowance, _, daily_now = daily_prompt_state(request.user)
         out = {"text": text, "model": model_voice, "cost_cents": cost, "money": money,

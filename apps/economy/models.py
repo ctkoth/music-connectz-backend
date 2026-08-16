@@ -104,12 +104,18 @@ class Transaction(models.Model):
     KIND_ROYALTY = "royalty"
     KIND_REWARD = "reward"
     KIND_SPEND = "spend"
+    # An AI model charge arriving in the platform owner's wallet. Its own kind
+    # rather than KIND_ROYALTY: that one is a member cashing out their accrued
+    # royalties, and putting both in one bucket would make either impossible to
+    # total. These are the "intelligence royalties" the Owner badge names.
+    KIND_INTELLIGENCE = "intelligence"
     KIND_CHOICES = [
         (KIND_ADD, "Add funds"),
         (KIND_PURCHASE, "Purchase"),
         (KIND_ROYALTY, "Royalty"),
         (KIND_REWARD, "Reward"),
         (KIND_SPEND, "Spend"),
+        (KIND_INTELLIGENCE, "Intelligence royalty"),
     ]
 
     # Which resource moved. Money was the only thing ever recorded, so SpinaZ
