@@ -1,7 +1,7 @@
 from django.urls import path
 
 from .directz_app import DirectZWorksView, DirectZRateView
-from .postz import PostCostView, PostsView, PostJoinView, PostShareView, SubmissionsView
+from .postz import PostCostView, PostDeleteView, PostsView, PostJoinView, PostShareView, SubmissionsView
 from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .distributez import TranscodeView, LyricsView
@@ -238,6 +238,7 @@ urlpatterns = [
     # are already the four assets a distributor asks for.
     path("postz/<int:pk>/distribute/", PostDistributeView.as_view(), name="economy-postz-distribute"),
     path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
+    path("postz/<int:pk>/delete/", PostDeleteView.as_view(), name="economy-postz-delete"),
     path("submissions/", SubmissionsView.as_view(), name="economy-submissions"),
     # PlaylistZ — Music ConnectZ posts and outside distro links in one order.
     path("playlistz/", PlaylistsView.as_view(), name="economy-playlistz"),
