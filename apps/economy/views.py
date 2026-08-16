@@ -101,6 +101,66 @@ def ensure_owner(user):
     return m
 
 
+class OwnerRevenueView(APIView):
+    """GET /api/economy/owner/revenue/ — what the platform has actually taken.
+
+    The Owner badge's face says it receives the developer tax and the
+    intelligence royalties. Both are true, and until now neither was visible
+    anywhere — which is most of why the badge ended up writing them down as
+    *effects*. An unseen fact reads as an unimplemented one.
+
+    This is a READ-OUT, not a balance, and the difference is the whole point.
+    The developer tax is not credited to a wallet and must not be: a member's
+    wallet balance is a liability against cash the platform already holds, so
+    declining to credit the tax IS how the tax is received. Crediting it again
+    would book the same margin twice — once as cash held free and clear, again
+    as a balance that could be cashed out.
+
+    Contrast the AI model charges, which ARE moved wallet-to-wallet: one
+    liability down, one up, total unchanged. That is why those conserve money
+    and a developer-tax credit would not.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from django.db.models import Sum
+        if not is_owner(request.user):
+            return Response({"detail": "Only the platform owner sees this."},
+                            status=status.HTTP_403_FORBIDDEN)
+        rows = Transaction.objects.exclude(dev_tax_cents=0)
+        owner = platform_owner()
+        return Response({
+            "owner": owner.username if owner else "",
+            # Every taxed movement already records what it took. Summing the
+            # ledger beats storing a running total: a stored copy is how a
+            # number outlives the rows that justify it.
+            "dev_tax_collected_cents": rows.aggregate(n=Sum("dev_tax_cents"))["n"] or 0,
+            "dev_tax_by_kind": {r["kind"]: r["n"] for r in
+                                rows.values("kind").annotate(n=Sum("dev_tax_cents")).order_by()},
+            "dev_tax_taxed_movements": rows.count(),
+            "dev_tax_rates": DEV_TAX,
+            "dev_tax_note": (
+                "Received by not being paid out — a wallet balance is a liability "
+                "against cash already held, so the tax never becoming a balance is "
+                "the platform keeping it. It is deliberately not credited anywhere."
+            ),
+            # No number rather than a fake one. The AI charges genuinely land in
+            # the owner's wallet, but they land as a bare balance bump with no
+            # Transaction behind them, so there is no ledger to total. Saying so
+            # is honest; inventing a figure from the wallet balance would not be,
+            # because that balance holds everything else too.
+            "intelligence_royalties_cents": None,
+            "intelligence_royalties_note": (
+                "Paid, but not itemised. AI model charges are credited straight to "
+                "the owner's wallet without a LogZ row, so there is nothing to add "
+                "up yet."
+            ),
+            # Cross-pollination: the total leads back to the rows that made it.
+            "open_in": "logz",
+        })
+
+
 class StatsView(APIView):
     """Powers the frontend CommunityBar + tier gating: /api/auth/stats/."""
 

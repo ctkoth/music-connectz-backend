@@ -2544,12 +2544,35 @@ def _translations_done(user):
 
 BADGES = {
     # ---- gifted ----
+    # This badge shipped claiming `dev_tax_share: 1.0` and
+    # `intelligence_royalties: True`, and NOTHING read either one. Same mistake
+    # the founding badge made below, so the same fix: a badge reflects a real
+    # record, it never asserts a second version of one.
+    #
+    # Both facts are true and neither is the badge's doing:
+    #
+    #   * The intelligence royalties are real and already paid. AI model
+    #     charges route to `views.platform_owner()`, which resolves by
+    #     OWNER_EMAILS / OWNER_USERNAMES — settings, not badges.
+    #   * The developer tax is received by NOT being paid out. A member's
+    #     wallet balance is a liability against cash the platform already
+    #     holds, so declining to credit the tax IS the platform keeping it.
+    #     `credit_funds` does exactly that.
+    #
+    # Wiring either to badge possession would put a deletable row in charge of
+    # where money goes. What the badge genuinely applies is the tier, and
+    # `grant_badge` applies it the moment it lands.
+    #
+    # The two facts were invisible, which is most of why they got written down
+    # as effects — an unseen fact reads as an unimplemented one. They are
+    # visible now: OwnerRevenueView serves what the tax has actually collected.
     "owner": {
         "icon": "badge_owner.png", "name": "Owner", "emoji": "👑", "title": "Owner", "gifted": True,
-        "desc": "This is whose app it is.",
+        "desc": "This is whose app it is. The developer tax and the intelligence "
+                "royalties come with the job.",
         "how": "Held by the platform owner.",
-        "effects": {"tier": "statz", "dev_tax_share": 1.0, "intelligence_royalties": True},
-        "effect_note": "StatZ for life, the developer tax, and the intelligence royalties.",
+        "effects": {"tier": "statz"},
+        "effect_note": "StatZ for life.",
     },
     # NOT gifted, and it does NOT own the discount. A founding seat is already a
     # real thing — catalog.FOUNDING_PLANS prices it, payments.py claims it, and
