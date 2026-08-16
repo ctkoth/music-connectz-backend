@@ -58,3 +58,51 @@ class MessageCapTests(TestCase):
         data = self.client.get("/api/economy/limits/").data
         self.assertFalse(data["char_limit_unlimited"])
         self.assertEqual(data["char_limit"], 1500)
+
+
+class TierUploadLimitsTests(TestCase):
+    """The sizes Corey set, and the invariant that keeps them coherent."""
+
+    def test_the_table(self):
+        from apps.economy.catalog import limits_for
+        self.assertEqual(limits_for(TIER_FREE)["upload_mb"], 100)
+        self.assertEqual(limits_for(TIER_PREMIUM)["upload_mb"], 1024)       # 1GB
+        self.assertEqual(limits_for(TIER_STATZ)["upload_mb"], 10240)        # 10GB
+        self.assertEqual(limits_for(TIER_FREE)["storage_mb"], 500)
+        self.assertEqual(limits_for(TIER_PREMIUM)["storage_mb"], 5120)      # 5GB
+        self.assertEqual(limits_for(TIER_STATZ)["storage_mb"], 102400)      # 100GB
+
+    def test_a_vault_always_holds_the_file_it_admits(self):
+        # The bug the written table would have shipped: Free was 100MB per
+        # file into a 50MB vault, so the upload passes the size check and then
+        # fails the quota check — allowed by one rule, refused by the next.
+        from apps.economy.catalog import TIER_LIMITS
+        for tier, lim in TIER_LIMITS.items():
+            self.assertGreaterEqual(
+                lim["storage_mb"], lim["upload_mb"],
+                f"{tier}: a {lim['upload_mb']}MB file can never fit a "
+                f"{lim['storage_mb']}MB vault",
+            )
+
+    def test_every_tier_is_bigger_than_the_one_below(self):
+        from apps.economy.catalog import limits_for
+        for key in ("upload_mb", "storage_mb"):
+            free, premium, statz = (limits_for(t)[key]
+                                    for t in (TIER_FREE, TIER_PREMIUM, TIER_STATZ))
+            self.assertLess(free, premium, key)
+            self.assertLess(premium, statz, key)
+
+    def test_the_coach_cap_says_it_is_not_a_tier_limit(self):
+        # A StatZ member with 10GB per file who gets refused at 14MB will read
+        # that as the plan they paid for being ignored, unless it says what it
+        # actually is: the scorer's own request ceiling.
+        from apps.economy.vocalcoach import MAX_MB
+        from apps.economy.catalog import limits_for
+        self.assertLess(MAX_MB, limits_for(TIER_FREE)["upload_mb"])
+        u = User.objects.create_user(username="singer", password="hunter2hunter2")
+        membership_for(u)
+        c = APIClient(); c.force_authenticate(u)
+        d = c.get("/api/singz/coach/").data
+        self.assertEqual(d["max_mb"], MAX_MB)
+        self.assertFalse(d["max_mb_is_tier_limit"])
+        self.assertIn("isn't your tier's upload limit", d["max_mb_why"])

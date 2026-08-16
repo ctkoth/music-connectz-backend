@@ -292,6 +292,18 @@ class SingZCoachView(APIView):
             # after a usable result parses. Worth saying, not just doing.
             "charged_on_failure": False,
             "max_mb": MAX_MB,
+            # Say WHAT this cap is, because it is not the member's tier. A
+            # StatZ member with a 10GB single-file allowance who is refused at
+            # 14MB reads that as the plan they paid for being ignored. It is
+            # the scorer's request ceiling: the take rides to the model inline,
+            # base64'd, inside one request that caps at 20MB.
+            "max_mb_why": (
+                "The coach reads the whole take in one request, and that request "
+                f"caps out around {MAX_MB}MB once the audio is encoded. It isn't your "
+                "tier's upload limit — send a longer take to PostZ or your vault, "
+                "and give the coach the section you want scored."
+            ),
+            "max_mb_is_tier_limit": False,
             # The client renders its score chips, range picker and honest-scope
             # footnote from these, so they cannot disagree with what the model
             # was actually asked to score.
