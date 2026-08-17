@@ -129,7 +129,7 @@ def _clamp(v, lo=1, hi=10):
         return None
 
 
-def score_take(app_key, f, content_type, *, genre, target, difficulty):
+def score_take(app_key, f, content_type, *, genre, target, difficulty, style=None):
     """Send one take to the model. Returns (payload, error) — exactly one is None.
 
     Shared by the member coach and the no-account trial, deliberately: a trial
@@ -149,6 +149,7 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty):
         genre=str(genre or "unspecified")[:60],
         target=str(target or "unspecified")[:60],
         difficulty=difficulty if difficulty in DIFFICULTIES else "builder",
+        style=str(style or "")[:60] or None,
     )
     # Normalise BEFORE the call. An unsupported container is a refusal we can
     # give instantly and explain, rather than a round trip that comes back as a
@@ -226,6 +227,16 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty):
         "scores": {k: _clamp((parsed.get("scores") or {}).get(k))
                    for k in profile_for_app(app_key)["scores"]},
         "verdict": str(parsed.get("verdict", ""))[:400],
+        # Where they are and where they're going. A score with no destination
+        # is a number, not coaching — and these are whitelisted like everything
+        # else, so a field the model invents never reaches the screen.
+        "now": str(parsed.get("now", ""))[:600],
+        "goal": str(parsed.get("goal", ""))[:600],
+        # Empty when the take was too short to read a range from, or when the
+        # app has no range to read. The client hides the row rather than
+        # printing a heading over nothing.
+        "range_profile": str(parsed.get("range_profile", ""))[:600],
+        "style_fit": str(parsed.get("style_fit", ""))[:600],
         "strengths": listy(parsed.get("strengths")),
         "fixes": listy(parsed.get("fixes")),
         "next_drill": str(parsed.get("next_drill", ""))[:300],
@@ -312,6 +323,11 @@ class SingZCoachView(APIView):
             "scores": profile["scores"],
             "range_label": profile["range_label"],
             "ranges": [{"key": k, "label": l} for k, l in profile["ranges"]],
+            # RapZ picks a style the way SingZ picks a range. Served from the
+            # profile so the lab's picker and the coach's prompt can't drift
+            # into two different lists of what a rap style is.
+            "style_label": profile.get("style_label"),
+            "styles": [{"key": k, "label": l} for k, l in profile.get("styles", [])],
             "difficulties": DIFFICULTIES,
             "caveat": profile["caveat"],
         })
@@ -362,7 +378,7 @@ class SingZCoachView(APIView):
         payload, err = score_take(
             self.app_key, f, content_type,
             genre=data.get("genre"), target=data.get("range"),
-            difficulty=data.get("difficulty"),
+            difficulty=data.get("difficulty"), style=data.get("style"),
         )
         if err:
             body, code = err
