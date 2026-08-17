@@ -525,3 +525,55 @@ class TheFailureSaysWhichFailureItWasTests(TestCase):
         before = daily_prompt_state(self.user)[2]
         self.send(429)
         self.assertEqual(daily_prompt_state(self.user)[2], before)
+
+
+class CoachVoiceTests(TestCase):
+    """The coach talks like the app, and the voice never buys off the score.
+
+    Corey's ask: RapZ and SingZ feedback in the paradigm the InstrumentZ lab
+    already speaks — emoji-led, second person, top-two-and-a-drill. The risk
+    that comes with it is the reason these assertions exist: a warm voice is
+    one step from flattery, and a 3/10 with a 🔥 on it costs somebody a month
+    of practising the wrong thing.
+    """
+
+    def test_both_coaches_are_asked_for_the_voice(self):
+        from apps.economy.instruments import prompt_for
+        for app_key in ("rapz", "singz"):
+            p = prompt_for(app_key, "Trap", "tenor", "builder")
+            self.assertIn("Music ConnectZ voice", p, app_key)
+            self.assertIn("Contractions", p, app_key)
+            self.assertIn("emoji", p.lower(), app_key)
+            self.assertIn("second person", p, app_key)
+
+    def test_the_voice_never_softens_the_score(self):
+        # The guard that makes the emoji safe to ask for at all.
+        from apps.economy.instruments import prompt_for
+        for app_key in ("rapz", "singz", "drumz"):
+            p = prompt_for(app_key, "Trap", "tenor", "builder")
+            self.assertIn("never soften", p, app_key)
+            self.assertIn("no flattery", p, app_key)
+
+    def test_it_still_refuses_to_invent_what_it_could_not_hear(self):
+        # Substance before the game layer: a livelier voice must not become a
+        # licence to describe detail the model never heard.
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn("Never invent detail you cannot hear", p)
+        self.assertIn("don't score it", p)
+
+    def test_each_coach_still_speaks_its_own_dimensions(self):
+        # A rapper isn't scored on breath support the way a singer is, and the
+        # voice change must not have flattened the profiles into one coach.
+        from apps.economy.instruments import prompt_for
+        rap = prompt_for("rapz", "Trap", None, "builder")
+        sing = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("rap coach", rap)
+        self.assertIn('"flow"', rap)
+        self.assertNotIn('"agility"', rap)
+        self.assertIn("vocal coach", sing)
+        self.assertIn('"agility"', sing)
+        self.assertNotIn('"flow"', sing)
+        # Only the singer gets asked about a target range.
+        self.assertIn("Target range", sing)
+        self.assertNotIn("Target range", rap)
