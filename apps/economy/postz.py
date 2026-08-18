@@ -14,6 +14,7 @@ from datetime import timedelta
 from django.db.models import Case, Count, IntegerField, Sum, When
 from django.utils import timezone
 
+from .crosspost import coach_price, destinations_for
 from .models import (
     CollabDeal,
     POST_COMMENT_UNLOCK_SEC,
@@ -93,8 +94,10 @@ def media_slots(p):
     return {k: v or "" for k, v in slots.items()}
 
 
-def _post_dict(p, request, up=0, down=0, collabs=None):
+def _post_dict(p, request, up=0, down=0, collabs=None, price=None):
     vibe = up - down
+    media = media_slots(p)
+    n_collabs = p.collab_deals.count() if collabs is None else collabs
     flagged = down >= HIDE_FLAG_MIN_DOWN and down >= up * HIDE_FLAG_RATIO
     return {
         "id": p.id,
@@ -113,7 +116,7 @@ def _post_dict(p, request, up=0, down=0, collabs=None):
         "items": p.items or [],
         # One of each, resolved for the client so it renders every attachment
         # rather than only the primary one.
-        "media": media_slots(p),
+        "media": media,
         "slots": list(MEDIA_SLOTS),
         "score": p.score or {},
         "genre": p.genre,
@@ -131,8 +134,14 @@ def _post_dict(p, request, up=0, down=0, collabs=None):
         # PostZ is for show, CollabZ is for collaboration — this is the count
         # of times somebody moved from one to the other on this post, and where
         # the client sends them to do it again.
-        "collab_count": p.collab_deals.count() if collabs is None else collabs,
+        "collab_count": n_collabs,
+        # Nothing is a dead end. `open_in` is the first door and stays a plain
+        # string for anything already reading it; `destinations` is the whole
+        # list — every app this post can open in, what happens there, what it
+        # costs before it is spent, and what it still needs when it can't go.
         "open_in": "collabz",
+        "destinations": destinations_for(p, request.user, media,
+                                         price=price, collabs=n_collabs),
         "skill_cost_cents": p.skill_cost_cents,
         "joins": p.joins.count() if p.visibility == "restricted" else 0,
         "shares": p.shares.count(),
@@ -392,8 +401,13 @@ class PostsView(APIView):
             .values_list("source_post_id")
             .annotate(n=Count("id"))
         )
+        # What a coached take costs this member, read ONCE. Every card offers
+        # SingZ and RapZ, and pricing each of them per row would be two hundred
+        # wallet reads to print the same two numbers.
+        price = coach_price(request.user)
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
-                            collabs=deals.get(p.id, 0)) for p in visible]
+                            collabs=deals.get(p.id, 0), price=price)
+                 for p in visible]
 
         now = timezone.now()
 
@@ -524,6 +538,39 @@ class PostsView(APIView):
                    f"✏️ @{request.user.username} edited your post \"{p.title}\" as platform owner.",
                    actor=request.user, item_id=f"post:{p.id}")
         return Response(_post_dict(p, request))
+
+
+class PostOpenView(APIView):
+    """GET /api/economy/postz/<pk>/open/ — where this post can go next.
+
+    The feed already carries the same list on every row, so this exists for the
+    surfaces that hold ONE post (a shared /p/ link, a card reopened after an
+    edit) and for re-reading a price that moves during a session: today's free
+    prompts run out while you are scrolling, and a menu still offering "free"
+    after the last one was spent is quoting a price that no longer exists.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        p = Post.objects.filter(pk=pk).select_related("author").first()
+        if not p:
+            return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+        if not can_view_post(p, request.user):
+            return Response({"detail": "you can't view this post"},
+                            status=status.HTTP_403_FORBIDDEN)
+        media = media_slots(p)
+        dests = destinations_for(p, request.user, media,
+                                 collabs=p.collab_deals.count())
+        return Response({
+            "post_id": p.id,
+            "title": p.title,
+            "destinations": dests,
+            # Said plainly rather than left to be counted off the list: a member
+            # looking at a lyrics-only post should read why the coach is greyed
+            # out, not conclude the feature is broken.
+            "open_count": sum(1 for d in dests if d["available"]),
+        })
 
 
 class PostJoinView(APIView):

@@ -119,6 +119,10 @@ Existing examples to follow:
   profile, so the same recorder serves RapZ without inventing scores.
 - LogZ rows carry the reason a resource moved, so a balance leads back to
   the action that changed it.
+- A post carries `destinations` — every app that can do something with it, what
+  each still needs, and what it costs before it is spent. `apps/economy/crosspost.py`
+  is the one list; SingZ and RapZ take the post itself as a Boss Take, so a
+  finished track can be coached without being uploaded a second time.
 
 When adding a screen, ask what a member would want to DO with each row, and
 give them the link. A read-only surface is usually an unfinished one.
