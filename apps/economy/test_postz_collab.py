@@ -187,6 +187,14 @@ class PostSideTests(TestCase):
         from django.test.utils import CaptureQueriesContext
         self.start()
 
+        # Warm up first. The feed now quotes what a coached take costs (every
+        # card offers SingZ and RapZ), and reading that price the first time
+        # creates the wallet and rolls today's prompt counter over. That is a
+        # one-off per session, not a per-card cost — measuring it inside the
+        # baseline would make the second request look four queries cheaper and
+        # hide what this test is actually watching.
+        self.client.get("/api/economy/postz/")
+
         with CaptureQueriesContext(connection) as one_card:
             self.client.get("/api/economy/postz/")
         for i in range(5):

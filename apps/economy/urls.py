@@ -1,7 +1,8 @@
 from django.urls import path
 
 from .directz_app import DirectZWorksView, DirectZRateView
-from .postz import PostCostView, PostDeleteView, PostsView, PostJoinView, PostShareView, SubmissionsView
+from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
+                    PostJoinView, PostShareView, SubmissionsView)
 from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .distributez import TranscodeView, LyricsView
@@ -229,6 +230,9 @@ urlpatterns = [
     # No account needed — a public post by link, and the author behind it.
     path("postz/<int:pk>/", PublicPostView.as_view(), name="economy-postz-public"),
     path("public/members/<str:username>/", PublicProfileView.as_view(), name="economy-public-member"),
+    # Nothing is a dead end: every app this post can open in, and the price of
+    # each before it is spent.
+    path("postz/<int:pk>/open/", PostOpenView.as_view(), name="economy-postz-open"),
     path("postz/<int:pk>/join/", PostJoinView.as_view(), name="economy-postz-join"),
     path("postz/<int:pk>/playlists/", PostPlaylistAppearancesView.as_view(), name="economy-postz-playlists"),
     path("postz/<int:pk>/collabs/", PostCollabsView.as_view(), name="economy-postz-collabs"),

@@ -27,7 +27,7 @@ import re
 import requests
 from django.conf import settings
 from rest_framework import status
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -256,7 +256,10 @@ class SingZCoachView(APIView):
     """
 
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser]
+    # JSON as well as multipart: a take handed over from PostZ has no file
+    # to upload — the recording is already stored — so that request is a
+    # plain `{"post_id": 12}` and would 415 on a multipart-only view.
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     app_key = "singz"
 
     def get(self, request):
@@ -343,10 +346,22 @@ class SingZCoachView(APIView):
         # free each day (PROMPT_ALLOWANCE: 1 / 5 / 10). Frequency is the honest
         # difference between somebody tracking daily and somebody curious once a
         # month; access was charging twice for the same thing.
+        # Two ways in, one coach. Either a file was just recorded, or a post
+        # the member is looking at IS the take — PostZ hands the post over
+        # rather than asking anyone to find the file and upload it a second
+        # time. Both land on the same rubric, the same size ceiling and the
+        # same bill: a second scoring path is how one surface quietly stops
+        # charging for what the other charges for.
+        post = None
         f = request.FILES.get("take")
+        if f:
+            content_type = (getattr(f, "content_type", "") or "").lower()
+        else:
+            post, f, content_type, err = self._take_from_post(request)
+            if err:
+                return err
         if not f:
             return Response({"detail": "Record or attach a take first."}, status=status.HTTP_400_BAD_REQUEST)
-        content_type = (getattr(f, "content_type", "") or "").lower()
         # Video has always been accepted here — the model watches the take as
         # well as hearing it, which is worth real marks on delivery and breath.
         # The refusal copy said "isn't audio" and contradicted the check, which
@@ -356,7 +371,18 @@ class SingZCoachView(APIView):
                                        "audio or video file."},
                             status=status.HTTP_400_BAD_REQUEST)
         if f.size > MAX_MB * 1024 * 1024:
-            return Response({"detail": f"That take is too big — keep it under {MAX_MB}MB."},
+            # Say WHOSE limit this is. It is the scorer's request ceiling, not
+            # the member's tier — and a posted track is exactly the case where
+            # that distinction matters, because the post accepted the file and
+            # the coach is now refusing the same one.
+            detail = f"That take is too big — keep it under {MAX_MB}MB."
+            if post is not None:
+                detail = (f"\"{post.title}\" is {f.size / (1024 * 1024):.0f}MB, and the coach "
+                          f"reads a take in one request that caps out near {MAX_MB}MB. "
+                          "It isn't your tier's upload limit — the post keeps the full "
+                          "track; record or attach the section you want scored.")
+            return Response({"detail": detail, "max_mb": MAX_MB,
+                             "max_mb_is_tier_limit": False},
                             status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
 
         key = _key()
@@ -375,11 +401,32 @@ class SingZCoachView(APIView):
                             status=status.HTTP_402_PAYMENT_REQUIRED)
 
         data = request.data
-        payload, err = score_take(
-            self.app_key, f, content_type,
-            genre=data.get("genre"), target=data.get("range"),
-            difficulty=data.get("difficulty"), style=data.get("style"),
-        )
+        # A post already says what it is. Its genre seeds the coach when the
+        # handoff didn't carry one, so a Drill track isn't scored as "unspecified".
+        genre = data.get("genre") or (post.genre if post else "")
+        try:
+            if post is not None:
+                # Opened here rather than in the lookup, so a take refused on
+                # size, on a missing key or on an empty balance never opens a
+                # file handle it then has to remember to close.
+                f.open("rb")
+            payload, err = score_take(
+                self.app_key, f, content_type,
+                genre=genre, target=data.get("range"),
+                difficulty=data.get("difficulty"), style=data.get("style"),
+            )
+        except Exception:                                    # pragma: no cover
+            logger.exception("%s coach: post %s take unreadable",
+                             self.app_key, getattr(post, "pk", None))
+            return Response(
+                {"detail": "That take couldn't be opened. Try attaching it here instead."},
+                status=status.HTTP_502_BAD_GATEWAY)
+        finally:
+            if post is not None:
+                try:
+                    f.close()
+                except Exception:                            # pragma: no cover
+                    pass
         if err:
             body, code = err
             return Response(body, status=code)
@@ -389,5 +436,83 @@ class SingZCoachView(APIView):
         # free daily prompts cover it first. Without it the coach silently
         # skipped the allowance a StatZ member is told they get and went
         # straight to their PromptZ and cash.
-        charged = _bill(request.user, note=f"{profile_for_app(self.app_key)['label']} Boss Take — AI Coach", count_daily=True)
-        return Response({**payload, "cost_cents": charged})
+        note = f"{profile_for_app(self.app_key)['label']} Boss Take — AI Coach"
+        if post is not None:
+            note += f" — post #{post.id}"
+        charged = _bill(request.user, note=note, count_daily=True)
+        out = {**payload, "cost_cents": charged}
+        if post is not None:
+            out.update({
+                "source": "post", "post_id": post.id, "post_title": post.title,
+                "post_author": post.author.username,
+                # Where this came from, so the score isn't a dead end either —
+                # the client offers the way back to the post it scored.
+                "open_in": "postz", "target": f"post:{post.id}",
+                # Kept on the post when it's the member's own work. Post.score
+                # is exactly this field — "optional scored-take payload (e.g.
+                # RapZ/SingZ lab result) for context on the post" — so a post
+                # that has been coached carries its coaching instead of the
+                # result living for one screenful and then being gone.
+                "saved_to_post": self._save_to_post(post, request.user, payload,
+                                                    self.app_key),
+            })
+        return Response(out)
+
+    def _take_from_post(self, request):
+        """(post, file, content_type, error_response) for a post-sourced take.
+
+        The post is resolved from the id and read for its OWN media URL — the
+        client never says which file to score, so no address it invents can
+        reach a file. Viewing rights are checked first: a take you may not see
+        is not a take you may send to a model.
+        """
+        from .crosspost import post_take
+        from .models import Post, can_view_post
+        from .postz import media_slots
+
+        raw = request.data.get("post_id")
+        if raw in (None, ""):
+            return None, None, "", None      # no file and no post: the caller says so
+        try:
+            pk = int(raw)
+        except (TypeError, ValueError):
+            return None, None, "", Response({"detail": "post_id must be a number."},
+                                            status=status.HTTP_400_BAD_REQUEST)
+        post = Post.objects.filter(pk=pk).select_related("author").first()
+        if not post:
+            return None, None, "", Response({"detail": "post not found"},
+                                            status=status.HTTP_404_NOT_FOUND)
+        if not can_view_post(post, request.user):
+            return None, None, "", Response({"detail": "you can't view this post"},
+                                            status=status.HTTP_403_FORBIDDEN)
+        upload, kind, why = post_take(post, media_slots(post))
+        if why:
+            return None, None, "", Response({"detail": why, "post_id": post.id},
+                                            status=status.HTTP_400_BAD_REQUEST)
+        # The Upload's own recorded type, falling back to the slot the post
+        # keeps it in — an upload saved with no content type is still audio if
+        # that is the slot it fills.
+        content_type = (upload.content_type or "").lower() or f"{kind}/webm"
+        return post, upload.file, content_type, None
+
+    @staticmethod
+    def _save_to_post(post, user, payload, app_key):
+        """Keep the coaching ON the post — but only when the post is theirs.
+
+        Coaching somebody else's track is allowed (you can see it, you paid for
+        it, and a second opinion is the point of a feed). Writing your score
+        onto their post is not: their post carries their name, and a number
+        that appeared on it because a stranger spent a prompt is the platform
+        putting words in their mouth. So that run answers to the member who
+        asked for it and leaves the post alone.
+        """
+        from .models import owns_post
+        from django.utils import timezone
+
+        if not owns_post(post, user):
+            return False
+        post.score = {**payload, "app_key": app_key,
+                      "coached_by": user.username,
+                      "coached_at": timezone.now().isoformat()}
+        post.save(update_fields=["score"])
+        return True
