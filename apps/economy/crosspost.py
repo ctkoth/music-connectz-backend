@@ -105,7 +105,65 @@ def _take_kind(media):
     return ""
 
 
-def destinations_for(post, user, media, *, price=None, collabs=0):
+def _tail(url):
+    """The stored path's filename. MEDIA_URL differs between local disk, Render
+    and any CDN in front of it, so whole-URL comparison matches in exactly one
+    environment."""
+    return str(url or "").split("?")[0].rsplit("/", 1)[-1]
+
+
+def take_bytes_for(rows):
+    """{post_id: size_bytes} for the take on each post — in ONE query.
+
+    The coach reads a take inside a single request that caps out near MAX_MB,
+    and until this existed the destination list had no idea how big a post's
+    track was. So "Coach it in SingZ" was offered on a 29MB post, the post
+    travelled, the button went live, and the ceiling announced itself by being
+    hit. A refusal you discover by pressing the button is the same failure as a
+    price you discover by paying it.
+
+    `rows` is [(post, media)]. Scoped to the authors of those posts, like
+    `upload_behind` — a size read is not a file read, but the same discipline
+    costs nothing and keeps a same-named file belonging to a stranger out of
+    the answer.
+    """
+    from django.db.models import Q
+
+    from .models import Upload
+
+    wanted, authors = {}, set()
+    for post, media in rows:
+        kind = _take_kind(media)
+        if not kind:
+            continue
+        tail = _tail(media[kind])
+        if tail:
+            wanted.setdefault(tail, []).append(post.id)
+            authors.add(post.author_id)
+    if not wanted:
+        return {}
+    match = Q()
+    for tail in wanted:
+        match |= Q(file__endswith=tail)
+    out = {}
+    for name, size in (Upload.objects.filter(match, user_id__in=authors)
+                       .values_list("file", "size_bytes")):
+        for pid in wanted.get(_tail(name), ()):
+            # Biggest wins on the off-chance two uploads share a basename: a
+            # warning that overstates is recoverable, one that understates puts
+            # the member back in front of the refusal this exists to prevent.
+            out[pid] = max(out.get(pid, 0), size or 0)
+    return out
+
+
+def coach_cap_bytes():
+    """The coach's per-request ceiling, in bytes. Imported here rather than at
+    module level to keep crosspost free of an import cycle through vocalcoach."""
+    from .vocalcoach import MAX_MB
+    return MAX_MB * 1024 * 1024
+
+
+def destinations_for(post, user, media, *, price=None, collabs=0, take_bytes=None):
     """Every app this post can open in, with the price of each stated first.
 
     `media` is `postz.media_slots(post)` — passed in rather than recomputed,
@@ -127,6 +185,25 @@ def destinations_for(post, user, media, *, price=None, collabs=0):
     no_take = [] if take else ["a recording — attach audio or video to this post"]
     out = []
 
+    # The coach's ceiling, checked HERE rather than on the way in. The post
+    # keeps the whole track — this is the scorer's per-request limit, not the
+    # member's tier — but a door that can only end in a refusal must say so on
+    # the row instead of after the tap.
+    #
+    # `take_bytes` is None when nobody looked. An unmeasured file is not a file
+    # over the limit, so the door stays open rather than claiming a size it
+    # never read; the coach still refuses at the wall if it comes to that.
+    cap = coach_cap_bytes()
+    too_big = bool(take and take_bytes and take_bytes > cap)
+    if too_big:
+        mb, cap_mb = take_bytes / (1024 * 1024), cap / (1024 * 1024)
+        coach_needs = [f"a take under {cap_mb:.0f}MB — the {take} on this post is "
+                       f"{mb:.0f}MB. That's the coach's limit for one request, not "
+                       f"your tier's: the post keeps the full track, so record or "
+                       f"attach just the section you want scored"]
+    else:
+        coach_needs = no_take
+
     # --- The improvement doors. -------------------------------------------
     # A post is a finished take standing still. The coach is what turns it into
     # the next one, so these go first.
@@ -140,11 +217,15 @@ def destinations_for(post, user, media, *, price=None, collabs=0):
             "what": f"Send this {take or 'take'} to the {p['coach']} — scored out of 10 on "
                     + ", ".join(list(p["scores"].values())[:3]).lower()
                     + ", with what worked, what to fix and one drill.",
-            "needs": no_take,
+            "needs": coach_needs,
             "cost": price,
             "gain": {"what": "a scored take with a drill to run next"},
             "carry": carry(post, media),
             "coach_kind": take,
+            # What the client needs to hold the same line if it is showing a
+            # card the feed rendered a while ago.
+            "take_bytes": take_bytes or 0,
+            "max_bytes": cap,
         })
 
     # --- Doors that already existed as buttons, now in the same list. -----

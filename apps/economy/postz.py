@@ -14,7 +14,7 @@ from datetime import timedelta
 from django.db.models import Case, Count, IntegerField, Sum, When
 from django.utils import timezone
 
-from .crosspost import coach_price, destinations_for
+from .crosspost import coach_price, destinations_for, take_bytes_for
 from .models import (
     CollabDeal,
     POST_COMMENT_UNLOCK_SEC,
@@ -94,9 +94,19 @@ def media_slots(p):
     return {k: v or "" for k, v in slots.items()}
 
 
-def _post_dict(p, request, up=0, down=0, collabs=None, price=None):
+# "nobody passed one", as distinct from "looked, and there is no take". The
+# feed resolves every size in one query and passes the answer — including None
+# — so it must not be re-read per row; a single-post response passes nothing and
+# gets it looked up here, because a card that can't state the coach's ceiling
+# sends the member at the button to find out.
+_UNSET = object()
+
+
+def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_bytes=_UNSET):
     vibe = up - down
     media = media_slots(p)
+    if take_bytes is _UNSET:
+        take_bytes = take_bytes_for([(p, media)]).get(p.id)
     n_collabs = p.collab_deals.count() if collabs is None else collabs
     flagged = down >= HIDE_FLAG_MIN_DOWN and down >= up * HIDE_FLAG_RATIO
     return {
@@ -141,7 +151,8 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None):
         # costs before it is spent, and what it still needs when it can't go.
         "open_in": "collabz",
         "destinations": destinations_for(p, request.user, media,
-                                         price=price, collabs=n_collabs),
+                                         price=price, collabs=n_collabs,
+                                         take_bytes=take_bytes),
         "skill_cost_cents": p.skill_cost_cents,
         "joins": p.joins.count() if p.visibility == "restricted" else 0,
         "shares": p.shares.count(),
@@ -405,8 +416,13 @@ class PostsView(APIView):
         # SingZ and RapZ, and pricing each of them per row would be two hundred
         # wallet reads to print the same two numbers.
         price = coach_price(request.user)
+        # How big each post's take is, in one query for the whole feed. Without
+        # it the coach door is offered on a track the coach cannot read, and the
+        # member finds out by pressing the button — see take_bytes_for.
+        sizes = take_bytes_for([(p, media_slots(p)) for p in visible])
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
-                            collabs=deals.get(p.id, 0), price=price)
+                            collabs=deals.get(p.id, 0), price=price,
+                            take_bytes=sizes.get(p.id))
                  for p in visible]
 
         now = timezone.now()
@@ -561,7 +577,8 @@ class PostOpenView(APIView):
                             status=status.HTTP_403_FORBIDDEN)
         media = media_slots(p)
         dests = destinations_for(p, request.user, media,
-                                 collabs=p.collab_deals.count())
+                                 collabs=p.collab_deals.count(),
+                                 take_bytes=take_bytes_for([(p, media)]).get(p.id))
         return Response({
             "post_id": p.id,
             "title": p.title,

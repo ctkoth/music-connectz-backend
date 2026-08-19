@@ -19,7 +19,8 @@ from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
-from apps.economy.crosspost import COACH_APPS, destinations_for, post_take
+from apps.economy.crosspost import (COACH_APPS, destinations_for, post_take,
+                                    take_bytes_for)
 from apps.economy.models import (PROMPT_ALLOWANCE, TIER_FREE, TIER_STATZ, Post,
                                  PostContributor, Upload, membership_for,
                                  wallet_for)
@@ -91,6 +92,64 @@ class DestinationListTests(TestCase):
         p = self.post_with(media_type="video", media_url="/media/uploads/1/clip.mp4",
                            items=[{"type": "audio", "url": "/media/uploads/1/song.ogg"}])
         self.assertEqual(find(self.dests(p), "singz")["coach_kind"], "audio")
+
+    # ---- the ceiling, before the button that would hit it ----
+    def stored(self, mb, owner=None):
+        """A post whose take is a real stored Upload of `mb` megabytes."""
+        owner = owner or self.me
+        size = int(mb * 1024 * 1024)
+        up = Upload.objects.create(
+            user=owner, name="take.webm", size_bytes=size, content_type="audio/webm",
+            file=SimpleUploadedFile("take.webm", b"0" * 16, content_type="audio/webm"))
+        return self.post_with(author=owner, media_type="audio", media_url=up.file.url)
+
+    def test_a_track_too_big_for_the_coach_says_so_on_the_row(self):
+        """The bug this exists to stop: a 29MB post offered the coach door, the
+        post travelled, the button went live, and the ceiling announced itself
+        by being hit. A refusal discovered by pressing is a bill, not a price."""
+        from apps.economy.vocalcoach import MAX_MB
+        p = self.stored(MAX_MB + 15)
+        d = destinations_for(p, self.me, media_slots(p),
+                             take_bytes=take_bytes_for([(p, media_slots(p))]).get(p.id))
+        singz = find(d, "singz")
+        self.assertFalse(singz["available"])
+        need = singz["needs"][0]
+        self.assertIn(f"{MAX_MB + 15}MB", need)          # what theirs is
+        self.assertIn(f"under {MAX_MB}MB", need)          # what the coach takes
+        self.assertIn("not\nyour tier's".replace("\n", " "), need)
+
+    def test_a_track_inside_the_ceiling_still_opens_the_door(self):
+        from apps.economy.vocalcoach import MAX_MB
+        p = self.stored(MAX_MB - 2)
+        d = destinations_for(p, self.me, media_slots(p),
+                             take_bytes=take_bytes_for([(p, media_slots(p))]).get(p.id))
+        self.assertTrue(find(d, "singz")["available"])
+
+    def test_a_size_nobody_measured_is_not_a_size_over_the_limit(self):
+        """A take hosted elsewhere has no stored size. The door stays open —
+        claiming a limit you never read is its own kind of lie, and the coach
+        still holds the wall."""
+        p = self.post_with(media_type="audio", media_url="https://example.com/x.mp3")
+        self.assertTrue(find(self.dests(p), "singz")["available"])
+
+    def test_the_size_of_every_take_in_the_feed_is_one_query(self):
+        from django.test.utils import CaptureQueriesContext
+        from django.db import connection
+        for _ in range(6):
+            self.stored(2)
+        rows = [(p, media_slots(p)) for p in Post.objects.all()]   # not measured
+        with CaptureQueriesContext(connection) as ctx:
+            sizes = take_bytes_for(rows)
+        self.assertEqual(len(ctx), 1)
+        self.assertEqual(len(sizes), 6)
+
+    def test_the_feed_carries_the_ceiling_so_the_card_can_state_it(self):
+        from apps.economy.vocalcoach import MAX_MB
+        p = self.stored(MAX_MB + 15)
+        row = next(r for r in self.c.get(POSTZ).data["posts"] if r["id"] == p.id)
+        singz = find(row["destinations"], "singz")
+        self.assertFalse(singz["available"])
+        self.assertGreater(singz["take_bytes"], singz["max_bytes"])
 
     # ---- the price, before it is spent ----
     def test_the_coach_door_quotes_its_price_up_front(self):
