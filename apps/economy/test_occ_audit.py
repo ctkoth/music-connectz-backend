@@ -15,8 +15,11 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.economy.catalog import (
+    OCC_MAX_ACRONYM_CHARS,
     OCC_MAX_ACRONYMS,
+    OCC_MAX_HISTORY_CHARS,
     OCC_MAX_HISTORY_TURNS,
+    OCC_MAX_KNOWLEDGE_CHARS,
     OCC_MAX_KNOWLEDGE_ITEMS,
     OCC_MAX_PROMPT_CHARS,
     OCC_MAX_TOTAL_CHARS,
@@ -41,6 +44,21 @@ def recording_client(seen):
                 seen.append(kw)
                 return type("R", (), {"content": [FakeBlock("ok")]})()
     return C
+
+
+def why(resp):
+    """Something readable to hand assertEqual, whatever kind of response it is.
+
+    `resp.data` exists on a DRF response and NOT on a plain Django one — so a
+    request refused by the transport (a body over DATA_UPLOAD_MAX_MEMORY_SIZE
+    never reaches the view) blew up with `AttributeError: 'HttpResponseBadRequest'
+    object has no attribute 'data'` INSIDE the failure message. The test could
+    not say what went wrong, which is how a red check sat here being unreadable
+    instead of being fixed.
+    """
+    if hasattr(resp, "data"):
+        return resp.data
+    return f"{resp.status_code} (no DRF body) {resp.content[:200]!r}"
 
 
 class Base(TestCase):
@@ -72,23 +90,48 @@ class OneMessageHasACeilingTests(Base):
         self.assertEqual(seen, [], "the model must not run on a refused message")
         self.assertIn("limits", resp.data)
 
+    # There are TWO ceilings, and only the second one is this app's work:
+    #
+    #   * the TRANSPORT ceiling — Django refuses a request body over
+    #     DATA_UPLOAD_MAX_MEMORY_SIZE (2.5MiB by default) before any view runs.
+    #     Pinned in TheTransportCeilingTests below.
+    #   * the BUDGET — OCC_MAX_TOTAL_CHARS, the assembled prompt the per-message
+    #     price was worked out for. That is what these tests are about.
+    #
+    # The smuggling payloads below are therefore sized to fit COMFORTABLY inside
+    # the transport ceiling while sitting far outside the budget. They used to
+    # be 4MB, which never reached the guard at all: Django bounced the request,
+    # the test read `.data` off a plain HttpResponseBadRequest, and the guard
+    # these tests exist to prove has not actually been exercised since.
+    #
+    # Sizes come off the caps rather than being round megabytes — the axis that
+    # matters here is "how many times over the budget", not "how many MB".
+
     def test_taught_knowledge_cannot_be_used_as_a_smuggling_route(self):
-        # 200 items of 20k characters each = 4MB of "knowledge" charged 2c.
-        resp, seen = self.ask(knowledge=[{"course": "c", "text": "x" * 20_000}
-                                         for _ in range(200)])
-        self.assertEqual(resp.status_code, 200, resp.data)
+        # 200 items — ten times the item cap — each five times the per-item cap.
+        # ~2MB on the wire, fifty times the assembled budget.
+        resp, seen = self.ask(
+            knowledge=[{"course": "c", "text": "x" * (OCC_MAX_KNOWLEDGE_CHARS * 5)}
+                       for _ in range(OCC_MAX_KNOWLEDGE_ITEMS * 10)])
+        self.assertEqual(resp.status_code, 200, why(resp))
         self.assertLessEqual(len(seen[0]["system"]), OCC_MAX_TOTAL_CHARS)
 
     def test_acronyms_cannot_either(self):
-        resp, seen = self.ask(acronyms=[{"term": "t" * 5_000, "means": "m" * 5_000}
-                                        for _ in range(200)])
-        self.assertEqual(resp.status_code, 200, resp.data)
+        resp, seen = self.ask(
+            acronyms=[{"term": "t" * (OCC_MAX_ACRONYM_CHARS * 40),
+                       "means": "m" * (OCC_MAX_ACRONYM_CHARS * 40)}
+                      for _ in range(OCC_MAX_ACRONYMS * 4)])
+        self.assertEqual(resp.status_code, 200, why(resp))
         self.assertLessEqual(len(seen[0]["system"]), OCC_MAX_TOTAL_CHARS)
 
     def test_nor_can_history(self):
-        resp, seen = self.ask(history=[{"role": "user", "text": "x" * 50_000}
-                                       for _ in range(50)])
-        self.assertEqual(resp.status_code, 200, resp.data)
+        # Was 50 turns of 50k — 2.5MB, close enough to the transport ceiling
+        # that one more zero anywhere would have made this fail the same
+        # unreadable way its neighbour did.
+        resp, seen = self.ask(
+            history=[{"role": "user", "text": "x" * (OCC_MAX_HISTORY_CHARS * 5)}
+                     for _ in range(OCC_MAX_HISTORY_TURNS * 6)])
+        self.assertEqual(resp.status_code, 200, why(resp))
         total = len(seen[0]["system"]) + sum(len(m["content"]) for m in seen[0]["messages"])
         self.assertLessEqual(total, OCC_MAX_TOTAL_CHARS * 1.1)
 
@@ -100,7 +143,7 @@ class OneMessageHasACeilingTests(Base):
             acronyms=[{"term": "t" * 100, "means": "m" * 100} for _ in range(OCC_MAX_ACRONYMS)],
             history=[{"role": "user", "text": "h" * 3_999} for _ in range(OCC_MAX_HISTORY_TURNS)],
         )
-        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.status_code, 200, why(resp))
         kw = seen[0]
         total = len(kw["system"]) + sum(len(m["content"]) for m in kw["messages"])
         self.assertLessEqual(total, OCC_MAX_TOTAL_CHARS * 1.1,
@@ -113,13 +156,13 @@ class OneMessageHasACeilingTests(Base):
             prompt="p" * (OCC_MAX_PROMPT_CHARS - 1),
             knowledge=[{"course": "c", "text": "k" * 1_999} for _ in range(OCC_MAX_KNOWLEDGE_ITEMS)],
             history=[{"role": "user", "text": "x" * 4_000} for _ in range(OCC_MAX_HISTORY_TURNS)])
-        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.status_code, 200, why(resp))
         self.assertGreater(resp.data.get("history_trimmed", 0), 0)
 
     def test_an_ordinary_message_is_untouched(self):
         resp, seen = self.ask(prompt="how do I mix vocals?",
                               history=[{"role": "user", "text": "hey"}])
-        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.status_code, 200, why(resp))
         self.assertNotIn("history_trimmed", resp.data)
         self.assertIn("how do I mix vocals?",
                       [m["content"] for m in seen[0]["messages"]])
@@ -130,6 +173,46 @@ class OneMessageHasACeilingTests(Base):
         limits = self.client.get("/api/economy/ai/models/").data["limits"]
         self.assertEqual(limits["prompt_chars"], OCC_MAX_PROMPT_CHARS)
         self.assertEqual(limits["total_chars"], OCC_MAX_TOTAL_CHARS)
+
+
+class TheTransportCeilingTests(Base):
+    """The other ceiling — the one that isn't OCC's.
+
+    Django refuses a request body over DATA_UPLOAD_MAX_MEMORY_SIZE before any
+    view runs, so nothing the audit above pinned can be reached with a payload
+    that big. That is worth having written down: the knowledge test was firing
+    at this wall and reporting an AttributeError, which reads like a broken app
+    rather than a request that was never allowed in — and an unreadable red
+    check is how the next real failure gets waved through.
+
+    What it means in practice: OCC's own guard has to survive everything UNDER
+    2.5MiB, because that is the largest thing that can ever get to it. The
+    tests above are sized on that basis.
+    """
+
+    def test_a_body_over_the_transport_ceiling_never_reaches_the_view(self):
+        from django.conf import settings
+
+        cap = getattr(settings, "DATA_UPLOAD_MAX_MEMORY_SIZE", 2_621_440)
+        resp, seen = self.ask(knowledge=[{"course": "c", "text": "x" * (cap // 2)}
+                                         for _ in range(3)])
+        self.assertEqual(resp.status_code, 400)
+        # The point of the ceiling: the model must not run on a message the
+        # server never accepted.
+        self.assertEqual(seen, [], "the model must not run on a refused body")
+
+    def test_the_guard_still_holds_at_the_largest_body_that_can_get_through(self):
+        """Just inside the transport ceiling is the real worst case."""
+        from django.conf import settings
+
+        cap = getattr(settings, "DATA_UPLOAD_MAX_MEMORY_SIZE", 2_621_440)
+        # 80% of the ceiling in taught knowledge — the biggest smuggle the
+        # transport will actually carry.
+        each = int(cap * 0.8) // 20
+        resp, seen = self.ask(knowledge=[{"course": "c", "text": "x" * each}
+                                         for _ in range(20)])
+        self.assertEqual(resp.status_code, 200, why(resp))
+        self.assertLessEqual(len(seen[0]["system"]), OCC_MAX_TOTAL_CHARS)
 
 
 class WhatOccSaysItCanRunTests(Base):
@@ -211,7 +294,7 @@ class TheVisionImageHasACeilingToo(Base):
 
     def test_an_ordinary_image_still_goes_through(self):
         resp, seen = self.ask(image=self.png())
-        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.status_code, 200, why(resp))
         block = seen[0]["messages"][-1]["content"][0]
         self.assertEqual(block["source"]["media_type"], "image/png")
 
