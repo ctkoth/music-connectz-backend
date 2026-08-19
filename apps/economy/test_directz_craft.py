@@ -185,6 +185,20 @@ class TheRatingIsAskedForAndPricedFirst(Base):
         self.assertIn("affordable", d["craft"])
         self.assertEqual(set(d["craft"]["scores"]), set(CRAFT_SCORES))
 
+    def test_the_raters_ceiling_is_published_so_the_box_can_state_it(self):
+        """The same failure the Boss Take coach had, next door: the rater has
+        its own per-request ceiling and the screen could not name it, because
+        nothing served it. So a 100MB video went up with the box ticked and the
+        refusal arrived afterwards as a note on the finished work."""
+        from apps.economy.vocalcoach import MAX_MB
+        craft = self.client.get(URL).json()["craft"]
+        self.assertEqual(craft["max_mb"], MAX_MB)
+        # And whose limit it is — reading it as the tier's is how a StatZ member
+        # concludes the plan they paid for is being ignored.
+        self.assertFalse(craft["max_mb_is_tier_limit"])
+        self.assertIn("isn't your tier's upload limit", craft["max_mb_why"])
+        self.assertFalse(craft["charged_on_failure"])
+
     def test_a_rating_is_billed_once_a_usable_result_exists(self):
         up = self.upload()
         before = wallet_for(self.user).promptz
