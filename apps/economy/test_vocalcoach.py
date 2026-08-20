@@ -93,8 +93,15 @@ class SingZCoachTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn("isn't audio", resp.data["detail"])
 
+    @patch("apps.economy.vocalcoach.MAX_MB", 2)
     def test_an_oversized_take_is_refused(self):
-        big = SimpleUploadedFile("long.webm", b"0" * (26 * 1024 * 1024), content_type="audio/webm")
+        """Over the coach's cap is still a 413 before any model run.
+
+        The cap is patched rather than met: it is 200MB now that big takes are
+        uploaded and referenced instead of inlined, and allocating 200MB of
+        zeroes to prove a comparison would be a slow way to test `>`.
+        """
+        big = SimpleUploadedFile("long.webm", b"0" * (3 * 1024 * 1024), content_type="audio/webm")
         self.assertEqual(self.client.post(URL, {"take": big}, format="multipart").status_code, 413)
 
     @patch("apps.economy.vocalcoach._key", return_value="")
@@ -387,10 +394,19 @@ class VideoTakesTests(TestCase):
 class TheSizeCapIsOneWeCanHonourTests(TestCase):
     """A limit the app states has to be a limit the app can actually serve.
 
-    The take rides to Gemini as base64 inside the request body, and that path
-    caps the whole request at 20MB. Base64 inflates by 4/3, so a file cap above
-    ~15MB is a promise the upstream breaks — and it broke it as "The coach
-    couldn't process that take", which blames the take rather than the size.
+    This used to be one number. It is two now, because there are two ways a
+    take reaches the model, and the invariant is different for each:
+
+    * INLINE — base64 inside the request body, which caps the whole request at
+      20MB. Base64 inflates by 4/3, so anything sent this way must stay under
+      ~15MB or the upstream breaks the promise, as "The coach couldn't process
+      that take", blaming the performance for a transport limit.
+    * UPLOADED — the take is sent to the Files API first and referenced by
+      URI. That path takes 2GB a file, which is what stopped the transport
+      being the thing that decides what can be coached.
+
+    So MAX_MB is no longer bounded by the request body. It is bounded by what
+    one take is, and by the file store's own ceiling.
     """
 
     GEMINI_INLINE_LIMIT_MB = 20
@@ -402,13 +418,29 @@ class TheSizeCapIsOneWeCanHonourTests(TestCase):
         m = membership_for(self.user); m.tier = TIER_STATZ; m.save()
         w = wallet_for(self.user); w.money_cents = 100000; w.save()
 
-    def test_a_take_at_the_cap_still_fits_the_request(self):
+    def test_anything_sent_inline_still_fits_the_request(self):
+        """The original invariant, now pinned to the path it actually governs.
+        Raising INLINE_MAX_MB past this would resurrect the exact bug."""
+        from apps.economy.vocalcoach import INLINE_MAX_MB
+        self.assertLess(INLINE_MAX_MB * 4 / 3, self.GEMINI_INLINE_LIMIT_MB,
+                        f"{INLINE_MAX_MB}MB base64-encodes to "
+                        f"{INLINE_MAX_MB * 4 / 3:.1f}MB and the inline path caps at "
+                        f"{self.GEMINI_INLINE_LIMIT_MB}MB — the app would be sending "
+                        "a size the request cannot carry")
+
+    def test_the_advertised_cap_fits_the_file_store_that_now_carries_it(self):
+        """MAX_MB is no longer the request's business — but it is still the
+        file store's, and a cap above 2GB would be a promise nobody keeps."""
+        from apps.economy.gemini_files import API_MAX_MB
         from apps.economy.vocalcoach import MAX_MB
-        self.assertLess(MAX_MB * 4 / 3, self.GEMINI_INLINE_LIMIT_MB,
-                        f"{MAX_MB}MB base64-encodes to "
-                        f"{MAX_MB * 4 / 3:.1f}MB and the inline path caps at "
-                        f"{self.GEMINI_INLINE_LIMIT_MB}MB — the app is advertising "
-                        "a size it cannot send")
+        self.assertLessEqual(MAX_MB, API_MAX_MB)
+
+    def test_the_big_cap_is_only_honourable_because_a_second_path_exists(self):
+        """If the uploaded path ever went away, MAX_MB would be a lie again.
+        Pinned so removing it fails here rather than in front of a member."""
+        from apps.economy.vocalcoach import INLINE_MAX_MB, MAX_MB, _media_part
+        self.assertGreater(MAX_MB, INLINE_MAX_MB)
+        self.assertTrue(callable(_media_part))
 
     def test_the_trial_cap_fits_too(self):
         from apps.economy.models import TRIAL_MAX_MB

@@ -60,7 +60,19 @@ logger = logging.getLogger(__name__)
 # It is enough for what a Boss Take is: ~15 minutes of 128kbps audio, or about
 # a minute of video at the bitrate the recorder asks for. Anything longer than
 # that is not one take.
-MAX_MB = 14
+INLINE_MAX_MB = 14
+
+# What the coach will actually take now. The 20MB request cap belongs to the
+# INLINE path, not to the coach — Google's Files API accepts 2GB per file, free,
+# and generateContent reads it by URI. So the transport stopped being the thing
+# that decides what can be coached, and this is a judgement about what one take
+# IS rather than what the wire can carry.
+#
+# 200MB is roughly three hours of 128kbps audio, or a long video take. A Boss
+# Take is one take; anything past this is a session, and scoring a session as a
+# take produces a number about the wrong thing. Env-overridable because that
+# judgement may want moving without a deploy.
+MAX_MB = int(os.environ.get("COACH_MAX_MB", "200"))
 
 # What Gemini will actually accept as inline media. Anything outside these two
 # sets is refused by the API, not by us — and the refusal arrives as a plain
@@ -107,6 +119,50 @@ def gemini_mime(content_type):
     base = (content_type or "").split(";")[0].strip().lower()
     base = _RELABEL.get(base, base)
     return base if base in _GEMINI_AUDIO or base in _GEMINI_VIDEO else None
+
+
+def _size_of(f):
+    """How many bytes this take is, without asking storage.
+
+    Seek-to-end works on an uploaded file and an opened stored one alike, and
+    unlike `FieldFile.size` it does not make a metadata call that raises when
+    the file has gone missing.
+    """
+    try:
+        here = f.tell()
+        f.seek(0, 2)
+        n = f.tell()
+        f.seek(here)
+        return n
+    except Exception:                                    # pragma: no cover
+        return int(getattr(f, "size", 0) or 0)
+
+
+def _media_part(f, mime, size):
+    """The generateContent part carrying the take, and a cleanup callback.
+
+    Small takes go INLINE, base64 in the request body: one round trip, nothing
+    to tidy afterwards, and the path with a year of production behind it.
+
+    Bigger ones are uploaded first and referenced by URI, which is what lifts
+    the ceiling from 14MB to gigabytes. Returns (part, cleanup, error) with
+    exactly one of part/error set.
+    """
+    if size <= INLINE_MAX_MB * 1024 * 1024:
+        return ({"inline_data": {"mime_type": mime,
+                                 "data": base64.b64encode(f.read()).decode()}},
+                None, None)
+
+    from . import gemini_files
+    up, why = gemini_files.upload(f, mime, size, display_name="boss-take")
+    if why:
+        return None, None, why
+    ready, why = gemini_files.wait_active(up)
+    if not ready:
+        gemini_files.delete(up)
+        return None, None, why
+    return (gemini_files.part_for(up, mime),
+            lambda: gemini_files.delete(up), None)
 
 
 def _parse(text):
@@ -165,20 +221,36 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
 
     model = os.environ.get("GEMINI_AUDIO_MODEL", "gemini-2.5-flash")
     unreadable = ({"detail": "The coach couldn't process that take."}, status.HTTP_502_BAD_GATEWAY)
+
+    # How the take travels: inline for small ones, uploaded-and-referenced for
+    # anything the inline request can't carry. Deciding it HERE means the trial
+    # door gets the same lift for free, and there is still exactly one rubric.
+    size = _size_of(f)
+    part, cleanup, why = _media_part(f, mime, size)
+    if why:
+        return None, ({"detail": f"The coach couldn't take that one — {why}.",
+                       "size_mb": round(size / (1024 * 1024), 1)},
+                      status.HTTP_502_BAD_GATEWAY)
     try:
         resp = requests.post(
             f"{BASE}/models/{model}:generateContent?key={key}",
-            json={"contents": [{"parts": [
-                {"text": prompt},
-                {"inline_data": {"mime_type": mime,
-                                 "data": base64.b64encode(f.read()).decode()}},
-            ]}]},
-            timeout=90,
+            json={"contents": [{"parts": [{"text": prompt}, part]}]},
+            # A referenced file is read by the model rather than sent with the
+            # request, and a long one takes longer to listen to than a short
+            # one — so the wait scales with the take instead of cutting a good
+            # one off at ninety seconds.
+            timeout=90 if cleanup is None else 300,
         )
     except requests.RequestException:
         logger.exception("SingZ coach: could not reach Gemini")
         return None, ({"detail": "Couldn't reach the coach. Try that take again."},
                       status.HTTP_502_BAD_GATEWAY)
+    finally:
+        # The upload is ours and it is finished with, whatever happened. Files
+        # expire in 48 hours by themselves, so this is tidiness rather than a
+        # correctness requirement — which is why it can never raise.
+        if cleanup:
+            cleanup()
 
     if resp.status_code != 200:
         # Log what we SENT as well as what came back. Without the mime type and
@@ -306,17 +378,21 @@ class SingZCoachView(APIView):
             # after a usable result parses. Worth saying, not just doing.
             "charged_on_failure": False,
             "max_mb": MAX_MB,
-            # Say WHAT this cap is, because it is not the member's tier. A
-            # StatZ member with a 10GB single-file allowance who is refused at
-            # 14MB reads that as the plan they paid for being ignored. It is
-            # the scorer's request ceiling: the take rides to the model inline,
-            # base64'd, inside one request that caps at 20MB.
+            # Say WHAT this cap is, because it is not the member's tier — and
+            # it is no longer the transport either. Big takes are uploaded to
+            # the model's own file store and read by reference, so the old 14MB
+            # request ceiling is gone; what is left is a judgement about what
+            # one take is, which is a much easier thing to say honestly.
             "max_mb_why": (
-                "The coach reads the whole take in one request, and that request "
-                f"caps out around {MAX_MB}MB once the audio is encoded. It isn't your "
-                "tier's upload limit — send a longer take to PostZ or your vault, "
-                "and give the coach the section you want scored."
+                f"A Boss Take can be up to {MAX_MB}MB — around three hours of audio. "
+                "Past that it's a session rather than a take, and a score about a "
+                "whole session is a number about the wrong thing. It isn't your "
+                "tier's upload limit."
             ),
+            # Under this the take rides inside the request; over it, it is
+            # uploaded first and referenced. Both are scored identically — this
+            # is here for diagnosis, not for the screen.
+            "inline_max_mb": INLINE_MAX_MB,
             "max_mb_is_tier_limit": False,
             # The client renders its score chips, range picker and honest-scope
             # footnote from these, so they cannot disagree with what the model
