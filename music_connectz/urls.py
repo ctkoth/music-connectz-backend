@@ -43,10 +43,20 @@ except Exception:  # pragma: no cover - never take the deploy down
 
 
 def health(_request):
+    # Whether member uploads are actually being kept. Reported here because it
+    # is the one place the answer can be read without a Render login — and
+    # because a service that is "ok" while quietly deleting everyone's music
+    # on the next deploy is not telling the whole truth about itself.
+    try:
+        from apps.economy.storage_health import upload_storage_state
+        uploads = upload_storage_state()
+    except Exception:                                    # pragma: no cover
+        uploads = {"durable": None, "detail": "could not be determined"}
     return JsonResponse(
         {
             "service": "music-connectz-backend",
             "status": "ok",
+            "uploads": uploads,
             "endpoints": [
                 "/api/auth/register/",
                 "/api/auth/login/",
