@@ -370,19 +370,16 @@ class SingZCoachView(APIView):
             return Response({"detail": "That isn't audio or video. Record a take, or attach an "
                                        "audio or video file."},
                             status=status.HTTP_400_BAD_REQUEST)
-        if f.size > MAX_MB * 1024 * 1024:
-            # Say WHOSE limit this is. It is the scorer's request ceiling, not
-            # the member's tier — and a posted track is exactly the case where
-            # that distinction matters, because the post accepted the file and
-            # the coach is now refusing the same one.
-            detail = f"That take is too big — keep it under {MAX_MB}MB."
-            if post is not None:
-                detail = (f"\"{post.title}\" is {f.size / (1024 * 1024):.0f}MB, and the coach "
-                          f"reads a take in one request that caps out near {MAX_MB}MB. "
-                          "It isn't your tier's upload limit — the post keeps the full "
-                          "track; record or attach the section you want scored.")
-            return Response({"detail": detail, "max_mb": MAX_MB,
-                             "max_mb_is_tier_limit": False},
+        # An uploaded file knows its own size. A stored one does NOT — asking a
+        # FieldFile for `.size` is a round trip to storage, and when the file
+        # has gone missing that call RAISES. Unhandled, it left the member
+        # looking at "Something went wrong on our side" for a recording that
+        # simply isn't there any more. So the post path is measured from its
+        # database row instead, inside _take_from_post, and never touches
+        # storage until the take is actually read.
+        if post is None and f.size > MAX_MB * 1024 * 1024:
+            return Response({"detail": f"That take is too big — keep it under {MAX_MB}MB.",
+                             "max_mb": MAX_MB, "max_mb_is_tier_limit": False},
                             status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
 
         key = _key()
@@ -415,12 +412,19 @@ class SingZCoachView(APIView):
                 genre=genre, target=data.get("range"),
                 difficulty=data.get("difficulty"), style=data.get("style"),
             )
-        except Exception:                                    # pragma: no cover
-            logger.exception("%s coach: post %s take unreadable",
+        except Exception:
+            # Almost always a recording that is no longer in storage. Say that,
+            # and say it as a fact about the FILE rather than about the take or
+            # about "our side" — the member did nothing wrong and the coach is
+            # working fine. 410, not 502: the thing is gone, the server isn't.
+            logger.exception("%s coach: post %s take could not be read from storage",
                              self.app_key, getattr(post, "pk", None))
             return Response(
-                {"detail": "That take couldn't be opened. Try attaching it here instead."},
-                status=status.HTTP_502_BAD_GATEWAY)
+                {"detail": f"The recording on \"{post.title}\" isn't on the server any "
+                           "more, so there's nothing for the coach to listen to. Record "
+                           "or attach the take here and it'll be scored.",
+                 "post_id": post.id, "take_missing": True},
+                status=status.HTTP_410_GONE)
         finally:
             if post is not None:
                 try:
@@ -489,6 +493,18 @@ class SingZCoachView(APIView):
         if why:
             return None, None, "", Response({"detail": why, "post_id": post.id},
                                             status=status.HTTP_400_BAD_REQUEST)
+        # Measured from the ROW, never from the file. `Upload.size_bytes` is a
+        # column; `FieldFile.size` is a storage call that raises on a file that
+        # has gone missing — which is exactly how the ceiling check turned a
+        # dead recording into a 500.
+        if (upload.size_bytes or 0) > MAX_MB * 1024 * 1024:
+            return None, None, "", Response(
+                {"detail": f"\"{post.title}\" is {upload.size_bytes / (1024 * 1024):.0f}MB, "
+                           f"and the coach reads a take in one request that caps out near "
+                           f"{MAX_MB}MB. It isn't your tier's upload limit — the post keeps "
+                           "the full track; record or attach the section you want scored.",
+                 "max_mb": MAX_MB, "max_mb_is_tier_limit": False, "post_id": post.id},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
         # The Upload's own recorded type, falling back to the slot the post
         # keeps it in — an upload saved with no content type is still audio if
         # that is the slot it fills.
