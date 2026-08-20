@@ -399,6 +399,37 @@ class CoachThePostTests(TestCase):
         self.assertFalse(r.data["max_mb_is_tier_limit"])
         self.assertIn("isn't your tier's upload limit", r.data["detail"])
 
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    def test_a_recording_missing_from_storage_is_an_answer_not_a_500(self, _k):
+        """The one that reached a member's screen as "Something went wrong on
+        our side."
+
+        Render's web disk is ephemeral, so an Upload row can outlive its file.
+        `FieldFile.size` is a storage call and it RAISES on a missing file —
+        which is how the ceiling check turned a dead recording into a 500 and
+        blamed the server for a file that simply is not there.
+        """
+        p, up = self.stored_post()
+        # The row survives; the bytes do not. Exactly what a deploy does.
+        up.file.storage.delete(up.file.name)
+        r = self.c.post("/api/singz/coach/", {"post_id": p.id}, format="json")
+        self.assertEqual(r.status_code, 410)          # gone, not broken
+        self.assertTrue(r.data["take_missing"])
+        self.assertIn("isn't on the server any more", r.data["detail"])
+        # And nothing is charged for a take that was never read.
+        self.assertEqual(wallet_for(self.me).prompts_used_today or 0, 0)
+
+    def test_the_ceiling_is_measured_without_touching_storage(self):
+        """The size check must not be the thing that goes and asks a missing
+        file how big it is — that is the 500 above, one line earlier."""
+        from apps.economy.vocalcoach import MAX_MB
+        p, up = self.stored_post()
+        Upload.objects.filter(pk=up.pk).update(size_bytes=(MAX_MB + 15) * 1024 * 1024)
+        up.file.storage.delete(up.file.name)          # gone from storage too
+        r = self.c.post("/api/singz/coach/", {"post_id": p.id}, format="json")
+        self.assertEqual(r.status_code, 413)          # the ceiling still answers
+        self.assertIn("isn't your tier's upload limit", r.data["detail"])
+
     def test_neither_a_file_nor_a_post_still_asks_for_a_take(self):
         r = self.c.post("/api/singz/coach/", {}, format="json")
         self.assertEqual(r.status_code, 400)
