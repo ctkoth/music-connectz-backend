@@ -884,6 +884,24 @@ class Post(models.Model):
     # the author's off switch for the case where it isn't welcome.
     allow_in_playlists = models.BooleanField(default=True)
     skill_cost_cents = models.PositiveIntegerField(default=0)  # combined skill price of what's used
+    # The coach's read on this post, when the author has asked for one.
+    #
+    # It is NOT the post's rating and must never be rendered as one. `rating`
+    # is the median of what members scored it; this is one model's opinion of
+    # the recording, kept on its own line and labelled as the coach's. Blending
+    # the two would put a machine's number inside a count of people, and the
+    # first member who compared them would be right to stop trusting both.
+    #
+    # Null means nobody has asked — NOT zero. `coach_note` says why when the
+    # coach was asked and couldn't answer, because an empty rating invites a
+    # real one and a fabricated one ends the question (CLAUDE.md, rule three).
+    coach_rating = models.FloatField(null=True, blank=True)
+    # The full Boss Take payload behind the score: per-dimension sub-scores,
+    # verdict, strengths, fixes, next_drill, plus which instrument coach was
+    # asked. Same shape SingZ and RapZ already return, so one component renders
+    # all three.
+    coach = models.JSONField(default=dict, blank=True)
+    coach_note = models.CharField(max_length=200, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(null=True, blank=True)
     edit_history = models.JSONField(default=list, blank=True)  # [{title, description, at}] prior versions
