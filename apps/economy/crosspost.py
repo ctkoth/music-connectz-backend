@@ -156,14 +156,25 @@ def take_bytes_for(rows):
     return out
 
 
-def coach_cap_bytes():
-    """The coach's per-request ceiling, in bytes. Imported here rather than at
-    module level to keep crosspost free of an import cycle through vocalcoach."""
-    from .vocalcoach import MAX_MB
-    return MAX_MB * 1024 * 1024
+def coach_cap(user):
+    """What the coach will take from THIS member: {mb, bytes, is_tier}.
+
+    Per-member, not global: the ceiling is the coach's own judgement or the
+    member's tier upload limit, whichever binds them first, so the destination
+    row greys out at the number that will actually refuse THEM.
+
+    Read ONCE per request and passed into `destinations_for`, for the same
+    reason the price is — it reads the membership row, and doing that per card
+    is a query per post to print one number that is the same on all of them.
+    The feed's own query-count test catches it if this is forgotten.
+    """
+    from .vocalcoach import cap_for
+    mb, is_tier = cap_for(user)
+    return {"mb": mb, "bytes": mb * 1024 * 1024, "is_tier": is_tier}
 
 
-def destinations_for(post, user, media, *, price=None, collabs=0, take_bytes=None):
+def destinations_for(post, user, media, *, price=None, collabs=0, take_bytes=None,
+                     cap=None):
     """Every app this post can open in, with the price of each stated first.
 
     `media` is `postz.media_slots(post)` — passed in rather than recomputed,
@@ -193,14 +204,15 @@ def destinations_for(post, user, media, *, price=None, collabs=0, take_bytes=Non
     # `take_bytes` is None when nobody looked. An unmeasured file is not a file
     # over the limit, so the door stays open rather than claiming a size it
     # never read; the coach still refuses at the wall if it comes to that.
-    cap = coach_cap_bytes()
-    too_big = bool(take and take_bytes and take_bytes > cap)
+    cap = cap or coach_cap(user)
+    too_big = bool(take and take_bytes and take_bytes > cap["bytes"])
     if too_big:
-        mb, cap_mb = take_bytes / (1024 * 1024), cap / (1024 * 1024)
-        coach_needs = [f"a take under {cap_mb:.0f}MB — the {take} on this post is "
-                       f"{mb:.0f}MB. That's the coach's limit for one request, not "
-                       f"your tier's: the post keeps the full track, so record or "
-                       f"attach just the section you want scored"]
+        from .vocalcoach import cap_why
+        mb = take_bytes / (1024 * 1024)
+        coach_needs = [f"a take under {cap['mb']}MB — the {take} on this post is "
+                       f"{mb:.0f}MB. " + cap_why(cap["mb"], cap["is_tier"])
+                       + " The post keeps the full track, so record or attach just "
+                         "the section you want scored"]
     else:
         coach_needs = no_take
 
@@ -225,7 +237,8 @@ def destinations_for(post, user, media, *, price=None, collabs=0, take_bytes=Non
             # What the client needs to hold the same line if it is showing a
             # card the feed rendered a while ago.
             "take_bytes": take_bytes or 0,
-            "max_bytes": cap,
+            "max_bytes": cap["bytes"],
+            "max_is_tier_limit": cap["is_tier"],
         })
 
     # --- Doors that already existed as buttons, now in the same list. -----

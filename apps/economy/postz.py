@@ -14,7 +14,7 @@ from datetime import timedelta
 from django.db.models import Case, Count, IntegerField, Sum, When
 from django.utils import timezone
 
-from .crosspost import coach_price, destinations_for, take_bytes_for
+from .crosspost import coach_cap, coach_price, destinations_for, take_bytes_for
 from .models import (
     CollabDeal,
     POST_COMMENT_UNLOCK_SEC,
@@ -102,7 +102,8 @@ def media_slots(p):
 _UNSET = object()
 
 
-def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_bytes=_UNSET):
+def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_bytes=_UNSET,
+               cap=None):
     vibe = up - down
     media = media_slots(p)
     if take_bytes is _UNSET:
@@ -152,7 +153,7 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_bytes=_U
         "open_in": "collabz",
         "destinations": destinations_for(p, request.user, media,
                                          price=price, collabs=n_collabs,
-                                         take_bytes=take_bytes),
+                                         take_bytes=take_bytes, cap=cap),
         "skill_cost_cents": p.skill_cost_cents,
         "joins": p.joins.count() if p.visibility == "restricted" else 0,
         "shares": p.shares.count(),
@@ -416,12 +417,15 @@ class PostsView(APIView):
         # SingZ and RapZ, and pricing each of them per row would be two hundred
         # wallet reads to print the same two numbers.
         price = coach_price(request.user)
+        # The take ceiling for this member, read once for the same reason the
+        # price is: it reads their membership row, and every card shows it.
+        cap = coach_cap(request.user)
         # How big each post's take is, in one query for the whole feed. Without
         # it the coach door is offered on a track the coach cannot read, and the
         # member finds out by pressing the button — see take_bytes_for.
         sizes = take_bytes_for([(p, media_slots(p)) for p in visible])
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
-                            collabs=deals.get(p.id, 0), price=price,
+                            collabs=deals.get(p.id, 0), price=price, cap=cap,
                             take_bytes=sizes.get(p.id))
                  for p in visible]
 

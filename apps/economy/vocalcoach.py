@@ -121,6 +121,47 @@ def gemini_mime(content_type):
     return base if base in _GEMINI_AUDIO or base in _GEMINI_VIDEO else None
 
 
+def cap_for(user):
+    """(megabytes, is_their_tier_limit) — the take ceiling for THIS member.
+
+    Two ceilings meet here and the smaller one wins:
+
+    * MAX_MB, which is now a judgement about what one take is;
+    * the member's own per-file upload limit, which is what their tier lets
+      them put on the platform at all.
+
+    While MAX_MB was 14 the coach's was always the smaller, so the app could
+    say "this isn't your tier's limit" and be right for everybody — which is
+    why `max_mb_is_tier_limit` has been a hardcoded False. At 200MB that stops
+    being true: a Free member can only upload 100MB, so THEIR ceiling is their
+    tier's, and telling them otherwise would be the app stating a size it can't
+    honour with a sentence explicitly denying whose limit it is.
+
+    So it is computed, and the flag finally does the job it was invented for.
+    """
+    from .catalog import limits_for
+    from .models import membership_for
+
+    try:
+        tier_mb = int(limits_for(membership_for(user).tier)["upload_mb"])
+    except Exception:                                    # pragma: no cover
+        return MAX_MB, False
+    if tier_mb < MAX_MB:
+        return tier_mb, True
+    return MAX_MB, False
+
+
+def cap_why(mb, is_tier):
+    """Whose ceiling it is, said in the member's terms."""
+    if is_tier:
+        return (f"Your tier uploads up to {mb}MB a file, and that's what the coach "
+                "can be given. A tier up raises it.")
+    return (f"A Boss Take can be up to {mb}MB — around three hours of audio. Past "
+            "that it's a session rather than a take, and a score about a whole "
+            "session is a number about the wrong thing. It isn't your tier's "
+            "upload limit.")
+
+
 def _size_of(f):
     """How many bytes this take is, without asking storage.
 
@@ -344,6 +385,7 @@ class SingZCoachView(APIView):
         """
         profile = profile_for_app(self.app_key)
         tier = membership_for(request.user).tier
+        cap_mb, cap_is_tier = cap_for(request.user)
         allowance, _, daily_left = daily_prompt_state(request.user)
         w = wallet_for(request.user)
         cost = ai_cost("standard")
@@ -377,23 +419,20 @@ class SingZCoachView(APIView):
             # A take the coach can't read is never billed — _bill runs only
             # after a usable result parses. Worth saying, not just doing.
             "charged_on_failure": False,
-            "max_mb": MAX_MB,
-            # Say WHAT this cap is, because it is not the member's tier — and
-            # it is no longer the transport either. Big takes are uploaded to
-            # the model's own file store and read by reference, so the old 14MB
-            # request ceiling is gone; what is left is a judgement about what
-            # one take is, which is a much easier thing to say honestly.
-            "max_mb_why": (
-                f"A Boss Take can be up to {MAX_MB}MB — around three hours of audio. "
-                "Past that it's a session rather than a take, and a score about a "
-                "whole session is a number about the wrong thing. It isn't your "
-                "tier's upload limit."
-            ),
+            # THIS member's ceiling, and whose it is — the coach's judgement or
+            # their tier's own upload limit, whichever binds them first. This
+            # flag was a hardcoded False, which was safe only while the coach's
+            # number was the smaller one for everybody. At 200MB it isn't.
+            "max_mb": cap_mb,
+            "max_mb_why": cap_why(cap_mb, cap_is_tier),
+            "max_mb_is_tier_limit": cap_is_tier,
+            # What the coach itself would take regardless of tier, so a member
+            # on a small plan can see what a tier up actually buys here.
+            "coach_max_mb": MAX_MB,
             # Under this the take rides inside the request; over it, it is
             # uploaded first and referenced. Both are scored identically — this
             # is here for diagnosis, not for the screen.
             "inline_max_mb": INLINE_MAX_MB,
-            "max_mb_is_tier_limit": False,
             # The client renders its score chips, range picker and honest-scope
             # footnote from these, so they cannot disagree with what the model
             # was actually asked to score.
@@ -453,9 +492,11 @@ class SingZCoachView(APIView):
         # simply isn't there any more. So the post path is measured from its
         # database row instead, inside _take_from_post, and never touches
         # storage until the take is actually read.
-        if post is None and f.size > MAX_MB * 1024 * 1024:
-            return Response({"detail": f"That take is too big — keep it under {MAX_MB}MB.",
-                             "max_mb": MAX_MB, "max_mb_is_tier_limit": False},
+        cap_mb, cap_is_tier = cap_for(request.user)
+        if post is None and f.size > cap_mb * 1024 * 1024:
+            return Response({"detail": f"That take is {f.size / (1024 * 1024):.0f}MB. "
+                                       + cap_why(cap_mb, cap_is_tier),
+                             "max_mb": cap_mb, "max_mb_is_tier_limit": cap_is_tier},
                             status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
 
         key = _key()
@@ -573,13 +614,14 @@ class SingZCoachView(APIView):
         # column; `FieldFile.size` is a storage call that raises on a file that
         # has gone missing — which is exactly how the ceiling check turned a
         # dead recording into a 500.
-        if (upload.size_bytes or 0) > MAX_MB * 1024 * 1024:
+        cap_mb, cap_is_tier = cap_for(request.user)
+        if (upload.size_bytes or 0) > cap_mb * 1024 * 1024:
             return None, None, "", Response(
-                {"detail": f"\"{post.title}\" is {upload.size_bytes / (1024 * 1024):.0f}MB, "
-                           f"and the coach reads a take in one request that caps out near "
-                           f"{MAX_MB}MB. It isn't your tier's upload limit — the post keeps "
-                           "the full track; record or attach the section you want scored.",
-                 "max_mb": MAX_MB, "max_mb_is_tier_limit": False, "post_id": post.id},
+                {"detail": f"\"{post.title}\" is {upload.size_bytes / (1024 * 1024):.0f}MB. "
+                           + cap_why(cap_mb, cap_is_tier)
+                           + " The post keeps the full track — record or attach the "
+                             "section you want scored.",
+                 "max_mb": cap_mb, "max_mb_is_tier_limit": cap_is_tier, "post_id": post.id},
                 status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
         # The Upload's own recorded type, falling back to the slot the post
         # keeps it in — an upload saved with no content type is still audio if
