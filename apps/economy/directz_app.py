@@ -119,6 +119,7 @@ def craft_price(user):
     from .catalog import ai_cost
     from .directz_craft import _key
     from .models import can_afford_ai, daily_prompt_state
+    from .vocalcoach import MAX_MB
 
     cost = ai_cost("standard")
     allowance, _, daily_left = daily_prompt_state(user)
@@ -132,6 +133,25 @@ def craft_price(user):
         "free_today": bool(cost) and daily_left > 0,
         "affordable": bool(not cost or daily_left > 0 or can_afford_ai(user, cost)),
         "configured": bool(_key()),
+        # The rater's ceiling, PUBLISHED — so the tickbox can say it before it
+        # is ticked. Without this the screen could not state the limit even if
+        # it wanted to: a 100MB video was posted with the box ticked and the
+        # refusal arrived afterwards, as a note on the finished work. The same
+        # failure the Boss Take coach had, in the app next door.
+        #
+        # Note this is NOT the member's tier upload limit. The post keeps the
+        # whole video; only the rater is bounded, because it watches the file
+        # inside one request.
+        "max_mb": MAX_MB,
+        "max_mb_why": (
+            f"The rater watches the whole video in one request, which caps out "
+            f"around {MAX_MB}MB. It isn't your tier's upload limit — the post keeps "
+            "the full video either way; only the rating needs a shorter cut."
+        ),
+        "max_mb_is_tier_limit": False,
+        # A video the rater can't watch is never billed — see _apply_craft_rating,
+        # which returns before charge_ai_usage. Worth saying, not just doing.
+        "charged_on_failure": False,
     }
 
 
