@@ -300,6 +300,14 @@ def media_part(key, fileobj, mime, *, display_name="take"):
     file went up the Files API and is the caller's to delete once scored.
     """
     size = _size_of(fileobj)
+    # Back to the start before anything reads it. `_size_of` restores the
+    # position it found, but a caller that already touched the file would
+    # otherwise send the model whatever was left — an empty take, reported as
+    # a take the coach couldn't read.
+    try:
+        fileobj.seek(0)
+    except (AttributeError, OSError):                    # pragma: no cover
+        pass
     if size is not None and size > INLINE_MAX_BYTES:
         uri, name, err = upload_media(key, fileobj, mime, size, display_name=display_name)
         if err:
