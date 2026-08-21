@@ -14,6 +14,7 @@ from datetime import timedelta
 from django.db.models import Case, Count, IntegerField, Sum, When
 from django.utils import timezone
 
+from .crosspost import coach_price, destinations_for, take_bytes_for
 from .models import (
     CollabDeal,
     POST_COMMENT_UNLOCK_SEC,
@@ -93,8 +94,20 @@ def media_slots(p):
     return {k: v or "" for k, v in slots.items()}
 
 
-def _post_dict(p, request, up=0, down=0, collabs=None):
+# "nobody passed one", as distinct from "looked, and there is no take". The
+# feed resolves every size in one query and passes the answer — including None
+# — so it must not be re-read per row; a single-post response passes nothing and
+# gets it looked up here, because a card that can't state the coach's ceiling
+# sends the member at the button to find out.
+_UNSET = object()
+
+
+def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_bytes=_UNSET):
     vibe = up - down
+    media = media_slots(p)
+    if take_bytes is _UNSET:
+        take_bytes = take_bytes_for([(p, media)]).get(p.id)
+    n_collabs = p.collab_deals.count() if collabs is None else collabs
     flagged = down >= HIDE_FLAG_MIN_DOWN and down >= up * HIDE_FLAG_RATIO
     return {
         "id": p.id,
@@ -113,7 +126,7 @@ def _post_dict(p, request, up=0, down=0, collabs=None):
         "items": p.items or [],
         # One of each, resolved for the client so it renders every attachment
         # rather than only the primary one.
-        "media": media_slots(p),
+        "media": media,
         "slots": list(MEDIA_SLOTS),
         "score": p.score or {},
         "genre": p.genre,
@@ -131,8 +144,15 @@ def _post_dict(p, request, up=0, down=0, collabs=None):
         # PostZ is for show, CollabZ is for collaboration — this is the count
         # of times somebody moved from one to the other on this post, and where
         # the client sends them to do it again.
-        "collab_count": p.collab_deals.count() if collabs is None else collabs,
+        "collab_count": n_collabs,
+        # Nothing is a dead end. `open_in` is the first door and stays a plain
+        # string for anything already reading it; `destinations` is the whole
+        # list — every app this post can open in, what happens there, what it
+        # costs before it is spent, and what it still needs when it can't go.
         "open_in": "collabz",
+        "destinations": destinations_for(p, request.user, media,
+                                         price=price, collabs=n_collabs,
+                                         take_bytes=take_bytes),
         "skill_cost_cents": p.skill_cost_cents,
         "joins": p.joins.count() if p.visibility == "restricted" else 0,
         "shares": p.shares.count(),
@@ -154,6 +174,11 @@ def _post_dict(p, request, up=0, down=0, collabs=None):
         "created_at": p.created_at.isoformat(),
         "edited_at": p.edited_at.isoformat() if p.edited_at else None,
         "edit_history": p.edit_history or [],
+        # Who touched it last, when that wasn't the author. A post carries its
+        # author's name; an edit by anybody else has to be visible on the post
+        # itself, not buried in a history nobody opens.
+        "edited_by": next((h.get("by") for h in reversed(p.edit_history or [])
+                           if h.get("by") and h.get("by") != p.author.username), ""),
     }
 
 
@@ -400,8 +425,18 @@ class PostsView(APIView):
             .values_list("source_post_id")
             .annotate(n=Count("id"))
         )
+        # What a coached take costs this member, read ONCE. Every card offers
+        # SingZ and RapZ, and pricing each of them per row would be two hundred
+        # wallet reads to print the same two numbers.
+        price = coach_price(request.user)
+        # How big each post's take is, in one query for the whole feed. Without
+        # it the coach door is offered on a track the coach cannot read, and the
+        # member finds out by pressing the button — see take_bytes_for.
+        sizes = take_bytes_for([(p, media_slots(p)) for p in visible])
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
-                            collabs=deals.get(p.id, 0)) for p in visible]
+                            collabs=deals.get(p.id, 0), price=price,
+                            take_bytes=sizes.get(p.id))
+                 for p in visible]
 
         now = timezone.now()
 
@@ -432,12 +467,31 @@ class PostsView(APIView):
         return Response({**_post_dict(p, request), **info}, status=status.HTTP_201_CREATED)
 
     def _edit(self, request, edit_id, d):
-        """Edit your own post's title/description within the tier's edit window."""
+        """Edit a post — yours within the tier's edit window, any post if you own
+        the platform.
+
+        Two things the owner override is careful about:
+
+        * **The window is the author's protection, not the owner's.** It exists
+          so a post can't be quietly rewritten after people have read and rated
+          it. The owner is exempt because somebody has to be able to fix a
+          broken media link on a two-year-old post — that is the whole reason
+          this exists — but exempt is not invisible.
+        * **An edit to somebody else's post is recorded as theirs to see.** The
+          history entry names who made it, and `_post_dict` surfaces it. A post
+          still carries its author's name; an unmarked edit by anybody else is
+          the platform putting words in their mouth, and no amount of "it's my
+          app" makes that readable to the person whose name is on it.
+        """
         from .catalog import edit_window_for
-        from .models import membership_for
-        p = Post.objects.filter(pk=edit_id, author=request.user).first()
+        from .models import membership_for, notify
+        from .views import is_owner
+        owner = is_owner(request.user)
+        p = (Post.objects.filter(pk=edit_id).first() if owner
+             else Post.objects.filter(pk=edit_id, author=request.user).first())
         if not p:
             return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+        mine = p.author_id == request.user.id
         # Playlist consent is a SETTING, not content, so it is not held to the
         # tier's edit window. Locking an author out of withdrawing their work
         # four minutes after posting would make the switch useless.
@@ -446,19 +500,107 @@ class PostsView(APIView):
             p.save(update_fields=["allow_in_playlists"])
             if len(d) <= 2:            # edit_id + the flag: nothing else to do
                 return Response(_post_dict(p, request))
-        window = edit_window_for(membership_for(request.user).tier)
-        if timezone.now() > p.created_at + timedelta(seconds=window):
-            return Response({"detail": "edit_window_passed", "window_seconds": window}, status=status.HTTP_403_FORBIDDEN)
+        if not owner:
+            window = edit_window_for(membership_for(request.user).tier)
+            if timezone.now() > p.created_at + timedelta(seconds=window):
+                return Response({"detail": "edit_window_passed", "window_seconds": window}, status=status.HTTP_403_FORBIDDEN)
         title = str(d.get("title", p.title)).strip()[:160] or p.title
         description = str(d.get("description", p.description))[:4000]
-        if title == p.title and description == p.description:
+        # Media is editable too. A post whose whole point is the track, with no
+        # way to attach one afterwards, is why this went past title-and-caption:
+        # the fix for a missing upload was posting the whole thing again.
+        before = {"title": p.title, "description": p.description,
+                  "media_url": p.media_url, "media_type": p.media_type,
+                  "items": p.items, "is_album": p.is_album, "links": p.links,
+                  "genre": p.genre, "skills_used": p.skills_used}
+        fields = ["title", "description"]
+        p.title, p.description = title, description
+        if "media_url" in d:
+            p.media_url = str(d.get("media_url") or "").strip()[:500]
+            fields.append("media_url")
+        if "media_type" in d:
+            p.media_type = str(d.get("media_type") or "").strip()[:24]
+            fields.append("media_type")
+        if "is_album" in d:
+            p.is_album = bool(d["is_album"])
+            fields.append("is_album")
+        if "items" in d:
+            items = clean_items(d.get("items"))
+            if not p.is_album:
+                # Same rule as posting: one of each slot unless it's an album,
+                # or a track plus its cover silently becomes "an album of two".
+                items, dup = one_of_each(items)
+                if dup:
+                    return Response(
+                        {"detail": f"A post carries one {SLOT_LABEL.get(dup, dup)} — you attached two. "
+                                   "Tick album if you meant several.",
+                         "duplicate_type": dup, "slots": list(MEDIA_SLOTS)},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            p.items = items
+            fields.append("items")
+        if "links" in d:
+            p.links = [x for x in (d.get("links") or []) if x][:20]
+            fields.append("links")
+        if "genre" in d:
+            p.genre = str(d.get("genre") or "")[:40]
+            fields.append("genre")
+        if "skills_used" in d:
+            p.skills_used = [str(x)[:60] for x in (d.get("skills_used") or [])
+                             if isinstance(x, (str, int))][:40]
+            fields.append("skills_used")
+
+        after = {k: getattr(p, k) for k in before}
+        if after == before:
             return Response(_post_dict(p, request))
-        p.edit_history = (p.edit_history or []) + [{"title": p.title, "description": p.description, "at": timezone.now().isoformat()}]
-        p.title = title
-        p.description = description
+        # Who changed it goes in the row. On your own post that is just you; on
+        # somebody else's it is the whole point of keeping a history at all.
+        entry = {**before, "at": timezone.now().isoformat(), "by": request.user.username}
+        p.edit_history = (p.edit_history or []) + [entry]
         p.edited_at = timezone.now()
-        p.save(update_fields=["title", "description", "edit_history", "edited_at"])
+        p.save(update_fields=[*fields, "edit_history", "edited_at"])
+        if not mine:
+            # The author finds out from the app, not by noticing. Editing
+            # somebody's work and letting them discover it is the version of
+            # this that costs trust.
+            notify(p.author, "post",
+                   f"✏️ @{request.user.username} edited your post \"{p.title}\" as platform owner.",
+                   actor=request.user, item_id=f"post:{p.id}")
         return Response(_post_dict(p, request))
+
+
+class PostOpenView(APIView):
+    """GET /api/economy/postz/<pk>/open/ — where this post can go next.
+
+    The feed already carries the same list on every row, so this exists for the
+    surfaces that hold ONE post (a shared /p/ link, a card reopened after an
+    edit) and for re-reading a price that moves during a session: today's free
+    prompts run out while you are scrolling, and a menu still offering "free"
+    after the last one was spent is quoting a price that no longer exists.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        p = Post.objects.filter(pk=pk).select_related("author").first()
+        if not p:
+            return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+        if not can_view_post(p, request.user):
+            return Response({"detail": "you can't view this post"},
+                            status=status.HTTP_403_FORBIDDEN)
+        media = media_slots(p)
+        dests = destinations_for(p, request.user, media,
+                                 collabs=p.collab_deals.count(),
+                                 take_bytes=take_bytes_for([(p, media)]).get(p.id))
+        return Response({
+            "post_id": p.id,
+            "title": p.title,
+            "destinations": dests,
+            # Said plainly rather than left to be counted off the list: a member
+            # looking at a lyrics-only post should read why the coach is greyed
+            # out, not conclude the feature is broken.
+            "open_count": sum(1 for d in dests if d["available"]),
+        })
 
 
 class PostJoinView(APIView):
@@ -515,6 +657,45 @@ class PostJoinView(APIView):
 
 # One sharer can't farm shares by rotating IPs/accounts on the same post.
 SHARE_REWARD_DAILY_CAP = 20  # max share rewards a single user can earn per day
+
+
+class PostDeleteView(APIView):
+    """DELETE /api/economy/postz/<pk>/delete/ — remove a post.
+
+    Yours at any age: the edit window protects readers from a post changing
+    under them, and taking your own work down is not that — an author who can
+    never withdraw what they published is the dead end this app doesn't do.
+
+    The platform owner can remove any post, which is what moderation is. When
+    it isn't theirs, the author is told, because work vanishing with no
+    explanation is indistinguishable from a bug.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pk):
+        from .models import notify
+        from .views import is_owner
+        p = Post.objects.filter(pk=pk).select_related("author").first()
+        if not p:
+            return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+        mine = p.author_id == request.user.id
+        if not mine and not is_owner(request.user):
+            return Response({"detail": "That isn't your post."},
+                            status=status.HTTP_403_FORBIDDEN)
+        title = p.title
+        author = p.author
+        if not mine:
+            notify(author, "post",
+                   f"🗑️ @{request.user.username} removed your post \"{title}\" as platform owner.",
+                   actor=request.user)
+        p.delete()
+        return Response({"deleted": True, "id": pk, "title": title,
+                         "author": author.username})
+
+    # Some clients can't send a body-less DELETE through their fetch wrapper.
+    def post(self, request, pk):
+        return self.delete(request, pk)
 
 
 class PostShareView(APIView):

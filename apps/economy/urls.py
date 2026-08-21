@@ -2,7 +2,8 @@ from django.urls import path
 
 from .directz_app import DirectZWorksView, DirectZRateView
 from .post_coach import PostCoachView
-from .postz import PostCostView, PostsView, PostJoinView, PostShareView, SubmissionsView
+from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
+                    PostJoinView, PostShareView, SubmissionsView)
 from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .distributez import TranscodeView, LyricsView
@@ -230,6 +231,9 @@ urlpatterns = [
     # No account needed — a public post by link, and the author behind it.
     path("postz/<int:pk>/", PublicPostView.as_view(), name="economy-postz-public"),
     path("public/members/<str:username>/", PublicProfileView.as_view(), name="economy-public-member"),
+    # Nothing is a dead end: every app this post can open in, and the price of
+    # each before it is spent.
+    path("postz/<int:pk>/open/", PostOpenView.as_view(), name="economy-postz-open"),
     path("postz/<int:pk>/join/", PostJoinView.as_view(), name="economy-postz-join"),
     path("postz/<int:pk>/playlists/", PostPlaylistAppearancesView.as_view(), name="economy-postz-playlists"),
     path("postz/<int:pk>/collabs/", PostCollabsView.as_view(), name="economy-postz-collabs"),
@@ -243,6 +247,7 @@ urlpatterns = [
     # are already the four assets a distributor asks for.
     path("postz/<int:pk>/distribute/", PostDistributeView.as_view(), name="economy-postz-distribute"),
     path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
+    path("postz/<int:pk>/delete/", PostDeleteView.as_view(), name="economy-postz-delete"),
     path("submissions/", SubmissionsView.as_view(), name="economy-submissions"),
     # PlaylistZ — Music ConnectZ posts and outside distro links in one order.
     path("playlistz/", PlaylistsView.as_view(), name="economy-playlistz"),

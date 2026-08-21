@@ -21,7 +21,7 @@ from rest_framework.views import APIView
 
 from .catalog import ai_cost
 from .models import can_afford_ai, charge_ai_usage, daily_prompt_state, wallet_for
-from .views import platform_owner
+from .views import credit_owner
 
 logger = logging.getLogger(__name__)
 
@@ -212,11 +212,7 @@ def _bill(user, note, count_daily=False):
         # Nothing left the member's wallet, so nothing may arrive in the
         # owner's — otherwise the platform mints money out of an allowance.
         return 0
-    owner = platform_owner()
-    if owner and owner.id != user.id:
-        ow = wallet_for(owner)
-        ow.money_cents = (ow.money_cents or 0) + cost
-        ow.save(update_fields=["money_cents", "updated_at"])
+    credit_owner(user, cost, note)
     return cost
 
 

@@ -250,11 +250,40 @@ class InstrumentCoachTests(TestCase):
         self.assertNotIn("range", scores)
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    def test_only_singing_offers_a_range_picker(self, _k):
-        self.assertIsNotNone(self.client.get(URL).data["range_label"])
-        self.assertIsNone(self.client.get("/api/rapz/coach/").data["range_label"])
-        self.assertEqual(len(self.client.get(URL).data["ranges"]), 8)
-        self.assertEqual(self.client.get("/api/rapz/coach/").data["ranges"], [])
+    def test_a_voice_gets_a_range_picker_and_a_drum_kit_does_not(self, _k):
+        # RapZ used to be in the second group, and it was wrong: the lab has
+        # always detected a rapper's register off the audio, so the one surface
+        # that actually scores the take was the one that couldn't say what it
+        # heard. A rapper has a register; a drum kit has nothing to target.
+        for app in (URL, "/api/rapz/coach/"):
+            d = self.client.get(app).data
+            self.assertIsNotNone(d["range_label"], app)
+            self.assertEqual(len(d["ranges"]), 8, app)
+        # DrumZ has no coach route mounted, so it is checked at the profile —
+        # the same place a mounted route would read it from.
+        from apps.economy.instruments import profile_for_app
+        drums = profile_for_app("drumz")
+        self.assertIsNone(drums["range_label"])
+        self.assertEqual(drums["ranges"], [])
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    def test_the_two_range_pickers_ask_different_questions(self, _k):
+        # A singer targets a range they are training toward; a rapper is being
+        # told the register they already have. Same list, different question,
+        # so the label is not shared.
+        self.assertEqual(self.client.get(URL).data["range_label"], "Target range")
+        self.assertEqual(self.client.get("/api/rapz/coach/").data["range_label"],
+                         "Your register")
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    def test_only_rap_offers_a_style_picker(self, _k):
+        d = self.client.get("/api/rapz/coach/").data
+        self.assertEqual(d["style_label"], "Rap style")
+        self.assertIn("Drill ⚔️", [s["label"] for s in d["styles"]])
+        from apps.economy.instruments import profile_for_app
+        self.assertIsNone(self.client.get(URL).data["style_label"])
+        self.assertEqual(self.client.get(URL).data["styles"], [])
+        self.assertIsNone(profile_for_app("drumz")["style_label"])
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
     def test_singz_still_scores_exactly_what_it_did(self, _k):
@@ -660,3 +689,135 @@ class ARetiredModelDoesNotTakeTheCoachDownTests(TestCase):
         self.assertEqual(resp.status_code, 502)
         bill.assert_not_called()
         self.assertNotIn("test-key", json.dumps(resp.data))
+class CoachVoiceTests(TestCase):
+    """The coach talks like the app, and the voice never buys off the score.
+
+    Corey's ask: RapZ and SingZ feedback in the paradigm the InstrumentZ lab
+    already speaks — emoji-led, second person, top-two-and-a-drill. The risk
+    that comes with it is the reason these assertions exist: a warm voice is
+    one step from flattery, and a 3/10 with a 🔥 on it costs somebody a month
+    of practising the wrong thing.
+    """
+
+    def test_both_coaches_are_asked_for_the_voice(self):
+        from apps.economy.instruments import prompt_for
+        for app_key in ("rapz", "singz"):
+            p = prompt_for(app_key, "Trap", "tenor", "builder")
+            self.assertIn("Music ConnectZ voice", p, app_key)
+            self.assertIn("Contractions", p, app_key)
+            self.assertIn("emoji", p.lower(), app_key)
+            self.assertIn("second person", p, app_key)
+
+    def test_the_voice_never_softens_the_score(self):
+        # The guard that makes the emoji safe to ask for at all.
+        from apps.economy.instruments import prompt_for
+        for app_key in ("rapz", "singz", "drumz"):
+            p = prompt_for(app_key, "Trap", "tenor", "builder")
+            self.assertIn("never soften", p, app_key)
+            self.assertIn("no flattery", p, app_key)
+
+    def test_it_still_refuses_to_invent_what_it_could_not_hear(self):
+        # Substance before the game layer: a livelier voice must not become a
+        # licence to describe detail the model never heard.
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn("Never invent detail you cannot hear", p)
+        self.assertIn("don't score it", p)
+
+    def test_each_coach_still_speaks_its_own_dimensions(self):
+        # A rapper isn't scored on breath support the way a singer is, and the
+        # voice change must not have flattened the profiles into one coach.
+        from apps.economy.instruments import prompt_for
+        rap = prompt_for("rapz", "Trap", None, "builder")
+        sing = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("rap coach", rap)
+        self.assertIn('"flow"', rap)
+        self.assertNotIn('"agility"', rap)
+        self.assertIn("vocal coach", sing)
+        self.assertIn('"agility"', sing)
+        self.assertNotIn('"flow"', sing)
+        # Only the singer gets asked about a target range.
+        self.assertIn("Target range", sing)
+        self.assertNotIn("Target range", rap)
+
+
+class GoalsAndCurrentQualitiesTests(TestCase):
+    """Corey's ask: say where they are, and where they're headed.
+
+    A score with no destination is a number, not coaching. So every answer
+    carries `now` (their current qualities) and `goal` (what they're aiming
+    at), and where the app has a range or a style, what those read as too.
+    """
+
+    def test_the_prompt_asks_for_both_ends(self):
+        from apps.economy.instruments import prompt_for
+        for app_key in ("rapz", "singz"):
+            p = prompt_for(app_key, "Trap", "tenor", "builder")
+            self.assertIn('"now"', p, app_key)
+            self.assertIn('"goal"', p, app_key)
+            self.assertIn("current qualities", p, app_key)
+
+    def test_the_goal_is_pitched_at_the_difficulty_they_picked(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "stageboss")
+        self.assertIn("stageboss", p)
+
+    def test_both_apps_are_asked_to_read_the_range(self):
+        from apps.economy.instruments import prompt_for
+        for app_key in ("rapz", "singz"):
+            p = prompt_for(app_key, "Trap", "tenor", "builder")
+            self.assertIn('"range_profile"', p, app_key)
+            self.assertIn("Soprano ☀️", p, app_key)      # the class list is offered
+            self.assertIn("what that range is GOOD for", p, app_key)
+
+    def test_a_range_it_could_not_hear_is_not_invented(self):
+        # The substance rule, at the place it would break first: a range
+        # guessed off four bars is a lie somebody builds a warm-up around.
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Drill", "bass", "builder")
+        self.assertIn("too short or too narrow to tell", p)
+
+    def test_a_drum_take_is_not_asked_for_a_range(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("drumz", "Trap", None, "builder")
+        self.assertNotIn('"range_profile"', p)
+
+    def test_rap_is_judged_against_the_style_it_picked(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", "bass", "builder", style="Drill ⚔️")
+        self.assertIn('"style_fit"', p)
+        self.assertIn("Drill ⚔️", p)
+        self.assertIn("not against rap in general", p)
+
+    def test_singing_is_judged_against_its_genre(self):
+        # SingZ has no style picker, so the genre is what it answers to.
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "Neo Soul", "tenor", "builder")
+        self.assertIn('"style_fit"', p)
+        self.assertIn("Neo Soul", p)
+
+    def test_the_new_fields_survive_the_whitelist(self):
+        # Everything the coach returns is whitelisted, so a field added to the
+        # prompt and not to the reader is a field the member never sees.
+        from apps.economy.vocalcoach import score_take
+        import json as _json
+        from unittest.mock import patch as _patch
+        payload = {"score": 7, "scores": {k: 7 for k in
+                   ("flow", "timing", "breath", "clarity", "delivery")},
+                   "verdict": "🎧 solid", "now": "🎤 you're here",
+                   "goal": "🎯 aim here", "range_profile": "🧔 Bass, D2–B4",
+                   "style_fit": "⚔️ drill wants menace", "strengths": ["a"],
+                   "fixes": ["b"], "next_drill": "c"}
+        fake = type("R", (), {"status_code": 200,
+                              "json": lambda self: {"candidates": [{"content": {"parts": [
+                                  {"text": _json.dumps(payload)}]}}]}})()
+        with _patch("apps.economy.vocalcoach._key", return_value="k"), \
+             _patch("apps.economy.gemini.requests.post", return_value=fake):
+            out, err = score_take("rapz", SimpleUploadedFile("t.mp3", b"x"),
+                                  "audio/mpeg", genre="Trap", target="bass",
+                                  difficulty="builder", style="Drill ⚔️")
+        self.assertIsNone(err)
+        self.assertEqual(out["now"], "🎤 you're here")
+        self.assertEqual(out["goal"], "🎯 aim here")
+        self.assertEqual(out["range_profile"], "🧔 Bass, D2–B4")
+        self.assertEqual(out["style_fit"], "⚔️ drill wants menace")

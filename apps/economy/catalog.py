@@ -19,16 +19,34 @@ SPECZ_CATALOG = {
 # than printing this number.
 UNLIMITED_CHARS = 10 ** 9
 
-# Per-tier limits. Storage in MB (Free 400MB / Premium 5GB / StatZ 100GB),
-# uploads in MB (Free 40MB / Premium 400MB / StatZ 4GB), char limits for
-# messages/posts/comments/AI prompts.
+# Per-tier limits. Single-file uploads in MB (Free 100MB / Premium 1GB /
+# StatZ 10GB), total vault storage in MB (Free 500MB / Premium 5GB /
+# StatZ 100GB), char limits for messages/posts/comments/AI prompts.
+#
+# Corey's table set the single-file limits and raised every one of them. Two
+# cells in it were read against his "nothing lower" instruction rather than
+# literally, because taking them literally would have CUT a limit that is
+# already live:
+#
+#   * Free vault read as 500MB, not the 50MB written. His other two rows are
+#     both 5x their single-file limit (1GB→5GB, 10GB→50GB) and 5x100MB is
+#     500MB; 50MB would also have been the only vault in the table SMALLER
+#     than the file allowed into it, so a Free member could never store the
+#     100MB file the same row grants them.
+#   * StatZ vault held at 100GB rather than the 50GB written, because 100GB is
+#     what StatZ members have today and halving it would strand whatever sits
+#     above the new line.
+#
+# Nothing here is ever lowered without a migration plan for the members already
+# over the new number — a quota that retroactively shrinks turns somebody's
+# stored work into an error message they didn't cause.
 TIER_LIMITS = {
-    TIER_FREE: {"char_limit": 400, "upload_mb": 40, "storage_mb": 400},
-    TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 400, "storage_mb": 5120},
+    TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500},
+    TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120},
     # StatZ writes without a character cap — the client already advertised this
     # ("StatZ char limit: Unlimited") while the server was still cutting at
     # 5000, so a StatZ member was told one thing and refused another.
-    TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 4096, "storage_mb": 102400},
+    TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400},
     # Owner god-mode: effectively unlimited.
     TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760},
 }

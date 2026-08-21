@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("economy", "0073_directzwork_craft_directzwork_rating_note_and_more"),
+        ("economy", "0074_alter_transaction_kind"),
     ]
 
     operations = [
