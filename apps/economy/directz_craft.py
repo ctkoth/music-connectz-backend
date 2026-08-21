@@ -31,20 +31,21 @@ member's work. The status and our own reading of it is the useful part.
 
 ### The honest limit
 
-Gemini's inline path caps the whole request at 20MB, and base64 inflates by 4/3
-— so about 14MB of video, which is `vocalcoach.MAX_MB`. A MovieZ entry is one to
-three hours and will not fit. That is not worked around here: a video too large
-to read is **not rated**, and the work says so. Rating a three-hour film from its
-metadata is precisely the thing this module exists to stop doing.
+The ceiling is `vocalcoach.MAX_MB`, and it is TIME rather than transport: big
+videos go up the Files API now, so the limit is what one request can upload,
+prepare and have watched inside the deploy's 120s worker timeout. A MovieZ entry
+is one to three hours and still will not fit. That is not worked around here: a
+video too large to watch is **not rated**, and the work says so. Rating a
+three-hour film from its metadata is precisely the thing this module exists to
+stop doing.
 """
-import base64
 import json
 import logging
 import re
 
 import requests
 
-from .gemini import generate_content
+from .gemini import delete_file, generate_content, media_part
 from .vocalcoach import MAX_MB, _key, gemini_mime
 
 logger = logging.getLogger(__name__)
@@ -101,10 +102,11 @@ def _clamp(v, lo=1, hi=10):
 
 
 def too_big(size_bytes):
-    """Whether a video is past what the inline path can carry.
+    """Whether a video is past what the rater can watch in one request.
 
     Checked by callers BEFORE reading the file, so a three-hour MovieZ never
-    gets loaded into memory just to be refused.
+    gets loaded into memory just to be refused. The ceiling is time, not the
+    transport — see vocalcoach.MAX_MB.
     """
     return bool(size_bytes) and size_bytes > MAX_MB * 1024 * 1024
 
@@ -130,12 +132,13 @@ def rate_video(fileobj, content_type, *, fmt="reelz", genre="", length=""):
 
     prompt = PROMPT.format(fmt=fmt, length=length or "unspecified length",
                            genre=genre or "unspecified")
-    # Read the video ONCE — the chain may try more than one model, and a file
-    # object read twice sends the second attempt nothing.
-    body = {"contents": [{"parts": [
-        {"text": prompt},
-        {"inline_data": {"mime_type": mime, "data": base64.b64encode(fileobj.read()).decode()}},
-    ]}]}
+    # Built ONCE — the chain may try more than one model, and a file object read
+    # twice sends the second attempt nothing. Big videos go up the Files API
+    # rather than inline, the same road the coach takes.
+    part, uploaded, why = media_part(key, fileobj, mime, display_name=f"DirectZ {fmt}")
+    if why:
+        return None, why
+    body = {"contents": [{"parts": [{"text": prompt}, part]}]}
     try:
         # Same chain the coach walks, so a retired model name can't take the
         # rater down on its own — see gemini.MODEL_CHAINS.
@@ -147,6 +150,9 @@ def rate_video(fileobj, content_type, *, fmt="reelz", genre="", length=""):
     except requests.RequestException:
         logger.exception("DirectZ craft: could not reach Gemini")
         return None, "couldn't reach the rater"
+    finally:
+        # Off Google's servers as soon as the request that needed it is done.
+        delete_file(key, uploaded)
     model = ", ".join(tried)
 
     if resp.status_code != 200:

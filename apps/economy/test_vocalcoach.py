@@ -107,7 +107,12 @@ class SingZCoachTests(TestCase):
         self.assertIn("isn't audio", resp.data["detail"])
 
     def test_an_oversized_take_is_refused(self):
-        big = SimpleUploadedFile("long.webm", b"0" * (26 * 1024 * 1024), content_type="audio/webm")
+        # Derived from the cap rather than hardcoded. This test said 26MB, and
+        # when the ceiling moved past 26 it started asserting that a take the
+        # coach can now hear gets refused.
+        from apps.economy.vocalcoach import MAX_MB
+        big = SimpleUploadedFile("long.webm", b"0" * int((MAX_MB + 1) * 1024 * 1024),
+                                 content_type="audio/webm")
         self.assertEqual(self.client.post(URL, {"take": big}, format="multipart").status_code, 413)
 
     @patch("apps.economy.vocalcoach._key", return_value="")
@@ -400,10 +405,15 @@ class VideoTakesTests(TestCase):
 class TheSizeCapIsOneWeCanHonourTests(TestCase):
     """A limit the app states has to be a limit the app can actually serve.
 
-    The take rides to Gemini as base64 inside the request body, and that path
-    caps the whole request at 20MB. Base64 inflates by 4/3, so a file cap above
-    ~15MB is a promise the upstream breaks — and it broke it as "The coach
-    couldn't process that take", which blames the take rather than the size.
+    This used to mean "keep the cap under what base64 fits in a 20MB request
+    body", because the take rode inline and a bigger cap was a promise the
+    upstream broke — as "The coach couldn't process that take", which blames
+    the take rather than the size.
+
+    The rule survives; the road changed. A take past the inline ceiling is
+    uploaded to the Files API instead, so what has to hold now is that whatever
+    still goes inline fits inline, and that anything bigger takes the other
+    road rather than being sent down one that cannot carry it.
     """
 
     GEMINI_INLINE_LIMIT_MB = 20
@@ -415,13 +425,22 @@ class TheSizeCapIsOneWeCanHonourTests(TestCase):
         m = membership_for(self.user); m.tier = TIER_STATZ; m.save()
         w = wallet_for(self.user); w.money_cents = 100000; w.save()
 
-    def test_a_take_at_the_cap_still_fits_the_request(self):
+    def test_whatever_still_rides_inline_fits_inline(self):
+        from apps.economy import gemini
+        inline_mb = gemini.INLINE_MAX_BYTES / (1024 * 1024)
+        self.assertLess(inline_mb * 4 / 3, self.GEMINI_INLINE_LIMIT_MB,
+                        f"{inline_mb:.0f}MB base64-encodes to "
+                        f"{inline_mb * 4 / 3:.1f}MB and the inline path caps at "
+                        f"{self.GEMINI_INLINE_LIMIT_MB}MB — takes that size are "
+                        "being sent down a road that cannot carry them")
+
+    def test_the_stated_cap_is_served_by_a_road_that_can_carry_it(self):
+        # The cap may now exceed the inline ceiling, but only because anything
+        # past it is uploaded instead. A cap above what the Files API takes
+        # would be the same broken promise one layer up.
+        from apps.economy import gemini
         from apps.economy.vocalcoach import MAX_MB
-        self.assertLess(MAX_MB * 4 / 3, self.GEMINI_INLINE_LIMIT_MB,
-                        f"{MAX_MB}MB base64-encodes to "
-                        f"{MAX_MB * 4 / 3:.1f}MB and the inline path caps at "
-                        f"{self.GEMINI_INLINE_LIMIT_MB}MB — the app is advertising "
-                        "a size it cannot send")
+        self.assertLessEqual(MAX_MB * 1024 * 1024, gemini.FILES_MAX_BYTES)
 
     def test_the_trial_cap_fits_too(self):
         from apps.economy.models import TRIAL_MAX_MB
@@ -821,3 +840,125 @@ class GoalsAndCurrentQualitiesTests(TestCase):
         self.assertEqual(out["goal"], "🎯 aim here")
         self.assertEqual(out["range_profile"], "🧔 Bass, D2–B4")
         self.assertEqual(out["style_fit"], "⚔️ drill wants menace")
+
+
+class ABigTakeGoesUpTheFilesApiTests(TestCase):
+    """14MB was never a decision — it was the inline path's ceiling.
+
+    `inline_data` carries the bytes inside the generateContent body, that body
+    caps at 20MB, and base64 inflates by 4/3. A member with a 29MB take was
+    being told to cut their song up because of a transport detail they had no
+    way to know about. Big takes go up the Files API and are referenced by URI.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("k", "k@e.com", "pw12345678")
+        self.client.force_authenticate(self.user)
+        m = membership_for(self.user); m.tier = TIER_STATZ; m.save()
+        w = wallet_for(self.user); w.money_cents = 100000; w.save()
+        gemini._proven.clear()
+        gemini._catalogue = None
+        self.addCleanup(gemini._proven.clear)
+        self.addCleanup(setattr, gemini, "_catalogue", None)
+
+    def big(self):
+        return take(size=gemini.INLINE_MAX_BYTES + 1)
+
+    def uploaded(self, state="ACTIVE"):
+        """The Files API's two replies: the start (headers) and the finalize."""
+        start = type("R", (), {"status_code": 200, "text": "",
+                               "headers": {"X-Goog-Upload-URL": "https://up.example/1"},
+                               "json": lambda self: {}})()
+        done = type("R", (), {"status_code": 200, "text": "", "headers": {},
+                              "json": lambda self: {"file": {
+                                  "name": "files/abc123",
+                                  "uri": "https://generativelanguage.googleapis.com/v1beta/files/abc123",
+                                  "state": state}}})()
+        return start, done
+
+    def poll(self, state="ACTIVE"):
+        return type("R", (), {"status_code": 200, "text": "",
+                              "json": lambda self: {"state": state}})()
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.delete")
+    @patch("apps.economy.gemini.requests.get")
+    @patch("apps.economy.gemini.requests.post")
+    def test_a_take_past_the_inline_ceiling_is_uploaded_and_still_scored(
+            self, post, get, delete, _k):
+        start, done = self.uploaded()
+        post.side_effect = [start, done, fake_gemini()]
+        get.return_value = self.poll()
+        resp = self.client.post(URL, {"take": self.big()}, format="multipart")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["score"], GOOD["score"])
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.delete")
+    @patch("apps.economy.gemini.requests.get")
+    @patch("apps.economy.gemini.requests.post")
+    def test_the_model_is_given_a_uri_not_the_bytes(self, post, get, delete, _k):
+        start, done = self.uploaded()
+        post.side_effect = [start, done, fake_gemini()]
+        get.return_value = self.poll()
+        self.client.post(URL, {"take": self.big()}, format="multipart")
+        parts = post.call_args.kwargs["json"]["contents"][0]["parts"]
+        self.assertIn("file_data", parts[1])
+        self.assertNotIn("inline_data", parts[1])
+        self.assertTrue(parts[1]["file_data"]["file_uri"])
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.delete")
+    @patch("apps.economy.gemini.requests.get")
+    @patch("apps.economy.gemini.requests.post")
+    def test_the_recording_is_deleted_once_the_request_that_needed_it_is_done(
+            self, post, get, delete, _k):
+        """A member's take shouldn't sit on someone else's server for the 48
+        hours Google keeps it by default."""
+        start, done = self.uploaded()
+        post.side_effect = [start, done, fake_gemini()]
+        get.return_value = self.poll()
+        self.client.post(URL, {"take": self.big()}, format="multipart")
+        self.assertTrue(delete.called)
+        self.assertIn("files/abc123", delete.call_args.args[0])
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.delete")
+    @patch("apps.economy.gemini.requests.get")
+    @patch("apps.economy.gemini.requests.post")
+    @patch("apps.economy.gemini.time.sleep")
+    def test_a_video_still_processing_is_waited_for(self, sleep, post, get, delete, _k):
+        start, done = self.uploaded(state="PROCESSING")
+        post.side_effect = [start, done, fake_gemini()]
+        get.side_effect = [self.poll("PROCESSING"), self.poll("ACTIVE")]
+        resp = self.client.post(URL, {"take": self.big()}, format="multipart")
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.delete")
+    @patch("apps.economy.gemini.requests.get")
+    @patch("apps.economy.gemini.requests.post")
+    @patch("apps.economy.vocalcoach._bill")
+    def test_a_take_that_never_uploaded_is_not_billed(self, bill, post, get, delete, _k):
+        post.return_value = type("R", (), {"status_code": 500, "text": "nope",
+                                           "headers": {}, "json": lambda self: {}})()
+        resp = self.client.post(URL, {"take": self.big()}, format="multipart")
+        self.assertEqual(resp.status_code, 502)
+        bill.assert_not_called()
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
+    def test_a_small_take_still_goes_inline(self, post, _k):
+        """One request instead of three. Most takes are small and shouldn't pay
+        for a road they don't need."""
+        self.client.post(URL, {"take": take(size=1000)}, format="multipart")
+        self.assertEqual(post.call_count, 1)
+        parts = post.call_args.kwargs["json"]["contents"][0]["parts"]
+        self.assertIn("inline_data", parts[1])
+
+    def test_the_ceiling_is_stated_and_is_no_longer_the_inline_one(self):
+        from apps.economy.vocalcoach import MAX_MB
+        self.assertGreater(MAX_MB * 1024 * 1024, gemini.INLINE_MAX_BYTES)
+        d = self.client.get(URL).data
+        self.assertEqual(d["max_mb"], MAX_MB)

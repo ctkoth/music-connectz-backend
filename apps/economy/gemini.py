@@ -8,8 +8,10 @@ Model names are env-overridable since Google revises them often — and, since
 one of those revisions took the Boss Take coach down mid-promotion, they are
 CHAINS rather than single names. See MODEL_CHAINS below.
 """
+import base64
 import logging
 import os
+import time
 
 import requests
 from django.conf import settings
@@ -26,6 +28,8 @@ from .views import credit_owner
 logger = logging.getLogger(__name__)
 
 BASE = "https://generativelanguage.googleapis.com/v1beta"
+# Uploads go to a different host path than everything else.
+UPLOAD_BASE = "https://generativelanguage.googleapis.com/upload/v1beta"
 
 
 # A model is a CHAIN, not a name.
@@ -146,6 +150,166 @@ def model_chain(kind, *env_vars, key=""):
     yield from fresh(MODEL_CHAINS.get(kind, ()))
     if key:
         yield from fresh(_catalogue_for(kind, key))
+
+
+# ---- Getting the media to the model ----
+#
+# There are two ways in, and the size decides which.
+#
+# `inline_data` carries the bytes inside the generateContent request body. That
+# body caps at 20MB TOTAL and base64 inflates by 4/3, so the real ceiling on the
+# file is about 15MB. That cap was the coach's advertised limit for a year, and
+# it is not a number anybody chose — it is the inline path's ceiling wearing a
+# product decision's clothes. A member with a 29MB take was told to go and cut
+# their song up.
+#
+# The Files API is the other way: upload once, get a URI back, reference it from
+# generateContent. Google keeps the file 48 hours and takes up to 2GB of it.
+#
+# So inline stays for small takes — it is one request instead of three, and most
+# takes are small — and anything bigger goes up the Files API. The member is
+# never asked which; the size picks.
+INLINE_MAX_BYTES = 14 * 1024 * 1024
+
+# What the Files API itself will take. Not what WE take — the coach's ceiling is
+# set in vocalcoach.MAX_MB against what one request can realistically finish
+# inside the deploy's worker timeout, which is far below this.
+FILES_MAX_BYTES = 2 * 1024 * 1024 * 1024
+
+
+def _size_of(fileobj):
+    """Bytes in an open file object, without reading it into memory."""
+    size = getattr(fileobj, "size", None)
+    if isinstance(size, int):
+        return size
+    try:
+        here = fileobj.tell()
+        fileobj.seek(0, 2)
+        size = fileobj.tell()
+        fileobj.seek(here)
+        return size
+    except (AttributeError, OSError):            # pragma: no cover
+        return None
+
+
+def upload_media(key, fileobj, mime, size_bytes, *, display_name="take", timeout=90):
+    """Put one file on the Files API. Returns (uri, name, error).
+
+    Resumable rather than the simple multipart upload: the simple one has to
+    buffer the whole body, and the point of this path is the files that are too
+    big to hold. `data=fileobj` streams straight off disk.
+
+    Uploading is not the end of it — a video arrives PROCESSING and cannot be
+    referenced until it goes ACTIVE, so the poll is part of the upload, not an
+    optimisation on top of it.
+    """
+    try:
+        start = requests.post(
+            f"{UPLOAD_BASE}/files", params={"key": key},
+            headers={"X-Goog-Upload-Protocol": "resumable",
+                     "X-Goog-Upload-Command": "start",
+                     "X-Goog-Upload-Header-Content-Length": str(size_bytes),
+                     "X-Goog-Upload-Header-Content-Type": mime,
+                     "Content-Type": "application/json"},
+            json={"file": {"display_name": display_name[:120]}}, timeout=30)
+    except requests.RequestException:
+        logger.exception("Gemini upload: could not start")
+        return None, None, "couldn't reach the coach to send that take"
+    if start.status_code != 200:
+        logger.error("Gemini upload start %s — %s", start.status_code, start.text[:300])
+        return None, None, "the coach wouldn't accept that upload"
+    # Header case varies by proxy; requests' headers are case-insensitive, but
+    # be explicit rather than rely on it.
+    url = start.headers.get("X-Goog-Upload-URL") or start.headers.get("x-goog-upload-url")
+    if not url:
+        logger.error("Gemini upload start: no upload URL in %s", dict(start.headers))
+        return None, None, "the coach wouldn't accept that upload"
+
+    try:
+        done = requests.post(
+            url,
+            headers={"Content-Length": str(size_bytes),
+                     "X-Goog-Upload-Offset": "0",
+                     "X-Goog-Upload-Command": "upload, finalize"},
+            data=fileobj, timeout=timeout)
+    except requests.RequestException:
+        logger.exception("Gemini upload: send failed")
+        return None, None, "that take didn't finish uploading to the coach"
+    if done.status_code != 200:
+        logger.error("Gemini upload %s — %s", done.status_code, done.text[:300])
+        return None, None, "that take didn't finish uploading to the coach"
+    try:
+        info = (done.json() or {}).get("file") or {}
+    except ValueError:                                   # pragma: no cover
+        info = {}
+    name, uri, state = info.get("name"), info.get("uri"), info.get("state")
+    if not name or not uri:
+        logger.error("Gemini upload: unreadable reply %s", done.text[:300])
+        return None, None, "that take didn't finish uploading to the coach"
+    return uri, name, None if state != "FAILED" else "the coach couldn't process that file"
+
+
+def await_active(key, name, *, tries=20, every=2, timeout=15):
+    """Block until an uploaded file is ACTIVE. Returns an error phrase or None.
+
+    Audio is usually ACTIVE on arrival; video is not. The wait is bounded well
+    inside the worker timeout on purpose — a request that hangs past it is
+    killed with no reply at all, which the member reads as the app breaking
+    rather than as a slow file.
+    """
+    for _ in range(tries):
+        try:
+            r = requests.get(f"{BASE}/{name}", params={"key": key}, timeout=timeout)
+        except requests.RequestException:                # pragma: no cover
+            logger.exception("Gemini file poll failed")
+            return "lost track of that take while the coach was preparing it"
+        if r.status_code != 200:
+            logger.error("Gemini file poll %s — %s", r.status_code, r.text[:200])
+            return "lost track of that take while the coach was preparing it"
+        try:
+            state = (r.json() or {}).get("state")
+        except ValueError:                               # pragma: no cover
+            state = None
+        if state == "ACTIVE":
+            return None
+        if state == "FAILED":
+            return "the coach couldn't process that file"
+        time.sleep(every)
+    return "that take was still being prepared when the coach had to answer — try it again"
+
+
+def delete_file(key, name):
+    """Remove an uploaded file. Best effort — never the reason a take fails.
+
+    Google drops these after 48 hours anyway. Deleting straight after scoring
+    means a member's recording isn't sitting on someone else's server for two
+    days longer than the one request that needed it.
+    """
+    if not name:
+        return
+    try:
+        requests.delete(f"{BASE}/{name}", params={"key": key}, timeout=15)
+    except requests.RequestException:                    # pragma: no cover
+        logger.warning("Gemini: could not delete %s", name)
+
+
+def media_part(key, fileobj, mime, *, display_name="take"):
+    """The generateContent part for this file, however big it is.
+
+    Returns (part, uploaded_name, error). `uploaded_name` is set only when the
+    file went up the Files API and is the caller's to delete once scored.
+    """
+    size = _size_of(fileobj)
+    if size is not None and size > INLINE_MAX_BYTES:
+        uri, name, err = upload_media(key, fileobj, mime, size, display_name=display_name)
+        if err:
+            return None, name, err
+        err = await_active(key, name)
+        if err:
+            return None, name, err
+        return {"file_data": {"mime_type": mime, "file_uri": uri}}, name, None
+    return {"inline_data": {"mime_type": mime,
+                            "data": base64.b64encode(fileobj.read()).decode()}}, None, None
 
 
 def generate_content(kind, body, *, key, timeout, env_vars=(), label="Gemini"):
