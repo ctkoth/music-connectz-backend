@@ -92,17 +92,56 @@ class TierUploadLimitsTests(TestCase):
             self.assertLess(free, premium, key)
             self.assertLess(premium, statz, key)
 
-    def test_the_coach_cap_says_it_is_not_a_tier_limit(self):
-        # A StatZ member with 10GB per file who gets refused at 14MB will read
-        # that as the plan they paid for being ignored, unless it says what it
-        # actually is: the scorer's own request ceiling.
-        from apps.economy.vocalcoach import MAX_MB
+    def test_the_coach_never_advertises_more_than_a_member_can_upload(self):
+        """The invariant this test has always been about, now that the two
+        ceilings can cross.
+
+        A StatZ member refused at 14MB reads that as the plan they paid for
+        being ignored — so the app says whose limit it is. That sentence was
+        safe to hardcode while the coach's cap was under EVERY tier's upload
+        limit. It isn't any more: the coach takes 200MB and Free uploads 100MB.
+        Advertising 200 to a Free member, with copy insisting it isn't their
+        tier, would be a size the app cannot honour and a denial of the very
+        limit doing the refusing.
+
+        So the ceiling is per-member, and never above what they can upload.
+        """
         from apps.economy.catalog import limits_for
-        self.assertLess(MAX_MB, limits_for(TIER_FREE)["upload_mb"])
-        u = User.objects.create_user(username="singer", password="hunter2hunter2")
-        membership_for(u)
+        from apps.economy.vocalcoach import MAX_MB
+
+        for tier in (TIER_FREE, TIER_PREMIUM, TIER_STATZ):
+            u = User.objects.create_user(username=f"singer-{tier}",
+                                         password="hunter2hunter2")
+            m = membership_for(u); m.tier = tier; m.save()
+            c = APIClient(); c.force_authenticate(u)
+            d = c.get("/api/singz/coach/").data
+            upload_mb = limits_for(tier)["upload_mb"]
+
+            self.assertLessEqual(d["max_mb"], upload_mb,
+                                 f"{tier}: the coach is offering more than this "
+                                 f"member can upload")
+            self.assertEqual(d["max_mb"], min(MAX_MB, upload_mb))
+            # And the copy agrees with the number about whose limit it is.
+            if d["max_mb_is_tier_limit"]:
+                self.assertIn("Your tier", d["max_mb_why"])
+                self.assertNotIn("isn't your tier's", d["max_mb_why"])
+            else:
+                self.assertIn("isn't your tier's upload limit", d["max_mb_why"])
+
+    def test_a_free_member_is_bound_by_their_tier_and_told_so(self):
+        u = User.objects.create_user(username="freebie", password="hunter2hunter2")
+        m = membership_for(u); m.tier = TIER_FREE; m.save()
+        c = APIClient(); c.force_authenticate(u)
+        d = c.get("/api/singz/coach/").data
+        self.assertTrue(d["max_mb_is_tier_limit"])
+        # ...and what a tier up would buy is on the same screen.
+        self.assertGreater(d["coach_max_mb"], d["max_mb"])
+
+    def test_a_statz_member_gets_the_coachs_own_ceiling(self):
+        from apps.economy.vocalcoach import MAX_MB
+        u = User.objects.create_user(username="statzy", password="hunter2hunter2")
+        m = membership_for(u); m.tier = TIER_STATZ; m.save()
         c = APIClient(); c.force_authenticate(u)
         d = c.get("/api/singz/coach/").data
         self.assertEqual(d["max_mb"], MAX_MB)
         self.assertFalse(d["max_mb_is_tier_limit"])
-        self.assertIn("isn't your tier's upload limit", d["max_mb_why"])

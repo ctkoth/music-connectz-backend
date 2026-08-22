@@ -103,27 +103,58 @@ class DestinationListTests(TestCase):
             file=SimpleUploadedFile("take.webm", b"0" * 16, content_type="audio/webm"))
         return self.post_with(author=owner, media_type="audio", media_url=up.file.url)
 
+    def cap_mb(self, user=None):
+        """What the coach will actually take from this member — their tier's
+        upload limit or the coach's own judgement, whichever binds first."""
+        from apps.economy.vocalcoach import cap_for
+        return cap_for(user or self.me)[0]
+
     def test_a_track_too_big_for_the_coach_says_so_on_the_row(self):
         """The bug this exists to stop: a 29MB post offered the coach door, the
         post travelled, the button went live, and the ceiling announced itself
         by being hit. A refusal discovered by pressing is a bill, not a price."""
-        from apps.economy.vocalcoach import MAX_MB
-        p = self.stored(MAX_MB + 15)
+        cap = self.cap_mb()
+        p = self.stored(cap + 15)
         d = destinations_for(p, self.me, media_slots(p),
                              take_bytes=take_bytes_for([(p, media_slots(p))]).get(p.id))
         singz = find(d, "singz")
         self.assertFalse(singz["available"])
         need = singz["needs"][0]
-        self.assertIn(f"{MAX_MB + 15}MB", need)          # what theirs is
-        self.assertIn(f"under {MAX_MB}MB", need)          # what the coach takes
-        self.assertIn("not\nyour tier's".replace("\n", " "), need)
+        self.assertIn(f"{cap + 15}MB", need)             # what theirs is
+        self.assertIn(f"under {cap}MB", need)            # what they can send
+        # And whose limit it is — the one thing this sentence must never get
+        # wrong, now that it can be either.
+        self.assertTrue(singz["max_is_tier_limit"] or "isn't your tier's" in need)
 
     def test_a_track_inside_the_ceiling_still_opens_the_door(self):
-        from apps.economy.vocalcoach import MAX_MB
-        p = self.stored(MAX_MB - 2)
+        p = self.stored(max(1, self.cap_mb() - 2))
         d = destinations_for(p, self.me, media_slots(p),
                              take_bytes=take_bytes_for([(p, media_slots(p))]).get(p.id))
         self.assertTrue(find(d, "singz")["available"])
+
+    def test_the_row_greys_out_at_the_number_that_will_refuse_THIS_member(self):
+        """A Free member uploads 100MB and the coach takes 200. Showing them
+        the coach's number would grey the door out at somebody else's limit —
+        or worse, leave it open on a take their own tier will refuse."""
+        from apps.economy.catalog import limits_for
+        from apps.economy.models import TIER_FREE, TIER_STATZ
+        from apps.economy.vocalcoach import MAX_MB
+
+        free_cap = limits_for(TIER_FREE)["upload_mb"]
+        p = self.stored(free_cap + 10)          # over Free, under the coach's own
+        sizes = take_bytes_for([(p, media_slots(p))])
+
+        m = membership_for(self.me); m.tier = TIER_FREE; m.save()
+        shut = find(destinations_for(p, self.me, media_slots(p),
+                                     take_bytes=sizes.get(p.id)), "singz")
+        self.assertFalse(shut["available"], "their tier refuses this one")
+        self.assertTrue(shut["max_is_tier_limit"])
+
+        m.tier = TIER_STATZ; m.save()
+        open_ = find(destinations_for(p, self.me, media_slots(p),
+                                      take_bytes=sizes.get(p.id)), "singz")
+        self.assertTrue(open_["available"], "the same take fits on a bigger plan")
+        self.assertEqual(open_["max_bytes"], MAX_MB * 1024 * 1024)
 
     def test_a_size_nobody_measured_is_not_a_size_over_the_limit(self):
         """A take hosted elsewhere has no stored size. The door stays open —

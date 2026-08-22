@@ -162,6 +162,32 @@ give them the link. A read-only surface is usually an unfinished one.
 - Member-authored text answers to the **tier's character limit**, never to a
   column width. Use `catalog.over_char_limit(text, tier)`.
 
+## The coach's ceiling is a judgement now, not a transport limit
+
+`vocalcoach.MAX_MB` was 14 because the take was base64'd into the
+`generateContent` body and that request caps at 20MB. It is **200MB** now, and
+the reason matters: big takes are uploaded to Google's Files API first
+(`gemini_files.py`) and read by URI, which takes 2GB a file, free. So the
+number is no longer "what fits in a request" — it is a judgement about what one
+take IS, and it can move (`COACH_MAX_MB`) without anyone re-deriving base64
+overhead.
+
+- `INLINE_MAX_MB = 14` still governs the inline path and still has to stay
+  under the 20MB request cap. `test_vocalcoach` pins that separately now.
+- Small takes still go inline on purpose: one round trip, nothing to clean up.
+- The switch is built so a Files API failure can never be worse than the old
+  behaviour — that is the property that made it shippable without being able to
+  reach the live API from CI.
+- **The ceiling is per-member now.** `vocalcoach.cap_for(user)` returns the
+  smaller of MAX_MB and the member's own `upload_mb`, plus whose limit that is.
+  While the coach's cap was 14 it was under every tier and the app could say
+  "this isn't your tier's limit" and always be right — which is why
+  `max_mb_is_tier_limit` was a hardcoded False. At 200MB a Free member (100MB)
+  is bound by their tier, so the flag is computed and the copy follows it.
+  Read the cap ONCE per request and pass it down (`coach_cap`), like the price:
+  it reads the membership row, and the feed's query-count test catches a
+  per-card read.
+
 ## Tier limits live on the server
 
 `apps/economy/catalog.py` is the source of truth for char limits, upload and
