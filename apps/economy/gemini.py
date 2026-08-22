@@ -3,8 +3,12 @@
 Uses Google's Generative Language REST API. Charges the AI-cost minimum (PromptZ
 first, then cash) like the rest of the AI suite. Every endpoint 503s cleanly
 when GEMINI_API_KEY isn't configured, so the client falls back gracefully.
-Model names are env-overridable since Google revises them often.
+
+Model names are env-overridable since Google revises them often — and, since
+one of those revisions took the Boss Take coach down mid-promotion, they are
+CHAINS rather than single names. See MODEL_CHAINS below.
 """
+import logging
 import os
 
 import requests
@@ -19,7 +23,159 @@ from .catalog import ai_cost
 from .models import can_afford_ai, charge_ai_usage, daily_prompt_state, wallet_for
 from .views import credit_owner
 
+logger = logging.getLogger(__name__)
+
 BASE = "https://generativelanguage.googleapis.com/v1beta"
+
+
+# A model is a CHAIN, not a name.
+#
+# `models/<name>:generateContent` answers 404 when the key has no such model —
+# and Google retires names on its own schedule, without asking us. Pinning one
+# name means every feature built on it goes dark together the day that name
+# goes, which is what took the Boss Take coach down: "the coach's model isn't
+# available" on a perfectly good take.
+#
+# The env override still wins, because setting it is a deliberate act. What it
+# no longer does is stand ALONE — a stale GEMINI_AUDIO_MODEL from a year ago
+# used to be a single point of failure with no way back. Now it is the first
+# guess, and a 404 falls through to the next one.
+#
+# Order within a chain is cheapest-that-can-do-the-job first. Every take is
+# billed at the same flat prompt whichever name answers, so a fallback must
+# never cost the member more than the take they were quoted.
+MODEL_CHAINS = {
+    # Multimodal in, text out — the vocal/rap coach and the DirectZ craft
+    # rater both send media and ask for JSON back.
+    "text": (
+        "gemini-2.5-flash",
+        "gemini-flash-latest",
+        "gemini-2.0-flash",
+        "gemini-2.5-pro",
+    ),
+}
+
+# Proven this process: once a name answers, it goes to the front of the chain
+# so the next take doesn't re-walk the 404s. Per-process and deliberately not
+# persisted — a fresh worker re-checks, which is how a name coming BACK gets
+# noticed without a deploy.
+_proven = {}
+_catalogue = None       # what ListModels said, asked at most once per process
+
+
+def _remember(kind, model):
+    if _proven.get(kind) != model:
+        logger.info("Gemini: %s runs on %s", kind, model)
+    _proven[kind] = model
+
+
+def _forget(kind, model):
+    if _proven.get(kind) == model:
+        _proven.pop(kind, None)
+
+
+def _suits_text(name):
+    """Could this model take media in and give text back?
+
+    Named exclusions rather than an allow-list: the catalogue is Google's and
+    it grows. A name we don't recognise is a candidate, not a reject — the
+    worst case is one wasted 400 and the next name in the chain.
+    """
+    if not name.startswith("gemini-"):
+        return False
+    return not any(bad in name for bad in
+                   ("embedding", "aqa", "imagen", "veo", "-tts", "-image", "live", "native-audio"))
+
+
+def _catalogue_for(kind, key):
+    """What this key can ACTUALLY run, straight from the API. Asked once.
+
+    Every name shipped in MODEL_CHAINS is a guess about someone else's
+    catalogue, made at the time the file was written. This is the one source
+    that cannot be out of date, so when all the guesses 404, ask.
+    """
+    global _catalogue
+    if _catalogue is None:
+        # Cached only on success. A timeout here is not an answer, and caching
+        # it as one would leave a worker permanently convinced the key can run
+        # nothing — the next take should get to ask again.
+        try:
+            r = requests.get(f"{BASE}/models", params={"key": key, "pageSize": 200}, timeout=20)
+        except requests.RequestException:
+            logger.exception("Gemini: could not list models")
+            return []
+        if r.status_code != 200:
+            logger.error("Gemini ListModels %s — %s", r.status_code, r.text[:200])
+            return []
+        try:
+            models = r.json().get("models") or []
+        except ValueError:
+            logger.error("Gemini ListModels: unreadable reply")
+            return []
+        _catalogue = [
+            (m.get("name") or "").split("/")[-1] for m in models
+            if "generateContent" in (m.get("supportedGenerationMethods") or [])
+        ]
+        logger.warning("Gemini: every shipped model name 404'd; the key can run %s",
+                       ", ".join(_catalogue) or "nothing")
+    if kind != "text":
+        return list(_catalogue)
+    names = [n for n in _catalogue if _suits_text(n)]
+    # Cheap and stable first: flash before pro, GA before preview or exp.
+    return sorted(names, key=lambda n: (0 if "flash" in n else 1,
+                                        "preview" in n, "exp" in n, n))
+
+
+def model_chain(kind, *env_vars, key=""):
+    """Every model name worth trying for this kind of run, best first.
+
+    A generator on purpose: ListModels is only called if the caller actually
+    gets to the end of the shipped names, so the happy path is one request.
+    """
+    seen = set()
+
+    def fresh(names):
+        for name in names:
+            name = (name or "").strip()
+            if name and name not in seen:
+                seen.add(name)
+                yield name
+
+    yield from fresh([_proven.get(kind)])
+    yield from fresh(os.environ.get(v) for v in env_vars)
+    yield from fresh(MODEL_CHAINS.get(kind, ()))
+    if key:
+        yield from fresh(_catalogue_for(kind, key))
+
+
+def generate_content(kind, body, *, key, timeout, env_vars=(), label="Gemini"):
+    """POST one generateContent, walking the chain past any model that isn't there.
+
+    Returns (response, tried) — `response` is the first reply that was not a
+    404, and `tried` is the model names used, newest last, for the log and the
+    error body.
+
+    404 is the ONE status worth retrying. It means "no such model for this
+    key", which is a fact about our configuration and never about the member's
+    upload. Every other status is a real answer about the request itself, and
+    asking four models the same bad question doesn't get a better one — so a
+    400, a 403 or a 429 stops the walk immediately.
+
+    Raises requests.RequestException for the caller to handle, exactly as a
+    bare requests.post would.
+    """
+    resp, tried = None, []
+    for model in model_chain(kind, *env_vars, key=key):
+        tried.append(model)
+        resp = requests.post(f"{BASE}/models/{model}:generateContent",
+                             params={"key": key}, json=body, timeout=timeout)
+        if resp.status_code != 404:
+            if resp.status_code == 200:
+                _remember(kind, model)
+            return resp, tried
+        logger.warning("%s: model %s isn't available to this key — trying the next one", label, model)
+        _forget(kind, model)
+    return resp, tried
 
 
 def _key():

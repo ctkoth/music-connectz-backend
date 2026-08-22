@@ -322,7 +322,7 @@ class CoachThePostTests(TestCase):
 
     # ---- it scores ----
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_a_post_can_be_coached_without_uploading_the_take_again(self, _rq, _k):
         p, _ = self.stored_post()
         r = self.c.post("/api/singz/coach/", {"post_id": p.id}, format="json")
@@ -334,7 +334,7 @@ class CoachThePostTests(TestCase):
         self.assertEqual(r.data["open_in"], "postz")
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_the_posts_genre_seeds_the_coach(self, rq, _k):
         p, _ = self.stored_post()
         self.c.post("/api/singz/coach/", {"post_id": p.id}, format="json")
@@ -342,7 +342,7 @@ class CoachThePostTests(TestCase):
         self.assertIn("Drill", sent)
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_rapz_scores_the_same_post_on_its_own_dimensions(self, _rq, _k):
         p, _ = self.stored_post()
         r = self.c.post("/api/rapz/coach/", {"post_id": p.id}, format="json")
@@ -352,7 +352,7 @@ class CoachThePostTests(TestCase):
 
     # ---- it is billed exactly like a recorded take ----
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_coaching_a_post_spends_a_prompt_like_any_other_take(self, _rq, _k):
         p, _ = self.stored_post()
         before = wallet_for(self.me).prompts_used_today or 0
@@ -360,7 +360,7 @@ class CoachThePostTests(TestCase):
         self.assertEqual(wallet_for(self.me).prompts_used_today, before + 1)
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini(status_code=429))
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini(status_code=429))
     def test_a_take_the_coach_could_not_read_is_not_charged(self, _rq, _k):
         p, _ = self.stored_post()
         before = wallet_for(self.me).prompts_used_today or 0
@@ -370,7 +370,7 @@ class CoachThePostTests(TestCase):
 
     # ---- the coaching stays with the work ----
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_your_own_post_keeps_the_coaching_it_was_given(self, _rq, _k):
         p, _ = self.stored_post()
         r = self.c.post("/api/singz/coach/", {"post_id": p.id}, format="json")
@@ -381,7 +381,7 @@ class CoachThePostTests(TestCase):
         self.assertEqual(p.score["coached_by"], "maker")
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
-    @patch("apps.economy.vocalcoach.requests.post", return_value=fake_gemini())
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
     def test_coaching_somebody_elses_post_never_writes_on_their_post(self, _rq, _k):
         """You paid for the read, so you get the read. Their post carries their
         name, and a score that appeared on it because a stranger spent a prompt
