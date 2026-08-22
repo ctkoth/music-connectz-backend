@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .directz_app import DirectZWorksView, DirectZRateView
+from .post_coach import PostCoachView
 from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView)
 from .publicz import PublicPostView, PublicProfileView
@@ -238,6 +239,10 @@ urlpatterns = [
     path("postz/<int:pk>/collabs/", PostCollabsView.as_view(), name="economy-postz-collabs"),
     # The return leg: a post made in OCC opens back in OCC with its prompt.
     path("postz/<int:pk>/occ/", PostOccWorkView.as_view(), name="economy-postz-occ"),
+    # Nothing is a dead end. A post used to show its author a median and a
+    # like count and stop — this is where they take the question "why isn't
+    # this landing?" to the coach that already listens to takes.
+    path("postz/<int:pk>/coach/", PostCoachView.as_view(), name="economy-postz-coach"),
     # A post populates a release: the song, the video, the cover and the lyrics
     # are already the four assets a distributor asks for.
     path("postz/<int:pk>/distribute/", PostDistributeView.as_view(), name="economy-postz-distribute"),

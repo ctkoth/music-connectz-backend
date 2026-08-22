@@ -158,6 +158,19 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_bytes=_U
         "shares": p.shares.count(),
         "up": up, "down": down, "vibe": vibe, "flagged": flagged,
         "rating": item_rating_median(f"post:{p.id}"),
+        # The coach's read, on its OWN line — never folded into `rating`.
+        # `rating` is the median of what members scored this; this is one
+        # model's opinion of the recording. A machine's number hidden inside a
+        # count of people is the failure CLAUDE.md's third rule names, and the
+        # first member to compare the two would be right to stop trusting both.
+        #
+        # None means nobody asked for one. It is never a zero, and the client
+        # must render the absence rather than reaching for a number.
+        "coach_rating": p.coach_rating,
+        "coach": p.coach or {},
+        # Why there ISN'T one, when the coach was asked and couldn't answer.
+        # An unexplained empty rating reads as a bad score.
+        "coach_note": p.coach_note,
         "created_at": p.created_at.isoformat(),
         "edited_at": p.edited_at.isoformat() if p.edited_at else None,
         "edit_history": p.edit_history or [],
