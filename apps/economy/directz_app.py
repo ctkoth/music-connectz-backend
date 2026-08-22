@@ -119,7 +119,7 @@ def craft_price(user):
     from .catalog import ai_cost
     from .directz_craft import _key
     from .models import can_afford_ai, daily_prompt_state
-    from .vocalcoach import MAX_MB
+    from .vocalcoach import INLINE_MAX_MB
 
     cost = ai_cost("standard")
     allowance, _, daily_left = daily_prompt_state(user)
@@ -142,10 +142,16 @@ def craft_price(user):
         # Note this is NOT the member's tier upload limit. The post keeps the
         # whole video; only the rater is bounded, because it watches the file
         # inside one request.
-        "max_mb": MAX_MB,
+        #
+        # INLINE_MAX_MB, not the coach's MAX_MB. The coach's ceiling rose to
+        # 200MB because big takes stopped riding inside the request; the rater
+        # still rides inside it, so its ceiling is still the request's. A
+        # shared constant that no longer describes this transport is worse than
+        # no constant, because it advertises a size that cannot be sent.
+        "max_mb": INLINE_MAX_MB,
         "max_mb_why": (
             f"The rater watches the whole video in one request, which caps out "
-            f"around {MAX_MB}MB. It isn't your tier's upload limit — the post keeps "
+            f"around {INLINE_MAX_MB}MB. It isn't your tier's upload limit — the post keeps "
             "the full video either way; only the rating needs a shorter cut."
         ),
         "max_mb_is_tier_limit": False,
@@ -188,9 +194,9 @@ def _apply_craft_rating(work, user):
         # Said plainly rather than worked around. A MovieZ is one to three hours
         # and will not fit the inline path — and rating a three-hour film from
         # its metadata is the exact thing this replaced.
-        from .vocalcoach import MAX_MB
+        from .vocalcoach import INLINE_MAX_MB
         note = (f"that video is {upload.size_bytes / (1024 * 1024):.0f}MB — over the "
-                f"{MAX_MB}MB the rater can watch in one go")
+                f"{INLINE_MAX_MB}MB the rater can watch in one go")
     else:
         try:
             upload.file.open("rb")

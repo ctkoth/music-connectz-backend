@@ -32,7 +32,7 @@ member's work. The status and our own reading of it is the useful part.
 ### The honest limit
 
 Gemini's inline path caps the whole request at 20MB, and base64 inflates by 4/3
-— so about 14MB of video, which is `vocalcoach.MAX_MB`. A MovieZ entry is one to
+— so about 14MB of video, which is `vocalcoach.INLINE_MAX_MB`. A MovieZ entry is one to
 three hours and will not fit. That is not worked around here: a video too large
 to read is **not rated**, and the work says so. Rating a three-hour film from its
 metadata is precisely the thing this module exists to stop doing.
@@ -45,7 +45,7 @@ import re
 import requests
 
 from .gemini import generate_content
-from .vocalcoach import MAX_MB, _key, gemini_mime
+from .vocalcoach import INLINE_MAX_MB, _key, gemini_mime
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +105,18 @@ def too_big(size_bytes):
 
     Checked by callers BEFORE reading the file, so a three-hour MovieZ never
     gets loaded into memory just to be refused.
+
+    Gated on INLINE_MAX_MB, not the coach's MAX_MB. The coach got a second road
+    — big takes are uploaded to the Files API and read by URI — and its ceiling
+    rose to 200MB with it. The rater did NOT get that road: `rate_video` still
+    base64s the video into the request body, and that body caps at 20MB however
+    high a shared constant goes. Reading MAX_MB here meant a 50MB video passed
+    this check, got inlined, and blew Gemini's request cap — the app advertising
+    a size it cannot send, which is the exact failure the coach's own cap was
+    rewritten to stop doing. Lift this the day the rater uses the upload path,
+    and not before.
     """
-    return bool(size_bytes) and size_bytes > MAX_MB * 1024 * 1024
+    return bool(size_bytes) and size_bytes > INLINE_MAX_MB * 1024 * 1024
 
 
 def rate_video(fileobj, content_type, *, fmt="reelz", genre="", length=""):
