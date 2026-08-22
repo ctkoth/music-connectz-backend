@@ -33,7 +33,7 @@ from apps.economy.models import (
     membership_for,
     wallet_for,
 )
-from apps.economy.vocalcoach import MAX_MB
+from apps.economy.vocalcoach import INLINE_MAX_MB
 
 User = get_user_model()
 PW = "hunter2hunter2"
@@ -121,10 +121,10 @@ class WhenItCannotWatchThereIsNoNumber(Base):
     def test_a_video_too_large_to_watch_says_so_instead_of_guessing(self):
         # A MovieZ is one to three hours. Rating a three-hour film from its
         # metadata is exactly what this replaced.
-        up = self.upload(size=int((MAX_MB + 5) * MB))
+        up = self.upload(size=int((INLINE_MAX_MB + 5) * MB))
         d = self.post(media_url=up.file.url).json()
         self.assertIsNone(d["rating"])
-        self.assertIn(str(MAX_MB), d["rating_note"])
+        self.assertIn(str(INLINE_MAX_MB), d["rating_note"])
 
     def test_a_rater_failure_leaves_no_rating_and_still_posts_the_work(self):
         # Losing a member's video because a third-party API was slow would be
@@ -190,9 +190,12 @@ class TheRatingIsAskedForAndPricedFirst(Base):
         its own per-request ceiling and the screen could not name it, because
         nothing served it. So a 100MB video went up with the box ticked and the
         refusal arrived afterwards as a note on the finished work."""
-        from apps.economy.vocalcoach import MAX_MB
+        from apps.economy.vocalcoach import INLINE_MAX_MB
         craft = self.client.get(URL).json()["craft"]
-        self.assertEqual(craft["max_mb"], MAX_MB)
+        # INLINE_MAX_MB, not the coach's MAX_MB. The rater still sends the
+        # video inside the request; the coach stopped, and its ceiling left
+        # this one behind.
+        self.assertEqual(craft["max_mb"], INLINE_MAX_MB)
         # And whose limit it is — reading it as the tier's is how a StatZ member
         # concludes the plan they paid for is being ignored.
         self.assertFalse(craft["max_mb_is_tier_limit"])
@@ -221,7 +224,7 @@ class TheRatingIsAskedForAndPricedFirst(Base):
 
     def test_a_video_too_big_to_watch_is_never_billed(self):
         before = wallet_for(self.user).promptz
-        up = self.upload(size=int((MAX_MB + 5) * MB))
+        up = self.upload(size=int((INLINE_MAX_MB + 5) * MB))
         self.post(media_url=up.file.url)
         self.assertEqual(wallet_for(self.user).promptz, before)
 
@@ -273,9 +276,13 @@ class MembersStillOutrankTheModel(Base):
 
 
 class TheSizeGateMatchesTheTransport(TestCase):
-    def test_the_ceiling_is_the_one_the_coach_already_honours(self):
-        self.assertFalse(too_big(MAX_MB * MB))
-        self.assertTrue(too_big(int((MAX_MB + 1) * MB)))
+    def test_the_ceiling_is_the_one_this_transport_can_honour(self):
+        # Was "the one the coach already honours", against MAX_MB. That was
+        # true while both rode inline and quietly stopped being true when the
+        # coach got the upload path — the assertion followed the constant
+        # instead of the transport, so it stayed green through the regression.
+        self.assertFalse(too_big(INLINE_MAX_MB * MB))
+        self.assertTrue(too_big(int((INLINE_MAX_MB + 1) * MB)))
 
     def test_an_unknown_size_is_not_treated_as_too_big(self):
         self.assertFalse(too_big(0))
@@ -311,3 +318,39 @@ class TheRaterRefusesWhatItCannotRead(TestCase):
             payload, why = directz_craft.rate_video(io.BytesIO(b"x"), "video/mp4")
         self.assertIsNone(payload)
         self.assertIn("configured", why)
+
+
+class TheRatersCeilingIsItsOwnTransportsTests(Base):
+    """A ceiling belongs to the road that carries the file, not to a constant.
+
+    The coach's `MAX_MB` went 14 → 200 when big takes stopped riding inside the
+    request and started being uploaded to the Files API. `too_big` was reading
+    that same constant, and `rate_video` still base64s the video into the
+    request body — so the rise let a 50MB video through this check, into an
+    inline body Gemini caps at 20MB, and the app went back to advertising a
+    size it could not send. That is the failure the coach's own cap was
+    rewritten to stop making.
+    """
+
+    def test_the_gate_follows_the_inline_ceiling_not_the_coachs(self):
+        from apps.economy.directz_craft import too_big
+        from apps.economy.vocalcoach import INLINE_MAX_MB, MAX_MB
+        mb = 1024 * 1024
+        self.assertFalse(too_big(INLINE_MAX_MB * mb))
+        self.assertTrue(too_big((INLINE_MAX_MB + 1) * mb))
+        if MAX_MB > INLINE_MAX_MB:
+            # The regression itself: a size the coach can now take, that the
+            # rater still cannot, must be refused HERE rather than by Gemini.
+            self.assertTrue(too_big(MAX_MB * mb),
+                            "the rater is accepting a video it will then inline "
+                            "into a request body that cannot hold it")
+
+    def test_what_it_advertises_is_what_it_can_actually_send(self):
+        from apps.economy.directz_app import craft_price
+        from apps.economy.vocalcoach import INLINE_MAX_MB
+        price = craft_price(self.user)
+        self.assertEqual(price["max_mb"], INLINE_MAX_MB)
+        self.assertLess(price["max_mb"] * 4 / 3, 20,
+                        "base64 of the advertised size does not fit the 20MB "
+                        "inline request cap")
+        self.assertIn(str(INLINE_MAX_MB), price["max_mb_why"])

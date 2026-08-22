@@ -32,7 +32,7 @@ member's work. The status and our own reading of it is the useful part.
 ### The honest limit
 
 Gemini's inline path caps the whole request at 20MB, and base64 inflates by 4/3
-— so about 14MB of video, which is `vocalcoach.MAX_MB`. A MovieZ entry is one to
+— so about 14MB of video, which is `vocalcoach.INLINE_MAX_MB`. A MovieZ entry is one to
 three hours and will not fit. That is not worked around here: a video too large
 to read is **not rated**, and the work says so. Rating a three-hour film from its
 metadata is precisely the thing this module exists to stop doing.
@@ -40,12 +40,12 @@ metadata is precisely the thing this module exists to stop doing.
 import base64
 import json
 import logging
-import os
 import re
 
 import requests
 
-from .vocalcoach import BASE, MAX_MB, _key, gemini_mime
+from .gemini import generate_content
+from .vocalcoach import INLINE_MAX_MB, _key, gemini_mime
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +105,18 @@ def too_big(size_bytes):
 
     Checked by callers BEFORE reading the file, so a three-hour MovieZ never
     gets loaded into memory just to be refused.
+
+    Gated on INLINE_MAX_MB, not the coach's MAX_MB. The coach got a second road
+    — big takes are uploaded to the Files API and read by URI — and its ceiling
+    rose to 200MB with it. The rater did NOT get that road: `rate_video` still
+    base64s the video into the request body, and that body caps at 20MB however
+    high a shared constant goes. Reading MAX_MB here meant a 50MB video passed
+    this check, got inlined, and blew Gemini's request cap — the app advertising
+    a size it cannot send, which is the exact failure the coach's own cap was
+    rewritten to stop doing. Lift this the day the rater uses the upload path,
+    and not before.
     """
-    return bool(size_bytes) and size_bytes > MAX_MB * 1024 * 1024
+    return bool(size_bytes) and size_bytes > INLINE_MAX_MB * 1024 * 1024
 
 
 def rate_video(fileobj, content_type, *, fmt="reelz", genre="", length=""):
@@ -128,23 +138,26 @@ def rate_video(fileobj, content_type, *, fmt="reelz", genre="", length=""):
     if not mime:
         return None, f"the rater can't read {content_type or 'that format'}"
 
-    model = os.environ.get("GEMINI_VIDEO_MODEL",
-                           os.environ.get("GEMINI_AUDIO_MODEL", "gemini-2.5-flash"))
     prompt = PROMPT.format(fmt=fmt, length=length or "unspecified length",
                            genre=genre or "unspecified")
+    # Read the video ONCE — the chain may try more than one model, and a file
+    # object read twice sends the second attempt nothing.
+    body = {"contents": [{"parts": [
+        {"text": prompt},
+        {"inline_data": {"mime_type": mime, "data": base64.b64encode(fileobj.read()).decode()}},
+    ]}]}
     try:
-        resp = requests.post(
-            f"{BASE}/models/{model}:generateContent?key={key}",
-            json={"contents": [{"parts": [
-                {"text": prompt},
-                {"inline_data": {"mime_type": mime,
-                                 "data": base64.b64encode(fileobj.read()).decode()}},
-            ]}]},
+        # Same chain the coach walks, so a retired model name can't take the
+        # rater down on its own — see gemini.MODEL_CHAINS.
+        resp, tried = generate_content(
+            "text", body, key=key,
             timeout=180,     # a video is a longer watch than a vocal take
-        )
+            env_vars=("GEMINI_VIDEO_MODEL", "GEMINI_AUDIO_MODEL"),
+            label="DirectZ craft")
     except requests.RequestException:
         logger.exception("DirectZ craft: could not reach Gemini")
         return None, "couldn't reach the rater"
+    model = ", ".join(tried)
 
     if resp.status_code != 200:
         # The mime and model in the line, for the same reason the coach logs
@@ -155,7 +168,7 @@ def rate_video(fileobj, content_type, *, fmt="reelz", genre="", length=""):
         return None, {
             400: "that video's format wasn't accepted",
             403: "the rater's API key was refused",
-            404: "the rater's model isn't available",
+            404: "the rater can't reach a model right now",
             429: "the rater has hit its limit for now",
         }.get(resp.status_code,
               "the rater is having a moment" if resp.status_code >= 500

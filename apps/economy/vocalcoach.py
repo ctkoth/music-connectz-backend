@@ -34,7 +34,7 @@ from rest_framework.views import APIView
 
 from .catalog import ai_cost
 from .instruments import DIFFICULTIES, profile_for_app, prompt_for
-from .gemini import BASE, _bill, _key
+from .gemini import _bill, _key, generate_content
 from .models import (
     PROMPT_ALLOWANCE,
     TIER_FREE,
@@ -260,7 +260,6 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
             status.HTTP_400_BAD_REQUEST,
         )
 
-    model = os.environ.get("GEMINI_AUDIO_MODEL", "gemini-2.5-flash")
     unreadable = ({"detail": "The coach couldn't process that take."}, status.HTTP_502_BAD_GATEWAY)
 
     # How the take travels: inline for small ones, uploaded-and-referenced for
@@ -272,16 +271,20 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         return None, ({"detail": f"The coach couldn't take that one — {why}.",
                        "size_mb": round(size / (1024 * 1024), 1)},
                       status.HTTP_502_BAD_GATEWAY)
+    # Built ONCE, before the chain walks. Several models may be tried, and a
+    # file object read a second time hands the next attempt an empty take —
+    # which is also why the upload above happens once rather than per model.
+    body = {"contents": [{"parts": [{"text": prompt}, part]}]}
     try:
-        resp = requests.post(
-            f"{BASE}/models/{model}:generateContent?key={key}",
-            json={"contents": [{"parts": [{"text": prompt}, part]}]},
+        resp, tried = generate_content(
+            "text", body, key=key,
             # A referenced file is read by the model rather than sent with the
             # request, and a long one takes longer to listen to than a short
             # one — so the wait scales with the take instead of cutting a good
             # one off at ninety seconds.
             timeout=90 if cleanup is None else 300,
-        )
+            env_vars=("GEMINI_AUDIO_MODEL",),
+            label=f"{app_key} coach")
     except requests.RequestException:
         logger.exception("SingZ coach: could not reach Gemini")
         return None, ({"detail": "Couldn't reach the coach. Try that take again."},
@@ -292,6 +295,8 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         # correctness requirement — which is why it can never raise.
         if cleanup:
             cleanup()
+    # Every name the chain actually tried, for the log line and the error body.
+    model = ", ".join(tried)
 
     if resp.status_code != 200:
         # Log what we SENT as well as what came back. Without the mime type and
@@ -310,7 +315,7 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         why = {
             400: "that take's format wasn't accepted",
             403: "the coach's API key was refused",
-            404: "the coach's model isn't available",
+            404: "the coach can't reach a model right now — we're on it",
             429: "the coach has hit its limit for now — try again shortly",
         }.get(resp.status_code,
               "the coach is having a moment" if resp.status_code >= 500
