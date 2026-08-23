@@ -188,6 +188,24 @@ overhead.
   it reads the membership row, and the feed's query-count test catches a
   per-card read.
 
+## The coach's live path has one check, and it isn't a test
+
+`gemini_files.py` (the Files API upload) and `gemini.MODEL_CHAINS` (the model
+fallback) both shipped **without ever running against Google.** CI has no key
+and neither does a dev box, so every test of them stubs `requests` — which pins
+the protocol we BELIEVE in and cannot tell us we believed the wrong thing.
+
+`tools/coach_live_check.sh` is the check that can. It walks the real upload,
+the ACTIVE poll, a `file_data` generateContent and the delete, in the same
+order and with the same headers as the code, and it generates its own ~29MB
+take so nothing has to be found first:
+
+    GEMINI_API_KEY=... ./tools/coach_live_check.sh
+
+Run it after touching the upload path or the chain, and after a key rotation.
+It costs one generateContent call. A stubbed suite going green is not evidence
+the transport works; this is.
+
 ## Tier limits live on the server
 
 `apps/economy/catalog.py` is the source of truth for char limits, upload and
