@@ -2877,6 +2877,35 @@ class SocialReview(models.Model):
         unique_together = ("user", "url")
 
 
+class QuestClaim(models.Model):
+    """One quest, claimed once, for one period.
+
+    The unique constraint IS the reset: a daily quest's period key rolls over at
+    midnight, so yesterday's claim can never block today's and nothing has to be
+    cleared on a schedule. It is also the only thing standing between a member
+    and claiming the same reward twice by pressing the button twice, so it is a
+    database constraint rather than a check in a view.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="quest_claims")
+    quest_id = models.CharField(max_length=40, db_index=True)
+    # "2026-08-23", "2026-W34", or "once" — see questz.period_key.
+    period = models.CharField(max_length=16)
+    # What was actually paid, streak bonus included. Stored rather than
+    # recomputed: the reward table can change, and a member's history should say
+    # what they got, not what they would get today.
+    energy = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "quest_id", "period")
+        indexes = [models.Index(fields=["user", "created_at"])]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.quest_id}@{self.period} +{self.energy} <{self.user}>"
+
+
 class PostContributor(models.Model):
     """A real row per person on a collab post.
 
