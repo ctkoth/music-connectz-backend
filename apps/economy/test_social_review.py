@@ -128,6 +128,57 @@ class WhatItCannotConfirmGoesToAPersonTests(SocialBase):
         self.assertIsNone(r.data["queue"])       # the queue itself is owner-only
 
 
+class AFailureIsToldToTheMemberNotToTheLogTests(SocialBase):
+    """A member reading `HTTPSConnectionPool(host='…' Max retries exceeded with
+    url: /koth (Caused by ProxyError('Unable to connect to` — truncated at 160
+    characters, mid-word — has been told nothing. That is what the screen
+    showed the first time the verify button was pressed against a page we
+    couldn't reach. The stack belongs in the log; the sentence belongs to them.
+    """
+
+    def _boom(self, exc):
+        return patch("requests.get", side_effect=exc)
+
+    def test_an_unreachable_page_reads_as_a_sentence(self):
+        import requests
+        with self._boom(requests.ConnectionError("HTTPSConnectionPool(host='x') " * 20)):
+            r = self.match()
+        self.assertEqual(r.status_code, 502)
+        detail = r.data["detail"]
+        self.assertNotIn("HTTPSConnectionPool", detail)
+        self.assertNotIn("Traceback", detail)
+        self.assertTrue(detail.endswith("."), detail)      # not cut off mid-word
+
+    def test_a_timeout_says_it_timed_out(self):
+        import requests
+        with self._boom(requests.Timeout("slow")):
+            r = self.match()
+        self.assertIn("too long", r.data["detail"])
+
+    def test_a_blocked_page_says_so_and_offers_the_other_route(self):
+        import requests
+
+        class Resp:
+            status_code = 403
+            def raise_for_status(self):
+                raise requests.HTTPError("403", response=self)
+
+        with patch("requests.get", return_value=Resp()):
+            r = self.match()
+        self.assertEqual(r.status_code, 502)
+        self.assertIn("blocking", r.data["detail"])
+        # The hint is the half that says what to do instead, and the client
+        # reads it — an error with no way forward is a dead end.
+        self.assertIn("code-in-bio", r.data["hint"])
+
+    def test_nothing_is_marked_verified_by_a_failure(self):
+        import requests
+        with self._boom(requests.ConnectionError("nope")):
+            self.match()
+        self.assertFalse(self.link().get("verified"))
+        self.assertFalse(SocialReview.objects.exists())
+
+
 class TheQueueTests(SocialBase):
     def setUp(self):
         super().setUp()
@@ -146,6 +197,21 @@ class TheQueueTests(SocialBase):
         row = r.data["queue"][0]
         self.assertEqual(row["username"], "koth")
         self.assertTrue(row["ai_reason"])
+
+    def test_the_owner_also_sees_their_own_waiting_links(self):
+        # The owner is a member too. Returning them only the queue meant the
+        # one screen that says "here's why your link is waiting" was blank for
+        # the only person who couldn't ask anybody else about it.
+        r = self.oc.get(REVIEWS)
+        self.assertEqual(r.data["mine"], [])
+        with patch("apps.economy.social_verify._fetch_public_page", return_value=PAGE), \
+             patch("apps.economy.social_verify._ai_identity", return_value=ai("unsure")):
+            self.oc.post(VERIFY, {"action": "match", "url": "https://x.com/owner"},
+                         format="json")
+        r = self.oc.get(REVIEWS)
+        self.assertEqual(len(r.data["mine"]), 1)
+        self.assertEqual(r.data["mine"][0]["url"], "https://x.com/owner")
+        self.assertEqual(r.data["pending"], 2)      # still the whole queue too
 
     def test_a_member_cannot_settle_their_own(self):
         r = self.client.post(REVIEWS, {"id": self.review.id, "decision": "approve"},

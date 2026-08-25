@@ -17,6 +17,7 @@ Two layers, most-trusted first:
    number. Best-effort: some platforms block server fetches; the UI labels
    those links "unverified" and they're excluded from the reach median.
 """
+import logging
 import re
 import secrets
 
@@ -31,6 +32,8 @@ from .models import SocialReview, profile_for, reach_median, social_sources
 
 VERIFY_MODEL = "claude-opus-4-8"
 CODE_PREFIX = "MCZ"
+
+log = logging.getLogger(__name__)
 
 
 def _issue_code():
@@ -50,7 +53,15 @@ def _find_link(links, url):
 
 
 def _fetch_public_page(url):
-    """Fetch a public profile page's visible text. Returns (text, error)."""
+    """Fetch a public profile page's visible text. Returns (text, error).
+
+    The error is written for the member, not for us. It used to be the raw
+    exception truncated to 160 characters, which on a real failure reached the
+    screen as `couldn't reach that page (HTTPSConnectionPool(host='…', port=443):
+    Max retries exceeded with url: /koth (Caused by ProxyError('Unable to
+    connect to` — cut off mid-word, and telling nobody anything. The stack goes
+    to the log where it's useful; the sentence goes to the person.
+    """
     import requests
     try:
         resp = requests.get(
@@ -59,8 +70,20 @@ def _fetch_public_page(url):
             headers={"User-Agent": "Mozilla/5.0 (compatible; MusicConnectZ/1.0)"},
         )
         resp.raise_for_status()
-    except Exception as exc:  # network, 403 (platform blocks bots), timeout
-        return None, f"couldn't reach that page ({exc})"[:160]
+    except requests.HTTPError as exc:
+        code = getattr(getattr(exc, "response", None), "status_code", 0)
+        log.warning("social verify: %s answered %s", url, code)
+        return None, (
+            "That page is private, gone, or blocking us."
+            if code in (401, 403, 404, 451)
+            else f"That page answered {code} instead of loading."
+        )
+    except requests.Timeout:
+        log.warning("social verify: %s timed out", url)
+        return None, "That page took too long to answer."
+    except Exception as exc:  # DNS, TLS, connection reset, a malformed URL
+        log.warning("social verify: couldn't fetch %s (%s)", url, exc)
+        return None, "We couldn't open that page."
     # Strip tags to visible text so the model reads the follower count + bio.
     text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", resp.text, flags=re.S | re.I)
     text = re.sub(r"<[^>]+>", " ", text)
@@ -97,7 +120,9 @@ def _ai_verify(page_text, code):
         )
         raw = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
     except Exception as exc:
-        return None, None, f"verification error: {exc}"[:160]
+        # Same rule as the fetch above: the stack is ours, the sentence is theirs.
+        log.warning("social verify: code read failed (%s)", exc)
+        return None, None, "The checker didn't answer. Nothing was charged — try again in a minute."
     import json
     m = re.search(r"\{.*\}", raw, re.S)
     if not m:
@@ -157,7 +182,8 @@ def _ai_identity(page_text, user, profile):
                                       messages=[{"role": "user", "content": prompt}])
         raw = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
     except Exception as exc:
-        return None, "", f"verification error: {exc}"[:160]
+        log.warning("social verify: identity read failed (%s)", exc)
+        return None, "", "The checker didn't answer. Nothing was charged — try again in a minute."
     import json
     m = re.search(r"\{.*\}", raw, re.S)
     if not m:
@@ -336,14 +362,18 @@ class SocialReviewQueueView(APIView):
         return is_owner(user)
 
     def get(self, request):
-        if not self._is_owner(request.user):
-            # A member sees their OWN pending reviews — waiting without being
-            # able to see that you're waiting is its own small cruelty.
-            mine = SocialReview.objects.filter(user=request.user)[:50]
-            return Response({"mine": [self._row(r) for r in mine], "queue": None})
-        qs = SocialReview.objects.filter(status=SocialReview.STATUS_PENDING)
-        return Response({"queue": [self._row(r) for r in qs[:200]],
-                         "pending": qs.count()})
+        # A member sees their OWN pending reviews — waiting without being able
+        # to see that you're waiting is its own small cruelty. EVERYONE gets
+        # `mine`, the owner included: the owner is also a member with links of
+        # their own, and returning only the queue to them meant their own
+        # screen was the one place that couldn't show why a link was waiting.
+        mine = SocialReview.objects.filter(user=request.user)[:50]
+        out = {"mine": [self._row(r) for r in mine], "queue": None}
+        if self._is_owner(request.user):
+            qs = SocialReview.objects.filter(status=SocialReview.STATUS_PENDING)
+            out["queue"] = [self._row(r) for r in qs[:200]]
+            out["pending"] = qs.count()
+        return Response(out)
 
     def _row(self, r):
         return {

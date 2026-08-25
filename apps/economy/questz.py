@@ -236,7 +236,11 @@ QUESTS = [
          title="Your first funded collab", app="collabz", anchor="collabz-deals",
          what="Get one deal funded.", why="This is the point of the whole thing."),
     dict(id="reach-verified", scope=ONCE, target=1, energy=150, count=_reach_verified,
-         title="Switch on passive Energy", app="social", anchor="social-feed",
+         # `social-verify` is the verification panel, not the member directory.
+         # This quest pointed at `social-feed` because that was the only anchor
+         # the tab had — which landed you on a search box for OTHER people when
+         # the thing being asked of you is proving your OWN account.
+         title="Switch on passive Energy", app="social", anchor="social-verify",
          what="Get one social source verified. Reach is the median across your "
               "verified accounts, so one is enough to start the clock.",
          why="Reach is what pays Energy every hour. This is the quest that "
