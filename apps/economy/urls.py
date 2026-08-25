@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .directz_app import DirectZWorksView, DirectZRateView
+from .questz import QuestBoardView, QuestClaimView
 from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView)
 from .publicz import PublicPostView, PublicProfileView
@@ -244,6 +245,9 @@ urlpatterns = [
     path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
     path("postz/<int:pk>/delete/", PostDeleteView.as_view(), name="economy-postz-delete"),
     path("submissions/", SubmissionsView.as_view(), name="economy-submissions"),
+    # QuestZ — the Energy on-ramp for members who have no reach yet.
+    path("questz/", QuestBoardView.as_view(), name="economy-questz"),
+    path("questz/<str:quest_id>/claim/", QuestClaimView.as_view(), name="economy-questz-claim"),
     # PlaylistZ — Music ConnectZ posts and outside distro links in one order.
     path("playlistz/", PlaylistsView.as_view(), name="economy-playlistz"),
     path("playlistz/appearances/", MyAppearancesView.as_view(), name="economy-playlist-appearances"),
