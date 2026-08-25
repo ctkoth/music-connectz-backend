@@ -147,6 +147,28 @@ class SpecTests(TestCase):
         self.assertFalse(spec["can_execute"])
         self.assertIn("sandbox", spec["execute_note"])
 
+    def test_every_tab_that_opens_somewhere_names_the_control_it_opens_on(self):
+        # `open_in` alone is a tab switch. The client used to build the second
+        # half itself as `occ:<key>`, and no such anchor has ever existed in the
+        # frontend, so every Open -> landed at the top of the destination app.
+        # A tab that says where it opens has to say where in it.
+        for tab in self.spec()["tabs"]:
+            if tab.get("open_in"):
+                self.assertTrue(tab.get("target"), tab)
+                # The anchor is a data-tour="..." name, never an `app:control`
+                # pair the client has to split — that split is what drifted.
+                self.assertNotIn(":", tab["target"], tab)
+
+    def test_a_tab_with_nothing_behind_it_yet_says_so_rather_than_opening_nowhere(self):
+        # The other half of the same rule: no `open_in` means the client renders
+        # "Not built yet", which is honest. What isn't honest is saying that
+        # about something that ships — Pick ConnectZ is the dock at the foot of
+        # every screen, so it opens like anything else that exists.
+        tabs = {t["key"]: t for t in self.spec()["tabs"]}
+        self.assertEqual(tabs["pickconnectz"]["open_in"], "occ")
+        self.assertTrue(tabs["pickconnectz"]["target"])
+        self.assertNotIn("open_in", tabs["gitz"])
+
     def test_ico_is_among_the_image_exports(self):
         self.assertIn("ico", self.spec()["image_exports"])
 

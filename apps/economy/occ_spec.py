@@ -48,63 +48,79 @@ def tier_at_least(tier, needed):
 # it here is what makes dropping the file into the frontend's public/icons/ the
 # entire job. Until the file lands it 404s and the client shows the emoji, so
 # reserving a name costs a member nothing and saves a code change later.
+#
+# `open_in` says which APP a tab opens; `target` says which CONTROL inside it.
+# The client used to build that second half itself, from `occ:<key>`, and
+# nothing in the frontend has ever carried an `occ:` anchor — so every Open →
+# switched tabs, hunted for an anchor that could not exist, and dropped the
+# member at the top of the destination. That is the tab switch wearing a
+# handoff's clothes that `goto.js` was written to stop.
+#
+# So the target is named HERE, next to the app it belongs to, and it is a real
+# `data-tour="…"` anchor the destination renders. Two of them (occ-run,
+# occ-workz) already existed for the guided tour; the rest were added with this
+# field, one anchor serving the tour and this list both so they can't drift.
+#
+# A tab with nothing behind it yet gets NEITHER field and renders as "Not built
+# yet" — which is why Pick ConnectZ gained both: the dock ships, so saying it
+# doesn't was the list being wrong about its own app.
 OCC_TABS = [
-    {"key": "editor", "open_in": "occ", "icon": "editor.png", "name": "Code editor", "emoji": "👁️‍🗨️", "needs": TIER_FREE,
+    {"key": "editor", "open_in": "occ", "target": "occ-run", "icon": "editor.png", "name": "Code editor", "emoji": "👁️‍🗨️", "needs": TIER_FREE,
      "desc": "Write and edit your files.", "builds": "editor"},
-    {"key": "taskz", "open_in": "occ", "icon": "taskz.png", "name": "TaskZ", "emoji": "📑", "needs": TIER_FREE,
+    {"key": "taskz", "open_in": "occ", "target": "occ-taskz", "icon": "taskz.png", "name": "TaskZ", "emoji": "📑", "needs": TIER_FREE,
      "desc": "Tasks OCC has been set, with live status, an ETA, and an undo window.",
      "builds": "taskz"},
     # Not in the original list of twenty-one: added because an OCC result that
     # can't be shown, rated or carried anywhere is a dead end, and nothing here
     # is allowed to be one. WorkZ is where what you gave OCC and what it gave
     # back are kept, in the PostZ format, ready to post.
-    {"key": "workz", "open_in": "occ", "icon": "workz.png", "name": "WorkZ", "emoji": "🧾", "needs": TIER_FREE,
+    {"key": "workz", "open_in": "occ", "target": "occ-workz", "icon": "workz.png", "name": "WorkZ", "emoji": "🧾", "needs": TIER_FREE,
      "desc": "What you gave OCC and what it gave back — post it, rate it, or take it "
              "into another app.", "builds": "workz"},
-    {"key": "codez", "open_in": "habitz", "icon": "codez.png", "name": "CodeZ", "emoji": "🧩", "needs": TIER_FREE,
+    {"key": "codez", "open_in": "habitz", "target": "habitz-kind-code", "icon": "codez.png", "name": "CodeZ", "emoji": "🧩", "needs": TIER_FREE,
      "desc": "Your acronyms, typos and slang — what you meant, and how often you've typed it.",
      "builds": "codez"},
-    {"key": "pathz", "open_in": "habitz", "icon": "pathz.png", "name": "PathZ", "emoji": "🛤️", "needs": TIER_PREMIUM,
+    {"key": "pathz", "open_in": "habitz", "target": "habitz-kind-path", "icon": "pathz.png", "name": "PathZ", "emoji": "🛤️", "needs": TIER_PREMIUM,
      "desc": "Your paths across devices.", "builds": "pathz"},
-    {"key": "mistakez", "open_in": "habitz", "icon": "mistakez.png", "name": "MistakeZ", "emoji": "❌", "needs": TIER_FREE,
+    {"key": "mistakez", "open_in": "habitz", "target": "habitz-kind-mistake", "icon": "mistakez.png", "name": "MistakeZ", "emoji": "❌", "needs": TIER_FREE,
      "desc": "Errors the AI made here, kept so it doesn't make them twice.",
      "builds": "mistakez"},
-    {"key": "habitz", "open_in": "habitz", "icon": "habitz.png", "name": "HabitZ", "emoji": "🎂", "needs": TIER_FREE,
+    {"key": "habitz", "open_in": "habitz", "target": "habitz-kind-habit", "icon": "habitz.png", "name": "HabitZ", "emoji": "🎂", "needs": TIER_FREE,
      "desc": "Something you repeat, noticed and kept.", "builds": "habitz"},
     {"key": "characterz", "icon": "characterz.png", "name": "CharacterZ", "emoji": "🤔", "needs": TIER_PREMIUM,
      "desc": "MBTI characters attached to a FaceZ face, with a story and a voice.",
      "builds": "characterz"},
-    {"key": "settings", "open_in": "occ", "icon": "preferencez.png", "name": "Settings", "emoji": "⚙️", "needs": TIER_FREE,
+    {"key": "settings", "open_in": "occ", "target": "occ-settings", "icon": "preferencez.png", "name": "Settings", "emoji": "⚙️", "needs": TIER_FREE,
      "desc": "AutomationZ and SuggestionZ live here.", "builds": "settings"},
-    {"key": "console", "open_in": "occ", "icon": "console.png", "name": "Output / Console", "emoji": "🖥️", "needs": TIER_FREE,
+    {"key": "console", "open_in": "occ", "target": "occ-console", "icon": "console.png", "name": "Output / Console", "emoji": "🖥️", "needs": TIER_FREE,
      "desc": "What OCC printed.", "builds": "console"},
     {"key": "callz", "icon": "callz.png", "name": "CallZ", "emoji": "📞", "needs": TIER_STATZ,
      "desc": "Talk it through.", "builds": "callz"},
-    {"key": "search", "open_in": "social", "icon": "search.png", "name": "Search", "emoji": "🔍", "needs": TIER_FREE,
+    {"key": "search", "open_in": "social", "target": "social-search", "icon": "search.png", "name": "Search", "emoji": "🔍", "needs": TIER_FREE,
      "desc": "Across every tab.", "builds": "search"},
     {"key": "tellz", "icon": "tellz.png", "name": "TellZ", "emoji": "🗣️", "needs": TIER_PREMIUM,
      "desc": "What you prompted or posted, per tab or across all of them.",
      "builds": "tellz"},
-    {"key": "logz", "open_in": "logz", "icon": "logz.png", "name": "LogZ", "emoji": "🪵", "needs": TIER_PREMIUM,
+    {"key": "logz", "open_in": "logz", "target": "logz-entries", "icon": "logz.png", "name": "LogZ", "emoji": "🪵", "needs": TIER_PREMIUM,
      "desc": "What was DONE, by day, week, month or a range you pick.",
      "builds": "logz"},
-    {"key": "pickconnectz", "icon": "pickconz.png", "name": "Pick ConnectZ", "emoji": "📌", "needs": TIER_FREE,
+    {"key": "pickconnectz", "open_in": "occ", "target": "occ-pickconnectz", "icon": "pickconz.png", "name": "Pick ConnectZ", "emoji": "📌", "needs": TIER_FREE,
      "desc": "Pin your favourites to the footer.", "builds": "pickconnectz"},
-    {"key": "filez", "open_in": "occ", "icon": "filez.png", "name": "FileZ", "emoji": "📁", "needs": TIER_FREE,
+    {"key": "filez", "open_in": "occ", "target": "occ-filez", "icon": "filez.png", "name": "FileZ", "emoji": "📁", "needs": TIER_FREE,
      "desc": "Files and uploads.", "builds": "filez"},
     {"key": "gitz", "icon": "gitz.png", "name": "GitZ", "emoji": "🔀", "needs": TIER_STATZ,
      "desc": "Branches, commits and pushes — every one of them a TaskZ task.",
      "builds": "gitz"},
     {"key": "gamez", "icon": "gamez.png", "name": "GameZ", "emoji": "🎮", "needs": TIER_PREMIUM,
      "desc": "Games you built here, by genre.", "builds": "gamez"},
-    {"key": "spinaz", "open_in": "logz", "icon": "spinaz.png", "name": "SpinaZ", "emoji": "🍥", "needs": TIER_FREE,
+    {"key": "spinaz", "open_in": "logz", "target": "logz-resource-spinaz", "icon": "spinaz.png", "name": "SpinaZ", "emoji": "🍥", "needs": TIER_FREE,
      "desc": "How you earned and spent it.", "builds": "spinaz"},
-    {"key": "energy", "open_in": "logz", "icon": "energy.png", "name": "Energy", "emoji": "⚡", "needs": TIER_FREE,
+    {"key": "energy", "open_in": "logz", "target": "logz-resource-energy", "icon": "energy.png", "name": "Energy", "emoji": "⚡", "needs": TIER_FREE,
      "desc": "How you earned and spent it.", "builds": "energy"},
-    {"key": "facez", "open_in": "profilez", "icon": "facez.png", "name": "FaceZ", "emoji": "🙄", "needs": TIER_FREE,
+    {"key": "facez", "open_in": "profilez", "target": "profilez-facez", "icon": "facez.png", "name": "FaceZ", "emoji": "🙄", "needs": TIER_FREE,
      "desc": "Faces available to AI images and video, taggable to a profile.",
      "builds": "facez"},
-    {"key": "welcome", "open_in": "occ", "icon": "welcome.png", "name": "Welcome", "emoji": "👋", "needs": TIER_FREE,
+    {"key": "welcome", "open_in": "occ", "target": "occ-welcome", "icon": "welcome.png", "name": "Welcome", "emoji": "👋", "needs": TIER_FREE,
      "desc": "Start here.", "builds": "welcome"},
 ]
 
@@ -279,6 +295,7 @@ def tabs_for(tier):
     # `builds` stays in the response. It was put there on purpose — "a menu that
     # offers twenty tabs and delivers three is worse than a menu that offers
     # three" — and the client simply never read it, which is the same failure
-    # one layer up. It is read now, alongside `open_in`, so the list says both
-    # what stands behind a tab and where that tab opens.
+    # one layer up. It is read now, alongside `open_in` and `target`, so the
+    # list says what stands behind a tab, where that tab opens, and which
+    # control it opens ON.
     return [{**tab, "allowed": tier_at_least(tier, tab["needs"])} for tab in OCC_TABS]
