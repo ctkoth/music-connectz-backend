@@ -43,8 +43,12 @@ its resource emoji.
 
 - **BossTake "Send it to the coach"** — spends a prompt, says nothing before
   you press it. `cost_cents` comes back only in the response.
-- **AI actions generally** (translate, OCC chat, Gemini image/video) — the
-  charge happens server-side with no pre-flight statement of the price.
+- **AI actions generally** (OCC chat, Gemini image/video) — the charge happens
+  server-side with no pre-flight statement of the price. **TranslateZ is done**:
+  `GET /api/economy/translate/` answers the price, what pays it, that a failed
+  batch costs nothing, that one charge covers the whole batch, and that the
+  daily free prompts do NOT apply here. Its payload is shaped like the coach's
+  on purpose so one client Cost component renders either.
 - **CallZ** — priced by the other member's skill rate per hour; the rate needs
   to be visible before the call connects.
 
