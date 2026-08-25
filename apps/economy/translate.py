@@ -14,6 +14,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .ai_price import ai_price
 from .catalog import ai_cost
 from .models import charge_ai_usage, can_afford_ai, wallet_for
 from .views import credit_owner
@@ -42,11 +43,57 @@ def _system(target_name):
     )
 
 
+def _configured():
+    """Whether the transcreation backend can actually run — the client, not just
+    the import. An unconfigured endpoint is unavailable, not free."""
+    try:
+        import anthropic
+    except ImportError:                                      # pragma: no cover
+        return False
+    try:
+        anthropic.Anthropic()
+    except Exception:                                        # pragma: no cover
+        return False
+    return True
+
+
 class TranslateView(APIView):
-    """POST { texts: [str], target_lang, target_name?, source_lang? } → transcreated
+    """GET  → what one batch costs this member, before they send one.
+    POST { texts: [str], target_lang, target_name?, source_lang? } → transcreated
     strings. Charges the model minimum once per batch on success."""
 
     permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """The price of a batch, stated before the batch.
+
+        Worth being precise about what the unit is: this charges ONCE per batch
+        of up to MAX_TEXTS strings, not once per string. A member quoted a
+        per-string price would batch defensively and pay the same either way.
+        """
+        out = ai_price(
+            request.user,
+            configured=_configured(),
+            # `charge_ai_usage` below is called without `count_daily`, so the
+            # day's free prompts do not cover a batch.
+            uses_allowance=False,
+            # Nothing is charged until an array of the right length parses out
+            # of the model's answer — a 503 on the backend, the parse, or the
+            # length check all return before the charge.
+            charged_on_failure=False,
+            failure_note="A batch that doesn't come back translated isn't "
+                         "charged — the charge runs only after one parses.",
+            action="Transcreate a batch",
+        )
+        # Priced per batch, not per string, and per batch is the number that
+        # decides how a member uses this.
+        out["unit"] = "batch"
+        out["max_texts"] = MAX_TEXTS
+        # English costs nothing because there is nothing to do — the POST
+        # short-circuits before the model. A price line that ignored this would
+        # quote a charge for a no-op.
+        out["free_langs"] = ["en", "eng", "english"]
+        return Response(out)
 
     def post(self, request):
         data = request.data or {}

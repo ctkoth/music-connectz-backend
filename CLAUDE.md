@@ -39,14 +39,47 @@ its resource emoji.
 - Both sides of a two-sided reward get stated: a referral is `+300 🍥` for the
   referrer and `+100 🍥` for the joinee, and both numbers belong on screen.
 
+### How an action quotes itself
+
+`apps/economy/ai_price.py` is the one answer. `SingZCoachView.get` worked out
+the shape — cost, whether a free daily prompt covers it, what it falls back to,
+whether a failed run is charged — and `ai_price()` is that shape factored out so
+the rest of the AI suite gives the same answer in the same words.
+
+The flag to get right is `uses_allowance`, and it is required rather than
+defaulted. The free daily allowance only covers a run charged with
+`count_daily=True`:
+
+```python
+charge_ai_usage(user, cost, count_daily=True)   # allowance applies
+charge_ai_usage(user, cost)                     # it does not
+```
+
+The coach passes it. Image, video and translate do not. A quote that inherited
+the coach's shape without that distinction would announce a free run and then
+charge for it — worse than saying nothing, because the member checked first.
+`test_ai_price.py` pins the quote against what the charge actually does.
+
 ### Known violations, not yet fixed
 
-- **BossTake "Send it to the coach"** — spends a prompt, says nothing before
-  you press it. `cost_cents` comes back only in the response.
-- **AI actions generally** (translate, OCC chat, Gemini image/video) — the
-  charge happens server-side with no pre-flight statement of the price.
+- **OCC chat** — the run is charged server-side with no `GET` that states the
+  price first. The `Price` component on the OCC screen is the ⚡ cost of
+  *posting* a work, not the prompt the chat spends. Give the view an
+  `ai_price(..., uses_allowance=...)` `GET` like the other three.
 - **CallZ** — priced by the other member's skill rate per hour; the rate needs
-  to be visible before the call connects.
+  to be visible before the call connects. Nothing connects a call yet
+  (`callz_ok` on a LessonZ offer is as far as it goes), so this is a rule for
+  whoever builds it rather than a bug sitting in a screen.
+
+### Fixed, kept here because the reasoning still applies
+
+- **BossTake "Send it to the coach"** — `SingZCoachView.get` quotes it and the
+  client renders the quote beside the button.
+- **Translate / Gemini image / Gemini video** — each has a `GET` that quotes the
+  run. Video is the interesting one: it is billed when Veo *accepts* the job and
+  there is no refund path in `GeminiVideoStatusView`, so its quote says
+  `charged_on_failure: true`. Matching the image's comfortable "no" would have
+  been the false answer.
 
 ---
 
@@ -87,12 +120,14 @@ So the rule, in practice:
 - **XP and badges may reward effort. Ratings and skill levels may not.** Turning
   up is worth something; it is not worth being called good.
 
-### Known violation, not yet fixed
+### Fixed — `directz_ai_rating`
 
-- **`directz_ai_rating`** — see above. It had never run in production because
-  nothing posted to DirectZ; the composer added in `claude/occ-agent-loop` means
-  it now will, at scale. Either it measures the video or it stops calling itself
-  craft.
+It stopped calling itself craft. `directz_craft.py` is what rates a work now;
+`models.directz_ai_rating` carries a DEPRECATED docstring and exists only
+because a handful of old rows still hold a number it produced. A work whose
+video cannot be watched now carries no rating at all, and
+`directz_display_rating` reports `source: None` rather than a zero — which is
+the "prefer no number to a fake one" rule, in the place that broke it.
 
 ---
 
