@@ -39,14 +39,33 @@ its resource emoji.
 - Both sides of a two-sided reward get stated: a referral is `+300 🍥` for the
   referrer and `+100 🍥` for the joinee, and both numbers belong on screen.
 
+### Where the price is answered
+
+Every AI route that charges answers **GET on its own path** with what THIS
+member pays right now — `apps/economy/ai_price.py` builds that block and
+`SingZCoachView.get` serves the same keys alongside its scoring profile. The
+shape is: `cost_cents`, whether a free daily prompt covers it, how many are
+left, the tier ladder, the wallet it falls back to, and what a failed attempt
+costs. A new AI endpoint gets one of these in the same commit that makes it
+charge, or the charge is a bill.
+
+Two flags exist because the honest answer differs per route, and a client
+reading several of them has to be able to tell:
+
+- `daily_covers` — whether the day's free allowance reaches this action at all.
+  It must match the `count_daily` the POST passes when it bills. The coach and
+  OCC chat spend the allowance; TranslateZ and the Gemini surfaces don't,
+  because those run models the allowance isn't priced for.
+- `charged_on_failure` / `charged_when` — Veo is the one action billed at
+  `start` rather than on a result, so a generation that dies afterwards has
+  already been paid for and `GeminiVideoStatusView` has nothing to refund.
+  Said out loud rather than discovered.
+
 ### Known violations, not yet fixed
 
-- **BossTake "Send it to the coach"** — spends a prompt, says nothing before
-  you press it. `cost_cents` comes back only in the response.
-- **AI actions generally** (translate, OCC chat, Gemini image/video) — the
-  charge happens server-side with no pre-flight statement of the price.
 - **CallZ** — priced by the other member's skill rate per hour; the rate needs
-  to be visible before the call connects.
+  to be visible before the call connects. `rate_cents` is stored per skill
+  (`apps/accounts/views.py`) and nothing reads it back out yet.
 
 ---
 
@@ -60,19 +79,21 @@ The test for any number this app displays: **could a member get a good one
 without getting good?** If yes, it is decoration wearing a measurement's
 clothes, and it will be found out by the first person who tries.
 
-Two things in this codebase, doing the opposite of each other:
+Two things in this codebase, one the pattern and one the cautionary tale:
 
 - **`vocalcoach.py` — substance.** The take is sent to a model that actually
   listens, and comes back scored on pitch, timing and tone. The number moves
   because the singing moved. The dimensions come from the instrument's own
   profile, so a drummer isn't scored on breath.
-- **`models.directz_ai_rating` — the failure.** It calls itself "a deterministic
-  AI craft estimate" and measures contributor count, how many skills were
-  listed, description length, sum of skill prices, and whether the duration fits
-  the band. **None of that is craft.** A bad video with five contributors and a
-  long description scores ~8; a brilliant one-person video with a terse
-  description scores ~4. `directz_display_rating` then shows it as the rating
-  until three real members rate it.
+- **`models.directz_ai_rating` — the failure, now retired.** It called itself
+  "a deterministic AI craft estimate" and measured contributor count, how many
+  skills were listed, description length, sum of skill prices, and whether the
+  duration fit the band. **None of that is craft.** A bad video with five
+  contributors and a long description scored ~8; a brilliant one-person video
+  with a terse description scored ~4 — and `directz_display_rating` showed it
+  as the rating until three real members rated it. `directz_craft.py` replaced
+  it; the function is left deprecated in `models.py` because old rows still
+  carry its numbers. Read it when tempted to score a form instead of a work.
 
 So the rule, in practice:
 
@@ -87,12 +108,14 @@ So the rule, in practice:
 - **XP and badges may reward effort. Ratings and skill levels may not.** Turning
   up is worth something; it is not worth being called good.
 
-### Known violation, not yet fixed
+### How `directz_ai_rating` was settled
 
-- **`directz_ai_rating`** — see above. It had never run in production because
-  nothing posted to DirectZ; the composer added in `claude/occ-agent-loop` means
-  it now will, at scale. Either it measures the video or it stops calling itself
-  craft.
+It measures the video now, or there is no number. `directz_craft.py` sends the
+work to a model that watches it; `directz_ai_rating` survives in `models.py`
+as a **deprecated** function nothing calls for a rating, kept only because old
+rows still carry the numbers it produced. A work whose video cannot be watched
+carries no rating at all, and `directz_display_rating` returns `source: None`
+with `rating: None` so callers render the absence instead of a zero.
 
 ---
 

@@ -10,6 +10,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .ai_price import ai_price, anthropic_configured
 from .catalog import (
     AI_MODELS,
     AI_MODEL_ORDER,
@@ -145,11 +146,35 @@ COURSES = (
 
 
 class OccChatView(APIView):
-    """POST a prompt; returns an LLM-generated OCC reply. Charges the model's
+    """GET  → what one message costs this member on their own engine.
+    POST a prompt; returns an LLM-generated OCC reply. Charges the model's
     minimum cost on success. 402 when the member can't afford it, 503 when the
     LLM backend isn't configured (client falls back to templated replies)."""
 
     permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """The price of a message, quoted on the engine that will actually run it.
+
+        A flat number would be wrong here: OCC prices per ENGINE, and the
+        member's choice is resolved against their tier, so a lapsed
+        subscription is quoted the engine it falls back to rather than the one
+        they picked a month ago. Same resolution as `post`, so the quote and
+        the charge cannot disagree.
+        """
+        tier = membership_for(request.user).tier
+        model_key, model_spec = ai_model_for(profile_for(request.user).ai_model, tier)
+        return Response(ai_price(request.user,
+                                 cost_cents=model_spec["cost_cents"],
+                                 configured=anthropic_configured(),
+                                 charged_when="result",
+                                 model=model_key,
+                                 action="occ_chat",
+                                 engine=model_key,
+                                 engine_name=model_spec["name"],
+                                 engine_emoji=model_spec["emoji"],
+                                 limits=occ_limits(),
+                                 open_in="modelz"))
 
     def post(self, request):
         data = request.data or {}

@@ -14,6 +14,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .ai_price import ai_price, anthropic_configured
 from .catalog import ai_cost
 from .models import charge_ai_usage, can_afford_ai, wallet_for
 from .views import credit_owner
@@ -43,10 +44,25 @@ def _system(target_name):
 
 
 class TranslateView(APIView):
-    """POST { texts: [str], target_lang, target_name?, source_lang? } → transcreated
+    """GET  → what one batch costs this member, before they send one.
+    POST { texts: [str], target_lang, target_name?, source_lang? } → transcreated
     strings. Charges the model minimum once per batch on success."""
 
     permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # One price per BATCH, not per string — the whole array is one call, so
+        # `max_texts` belongs next to the price: it is what the member gets for
+        # it. `charge_ai_usage` here passes no count_daily, so the free daily
+        # allowance doesn't reach this one.
+        return Response(ai_price(request.user,
+                                 configured=anthropic_configured(),
+                                 daily_covers=False,
+                                 charged_when="result",
+                                 model=TRANSLATE_MODEL,
+                                 action="translate",
+                                 max_texts=MAX_TEXTS,
+                                 per="batch"))
 
     def post(self, request):
         data = request.data or {}

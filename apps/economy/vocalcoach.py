@@ -409,6 +409,11 @@ class SingZCoachView(APIView):
             "cost_cents": cost,
             # A free daily prompt covers the whole run before any paid balance.
             "free_today": daily_left > 0,
+            # `_bill` here passes count_daily=True, so the allowance genuinely
+            # reaches a take. Stated as a flag rather than left implied,
+            # because the Gemini image and video prices say the opposite and a
+            # client reading both needs to tell them apart. See ai_price.py.
+            "daily_covers": True,
             "daily_remaining": daily_left,
             "daily_allowance": allowance,
             "tier": tier,
@@ -424,6 +429,7 @@ class SingZCoachView(APIView):
             # A take the coach can't read is never billed — _bill runs only
             # after a usable result parses. Worth saying, not just doing.
             "charged_on_failure": False,
+            "charged_when": "result",
             # THIS member's ceiling, and whose it is — the coach's judgement or
             # their tier's own upload limit, whichever binds them first. This
             # flag was a hardcoded False, which was safe only while the coach's

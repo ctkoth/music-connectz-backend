@@ -19,6 +19,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .ai_price import ai_price
 from .catalog import ai_cost
 from .models import can_afford_ai, charge_ai_usage, daily_prompt_state, wallet_for
 from .views import credit_owner
@@ -217,9 +218,20 @@ def _bill(user, note, count_daily=False):
 
 
 class GeminiImageView(APIView):
-    """POST { prompt } → a generated image as a data URI. Synchronous."""
+    """GET  → what one image costs this member, before they generate one.
+    POST { prompt } → a generated image as a data URI. Synchronous."""
 
     permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # `_bill` runs after the image comes back and passes count_daily=False,
+        # so a free daily prompt does NOT cover this one — say so here rather
+        # than let the member find out from the balance afterwards.
+        return Response(ai_price(request.user, configured=bool(_key()), daily_covers=False,
+                                 charged_when="result",
+                                 model=os.environ.get("GEMINI_IMAGE_MODEL",
+                                                      "gemini-2.5-flash-image-preview"),
+                                 action="gemini_image"))
 
     def post(self, request):
         prompt = str((request.data or {}).get("prompt", "")).strip()
@@ -267,10 +279,27 @@ class GeminiImageView(APIView):
 
 
 class GeminiVideoView(APIView):
-    """POST { prompt } → start a Veo video generation; returns an operation name
+    """GET  → what one video costs this member, before they start one.
+    POST { prompt } → start a Veo video generation; returns an operation name
     to poll. Video gen is long-running (~1–2 min)."""
 
     permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # Billed once the operation STARTS, not when it finishes, and with
+        # count_daily=False like the image path — so no free prompt here either.
+        #
+        # And unlike every other AI action in the app, this one CAN charge for a
+        # run that produces nothing: Veo is long-running, the charge lands at
+        # start, and GeminiVideoStatusView has nothing to refund if the
+        # generation later fails. That is the truth about the price, so it is
+        # what the price says.
+        return Response(ai_price(request.user, configured=bool(_key()), daily_covers=False,
+                                 charged_on_failure=True,
+                                 charged_when="start",
+                                 model=os.environ.get("GEMINI_VIDEO_MODEL",
+                                                      "veo-3.0-generate-preview"),
+                                 action="gemini_video"))
 
     def post(self, request):
         prompt = str((request.data or {}).get("prompt", "")).strip()
