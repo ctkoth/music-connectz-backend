@@ -165,13 +165,17 @@ the feed renders a player that 404s, and SingZ tells somebody their own take
 
 `storage_health.py` says so in the deploy log (`economy.W001`), in the running
 service's log at startup, and in `GET /`. **A warning is not a fix.** Neither
-option below is a code change; both are already wired:
+option is a code change; both are wired, and **the disk is the one in force**:
 
+- **A persistent disk — current.** `render.yaml` mounts `mcz-media` at
+  `/var/mcz-media`, and `MEDIA_ROOT` + `MEDIA_DURABLE=1` sit beside it in the
+  same file so the claim and the thing it claims cannot drift apart. No
+  credentials and no external service. It pins the service to one instance,
+  wants a paid instance type, and costs a few seconds of downtime per deploy
+  instead of zero — that is the whole price.
 - **A bucket** — `S3_BUCKET_NAME` + `S3_ACCESS_KEY_ID` + `S3_SECRET_ACCESS_KEY`
-  (add `S3_ENDPOINT_URL` for R2). Scales, no instance pinning, needs an account.
-- **A persistent disk** — uncomment the `disk:` block in `render.yaml`, set
-  `MEDIA_ROOT` to its `mountPath` and `MEDIA_DURABLE=1`. No credentials and no
-  external service; it pins the service to one instance and wants a paid plan.
+  (add `S3_ENDPOINT_URL` for R2). Scales, no instance pinning, needs an
+  account. Setting these takes precedence over the disk, which can then go.
 
 `MEDIA_DURABLE` is an assertion, not a measurement. A mounted disk is
 indistinguishable from the container's own directory from inside the process,

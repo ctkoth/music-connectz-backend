@@ -12,15 +12,22 @@ services:
     # `/` is a static JSON payload that touches no database, so a failing health
     # check means the process itself is wedged and Render should replace it.
     healthCheckPath: /
-    # OPTION 2, above. Uncomment together with MEDIA_ROOT=/var/mcz-media and
-    # MEDIA_DURABLE=1. Render will not attach a disk to a free instance, and a
-    # service with a disk deploys with a short gap instead of zero-downtime —
-    # both worth knowing before it is switched on, neither worth losing a
-    # member's only copy of a take over.
-    # disk:
-    #   name: mcz-media
-    #   mountPath: /var/mcz-media
-    #   sizeGB: 10
+    # Where member uploads actually live. This survives a deploy; the rest of
+    # the container does not. MEDIA_ROOT below points at the same mountPath and
+    # MEDIA_DURABLE asserts it to storage_health — the three move TOGETHER, and
+    # that is the point of them being in one file. Render will not attach a
+    # disk to a free instance, and if it refuses this one the blueprint sync
+    # fails and MEDIA_DURABLE never lands either. A "durable" flag over an
+    # ephemeral disk is the one lie the health check can tell; keeping the
+    # claim in the same commit as the thing it claims is what stops it.
+    #
+    # A service with a disk deploys with a short gap instead of zero-downtime.
+    # That is the price. It is seconds, once per deploy, against never losing
+    # a member's only copy of a take.
+    disk:
+      name: mcz-media
+      mountPath: /var/mcz-media
+      sizeGB: 10
     envVars:
       - key: SECRET_KEY
         generateValue: true
@@ -48,16 +55,21 @@ services:
       # needs credentials. Set S3_BUCKET_NAME + the two keys below; add
       # S3_ENDPOINT_URL for R2. settings.py switches over on the next restart.
       #
-      # OPTION 2 — a persistent disk. No credentials, no external account, but
-      # it pins this service to a single instance and needs a paid instance
-      # type. Uncomment the `disk:` block below, then set MEDIA_ROOT to the
-      # same mountPath and MEDIA_DURABLE=1.
+      # OPTION 2 — a persistent disk, and the one IN FORCE. No credentials and
+      # no external account; it pins this service to a single instance and
+      # needs a paid instance type. The `disk:` block above is mounted and the
+      # two MEDIA_* vars below point at it.
       #
-      # Neither is a code change. Both are already wired.
+      # Neither is a code change. Both are already wired. OPTION 2 is the one
+      # in force: the `disk:` above is mounted at this exact path, and
+      # MEDIA_DURABLE is the deliberate assertion that it is a real mount —
+      # set here, beside the disk it describes, so the two cannot drift apart
+      # in somebody's dashboard. Setting the S3_* keys below switches to a
+      # bucket and takes precedence; the disk can be dropped then.
       - key: MEDIA_ROOT
-        sync: false
+        value: /var/mcz-media
       - key: MEDIA_DURABLE
-        sync: false
+        value: "1"
       - key: S3_BUCKET_NAME
         sync: false
       - key: S3_ACCESS_KEY_ID
