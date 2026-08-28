@@ -42,6 +42,7 @@ from .models import (
     TIER_STATZ,
     can_afford_ai,
     daily_prompt_state,
+    mark_upload_missing,
     membership_for,
     wallet_for,
 )
@@ -541,6 +542,13 @@ class SingZCoachView(APIView):
             # working fine. 410, not 502: the thing is gone, the server isn't.
             logger.exception("%s coach: post %s take could not be read from storage",
                              self.app_key, getattr(post, "pk", None))
+            # Write it down. This is the only place in the app that goes to
+            # storage for a member's take and learns it is not there, and until
+            # now it threw that away: the feed carried on rendering a player and
+            # offering "coach it in SingZ" for a file established as gone one
+            # request earlier, and the next member to press it paid the same
+            # trip to find out the same thing.
+            mark_upload_missing(getattr(f, "instance", None))
             return Response(
                 {"detail": f"The recording on \"{post.title}\" isn't on the server any "
                            "more, so there's nothing for the coach to listen to. Record "

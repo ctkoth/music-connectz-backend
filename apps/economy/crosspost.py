@@ -112,6 +112,25 @@ def _tail(url):
     return str(url or "").split("?")[0].rsplit("/", 1)[-1]
 
 
+def take_state_for(rows):
+    """{post_id: {"bytes": n, "missing": bool}} for each post's take — ONE query.
+
+    Both facts come off the same `Upload` row, so reading them apart would be
+    two queries over the feed to answer one question about the same file.
+
+    `missing` is the row's own `missing_since`, which is only ever stamped by
+    something that WENT AND LOOKED — the coach reading a take, or the reconcile
+    sweep. Nothing here touches storage: a feed of 100 posts must not become
+    100 stat calls, or 100 HEAD requests once uploads are in a bucket.
+
+    A post whose media resolves to no Upload row at all is not marked missing.
+    That is a link to somebody else's site, which is a perfectly good post and
+    a take the coach simply cannot fetch — a different sentence, and one
+    `post_take()` already says.
+    """
+    return _take_rows(rows)
+
+
 def take_bytes_for(rows):
     """{post_id: size_bytes} for the take on each post — in ONE query.
 
@@ -131,7 +150,7 @@ def take_bytes_for(rows):
 
     from .models import Upload
 
-    wanted, authors = {}, set()
+    wanted, authors, kinds = {}, set(), {}
     for post, media in rows:
         kind = _take_kind(media)
         if not kind:
@@ -139,6 +158,28 @@ def take_bytes_for(rows):
         tail = _tail(media[kind])
         if tail:
             wanted.setdefault(tail, []).append(post.id)
+            kinds[post.id] = kind
+            authors.add(post.author_id)
+    if not wanted:
+        return {}
+    return {pid: st["bytes"] for pid, st in _take_rows(rows).items()}
+
+
+def _take_rows(rows):
+    """The shared body. See `take_state_for` — one query, both facts."""
+    from django.db.models import Q
+
+    from .models import Upload
+
+    wanted, authors, kinds = {}, set(), {}
+    for post, media in rows:
+        kind = _take_kind(media)
+        if not kind:
+            continue
+        tail = _tail(media[kind])
+        if tail:
+            wanted.setdefault(tail, []).append(post.id)
+            kinds[post.id] = kind
             authors.add(post.author_id)
     if not wanted:
         return {}
@@ -146,13 +187,26 @@ def take_bytes_for(rows):
     for tail in wanted:
         match |= Q(file__endswith=tail)
     out = {}
-    for name, size in (Upload.objects.filter(match, user_id__in=authors)
-                       .values_list("file", "size_bytes")):
+    for name, size, missing in (Upload.objects.filter(match, user_id__in=authors)
+                                .values_list("file", "size_bytes", "missing_since")):
         for pid in wanted.get(_tail(name), ()):
+            # `kind` travels with it so the client knows WHICH player to
+            # replace with the notice — a post can carry a video that is fine
+            # and an audio take that is not.
+            prev = out.setdefault(pid, {"bytes": 0, "missing": True,
+                                        "kind": kinds.get(pid, "")})
             # Biggest wins on the off-chance two uploads share a basename: a
             # warning that overstates is recoverable, one that understates puts
             # the member back in front of the refusal this exists to prevent.
-            out[pid] = max(out.get(pid, 0), size or 0)
+            prev["bytes"] = max(prev["bytes"], size or 0)
+            # Missing only when EVERY candidate behind that name is. One
+            # readable file there is a post that still plays, and telling its
+            # author their music is gone when it is not is the same false
+            # certainty the <audio> element had — pointed at somebody's work
+            # this time. It starts True and one present row clears it, so the
+            # error is always on the side of saying nothing.
+            if not missing:
+                prev["missing"] = False
     return out
 
 
@@ -174,7 +228,7 @@ def coach_cap(user):
 
 
 def destinations_for(post, user, media, *, price=None, collabs=0, take_bytes=None,
-                     cap=None):
+                     cap=None, take_missing=False):
     """Every app this post can open in, with the price of each stated first.
 
     `media` is `postz.media_slots(post)` — passed in rather than recomputed,
@@ -206,7 +260,18 @@ def destinations_for(post, user, media, *, price=None, collabs=0, take_bytes=Non
     # never read; the coach still refuses at the wall if it comes to that.
     cap = cap or coach_cap(user)
     too_big = bool(take and take_bytes and take_bytes > cap["bytes"])
-    if too_big:
+    # The recording is gone from storage, and we know because something went
+    # and looked. The coach door has to close HERE, on the row, in the app the
+    # member is already in — not one jump away after they have chosen it. That
+    # trip used to end with SingZ telling somebody their own take was not on
+    # the server, which is the worst possible place to learn it: away from the
+    # post, away from the file they might still have, and framed as a refusal
+    # by the coach rather than as something the platform lost.
+    if take and take_missing:
+        coach_needs = [f"the {take} back — the recording on this post isn't on "
+                       f"the server any more. Attach it again here and every "
+                       f"door on this post opens with it"]
+    elif too_big:
         from .vocalcoach import cap_why
         mb = take_bytes / (1024 * 1024)
         coach_needs = [f"a take under {cap['mb']}MB — the {take} on this post is "
@@ -276,7 +341,9 @@ def destinations_for(post, user, media, *, price=None, collabs=0, take_bytes=Non
         "action": "seed",
         "what": "Put this up as your entry — the title and the take are filled in "
                 "from the post. The battle states its own stake before you enter.",
-        "needs": no_take,
+        # Same fact, same sentence. A door that hands over a recording cannot
+        # open on a recording that is not there either.
+        "needs": (coach_needs if (take and take_missing) else no_take),
         "cost": FREE,
         "gain": {"what": "your entry, prefilled"},
         "carry": carry(post, media),

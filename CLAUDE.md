@@ -183,6 +183,41 @@ so nothing but that variable will be taken as proof — anything short of it
 (unset, empty, `0`) leaves the warning standing, because the cost of a false
 "durable" is somebody's only copy of a take.
 
+## A lost file gets written down, once, by whatever found it
+
+The disk is mounted, so nothing new is lost. What was already lost is still
+lost, and the app used to rediscover each one from scratch: the coach reached
+for a take, got nothing, answered 410 — and forgot. The feed went on offering
+a player and a "Coach it in SingZ" door for a file established as gone one
+request earlier, and the next member to press it paid the same trip to learn
+the same thing.
+
+`Upload.missing_since` is where that goes now. Three rules about it:
+
+- **Only something that WENT AND LOOKED may stamp it.** The coach's 410 path,
+  and `manage.py reconcile_uploads`. A read path must never guess — "we could
+  not play it" is not "it is not there", which is the exact mistake the Boss
+  Take card made with an `<audio>` element.
+- **Null means "no reason to think so", not "checked and present."** Nothing
+  walks storage to serve a feed; 100 posts must not become 100 stat calls, or
+  100 HEAD requests once uploads are in a bucket.
+- **The row survives; only the bytes are gone.** It is the record of what was
+  lost and the thing that lets a post name it. `storage_used_bytes` stops
+  counting it, because charging somebody quota for a recording the platform
+  lost is billing them for our own failure.
+
+`crosspost.take_state_for` reads the size and the state off the same row in
+**one** query for the whole feed (the query-count test holds that), so the post
+carries `take_missing`/`take_kind`, PostZ replaces that player with the truth
+and a way to re-attach, and every door that hands over a recording — the coach,
+BattleZ — closes on the row instead of one jump away.
+
+`manage.py reconcile_uploads [--write]` is the deliberate sweep, and the only
+thing in the codebase that walks storage. It **clears** the mark for files that
+came back, and a storage backend that cannot answer is never treated as a file
+that is gone — marking on an unreachable bucket would tell every member on the
+platform their music was lost, which is worse than the bug it exists for.
+
 ## Nothing stores a storage URL — `/api/economy/media/<id>/<name>` does
 
 The app **writes the URL it hands out into the database**: `uploadWork.js`

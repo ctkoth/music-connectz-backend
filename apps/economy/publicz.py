@@ -41,6 +41,16 @@ def public_post_dict(p):
     deny-list quietly leaks whatever gets added to the post later, and this
     response is the one nobody has to log in to read.
     """
+    from .crosspost import take_state_for
+    from .postz import media_slots
+
+    # One query, on a single post, to answer the question a shared link asks
+    # loudest. Somebody followed this link to hear a track; if the recording is
+    # gone they get a player that sits at 0:00 and concludes the artist posted
+    # silence. That is the member's name on a stranger's screen, so it is worth
+    # a query to say whose failure it actually was.
+    state = take_state_for([(p, media_slots(p))]).get(p.id) or {}
+    missing = bool(state.get("missing"))
     return {
         "id": p.id,
         "author": p.author.username,
@@ -54,6 +64,8 @@ def public_post_dict(p):
         "score": p.score or {},
         "rating": item_rating_median(f"post:{p.id}"),
         "created_at": p.created_at.isoformat(),
+        "take_missing": missing,
+        "take_kind": state.get("kind", "") if missing else "",
         "public": True,
     }
 
