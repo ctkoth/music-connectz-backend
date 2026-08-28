@@ -12,6 +12,15 @@ services:
     # `/` is a static JSON payload that touches no database, so a failing health
     # check means the process itself is wedged and Render should replace it.
     healthCheckPath: /
+    # OPTION 2, above. Uncomment together with MEDIA_ROOT=/var/mcz-media and
+    # MEDIA_DURABLE=1. Render will not attach a disk to a free instance, and a
+    # service with a disk deploys with a short gap instead of zero-downtime —
+    # both worth knowing before it is switched on, neither worth losing a
+    # member's only copy of a take over.
+    # disk:
+    #   name: mcz-media
+    #   mountPath: /var/mcz-media
+    #   sizeGB: 10
     envVars:
       - key: SECRET_KEY
         generateValue: true
@@ -27,9 +36,28 @@ services:
         sync: false
       - key: APPLE_OAUTH_CLIENT_ID
         sync: false
-      # Object storage for user uploads (S3 / Cloudflare R2). Set these to
-      # persist FileZ uploads across deploys; leave unset to use the local
-      # (ephemeral) filesystem. For R2 also set S3_ENDPOINT_URL.
+      # ---- KEEPING MEMBERS' UPLOADS -------------------------------------
+      # This container's disk is rebuilt on every deploy. With neither of the
+      # two options below in force, every track, video and cover any member has
+      # uploaded is DELETED the next time anything merges to main, while the
+      # Upload rows survive in Postgres — so the app goes on serving links to
+      # files that are not there. `manage.py check` says so on every deploy
+      # (economy.W001) and `GET /` reports it in `uploads`.
+      #
+      # OPTION 1 — a bucket (S3 / Cloudflare R2). Scales, no instance pinning,
+      # needs credentials. Set S3_BUCKET_NAME + the two keys below; add
+      # S3_ENDPOINT_URL for R2. settings.py switches over on the next restart.
+      #
+      # OPTION 2 — a persistent disk. No credentials, no external account, but
+      # it pins this service to a single instance and needs a paid instance
+      # type. Uncomment the `disk:` block below, then set MEDIA_ROOT to the
+      # same mountPath and MEDIA_DURABLE=1.
+      #
+      # Neither is a code change. Both are already wired.
+      - key: MEDIA_ROOT
+        sync: false
+      - key: MEDIA_DURABLE
+        sync: false
       - key: S3_BUCKET_NAME
         sync: false
       - key: S3_ACCESS_KEY_ID

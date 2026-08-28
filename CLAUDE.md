@@ -153,6 +153,66 @@ give them the link. A read-only surface is usually an unfinished one.
   migration touching field widths gets checked against real Postgres BEFORE it
   reaches `main`, not after.
 
+## Uploads have to outlive a deploy, and there are two ways to make them
+
+Render's web filesystem is part of the container, and the container is rebuilt
+every time anything merges to `main`. With no bucket and no disk, `MEDIA_ROOT`
+is a directory inside it — so **every track, video, cover and avatar any member
+has uploaded is deleted by the next deploy.** The `Upload` rows are in Postgres
+and survive, so the app carries on serving links to files that are not there:
+the feed renders a player that 404s, and SingZ tells somebody their own take
+"isn't on the server any more".
+
+`storage_health.py` says so in the deploy log (`economy.W001`), in the running
+service's log at startup, and in `GET /`. **A warning is not a fix.** Neither
+option below is a code change; both are already wired:
+
+- **A bucket** — `S3_BUCKET_NAME` + `S3_ACCESS_KEY_ID` + `S3_SECRET_ACCESS_KEY`
+  (add `S3_ENDPOINT_URL` for R2). Scales, no instance pinning, needs an account.
+- **A persistent disk** — uncomment the `disk:` block in `render.yaml`, set
+  `MEDIA_ROOT` to its `mountPath` and `MEDIA_DURABLE=1`. No credentials and no
+  external service; it pins the service to one instance and wants a paid plan.
+
+`MEDIA_DURABLE` is an assertion, not a measurement. A mounted disk is
+indistinguishable from the container's own directory from inside the process,
+so nothing but that variable will be taken as proof — anything short of it
+(unset, empty, `0`) leaves the warning standing, because the cost of a false
+"durable" is somebody's only copy of a take.
+
+## Nothing stores a storage URL — `/api/economy/media/<id>/<name>` does
+
+The app **writes the URL it hands out into the database**: `uploadWork.js`
+uploads a blob, takes the `url` that comes back and puts it in `Post.media_url`,
+the post's `items`, a collab deal, a battle entry. It stays there for the life
+of the post.
+
+Harmless while uploads sit on a local disk. It stops being harmless at exactly
+the moment somebody fixes the paragraph above — a bucket hands out **signed**
+URLs (`S3_QUERYSTRING_AUTH` defaults on, `S3_URL_EXPIRE` an hour), and freezing
+one into a post means the track goes silent sixty minutes after it is posted.
+Worse: every one of those columns is `max_length=500` and every writer
+truncates to it, and a signed URL is routinely longer than that — so the stored
+link would have been cut in half on the way in and been wrong from the first
+second. **The fix for losing everyone's music would have shipped as a new way
+to lose it.**
+
+So `_upload_dict` hands out `/api/economy/media/<id>/<filename>` and that is
+what gets stored. It resolves the address freshly on every request: a new
+signature each time on a bucket, the plain media path on disk. Two things about
+its shape are load-bearing and neither is decoration:
+
+- **The filename is last, and there is no trailing slash.**
+  `upload_behind()` and `take_bytes_for()` find the `Upload` behind a post by
+  the *tail* of its URL, because `MEDIA_URL` differs between disk, Render and a
+  CDN and a whole-URL comparison matches in exactly one environment. Ending the
+  route with the stored basename keeps every one of those lookups working; a
+  trailing slash makes `rsplit("/", 1)[-1]` the empty string and they all miss,
+  silently, with the coach no longer finding the take on a post.
+- **It is unauthenticated, like the `/media/` route it replaces.** `<audio src>`
+  sends no `Authorization` header, so auth here would break the thing it exists
+  for. The id and the filename must agree, which is what stops the id range
+  being walked for a list of everybody's filenames.
+
 ## Testing
 
 - The suite runs on SQLite by default, but production is PostgreSQL, and
