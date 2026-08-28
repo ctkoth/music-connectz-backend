@@ -613,7 +613,13 @@ class SingZCoachView(APIView):
                                             status=status.HTTP_403_FORBIDDEN)
         upload, kind, why = post_take(post, media_slots(post))
         if why:
-            return None, None, "", Response({"detail": why, "post_id": post.id},
+            # Flagged, not just worded. This post can never be coached — there
+            # is no take on it, or its media lives somewhere we can't fetch —
+            # so the client has to be able to tell this apart from a refusal
+            # worth retrying and put the post down. Matching on the prose is
+            # not telling them apart.
+            return None, None, "", Response({"detail": why, "post_id": post.id,
+                                             "take_unreadable": True},
                                             status=status.HTTP_400_BAD_REQUEST)
         # Measured from the ROW, never from the file. `Upload.size_bytes` is a
         # column; `FieldFile.size` is a storage call that raises on a file that
