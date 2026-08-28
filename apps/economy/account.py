@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 from .models import (
     Follow,
     ItemRating,
+    JournalEntry,
     Post,
     SocialComment,
     membership_for,
@@ -43,6 +44,22 @@ class AccountExportView(APIView):
             },
             "social": {"following": following, "followers": followers},
             "posts": list(Post.objects.filter(author=u).values("id", "title", "visibility", "created_at")),
+            # The diary comes out WHOLE — the words, not a list of dates.
+            #
+            # Everything else here exports as metadata because the content is
+            # already public or recoverable from the app. A journal entry is
+            # neither: it exists nowhere else, nobody else can read it, and it
+            # is the one thing on this account that would be genuinely lost.
+            # An export that named the days and dropped the writing would be an
+            # index to something it refused to hand over.
+            #
+            # This is the free floor under the Premium `journalz_export`, and
+            # that gate's own refusal says so: what Premium buys is a formatted
+            # file, never access to a member's own words.
+            "journal": list(JournalEntry.objects.filter(author=u).values(
+                "id", "day", "title", "body", "mood", "weather", "tags", "people",
+                "place_name", "place_lat", "place_lng", "items", "visibility",
+                "created_at")),
             "ratings_given": list(ItemRating.objects.filter(user=u).values("item_id", "score")),
             "comments": list(SocialComment.objects.filter(user=u).values("item_id", "body", "created_at")),
         })

@@ -472,7 +472,19 @@ class SingZCoachView(APIView):
         # time. Both land on the same rubric, the same size ceiling and the
         # same bill: a second scoring path is how one surface quietly stops
         # charging for what the other charges for.
-        post = None
+        #
+        # There are three doors and one coach: a file just recorded, a post the
+        # member is looking at, and a page of their own diary. The third exists
+        # because a voice note kept in JournalZ is a take like any other, and
+        # making somebody publish their diary to have it scored would be this
+        # app charging privacy as the price of a feature.
+        #
+        # `stored` is the shared half: a take that is ALREADY on the server, so
+        # nothing is uploaded twice and the size is read from a row rather than
+        # from storage. `post` stays set only for the post door, because the
+        # things that are genuinely post-shaped — writing the score back onto
+        # the post, offering the way back to it — are its alone.
+        post = stored = None
         f = request.FILES.get("take")
         if f:
             content_type = (getattr(f, "content_type", "") or "").lower()
@@ -480,6 +492,12 @@ class SingZCoachView(APIView):
             post, f, content_type, err = self._take_from_post(request)
             if err:
                 return err
+            if post is None:
+                stored, f, content_type, err = self._take_from_journal(request)
+                if err:
+                    return err
+        if post is not None:
+            stored = {"kind": "post", "title": post.title, "id": post.id}
         if not f:
             return Response({"detail": "Record or attach a take first."}, status=status.HTTP_400_BAD_REQUEST)
         # Video has always been accepted here — the model watches the take as
@@ -498,7 +516,7 @@ class SingZCoachView(APIView):
         # database row instead, inside _take_from_post, and never touches
         # storage until the take is actually read.
         cap_mb, cap_is_tier = cap_for(request.user)
-        if post is None and f.size > cap_mb * 1024 * 1024:
+        if stored is None and f.size > cap_mb * 1024 * 1024:
             return Response({"detail": f"That take is {f.size / (1024 * 1024):.0f}MB. "
                                        + cap_why(cap_mb, cap_is_tier),
                              "max_mb": cap_mb, "max_mb_is_tier_limit": cap_is_tier},
@@ -524,7 +542,7 @@ class SingZCoachView(APIView):
         # handoff didn't carry one, so a Drill track isn't scored as "unspecified".
         genre = data.get("genre") or (post.genre if post else "")
         try:
-            if post is not None:
+            if stored is not None:
                 # Opened here rather than in the lookup, so a take refused on
                 # size, on a missing key or on an empty balance never opens a
                 # file handle it then has to remember to close.
@@ -539,16 +557,25 @@ class SingZCoachView(APIView):
             # and say it as a fact about the FILE rather than about the take or
             # about "our side" — the member did nothing wrong and the coach is
             # working fine. 410, not 502: the thing is gone, the server isn't.
-            logger.exception("%s coach: post %s take could not be read from storage",
-                             self.app_key, getattr(post, "pk", None))
+            logger.exception("%s coach: %s %s take could not be read from storage",
+                             self.app_key, (stored or {}).get("kind"),
+                             (stored or {}).get("id"))
+            # Named when the take came from somewhere with a name; "that take"
+            # when it was just recorded. This used to read `post.title`
+            # unconditionally, which meant a fresh upload failing here raised
+            # inside the handler and answered 500 to a member whose only problem
+            # was a file that hadn't finished writing.
+            where = (stored or {}).get("title") or "that take"
             return Response(
-                {"detail": f"The recording on \"{post.title}\" isn't on the server any "
+                {"detail": f"The recording on \"{where}\" isn't on the server any "
                            "more, so there's nothing for the coach to listen to. Record "
                            "or attach the take here and it'll be scored.",
-                 "post_id": post.id, "take_missing": True},
+                 **({"post_id": post.id} if post else
+                    {"journal_id": (stored or {}).get("id")}),
+                 "take_missing": True},
                 status=status.HTTP_410_GONE)
         finally:
-            if post is not None:
+            if stored is not None:
                 try:
                     f.close()
                 except Exception:                            # pragma: no cover
@@ -563,10 +590,16 @@ class SingZCoachView(APIView):
         # skipped the allowance a StatZ member is told they get and went
         # straight to their PromptZ and cash.
         note = f"{profile_for_app(self.app_key)['label']} Boss Take — AI Coach"
-        if post is not None:
-            note += f" — post #{post.id}"
+        if stored is not None:
+            note += f" — {stored['kind']} #{stored['id']}"
         charged = _bill(request.user, note=note, count_daily=True)
         out = {**payload, "cost_cents": charged}
+        if stored is not None and post is None:
+            # A scored take is never a dead end either: the score offers the way
+            # back to the day it came from.
+            out.update({"source": "journal", "journal_id": stored["id"],
+                        "journal_day": stored["day"],
+                        "open_in": "journalz", "target": "journalz-entries"})
         if post is not None:
             out.update({
                 "source": "post", "post_id": post.id, "post_title": post.title,
@@ -633,6 +666,60 @@ class SingZCoachView(APIView):
         # that is the slot it fills.
         content_type = (upload.content_type or "").lower() or f"{kind}/webm"
         return post, upload.file, content_type, None
+
+    def _take_from_journal(self, request):
+        """(stored, file, content_type, error) for a take on a journal entry.
+
+        Yours only, and that is not an oversight to be relaxed later. A journal
+        entry is private by default and a shared one is a POST — which already
+        has the post door, with its own view check. So the only entry anybody
+        can coach through here is one of their own, and the query says so
+        rather than a permission check saying it afterwards.
+        """
+        from .crosspost import upload_behind
+        from .journalz import entry_media
+        from .models import JournalEntry
+
+        raw = request.data.get("journal_id")
+        if raw in (None, ""):
+            return None, None, "", None
+        try:
+            pk = int(raw)
+        except (TypeError, ValueError):
+            return None, None, "", Response({"detail": "journal_id must be a number."},
+                                            status=status.HTTP_400_BAD_REQUEST)
+        e = JournalEntry.objects.filter(pk=pk, author=request.user).first()
+        if not e:
+            return None, None, "", Response({"detail": "entry not found"},
+                                            status=status.HTTP_404_NOT_FOUND)
+        media = entry_media(e)
+        kind = next((k for k in ("audio", "video") if media.get(k)), "")
+        if not kind:
+            return None, None, "", Response(
+                {"detail": "There's no recording on that entry — the coach scores audio "
+                           "or video, so attach a take and try again.",
+                 "journal_id": e.id}, status=status.HTTP_400_BAD_REQUEST)
+        upload = upload_behind(media[kind], [request.user.id])
+        if upload is None:
+            return None, None, "", Response(
+                {"detail": "That take isn't stored on Music ConnectZ, so the coach can't "
+                           "read it. Record or attach it in the coach and it'll be scored.",
+                 "journal_id": e.id}, status=status.HTTP_400_BAD_REQUEST)
+        # From the ROW, never the file — see _take_from_post.
+        cap_mb, cap_is_tier = cap_for(request.user)
+        if (upload.size_bytes or 0) > cap_mb * 1024 * 1024:
+            return None, None, "", Response(
+                {"detail": f"That take is {upload.size_bytes / (1024 * 1024):.0f}MB. "
+                           + cap_why(cap_mb, cap_is_tier)
+                           + " The entry keeps the whole recording — attach just the "
+                             "section you want scored.",
+                 "max_mb": cap_mb, "max_mb_is_tier_limit": cap_is_tier,
+                 "journal_id": e.id},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+        content_type = (upload.content_type or "").lower() or f"{kind}/webm"
+        stored = {"kind": "journal", "id": e.id, "title": e.title or str(e.day),
+                  "day": str(e.day)}
+        return stored, upload.file, content_type, None
 
     @staticmethod
     def _save_to_post(post, user, payload, app_key):

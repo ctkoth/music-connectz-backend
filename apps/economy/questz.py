@@ -155,6 +155,21 @@ def _referrals_who_posted(user, since):
             .values("author_id").distinct().count())
 
 
+def _journaled(user, since):
+    """Days with a journal entry — DAYS, not entries.
+
+    Counting entries would pay a member for pressing save five times on the
+    same afternoon. The quest is "keep the day", so the thing counted is the
+    day, and the `day` column is the one the member chose rather than the clock
+    the row was written on.
+    """
+    from .models import JournalEntry
+    q = JournalEntry.objects.filter(author=user)
+    if since:
+        q = q.filter(created_at__gte=since)
+    return q.values("day").distinct().count()
+
+
 def _priced_a_skill(user, _since):
     from .models import profile_for
     for persona in (profile_for(user).personas or []):
@@ -191,6 +206,12 @@ QUESTS = [
          title="Take a post somewhere else", app="postz", anchor="postz-open-in",
          what="Open one post in another app and start something with it.",
          why="Nothing you make is a dead end — this is the habit that proves it."),
+    dict(id="journal-1", scope=DAILY, target=1, energy=15, count=_journaled,
+         title="Keep the day", app="journalz", anchor="journalz-composer",
+         what="Write one JournalZ entry for today. It stays private — nothing is "
+              "published and nobody you tag is told unless you share it.",
+         why="The only daily here you can do on a day nothing happened, which is "
+             "what makes it the one that holds a streak together."),
     dict(id="practise-1", scope=DAILY, target=1, energy=15, count=_practised,
          title="Practise once", app="mimez", anchor="skillz-panel",
          what="Log one drill in MimeZ or any SkillZ app.",

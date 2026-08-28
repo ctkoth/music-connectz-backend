@@ -427,6 +427,14 @@ class LimitsView(APIView):
         # Yes". Third-party ads to a member we know to be 13-17 would make that
         # answer untrue.
         lim["third_party_ads"] = third_party_ads_allowed(request.user)
+        # JournalZ's per-entry room, from the same table the diary enforces.
+        # Served here as well as on `/journalz/cost/` so any screen that talks
+        # about what a tier buys reads the number rather than retyping it —
+        # MembershipZ's copy is where that drift starts.
+        from .catalog import JOURNAL_LIMITS, journal_limits_for
+        lim["journal"] = journal_limits_for(m.tier)
+        lim["journal_by_tier"] = {t: v for t, v in JOURNAL_LIMITS.items()
+                                  if t != TIER_DEBUG}
         return Response(lim)
 
 
