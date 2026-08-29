@@ -56,6 +56,77 @@ def limits_for(tier):
     return TIER_LIMITS.get(tier, TIER_LIMITS[TIER_FREE])
 
 
+# ---- The keyboard's voice: speaking to it, and it speaking back ----
+#
+# Gated the way translate is gated, and for the same stated reason. The
+# wallpaper is Premium because it is DECORATION — nobody loses a capability by
+# not having it, which is exactly what makes it fair to sell. Voice is not
+# decoration:
+#
+# * Read-aloud is the second half of translate. Handing a Free member the
+#   Portuguese for "where's the studio?" and then charging them to hear how to
+#   SAY it is giving away half a capability and selling the other half, which
+#   teaches members the free half was bait.
+# * Speech input is what you use when typing is the hard part — a motor
+#   impairment, a script your phone has no keyboard for, a language easier to
+#   speak than to spell. The members who need it most are the least likely to
+#   be on the top tier, so an access gate lands hardest on exactly the people
+#   it should be helping.
+#
+# So the tier buys HOW OFTEN, not whether — the same answer BossTake's
+# allowance ladder gives, and the same one that keeps translate free.
+#
+# Clips for listening, characters for reading, because that is the unit each
+# action actually comes in: you speak in clips and you read text. One number
+# per action, published by GET before either button is pressed.
+KEY_TRANSCRIBE_DAILY_CLIPS = {
+    TIER_FREE: 10,
+    TIER_PREMIUM: 60,
+    TIER_STATZ: 300,
+    TIER_DEBUG: 10 ** 6,
+}
+
+# Only the SERVER voice is metered. The device's own voice costs us nothing,
+# works offline and is unlimited at every tier — see keyconnectz.py. This
+# allowance exists for the languages a phone has no voice for, which is
+# Yorùbá, Igbo, Hausa and Amharic before it is anything else. Gating that
+# behind a tier would mean English speakers read aloud free while Yorùbá
+# speakers pay, which is the inverse of what this keyboard is for.
+KEY_SPEAK_DAILY_CHARS = {
+    TIER_FREE: 2_000,
+    TIER_PREMIUM: 20_000,
+    TIER_STATZ: 100_000,
+    TIER_DEBUG: 10 ** 8,
+}
+
+# One clip is one thing said, not a recording session. Sixty seconds is a long
+# sentence and a short voice note, and it is what keeps a clip inside a single
+# request without anyone re-deriving the transport's limits.
+KEY_VOICE_CLIP_MAX_SECONDS = 60
+KEY_VOICE_CLIP_MAX_MB = 8
+
+
+def key_voice_limits(tier):
+    """{clips, chars} — this tier's daily voice allowance."""
+    return {
+        "clips": KEY_TRANSCRIBE_DAILY_CLIPS.get(tier, KEY_TRANSCRIBE_DAILY_CLIPS[TIER_FREE]),
+        "chars": KEY_SPEAK_DAILY_CHARS.get(tier, KEY_SPEAK_DAILY_CHARS[TIER_FREE]),
+    }
+
+
+def key_voice_ladder():
+    """The whole ladder, for the client to show what a tier up would buy.
+
+    Same shape as BossTake's: what tier buys here is frequency, and a member
+    who has spent today's allowance deserves "a tier up gets you sixty" rather
+    than a wall with nothing behind it.
+    """
+    return [{"tier": t,
+             "clips": KEY_TRANSCRIBE_DAILY_CLIPS[t],
+             "chars": KEY_SPEAK_DAILY_CHARS[t]}
+            for t in (TIER_FREE, TIER_PREMIUM, TIER_STATZ)]
+
+
 def chars_unlimited(tier):
     """True when this tier writes without a character cap."""
     return limits_for(tier)["char_limit"] >= UNLIMITED_CHARS
