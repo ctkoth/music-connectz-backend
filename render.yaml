@@ -27,6 +27,32 @@ services:
         sync: false
       - key: APPLE_OAUTH_CLIENT_ID
         sync: false
+      # The five OAUTH2_PROVIDERS in apps/accounts/oauth.py (spotify,
+      # microsoft, facebook, soundcloud, twitter) never had a placeholder
+      # here, so this file — the one place every other credential this app
+      # needs is listed — understated what OAuth actually needs by five
+      # providers. Each needs BOTH vars; provider_status() in oauth.py keeps
+      # a button hidden rather than live-but-failing on only one being set.
+      - key: SPOTIFY_OAUTH_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: FACEBOOK_OAUTH_CLIENT_ID
+        sync: false
+      - key: FACEBOOK_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: SOUNDCLOUD_OAUTH_CLIENT_ID
+        sync: false
+      - key: SOUNDCLOUD_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: TWITTER_OAUTH_CLIENT_ID
+        sync: false
+      - key: TWITTER_OAUTH_CLIENT_SECRET
+        sync: false
       # Object storage for user uploads (S3 / Cloudflare R2). Set these to
       # persist FileZ uploads across deploys; leave unset to use the local
       # (ephemeral) filesystem. For R2 also set S3_ENDPOINT_URL.
