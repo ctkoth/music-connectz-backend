@@ -21,7 +21,14 @@ except Exception:  # pragma: no cover - never let this take the deploy down
     def training_urlpatterns(app_key):
         return []
 
-INSTRUMENT_APP_KEYS = ["singz", "rapz"]
+# guitarz/bassz/keyz/drumz/violinz have had a scored profile in
+# apps/economy/instruments.py (dimensions, caveat, prompt_for) since it was
+# written — `prompt_for("drumz", ...)` is tested and has worked the whole
+# time. What they never had was a route: this list is the only thing that
+# turns a profile into `/api/<key>/coach/`, `/api/<key>/trial/` and a SkillZ
+# tree, so five fully-scoreable instruments 404'd behind a tab the frontend
+# never had reason to build. One line.
+INSTRUMENT_APP_KEYS = ["singz", "rapz", "guitarz", "bassz", "keyz", "drumz", "violinz"]
 
 # Boss Take — the blueprint's scored final take, coached by the StatZ AI coach.
 # Mounted for EVERY instrument app beside the SkillZ tree, because a take is a
