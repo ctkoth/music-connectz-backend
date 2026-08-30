@@ -117,8 +117,6 @@ Existing examples to follow:
 - OnboardZ steps link to the control that completes them, not just the tab.
 - A Boss Take is scored in SingZ and its dimensions come from that app's
   profile, so the same recorder serves RapZ without inventing scores.
-- LogZ rows carry the reason a resource moved, so a balance leads back to
-  the action that changed it.
 - A post carries `destinations` — every app that can do something with it, what
   each still needs, and what it costs before it is spent. `apps/economy/crosspost.py`
   is the one list; SingZ and RapZ take the post itself as a Boss Take, so a
@@ -126,6 +124,24 @@ Existing examples to follow:
 
 When adding a screen, ask what a member would want to DO with each row, and
 give them the link. A read-only surface is usually an unfinished one.
+
+### Known violation, not yet fixed
+
+- **LogZ is this rule's own counter-example.** This section used to list it
+  as one of the working ones — "LogZ rows carry the reason a resource moved,
+  so a balance leads back to the action that changed it" — and that line was
+  never true. `Transaction.note` (`logz.py: _row()`) is a free-text sentence
+  ("SingZ Boss Take — AI Coach — post #47"), not a structured reference, and
+  `LogZ.jsx` renders it as plain text with no button, no link, nowhere to
+  go. A member reading "post #47" in their ledger cannot get from that
+  sentence to the post.
+  Fixing it for real means giving `Transaction` a structured `app_key`/
+  `target` (the same shape `Observation` already uses) and threading it
+  through every call site that writes one — `vocalcoach.py`, `crosspost.py`,
+  `battlez.py`, `adz.py`, `offerz.py`, referrals, and more — which is a
+  schema migration plus a multi-file call-site sweep, not a one-screen fix.
+  Correct the doc first (done, here); the code is still owed the fix this
+  section claims it already has.
 
 
 ---
@@ -205,6 +221,21 @@ take so nothing has to be found first:
 Run it after touching the upload path or the chain, and after a key rotation.
 It costs one generateContent call. A stubbed suite going green is not evidence
 the transport works; this is.
+
+## A profile in `instruments.py` is not the same as a route
+
+`INSTRUMENT_APP_KEYS` in `music_connectz/urls.py` is the ONLY thing that turns
+an instrument's scored profile into `/api/<key>/coach/`, `/api/<key>/trial/`
+and a SkillZ tree. Adding an instrument to `instruments.py` — dimensions, a
+caveat, `prompt_for()` support — does not by itself make it reachable.
+
+That gap held for a while: guitarz, bassz, keyz, drumz and violinz had full
+profiles, and `prompt_for("drumz", ...)` was tested and correct, while
+`INSTRUMENT_APP_KEYS = ["singz", "rapz"]` meant every one of those coaches
+404'd. `test_instrument_routes.py` pins both directions now — every key in
+`INSTRUMENTS` is in `INSTRUMENT_APP_KEYS`, and the coach/trial/SkillZ routes
+actually resolve for each — so a future instrument added to one list and not
+the other fails a test instead of shipping a coach nobody can reach.
 
 ## Tier limits live on the server
 
