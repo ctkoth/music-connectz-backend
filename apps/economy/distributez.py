@@ -21,6 +21,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import limits_for
+from .media import stable_media_url
 from .models import Post, Upload, membership_for, storage_used_bytes
 
 MB = 1024 * 1024
@@ -35,7 +36,8 @@ def _upload_dict(u, request):
         "id": u.id,
         "name": u.name,
         "content_type": u.content_type,
-        "url": request.build_absolute_uri(u.file.url) if u.file else None,
+        # A stored address must not be one that expires — see media.py.
+        "url": stable_media_url(u, request) or None,
     }
 
 

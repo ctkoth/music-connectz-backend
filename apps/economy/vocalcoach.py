@@ -42,6 +42,7 @@ from .models import (
     TIER_STATZ,
     can_afford_ai,
     daily_prompt_state,
+    mark_upload_missing,
     membership_for,
     wallet_for,
 )
@@ -541,6 +542,13 @@ class SingZCoachView(APIView):
             # working fine. 410, not 502: the thing is gone, the server isn't.
             logger.exception("%s coach: post %s take could not be read from storage",
                              self.app_key, getattr(post, "pk", None))
+            # Write it down. This is the only place in the app that goes to
+            # storage for a member's take and learns it is not there, and until
+            # now it threw that away: the feed carried on rendering a player and
+            # offering "coach it in SingZ" for a file established as gone one
+            # request earlier, and the next member to press it paid the same
+            # trip to find out the same thing.
+            mark_upload_missing(getattr(f, "instance", None))
             return Response(
                 {"detail": f"The recording on \"{post.title}\" isn't on the server any "
                            "more, so there's nothing for the coach to listen to. Record "
@@ -613,7 +621,13 @@ class SingZCoachView(APIView):
                                             status=status.HTTP_403_FORBIDDEN)
         upload, kind, why = post_take(post, media_slots(post))
         if why:
-            return None, None, "", Response({"detail": why, "post_id": post.id},
+            # Flagged, not just worded. This post can never be coached — there
+            # is no take on it, or its media lives somewhere we can't fetch —
+            # so the client has to be able to tell this apart from a refusal
+            # worth retrying and put the post down. Matching on the prose is
+            # not telling them apart.
+            return None, None, "", Response({"detail": why, "post_id": post.id,
+                                             "take_unreadable": True},
                                             status=status.HTTP_400_BAD_REQUEST)
         # Measured from the ROW, never from the file. `Upload.size_bytes` is a
         # column; `FieldFile.size` is a storage call that raises on a file that

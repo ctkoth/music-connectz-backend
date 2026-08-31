@@ -1,6 +1,7 @@
-from django.urls import path
+from django.urls import path, re_path
 
 from .directz_app import DirectZWorksView, DirectZRateView
+from .media import MediaFileView
 from .questz import QuestBoardView, QuestClaimView
 from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView)
@@ -177,6 +178,13 @@ urlpatterns = [
     path("royalties/cashout/", RoyaltyCashoutView.as_view(), name="economy-royalties-cashout"),
     path("uploads/", UploadsView.as_view(), name="economy-uploads"),
     path("uploads/<int:pk>/", UploadDetailView.as_view(), name="economy-upload-detail"),
+    # The address an upload is HANDED OUT under, and the only one anything
+    # stores. Resolved to wherever the bytes are on every request, so a signed
+    # bucket URL is minted fresh instead of being frozen into a post that then
+    # goes dead an hour later. No trailing slash, and the filename last —
+    # `upload_behind()` finds the take on a post by the tail of its URL.
+    re_path(r"^media/(?P<pk>\d+)/(?P<filename>[^/]+)$",
+            MediaFileView.as_view(), name="economy-media-file"),
     path("checkout/config/", CheckoutConfigView.as_view(), name="economy-checkout-config"),
     path("checkout/stripe/", StripeCheckoutView.as_view(), name="economy-checkout-stripe"),
     path("checkout/paypal/", PaypalCreateView.as_view(), name="economy-checkout-paypal"),

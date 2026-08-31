@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("economy", "0075_questclaim"),
+        ("economy", "0076_upload_missing_since"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
