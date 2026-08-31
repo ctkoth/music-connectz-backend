@@ -215,6 +215,34 @@ OAUTH2_PROVIDERS = {
                                      "name": d.get("name") or d.get("username") or "",
                                      "avatar_url": d.get("profile_image_url") or ""})(u.get("data") or u),
     },
+    "discord": {
+        "token_url": "https://discord.com/api/oauth2/token",
+        "userinfo_url": "https://discord.com/api/users/@me",
+        # Discord's own response says whether the address was confirmed —
+        # unlike every other provider here, that's worth trusting.
+        "map": lambda u: {"uid": str(u.get("id") or ""),
+                          "email": (u.get("email") or ""),
+                          "email_verified": bool(u.get("verified")),
+                          "name": u.get("global_name") or u.get("username") or "",
+                          "avatar_url": (
+                              f"https://cdn.discordapp.com/avatars/{u.get('id')}/{u.get('avatar')}.png"
+                              if u.get("avatar") else ""
+                          )},
+    },
+    "reddit": {
+        "token_url": "https://www.reddit.com/api/v1/access_token",
+        "userinfo_url": "https://oauth.reddit.com/api/v1/me",
+        "basic_auth": True,  # Reddit refuses a secret sent any other way
+        # Reddit rate-limits by User-Agent and blocks the default python-requests
+        # one outright, on both the token exchange and the userinfo call.
+        "extra_headers": {"User-Agent": "web:musicconnectz:v1.0 (by /u/musicconnectz)"},
+        "map": lambda u: {"uid": str(u.get("id") or ""),
+                          # The `identity` scope never returns an address, verified
+                          # or not — same shape as Twitter above.
+                          "email": "",
+                          "name": u.get("name") or "",
+                          "avatar_url": (u.get("icon_img") or "").split("?")[0]},
+    },
 }
 
 
@@ -286,7 +314,11 @@ def exchange_oauth2(provider: str, code: str, redirect_uri: str = "", code_verif
     }
     if code_verifier:
         body["code_verifier"] = code_verifier
-    headers = {"Accept": "application/json"}
+    # A provider-specific header (Reddit's mandatory User-Agent) goes on both
+    # requests below, not just this one — Reddit rejects the userinfo call
+    # exactly the same way it rejects the token exchange.
+    extra_headers = cfg.get("extra_headers") or {}
+    headers = {"Accept": "application/json", **extra_headers}
     auth = None
     if cfg.get("basic_auth"):
         auth = (client_id, client_secret)  # HTTP Basic
@@ -305,7 +337,9 @@ def exchange_oauth2(provider: str, code: str, redirect_uri: str = "", code_verif
 
     try:
         profile = requests.get(
-            cfg["userinfo_url"], headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=10
+            cfg["userinfo_url"],
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json", **extra_headers},
+            timeout=10,
         ).json()
     except (requests.RequestException, ValueError):
         raise OAuthError(f"Could not load your {provider.title()} profile.")
@@ -315,8 +349,9 @@ def exchange_oauth2(provider: str, code: str, redirect_uri: str = "", code_verif
         raise OAuthError(f"{provider.title()} did not return a user id.")
     info["provider"] = provider
     info["email"] = (info.get("email") or "").lower()
-    # None of these userinfo endpoints tell us whether the address was
-    # confirmed, so it never auto-matches an existing account. Flip a provider
-    # to True only once its response is known to carry a verified flag.
-    info["email_verified"] = False
+    # Most of these userinfo endpoints never say whether the address was
+    # confirmed, so the default is "no" and the account never auto-matches on
+    # it. A provider whose response DOES carry that (Discord) sets it in its
+    # own `map`, and this only fills the gap for the ones that don't.
+    info.setdefault("email_verified", False)
     return info

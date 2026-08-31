@@ -43,6 +43,18 @@ services:
         sync: false
       - key: APPLE_OAUTH_CLIENT_ID
         sync: false
+      # Discord and Reddit — the two OAUTH2_PROVIDERS entries this PR adds.
+      # Each needs BOTH vars; provider_status() in oauth.py keeps the button
+      # hidden rather than live-but-failing on only one being set, same as
+      # every other provider here.
+      - key: DISCORD_OAUTH_CLIENT_ID
+        sync: false
+      - key: DISCORD_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: REDDIT_OAUTH_CLIENT_ID
+        sync: false
+      - key: REDDIT_OAUTH_CLIENT_SECRET
+        sync: false
       # ---- KEEPING MEMBERS' UPLOADS -------------------------------------
       # This container's disk is rebuilt on every deploy. With neither of the
       # two options below in force, every track, video and cover any member has
