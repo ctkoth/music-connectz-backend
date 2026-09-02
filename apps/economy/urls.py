@@ -18,7 +18,8 @@ from .earn import EarnView
 from .battlez import (BattlesView, BattleChallengeView, BattleDetailView,
                       BattleEnterView, BattleRespondView, BattleSettleView,
                       BattleWagerView, MoneyBattleVoteView)
-from .keyconnectz import KeyboardView, KeyTranslateView
+from .keyconnectz import (KeyboardView, KeySpeakView, KeyTranscribeView,
+                          KeyTranslateView)
 from .playlistz import (PlaylistCollaboratorsView, PlaylistDetailView,
                         PlaylistItemDetailView, PlaylistItemsView,
                         PlaylistReorderView, PlaylistsView,
@@ -125,6 +126,10 @@ urlpatterns = [
     # KeyConnectZ — the keyboard. Wallpaper is Premium; translate is free.
     path("keyz/", KeyboardView.as_view(), name="economy-keyz"),
     path("keyz/translate/", KeyTranslateView.as_view(), name="economy-keyz-translate"),
+    # Voice, both directions. Neither is gated by tier — the allowance is, and
+    # GET keyz/ publishes it before either button is pressed.
+    path("keyz/transcribe/", KeyTranscribeView.as_view(), name="economy-keyz-transcribe"),
+    path("keyz/speak/", KeySpeakView.as_view(), name="economy-keyz-speak"),
     path("wallet/add/", AddFundsView.as_view(), name="economy-wallet-add"),
     path("owner/revenue/", OwnerRevenueView.as_view(), name="economy-owner-revenue"),
     path("membership/", MembershipView.as_view(), name="economy-membership"),

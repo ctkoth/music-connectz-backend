@@ -2263,6 +2263,51 @@ def key_translate_state(user):
     return used, KEY_TRANSLATE_DAILY_CHARS, max(0, KEY_TRANSLATE_DAILY_CHARS - used)
 
 
+class KeyVoiceUse(models.Model):
+    """One voice run — a clip transcribed, or text read aloud by the server.
+
+    Same job `KeyTranslation` does for translate: the daily allowance, and an
+    honest record of what the keyboard has been doing. `units` is clips for
+    "transcribe" and characters for "speak", because that is the unit each
+    action comes in — you speak in clips and you read text, and one unit
+    pretending to cover both would be a number nobody could check.
+
+    The DEVICE voice is never recorded here. It costs us nothing, so metering
+    it would be counting something we do not pay for in order to charge for it.
+    """
+    KIND_TRANSCRIBE = "transcribe"
+    KIND_SPEAK = "speak"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="key_voice_uses")
+    kind = models.CharField(max_length=12)
+    lang = models.CharField(max_length=12, blank=True, default="")
+    units = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["user", "kind", "created_at"])]
+
+
+def key_voice_state(user, kind):
+    """(used, cap, remaining) for one voice action — published BEFORE the button.
+
+    A rolling 24 hours, like translate, so nobody's allowance resets at a
+    timezone they did not pick.
+    """
+    from datetime import timedelta
+
+    from .catalog import key_voice_limits
+
+    rows = KeyVoiceUse.objects.filter(
+        user=user, kind=kind, created_at__gte=timezone.now() - timedelta(hours=24))
+    used = sum(rows.values_list("units", flat=True))
+    limits = key_voice_limits(membership_for(user).tier)
+    cap = limits["clips"] if kind == KeyVoiceUse.KIND_TRANSCRIBE else limits["chars"]
+    return used, cap, max(0, cap - used)
+
+
 # ---- BattleZ ----
 #
 # BattleZ has been named in the app since the tab bar was written and has never
