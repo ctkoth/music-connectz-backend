@@ -42,6 +42,7 @@ from .models import (
     TIER_STATZ,
     can_afford_ai,
     daily_prompt_state,
+    mark_upload_missing,
     membership_for,
     wallet_for,
 )
@@ -560,6 +561,17 @@ class SingZCoachView(APIView):
             logger.exception("%s coach: %s %s take could not be read from storage",
                              self.app_key, (stored or {}).get("kind"),
                              (stored or {}).get("id"))
+            # Write it down. This is the only place in the app that goes to
+            # storage for a member's take and learns it is not there, and until
+            # now it threw that away: the feed carried on rendering a player and
+            # offering "coach it in SingZ" for a file established as gone one
+            # request earlier, and the next member to press it paid the same
+            # trip to find out the same thing.
+            #
+            # It marks the Upload, so it covers a take reached through a journal
+            # entry exactly as it covers one reached through a post — the file
+            # is the same file, and which door found it gone doesn't change that.
+            mark_upload_missing(getattr(f, "instance", None))
             # Named when the take came from somewhere with a name; "that take"
             # when it was just recorded. This used to read `post.title`
             # unconditionally, which meant a fresh upload failing here raised
@@ -646,7 +658,13 @@ class SingZCoachView(APIView):
                                             status=status.HTTP_403_FORBIDDEN)
         upload, kind, why = post_take(post, media_slots(post))
         if why:
-            return None, None, "", Response({"detail": why, "post_id": post.id},
+            # Flagged, not just worded. This post can never be coached — there
+            # is no take on it, or its media lives somewhere we can't fetch —
+            # so the client has to be able to tell this apart from a refusal
+            # worth retrying and put the post down. Matching on the prose is
+            # not telling them apart.
+            return None, None, "", Response({"detail": why, "post_id": post.id,
+                                             "take_unreadable": True},
                                             status=status.HTTP_400_BAD_REQUEST)
         # Measured from the ROW, never from the file. `Upload.size_bytes` is a
         # column; `FieldFile.size` is a storage call that raises on a file that

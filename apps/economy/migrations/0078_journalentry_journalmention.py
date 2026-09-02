@@ -8,7 +8,11 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("economy", "0075_questclaim"),
+        # Renumbered from 0076 onto the head that main actually carries: two
+        # other PRs landed 0076 and 0077 while this branch was open, and two
+        # leaves in the graph is a migrate that refuses to run. This one only
+        # creates new tables, so where it sits in the order changes nothing.
+        ("economy", "0077_key_voice_use"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

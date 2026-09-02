@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import AI_MODEL_COSTS, SPECZ_CATALOG, ai_cost, cashout_rate, limits_for
+from .media import stable_media_url
 from .models import (
     DEV_TAX,
     MB,
@@ -547,7 +548,10 @@ def _upload_dict(u, request):
         "size_bytes": u.size_bytes,
         "size_mb": round(u.size_bytes / MB, 2),
         "content_type": u.content_type,
-        "url": request.build_absolute_uri(u.file.url) if u.file else None,
+        # NOT `u.file.url`. That is the storage's own address, and on a bucket
+        # it carries a signature that expires in an hour — which every caller
+        # then STORES on a post, a deal or a battle entry. See media.py.
+        "url": stable_media_url(u, request) or None,
         "created_at": u.created_at,
     }
 

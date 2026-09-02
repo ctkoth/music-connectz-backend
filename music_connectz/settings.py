@@ -154,7 +154,11 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 # vars we fall back to the local filesystem for dev/tests. Per-tier quota
 # enforcement is storage-backend agnostic either way.
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+# Overridable so a Render PERSISTENT DISK can be mounted at it without touching
+# code. A disk is the other way to make uploads durable, and the one that needs
+# no bucket and no keys: add a `disk:` to render.yaml, point MEDIA_ROOT at its
+# mountPath, and set MEDIA_DURABLE=1 so the app knows the floor is solid.
+MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT") or (BASE_DIR / "media"))
 
 _static_storage = {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"}
 
@@ -167,6 +171,11 @@ if os.environ.get("S3_BUCKET_NAME"):
         "file_overwrite": False,          # keep distinct uploads distinct
         "default_acl": None,              # R2 rejects ACLs; S3 buckets can be private
         "signature_version": "s3v4",
+        # Signed URLs are safe HERE only because nothing stores one any more:
+        # every upload is handed out under /api/economy/media/<id>/<name>,
+        # which mints a fresh signature per request. Before that route existed
+        # a signed URL got written into Post.media_url and the post's audio
+        # went dead an hour later — see apps/economy/media.py.
         "querystring_auth": _env_bool("S3_QUERYSTRING_AUTH", "1"),
         "querystring_expire": int(os.environ.get("S3_URL_EXPIRE", "3600")),
     }

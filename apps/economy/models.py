@@ -249,6 +249,17 @@ class Upload(models.Model):
     size_bytes = models.PositiveBigIntegerField(default=0)
     content_type = models.CharField(max_length=120, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
+    # When storage was found not to have this file. The row outlives the bytes
+    # — that is the whole shape of the ephemeral-disk bug — and until this
+    # existed the app had nowhere to WRITE DOWN what it had already discovered.
+    # The coach hit a missing take, answered 410, and then forgot, so the feed
+    # went on offering a player and a "coach it" door for a file that was
+    # established as gone thirty seconds earlier.
+    #
+    # Null means "no reason to think it is missing", NOT "checked and present".
+    # Nothing walks storage on the read path; this is only ever stamped by
+    # something that actually went looking and came back empty.
+    missing_since = models.DateTimeField(null=True, blank=True, db_index=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -262,7 +273,56 @@ MB = 1024 * 1024
 
 
 def storage_used_bytes(user):
-    return Upload.objects.filter(user=user).aggregate(t=models.Sum("size_bytes"))["t"] or 0
+    """Bytes this member is actually storing.
+
+    Files known to be gone are not counted. Charging somebody quota for a
+    recording the platform lost is billing them for our own failure, and it is
+    the kind of number that is only ever noticed by the member it is wrong for.
+    The row stays — it is the record of what was lost and the thing that lets a
+    post say so — but it stops taking up room.
+    """
+    return (Upload.objects.filter(user=user, missing_since__isnull=True)
+            .aggregate(t=models.Sum("size_bytes"))["t"] or 0)
+
+
+def mark_upload_missing(upload):
+    """Record that storage did not have this file. Never raises.
+
+    Called from the paths that ACTUALLY went and looked — the coach reading a
+    take, the reconcile sweep — and from nowhere else. A read path must never
+    guess this: "we could not play it" is not "it is not there", which is the
+    exact mistake the Boss Take card used to make with an <audio> element.
+
+    Never raises, because every caller is already handling a worse failure and
+    a bookkeeping write must not become the thing that turns a clean 410 into
+    a 500.
+    """
+    from django.utils import timezone
+
+    try:
+        if upload is None or getattr(upload, "pk", None) is None:
+            return False
+        if upload.missing_since:
+            return False
+        # update(), not save(): the caller is mid-exception on a file handle
+        # and has no business re-writing the whole row.
+        Upload.objects.filter(pk=upload.pk, missing_since__isnull=True).update(
+            missing_since=timezone.now())
+        return True
+    except Exception:                                    # pragma: no cover
+        return False
+
+
+def mark_upload_found(upload):
+    """The file is back (restored, re-uploaded over the same path). Clear the
+    mark rather than leaving a post saying its audio is gone while it plays."""
+    try:
+        if upload is None or getattr(upload, "pk", None) is None:
+            return False
+        return bool(Upload.objects.filter(pk=upload.pk, missing_since__isnull=False)
+                    .update(missing_since=None))
+    except Exception:                                    # pragma: no cover
+        return False
 
 
 def wallet_for(user):
@@ -2201,6 +2261,51 @@ def key_translate_state(user):
     if badge_effects(user).get("translate_uncapped"):
         return used, None, None
     return used, KEY_TRANSLATE_DAILY_CHARS, max(0, KEY_TRANSLATE_DAILY_CHARS - used)
+
+
+class KeyVoiceUse(models.Model):
+    """One voice run — a clip transcribed, or text read aloud by the server.
+
+    Same job `KeyTranslation` does for translate: the daily allowance, and an
+    honest record of what the keyboard has been doing. `units` is clips for
+    "transcribe" and characters for "speak", because that is the unit each
+    action comes in — you speak in clips and you read text, and one unit
+    pretending to cover both would be a number nobody could check.
+
+    The DEVICE voice is never recorded here. It costs us nothing, so metering
+    it would be counting something we do not pay for in order to charge for it.
+    """
+    KIND_TRANSCRIBE = "transcribe"
+    KIND_SPEAK = "speak"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="key_voice_uses")
+    kind = models.CharField(max_length=12)
+    lang = models.CharField(max_length=12, blank=True, default="")
+    units = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["user", "kind", "created_at"])]
+
+
+def key_voice_state(user, kind):
+    """(used, cap, remaining) for one voice action — published BEFORE the button.
+
+    A rolling 24 hours, like translate, so nobody's allowance resets at a
+    timezone they did not pick.
+    """
+    from datetime import timedelta
+
+    from .catalog import key_voice_limits
+
+    rows = KeyVoiceUse.objects.filter(
+        user=user, kind=kind, created_at__gte=timezone.now() - timedelta(hours=24))
+    used = sum(rows.values_list("units", flat=True))
+    limits = key_voice_limits(membership_for(user).tier)
+    cap = limits["clips"] if kind == KeyVoiceUse.KIND_TRANSCRIBE else limits["chars"]
+    return used, cap, max(0, cap - used)
 
 
 # ---- BattleZ ----

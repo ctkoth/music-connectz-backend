@@ -153,6 +153,146 @@ give them the link. A read-only surface is usually an unfinished one.
   migration touching field widths gets checked against real Postgres BEFORE it
   reaches `main`, not after.
 
+## KeyConnectZ voice: the tier buys how many, never whether
+
+`keyconnectz.py` had already written the rule down: the wallpaper is Premium
+because it is **decoration** and nobody loses a capability without it; translate
+is free at every tier because **being understood is not a luxury.** Transcribe
+and read-aloud are on the capability side of that line, twice over —
+
+- Read-aloud is the second half of translate. Hand a Free member the Portuguese
+  and charge them to hear how to *say* it and you have sold half a capability.
+- Speech input is how you type when typing is the hard part. An access gate
+  lands hardest on exactly the members it should be helping.
+
+— so both are available at every tier and the **allowance** is what ladders:
+`catalog.KEY_TRANSCRIBE_DAILY_CLIPS` (clips) and `KEY_SPEAK_DAILY_CHARS`
+(characters). Clips for listening and characters for reading, because that is
+the unit each action comes in; one unit covering both would be a number nobody
+could check. `GET /api/economy/keyz/` publishes both, plus the ladder, before
+either button is pressed.
+
+**The device voice never reaches the server and is never metered.** The client
+tries `speechSynthesis` first — it costs us nothing, so metering it would be
+counting something we do not pay for in order to charge for it. `keyz/speak/`
+exists for the languages a handset has no voice for, which is Yorùbá, Igbo,
+Hausa and Amharic before it is anything else. That is the reason it is not sold
+by tier: a gate there would mean English speakers hear their translation read
+back free while Yorùbá speakers pay for the same sentence.
+
+Two things that must not rot:
+
+- **A failed run never spends the allowance.** An empty transcript or an empty
+  voice returns 502 and writes no `KeyVoiceUse`, exactly as a failed Boss Take
+  is not billed and a failed translation is not metered.
+- **TTS needs its own model chain.** `responseModalities: ["AUDIO"]` against
+  `gemini-2.5-flash` is a 400, not a fallback, so `MODEL_CHAINS["tts"]` is
+  separate. Gemini answers with raw PCM (`audio/L16;codec=pcm;rate=24000`) and
+  no browser will play that — the RIFF header goes on in `_wav()`, server-side,
+  rather than in three clients that would each get it slightly wrong.
+
+Like the coach's upload path, **the TTS transport has never run against
+Google** — CI has no key. `tools/keyvoice_live_check.sh` is the check that can.
+=======
+## Uploads have to outlive a deploy, and there are two ways to make them
+
+Render's web filesystem is part of the container, and the container is rebuilt
+every time anything merges to `main`. With no bucket and no disk, `MEDIA_ROOT`
+is a directory inside it — so **every track, video, cover and avatar any member
+has uploaded is deleted by the next deploy.** The `Upload` rows are in Postgres
+and survive, so the app carries on serving links to files that are not there:
+the feed renders a player that 404s, and SingZ tells somebody their own take
+"isn't on the server any more".
+
+`storage_health.py` says so in the deploy log (`economy.W001`), in the running
+service's log at startup, and in `GET /`. **A warning is not a fix.** Neither
+option is a code change; both are wired, and **the disk is the one in force**:
+
+- **A persistent disk — current.** `render.yaml` mounts `mcz-media` at
+  `/var/mcz-media`, and `MEDIA_ROOT` + `MEDIA_DURABLE=1` sit beside it in the
+  same file so the claim and the thing it claims cannot drift apart. No
+  credentials and no external service. It pins the service to one instance,
+  wants a paid instance type, and costs a few seconds of downtime per deploy
+  instead of zero — that is the whole price.
+- **A bucket** — `S3_BUCKET_NAME` + `S3_ACCESS_KEY_ID` + `S3_SECRET_ACCESS_KEY`
+  (add `S3_ENDPOINT_URL` for R2). Scales, no instance pinning, needs an
+  account. Setting these takes precedence over the disk, which can then go.
+
+`MEDIA_DURABLE` is an assertion, not a measurement. A mounted disk is
+indistinguishable from the container's own directory from inside the process,
+so nothing but that variable will be taken as proof — anything short of it
+(unset, empty, `0`) leaves the warning standing, because the cost of a false
+"durable" is somebody's only copy of a take.
+
+## A lost file gets written down, once, by whatever found it
+
+The disk is mounted, so nothing new is lost. What was already lost is still
+lost, and the app used to rediscover each one from scratch: the coach reached
+for a take, got nothing, answered 410 — and forgot. The feed went on offering
+a player and a "Coach it in SingZ" door for a file established as gone one
+request earlier, and the next member to press it paid the same trip to learn
+the same thing.
+
+`Upload.missing_since` is where that goes now. Three rules about it:
+
+- **Only something that WENT AND LOOKED may stamp it.** The coach's 410 path,
+  and `manage.py reconcile_uploads`. A read path must never guess — "we could
+  not play it" is not "it is not there", which is the exact mistake the Boss
+  Take card made with an `<audio>` element.
+- **Null means "no reason to think so", not "checked and present."** Nothing
+  walks storage to serve a feed; 100 posts must not become 100 stat calls, or
+  100 HEAD requests once uploads are in a bucket.
+- **The row survives; only the bytes are gone.** It is the record of what was
+  lost and the thing that lets a post name it. `storage_used_bytes` stops
+  counting it, because charging somebody quota for a recording the platform
+  lost is billing them for our own failure.
+
+`crosspost.take_state_for` reads the size and the state off the same row in
+**one** query for the whole feed (the query-count test holds that), so the post
+carries `take_missing`/`take_kind`, PostZ replaces that player with the truth
+and a way to re-attach, and every door that hands over a recording — the coach,
+BattleZ — closes on the row instead of one jump away.
+
+`manage.py reconcile_uploads [--write]` is the deliberate sweep, and the only
+thing in the codebase that walks storage. It **clears** the mark for files that
+came back, and a storage backend that cannot answer is never treated as a file
+that is gone — marking on an unreachable bucket would tell every member on the
+platform their music was lost, which is worse than the bug it exists for.
+
+## Nothing stores a storage URL — `/api/economy/media/<id>/<name>` does
+
+The app **writes the URL it hands out into the database**: `uploadWork.js`
+uploads a blob, takes the `url` that comes back and puts it in `Post.media_url`,
+the post's `items`, a collab deal, a battle entry. It stays there for the life
+of the post.
+
+Harmless while uploads sit on a local disk. It stops being harmless at exactly
+the moment somebody fixes the paragraph above — a bucket hands out **signed**
+URLs (`S3_QUERYSTRING_AUTH` defaults on, `S3_URL_EXPIRE` an hour), and freezing
+one into a post means the track goes silent sixty minutes after it is posted.
+Worse: every one of those columns is `max_length=500` and every writer
+truncates to it, and a signed URL is routinely longer than that — so the stored
+link would have been cut in half on the way in and been wrong from the first
+second. **The fix for losing everyone's music would have shipped as a new way
+to lose it.**
+
+So `_upload_dict` hands out `/api/economy/media/<id>/<filename>` and that is
+what gets stored. It resolves the address freshly on every request: a new
+signature each time on a bucket, the plain media path on disk. Two things about
+its shape are load-bearing and neither is decoration:
+
+- **The filename is last, and there is no trailing slash.**
+  `upload_behind()` and `take_bytes_for()` find the `Upload` behind a post by
+  the *tail* of its URL, because `MEDIA_URL` differs between disk, Render and a
+  CDN and a whole-URL comparison matches in exactly one environment. Ending the
+  route with the stored basename keeps every one of those lookups working; a
+  trailing slash makes `rsplit("/", 1)[-1]` the empty string and they all miss,
+  silently, with the coach no longer finding the take on a post.
+- **It is unauthenticated, like the `/media/` route it replaces.** `<audio src>`
+  sends no `Authorization` header, so auth here would break the thing it exists
+  for. The id and the filename must agree, which is what stops the id range
+  being walked for a list of everybody's filenames.
+
 ## Testing
 
 - The suite runs on SQLite by default, but production is PostgreSQL, and

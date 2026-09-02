@@ -450,6 +450,33 @@ class CoachThePostTests(TestCase):
         # And nothing is charged for a take that was never read.
         self.assertEqual(wallet_for(self.me).prompts_used_today or 0, 0)
 
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    def test_a_take_the_coach_cannot_fetch_says_so_in_a_flag(self, _k):
+        """A post whose media is a link to somebody else's site, or has no
+        recording at all, can never be coached — no retry helps.
+
+        The prose said that; nothing else did. A client that can only read
+        `detail` has to match on the sentence to tell "put this post down and
+        record instead" apart from "try again in a minute", so it never did —
+        SingZ guessed from whether its own <audio> element played, which is a
+        question about the browser and not about the file.
+        """
+        p = Post.objects.create(author=self.me, title="somebody else's link",
+                                media_type="audio",
+                                media_url="https://example.com/not-ours.mp3")
+        r = self.c.post("/api/singz/coach/", {"post_id": p.id}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertTrue(r.data["take_unreadable"])
+        self.assertIn("isn't stored on Music ConnectZ", r.data["detail"])
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    def test_a_post_with_no_recording_is_flagged_the_same_way(self, _k):
+        p = Post.objects.create(author=self.me, title="just words",
+                                description="a verse I have not recorded yet")
+        r = self.c.post("/api/singz/coach/", {"post_id": p.id}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertTrue(r.data["take_unreadable"])
+
     def test_the_ceiling_is_measured_without_touching_storage(self):
         """The size check must not be the thing that goes and asks a missing
         file how big it is — that is the 500 above, one line earlier."""

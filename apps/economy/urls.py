@@ -1,6 +1,7 @@
-from django.urls import path
+from django.urls import path, re_path
 
 from .directz_app import DirectZWorksView, DirectZRateView
+from .media import MediaFileView
 from .questz import QuestBoardView, QuestClaimView
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
@@ -19,7 +20,8 @@ from .earn import EarnView
 from .battlez import (BattlesView, BattleChallengeView, BattleDetailView,
                       BattleEnterView, BattleRespondView, BattleSettleView,
                       BattleWagerView, MoneyBattleVoteView)
-from .keyconnectz import KeyboardView, KeyTranslateView
+from .keyconnectz import (KeyboardView, KeySpeakView, KeyTranscribeView,
+                          KeyTranslateView)
 from .playlistz import (PlaylistCollaboratorsView, PlaylistDetailView,
                         PlaylistItemDetailView, PlaylistItemsView,
                         PlaylistReorderView, PlaylistsView,
@@ -126,6 +128,10 @@ urlpatterns = [
     # KeyConnectZ — the keyboard. Wallpaper is Premium; translate is free.
     path("keyz/", KeyboardView.as_view(), name="economy-keyz"),
     path("keyz/translate/", KeyTranslateView.as_view(), name="economy-keyz-translate"),
+    # Voice, both directions. Neither is gated by tier — the allowance is, and
+    # GET keyz/ publishes it before either button is pressed.
+    path("keyz/transcribe/", KeyTranscribeView.as_view(), name="economy-keyz-transcribe"),
+    path("keyz/speak/", KeySpeakView.as_view(), name="economy-keyz-speak"),
     path("wallet/add/", AddFundsView.as_view(), name="economy-wallet-add"),
     path("owner/revenue/", OwnerRevenueView.as_view(), name="economy-owner-revenue"),
     path("membership/", MembershipView.as_view(), name="economy-membership"),
@@ -174,6 +180,13 @@ urlpatterns = [
     path("royalties/cashout/", RoyaltyCashoutView.as_view(), name="economy-royalties-cashout"),
     path("uploads/", UploadsView.as_view(), name="economy-uploads"),
     path("uploads/<int:pk>/", UploadDetailView.as_view(), name="economy-upload-detail"),
+    # The address an upload is HANDED OUT under, and the only one anything
+    # stores. Resolved to wherever the bytes are on every request, so a signed
+    # bucket URL is minted fresh instead of being frozen into a post that then
+    # goes dead an hour later. No trailing slash, and the filename last —
+    # `upload_behind()` finds the take on a post by the tail of its URL.
+    re_path(r"^media/(?P<pk>\d+)/(?P<filename>[^/]+)$",
+            MediaFileView.as_view(), name="economy-media-file"),
     path("checkout/config/", CheckoutConfigView.as_view(), name="economy-checkout-config"),
     path("checkout/stripe/", StripeCheckoutView.as_view(), name="economy-checkout-stripe"),
     path("checkout/paypal/", PaypalCreateView.as_view(), name="economy-checkout-paypal"),

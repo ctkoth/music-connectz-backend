@@ -1,0 +1,465 @@
+================================================================================
+THE COREY VOICE — Music ConnectZ house paradigm, written down so it can be
+                  replicated by anyone (or any model) touching this codebase.
+================================================================================
+
+Everything below is drawn from what is already in the two repos. Nothing here
+is invented style advice — every rule has a live example, and most have a live
+violation too, because the violations are how the rules got written.
+
+Read this before writing: member-facing copy, code comments, commit messages,
+CLAUDE.md sections, error strings, button labels, docs.
+
+
+================================================================================
+PART 1 — THE FOUR RULES (the paradigm itself)
+================================================================================
+
+These are named in CLAUDE.md in both repos. They are product rules, not style
+rules, but the voice exists to serve them, so they come first.
+
+--------------------------------------------------------------------------------
+RULE 1 — COST AND GAIN, UP FRONT  ("Corey's rule")
+--------------------------------------------------------------------------------
+Every action that moves a resource states its cost and its gain BEFORE the
+member commits to it. Never after. Never only in the result.
+
+    −1 🏷️   +8 ⚡
+
+    Red / minus  = what leaves you      -> text-mcz-ember
+    Green / plus = what you get         -> text-emerald-300
+
+  * Always the resource emoji, never a bare number.
+  * ⚡ Energy · 🍥 SpinaZ · 🏷️ PromptZ · 💵 Money · ⭐ XP
+  * Import from src/resources.js. Never retype the character.
+  * The cost goes ON the button or immediately beside it. If the member has to
+    press it to learn the price, it is wrong.
+  * Free actions that EARN still show the gain. "+1 ⚡" on a rating is the whole
+    reason anyone rates.
+  * Say whether a FAILED attempt is charged. It usually should not be.
+  * Two-sided rewards show both sides: a referral is +300 🍥 / +100 🍥.
+
+The sentence that carries the whole rule:
+    "A price discovered by paying it is not a price, it's a bill."
+
+--------------------------------------------------------------------------------
+RULE 2 — SUBSTANCE BEFORE THE GAME LAYER  ("Corey's third rule")
+--------------------------------------------------------------------------------
+Every skill, score and rating must measure the real thing. XP, badges, ⭐,
+medians and leaderboards SHOW reality; they never substitute for measuring it.
+Gamified reality, not gamified nothing.
+
+The test for any number the app displays:
+    "Could a member get a good one without getting good?"
+If yes, it is decoration wearing a measurement's clothes.
+
+  * A score derived from FORM COMPLETENESS is not a score. Field count, text
+    length, number of collaborators, money spent — none of these are quality,
+    and a rating built on them teaches members to pad.
+  * If the real thing cannot be measured yet, SAY WHAT THE NUMBER IS.
+    "Seeded from how staffed this work is" is honest.
+    "AI craft estimate" is not.
+  * Prefer no number to a fake one. An empty rating invites a real one; a fake
+    one ends the question.
+  * XP and badges MAY reward effort. Ratings and skill levels MAY NOT.
+    Turning up is worth something; it is not worth being called good.
+
+Live example (good):  vocalcoach.py — a model actually listens to the take.
+Live violation:       models.directz_ai_rating — counts contributors and
+                      description length and calls it craft.
+
+--------------------------------------------------------------------------------
+RULE 3 — CROSS-POLLINATION  ("Corey's crux")
+--------------------------------------------------------------------------------
+Nothing is a dead end. Something created, recorded or noticed in one app opens
+in another to edit or analyse. A member should never hit a screen that shows
+them a fact and gives them nowhere to take it.
+
+  * Anything that stores a thing stores WHERE IT CAME FROM:
+        Observation(kind=..., key=..., app_key="singz", target="singz:coach")
+  * Every row served carries `open_in` so the client can offer the jump.
+  * goToSpot(tab, target) lands on the exact CONTROL, not the top of the app.
+  * A post carries `destinations` — every app that can do something with it,
+    what each still needs, and what it costs before it is spent.
+
+When adding a screen, ask what a member would want to DO with each row, and
+give them the link.
+    "A read-only surface is usually an unfinished one."
+
+--------------------------------------------------------------------------------
+RULE 4 — THE REAL ERROR, ALWAYS
+--------------------------------------------------------------------------------
+Save handlers must report the REAL error. A `catch` that answers "saved" on
+failure is named in CLAUDE.md as "the worst bug class in this app" — and it has
+shipped twice.
+
+Extended in practice to:
+  * One sentence for four different problems is not an error message.
+    (A refused API key, a retired model, a spent quota and an unreadable
+    container all came back as "The coach couldn't process that take" — which
+    reads to the member as "my take was bad".)
+  * Say WHOSE limit refused you. The coach's own ceiling and the member's tier
+    upload limit are different facts and must not be swapped.
+  * Never assert as fact something you only inferred. A browser that cannot
+    play a file has not established that the file is missing.
+
+
+================================================================================
+PART 2 — THE VOICE (sentence-level mechanics)
+================================================================================
+
+The voice is the same in member copy, in code comments and in commit messages.
+That is deliberate: the same person is talking, and the reasoning that belongs
+in a comment is the reasoning that produced the copy.
+
+--------------------------------------------------------------------------------
+2.1  THE SIGNATURE MOVE: the reversal
+--------------------------------------------------------------------------------
+State the thing, then state what it is NOT, using an em dash or a comma. The
+negative half is where the meaning lands.
+
+    "A price discovered by paying it is not a price, it's a bill."
+    "A model is a chain, not a name."
+    "The coach's ceiling is a judgement now, not a transport limit."
+    "A recording that isn't there is an answer, not a 500."
+    "A read-only surface is usually an unfinished one."
+    "Gamified reality, not gamified nothing."
+    "A refusal you discover by pressing the button is the same failure as a
+     price you discover by paying it."
+    "A warning nobody sees is the same as no warning, which is what we had."
+
+Formula:   <X> is <what it actually is>, not <what it was being treated as>.
+           A <thing> that <does the wrong thing> is not a <thing>, it's a <worse thing>.
+
+Use it once per paragraph at most. It is a punch, not a rhythm.
+
+--------------------------------------------------------------------------------
+2.2  ALWAYS SAY WHY, AND SAY THE COST OF THE ALTERNATIVE
+--------------------------------------------------------------------------------
+Never state a decision without the consequence that forced it. The reader
+should be able to reconstruct the bug from the comment.
+
+    # Stop BELOW the cap, not at it. stop() flushes one more chunk, so leaving
+    # room for two seconds of the heaviest second seen so far keeps the finished
+    # take inside the limit — otherwise the size stop would hand attach() a file
+    # attach() then refuses, losing the take twice.
+
+    # Measured from the ROW, never from the file. `Upload.size_bytes` is a
+    # column; `FieldFile.size` is a storage call that raises on a file that has
+    # gone missing — which is exactly how the ceiling check turned a dead
+    # recording into a 500.
+
+--------------------------------------------------------------------------------
+2.3  NAME THE SCAR
+--------------------------------------------------------------------------------
+When something exists because it broke, say so, concretely, with the number or
+the symptom. Vague regret is not documentation.
+
+    # It does not: a 640x360, 900kbps request came back as 1,407.8MB of 1080p
+    # at roughly 20Mbps, because every constraint below `max` is a preference
+    # the encoder may ignore.
+
+    # that is how the "20 free prompts" figure ended up in nine places and drifted.
+
+    # Keep the filename in state rather than assigning onto the Blob: File.name
+    # is a read-only getter, so Object.assign threw and swallowed the attach.
+
+    """The one that reached a member's screen as "Something went wrong on our side."."""
+
+Phrases that carry this: "learned the hard way", "has shipped twice",
+"it also left me guessing from a screenshot", "this exists because it did not,
+and nothing said so".
+
+--------------------------------------------------------------------------------
+2.4  SECOND PERSON, PLAIN WORDS, MEMBER-SIDE
+--------------------------------------------------------------------------------
+Member copy talks to the member about their own work. No product-speak, no
+apology theatre, no "oops", no exclamation marks.
+
+    "Record one take — mic or camera — or upload audio or video, and have it
+     scored. You'll get what actually worked, what to fix, and a drill to run
+     before the next one."
+
+    "That take is 31.2MB — keep it under 200MB. Trim it to the section you want
+     scored, or record video at a shorter length."
+
+    "Stopped at 90 seconds — that's a full Boss Take. Send it, or record another."
+
+Every refusal ends with the way forward. Never a dead stop.
+
+Banned from member copy:
+    "Oops"  "Something went wrong"  "Please try again later"  "Error occurred"
+    "Invalid input"  "Failed"  bare status codes  stack traces  markup
+
+--------------------------------------------------------------------------------
+2.5  THE VOCABULARY
+--------------------------------------------------------------------------------
+Words this codebase uses, on purpose:
+
+    member          (never "user")
+    take            (one recorded performance — a Boss Take is ONE take)
+    the coach       (never "the AI" or "the model" in member copy)
+    ceiling / cap / wall / the line     (limits)
+    door / destination / the jump / hand over / carry   (cross-pollination)
+    spend / costs / charged / billed    (never "consume", never "deduct")
+    the row / the card / the button / the control
+    up front        (the timing word for Rule 1)
+    honest          (the adjective for a number that measures the real thing)
+    substance       (the opposite of decoration)
+
+Capitalisation: apps are CamelCase-Z — SingZ, RapZ, PostZ, OnboardZ, CollabZ,
+BattleZ, DirectZ, MembershipZ, LogZ, OCC. Tiers: Free, StatZ. Boss Take is two
+capitalised words.
+
+--------------------------------------------------------------------------------
+2.6  EM DASHES, COLONS AND THE TWO-BEAT SENTENCE
+--------------------------------------------------------------------------------
+The em dash carries the turn; the colon carries the payoff. Sentences run long
+because the reasoning runs long, but they always resolve on a short clause.
+
+    "The player says whether YOUR BROWSER can play it. It cannot say whether the
+     coach can read it — the coach fetches the file from storage and never
+     touches this element — so `onError` sets a note, not a verdict."
+
+CAPITALS for a single load-bearing word are allowed and used: ROW, NOT, WHOSE,
+BELOW, SOMEBODY ELSE. One per paragraph. Never a whole sentence.
+
+--------------------------------------------------------------------------------
+2.7  NUMBERS AND WHERE THEY LIVE
+--------------------------------------------------------------------------------
+Tier numbers (char limits, prompts, storage, prices) come from the server via
+limits.js -> /api/economy/limits/. NEVER hardcode one in copy.
+apps/economy/catalog.py is the single source of truth.
+
+When a number appears in prose, say where it came from and what could move it:
+    "It is 200MB now, and the reason matters: big takes are uploaded to Google's
+     Files API first and read by URI, which takes 2GB a file, free. So the number
+     is no longer 'what fits in a request' — it is a judgement about what one
+     take IS, and it can move without anyone re-deriving base64 overhead."
+
+
+================================================================================
+PART 3 — COMMIT MESSAGES
+================================================================================
+
+--------------------------------------------------------------------------------
+3.1  THE SUBJECT LINE
+--------------------------------------------------------------------------------
+A sentence, not a label. No "fix:", no "feat:", no ticket numbers, no scope
+prefixes. Lowercase after the first word. No trailing period. Usually states
+the RESULT or the REVERSAL, not the change.
+
+Real subjects:
+    A player that can't play a take is not a coach that can't read it
+    A recording that isn't there is an answer, not a 500
+    A model is a chain, not a name — the coach stops dying with one model ID
+    The app says out loud when it is about to eat everyone's music
+    The coach's ceiling is stated on the row, not discovered at the button
+    "+1 🏷️" was a green plus on something that spends
+    Only offer a sign-in that can finish
+    Take the post with you — into the coach, and into every other app
+    A post opens in any app that can do something with it
+    The Owner badge stops claiming the money it doesn't move
+
+Patterns that recur:
+    <Thing> is <what it is>, not <what it was>
+    <Thing> stops <doing the wrong thing>
+    <Feature>: <the one-line reason it exists>
+    Only <do the honest version>
+
+--------------------------------------------------------------------------------
+3.2  THE BODY
+--------------------------------------------------------------------------------
+Wrapped at ~72. Structured as:
+
+    1. WHAT WAS WRONG — concretely, in the member's experience where possible.
+    2. WHY IT WAS WRONG — the mechanism. Name the function, the field, the call.
+    3. WHAT THE CHANGE IS — stated as the new rule, not as a diff summary.
+    4. What is deliberately NOT in it, and why. (Used often. See below.)
+
+Bare ALL-CAPS headers are used for longer bodies:
+    WHAT IT PAYS
+    "POST 5 TRACKS" IS NOT IN HERE, ON PURPOSE
+    THE RULES IT FOLLOWS
+
+The "deliberately not" section is a signature. It pre-empts the reviewer:
+    "'Post 5 tracks' is deliberately not in the set — posting is free without
+     priced skills, so it pays for spam. The weekly counts posts somebody else
+     rated instead: same work honestly, unreachable for one account."
+
+Never mention the tool or model that wrote the change. Never put a model
+identifier in a commit message, PR body, code comment or any pushed artifact.
+
+--------------------------------------------------------------------------------
+3.3  MERGES
+--------------------------------------------------------------------------------
+Merge commits are written, not defaulted:
+    Merge: the quest board, the Play release kit, and two dead links fixed
+    Merge: a check for whether the per-URL meta is actually running in production
+
+Both repos auto-deploy from main, so THE MERGE IS THE DEPLOY. Develop on a
+branch; the merge is the deliberate act. When a screen needs a new endpoint,
+merge the BACKEND FIRST — an endpoint may exist before anything calls it, but
+never the reverse.
+
+
+================================================================================
+PART 4 — CODE COMMENTS
+================================================================================
+
+Comment density here is HIGH and that is intentional. The comments carry the
+product reasoning, so they are written for the person who will be tempted to
+undo the line.
+
+  * Module docstrings open with a question or a claim, then answer it.
+        """Is the place member uploads go actually going to keep them?
+        This exists because it did not, and nothing said so."""
+
+        """Where a post can go next."""
+
+  * Function docstrings state the RETURN as a phrase, then the rule.
+        """(post, file, content_type, error_response) for a post-sourced take.
+        The post is resolved from the id and read for its OWN media URL — the
+        client never says which file to score, so no address it invents can
+        reach a file."""
+
+  * Inline comments explain the ALTERNATIVE that was rejected:
+        # VP8 first for video, not MP4. Android records MP4 through a hardware
+        # encoder that commonly ignores videoBitsPerSecond — which is how a
+        # 900kbps request produced a 20Mbps file.
+
+  * Test docstrings name the incident:
+        """The one that reached a member's screen as "Something went wrong on
+        our side." Render's web disk is ephemeral, so an Upload row can outlive
+        its file."""
+
+  * Test method names are sentences:
+        test_a_recording_missing_from_storage_is_an_answer_not_a_500
+        test_the_ceiling_is_measured_without_touching_storage
+        test_an_unreadable_container_never_reaches_the_model
+        test_a_post_can_be_coached_without_uploading_the_take_again
+
+  * Test CLASS docstrings state the rule the class defends:
+        class TheFailureSaysWhichFailureItWasTests:
+            """One sentence for four different problems is not an error message."""
+
+
+================================================================================
+PART 5 — CLAUDE.md / DOCS SECTIONS
+================================================================================
+
+Sections follow a fixed shape:
+
+    ## <The rule, as a sentence with a claim in it>
+
+    **<The rule in one bold line.>** Then two or three sentences of why.
+
+    - bullets of what it means IN PRACTICE, each one actionable
+    - each bullet is a sentence, not a fragment
+
+    ### Known violations, not yet fixed
+
+    - **`thing`** — what it does wrong, and what would fix it.
+
+"Known violations, not yet fixed" is the most important habit in these docs.
+The codebase names its own broken parts BY NAME and keeps them named until they
+are fixed. Do not remove one to make a doc look clean; remove it when the code
+changes.
+
+Headings are claims, not nouns:
+    "The coach's ceiling is a judgement now, not a transport limit"
+    "The coach's live path has one check, and it isn't a test"
+    "Tier limits live on the server"
+    "Substance before the game layer"
+
+
+================================================================================
+PART 6 — THE CHECKLIST (run this before shipping anything)
+================================================================================
+
+COPY
+  [ ] Does every button that spends something say so ON or BESIDE it?
+  [ ] Is the resource EMOJI there, not a bare number?
+  [ ] Does it say whether a FAILED attempt is charged?
+  [ ] Does every refusal end with the way forward?
+  [ ] Is every number read from the server, not hardcoded?
+  [ ] Would a member know WHOSE limit stopped them?
+
+NUMBERS
+  [ ] Could someone get a good score without getting good?
+  [ ] If the number can't measure the real thing, does it SAY what it measures?
+  [ ] Is a fake number being shown where no number would be more honest?
+
+SURFACES
+  [ ] Can a member DO something with every row on this screen?
+  [ ] Does every stored thing record where it came from (app_key / target)?
+  [ ] Does every row that could travel carry `open_in`?
+
+ERRORS
+  [ ] Does the failure say WHICH failure it was?
+  [ ] Is anything being asserted as fact that was only inferred?
+  [ ] Does any catch answer "saved" on a failure?
+
+VOICE
+  [ ] Is there one reversal, and only one, per paragraph?
+  [ ] Does every non-obvious line say WHY, including the rejected alternative?
+  [ ] Is the scar named, with its number or symptom?
+  [ ] Is it "member", not "user"?
+  [ ] Any "Oops", "Something went wrong", or exclamation marks? Remove them.
+
+
+================================================================================
+PART 7 — SIDE BY SIDE
+================================================================================
+
+BEFORE                                  AFTER
+------                                  -----
+"Send it to the coach"                  "Send it to the coach"  −1 🏷️
+                                        "A take the coach can't read isn't charged."
+
+"Free today +1 🏷️"                      "Free today — uses 1 of the 4 🏷️ you
+                                         have left"
+(a green plus on something that spends)
+
+"That file is too large."               "That take is 31.2MB — keep it under
+                                         200MB. 200MB is your tier's upload
+                                         limit; the coach itself takes up to
+                                         200MB — a tier up gets you there."
+
+"The coach couldn't process that take." "The coach's key was refused." /
+(one sentence for four problems)        "That model has been retired." /
+                                        "The coach's quota is spent for now." /
+                                        "audio/x-weird isn't a container the
+                                         coach can read."
+
+"AI craft estimate: 8/10"               "Seeded from how staffed this work is —
+                                         not a craft score. Three member
+                                         ratings replace it."
+
+"This recording won't load — it isn't    "This preview won't play in your browser
+ on the server any more."                — that's the player, not the take. The
+(inferred from an <audio> onError)       coach reads the file from the server
+                                         rather than from here, so send it and
+                                         find out: a take it can't read isn't
+                                         charged."
+
+"Something went wrong on our side."     "The recording on "She's too Good for me"
+(a 500 from a missing file)              isn't on the server any more, so there's
+                                         nothing for the coach to listen to.
+                                         Record or attach the take here and it'll
+                                         be scored."
+
+
+================================================================================
+PART 8 — THE ONE-PARAGRAPH SUMMARY
+================================================================================
+
+Tell the member the price before they pay it, in the currency's own emoji, on
+the button itself. Measure the real thing or admit you are not measuring it.
+Never leave anyone on a screen with nowhere to go. When something fails, say
+which failure it was and what to do next. Write every comment for the person
+who will want to delete the line, and every commit message as the sentence that
+would have prevented the bug. Name your own broken parts, keep them named, and
+say what it would take to fix them.
+
+================================================================================
