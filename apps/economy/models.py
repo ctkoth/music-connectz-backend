@@ -3498,3 +3498,126 @@ class GameAsset(models.Model):
 
     def __str__(self):
         return f"{self.game_id}:{self.path}"
+
+
+# ---- JournalZ 📔 — the diary, and the one app whose default is silence.
+#
+# Every other surface in Music ConnectZ publishes. PostZ, CollabZ, BattleZ,
+# DirectZ — you make a thing and the room sees it. A diary is the opposite
+# promise, and the promise is the product: an entry is PRIVATE unless the member
+# does something deliberate to change that.
+#
+# Which is why the tagging on it is careful rather than clever. An entry can tag
+# members and a place like a post can, but a tag on a private entry is a note to
+# yourself: nobody is notified, nobody can read it, and the coordinates never
+# leave the author. Sharing is what turns a tag into a mention — see
+# `journalz.py`, where that transition is the only place a notification is sent.
+#
+# `mood` and `weather` carry the two things Diarium-style journals have always
+# kept beside the words. They are FACTS about the day, recorded by the member —
+# not scores. Nothing in this app rates a journal entry, and nothing should: a
+# number on somebody's diary is the exact shape of the failure CLAUDE.md names,
+# a score you could get a good one of without getting good at anything.
+JOURNAL_MOODS = [
+    ("great", "Great 😄"), ("good", "Good 🙂"), ("ok", "OK 😐"),
+    ("low", "Low 🙁"), ("rough", "Rough 😣"),
+]
+JOURNAL_MOOD_KEYS = [k for k, _ in JOURNAL_MOODS]
+
+# What one entry can carry, before the tier caps bite. Hard ceilings on the
+# JSON columns so a client bug can't write a megabyte of tags.
+JOURNAL_MAX_TAGS = 60
+JOURNAL_MAX_PEOPLE = 30
+JOURNAL_MAX_ITEMS = 10
+
+
+class JournalEntry(models.Model):
+    """One day, written down. Private by default — see the module note above."""
+
+    VIS_PRIVATE = "private"
+    VIS_RESTRICTED = "restricted"
+    VIS_PUBLIC = "public"
+    # Same three words PostZ uses, in the same order, because a member who has
+    # learned what "restricted" means on a post should not have to learn it
+    # again here. The DEFAULT is the difference: a post is public, a diary
+    # entry is not.
+    VIS_CHOICES = [(VIS_PRIVATE, "Just me"), (VIS_RESTRICTED, "Members only"),
+                   (VIS_PUBLIC, "Public")]
+
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="journal_entries")
+    # The day the entry is ABOUT, which is not always the day it was written —
+    # writing up Saturday on Sunday morning is the normal case, not the edge
+    # one. `created_at` keeps the writing time; this keeps the day it belongs to,
+    # and every calendar, streak and On-This-Day read goes through it.
+    day = models.DateField(db_index=True)
+    title = models.CharField(max_length=160, blank=True, default="")
+    # TextField for the same reason Profile.bio is one: the cap belongs to the
+    # member's tier (unlimited at StatZ), so no column width can express it.
+    body = models.TextField(blank=True, default="")
+    mood = models.CharField(max_length=12, blank=True, default="", choices=JOURNAL_MOODS)
+    weather = models.CharField(max_length=40, blank=True, default="")
+    # Free-text tags, lowercased on the way in. The member's own vocabulary,
+    # not a fixed taxonomy — a diary that only accepts the app's words is a form.
+    tags = models.JSONField(default=list, blank=True)
+    # Usernames tagged on the entry. Kept as names rather than a join table for
+    # the same reason Post.contributors is: an entry is a document, and a
+    # deleted account should leave the sentence it was written in intact. The
+    # rows that MATTER — who was told — are JournalMention.
+    people = models.JSONField(default=list, blank=True)
+    # Where it happened. The name always travels with a shared entry; the
+    # coordinates only do when `place_exact` is on. Off by default, because
+    # "the pub on Dorset Road" and "51.4571, -2.5891" are not the same
+    # disclosure and only one of them is a place a stranger can wait at.
+    place_name = models.CharField(max_length=120, blank=True, default="")
+    place_lat = models.FloatField(null=True, blank=True)
+    place_lng = models.FloatField(null=True, blank=True)
+    place_exact = models.BooleanField(default=False)
+    # Attachments, in PostZ's `items` shape [{url, type, title, lyrics}] so a
+    # shared entry hands its media straight to `create_post` and the coach can
+    # read a take off a journal entry without it being posted first.
+    items = models.JSONField(default=list, blank=True)
+    visibility = models.CharField(max_length=12, choices=VIS_CHOICES, default=VIS_PRIVATE)
+    # The post this entry was published as, when it was. SET_NULL so deleting
+    # the post never takes the diary entry with it — the entry is the original
+    # and the post is the copy, never the other way round.
+    shared_post = models.ForeignKey("Post", on_delete=models.SET_NULL, null=True,
+                                    blank=True, related_name="journal_entries")
+    created_at = models.DateTimeField(auto_now_add=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-day", "-created_at")
+        indexes = [models.Index(fields=["author", "day"])]
+
+    def __str__(self):
+        return f"{self.day} {self.title or '(untitled)'} <{self.author}>"
+
+    @property
+    def is_private(self):
+        return self.visibility == self.VIS_PRIVATE
+
+
+class JournalMention(models.Model):
+    """A member who was actually TOLD they were tagged in an entry.
+
+    Separate from `JournalEntry.people` on purpose, and the separation is the
+    privacy rule made structural: `people` is what the author wrote down, this
+    is what left the author's account. A private entry has names in `people` and
+    no rows here, and that is what makes tagging safe to offer on a diary.
+
+    One row per (entry, member), so re-sharing an entry can't notify the same
+    person twice — the same discipline PostShare uses for its reward.
+    """
+    entry = models.ForeignKey(JournalEntry, on_delete=models.CASCADE,
+                              related_name="mentions")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="journal_mentions")
+    notified_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("entry", "user")
+        ordering = ("-notified_at",)
+
+    def __str__(self):
+        return f"{self.entry_id} → {self.user}"

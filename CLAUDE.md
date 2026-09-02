@@ -193,7 +193,7 @@ Two things that must not rot:
 
 Like the coach's upload path, **the TTS transport has never run against
 Google** — CI has no key. `tools/keyvoice_live_check.sh` is the check that can.
-=======
+
 ## Uploads have to outlive a deploy, and there are two ways to make them
 
 Render's web filesystem is part of the container, and the container is rebuilt

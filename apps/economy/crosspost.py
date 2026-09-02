@@ -348,6 +348,22 @@ def destinations_for(post, user, media, *, price=None, collabs=0, take_bytes=Non
         "gain": {"what": "your entry, prefilled"},
         "carry": carry(post, media),
     })
+    # The diary door. Cross-pollination runs both ways or it isn't a loop:
+    # JournalZ publishes an entry as a post, and this is the return leg — the
+    # track you just heard, kept in your own day, where nobody else sees it.
+    out.append({
+        "app": "journalz",
+        "label": "Keep it in your journal",
+        "target": "journalz-composer",
+        "action": "seed",
+        "what": "Start today's JournalZ entry from this post — the title, the words "
+                "and the attachment come with it. The entry is private, so keeping "
+                "somebody else's post in your day tells them nothing.",
+        "needs": [],
+        "cost": FREE,
+        "gain": {"what": "today's entry, prefilled — and the QuestZ daily it completes"},
+        "carry": carry(post, media),
+    })
     out.append({
         "app": "occ",
         "label": "Rework it in OCC",

@@ -157,6 +157,31 @@ def edit_window_for(tier):
     return EDIT_WINDOW_SECONDS.get(tier, EDIT_WINDOW_SECONDS[TIER_FREE])
 
 
+# JournalZ — what one entry can carry, by tier.
+#
+# Note what is NOT in here: how far back a member can read their own diary, and
+# how many entries they may keep. Those were the obvious places to put a wall
+# and they are the wrong ones — a journal that hides last year behind a payment
+# is holding somebody's own words hostage, and nobody upgrades out of resentment.
+# What a tier buys instead is ROOM: more attachments on a day, more people and
+# tags on an entry, more entries in one day. The words are always free and
+# always readable.
+#
+# The body length is NOT here either — it runs through `over_char_limit`, like
+# every other member-authored field, so a Premium member gets their 1,500 and a
+# StatZ member writes without a cap.
+JOURNAL_LIMITS = {
+    TIER_FREE: {"attachments": 1, "tags": 5, "people": 3, "per_day": 3},
+    TIER_PREMIUM: {"attachments": 4, "tags": 20, "people": 10, "per_day": 10},
+    TIER_STATZ: {"attachments": 10, "tags": 60, "people": 30, "per_day": 50},
+    TIER_DEBUG: {"attachments": 10, "tags": 60, "people": 30, "per_day": 500},
+}
+
+
+def journal_limits_for(tier):
+    return JOURNAL_LIMITS.get(tier, JOURNAL_LIMITS[TIER_FREE])
+
+
 # Royalty cashout tax by plan. Weekly is its own per-tier schedule
 # (Free 10% / Premium 5% / StatZ 3%) — matches the StatZ developer-tax rate.
 # The others are flat.
