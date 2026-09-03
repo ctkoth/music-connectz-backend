@@ -7,7 +7,12 @@ from django.http import JsonResponse
 from django.urls import include, path, re_path
 from django.views.static import serve as static_serve
 
-from apps.economy.views import PublicStatsView, StatsView
+from apps.economy.views import (
+    FunnelEventView,
+    FunnelSummaryView,
+    PublicStatsView,
+    StatsView,
+)
 from apps.omviardz.wellknown import AssetLinksView
 
 # SkillZ training is generated per app_key. MimeZ/DirectZ/LessonZ mount their own
@@ -75,6 +80,10 @@ urlpatterns = [
     path("api/auth/stats/", StatsView.as_view(), name="auth-stats"),
     # No session required — the landing page's real member/online count.
     path("api/auth/public-stats/", PublicStatsView.as_view(), name="auth-public-stats"),
+    # No session required — a step on the join funnel, logged by a visitor
+    # who may never have had one. Owner-only summary sits behind it.
+    path("api/auth/funnel/", FunnelEventView.as_view(), name="auth-funnel"),
+    path("api/auth/funnel/summary/", FunnelSummaryView.as_view(), name="auth-funnel-summary"),
     path("api/auth/", include("apps.accounts.urls")),
     path("api/economy/", include("apps.economy.urls")),
     path("api/mimez/", include("apps.mimez.urls")),

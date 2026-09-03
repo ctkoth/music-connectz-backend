@@ -3621,3 +3621,41 @@ class JournalMention(models.Model):
 
     def __str__(self):
         return f"{self.entry_id} → {self.user}"
+
+
+# Steps on the join funnel, in the order a visitor actually clears them.
+# A closed set on purpose — see FunnelEventView.ALLOWED_KINDS — so a typo on
+# the client can't quietly start a new, never-analysed event kind.
+FUNNEL_KINDS = (
+    ("landing_view", "Landing page viewed"),
+    ("try_view", "Trial take screen opened"),
+    ("try_scored", "Trial take scored"),
+    ("register_view", "Register screen opened"),
+    ("register_success", "Account created"),
+    ("login_success", "Logged in"),
+)
+
+
+class FunnelEvent(models.Model):
+    """One step of the join funnel, from a visitor who may have no account yet.
+
+    Before this there was no way to answer "where do people drop off before
+    joining" except by guessing — no analytics of any kind ran on the
+    logged-out path. `anon_id` is a UUID the client makes up and keeps in
+    localStorage; it identifies a BROWSER for one session's worth of funnel
+    steps, never a person, and nothing here is exported or joined against
+    Users — see FunnelSummaryView, which only ever returns counts.
+    """
+    kind = models.CharField(max_length=20, choices=FUNNEL_KINDS, db_index=True)
+    anon_id = models.CharField(max_length=64, db_index=True)
+    # Free-form, small, server-validated shape per kind (e.g. {"app_key": "singz"}
+    # on a trial event) — never free text a visitor typed, which is what keeps
+    # this from becoming a place PII could land by accident.
+    meta = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.kind} @ {self.created_at:%Y-%m-%d %H:%M}"

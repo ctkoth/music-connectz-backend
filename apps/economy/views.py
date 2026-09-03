@@ -12,10 +12,12 @@ from .catalog import AI_MODEL_COSTS, SPECZ_CATALOG, ai_cost, cashout_rate, limit
 from .media import stable_media_url
 from .models import (
     DEV_TAX,
+    FUNNEL_KINDS,
     MB,
     TIER_CHOICES,
     TIER_DEBUG,
     TIER_STATZ,
+    FunnelEvent,
     Membership,
     RoyaltyEntry,
     SpecZPurchase,
@@ -262,6 +264,104 @@ class PublicStatsView(APIView):
         return Response({
             "total_members": User.objects.count(),
             "online_now": online_now,
+        })
+
+
+class FunnelEventView(APIView):
+    """One step of the join funnel, logged by a visitor who may have no
+    account yet: POST /api/auth/funnel/.
+
+    Before this, nothing on the logged-out path was measured at all — "why
+    isn't anybody joining" had no data behind it, only guesses. `kind` is
+    checked against FUNNEL_KINDS so a client typo can't silently open a new,
+    never-analysed event type; `meta` is checked against a small per-kind
+    allowlist so this never becomes a place free-typed text (and therefore
+    PII) can land by accident.
+    """
+
+    permission_classes = [AllowAny]
+
+    ALLOWED_KINDS = {k for k, _ in FUNNEL_KINDS}
+    # Per kind, the only meta keys accepted and how each is coerced. Anything
+    # else in the posted meta is dropped, not stored.
+    META_SHAPE = {
+        "try_view": {"app_key": lambda v: v if v in ("singz", "rapz") else None},
+        "try_scored": {"app_key": lambda v: v if v in ("singz", "rapz") else None},
+        "register_view": {
+            "has_ref": lambda v: bool(v),
+            "has_trial": lambda v: bool(v),
+        },
+    }
+
+    def post(self, request):
+        kind = str(request.data.get("kind") or "")
+        anon_id = str(request.data.get("anon_id") or "").strip()[:64]
+        if kind not in self.ALLOWED_KINDS or not anon_id:
+            return Response({"detail": "Invalid event."}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw_meta = request.data.get("meta") or {}
+        shape = self.META_SHAPE.get(kind, {})
+        meta = {}
+        if isinstance(raw_meta, dict):
+            for key, coerce in shape.items():
+                if key in raw_meta:
+                    value = coerce(raw_meta[key])
+                    if value is not None:
+                        meta[key] = value
+
+        FunnelEvent.objects.create(kind=kind, anon_id=anon_id, meta=meta)
+        # 204: there is nothing for the client to do with the response, and a
+        # beacon-style call (sendBeacon, fire-and-forget) never reads the body.
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class FunnelSummaryView(APIView):
+    """Owner-only read of the join funnel counts: GET /api/auth/funnel/summary/.
+
+    Real counts of real events, nothing modeled or estimated — the same
+    substance-over-decoration rule the rest of this file follows for scores
+    and ratings applies here too: a funnel number that could look fine
+    without the funnel actually working would be worse than no number.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        ensure_owner(request.user)  # promote the configured owner account, as StatsView does
+        if not is_owner(request.user):
+            return Response({"detail": "Only the platform owner sees this."},
+                            status=status.HTTP_403_FORBIDDEN)
+        days = min(max(int(request.query_params.get("days") or 30), 1), 90)
+        since = timezone.now() - timedelta(days=days)
+        rows = FunnelEvent.objects.filter(created_at__gte=since)
+
+        steps = {}
+        for kind, label in FUNNEL_KINDS:
+            qs = rows.filter(kind=kind)
+            steps[kind] = {
+                "label": label,
+                "events": qs.count(),
+                # Unique browsers reaching this step — the number that
+                # actually answers "how many people," not "how many clicks."
+                "unique": qs.values("anon_id").distinct().count(),
+            }
+
+        # Conversion relative to the top of the funnel actually measured —
+        # landing_view unless nobody hit it yet (e.g. only /try was shared
+        # directly), in which case the largest step stands in as the base
+        # rather than dividing by zero.
+        base_kind = "landing_view" if steps["landing_view"]["unique"] else max(
+            steps, key=lambda k: steps[k]["unique"]
+        )
+        base = steps[base_kind]["unique"] or 1
+        for kind in steps:
+            steps[kind]["pct_of_base"] = round(100 * steps[kind]["unique"] / base, 1)
+
+        return Response({
+            "days": days,
+            "since": since,
+            "base_kind": base_kind,
+            "steps": steps,
         })
 
 
