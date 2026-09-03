@@ -43,6 +43,39 @@ services:
         sync: false
       - key: APPLE_OAUTH_CLIENT_ID
         sync: false
+      # The rest of apps/accounts/oauth.py's OAUTH2_PROVIDERS registry (each
+      # needs both halves — provider_status() in oauth.py won't advertise a
+      # client ID whose secret is missing, and the button for it disappears
+      # rather than send a member to the provider only to refuse on the way
+      # back). These five were coded and had working frontend buttons for a
+      # long time with NO entry here at all — a from-scratch deploy off this
+      # blueprint left every one of them silently unconfigured no matter what
+      # the code could do, because Render only prompts for a value on a key
+      # the blueprint actually declares.
+      - key: SPOTIFY_OAUTH_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: FACEBOOK_OAUTH_CLIENT_ID
+        sync: false
+      - key: FACEBOOK_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: SOUNDCLOUD_OAUTH_CLIENT_ID
+        sync: false
+      - key: SOUNDCLOUD_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: TWITTER_OAUTH_CLIENT_ID
+        sync: false
+      - key: TWITTER_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: LINKEDIN_OAUTH_CLIENT_ID
+        sync: false
+      - key: LINKEDIN_OAUTH_CLIENT_SECRET
+        sync: false
       # ---- KEEPING MEMBERS' UPLOADS -------------------------------------
       # This container's disk is rebuilt on every deploy. With neither of the
       # two options below in force, every track, video and cover any member has
