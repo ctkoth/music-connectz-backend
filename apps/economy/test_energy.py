@@ -129,7 +129,7 @@ class EnergyRateByTierTests(TestCase):
         self.user = User.objects.create_user("r", "r@e.com", PW)
         import apps.economy.models as m
         orig = m.reach_median
-        m.reach_median = lambda user: 100
+        m.reach_median = lambda user, links_override=None: 100
         self.addCleanup(setattr, m, "reach_median", orig)
 
     def as_tier(self, tier):

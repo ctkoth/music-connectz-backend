@@ -1410,7 +1410,7 @@ class Follow(models.Model):
         unique_together = ("follower", "following")
 
 
-def social_sources(user):
+def social_sources(user, links_override=None):
     """Every follower source that counts toward reach: the Music ConnectZ
     follower count (always verified — it's our own number) plus each connected
     external account from Profile.links that has been VERIFIED (real count +
@@ -1418,13 +1418,22 @@ def social_sources(user):
     flagged so callers can exclude them from the median (anti-cheat: nobody
     games reach by typing a stranger's big follower number).
 
-    Each source: {label, followers, verified}."""
+    Each source: {label, followers, verified}.
+
+    `links_override`, when given, replaces Profile.links entirely — nothing
+    is read from or written to the database for it. This is what lets a
+    counterfactual ("what would my reach be if THIS link didn't count")
+    share this exact function instead of a second copy of the same math."""
     mcz_followers = len(set(
         Follow.objects.filter(following=user).values_list("follower_id", flat=True)
     ))
     sources = [{"label": "Music ConnectZ", "followers": mcz_followers, "verified": True}]
-    p = getattr(user, "mcz_profile", None)
-    for link in (getattr(p, "links", None) or []):
+    if links_override is not None:
+        raw_links = links_override
+    else:
+        p = getattr(user, "mcz_profile", None)
+        raw_links = getattr(p, "links", None) or []
+    for link in raw_links:
         if not isinstance(link, dict):
             continue
         try:
@@ -1446,11 +1455,11 @@ def social_sources(user):
     return sources
 
 
-def reach_median(user):
+def reach_median(user, links_override=None):
     """Median follower count across all VERIFIED sources. Median (not sum) so a
     single huge account can't dominate — it's the typical reach across the
     creator's proven presence. Unverified links are excluded."""
-    counts = [s["followers"] for s in social_sources(user) if s.get("verified")]
+    counts = [s["followers"] for s in social_sources(user, links_override) if s.get("verified")]
     m = _median(counts)
     return int(m) if m is not None else 0
 
@@ -1480,11 +1489,15 @@ def follow_counts(user):
     }
 
 
-def energy_rate_per_hour(user):
+def energy_rate_per_hour(user, links_override=None):
     """Hourly passive energy by tier, from the MEDIAN reach across a creator's
     verified sources (Music ConnectZ + verified external accounts):
-    Free = median/10, Premium = median/5, StatZ = median/1."""
-    reach = reach_median(user)
+    Free = median/10, Premium = median/5, StatZ = median/1.
+
+    `links_override` flows straight through to reach_median/social_sources —
+    it's what lets a single link's ⚡/hour swing (SocialZ's cost/gain chip)
+    share this exact formula instead of a second copy of it."""
+    reach = reach_median(user, links_override)
     m = membership_for(user)
     divisor = {TIER_FREE: 10, TIER_PREMIUM: 5, TIER_STATZ: 1, TIER_DEBUG: 1}.get(m.tier, 10)
     base = reach // divisor

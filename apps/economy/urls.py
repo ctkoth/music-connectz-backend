@@ -31,7 +31,8 @@ from .account import AccountExportView, AccountDeleteView
 from .messages_view import MessagesView
 from .logz import FeaturesView, LogZView
 from .observationz import ObservationConsentView, ObservationZView
-from .social_verify import SocialReviewQueueView, SocialVerifyView
+from .social_verify import (LinkDetectView, SocialReviewQueueView,
+                            SocialVerifyView, YouTubeVerifyView)
 from .parcel import ParcelCampaignView
 from .autotopup import AutoTopUpView, AutoTopUpCancelView
 from .identity import IdentityView
@@ -225,6 +226,12 @@ urlpatterns = [
     path("social/comment/", SocialView.as_view(), {"action": "comment"}, name="economy-social-comment"),
     path("social/rate/", SocialView.as_view(), {"action": "rate"}, name="economy-social-rate"),
     path("social/verify/", SocialVerifyView.as_view(), name="economy-social-verify"),
+    path("social/detect/", LinkDetectView.as_view(), name="economy-social-detect"),
+    # OAuth-connect verification — proves ownership AND reads the real count
+    # in one step, no scraping, no human queue. Only YouTube today; the same
+    # shape (access-token exchange + a statistics read) is how Spotify would
+    # go in next.
+    path("social/verify/youtube/", YouTubeVerifyView.as_view(), name="economy-social-verify-youtube"),
     # What the AI couldn't confirm goes to a person, not to a wall.
     path("social/reviews/", SocialReviewQueueView.as_view(), name="economy-social-reviews"),
     path("members/", MembersView.as_view(), name="economy-members"),

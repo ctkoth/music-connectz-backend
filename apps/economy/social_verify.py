@@ -17,9 +17,12 @@ Two layers, most-trusted first:
    number. Best-effort: some platforms block server fetches; the UI labels
    those links "unverified" and they're excluded from the reach median.
 """
+import os
 import re
 import secrets
+from urllib.parse import urlencode, urlparse
 
+import requests
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -27,10 +30,15 @@ from rest_framework.views import APIView
 
 from django.utils import timezone
 
-from .models import SocialReview, profile_for, reach_median, social_sources
+from .models import (SocialReview, energy_rate_per_hour, profile_for,
+                     reach_median, social_sources)
 
 VERIFY_MODEL = "claude-opus-4-8"
 CODE_PREFIX = "MCZ"
+
+
+def _env(name):
+    return os.environ.get(name, "").strip()
 
 
 def _issue_code():
@@ -178,18 +186,61 @@ def _ai_identity(page_text, user, profile):
             "handle": str(data.get("handle") or "")[:120]}, str(data.get("reason") or "")[:500], None
 
 
-class SocialVerifyView(APIView):
-    """POST /api/economy/social/verify/
+def _energy_delta_for_link(user, links, link):
+    """The ⚡/hour swing from this ONE link counting toward reach vs not —
+    the number the cost/gain chip on each link is built from.
 
+    A verified link shows what you'd LOSE by removing it (usually negative,
+    but not always: dropping a low source can raise a median, same as it can
+    for any set of numbers — the real arithmetic decides, never an assumed
+    sign). An unverified link with a known claimed count (from a pending
+    AI-flagged match) shows what you'd GAIN once it clears. None when there's
+    no real number behind it yet — no fabricated projection for a link that
+    is just a bare URL so far.
+    """
+    number = link.get("verified_count") if link.get("verified") else link.get("claimed_followers")
+    if number is None:
+        return None
+    current = energy_rate_per_hour(user, links)
+    toggled_link = (
+        {**link, "verified": False}
+        if link.get("verified")
+        else {**link, "verified": True, "verified_count": number}
+    )
+    toggled = [toggled_link if ln is link else ln for ln in links]
+    return energy_rate_per_hour(user, toggled) - current
+
+
+class SocialVerifyView(APIView):
+    """GET /api/economy/social/verify/ — every link + its verification state.
+
+    POST /api/economy/social/verify/
+    action="save"  {url, label?} → add/relabel a link, unverified, no checks run.
+    action="remove" {url}        → drop a link entirely.
     action="start" {url}  → issue a code to paste in the profile bio.
     action="check" {url}  → fetch the public page, AI-confirm the code + read the
                             real follower count, mark the link verified.
+    action="match" {url}  → no code needed; AI judges identity from the page.
 
     Returns the refreshed {sources, reach_median} so the client can redraw the
     median readout with the green ▲ / red ▼ delta.
     """
 
     permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Every link the member has added, with its verification state —
+        the read nothing else here provides, since every POST action only
+        returns this as a side effect of doing something to a link."""
+        p = profile_for(request.user)
+        links = p.links or []
+        annotated = [{**ln, "energy_delta": _energy_delta_for_link(request.user, links, ln)}
+                    for ln in links if isinstance(ln, dict)]
+        return Response({
+            "links": annotated,
+            "sources": social_sources(request.user),
+            "reach_median": reach_median(request.user),
+        })
 
     def post(self, request):
         action = str(request.data.get("action", "start")).strip().lower()
@@ -199,11 +250,39 @@ class SocialVerifyView(APIView):
 
         p = profile_for(request.user)
         links = list(p.links or [])
+
+        if action == "remove":
+            links = [ln for ln in links if _norm(ln.get("url")) != _norm(url)]
+            p.links = links
+            p.save(update_fields=["links", "updated_at"])
+            SocialReview.objects.filter(user=request.user, url=url).delete()
+            return Response({"removed": True, "sources": social_sources(request.user),
+                             "reach_median": reach_median(request.user)})
+
         link = _find_link(links, url)
         if link is None:
-            # Allow verifying a URL that isn't saved yet by adding a stub link.
+            # Allow verifying (or just saving) a URL that isn't stored yet.
             link = {"label": str(request.data.get("label", "")).strip() or url, "url": url}
             links.append(link)
+
+        if action == "save":
+            # Add or relabel a link WITHOUT verifying it yet — verification
+            # can come later (or never); a link is allowed to just sit on a
+            # profile unverified, same as it always could once one existed.
+            label = str(request.data.get("label", "")).strip()
+            if label:
+                link["label"] = label[:80]
+            # `service` came from LinkDetectView (a domain match or an AI
+            # guess) — stored so the client's icon lookup survives a reload
+            # without re-detecting the same URL every time the page loads.
+            service = str(request.data.get("service", "")).strip()
+            if service:
+                link["service"] = service[:40]
+            link.setdefault("verified", False)
+            p.links = links
+            p.save(update_fields=["links", "updated_at"])
+            return Response({"link": link, "sources": social_sources(request.user),
+                             "reach_median": reach_median(request.user)})
 
         if action == "start":
             code = link.get("code") or _issue_code()
@@ -292,6 +371,11 @@ class SocialVerifyView(APIView):
             # counting toward reach — being in the queue must not pay.
             link["verified"] = False
             link["review"] = "pending"
+            # Stashed on the link itself (not only the SocialReview row) so
+            # the ⚡/hour projection has a real number to project FROM the
+            # moment it's flagged, not only once a human clears it.
+            if result["followers"] is not None:
+                link["claimed_followers"] = result["followers"]
             p.links = links
             p.save(update_fields=["links", "updated_at"])
             SocialReview.objects.update_or_create(
@@ -313,8 +397,268 @@ class SocialVerifyView(APIView):
                 "reach_median": reach_median(request.user),
             }, status=status.HTTP_202_ACCEPTED)
 
-        return Response({"detail": "action must be start|check|match"},
+        return Response({"detail": "action must be save|remove|start|check|match"},
                         status=status.HTTP_400_BAD_REQUEST)
+
+
+# host -> (service key, display label). The service key is what the client
+# looks up a logo by, so it has to be stable — never rename one without
+# updating the client's icon registry alongside it.
+KNOWN_SERVICES = {
+    "spotify.com": ("spotify", "Spotify"),
+    "open.spotify.com": ("spotify", "Spotify"),
+    "soundcloud.com": ("soundcloud", "SoundCloud"),
+    "youtube.com": ("youtube", "YouTube"),
+    "youtu.be": ("youtube", "YouTube"),
+    "music.youtube.com": ("youtube", "YouTube"),
+    "instagram.com": ("instagram", "Instagram"),
+    "tiktok.com": ("tiktok", "TikTok"),
+    "twitter.com": ("twitter", "Twitter / X"),
+    "x.com": ("twitter", "Twitter / X"),
+    "facebook.com": ("facebook", "Facebook"),
+    "bandcamp.com": ("bandcamp", "Bandcamp"),
+    "music.apple.com": ("apple_music", "Apple Music"),
+    "discord.gg": ("discord", "Discord"),
+    "discord.com": ("discord", "Discord"),
+    "twitch.tv": ("twitch", "Twitch"),
+    "patreon.com": ("patreon", "Patreon"),
+    "linkedin.com": ("linkedin", "LinkedIn"),
+    "github.com": ("github", "GitHub"),
+    "threads.net": ("threads", "Threads"),
+}
+
+
+def _service_for_domain(host):
+    host = (host or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    for domain, hit in KNOWN_SERVICES.items():
+        if host == domain or host.endswith(f".{domain}"):
+            return hit
+    return None
+
+
+def _ai_detect_service(host, url):
+    """Ask the model what platform an UNRECOGNIZED domain belongs to. Only
+    reached when KNOWN_SERVICES misses — the common case (Spotify, YouTube,
+    Instagram, ...) never costs a call. Best-effort: a model that can't tell,
+    or isn't configured, falls back to a generic 'website' link rather than
+    blocking the member from saving it."""
+    try:
+        import anthropic
+    except ImportError:
+        return None, None
+    prompt = (
+        "What platform or service does this URL belong to?\n"
+        f"URL: {url}\nHost: {host}\n\n"
+        "Answer STRICTLY as JSON with two keys:\n"
+        '  "service": a short lowercase_snake_case key for the platform (e.g. "bandcamp", '
+        '"apple_music", "personal_website"), or null if you genuinely cannot tell\n'
+        '  "label": a short human-readable name (e.g. "Bandcamp", "Apple Music", "Website")\n'
+        "Return ONLY the JSON object."
+    )
+    try:
+        client = anthropic.Anthropic()
+        resp = client.messages.create(model=VERIFY_MODEL, max_tokens=100,
+                                      messages=[{"role": "user", "content": prompt}])
+        raw = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
+    except Exception:
+        return None, None
+    import json
+    m = re.search(r"\{.*\}", raw, re.S)
+    if not m:
+        return None, None
+    try:
+        data = json.loads(m.group(0))
+    except ValueError:
+        return None, None
+    service = str(data.get("service") or "")[:40].strip() or None
+    label = str(data.get("label") or "")[:60].strip() or None
+    return service, label
+
+
+class LinkDetectView(APIView):
+    """POST {url} -> {service, label, source} — recognize which platform a
+    pasted link belongs to, so the client can show the right logo without
+    the member hand-picking one from a list. A known domain (the common
+    case) matches instantly and for free against KNOWN_SERVICES; an
+    unrecognized one asks the model once rather than falling back to a bare
+    "website" immediately — a hand-rolled domain list can never keep up with
+    every platform a member might paste.
+
+    Detection only — it does not save anything. The client still calls
+    SocialVerifyView's action="save" (or a verify action) to actually add
+    the link, using the service/label this returns.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        url = str(request.data.get("url", "")).strip()
+        if not url:
+            return Response({"detail": "url required"}, status=status.HTTP_400_BAD_REQUEST)
+        parsed = urlparse(url if "://" in url else f"https://{url}")
+        host = parsed.netloc or parsed.path.split("/")[0]
+
+        hit = _service_for_domain(host)
+        if hit:
+            service, label = hit
+            return Response({"service": service, "label": label, "source": "domain"})
+
+        service, label = _ai_detect_service(host, url)
+        return Response({
+            "service": service or "website",
+            "label": label or host or url,
+            "source": "ai" if service else "fallback",
+        })
+
+
+YOUTUBE_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
+
+
+class YouTubeVerifyView(APIView):
+    """OAuth-connect verification for a member's own YouTube channel — the
+    "layer 1" this module's docstring always described but never built. This
+    module's other verification (code-in-bio + AI) exists precisely because
+    OAuth-connect wasn't implemented for anything; it works everywhere but is
+    best-effort (platforms block scraping) and can land a member in a human
+    review queue. Signing in with Google and granting read-only YouTube access
+    is definitive AND immediate: it proves ownership and returns the real
+    subscriberCount in the same step — no queue, no code to paste, no page to
+    fetch. Energy's hourly regen rate is reach ÷ tier, and reach is the
+    median of VERIFIED sources — so a fast, sure way to verify one matters
+    for more than just a badge on a profile.
+
+    POST {action: "start", redirect_uri}
+        -> {auth_url, state} — send the member to auth_url.
+    POST {action: "finish", code, redirect_uri}
+        -> exchanges the code, reads the channel's real statistics, and marks
+           the matching Profile.links entry verified (creating one if the
+           member hadn't already added a YouTube link).
+
+    Needs GOOGLE_OAUTH_CLIENT_ID *and* GOOGLE_OAUTH_CLIENT_SECRET. The ID
+    alone is enough for "Sign in with Google" (an ID-token check, no API
+    access) but reading a channel's statistics needs an access-token
+    exchange, which requires a confidential client — the secret "Sign in
+    with Google" never needed.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        action = str(request.data.get("action", "")).strip().lower()
+        client_id = _env("GOOGLE_OAUTH_CLIENT_ID")
+        client_secret = _env("GOOGLE_OAUTH_CLIENT_SECRET")
+        if not client_id or not client_secret:
+            return Response(
+                {"detail": "YouTube verification isn't configured on the server yet."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        if action == "start":
+            redirect_uri = str(request.data.get("redirect_uri", ""))
+            if not redirect_uri:
+                return Response({"detail": "redirect_uri required"}, status=status.HTTP_400_BAD_REQUEST)
+            state = secrets.token_urlsafe(24)
+            params = urlencode({
+                "client_id": client_id, "redirect_uri": redirect_uri,
+                "response_type": "code", "scope": YOUTUBE_SCOPE,
+                "access_type": "online", "prompt": "consent", "state": state,
+            })
+            return Response({"auth_url": f"https://accounts.google.com/o/oauth2/v2/auth?{params}",
+                             "state": state})
+
+        if action == "finish":
+            code = str(request.data.get("code", ""))
+            redirect_uri = str(request.data.get("redirect_uri", ""))
+            if not code:
+                return Response({"detail": "code required"}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                token_resp = requests.post(
+                    "https://oauth2.googleapis.com/token",
+                    data={"code": code, "client_id": client_id, "client_secret": client_secret,
+                          "redirect_uri": redirect_uri, "grant_type": "authorization_code"},
+                    timeout=10,
+                )
+                access_token = (token_resp.json() or {}).get("access_token")
+            except (requests.RequestException, ValueError):
+                return Response({"detail": "Couldn't reach Google to verify that."},
+                                status=status.HTTP_502_BAD_GATEWAY)
+            if not access_token:
+                return Response({"detail": "Google didn't grant access — try again."},
+                                status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                yt_resp = requests.get(
+                    "https://www.googleapis.com/youtube/v3/channels",
+                    params={"part": "snippet,statistics", "mine": "true"},
+                    headers={"Authorization": f"Bearer {access_token}"}, timeout=10,
+                )
+                data = yt_resp.json() or {}
+            except (requests.RequestException, ValueError):
+                return Response({"detail": "Couldn't reach YouTube to read the channel."},
+                                status=status.HTTP_502_BAD_GATEWAY)
+            items = data.get("items") or []
+            if not items:
+                return Response(
+                    {"detail": "That Google account doesn't have a YouTube channel."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            channel = items[0]
+            stats = channel.get("statistics") or {}
+            channel_id = channel.get("id", "")
+            title = (channel.get("snippet") or {}).get("title", "") or "YouTube"
+            url = f"https://www.youtube.com/channel/{channel_id}"
+
+            p = profile_for(request.user)
+            links = list(p.links or [])
+            link = _find_link(links, url)
+            if link is None:
+                link = {"label": title, "url": url}
+                links.append(link)
+            else:
+                link["label"] = title
+            link["verified_by"] = "oauth"
+            link.pop("review", None)
+
+            # A channel owner can hide their subscriber count. We've PROVEN
+            # ownership either way — that's what the OAuth grant means — but
+            # "verified" on a source means "real count", and there is none to
+            # show. Marking it verified with a followers of 0 would drag the
+            # reach median down for a number we were simply never told, which
+            # is worse than not counting the source at all.
+            followers = stats.get("subscriberCount")
+            if followers is not None:
+                followers = int(followers)
+                link["verified"] = True
+                link["verified_at"] = timezone.now().isoformat()
+                link["verified_count"] = followers
+                link["followers"] = followers
+                link.pop("count_hidden", None)
+            else:
+                link["verified"] = False
+                link["count_hidden"] = True
+                link.pop("verified_count", None)
+
+            p.links = links
+            p.save(update_fields=["links", "updated_at"])
+            SocialReview.objects.filter(user=request.user, url=url).delete()
+
+            return Response({
+                "verified": bool(followers is not None),
+                "count_hidden": followers is None,
+                "followers": followers,
+                "label": title,
+                "detail": None if followers is not None else (
+                    "We confirmed this is your channel, but its subscriber count is hidden. "
+                    "Make it public in YouTube Studio, then verify again, to have it count "
+                    "toward your reach."
+                ),
+                "sources": social_sources(request.user),
+                "reach_median": reach_median(request.user),
+            })
+
+        return Response({"detail": "action must be start|finish"}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class SocialReviewQueueView(APIView):

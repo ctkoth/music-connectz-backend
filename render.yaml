@@ -37,6 +37,14 @@ services:
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_ID
         sync: false
+      # "Sign in with Google" (GOOGLE_OAUTH_CLIENT_ID alone, above) only ever
+      # checks an ID token — no API access, no secret needed. Reading a
+      # member's real YouTube subscriber count (SocialZ reach verification)
+      # is a different, scoped access-token exchange, and THAT needs a
+      # confidential client. Same Google Cloud OAuth client works for both;
+      # this is just the secret the ID-token flow never had to ask for.
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
       - key: GITHUB_OAUTH_CLIENT_ID
         sync: false
       - key: GITHUB_OAUTH_CLIENT_SECRET
