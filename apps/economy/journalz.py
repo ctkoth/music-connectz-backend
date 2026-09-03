@@ -60,6 +60,7 @@ from .models import (
     JournalEntry,
     JournalMention,
     blocked_user_ids,
+    clean_link,
     membership_for,
     notify,
     record_observation,
@@ -349,6 +350,9 @@ def entry_dict(e, user, share_cost=None, with_destinations=True, mentions=_UNSET
         },
         "items": e.items or [],
         "media": media,
+        # What was playing while this got written — a pointer, not an
+        # attachment; see the field's own comment on the model.
+        "link": e.link or {},
         "visibility": e.visibility,
         "private": e.is_private,
         "shared_post_id": e.shared_post_id,
@@ -584,9 +588,10 @@ class JournalZView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         title = str(d.get("title", "")).strip()[:160]
-        if not (title or body.strip() or d.get("items")):
+        link = clean_link(d.get("link"))
+        if not (title or body.strip() or d.get("items") or link):
             return Response({"detail": "An entry needs something in it — a title, "
-                                       "some words, or an attachment."},
+                                       "some words, an attachment, or a linked track."},
                             status=status.HTTP_400_BAD_REQUEST)
 
         tags, tags_dropped = clean_tags(d.get("tags"), lim["tags"])
@@ -600,7 +605,7 @@ class JournalZView(APIView):
             author=user, day=day, title=title, body=body,
             mood=str(d.get("mood", ""))[:12] if d.get("mood") in JOURNAL_MOOD_KEYS else "",
             weather=str(d.get("weather", ""))[:40],
-            tags=tags, people=people, items=items,
+            tags=tags, people=people, items=items, link=link,
             place_name=str(d.get("place_name", ""))[:120],
             place_lat=_coord(d.get("place_lat")), place_lng=_coord(d.get("place_lng")),
             place_exact=bool(d.get("place_exact")),
@@ -673,6 +678,9 @@ class JournalZView(APIView):
         if "items" in d:
             e.items, dropped["attachments"] = clean_items(d.get("items"), lim["attachments"])
             fields.append("items")
+        if "link" in d:
+            e.link = clean_link(d.get("link"))
+            fields.append("link")
         for key, attr in (("place_name", "place_name"), ("place_exact", "place_exact")):
             if key in d:
                 setattr(e, attr, str(d[key])[:120] if key == "place_name" else bool(d[key]))

@@ -131,6 +131,40 @@ class SocialVerifyLinkManagementTests(LinkDetectBase):
         self.assertEqual(r.status_code, 200, r.data)
         self.assertEqual(profile_for(self.user).links, [])
 
+    def test_featuring_a_saved_link_pins_it(self):
+        self.client.post(VERIFY, {"action": "save", "url": "https://open.spotify.com/x",
+                                  "label": "Spotify"}, format="json")
+        r = self.client.post(VERIFY, {"action": "feature", "url": "https://open.spotify.com/x"},
+                             format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["featured_link"]["label"], "Spotify")
+        self.assertEqual(profile_for(self.user).featured_url, "https://open.spotify.com/x")
+
+    def test_featuring_an_unsaved_url_is_refused(self):
+        r = self.client.post(VERIFY, {"action": "feature", "url": "https://open.spotify.com/x"},
+                             format="json")
+        self.assertEqual(r.status_code, 400, r.data)
+
+    def test_unfeature_clears_it_with_no_url_needed(self):
+        self.client.post(VERIFY, {"action": "save", "url": "https://open.spotify.com/x"}, format="json")
+        self.client.post(VERIFY, {"action": "feature", "url": "https://open.spotify.com/x"}, format="json")
+        r = self.client.post(VERIFY, {"action": "unfeature"}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(profile_for(self.user).featured_url, "")
+
+    def test_removing_the_featured_link_unfeatures_it_too(self):
+        self.client.post(VERIFY, {"action": "save", "url": "https://open.spotify.com/x"}, format="json")
+        self.client.post(VERIFY, {"action": "feature", "url": "https://open.spotify.com/x"}, format="json")
+        self.client.post(VERIFY, {"action": "remove", "url": "https://open.spotify.com/x"}, format="json")
+        self.assertEqual(profile_for(self.user).featured_url, "")
+
+    def test_get_includes_the_featured_link(self):
+        self.client.post(VERIFY, {"action": "save", "url": "https://open.spotify.com/x",
+                                  "label": "Spotify"}, format="json")
+        self.client.post(VERIFY, {"action": "feature", "url": "https://open.spotify.com/x"}, format="json")
+        r = self.client.get(VERIFY)
+        self.assertEqual(r.data["featured_link"]["label"], "Spotify")
+
 
 class EnergyDeltaChipTests(LinkDetectBase):
     """Each link's ⚡/hour swing — the number the cost/gain chip is built

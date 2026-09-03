@@ -32,6 +32,7 @@ from .models import (
     can_view_post,
     item_rating_median,
 )
+from .social import featured_link_for
 
 
 def public_post_dict(p):
@@ -106,6 +107,7 @@ def public_profile_dict(p):
         "badge_title": p.badge_title,
         "badges": [public_badge_chip(b) for b in badges_for(p.user, only_visible=True)],
         "links": p.links or [],
+        "featured_link": featured_link_for(p),
         "public": True,
     }
 

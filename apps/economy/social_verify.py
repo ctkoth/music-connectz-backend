@@ -32,6 +32,7 @@ from django.utils import timezone
 
 from .models import (SocialReview, energy_rate_per_hour, profile_for,
                      reach_median, social_sources)
+from .social import featured_link_for
 
 VERIFY_MODEL = "claude-opus-4-8"
 CODE_PREFIX = "MCZ"
@@ -216,7 +217,9 @@ class SocialVerifyView(APIView):
 
     POST /api/economy/social/verify/
     action="save"  {url, label?} → add/relabel a link, unverified, no checks run.
-    action="remove" {url}        → drop a link entirely.
+    action="remove" {url}        → drop a link entirely (un-features it too, if it was).
+    action="feature" {url}       → pin one of your EXISTING links to the top of ProfileZ.
+    action="unfeature"           → clear it (no url needed).
     action="start" {url}  → issue a code to paste in the profile bio.
     action="check" {url}  → fetch the public page, AI-confirm the code + read the
                             real follower count, mark the link verified.
@@ -240,21 +243,42 @@ class SocialVerifyView(APIView):
             "links": annotated,
             "sources": social_sources(request.user),
             "reach_median": reach_median(request.user),
+            "featured_url": p.featured_url,
+            "featured_link": featured_link_for(p),
         })
 
     def post(self, request):
         action = str(request.data.get("action", "start")).strip().lower()
         url = str(request.data.get("url", "")).strip()
-        if not url:
-            return Response({"detail": "url required"}, status=status.HTTP_400_BAD_REQUEST)
 
         p = profile_for(request.user)
         links = list(p.links or [])
 
+        if action == "unfeature":
+            p.featured_url = ""
+            p.save(update_fields=["featured_url", "updated_at"])
+            return Response({"featured_url": "", "featured_link": None})
+
+        if not url:
+            return Response({"detail": "url required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if action == "feature":
+            if not any(_norm(ln.get("url")) == _norm(url) for ln in links if isinstance(ln, dict)):
+                return Response({"detail": "Save this link first, then feature it."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            p.featured_url = url
+            p.save(update_fields=["featured_url", "updated_at"])
+            return Response({"featured_url": url, "featured_link": featured_link_for(p)})
+
         if action == "remove":
             links = [ln for ln in links if _norm(ln.get("url")) != _norm(url)]
             p.links = links
-            p.save(update_fields=["links", "updated_at"])
+            # A removed link can't stay pinned — nothing left for it to point at.
+            if _norm(p.featured_url) == _norm(url):
+                p.featured_url = ""
+                p.save(update_fields=["links", "featured_url", "updated_at"])
+            else:
+                p.save(update_fields=["links", "updated_at"])
             SocialReview.objects.filter(user=request.user, url=url).delete()
             return Response({"removed": True, "sources": social_sources(request.user),
                              "reach_median": reach_median(request.user)})
@@ -397,7 +421,7 @@ class SocialVerifyView(APIView):
                 "reach_median": reach_median(request.user),
             }, status=status.HTTP_202_ACCEPTED)
 
-        return Response({"detail": "action must be save|remove|start|check|match"},
+        return Response({"detail": "action must be save|remove|feature|unfeature|start|check|match"},
                         status=status.HTTP_400_BAD_REQUEST)
 
 

@@ -34,6 +34,7 @@ from .models import (
     MoneyBattleVote,
     award_spinaz,
     blocked_user_ids,
+    clean_link,
     item_rating_median,
     membership_for,
     notify,
@@ -64,6 +65,7 @@ def entry_dict(e, request=None):
         "media_url": e.media_url,
         "image_url": e.image_url,
         "lyrics": e.lyrics,
+        "link": e.link or {},
         # Judged through the shared item space, not a second rating system.
         "item_key": e.item_key,
         "rating": item_rating_median(e.item_key),
@@ -233,7 +235,8 @@ class BattleEnterView(APIView):
 
         d = request.data or {}
         entry = BattleEntry.objects.create(
-            battle=b, user=request.user, title=str(d.get("title", "") or "")[:160], **_media(d),
+            battle=b, user=request.user, title=str(d.get("title", "") or "")[:160],
+            link=clean_link(d.get("link")), **_media(d),
         )
         if b.entry_spinaz:
             # Entry goes to the host. Stated on the button before it's pressed.
