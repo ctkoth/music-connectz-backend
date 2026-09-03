@@ -41,12 +41,17 @@ its resource emoji.
 
 ### Known violations, not yet fixed
 
-- **BossTake "Send it to the coach"** — spends a prompt, says nothing before
-  you press it. `cost_cents` comes back only in the response.
-- **AI actions generally** (translate, OCC chat, Gemini image/video) — the
-  charge happens server-side with no pre-flight statement of the price.
-- **CallZ** — priced by the other member's skill rate per hour; the rate needs
-  to be visible before the call connects.
+- **CallZ** — no live 1:1 calling surface exists yet (LessonZ's "CallZ"
+  delivery method is priced the same as remote/in-person on the same booking
+  flow — it isn't a per-minute connect). Whenever a real call feature ships,
+  the other member's rate has to be visible before it connects, same as
+  everywhere else.
+
+Previously listed here and since fixed, client-side — BossTake's "Send it to
+the coach", OCC chat, DirectZ craft, and KeyConnectZ translate all render the
+price beside the control that spends it now, before it's pressed. Don't read
+this list as exhaustive: a surface not named here was never audited, not
+cleared.
 
 ---
 

@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -239,6 +239,30 @@ class StatsView(APIView):
                 "dev_tax_rate": m.dev_tax_rate,
             }
         )
+
+
+class PublicStatsView(APIView):
+    """Real member/online counts for a visitor who has no session yet.
+
+    StatsView (above) can't serve this: it's IsAuthenticated, and it marks
+    the CALLER as seen as a side effect of being read — so a public caller
+    with no membership row would either 500 or (worse) manufacture one.
+    This reads the same two numbers and nothing else: no username list, no
+    wallet, no per-member anything. Real counts or none — see CLAUDE.md on
+    substance over decoration; a landing page showing a fake community size
+    would be exactly the kind of number that "could look good without being
+    good."
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        online_cutoff = timezone.now() - timedelta(minutes=5)
+        online_now = Membership.objects.filter(last_seen__gte=online_cutoff).count()
+        return Response({
+            "total_members": User.objects.count(),
+            "online_now": online_now,
+        })
 
 
 class WalletView(APIView):
