@@ -261,7 +261,9 @@ class VenueGateTests(TestCase):
         self.host = User.objects.create_user("host", "h@e.com", PW)
 
     def venue(self, **kw):
-        return Venue.objects.create(host=self.host, title="Session", host_price_cents=0, **kw)
+        kw.setdefault("title", "Session")
+        kw.setdefault("host_price_cents", 0)
+        return Venue.objects.create(host=self.host, **kw)
 
     def test_a_host_can_post_gates_and_read_them_back(self):
         self.client.force_authenticate(self.host)
@@ -302,6 +304,60 @@ class VenueGateTests(TestCase):
         resp = self.client.post(f"/api/economy/venues/{v.pk}/join/")
         self.assertEqual(resp.status_code, 403, resp.content)
         self.assertIn("attractiveness 8+", resp.data["detail"])
+
+    def test_a_real_venues_own_address_gates_km_not_the_hosts_profile(self):
+        # The host's personal location is nowhere near the club, but the club
+        # itself is 100m from the artist — the venue's own coordinates must
+        # be what the distance gate measures, not wherever the host is.
+        host_p = profile_for(self.host)
+        host_p.lat, host_p.lng, host_p.share_location = 51.5, -0.1, True  # London
+        host_p.save()
+        v = self.venue(gates={"km": [None, 1]}, lat=40.7580, lng=-73.9855)  # Times Square
+        artist = make_member("nearby", lat=40.7590, lng=-73.9850)  # a block away
+        self.client.force_authenticate(artist)
+        resp = self.client.post(f"/api/economy/venues/{v.pk}/join/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+    def test_a_real_venue_still_gates_out_someone_too_far_from_its_address(self):
+        v = self.venue(gates={"km": [None, 1]}, lat=40.7580, lng=-73.9855)
+        artist = make_member("faraway", lat=34.05, lng=-118.24)  # Los Angeles
+        self.client.force_authenticate(artist)
+        resp = self.client.post(f"/api/economy/venues/{v.pk}/join/")
+        self.assertEqual(resp.status_code, 403, resp.content)
+        self.assertEqual(resp.data["gate"], "km")
+
+    def test_discovery_returns_distance_and_sorts_nearest_venue_first(self):
+        near = self.venue(title="Near", lat=40.7580, lng=-73.9855)
+        far = self.venue(title="Far", lat=34.05, lng=-118.24)
+        no_address = self.venue(title="Someone's living room")
+        artist = make_member("browsing", lat=40.7590, lng=-73.9850)
+        self.client.force_authenticate(artist)
+        resp = self.client.get("/api/economy/venues/")
+        rows = resp.data["venues"]
+        self.assertEqual([r["title"] for r in rows], ["Near", "Far", "Someone's living room"])
+        self.assertIsNotNone(rows[0]["distance_km"])
+        self.assertLess(rows[0]["distance_km"], rows[1]["distance_km"])
+        self.assertIsNone(rows[2]["distance_km"])
+
+    def test_a_host_can_publish_a_real_address(self):
+        self.client.force_authenticate(self.host)
+        resp = self.client.post("/api/economy/venues/", {
+            "title": "The Blue Room", "address": "123 Main St, Springfield",
+            "lat": 40.758, "lng": -73.9855, "vtype": "club",
+        }, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.data["venue"]["address"], "123 Main St, Springfield")
+        self.assertEqual(resp.data["venue"]["lat"], 40.758)
+
+    def test_a_lone_coordinate_with_no_partner_is_dropped(self):
+        # Half a coordinate pair is worse than none — it would gate distance
+        # against an incomplete location.
+        self.client.force_authenticate(self.host)
+        resp = self.client.post("/api/economy/venues/", {
+            "title": "Sloppy input", "lat": 40.758,
+        }, format="json")
+        self.assertIsNone(resp.data["venue"]["lat"])
+        self.assertIsNone(resp.data["venue"]["lng"])
 
 
 class CollabGateTests(TestCase):

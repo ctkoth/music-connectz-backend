@@ -57,10 +57,31 @@ from .gates import GATE_KEYS, clean_gates, failing_gate, member_metrics, refusal
 from .serializers import WalletSerializer
 
 User = get_user_model()
-VALID_TYPES = {"party", "openmic", "theater", "show", "custom"}
+VALID_TYPES = {"party", "openmic", "theater", "show", "club", "studio", "festival", "custom"}
+
+
+def venue_origin(v):
+    """Where a venue's own "km" gate and distance measure FROM: the venue's
+    own address if the host geocoded one, else the host's personal opt-in
+    location (legacy — a meetup with no fixed address, gated on wherever its
+    host happens to be). Real venues get real distance; informal ones keep
+    working exactly as before."""
+    if v.lat is not None and v.lng is not None:
+        return (v.lat, v.lng)
+    host_p = profile_for(v.host)
+    if host_p.share_location and host_p.lat is not None:
+        return (host_p.lat, host_p.lng)
+    return (None, None)
 
 
 def _venue_dict(v, request):
+    my_p = profile_for(request.user)
+    origin = venue_origin(v)
+    distance_km = (
+        haversine_km(my_p.lat, my_p.lng, origin[0], origin[1])
+        if my_p.share_location and my_p.lat is not None and origin[0] is not None
+        else None
+    )
     return {
         "id": v.id,
         "title": v.title,
@@ -72,6 +93,10 @@ def _venue_dict(v, request):
         "host_price_cents": v.host_price_cents,
         "visitor_pay_cents": v.visitor_pay_cents,
         "min_attract": v.min_attract,
+        "address": v.address,
+        "lat": v.lat,
+        "lng": v.lng,
+        "distance_km": distance_km,
         "gates": v.gates or {},
         "attending": v.attendances.filter(visitor=request.user).exists(),
         "created_at": v.created_at,
@@ -82,8 +107,14 @@ class VenuesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        venues = Venue.objects.select_related("host").all()[:200]
-        return Response({"venues": [_venue_dict(v, request) for v in venues]})
+        venues = list(Venue.objects.select_related("host").all()[:200])
+        rows = [_venue_dict(v, request) for v in venues]
+        # An artist who shares a location gets real venues sorted nearest
+        # first — venues with no distance to show (no address, no shared host
+        # location, or the artist hasn't opted in) fall to the end rather
+        # than sorting arbitrarily among themselves.
+        rows.sort(key=lambda r: (r["distance_km"] is None, r["distance_km"]))
+        return Response({"venues": rows})
 
     def post(self, request):
         d = request.data
@@ -99,12 +130,25 @@ class VenuesView(APIView):
             except (TypeError, ValueError):
                 return 0
 
+        def coord(key):
+            try:
+                v = d.get(key)
+                return None if v in (None, "") else float(v)
+            except (TypeError, ValueError):
+                return None
+
+        lat, lng = coord("lat"), coord("lng")
         v = Venue.objects.create(
             host=request.user, title=title[:120], mode=mode, vtype=vtype,
             custom_name=str(d.get("custom_name", ""))[:60],
             host_price_cents=cents("host_price_cents"),
             visitor_pay_cents=cents("visitor_pay_cents") if mode == Venue.MODE_COLLAB else 0,
             min_attract=min(10, max(0, cents("min_attract"))),
+            address=str(d.get("address", ""))[:200],
+            # A stray lat with no lng (or vice versa) is worse than neither —
+            # it would gate distance against half a coordinate.
+            lat=lat if lng is not None else None,
+            lng=lng if lat is not None else None,
             gates=clean_gates(d.get("gates")),
         )
         return Response({"venue": _venue_dict(v, request)}, status=status.HTTP_201_CREATED)
@@ -121,12 +165,13 @@ class VenueJoinView(APIView):
             return Response({"detail": "you can't attend your own venue"}, status=status.HTTP_400_BAD_REQUEST)
 
         # All five ranges, evaluated exactly as search evaluates them, so what
-        # a host advertises and what the door enforces cannot diverge.
+        # a host advertises and what the door enforces cannot diverge. The
+        # "km" range measures from the venue's own address when it has one —
+        # a real venue's distance gate is about how far the ARTIST is from
+        # that room, not from wherever its host's profile happens to be.
         if venue.gates:
             me = profile_for(request.user)
-            host_p = profile_for(venue.host)
-            origin = ((host_p.lat, host_p.lng)
-                      if (host_p.share_location and host_p.lat is not None) else (None, None))
+            origin = venue_origin(venue)
             failed = failing_gate(member_metrics(me, origin), venue.gates)
             if failed:
                 return Response(refusal(failed, venue.gates), status=status.HTTP_403_FORBIDDEN)

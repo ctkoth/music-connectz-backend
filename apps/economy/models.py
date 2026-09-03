@@ -540,11 +540,21 @@ class Venue(models.Model):
     host = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="venues")
     title = models.CharField(max_length=120)
     mode = models.CharField(max_length=16, choices=MODE_CHOICES, default=MODE_COLLAB)
-    vtype = models.CharField(max_length=24, default="party")  # party/openmic/theater/show/custom
+    vtype = models.CharField(max_length=24, default="party")  # party/openmic/theater/show/club/studio/festival/custom
     custom_name = models.CharField(max_length=60, blank=True, default="")
     host_price_cents = models.PositiveIntegerField(default=0)
     visitor_pay_cents = models.PositiveIntegerField(default=0)
     min_attract = models.PositiveSmallIntegerField(default=0)  # 0-10, legacy
+    # The venue's OWN place — a real address and, once geocoded (device GPS or
+    # typed manually), the coordinates that place sits at. Independent of the
+    # host's personal opt-in location (Profile.lat/lng): a member hosting a
+    # party at home shares nothing here, but a club, bar or theater posting
+    # itself as a VenueZ listing is a fixed physical place an artist should be
+    # able to find by distance, whether or not its host ever opts their own
+    # profile into location sharing.
+    address = models.CharField(max_length=200, blank=True, default="")
+    lat = models.FloatField(null=True, blank=True)
+    lng = models.FloatField(null=True, blank=True)
     # All five range gates: {"rating": [lo, hi], "price": [...], "attract": ...,
     # "age": ..., "km": [None, hi]}. Exclusive — no value for a gated metric
     # means excluded. min_attract above is kept so old venues keep working.
