@@ -41,11 +41,26 @@ class PublicPostTests(TestCase):
         p = make_post(self.author)
         self.assertEqual(self.client.get(f"/api/economy/postz/{p.pk}/").status_code, 200)
 
-    def test_a_restricted_post_is_members_only(self):
+    def test_a_restricted_post_answers_a_locked_teaser_not_a_404(self):
+        # RESTRICTED_JOIN_REWARD_SPINAZ exists to reward an author for a
+        # stranger who sees this locked door and joins — erasing the door
+        # (404) would erase the whole mechanic's reason to exist.
         p = make_post(self.author, visibility="restricted")
-        self.assertEqual(self.client.get(f"/api/postz/{p.pk}/").status_code, 404)
+        resp = self.client.get(f"/api/postz/{p.pk}/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertTrue(resp.data["locked"])
+        self.assertEqual(resp.data["title"], "Track")
+        self.assertEqual(resp.data["author"], "author")
+        self.assertNotIn("description", resp.data)
+        self.assertNotIn("media_url", resp.data)
+
+    def test_a_member_gets_the_real_restricted_post_not_the_teaser(self):
+        p = make_post(self.author, visibility="restricted")
         self.client.force_authenticate(User.objects.create_user("m", "m@e.com", PW))
-        self.assertEqual(self.client.get(f"/api/postz/{p.pk}/").status_code, 200)
+        resp = self.client.get(f"/api/postz/{p.pk}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("locked", resp.data)
+        self.assertEqual(resp.data["description"], "d")
 
     def test_a_private_post_answers_404_not_403(self):
         # A 403 confirms the post exists, which is itself the leak.
@@ -73,6 +88,55 @@ class PublicPostTests(TestCase):
     def test_anonymous_member_search_stays_shut(self):
         # Search carries age and attractiveness — it does not leave the login.
         self.assertEqual(self.client.get("/api/economy/members/").status_code, 401)
+
+
+class PublicFeedTests(TestCase):
+    """Browse without an account — public posts in full, restricted posts as
+    a locked teaser that converts. Never a private post, never anything a
+    direct /p/:id link to any one of these wouldn't already answer."""
+
+    def setUp(self):
+        self.client = APIClient()          # deliberately NOT authenticated
+        self.author = User.objects.create_user("author", "a@e.com", PW)
+
+    def test_a_public_post_appears_in_full(self):
+        make_post(self.author, title="Loud one")
+        resp = self.client.get("/api/economy/public/feed/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        row = resp.data["posts"][0]
+        self.assertEqual(row["title"], "Loud one")
+        self.assertIn("description", row)
+
+    def test_a_restricted_post_appears_as_a_locked_teaser(self):
+        make_post(self.author, visibility="restricted", title="Members only")
+        row = self.client.get("/api/economy/public/feed/").data["posts"][0]
+        self.assertEqual(row["title"], "Members only")
+        self.assertTrue(row["locked"])
+        self.assertNotIn("description", row)
+
+    def test_a_private_post_never_appears(self):
+        make_post(self.author, visibility="private", title="Just for me")
+        titles = [r["title"] for r in self.client.get("/api/economy/public/feed/").data["posts"]]
+        self.assertNotIn("Just for me", titles)
+
+    def test_newest_first(self):
+        make_post(self.author, title="First")
+        make_post(self.author, title="Second")
+        titles = [r["title"] for r in self.client.get("/api/economy/public/feed/").data["posts"]]
+        self.assertEqual(titles, ["Second", "First"])
+
+    def test_pagination_hands_back_a_cursor_only_when_more_remain(self):
+        for i in range(25):
+            make_post(self.author, title=f"p{i}")
+        first = self.client.get("/api/economy/public/feed/").data
+        self.assertEqual(len(first["posts"]), 20)
+        self.assertIsNotNone(first["next_before"])
+        second = self.client.get(f"/api/economy/public/feed/?before={first['next_before']}").data
+        self.assertEqual(len(second["posts"]), 5)
+        self.assertIsNone(second["next_before"])
+
+    def test_it_needs_no_login(self):
+        self.assertEqual(self.client.get("/api/economy/public/feed/").status_code, 200)
 
 
 class PublicProfileTests(TestCase):

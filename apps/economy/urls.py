@@ -7,7 +7,7 @@ from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
 from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView)
-from .publicz import PublicPostView, PublicProfileView
+from .publicz import PublicFeedView, PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .distributez import TranscodeView, LyricsView
 from .adz import AdzView, AdDetailView, AdRewardView
@@ -252,6 +252,7 @@ urlpatterns = [
     path("postz/cost/", PostCostView.as_view(), name="economy-postz-cost"),
     # No account needed — a public post by link, and the author behind it.
     path("postz/<int:pk>/", PublicPostView.as_view(), name="economy-postz-public"),
+    path("public/feed/", PublicFeedView.as_view(), name="economy-public-feed"),
     path("public/members/<str:username>/", PublicProfileView.as_view(), name="economy-public-member"),
     # Nothing is a dead end: every app this post can open in, and the price of
     # each before it is spent.

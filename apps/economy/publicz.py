@@ -7,10 +7,14 @@ never built, so every link a member has ever shared off-platform lands on a
 
 The rule here is narrow on purpose:
 
-* **By link, not by browse.** One public post, one public profile, each fetched
-  by its own identifier. There is no anonymous feed and no anonymous member
-  search — the feed is the product, and search carries age and attractiveness
-  data that has no business leaving the login.
+* **By link, or by browse of PUBLIC posts only.** `PublicFeedView` is the one
+  exception to "by link, not by browse" this file used to hold as absolute —
+  it opens discovery, never data: it serves the exact same `public_post_dict`
+  every shared link already exposes, filtered to `visibility="public"` only
+  (never `restricted`, which `can_view_post` still requires a session for).
+  There is still no anonymous MEMBER search — that is the part of the old
+  rule that actually mattered, because member search is what carries age and
+  attractiveness data. A feed of posts never touches either field.
 * **Read-only, and no resource moves.** A visitor has no wallet, so nothing
   here can be priced, rewarded, or farmed. Anonymous views deliberately earn
   the author nothing: a reward you can mint by hitting a URL in a loop is not a
@@ -71,6 +75,28 @@ def public_post_dict(p):
     }
 
 
+def public_post_teaser(p):
+    """A RESTRICTED post as a stranger sees it: enough to know it exists and
+    who made it, nothing of what's actually in it. `can_view_post` already
+    refuses the content itself with no session — a teaser must not quietly
+    hand over what the door refuses, or it isn't a door.
+
+    Existence is fine to reveal here, unlike a private post: a restricted
+    post's whole point is RESTRICTED_JOIN_REWARD_SPINAZ — the author is
+    rewarded for a stranger who sees this locked door and joins to open it.
+    A 404 for restricted would erase the door instead of showing it.
+    """
+    return {
+        "id": p.id,
+        "author": p.author.username,
+        "title": p.title,
+        "visibility": "restricted",
+        "locked": True,
+        "created_at": p.created_at.isoformat(),
+        "public": True,
+    }
+
+
 def public_profile_dict(p):
     """A member's card as a stranger sees it — the work, not the person.
 
@@ -125,10 +151,51 @@ class PublicPostView(APIView):
         p = Post.objects.select_related("author").filter(pk=pk).first()
         if not p:
             return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
-        if not can_view_post(p, request.user):
-            # 404, not 403 — confirming a private post exists is itself a leak.
-            return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
-        return Response(public_post_dict(p))
+        if can_view_post(p, request.user):
+            return Response(public_post_dict(p))
+        if p.visibility == "restricted":
+            # A locked door, not an erased one — see public_post_teaser.
+            return Response(public_post_teaser(p))
+        # private — confirming it exists at all is itself a leak.
+        return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+
+
+FEED_PAGE = 20
+
+
+class PublicFeedView(APIView):
+    """GET /api/economy/public/feed/?before=<id> — the newest posts, no
+    account needed. `before` pages backward in time (pass the previous page's
+    `next_before`); omit it for the first page.
+
+    Two shapes ride in the same list: a `public` post is the identical
+    `public_post_dict` a shared /p/:id link already serves with no login, and
+    a `restricted` one is `public_post_teaser` — a locked door, title and
+    author only, the same content-free stub PublicPostView answers with for
+    a direct link. Browsing this feed can never show a stranger more than
+    following a link to any one of these posts already would. `private`
+    posts never appear here regardless of who wrote them.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        qs = (Post.objects.exclude(visibility="private")
+              .select_related("author").order_by("-created_at"))
+        before = request.query_params.get("before")
+        if before:
+            try:
+                qs = qs.filter(pk__lt=int(before))
+            except (TypeError, ValueError):
+                pass
+        rows = list(qs[:FEED_PAGE + 1])
+        has_more = len(rows) > FEED_PAGE
+        rows = rows[:FEED_PAGE]
+        return Response({
+            "posts": [public_post_dict(p) if p.visibility == "public" else public_post_teaser(p)
+                     for p in rows],
+            "next_before": rows[-1].id if (rows and has_more) else None,
+        })
 
 
 class PublicProfileView(APIView):
