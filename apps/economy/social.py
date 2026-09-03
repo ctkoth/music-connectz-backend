@@ -493,6 +493,13 @@ def _profile_card(p, request=None, badges=None):
         "sign": p.sign,
         "regions": p.regions,
         "nationalities": p.nationalities,
+        # Social ConnectZ's directory renders a persona label + city per card,
+        # same as the full profile does — leaving these off the compact card
+        # meant the search list either showed nothing real for either, or had
+        # to fake them (which is how the demo SEED array in the frontend
+        # happened in the first place).
+        "location": p.location,
+        "personas": p.personas,
         "sober": p.sober,
         "attracted_to": p.attracted_to,
         "median": attractiveness_median(p.user),
