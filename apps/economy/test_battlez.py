@@ -124,6 +124,22 @@ class EnteringTests(TestCase):
         self.battle.save(update_fields=["status"])
         self.assertEqual(self.enter().status_code, 409)
 
+    def test_an_entry_can_bring_a_linked_track_instead_of_an_upload(self):
+        resp = self.client.post(
+            f"/api/economy/battlez/{self.battle.pk}/enter/",
+            {"title": "My 16", "media_type": "", "media_url": "",
+             "link": {"url": "https://open.spotify.com/track/xyz", "label": "My track",
+                      "service": "spotify"}},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(resp.data["entry"]["link"]["url"], "https://open.spotify.com/track/xyz")
+        self.assertEqual(resp.data["entry"]["link"]["service"], "spotify")
+
+    def test_a_link_with_no_url_is_dropped_not_stored_as_an_empty_shell(self):
+        resp = self.enter(link={"label": "no url here"})
+        self.assertEqual(resp.data["entry"]["link"], {})
+
     def test_withdrawing_removes_the_entry(self):
         self.enter()
         resp = self.client.delete(f"/api/economy/battlez/{self.battle.pk}/enter/")

@@ -7,7 +7,7 @@ from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
 from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView)
-from .publicz import PublicPostView, PublicProfileView
+from .publicz import PublicFeedView, PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .distributez import TranscodeView, LyricsView
 from .adz import AdzView, AdDetailView, AdRewardView
@@ -31,7 +31,8 @@ from .account import AccountExportView, AccountDeleteView
 from .messages_view import MessagesView
 from .logz import FeaturesView, LogZView
 from .observationz import ObservationConsentView, ObservationZView
-from .social_verify import SocialReviewQueueView, SocialVerifyView
+from .social_verify import (LinkDetectView, SocialReviewQueueView,
+                            SocialVerifyView, YouTubeVerifyView)
 from .parcel import ParcelCampaignView
 from .autotopup import AutoTopUpView, AutoTopUpCancelView
 from .identity import IdentityView
@@ -225,6 +226,12 @@ urlpatterns = [
     path("social/comment/", SocialView.as_view(), {"action": "comment"}, name="economy-social-comment"),
     path("social/rate/", SocialView.as_view(), {"action": "rate"}, name="economy-social-rate"),
     path("social/verify/", SocialVerifyView.as_view(), name="economy-social-verify"),
+    path("social/detect/", LinkDetectView.as_view(), name="economy-social-detect"),
+    # OAuth-connect verification — proves ownership AND reads the real count
+    # in one step, no scraping, no human queue. Only YouTube today; the same
+    # shape (access-token exchange + a statistics read) is how Spotify would
+    # go in next.
+    path("social/verify/youtube/", YouTubeVerifyView.as_view(), name="economy-social-verify-youtube"),
     # What the AI couldn't confirm goes to a person, not to a wall.
     path("social/reviews/", SocialReviewQueueView.as_view(), name="economy-social-reviews"),
     path("members/", MembersView.as_view(), name="economy-members"),
@@ -245,6 +252,7 @@ urlpatterns = [
     path("postz/cost/", PostCostView.as_view(), name="economy-postz-cost"),
     # No account needed — a public post by link, and the author behind it.
     path("postz/<int:pk>/", PublicPostView.as_view(), name="economy-postz-public"),
+    path("public/feed/", PublicFeedView.as_view(), name="economy-public-feed"),
     path("public/members/<str:username>/", PublicProfileView.as_view(), name="economy-public-member"),
     # Nothing is a dead end: every app this post can open in, and the price of
     # each before it is spent.

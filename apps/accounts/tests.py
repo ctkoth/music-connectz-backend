@@ -130,6 +130,113 @@ class OAuthLinkingTests(TestCase):
         self.assertEqual(_user_from_oauth(self._info()).pk, self.existing.pk)
 
 
+class OAuthAccountLinkViewTests(TestCase):
+    """A signed-in member attaching an ADDITIONAL provider to their existing
+    account — the piece OAuthLoginView doesn't cover, since it never reads
+    request.user and only ever matches-or-creates."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("owner", "owner@example.com", PASSWORD)
+        self.client.force_authenticate(self.user)
+
+    def _mock_verify(self, **over):
+        info = {"provider": "spotify", "uid": "spotify-uid-1", "email": "owner@spotify.example",
+                "email_verified": False, "name": "Owner", "avatar_url": ""}
+        info.update(over)
+        from unittest import mock
+        return mock.patch("apps.accounts.views._verify_provider", return_value=info)
+
+    def test_linking_attaches_the_identity_to_my_account(self):
+        with self._mock_verify():
+            resp = self.client.post("/api/auth/oauth/spotify/link/", {"code": "x"}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.content)
+        from apps.accounts.models import OAuthIdentity
+        identity = OAuthIdentity.objects.get(provider="spotify", provider_uid="spotify-uid-1")
+        self.assertEqual(identity.user_id, self.user.id)
+
+    def test_it_requires_being_signed_in(self):
+        self.client.force_authenticate(None)
+        resp = self.client.post("/api/auth/oauth/spotify/link/", {"code": "x"}, format="json")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_linking_the_same_identity_twice_is_a_harmless_no_op(self):
+        with self._mock_verify():
+            self.client.post("/api/auth/oauth/spotify/link/", {"code": "x"}, format="json")
+            resp = self.client.post("/api/auth/oauth/spotify/link/", {"code": "x"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        from apps.accounts.models import OAuthIdentity
+        self.assertEqual(OAuthIdentity.objects.filter(provider="spotify").count(), 1)
+
+    def test_an_identity_already_linked_to_someone_else_is_refused(self):
+        other = User.objects.create_user("stranger", "stranger@example.com", PASSWORD)
+        from apps.accounts.models import OAuthIdentity
+        OAuthIdentity.objects.create(provider="spotify", provider_uid="spotify-uid-1", user=other)
+        with self._mock_verify():
+            resp = self.client.post("/api/auth/oauth/spotify/link/", {"code": "x"}, format="json")
+        self.assertEqual(resp.status_code, 409, resp.content)
+        # And it was NOT silently moved to the requester.
+        self.assertEqual(OAuthIdentity.objects.get(provider="spotify").user_id, other.id)
+
+    def test_linked_now_shows_up_on_login_with_that_provider(self):
+        # The whole point: one account, reachable by either.
+        with self._mock_verify():
+            self.client.post("/api/auth/oauth/spotify/link/", {"code": "x"}, format="json")
+        with self._mock_verify():
+            resp = self.client.post("/api/auth/oauth/spotify/", {"code": "x"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.assertEqual(resp.data["user"]["username"], "owner")
+
+    def test_listing_shows_every_linked_provider(self):
+        with self._mock_verify():
+            self.client.post("/api/auth/oauth/spotify/link/", {"code": "x"}, format="json")
+        resp = self.client.get("/api/auth/oauth/linked/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual([i["provider"] for i in resp.data["identities"]], ["spotify"])
+
+    def test_unlinking_removes_it(self):
+        with self._mock_verify():
+            self.client.post("/api/auth/oauth/spotify/link/", {"code": "x"}, format="json")
+        resp = self.client.delete("/api/auth/oauth/spotify/link/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+        from apps.accounts.models import OAuthIdentity
+        self.assertFalse(OAuthIdentity.objects.filter(provider="spotify").exists())
+
+    def test_unlinking_something_not_linked_is_a_404(self):
+        resp = self.client.delete("/api/auth/oauth/spotify/link/")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_an_oauth_only_member_cant_unlink_their_last_identity(self):
+        # set_unusable_password() is exactly what _user_from_oauth does for a
+        # brand-new OAuth signup — this member has no password to fall back on.
+        oauth_only = User.objects.create_user("oauthonly", "o@example.com")
+        oauth_only.set_unusable_password()
+        oauth_only.save()
+        self.client.force_authenticate(oauth_only)
+        from apps.accounts.models import OAuthIdentity
+        OAuthIdentity.objects.create(provider="google", provider_uid="g-1", user=oauth_only)
+        resp = self.client.delete("/api/auth/oauth/google/link/")
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertTrue(OAuthIdentity.objects.filter(provider="google", user=oauth_only).exists())
+
+    def test_a_second_linked_identity_may_be_removed_even_with_no_password(self):
+        oauth_only = User.objects.create_user("oauthonly2", "o2@example.com")
+        oauth_only.set_unusable_password()
+        oauth_only.save()
+        self.client.force_authenticate(oauth_only)
+        from apps.accounts.models import OAuthIdentity
+        OAuthIdentity.objects.create(provider="google", provider_uid="g-2", user=oauth_only)
+        OAuthIdentity.objects.create(provider="github", provider_uid="gh-2", user=oauth_only)
+        resp = self.client.delete("/api/auth/oauth/google/link/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+    def test_a_member_with_a_real_password_may_unlink_their_only_identity(self):
+        from apps.accounts.models import OAuthIdentity
+        OAuthIdentity.objects.create(provider="spotify", provider_uid="spotify-uid-1", user=self.user)
+        resp = self.client.delete("/api/auth/oauth/spotify/link/")
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+
 class OAuthVerifierShapeTests(TestCase):
     """Every verifier must declare email_verified — a missing key is falsy and
     would quietly disable linking for a provider that does verify."""
@@ -160,4 +267,35 @@ class OAuthVerifierShapeTests(TestCase):
             os.environ.pop("SPOTIFY_OAUTH_CLIENT_ID", None)
             os.environ.pop("SPOTIFY_OAUTH_CLIENT_SECRET", None)
         self.assertIn("email_verified", info)
+        self.assertIs(info["email_verified"], False)
+
+    def test_linkedin_maps_oidc_userinfo_claims(self):
+        import apps.accounts.oauth as oauth_mod
+
+        class FakeResp:
+            status_code = 200
+            def json(self):
+                return {"access_token": "t"}
+
+        orig_post, orig_get = oauth_mod.requests.post, oauth_mod.requests.get
+        oauth_mod.requests.post = lambda *a, **k: FakeResp()
+        oauth_mod.requests.get = lambda *a, **k: type(
+            "R", (), {"json": lambda self: {
+                "sub": "linkedin-uid-1", "email": "x@example.com",
+                "name": "X Person", "picture": "https://x/pic.jpg",
+            }}
+        )()
+        try:
+            import os
+            os.environ["LINKEDIN_OAUTH_CLIENT_ID"] = "id"
+            os.environ["LINKEDIN_OAUTH_CLIENT_SECRET"] = "secret"
+            info = oauth_mod.exchange_oauth2("linkedin", "code", "https://x/cb")
+        finally:
+            oauth_mod.requests.post, oauth_mod.requests.get = orig_post, orig_get
+            os.environ.pop("LINKEDIN_OAUTH_CLIENT_ID", None)
+            os.environ.pop("LINKEDIN_OAUTH_CLIENT_SECRET", None)
+        self.assertEqual(info["uid"], "linkedin-uid-1")
+        self.assertEqual(info["email"], "x@example.com")
+        self.assertEqual(info["name"], "X Person")
+        self.assertEqual(info["avatar_url"], "https://x/pic.jpg")
         self.assertIs(info["email_verified"], False)

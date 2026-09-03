@@ -286,42 +286,124 @@ class OnboardCompleteView(APIView):
         })
 
 
+def _verify_provider(provider, data):
+    """Run the right verifier for `provider` against request data and return
+    its normalized identity dict. Shared by sign-in (OAuthLoginView) and
+    account-linking (OAuthLinkView) so both trust the exact same check —
+    a provider that's good enough to sign in with is good enough to attach."""
+    if provider == "google":
+        return verify_google(data.get("credential") or data.get("id_token"))
+    if provider == "github":
+        return exchange_github(data.get("code"), data.get("redirect_uri", ""))
+    if provider == "apple":
+        return verify_apple(data.get("id_token") or data.get("credential"))
+    if provider in OAUTH2_PROVIDERS:
+        return exchange_oauth2(
+            provider, data.get("code"), data.get("redirect_uri", ""),
+            data.get("code_verifier", ""),
+        )
+    raise OAuthError(f"Unsupported provider '{provider}'.")
+
+
+def _linked_identities(user):
+    return [
+        {"provider": i.provider, "email": i.email, "linked_at": i.created_at.isoformat()}
+        for i in user.oauth_identities.order_by("provider")
+    ]
+
+
 class OAuthLoginView(APIView):
     """POST /api/auth/oauth/<provider>/ — verify provider token, return JWT."""
 
     permission_classes = [AllowAny]
 
     def post(self, request, provider):
-        data = request.data or {}
         try:
-            if provider == "google":
-                info = verify_google(data.get("credential") or data.get("id_token"))
-            elif provider == "github":
-                info = exchange_github(
-                    data.get("code"), data.get("redirect_uri", "")
-                )
-            elif provider == "apple":
-                info = verify_apple(data.get("id_token") or data.get("credential"))
-            elif provider in OAUTH2_PROVIDERS:
-                info = exchange_oauth2(
-                    provider,
-                    data.get("code"),
-                    data.get("redirect_uri", ""),
-                    data.get("code_verifier", ""),
-                )
-            else:
-                return Response(
-                    {"detail": f"Unsupported provider '{provider}'."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
             # Linking lives inside the same try so a refused link answers 400
             # with its reason, not a 500.
+            info = _verify_provider(provider, request.data or {})
             user = _user_from_oauth(info)
         except OAuthError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         tokens = issue_tokens(user)
         return Response({"user": PublicUserSerializer(user).data, **tokens})
+
+
+class OAuthLinkView(APIView):
+    """Attach or remove a verified provider identity on the SIGNED-IN member's
+    OWN account, so it can be reached by signing in with any of them.
+
+    OAuthLoginView never consults `request.user` — every hit either matches
+    an existing account by verified email or creates a new one. That's right
+    for signing IN, but gives a member no way to say "this is ALSO me": two
+    providers with different (or no) emails on the same person land as two
+    separate accounts instead of one account reachable two ways. This view is
+    the missing piece — the same verifiers, run while authenticated, writing
+    the resulting OAuthIdentity onto `request.user` instead of resolving one.
+
+    GET    /api/auth/oauth/linked/           — every provider on this account.
+    POST   /api/auth/oauth/<provider>/link/  — verify + attach one.
+    DELETE /api/auth/oauth/<provider>/link/  — detach one.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, provider=None):
+        # `provider` is only ever populated by GET on the /<provider>/link/
+        # route, which this view also answers for POST/DELETE — accepting and
+        # ignoring it here means a stray GET there lists rather than 500s.
+        return Response({"identities": _linked_identities(request.user)})
+
+    def post(self, request, provider):
+        try:
+            info = _verify_provider(provider, request.data or {})
+        except OAuthError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing = OAuthIdentity.objects.filter(
+            provider=provider, provider_uid=info["uid"]
+        ).first()
+        # Somebody else's identity — refuse rather than silently moving it,
+        # the same principle _user_from_oauth applies to email matches: an
+        # identity changes hands only on an explicit, provider-verified act,
+        # never as a side effect of someone else clicking a button.
+        if existing and existing.user_id != request.user.id:
+            return Response(
+                {"detail": f"That {provider.title()} account is already linked to a "
+                           "different Music ConnectZ account — sign in with it directly, "
+                           "or unlink it there first."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if not existing:
+            OAuthIdentity.objects.create(
+                provider=provider, provider_uid=info["uid"],
+                user=request.user, email=info.get("email", ""),
+            )
+
+        return Response(
+            {"linked": provider, "identities": _linked_identities(request.user)},
+            status=status.HTTP_200_OK if existing else status.HTTP_201_CREATED,
+        )
+
+    def delete(self, request, provider):
+        identity = OAuthIdentity.objects.filter(user=request.user, provider=provider).first()
+        if not identity:
+            return Response({"detail": f"{provider.title()} isn't linked to your account."},
+                            status=status.HTTP_404_NOT_FOUND)
+        # Never leave an account with no way back in. A member who has only
+        # ever signed in via OAuth has an unusable password (set_unusable_password
+        # in _user_from_oauth) — unlinking their last identity then would lock
+        # them out for good, with no email/password fallback to reach for.
+        others = OAuthIdentity.objects.filter(user=request.user).exclude(pk=identity.pk).exists()
+        if not others and not request.user.has_usable_password():
+            return Response(
+                {"detail": "This is your only way to sign in — set a password first, "
+                           "or link another provider before removing this one."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        identity.delete()
+        return Response({"unlinked": provider, "identities": _linked_identities(request.user)})
 
 
 class OAuthConfigView(APIView):

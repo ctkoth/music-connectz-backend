@@ -207,6 +207,16 @@ OAUTH2_PROVIDERS = {
                           "name": u.get("username") or u.get("full_name") or "",
                           "avatar_url": u.get("avatar_url") or ""},
     },
+    "linkedin": {
+        # "Sign In with LinkedIn using OpenID Connect" — the current product;
+        # the old r_liteprofile/v2/me profile API is deprecated for new apps.
+        # /v2/userinfo returns standard OIDC claims, same shape every OIDC
+        # provider uses, so no bespoke field-hunting here.
+        "token_url": "https://www.linkedin.com/oauth/v2/accessToken",
+        "userinfo_url": "https://api.linkedin.com/v2/userinfo",
+        "map": lambda u: {"uid": str(u.get("sub") or ""), "email": (u.get("email") or ""),
+                          "name": u.get("name") or "", "avatar_url": u.get("picture") or ""},
+    },
     "twitter": {
         "token_url": "https://api.twitter.com/2/oauth2/token",
         "userinfo_url": "https://api.twitter.com/2/users/me?user.fields=profile_image_url",

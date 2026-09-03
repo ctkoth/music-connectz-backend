@@ -211,6 +211,38 @@ class NothingScoresAnEntryTests(Base):
         self.assertEqual(d["days_kept"], 1)
 
 
+class WhatWasPlayingTests(Base):
+    """A linked track — what was playing while the entry got written."""
+
+    def test_a_link_rides_along_with_an_entry(self):
+        d = self.write(link={"url": "https://open.spotify.com/track/x",
+                             "label": "That song", "service": "spotify"})
+        self.assertEqual(d["link"]["url"], "https://open.spotify.com/track/x")
+        self.assertEqual(d["link"]["service"], "spotify")
+
+    def test_a_link_with_no_url_is_dropped(self):
+        d = self.write(link={"label": "no url"})
+        self.assertEqual(d["link"], {})
+
+    def test_a_link_alone_with_no_title_or_body_is_still_something(self):
+        r = self.c.post(LIST, {"title": "", "body": "",
+                               "link": {"url": "https://open.spotify.com/track/x"}},
+                        format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+
+    def test_an_entry_with_truly_nothing_is_still_refused(self):
+        r = self.c.post(LIST, {"title": "", "body": ""}, format="json")
+        self.assertEqual(r.status_code, 400, r.data)
+
+    def test_editing_replaces_the_link(self):
+        d = self.write(link={"url": "https://open.spotify.com/track/x"})
+        r = self.c.post(LIST, {"entry_id": d["id"],
+                               "link": {"url": "https://soundcloud.com/y", "service": "soundcloud"}},
+                        format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["link"]["service"], "soundcloud")
+
+
 class ThePriceAndTheGainAreStatedFirstTests(Base):
 
     def test_cost_states_that_writing_is_free_and_what_it_pays(self):

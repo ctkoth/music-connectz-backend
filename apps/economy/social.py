@@ -347,7 +347,19 @@ ADULT_ONLY_PROFILE_FIELDS = ("attracted_to", "asexual")
 PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign",
                   "nationalities", "regions", "substances", "sober",
                   "attracted_to", "asexual", "traits", "personas", "links",
-                  "external_followers")
+                  "external_followers", "featured_url")
+
+
+def featured_link_for(p):
+    """The Profile.links entry `featured_url` points at, or None. A pointer
+    that no longer matches (the link was removed) resolves to nothing rather
+    than a stale/dangling row — never fabricated, never half-shown."""
+    if not p.featured_url:
+        return None
+    return next(
+        (l for l in (p.links or []) if isinstance(l, dict) and l.get("url") == p.featured_url),
+        None,
+    )
 
 
 def _avatar_url(p, request):
@@ -535,6 +547,8 @@ def _profile_full(p, request, recheck=False):
         "bio": p.bio, "location": p.location, "birthday": p.birthday,
         "substances": p.substances, "asexual": p.asexual, "traits": p.traits,
         "personas": p.personas, "links": p.links, "mine": mine,
+        "featured_url": p.featured_url,
+        "featured_link": featured_link_for(p),
         "my_attractiveness": AttractivenessRating.objects.filter(rater=request.user, target=p.user).values_list("score", flat=True).first(),
         "my_overall": OverallRating.objects.filter(rater=request.user, target=p.user).values_list("score", flat=True).first(),
         "overall_count": OverallRating.objects.filter(target=p.user).count(),
@@ -741,6 +755,16 @@ class ProfileView(APIView):
         for f in PROFILE_FIELDS:
             if f in d:
                 setattr(p, f, clean_substances(d[f]) if f == "substances" else d[f])
+        # A featured track must point at a link the member actually has —
+        # otherwise the profile header would pin a URL that's nowhere in
+        # `links`, which the read side can never resolve to a label/service.
+        if p.featured_url and not any(
+            isinstance(l, dict) and l.get("url") == p.featured_url for l in (p.links or [])
+        ):
+            return Response(
+                {"detail": "Feature one of your saved links first — add it below, then feature it."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         minor = profile_is_minor(p)
         blocked = [f for f in ADULT_ONLY_PROFILE_FIELDS if minor and f in d]
         if minor:
