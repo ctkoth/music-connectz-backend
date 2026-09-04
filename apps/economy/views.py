@@ -667,45 +667,111 @@ class SpecZView(APIView):
 
 
 class RoyaltiesView(APIView):
-    """GET royalty balance + ledger."""
+    """GET royalty balance, ledger, and what each cashout plan would actually pay.
+
+    The plans ship WITH their arithmetic already done for this member. Cashing
+    out costs a percentage that depends on the plan and on the member's tier,
+    so a client that wanted to state the price before the button — which is the
+    rule — would otherwise have to hold its own copy of the tax table, and a
+    tier number retyped in the client is exactly how "20 free prompts" reached
+    nine places and drifted.
+
+    So the server answers the whole question: for this balance, at this tier,
+    each plan's rate, what it takes, and what lands. Same shape as the
+    KeyConnectZ allowance ladder — publish the ladder before either button is
+    pressed, so "quarterly keeps all of it" is a thing the member can SEE
+    rather than a thing they discover by picking the wrong one.
+    """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         w = wallet_for(request.user)
+        tier = membership_for(request.user).tier
+        gross = w.royalties_cents
+        plans = []
+        for plan in ("instant", "weekly", "monthly", "quarterly"):
+            rate = cashout_rate(plan, tier)
+            tax = round(gross * rate)
+            plans.append({
+                "plan": plan,
+                "rate": rate,
+                "rate_percent": round(rate * 100, 2),
+                # The two numbers the member is actually choosing between.
+                "tax_cents": tax,
+                "net_cents": gross - tax,
+            })
         entries = [
             {"kind": e.kind, "amount_cents": e.amount_cents, "tax_cents": e.tax_cents, "source": e.source, "created_at": e.created_at}
             for e in request.user.royalty_entries.all()[:50]
         ]
-        return Response({"royalties_cents": w.royalties_cents, "royalties": w.royalties, "entries": entries})
+        return Response({
+            "royalties_cents": gross, "royalties": w.royalties,
+            "tier": tier, "plans": plans, "entries": entries,
+            # Nothing accrues on its own yet. Saying so is the honest version of
+            # an empty screen — a member with 0 needs to know whether that means
+            # "you have earned nothing" or "nothing pays into this yet".
+            "accrual_is_live": False,
+        })
 
 
 class RoyaltyAccrueView(APIView):
-    """Accrue royalties to a user (called when their media earns; open for testing)."""
+    """Credit royalties to a member. OWNER ONLY.
+
+    This said "open for testing" and was exactly that: any authenticated member
+    could POST an arbitrary `amount_cents` to their own balance, and
+    `RoyaltyCashoutView` below moves that balance into `money_cents` — which
+    pays other members (`pay_between`), buys PromptZ, and settles CollabZ
+    deals. So the two endpoints together were an open mint, and the money did
+    not stay in the account that printed it.
+
+    Nothing here was ever load-bearing for a member: no client has ever called
+    it, and royalties do not accrue automatically yet (`accrual_is_live` above
+    says so out loud). Closing it costs nobody anything and had to happen
+    before any screen pointed at this balance.
+
+    `username` lets the owner credit the member whose media actually earned,
+    which is the job this endpoint exists to do — crediting only yourself was
+    never the useful version of it.
+    """
 
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        ensure_owner(request.user)
+        if not is_owner(request.user):
+            return Response({"detail": "Only the platform owner credits royalties."},
+                            status=status.HTTP_403_FORBIDDEN)
         try:
             amount_cents = int(request.data.get("amount_cents"))
         except (TypeError, ValueError):
             return Response({"detail": "amount_cents (integer) required"}, status=status.HTTP_400_BAD_REQUEST)
         if amount_cents <= 0:
             return Response({"detail": "amount must be positive"}, status=status.HTTP_400_BAD_REQUEST)
-        w = wallet_for(request.user)
+        target = request.user
+        username = str(request.data.get("username") or "").strip()
+        if username:
+            target = User.objects.filter(username__iexact=username).first()
+            if not target:
+                return Response({"detail": f"No member called {username}."},
+                                status=status.HTTP_404_NOT_FOUND)
+        w = wallet_for(target)
         w.royalties_cents += amount_cents
         w.save(update_fields=["royalties_cents", "updated_at"])
         RoyaltyEntry.objects.create(
-            user=request.user, kind=RoyaltyEntry.KIND_ACCRUAL, amount_cents=amount_cents,
+            user=target, kind=RoyaltyEntry.KIND_ACCRUAL, amount_cents=amount_cents,
             source=str(request.data.get("source", ""))[:200],
         )
-        return Response({"royalties_cents": w.royalties_cents, "royalties": w.royalties})
+        return Response({"username": target.username,
+                         "royalties_cents": w.royalties_cents, "royalties": w.royalties})
 
 
 class RoyaltyCashoutView(APIView):
     """Cash out royalties into the wallet, applying the plan's tax.
 
-    Plans: instant (15%), weekly (per-tier 10/5/2), monthly (1%), quarterly (0%).
+    Plans: instant (15%), weekly (per-tier 10/5/3), monthly (1%), quarterly (0%).
+    The rates live in `catalog.cashout_rate` and are published, already
+    applied to this balance, by RoyaltiesView above — never retyped here.
     """
 
     permission_classes = [IsAuthenticated]
