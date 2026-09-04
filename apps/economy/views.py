@@ -8,7 +8,9 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import AI_MODEL_COSTS, SPECZ_CATALOG, ai_cost, cashout_rate, limits_for
+from .catalog import (AI_MODEL_COSTS, SPECZ_APP_KEYS, SPECZ_APPS,
+                      SPECZ_LABEL_MAX, SPECZ_PRICE_SPINAZ, SPECZ_VALUE_MAX,
+                      ai_cost, cashout_rate, limits_for)
 from .media import stable_media_url
 from .models import (
     DEV_TAX,
@@ -28,6 +30,7 @@ from .models import (
     daily_prompt_state,
     energy_for_topup,
     ENERGY_TOPUP_MULT,
+    log_resource,
     membership_for,
     split_cents,
     storage_used_bytes,
@@ -629,41 +632,102 @@ class LimitsView(APIView):
 
 
 class SpecZView(APIView):
-    """GET the SpecZ catalog with owned flags; POST buys an item (StatZ only)."""
+    """GET your SpecZ and what one costs; POST writes one; DELETE removes one.
+
+    A SpecZ is a label and a value the member writes and attaches to an app —
+    "Preferred BPM: 140-150, dark strings" on PostZ. It was authored in the tab
+    and saved to `localStorage`: no API call, no balance touched, nothing on
+    the server. Meanwhile MembershipZ sold the SpecZ marketplace as THE
+    StatZ-only perk, so the one thing advertised as worth a subscription was
+    the one thing that charged nothing and did not survive a new browser.
+    """
 
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        owned = set(request.user.specz_purchases.values_list("item_id", flat=True))
-        items = [
-            {"id": iid, "name": d["name"], "price_cents": d["price_cents"], "owned": iid in owned}
-            for iid, d in SPECZ_CATALOG.items()
+    def _mine(self, user):
+        return [
+            {"id": p.id, "app_key": p.app_key, "label": p.label, "value": p.value,
+             "price_spinaz": p.price_spinaz, "created_at": p.created_at}
+            for p in user.specz_purchases.all()[:200]
         ]
-        return Response({"items": items})
+
+    def get(self, request):
+        w = wallet_for(request.user)
+        have = w.spinaz or 0
+        return Response({
+            "items": self._mine(request.user),
+            "price_spinaz": SPECZ_PRICE_SPINAZ,
+            "spinaz": have,
+            # Whether they can afford it travels WITH the price, so the tab
+            # states it on the button instead of after it is pressed.
+            "affordable": have >= SPECZ_PRICE_SPINAZ,
+            "apps": SPECZ_APPS,
+            "label_max": SPECZ_LABEL_MAX,
+            "value_max": SPECZ_VALUE_MAX,
+            "tier": membership_for(request.user).tier,
+            "tier_required": TIER_STATZ,
+        })
 
     def post(self, request):
-        m = membership_for(request.user)
-        if m.tier != TIER_STATZ:
-            return Response({"detail": "SpecZ is a StatZ-only marketplace"}, status=status.HTTP_403_FORBIDDEN)
-        item_id = str(request.data.get("item_id", ""))
-        item = SPECZ_CATALOG.get(item_id)
-        if not item:
-            return Response({"detail": "unknown item"}, status=status.HTTP_400_BAD_REQUEST)
-        if request.user.specz_purchases.filter(item_id=item_id).exists():
-            return Response({"detail": "already owned"}, status=status.HTTP_409_CONFLICT)
+        if membership_for(request.user).tier != TIER_STATZ:
+            return Response({"detail": "SpecZ is a StatZ-only marketplace"},
+                            status=status.HTTP_403_FORBIDDEN)
+        d = request.data or {}
+        app_key = str(d.get("app_key", "")).strip()
+        if app_key not in SPECZ_APP_KEYS:
+            return Response({"detail": "Pick an app to attach it to.",
+                             "apps": SPECZ_APPS}, status=status.HTTP_400_BAD_REQUEST)
+        label = str(d.get("label", "")).strip()
+        value = str(d.get("value", "")).strip()
+        if not label or not value:
+            return Response({"detail": "A SpecZ needs both a label and a value."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        # Refuse over-length rather than silently truncating. A save handler
+        # that quietly cuts what somebody typed and answers "saved" is the
+        # worst bug class in this app and has shipped twice.
+        if len(label) > SPECZ_LABEL_MAX or len(value) > SPECZ_VALUE_MAX:
+            return Response(
+                {"detail": f"Label is up to {SPECZ_LABEL_MAX} characters and value up to {SPECZ_VALUE_MAX}.",
+                 "label_max": SPECZ_LABEL_MAX, "value_max": SPECZ_VALUE_MAX},
+                status=status.HTTP_400_BAD_REQUEST)
         w = wallet_for(request.user)
-        price = item["price_cents"]
-        if w.money_cents < price:
-            return Response({"detail": "insufficient balance"}, status=status.HTTP_402_PAYMENT_REQUIRED)
-        dev, _ = split_cents(price, m.dev_tax_rate)  # developer tax recorded on the sale
-        w.money_cents -= price
-        w.save(update_fields=["money_cents", "updated_at"])
-        SpecZPurchase.objects.create(user=request.user, item_id=item_id, price_cents=price, dev_tax_cents=dev)
-        Transaction.objects.create(
-            user=request.user, kind=Transaction.KIND_PURCHASE, amount_cents=-price,
-            dev_tax_cents=dev, note=f"SpecZ: {item['name']}",
+        have = w.spinaz or 0
+        if have < SPECZ_PRICE_SPINAZ:
+            # Name both numbers. "Insufficient balance" makes somebody go and
+            # count their own SpinaZ to work out how short they are.
+            return Response(
+                {"detail": f"That's {SPECZ_PRICE_SPINAZ} 🍥 and you have {have}.",
+                 "price_spinaz": SPECZ_PRICE_SPINAZ, "spinaz": have},
+                status=status.HTTP_402_PAYMENT_REQUIRED)
+        # Charge only once everything above has passed, so a refused SpecZ is
+        # never a paid one — the rule the coach bills on.
+        w.spinaz = have - SPECZ_PRICE_SPINAZ
+        w.save(update_fields=["spinaz", "updated_at"])
+        p = SpecZPurchase.objects.create(
+            user=request.user, app_key=app_key, label=label, value=value,
+            price_spinaz=SPECZ_PRICE_SPINAZ,
         )
-        return Response({"wallet": WalletSerializer(w).data, "item_id": item_id, "dev_tax_cents": dev})
+        # Through log_resource so it lands in LogZ as a SpinaZ movement with
+        # its reason, like every other spend. A purchase that moves a balance
+        # and leaves no row is how "where did my SpinaZ go" starts.
+        log_resource(request.user, Transaction.RES_SPINAZ, -SPECZ_PRICE_SPINAZ,
+                     f"SpecZ on {app_key}: {label}")
+        return Response({"item": {"id": p.id, "app_key": p.app_key, "label": p.label,
+                                  "value": p.value, "price_spinaz": p.price_spinaz,
+                                  "created_at": p.created_at},
+                         "wallet": WalletSerializer(w).data, "spinaz": w.spinaz},
+                        status=status.HTTP_201_CREATED)
+
+    def delete(self, request, pk=None):
+        p = request.user.specz_purchases.filter(pk=pk).first()
+        if not p:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        p.delete()
+        # Deliberately no refund, and the tab says so before the button. Buying
+        # it back costs the same as buying it did; a delete that quietly
+        # returned the SpinaZ would make the price meaningless.
+        return Response({"deleted": pk, "refunded_spinaz": 0,
+                         "spinaz": wallet_for(request.user).spinaz})
 
 
 class RoyaltiesView(APIView):

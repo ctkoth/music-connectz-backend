@@ -150,16 +150,32 @@ class Transaction(models.Model):
 
 
 class SpecZPurchase(models.Model):
+    """One piece of metadata a member wrote and attached to an app.
+
+    Was a row saying which of six catalog products you owned. Nothing produced
+    those products and nothing read this table, so the row was the whole
+    purchase. It holds the SpecZ itself now — the label and the value the
+    member typed — which is the part that was real all along and was living in
+    their browser's localStorage.
+    """
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="specz_purchases"
     )
-    item_id = models.CharField(max_length=64)
-    price_cents = models.PositiveIntegerField()
-    dev_tax_cents = models.PositiveIntegerField(default=0)
+    # A tab key, so the SpecZ can link back to the app it describes.
+    app_key = models.CharField(max_length=32)
+    label = models.CharField(max_length=60)
+    value = models.CharField(max_length=200)
+    # Paid in SpinaZ. No dev-tax column: SpinaZ is never dev-taxed anywhere in
+    # this codebase (`split_participants`), and a column that can only ever
+    # hold 0 is decoration wearing a measurement's clothes.
+    price_spinaz = models.PositiveIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ("user", "item_id")
+        # No unique_together any more. The old one was ("user", "item_id") —
+        # buy each catalog product once. A member may write as many SpecZ as
+        # they like; the SpinaZ price is the only cap it needs.
         ordering = ["-created_at"]
 
 
