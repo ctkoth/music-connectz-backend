@@ -104,6 +104,7 @@ from .views import (
     OwnerClaimView,
     OwnerRevenueView,
     PromptzBuyView,
+    PromptzConvertView,
     RoyaltiesView,
     RoyaltyAccrueView,
     RoyaltyCashoutView,
@@ -140,6 +141,7 @@ urlpatterns = [
     path("limits/", LimitsView.as_view(), name="economy-limits"),
     path("ai/charge/", AIChargeView.as_view(), name="economy-ai-charge"),
     path("promptz/buy/", PromptzBuyView.as_view(), name="economy-promptz-buy"),
+    path("promptz/convert/", PromptzConvertView.as_view(), name="economy-promptz-convert"),
     path("ai/occ/", OccChatView.as_view(), name="economy-ai-occ"),
     # OCC — Ocular Code ConnectZ.
     path("occ/spec/", OccSpecView.as_view(), name="economy-occ-spec"),

@@ -351,6 +351,73 @@ Run it after touching the upload path or the chain, and after a key rotation.
 It costs one generateContent call. A stubbed suite going green is not evidence
 the transport works; this is.
 
+## A limit that stops a member doing anything is not a limit, it's a door out
+
+`catalog.py` and `models.py` hold about a dozen ladders, and the audit that
+produced this section found three of them answering "nothing" to somebody on
+the day they arrived. The rule they broke is the one to check every new limit
+against:
+
+**A tier limit says how MUCH, how OFTEN or how FAST. It may never say whether.**
+A member who cannot do a thing at all does not upgrade — they leave, and they
+leave believing the app is broken rather than that it is paid.
+
+The three, and what each looked like from the inside:
+
+- **`PROMPT_ALLOWANCE["free"]` was 1** — one AI run a day across the coach, OCC,
+  DirectZ and every Gemini surface combined. The ANONYMOUS trial door hands a
+  stranger the same one (`TRIAL_PER_IP_HOURS`), so registering bought literally
+  nothing on the axis people arrive for. It is 3.
+- **Passive Energy was `reach_median // divisor` with no floor**, and
+  `reach_median` is 0 until an external account is VERIFIED — so the app
+  published "⚡ regenerates hourly at reach ÷ tier", showed a new member their
+  rate, and the rate was 0. `ENERGY_FLOOR_PER_HOUR` is the floor; reach still
+  decides how fast it goes, the floor decides that it goes.
+- **PromptZ could be bought with cash and nothing else.** Every free way to earn
+  here — rating, referring, AdZ, OfferZ, OnboardZ — pays in 🍥, and 🍥 could not
+  reach the AI. `catalog.SPINAZ_PER_PROMPTZ` (10:1) is the door; cash stays the
+  fast lane and the subscription stays the shortcut.
+
+And the inverse failure, in the same audit, which is what makes the first one
+affordable to fix:
+
+- **The allowance capped the COUNT and not the PRICE.** `charge_ai_usage` let a
+  free daily prompt cover whatever the run cost, and the run's cost is the
+  member's own engine choice — so StatZ's 10/day on Fable (15c) was $45/mo of
+  model spend against a $15/mo subscription, while the margin comment beside
+  `PROMPT_ALLOWANCE` reasoned at the 3c floor and described a ladder that did
+  not exist. `DAILY_PROMPT_MAX_CENTS` is what one free prompt is worth. Dearer
+  engines are paid for, which is what PromptZ is for.
+
+So, when adding or moving a limit:
+
+- **State it in a unit the member can check** — clips, characters, runs a day,
+  MB. `KEY_TRANSCRIBE_DAILY_CLIPS` and `KEY_SPEAK_DAILY_CHARS` are two numbers
+  rather than one on purpose.
+- **A number that gates a capability needs a floor, not just a formula.** Any
+  ladder derived from something a new member cannot have yet — reach, ratings,
+  followers, history — starts at zero for everyone who has just arrived, which
+  is precisely the audience it is supposed to be recruiting.
+- **Anything metered by a cost must cap the cost, not only the count.** Or the
+  ladder is whatever the most expensive path happens to be.
+- **Check the free tier against the logged-out door.** If the anonymous trial
+  gives as much as an account does, the account is not a step up, and the
+  signup form is a wall in front of nothing.
+- **Never lower a live limit without a plan for the members already over it** —
+  the `TIER_LIMITS` note says this about storage and it is true of all of them.
+
+### Known limit still owed a decision (Corey's, not the code's)
+
+**Premium's allowance is pinned by Premium's price, and Premium's price is
+pinned by the founding discount.** The founding seat is half of StatZ
+($7.50/mo), and `catalog.py` asserts founding StatZ must cost more than
+Premium — so Premium cannot exceed $7.50, and at $6/mo its AI allowance cannot
+widen much past 5/day before the model cost eats the subscription (5/day at
+`DAILY_PROMPT_MAX_CENTS` is $4.50/mo of the $6). Free went to 3 and Premium
+stayed at 5, which is a thin gap. Making the founding discount LIFETIME-ONLY
+would unpin the monthly ladder. That is a pricing decision, so the code
+records it here rather than making it.
+
 ## Tier limits live on the server
 
 `apps/economy/catalog.py` is the source of truth for char limits, upload and

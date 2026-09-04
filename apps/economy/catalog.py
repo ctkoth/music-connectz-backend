@@ -370,6 +370,23 @@ PROMPTZ_BONUS = 1.25
 # pass-through pricing a loss: sell at 0.8c, owe Anthropic 1c.
 PROMPTZ_CENTS_PER_UNIT = 1 / PROMPTZ_BONUS
 
+# SpinaZ buy PromptZ, at ten to one.
+#
+# Before this, PromptZ could be bought with CASH and nothing else — so every
+# free way to earn on this platform (rating, referring, AdZ, OfferZ, finishing
+# OnboardZ) paid out in a currency that could not reach the thing members
+# actually come here for. A member could rate two hundred takes, hold 🍥 they
+# had genuinely worked for, and still be told the coach costs money. That is a
+# dead end, and this codebase's own rule is that nothing is a dead end.
+#
+# Ten to one, not one to one, and the ratio is the whole design: AdZ pegs 🍥 to
+# cents, so parity would make watching an ad strictly better than paying and
+# nobody would ever pay. At 10:1 the grind is real but slow — 150 🍥 from
+# OnboardZ is 15 🏷️, about seven Haiku runs, a genuine welcome and not a
+# living. Cash stays the fast lane and the subscription stays the shortcut.
+# What changes is that a member without either is no longer stuck.
+SPINAZ_PER_PROMPTZ = 10
+
 # What an agent run is CHARGED, as a multiple of what it COST to serve.
 #
 # This exists because pass-through pricing loses money here, and it took the

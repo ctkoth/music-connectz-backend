@@ -20,7 +20,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import ai_cost
-from .models import can_afford_ai, charge_ai_usage, daily_prompt_state, wallet_for
+from .models import (can_afford_ai, charge_ai_usage, daily_prompt_covers,
+                     daily_prompt_state, wallet_for)
 from .views import credit_owner
 
 logger = logging.getLogger(__name__)
@@ -212,7 +213,7 @@ def _bill(user, note, count_daily=False):
     covered_free = False
     if count_daily:
         _, _, daily_left = daily_prompt_state(user)
-        covered_free = daily_left > 0
+        covered_free = daily_prompt_covers(cost) and daily_left > 0
     remaining = charge_ai_usage(user, cost, note=note, count_daily=count_daily)
     if remaining is None:
         return None

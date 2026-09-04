@@ -205,13 +205,18 @@ class TheRatingIsAskedForAndPricedFirst(Base):
     def test_a_rating_is_billed_once_a_usable_result_exists(self):
         up = self.upload()
         before = wallet_for(self.user).promptz
+        # Read the allowance BEFORE, rather than asserting against a literal.
+        # This assertion used to read `left < 1`, which only held while the free
+        # tier's allowance was exactly 1 — so raising it turned a real billing
+        # check into a test of the old number.
+        _, _, left_before = daily_prompt_state(self.user)
         with patch.object(directz_craft, "rate_video", return_value=(GOOD, None)):
             self.post(media_url=up.file.url)
         # The daily allowance covers the first one, so either the free prompt
         # went or PromptZ did — never both, and never nothing.
-        _, _, left = daily_prompt_state(self.user)
+        _, _, left_after = daily_prompt_state(self.user)
         spent = before - wallet_for(self.user).promptz
-        self.assertTrue(spent > 0 or left < 1)
+        self.assertTrue(spent > 0 or left_after == left_before - 1)
 
     def test_a_video_the_rater_could_not_read_is_never_billed(self):
         # The rule vocalcoach.py bills on.

@@ -5,6 +5,8 @@ transaction) is enforced here, server-side, so the client can't bypass it.
 
 Rates match the frontend: Free 10% · Premium 5% · StatZ 2%.
 """
+import os
+
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
@@ -467,7 +469,41 @@ def award_promptz(user, amount, note="PromptZ"):
 # $15/mo subscription, and $18 against $7.50 for a founding seat. At 10/day it
 # is $9 against $15 — a real margin, and still twice what Premium gets. Anyone
 # who wants more buys prepaid PromptZ, which is priced to cover itself.
-PROMPT_ALLOWANCE = {"free": 1, "premium": 5, "statz": 10, "debug": 10 ** 6}
+#
+# Free is 3, not 1. One was the same allowance the ANONYMOUS trial door hands a
+# stranger (one scored take per IP per day, TRIAL_PER_IP_HOURS), so registering
+# bought nothing at all on the axis people arrive for — the account was strictly
+# more work for the same thing. Three is the smallest number that is visibly an
+# allowance rather than a demo: a take coached, a follow-up asked, a lyric
+# looked at, in one sitting. At DAILY_PROMPT_MAX_CENTS below that is 9c a day of
+# model cost for a member paying nothing, and only for one who spends all three
+# every day.
+PROMPT_ALLOWANCE = {"free": 3, "premium": 5, "statz": 10, "debug": 10 ** 6}
+
+# What ONE free daily prompt is allowed to be worth, in cents.
+#
+# The allowance used to cover whatever the run cost, and the run's price is the
+# member's own engine choice — so a StatZ member's 10 free prompts a day on
+# Fable (15c) was $45/mo of model cost against a $15/mo subscription, and the
+# margin note above, which reasons at the 3c floor, was describing a ladder that
+# did not exist. The COUNT was capped and the PRICE was not.
+#
+# 3c covers every engine a Free member can pick (Haiku 2c), the coach and the
+# other Gemini surfaces (ai_cost("standard") = 3c), and Corey GPT (1c). Sonnet,
+# Opus and Fable are dearer than an allowance and are paid for in PromptZ or
+# cash, which is what PromptZ is for. So the tier buys HOW MANY runs and the
+# engine is what costs money, both knowable before either is chosen — the same
+# shape as KeyConnectZ's allowance ladder.
+DAILY_PROMPT_MAX_CENTS = int(os.environ.get("DAILY_PROMPT_MAX_CENTS", "3"))
+
+
+def daily_prompt_covers(cost_cents):
+    """True when a free daily prompt may pay for a run at this price.
+
+    Callers that need to SAY whether a run will be free — before it is made,
+    per the cost/gain rule — must ask this and not merely whether prompts remain.
+    """
+    return 0 < int(cost_cents or 0) <= DAILY_PROMPT_MAX_CENTS
 
 
 def daily_prompt_state(user):
@@ -485,9 +521,12 @@ def daily_prompt_state(user):
     return allowance, (w.prompts_used_today or 0), remaining
 
 
-def _consume_daily_prompt(user):
-    """Spend one of today's free prompts if any remain. Returns True if one was
-    consumed (the caller should treat the run as free), else False."""
+def _consume_daily_prompt(user, cost_cents):
+    """Spend one of today's free prompts if any remain AND this run is inside
+    what an allowance is worth. Returns True if one was consumed (the caller
+    should treat the run as free), else False."""
+    if not daily_prompt_covers(cost_cents):
+        return False
     _, _, remaining = daily_prompt_state(user)  # also handles the daily reset
     if remaining <= 0:
         return False
@@ -499,16 +538,17 @@ def _consume_daily_prompt(user):
 
 def charge_ai_usage(user, cost_cents, note="AI usage", count_daily=False):
     """Debit the *minimum* cost to cover an AI model run — pure pass-through, no
-    developer tax. When `count_daily` is set (a genuine prompt run), the day's
-    free allowance is spent first and the run is free; otherwise spends prepaid
-    PromptZ (1 PromptZ = 1¢), then cash. Returns remaining money_cents, or None
+    developer tax. When `count_daily` is set (a genuine prompt run) and the run is
+    inside DAILY_PROMPT_MAX_CENTS, the day's free allowance is spent first and
+    the run is free; otherwise spends prepaid PromptZ (1 PromptZ = 1¢), then cash. Returns remaining money_cents, or None
     if the member can't afford it even with PromptZ (caller returns 402)."""
     cost_cents = int(cost_cents or 0)
     w = wallet_for(user)
     if cost_cents <= 0:
         return w.money_cents
-    # A free daily prompt covers the whole run before any paid balance is touched.
-    if count_daily and _consume_daily_prompt(user):
+    # A free daily prompt covers a run priced like an allowance before any paid
+    # balance is touched. A dearer engine is the member's choice and their bill.
+    if count_daily and _consume_daily_prompt(user, cost_cents):
         Transaction.objects.create(
             user=user, kind=Transaction.KIND_SPEND, amount_cents=0,
             dev_tax_cents=0, note=(note + " · daily prompt 🏷️")[:200],
@@ -1510,14 +1550,33 @@ def follow_counts(user):
     }
 
 
+# The floor under passive Energy, per hour, by tier.
+#
+# `reach_median` is 0 until a member VERIFIES an external account, so without
+# this every new member's hourly rate was exactly 0 — the app published "⚡
+# regenerates hourly at reach ÷ tier", showed them the number, and the number
+# was nothing. Reach is the right way to scale income and the wrong way to
+# START it: you cannot verify a following on day one, which made the one
+# resource that gates nothing feel like the one that gated everything.
+#
+# So reach still decides how fast it goes; the floor decides that it goes.
+# Free is 2/hour — 48 a day, enough to post through a session, and it arrives
+# whether or not anybody has heard of you yet. The tier multiplies the floor by
+# the same shape it multiplies reach, so upgrading is still worth it on day one
+# and not only after somebody gets famous.
+ENERGY_FLOOR_PER_HOUR = {TIER_FREE: 2, TIER_PREMIUM: 6, TIER_STATZ: 20, TIER_DEBUG: 20}
+
+
 def energy_rate_per_hour(user):
     """Hourly passive energy by tier, from the MEDIAN reach across a creator's
     verified sources (Music ConnectZ + verified external accounts):
-    Free = median/10, Premium = median/5, StatZ = median/1."""
+    Free = median/10, Premium = median/5, StatZ = median/1 — or the tier's
+    floor, whichever is larger."""
     reach = reach_median(user)
     m = membership_for(user)
     divisor = {TIER_FREE: 10, TIER_PREMIUM: 5, TIER_STATZ: 1, TIER_DEBUG: 1}.get(m.tier, 10)
-    base = reach // divisor
+    floor = ENERGY_FLOOR_PER_HOUR.get(m.tier, ENERGY_FLOOR_PER_HOUR[TIER_FREE])
+    base = max(reach // divisor, floor)
     # BadgeZ effects are read HERE, by the thing they affect. A badge whose
     # multiplier lived only in its description would be a sticker.
     mult = badge_effects(user).get("energy_multiplier", 1.0)
@@ -2023,8 +2082,23 @@ SIGNIFICANT_AT = 3
 # dead end — the thing they made in the door opens inside SingZ/RapZ.
 #
 # It costs real money to run (Gemini), and an unauthenticated endpoint that
-# spends money is a bill anybody with curl can run up. Hence both caps below.
-TRIAL_MAX_MB = 8
+# spends money is a bill anybody with curl can run up. Hence the caps below.
+#
+# The SIZE cap was 8MB, which predated the coach learning to upload a take to
+# the Files API instead of base64ing it into the request. `score_take` picks
+# that path by size and says so in its own comment — "the trial door gets the
+# same lift for free" — so 8 stopped being a transport limit a while ago and
+# has just been a stale number since.
+#
+# It is 100 now because that is the FREE tier's own `upload_mb`. The trial is
+# supposed to be the product, and a door that refuses a take the free account
+# it is advertising would have accepted is a lie about the product — somebody
+# gets told their 47MB verse is too big, signs up, and finds out it never was.
+#
+# The real abuse control is TRIAL_PER_IP_HOURS below, which caps the COUNT;
+# size only decides how big one already-rate-limited take may be. Env-tunable
+# so it can be dialled down in a hurry without a deploy.
+TRIAL_MAX_MB = int(os.environ.get("TRIAL_MAX_MB", "100"))
 TRIAL_PER_IP_HOURS = 24          # one free scored take per address per day
 TRIAL_CLAIM_DAYS = 30            # a token stays claimable this long
 
