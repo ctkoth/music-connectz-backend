@@ -183,7 +183,8 @@ class MeView(APIView):
         drives ZodiacZ + the AdZ age gate, nationalities, and basic display
         bits) on the searchable economy profile. Returns the updated user."""
         from apps.economy.catalog import over_char_limit
-        from apps.economy.models import membership_for, profile_for, zodiac_for
+        from apps.economy.models import (EXPLICIT_MIN_AGE, may_be_explicit,
+                                         membership_for, profile_for, zodiac_for)
         p = profile_for(request.user)
         data = request.data or {}
         changed = []
@@ -204,6 +205,11 @@ class MeView(APIView):
             p.birthday = bd
             p.sign = zodiac_for(bd)
             changed += ["birthday", "sign"]
+            # A birthday that no longer clears the bar takes the explicit
+            # voice with it, rather than leaving a dormant True behind.
+            if p.voice_explicit and not may_be_explicit(p):
+                p.voice_explicit = False
+                changed.append("voice_explicit")
         # The bio is member-authored prose, so its ceiling is the tier's
         # character limit — not a column width. It used to share the truncation
         # below, which silently cut a Premium member at the old varchar(500);
@@ -223,6 +229,27 @@ class MeView(APIView):
         # Truncate to each column's real width — display_name/location/gender
         # are short identifiers, not prose, and overflowing them raises a
         # DataError (500) on PostgreSQL instead of quietly saving.
+        # VoiceZ switches. Explicit is the only one with a gate, and the gate
+        # is here rather than in the client: a request to be sworn at from an
+        # account that is thirteen is refused, and refused OUT LOUD, because
+        # silently storing False for something somebody just switched on is
+        # how a setting screen starts lying about itself.
+        if "voice" in data and isinstance(data["voice"], dict):
+            v = data["voice"]
+            if "explicit" in v:
+                want = bool(v["explicit"])
+                if want and not may_be_explicit(p):
+                    return Response(
+                        {"detail": f"The explicit voice is {EXPLICIT_MIN_AGE}+. Add a birthday that says so in ProfileZ.",
+                         "voice_explicit_allowed": False},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                p.voice_explicit = want
+                changed.append("voice_explicit")
+            for key in ("emoji", "slang"):
+                if key in v:
+                    setattr(p, f"voice_{key}", bool(v[key]))
+                    changed.append(f"voice_{key}")
         for f in ("display_name", "location", "gender"):
             if isinstance(data.get(f), str):
                 limit = p._meta.get_field(f).max_length
