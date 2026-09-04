@@ -177,6 +177,8 @@ urlpatterns = [
     path("gemini/video/status/", GeminiVideoStatusView.as_view(), name="economy-gemini-video-status"),
     path("specz/", SpecZView.as_view(), name="economy-specz"),
     path("specz/buy/", SpecZView.as_view(), name="economy-specz-buy"),
+    # Removing one is a DELETE on the thing itself, not a POST to /remove/.
+    path("specz/<int:pk>/", SpecZView.as_view(), name="economy-specz-item"),
     path("royalties/", RoyaltiesView.as_view(), name="economy-royalties"),
     path("royalties/accrue/", RoyaltyAccrueView.as_view(), name="economy-royalties-accrue"),
     path("royalties/cashout/", RoyaltyCashoutView.as_view(), name="economy-royalties-cashout"),

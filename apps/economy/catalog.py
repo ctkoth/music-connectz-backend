@@ -3,15 +3,50 @@ import math
 
 from .models import TIER_FREE, TIER_PREMIUM, TIER_STATZ, TIER_DEBUG
 
-# SpecZ marketplace — StatZ-only purchasable metadata/UGC. Prices in cents.
-SPECZ_CATALOG = {
-    "demographics": {"name": "Audience Demographics", "price_cents": 999},
-    "engagement": {"name": "Engagement Heatmap", "price_cents": 799},
-    "genre-intel": {"name": "Genre Intelligence", "price_cents": 699},
-    "collab-score": {"name": "Collab Compatibility", "price_cents": 499},
-    "ugc-covers": {"name": "UGC: Cover Art Pack", "price_cents": 1299},
-    "trending": {"name": "Trending Metadata Report", "price_cents": 899},
-}
+# ---- SpecZ: metadata a member writes and attaches to an app. ----
+#
+# This was a catalog of six analytics products — "Audience Demographics",
+# "Engagement Heatmap", "Genre Intelligence" and so on, priced 499-1299 — and
+# the catalog is gone because NOTHING PRODUCED ANY OF THEM. Nothing read
+# `specz_purchases` except the endpoint that wrote it, and no code anywhere
+# generated a demographics report. Buying one bought a row in a table.
+#
+# The tab, meanwhile, had built something that does work: pick an app, write a
+# label and a value, attach it. That exists after purchase because the member
+# typed it. It just never charged for it — `persist()` wrote to localStorage,
+# no API call, no balance touched — while MembershipZ sold SpecZ as THE
+# StatZ-only perk.
+#
+# So there were two SpecZ, one that charged for nothing and one that delivered
+# for free, and the fix is not to connect them: wiring the tab to that catalog
+# would have taken 999 real SpinaZ for a report that does not exist, which is
+# the same bug with a working till attached. SpecZ is the thing that delivers,
+# and it charges now.
+SPECZ_PRICE_SPINAZ = 250          # flat — what the tab already told people
+
+# Where a SpecZ can be attached. Keys are TAB keys, so a stored SpecZ can link
+# back to the app it describes (`goToSpot(app_key)`) instead of naming one and
+# leaving the member to go and find it.
+SPECZ_APPS = [
+    {"key": "postz", "name": "PostZ", "icon": "postz.png"},
+    {"key": "battlez", "name": "BattleZ", "icon": "battlez.png"},
+    {"key": "collabz", "name": "CollabZ", "icon": "collabz.png"},
+    {"key": "singz", "name": "SingZ", "icon": "singz.png"},
+    {"key": "rapz", "name": "RapZ", "icon": "rapz.png"},
+    {"key": "labelz", "name": "LabelZ", "icon": "labelz.png"},
+    {"key": "groupz", "name": "GroupZ", "icon": "groupz.png"},
+    {"key": "social", "name": "Social ConnectZ", "icon": "social_connectz.png"},
+    {"key": "lessonz", "name": "LessonZ", "icon": "lessonz.png"},
+    {"key": "messagez", "name": "MessageZ", "icon": "messagez.png"},
+]
+SPECZ_APP_KEYS = {a["key"] for a in SPECZ_APPS}
+
+# A label and a value are member-authored text, so they answer to a length the
+# server states rather than to a column width — the same rule as everywhere
+# else. These are short by design: a SpecZ is a fact about how you work, not a
+# document, and the tier's char limit belongs to prose.
+SPECZ_LABEL_MAX = 60
+SPECZ_VALUE_MAX = 200
 
 # A cap high enough that no human writes past it, while staying a plain int —
 # so every `len(x) > cap` and `x[:cap]` in the codebase keeps working, and it
