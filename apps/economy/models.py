@@ -179,6 +179,77 @@ class SpecZPurchase(models.Model):
         ordering = ["-created_at"]
 
 
+class Call(models.Model):
+    """One 1:1 call, and the money that moves through it.
+
+    CallZ was sold at the top tier and did not exist. LessonZ had a "CallZ"
+    delivery option on a booking, priced the same as remote or in-person —
+    a dropdown, not a connect — which is why `CLAUDE.md` has listed it as an
+    open cost/gain violation the whole time: there was no per-minute rate to
+    state before a call because there was no call.
+
+    Three things about this row are the feature, and none of them are the video:
+
+      * `rate_cents_per_min` is SNAPSHOT AT RING. The callee's rate comes from
+        their own priced skills, and a rate that could move while the call is
+        running is a price discovered by paying it.
+      * `held_cents` is escrow, taken from the caller when the callee ANSWERS
+        and not before. Nobody pays for a call that was never picked up, and
+        the callee is never owed by somebody who cannot pay.
+      * `last_seen_at` is what stops escrow being held forever by a browser
+        that closed mid-call. Any read settles a call nobody has touched in
+        `CALL_STALE_SECONDS`, the same way `settle_energy` pays what is owed on
+        read rather than waiting for a cron that does not exist.
+
+    The SDP and ICE columns are the signalling channel. This app runs on
+    gunicorn with no ASGI and no channels layer, so there are no WebSockets to
+    signal over — both sides poll this row instead. That is slower to connect
+    than a socket and it is honest: the media itself is peer-to-peer once the
+    handshake lands, so the polling only costs the first few seconds.
+    """
+
+    STATUS_RINGING = "ringing"
+    STATUS_LIVE = "live"
+    STATUS_ENDED = "ended"
+    STATUS_DECLINED = "declined"
+    STATUS_MISSED = "missed"
+    STATUS_CHOICES = [
+        (STATUS_RINGING, "Ringing"), (STATUS_LIVE, "Live"), (STATUS_ENDED, "Ended"),
+        (STATUS_DECLINED, "Declined"), (STATUS_MISSED, "Missed"),
+    ]
+
+    caller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="calls_made")
+    callee = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="calls_received")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_RINGING)
+
+    rate_cents_per_min = models.PositiveIntegerField(default=0)
+    held_cents = models.PositiveIntegerField(default=0)
+    charged_cents = models.PositiveIntegerField(default=0)
+    billed_seconds = models.PositiveIntegerField(default=0)
+
+    # WebRTC handshake, exchanged by polling this row.
+    offer_sdp = models.TextField(blank=True, default="")
+    answer_sdp = models.TextField(blank=True, default="")
+    caller_ice = models.JSONField(default=list, blank=True)
+    callee_ice = models.JSONField(default=list, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    end_reason = models.CharField(max_length=32, blank=True, default="")
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["callee", "status"]),
+                   models.Index(fields=["caller", "status"])]
+
+    def __str__(self):
+        return f"{self.caller_id}->{self.callee_id} {self.status}"
+
+
 class RoyaltyEntry(models.Model):
     KIND_ACCRUAL = "accrual"
     KIND_CASHOUT = "cashout"

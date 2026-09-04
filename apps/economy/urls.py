@@ -9,6 +9,7 @@ from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView)
 from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
+from .callz import CallDetailView, CallRateView, CallsView
 from .distributez import TranscodeView, LyricsView
 from .adz import AdzView, AdDetailView, AdRewardView
 from .rewards import (AdmobConfigView, AdmobSsvView, OfferzView,
@@ -175,6 +176,13 @@ urlpatterns = [
     path("gemini/image/", GeminiImageView.as_view(), name="economy-gemini-image"),
     path("gemini/video/", GeminiVideoView.as_view(), name="economy-gemini-video"),
     path("gemini/video/status/", GeminiVideoStatusView.as_view(), name="economy-gemini-video-status"),
+    # CallZ. The rate route is separate and comes FIRST in the flow: a member
+    # asks what a call costs before anything rings, which is the whole
+    # cost/gain rule for a feature priced by the minute.
+    path("callz/rate/<str:username>/", CallRateView.as_view(), name="economy-callz-rate"),
+    path("callz/", CallsView.as_view(), name="economy-callz"),
+    path("callz/<int:pk>/", CallDetailView.as_view(), name="economy-call"),
+    path("callz/<int:pk>/<str:action>/", CallDetailView.as_view(), name="economy-call-action"),
     path("specz/", SpecZView.as_view(), name="economy-specz"),
     path("specz/buy/", SpecZView.as_view(), name="economy-specz-buy"),
     # Removing one is a DELETE on the thing itself, not a POST to /remove/.

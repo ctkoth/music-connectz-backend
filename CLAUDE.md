@@ -41,11 +41,14 @@ its resource emoji.
 
 ### Known violations, not yet fixed
 
-- **CallZ** — no live 1:1 calling surface exists yet (LessonZ's "CallZ"
-  delivery method is priced the same as remote/in-person on the same booking
-  flow — it isn't a per-minute connect). Whenever a real call feature ships,
-  the other member's rate has to be visible before it connects, same as
-  everywhere else.
+- *(none open on this list.)* CallZ was here for the whole life of this file —
+  no live 1:1 surface existed, LessonZ's "CallZ" was a delivery method on a
+  booking priced the same as remote or in-person, so there was no per-minute
+  rate to state because there was no call. It ships now: `apps/economy/callz.py`
+  publishes the callee's rate, the caller's balance and the minutes they can
+  afford BEFORE anything rings, the running cost is on screen during the call,
+  and the receipt matches the quote. The rate is snapshot at ring so it cannot
+  move under a call in progress.
 
 Previously listed here and since fixed, client-side — BossTake's "Send it to
 the coach", OCC chat, DirectZ craft, and KeyConnectZ translate all render the
