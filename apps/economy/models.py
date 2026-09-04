@@ -677,6 +677,19 @@ class Profile(models.Model):
     # default follows an upgrade or a lapse without anything having to migrate
     # the stored value. Always read it through catalog.ai_model_for().
     ai_model = models.CharField(max_length=16, blank=True, default="")
+    # VoiceZ — how hard the app talks to THIS member. Three independent
+    # switches rather than one "tone" dropdown, because they are genuinely
+    # independent: somebody can want the slang and not the swearing, or the
+    # swearing and not a screen full of emoji.
+    #
+    # Defaults say what the house voice is. Slang and emoji are ON because
+    # that is how Music ConnectZ already talks and turning them off is the
+    # deliberate act. `voice_explicit` is OFF and stays off until asked for —
+    # and `may_be_explicit()` below is what stops asking being enough on its
+    # own, because this platform starts at 13.
+    voice_explicit = models.BooleanField(default=False)
+    voice_emoji = models.BooleanField(default=True)
+    voice_slang = models.BooleanField(default=True)
     links = models.JSONField(default=list, blank=True)  # [{label, url}] public links
     # Location (opt-in) for in-person CollabZ / VenueZ distance filtering.
     share_location = models.BooleanField(default=False)
@@ -710,6 +723,23 @@ def profile_age(p):
         return today.year - y - ((today.month, today.day) < (m, d))
     except (ValueError, TypeError):
         return None
+
+
+# The age the explicit voice needs. Not a number typed into a view: the gate
+# and the reason for it belong next to the field they govern.
+EXPLICIT_MIN_AGE = 18
+
+
+def may_be_explicit(p):
+    """Whether this member may turn the explicit voice on at all.
+
+    A toggle the client can set is a request, not a permission. AdZ already
+    treats an unknown age as under-age rather than over it, and the same
+    answer is the right one here: no birthday means no, because the failure
+    we can't take back is swearing at a thirteen-year-old.
+    """
+    age = profile_age(p)
+    return age is not None and age >= EXPLICIT_MIN_AGE
 
 
 # Last MMDD of each sign, in calendar order — e.g. Capricorn runs through Jan 19,
