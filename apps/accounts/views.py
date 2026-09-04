@@ -6,6 +6,8 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.economy.personaz import clean_persona
+
 from .models import OAuthIdentity, Profile
 from .oauth import (
     OAUTH2_PROVIDERS,
@@ -35,61 +37,12 @@ def _unique_username(base):
     return candidate
 
 
-def _clean_persona(raw):
-    """Normalize one PersonaZ entry, keeping its skills and their start dates.
-
-    Accepts the string form (just a key) and the dict form; always returns a
-    dict so downstream code has one shape to reason about. Skill stints are the
-    input to profile_max_experience, so they are preserved verbatim — both the
-    new `periods` list and the legacy single `start`.
-    """
-    if not isinstance(raw, dict):
-        return {"key": str(raw)[:60], "name": str(raw)[:60], "skills": []}
-
-    skills = []
-    for s in (raw.get("skills") or [])[:100]:
-        if not isinstance(s, dict):
-            name = str(s)[:80]
-            if name:
-                skills.append({"name": name})
-            continue
-        name = str(s.get("name", ""))[:80]
-        if not name:
-            continue
-        # Stints. Experience is the SUM of these, so a member who stopped is
-        # not credited for the years they were away. The legacy single `start`
-        # is read as one still-open stint and preserved on the way through —
-        # dropping it here would silently zero somebody's experience.
-        periods = []
-        for pr in (s.get("periods") or [])[:20]:
-            if not isinstance(pr, dict):
-                continue
-            start = str(pr.get("start") or "")[:10]
-            if not start:
-                continue
-            end = str(pr.get("end") or "")[:10]
-            periods.append({"start": start, "end": end} if end else {"start": start})
-        # Hourly rate, in cents. The blueprint prices CallZ by "the other
-        # member's skill rate per hour" and nothing stored one, so the price
-        # range had no metric to gate on.
-        try:
-            rate = max(0, int(s.get("rate_cents") or 0))
-        except (TypeError, ValueError):
-            rate = 0
-        entry = {"name": name}
-        if periods:
-            entry["periods"] = periods
-        else:
-            start = str(s.get("start") or "")[:10]
-            if start:
-                entry["start"] = start
-        if rate:
-            entry["rate_cents"] = rate
-        skills.append(entry)
-        continue
-
-    key = str(raw.get("key") or raw.get("name") or "")[:60]
-    return {"key": key, "name": str(raw.get("name") or key)[:60], "skills": skills}
+# The persona normalizer lives in apps.economy.personaz, next to the recovery
+# for the rows that lost the shape and the sweep that repairs them. It used to
+# be defined here, which meant the WRITE path knew how to normalize a persona
+# and no read path did — so a member whose row was already mangled stayed
+# mangled until they happened to save their profile again.
+_clean_persona = clean_persona
 
 
 def _user_from_oauth(info):

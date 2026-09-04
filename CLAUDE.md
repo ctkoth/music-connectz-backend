@@ -418,6 +418,63 @@ stayed at 5, which is a thin gap. Making the founding discount LIFETIME-ONLY
 would unpin the monthly ladder. That is a pricing decision, so the code
 records it here rather than making it.
 
+## A profile field has two writers, and only one of them used to clean
+
+`POST /api/economy/profile/` wrote every name in `social.PROFILE_FIELDS`
+**straight off the request body** — `setattr(p, f, d[f])`, with `substances`
+the single exception — while `PATCH /api/auth/me/` normalized the same fields
+properly. Two writers for one column, one of them a passthrough.
+
+That is where `"{'name': 'Independent Artist', 'emoji': '🎤', 'skills': []}"`
+came from: a persona reached the profile as the **printed form of a dict**,
+58 characters, which fits under the 60-character cap a persona name is
+truncated to — so it was stored whole and served back verbatim, and the
+member's own card rendered machine noise where a persona should be.
+
+**It broke quietly, and that is the part worth remembering.** Every consumer of
+`profile.personas` guards with `if not isinstance(persona, dict): continue` —
+postz's skill pricing, questz's rate check, occ_suggest, social's rate range
+and experience metric, publicz's public card. Those guards are correct and are
+why nothing ever 500'd. They are also why nobody noticed: a member in this
+state saw no error, just a persona that read as noise, their priced skills
+silently absent from what a post costs, their experience metric blank, and
+their public card one persona short. **Nothing to report, so nothing got
+reported.** A defensive `continue` over member data hides the corruption it
+protects you from — so the guard belongs in a normalizer that repairs, not at
+each call site that skips.
+
+Three more things rode in through the same gap:
+
+- **`links` was unvalidated**, and it is rendered as `<a href>` on the member
+  card *and* on the logged-out public profile. A stored `javascript:` there is
+  executable on a page a stranger can open — React warns about one and puts it
+  in the DOM anyway.
+- **Nothing capped a list**, so a profile row could be made arbitrarily large,
+  and that row is serialized into every member card and search result.
+- **`birthday` skipped the zodiac recompute and the explicit-voice revocation**
+  that the same edit performs on `/api/auth/me/`. The read path re-applies the
+  age gate (`test_voice`), which is why that one was contained rather than
+  exploitable — but a second writer that forgets what the first one does stays
+  contained by luck.
+
+So:
+
+- **`apps/economy/personaz.py` is the one shape.** `clean_persona`, `clean_link`
+  and the `personas_of` / `links_of` read helpers live together, and
+  `accounts.views` imports the same `clean_persona` rather than defining a
+  second one. A field with two endpoints gets one cleaner, not two.
+- **Repair on read, not only on write.** Fixing a writer does nothing for what
+  it already wrote, and a member stays broken until they happen to save again.
+  `socialData.js` already says this about localStorage; it is just as true of a
+  column. Links especially: a refused URL must not be one un-run command away
+  from being served.
+- **`manage.py repair_profiles [--write]`** is the sweep that makes the
+  read-side repair stop being needed. Dry by default, like `reconcile_uploads`,
+  and it NAMES each link it refused rather than binning it silently.
+- **Recovery parses, it never evaluates.** `ast.literal_eval` handles literals
+  only, so a persona name cannot become code execution on a profile save.
+  A name that merely looks like a dict is kept as typed.
+
 ## Tier limits live on the server
 
 `apps/economy/catalog.py` is the source of truth for char limits, upload and
