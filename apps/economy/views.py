@@ -24,6 +24,7 @@ from .models import (
     Transaction,
     Upload,
     charge_ai_usage,
+    DAILY_PROMPT_MAX_CENTS,
     daily_prompt_state,
     energy_for_topup,
     ENERGY_TOPUP_MULT,
@@ -234,8 +235,11 @@ class StatsView(APIView):
                 "my_energy": w.energy,
                 "my_spinaz": w.spinaz,
                 "my_promptz": w.promptz,  # prepaid AI credits (persist)
-                # Free daily prompts by tier (free 1 / premium 5 / statz 10) — reset daily, don't stack.
+                # Free daily prompts by tier (free 3 / premium 5 / statz 10) — reset daily, don't stack.
                 "my_promptz_daily": prompt_allowance,
+                # What one of them is worth. Published because "you have 3 left"
+                # is not the whole price when a dearer engine is billed anyway.
+                "my_promptz_daily_max_cents": DAILY_PROMPT_MAX_CENTS,
                 "my_promptz_daily_used": prompts_used,
                 "my_promptz_daily_remaining": prompts_remaining,
                 "dev_tax_rate": m.dev_tax_rate,
@@ -522,6 +526,66 @@ class PromptzBuyView(APIView):
             dev_tax_cents=0, note=f"Bought {granted} PromptZ 🏷️",
         )
         return Response({"wallet": WalletSerializer(w).data, "granted": granted})
+
+
+class PromptzConvertView(APIView):
+    """GET / POST { spinaz } — turn earned SpinaZ into prepaid PromptZ at
+    catalog.SPINAZ_PER_PROMPTZ to 1.
+
+    GET states the rate and what the member's balance is worth BEFORE they
+    spend it, because a price discovered by paying it is a bill. POST does it.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _rate(self, w):
+        from .catalog import SPINAZ_PER_PROMPTZ
+        have = max(0, w.spinaz or 0)
+        return {
+            "spinaz_per_promptz": SPINAZ_PER_PROMPTZ,
+            "spinaz": have,
+            # What pressing it would get them, at everything they hold.
+            "max_promptz": have // SPINAZ_PER_PROMPTZ,
+            "note": f"{SPINAZ_PER_PROMPTZ} 🍥 → 1 🏷️. Earn 🍥 by rating, "
+                    f"referring and OfferZ — no card needed.",
+        }
+
+    def get(self, request):
+        return Response(self._rate(wallet_for(request.user)))
+
+    def post(self, request):
+        from .catalog import SPINAZ_PER_PROMPTZ
+
+        spend = int((request.data or {}).get("spinaz") or 0)
+        if spend <= 0:
+            return Response({"detail": "spinaz required"}, status=status.HTTP_400_BAD_REQUEST)
+        # Refuse a spend that would round down to nothing rather than taking it
+        # and granting zero — a conversion that silently eats 9 🍥 is theft with
+        # a rounding excuse.
+        if spend < SPINAZ_PER_PROMPTZ:
+            return Response(
+                {"detail": f"That converts to nothing — {SPINAZ_PER_PROMPTZ} 🍥 is the "
+                           f"smallest that buys 1 🏷️.",
+                 "spinaz_per_promptz": SPINAZ_PER_PROMPTZ},
+                status=status.HTTP_400_BAD_REQUEST)
+        w = wallet_for(request.user)
+        if (w.spinaz or 0) < spend:
+            return Response({"detail": f"That's {spend} 🍥 and you have {w.spinaz or 0}.",
+                             "spinaz": w.spinaz or 0},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
+        # Charge only for whole PromptZ. The remainder stays in their wallet.
+        granted = spend // SPINAZ_PER_PROMPTZ
+        charged = granted * SPINAZ_PER_PROMPTZ
+        w.spinaz -= charged
+        w.promptz = (w.promptz or 0) + granted
+        w.save(update_fields=["spinaz", "promptz", "updated_at"])
+        Transaction.objects.create(
+            user=request.user, kind=Transaction.KIND_PURCHASE, amount_cents=0,
+            dev_tax_cents=0, note=f"−{charged} 🍥 → +{granted} 🏷️",
+        )
+        return Response({"wallet": WalletSerializer(w).data,
+                         "granted": granted, "charged": charged,
+                         **self._rate(w)})
 
 
 class LimitsView(APIView):

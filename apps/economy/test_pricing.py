@@ -72,9 +72,26 @@ class PromptAllowanceMarginTests(TestCase):
                                 models.PROMPT_ALLOWANCE["premium"] * 2)
 
     def test_the_published_allowances(self):
-        self.assertEqual(models.PROMPT_ALLOWANCE["free"], 1)
+        # Free is 3, not 1: at 1 it was the same allowance the anonymous trial
+        # door hands a stranger, so an account bought nothing on the axis
+        # people arrive for.
+        self.assertEqual(models.PROMPT_ALLOWANCE["free"], 3)
         self.assertEqual(models.PROMPT_ALLOWANCE["premium"], 5)
         self.assertEqual(models.PROMPT_ALLOWANCE["statz"], 10)
+
+    def test_the_margin_math_above_describes_a_ladder_that_exists(self):
+        """`_monthly_cost_cents` reasons at the standard model's floor rate —
+        which was fiction while the allowance covered whatever the run cost.
+
+        A StatZ member picking Fable got ten free runs a day at 15c, so the
+        real figure was $45/mo against $15/mo of revenue and every margin test
+        in this class was passing on a number nothing enforced.
+        """
+        self.assertGreaterEqual(models.DAILY_PROMPT_MAX_CENTS,
+                                catalog.ai_cost("standard"))
+        dearest = max(m["cost_cents"] for m in catalog.AI_MODELS.values())
+        self.assertGreater(dearest, models.DAILY_PROMPT_MAX_CENTS)
+        self.assertFalse(models.daily_prompt_covers(dearest))
 
 
 class StatZCheckoutTests(TestCase):

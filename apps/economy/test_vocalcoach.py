@@ -455,9 +455,31 @@ class TheSizeCapIsOneWeCanHonourTests(TestCase):
         self.assertGreater(MAX_MB, INLINE_MAX_MB)
         self.assertTrue(callable(_media_part))
 
-    def test_the_trial_cap_fits_too(self):
+    def test_the_trial_cap_is_carried_by_a_path_that_exists(self):
+        """The trial cap used to be pinned under the INLINE limit (times 4/3
+        for base64), which was right while every trial take was base64'd into
+        the request body. It isn't any more: score_take picks the transport by
+        size, so a trial take over INLINE_MAX_MB is uploaded and referenced
+        exactly like a member's is.
+
+        What still has to hold is that the trial never advertises a size the
+        coach itself can't carry — the two share score_take, so a trial cap
+        above MAX_MB would be a promise the shared path would refuse."""
         from apps.economy.models import TRIAL_MAX_MB
-        self.assertLess(TRIAL_MAX_MB * 4 / 3, self.GEMINI_INLINE_LIMIT_MB)
+        from apps.economy.vocalcoach import INLINE_MAX_MB, MAX_MB
+        self.assertLessEqual(TRIAL_MAX_MB, MAX_MB)
+        # And if it's over the inline limit, the uploaded path is what carries
+        # it — so that path existing is part of this cap being honest.
+        if TRIAL_MAX_MB > INLINE_MAX_MB:
+            from apps.economy.vocalcoach import _media_part
+            self.assertTrue(callable(_media_part))
+
+    def test_the_trial_is_not_stingier_than_the_free_account_it_advertises(self):
+        """The trial exists to sell the free tier. Refusing a take that a Free
+        member could upload would make the door misrepresent the room."""
+        from apps.economy.catalog import TIER_LIMITS
+        from apps.economy.models import TIER_FREE, TRIAL_MAX_MB
+        self.assertGreaterEqual(TRIAL_MAX_MB, TIER_LIMITS[TIER_FREE]["upload_mb"])
 
     def test_the_cap_is_published_so_the_client_can_stop_it_early(self):
         # The client checks against this before uploading, so an oversize take
