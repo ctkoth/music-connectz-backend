@@ -287,6 +287,7 @@ class FunnelEventView(APIView):
     META_SHAPE = {
         "try_view": {"app_key": lambda v: v if v in ("singz", "rapz") else None},
         "try_scored": {"app_key": lambda v: v if v in ("singz", "rapz") else None},
+        "try_shared": {"app_key": lambda v: v if v in ("singz", "rapz") else None},
         "register_view": {
             "has_ref": lambda v: bool(v),
             "has_trial": lambda v: bool(v),

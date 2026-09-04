@@ -50,6 +50,17 @@ class FunnelEventTests(TestCase):
         self.assertEqual(r.status_code, 204)
         self.assertEqual(FunnelEvent.objects.get().meta, {})
 
+    def test_the_share_step_is_accepted_and_carries_its_app(self):
+        # The one outward-pointing step: somebody handing their score to
+        # someone else is what widens the top of the funnel.
+        r = self.client.post(EVENT, {
+            "kind": "try_shared", "anon_id": "abc123", "meta": {"app_key": "rapz"},
+        }, format="json")
+        self.assertEqual(r.status_code, 204)
+        row = FunnelEvent.objects.get()
+        self.assertEqual(row.kind, "try_shared")
+        self.assertEqual(row.meta, {"app_key": "rapz"})
+
     def test_a_kind_with_no_declared_shape_stores_no_meta(self):
         r = self.client.post(EVENT, {
             "kind": "landing_view", "anon_id": "abc123", "meta": {"app_key": "singz"},

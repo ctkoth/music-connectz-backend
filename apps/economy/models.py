@@ -3630,6 +3630,10 @@ FUNNEL_KINDS = (
     ("landing_view", "Landing page viewed"),
     ("try_view", "Trial take screen opened"),
     ("try_scored", "Trial take scored"),
+    # Someone handed their score to somebody else. The only step here that
+    # points OUTWARD — every other kind measures a visitor moving down the
+    # funnel, this one measures them widening the top of it.
+    ("try_shared", "Trial score shared"),
     ("register_view", "Register screen opened"),
     ("register_success", "Account created"),
     ("login_success", "Logged in"),
