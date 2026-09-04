@@ -124,6 +124,17 @@ LOGICZ_TABS = [
      "desc": "Offers that pay SpinaZ for doing something outside the app.", "apps": []},
     {"key": "logz", "name": "LogZ", "emoji": "🪵", "icon": "logz.png",
      "desc": "What was done, by day, week, month, or a range you pick.", "apps": []},
+    {"key": "journalz", "name": "JournalZ", "emoji": "📔", "icon": "journalz.png",
+     "desc": "The diary. Every other tab here publishes — this one keeps its mouth "
+             "shut until you tell it not to. Tag people and a place like a post; "
+             "on a private entry that tells nobody anything.",
+     "apps": [
+         _app("Entries", "📝", "A day, written down — mood, weather, tags, a place.", True),
+         _app("On This Day", "🕰️", "The same date in every year you've kept. Premium.", True),
+         _app("Export", "📦", "The whole journal as one file. Premium.", True),
+         _app("Publish", "🪧", "Turn an entry into a PostZ — the one thing here that "
+                               "tells anybody anything.", True),
+     ]},
     {"key": "habitz", "name": "HabitZ", "emoji": "🎂", "icon": "habitz.png",
      "desc": "Something you repeat, noticed and kept.", "apps": []},
     {"key": "bugz", "name": "BugZ", "emoji": "🐞", "icon": "bugz.png",

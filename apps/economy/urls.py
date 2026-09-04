@@ -3,6 +3,8 @@ from django.urls import path, re_path
 from .directz_app import DirectZWorksView, DirectZRateView
 from .media import MediaFileView
 from .questz import QuestBoardView, QuestClaimView
+from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
+                       JournalLookbackView, JournalShareView, JournalZView)
 from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView)
 from .publicz import PublicPostView, PublicProfileView
@@ -18,7 +20,8 @@ from .earn import EarnView
 from .battlez import (BattlesView, BattleChallengeView, BattleDetailView,
                       BattleEnterView, BattleRespondView, BattleSettleView,
                       BattleWagerView, MoneyBattleVoteView)
-from .keyconnectz import KeyboardView, KeyTranslateView
+from .keyconnectz import (KeyboardView, KeySpeakView, KeyTranscribeView,
+                          KeyTranslateView)
 from .playlistz import (PlaylistCollaboratorsView, PlaylistDetailView,
                         PlaylistItemDetailView, PlaylistItemsView,
                         PlaylistReorderView, PlaylistsView,
@@ -125,6 +128,10 @@ urlpatterns = [
     # KeyConnectZ — the keyboard. Wallpaper is Premium; translate is free.
     path("keyz/", KeyboardView.as_view(), name="economy-keyz"),
     path("keyz/translate/", KeyTranslateView.as_view(), name="economy-keyz-translate"),
+    # Voice, both directions. Neither is gated by tier — the allowance is, and
+    # GET keyz/ publishes it before either button is pressed.
+    path("keyz/transcribe/", KeyTranscribeView.as_view(), name="economy-keyz-transcribe"),
+    path("keyz/speak/", KeySpeakView.as_view(), name="economy-keyz-speak"),
     path("wallet/add/", AddFundsView.as_view(), name="economy-wallet-add"),
     path("owner/revenue/", OwnerRevenueView.as_view(), name="economy-owner-revenue"),
     path("membership/", MembershipView.as_view(), name="economy-membership"),
@@ -253,6 +260,16 @@ urlpatterns = [
     path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
     path("postz/<int:pk>/delete/", PostDeleteView.as_view(), name="economy-postz-delete"),
     path("submissions/", SubmissionsView.as_view(), name="economy-submissions"),
+    # JournalZ — the diary. Private by default, which is the one thing here
+    # that isn't like PostZ, so the share is its own deliberate endpoint and
+    # quotes what it costs and who it tells before it does either.
+    path("journalz/", JournalZView.as_view(), name="economy-journalz"),
+    path("journalz/cost/", JournalCostView.as_view(), name="economy-journalz-cost"),
+    # On This Day and the formatted export — Premium, through the standard gate.
+    path("journalz/lookback/", JournalLookbackView.as_view(), name="economy-journalz-lookback"),
+    path("journalz/export/", JournalExportView.as_view(), name="economy-journalz-export"),
+    path("journalz/<int:pk>/", JournalEntryView.as_view(), name="economy-journalz-entry"),
+    path("journalz/<int:pk>/share/", JournalShareView.as_view(), name="economy-journalz-share"),
     # QuestZ — the Energy on-ramp for members who have no reach yet.
     path("questz/", QuestBoardView.as_view(), name="economy-questz"),
     path("questz/<str:quest_id>/claim/", QuestClaimView.as_view(), name="economy-questz-claim"),

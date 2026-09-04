@@ -41,12 +41,17 @@ its resource emoji.
 
 ### Known violations, not yet fixed
 
-- **BossTake "Send it to the coach"** — spends a prompt, says nothing before
-  you press it. `cost_cents` comes back only in the response.
-- **AI actions generally** (translate, OCC chat, Gemini image/video) — the
-  charge happens server-side with no pre-flight statement of the price.
-- **CallZ** — priced by the other member's skill rate per hour; the rate needs
-  to be visible before the call connects.
+- **CallZ** — no live 1:1 calling surface exists yet (LessonZ's "CallZ"
+  delivery method is priced the same as remote/in-person on the same booking
+  flow — it isn't a per-minute connect). Whenever a real call feature ships,
+  the other member's rate has to be visible before it connects, same as
+  everywhere else.
+
+Previously listed here and since fixed, client-side — BossTake's "Send it to
+the coach", OCC chat, DirectZ craft, and KeyConnectZ translate all render the
+price beside the control that spends it now, before it's pressed. Don't read
+this list as exhaustive: a surface not named here was never audited, not
+cleared.
 
 ---
 
@@ -152,6 +157,47 @@ give them the link. A read-only surface is usually an unfinished one.
   migrations now applying unattended, that gap is the one to respect: a
   migration touching field widths gets checked against real Postgres BEFORE it
   reaches `main`, not after.
+
+## KeyConnectZ voice: the tier buys how many, never whether
+
+`keyconnectz.py` had already written the rule down: the wallpaper is Premium
+because it is **decoration** and nobody loses a capability without it; translate
+is free at every tier because **being understood is not a luxury.** Transcribe
+and read-aloud are on the capability side of that line, twice over —
+
+- Read-aloud is the second half of translate. Hand a Free member the Portuguese
+  and charge them to hear how to *say* it and you have sold half a capability.
+- Speech input is how you type when typing is the hard part. An access gate
+  lands hardest on exactly the members it should be helping.
+
+— so both are available at every tier and the **allowance** is what ladders:
+`catalog.KEY_TRANSCRIBE_DAILY_CLIPS` (clips) and `KEY_SPEAK_DAILY_CHARS`
+(characters). Clips for listening and characters for reading, because that is
+the unit each action comes in; one unit covering both would be a number nobody
+could check. `GET /api/economy/keyz/` publishes both, plus the ladder, before
+either button is pressed.
+
+**The device voice never reaches the server and is never metered.** The client
+tries `speechSynthesis` first — it costs us nothing, so metering it would be
+counting something we do not pay for in order to charge for it. `keyz/speak/`
+exists for the languages a handset has no voice for, which is Yorùbá, Igbo,
+Hausa and Amharic before it is anything else. That is the reason it is not sold
+by tier: a gate there would mean English speakers hear their translation read
+back free while Yorùbá speakers pay for the same sentence.
+
+Two things that must not rot:
+
+- **A failed run never spends the allowance.** An empty transcript or an empty
+  voice returns 502 and writes no `KeyVoiceUse`, exactly as a failed Boss Take
+  is not billed and a failed translation is not metered.
+- **TTS needs its own model chain.** `responseModalities: ["AUDIO"]` against
+  `gemini-2.5-flash` is a 400, not a fallback, so `MODEL_CHAINS["tts"]` is
+  separate. Gemini answers with raw PCM (`audio/L16;codec=pcm;rate=24000`) and
+  no browser will play that — the RIFF header goes on in `_wav()`, server-side,
+  rather than in three clients that would each get it slightly wrong.
+
+Like the coach's upload path, **the TTS transport has never run against
+Google** — CI has no key. `tools/keyvoice_live_check.sh` is the check that can.
 
 ## Uploads have to outlive a deploy, and there are two ways to make them
 

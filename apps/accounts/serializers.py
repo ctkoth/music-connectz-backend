@@ -32,6 +32,10 @@ class PublicUserSerializer(serializers.ModelSerializer):
     birthday = serializers.SerializerMethodField()
     age = serializers.SerializerMethodField()
     zodiac = serializers.SerializerMethodField()
+    # VoiceZ. `voice_explicit_allowed` is served alongside the switch itself
+    # so the client can explain a disabled toggle instead of letting somebody
+    # flip it and watch it silently flip back.
+    voice = serializers.SerializerMethodField()
 
     # Nine of the fields below live on the economy profile/wallet/membership. Look
     # each row up ONCE per user and cache it on the serializer — resolving them
@@ -55,6 +59,21 @@ class PublicUserSerializer(serializers.ModelSerializer):
     def get_age(self, obj):
         from apps.economy.models import profile_age
         return profile_age(self._economy(obj, "profile"))
+
+    def get_voice(self, obj):
+        from apps.economy.models import may_be_explicit
+        p = self._economy(obj, "profile")
+        allowed = may_be_explicit(p)
+        return {
+            # Effective, not stored. Somebody can set this at 18 and then edit
+            # their birthday to fifteen; the stored bit would still say True
+            # and every screen reading it would swear at a child. The gate is
+            # applied on the way OUT as well as on the way in.
+            "explicit": bool(p.voice_explicit) and allowed,
+            "emoji": bool(p.voice_emoji),
+            "slang": bool(p.voice_slang),
+            "explicit_allowed": allowed,
+        }
 
     def get_zodiac(self, obj):
         return self._economy(obj, "profile").sign or ""
@@ -88,7 +107,7 @@ class PublicUserSerializer(serializers.ModelSerializer):
         fields = (
             "id", "username", "email", "phone", "avatar_url", "is_owner",
             "tier", "spinaz", "energy", "onboarded", "personas", "nationalities",
-            "birthday", "age", "zodiac",
+            "birthday", "age", "zodiac", "voice",
         )
 
 
