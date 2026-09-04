@@ -37,6 +37,7 @@ from .models import (
     submissions_used_today,
     wallet_for,
 )
+from .personaz import personas_of
 
 # Reach engine: likes/dislikes rank the feed (they never touch price — that's
 # ratings' job). Heavy dislike ratio downranks + flags for moderation.
@@ -232,9 +233,7 @@ def skill_prices(user):
     """{skill name: rate_cents} from the member's own PersonaZ skills."""
     from .models import profile_for
     out = {}
-    for persona in (profile_for(user).personas or []):
-        if not isinstance(persona, dict):
-            continue
+    for persona in personas_of(profile_for(user)):
         for s in (persona.get("skills") or []):
             if not isinstance(s, dict):
                 continue
