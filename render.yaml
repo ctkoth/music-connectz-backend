@@ -12,6 +12,22 @@ services:
     # `/` is a static JSON payload that touches no database, so a failing health
     # check means the process itself is wedged and Render should replace it.
     healthCheckPath: /
+    # Where member uploads actually live. This survives a deploy; the rest of
+    # the container does not. MEDIA_ROOT below points at the same mountPath and
+    # MEDIA_DURABLE asserts it to storage_health — the three move TOGETHER, and
+    # that is the point of them being in one file. Render will not attach a
+    # disk to a free instance, and if it refuses this one the blueprint sync
+    # fails and MEDIA_DURABLE never lands either. A "durable" flag over an
+    # ephemeral disk is the one lie the health check can tell; keeping the
+    # claim in the same commit as the thing it claims is what stops it.
+    #
+    # A service with a disk deploys with a short gap instead of zero-downtime.
+    # That is the price. It is seconds, once per deploy, against never losing
+    # a member's only copy of a take.
+    disk:
+      name: mcz-media
+      mountPath: /var/mcz-media
+      sizeGB: 10
     envVars:
       - key: SECRET_KEY
         generateValue: true
@@ -53,6 +69,36 @@ services:
         sync: false
       - key: TWITTER_OAUTH_CLIENT_SECRET
         sync: false
+      # Discord and Reddit have their own placeholders in
+      # claude/oauth-discord-reddit (#127) — not duplicated here to avoid
+      # two branches fighting over the same four keys when both land.
+      # ---- KEEPING MEMBERS' UPLOADS -------------------------------------
+      # This container's disk is rebuilt on every deploy. With neither of the
+      # two options below in force, every track, video and cover any member has
+      # uploaded is DELETED the next time anything merges to main, while the
+      # Upload rows survive in Postgres — so the app goes on serving links to
+      # files that are not there. `manage.py check` says so on every deploy
+      # (economy.W001) and `GET /` reports it in `uploads`.
+      #
+      # OPTION 1 — a bucket (S3 / Cloudflare R2). Scales, no instance pinning,
+      # needs credentials. Set S3_BUCKET_NAME + the two keys below; add
+      # S3_ENDPOINT_URL for R2. settings.py switches over on the next restart.
+      #
+      # OPTION 2 — a persistent disk, and the one IN FORCE. No credentials and
+      # no external account; it pins this service to a single instance and
+      # needs a paid instance type. The `disk:` block above is mounted and the
+      # two MEDIA_* vars below point at it.
+      #
+      # Neither is a code change. Both are already wired. OPTION 2 is the one
+      # in force: the `disk:` above is mounted at this exact path, and
+      # MEDIA_DURABLE is the deliberate assertion that it is a real mount —
+      # set here, beside the disk it describes, so the two cannot drift apart
+      # in somebody's dashboard. Setting the S3_* keys below switches to a
+      # bucket and takes precedence; the disk can be dropped then.
+      - key: MEDIA_ROOT
+        value: /var/mcz-media
+      - key: MEDIA_DURABLE
+        value: "1"
       # Object storage for user uploads (S3 / Cloudflare R2). Set these to
       # persist FileZ uploads across deploys; leave unset to use the local
       # (ephemeral) filesystem. For R2 also set S3_ENDPOINT_URL.

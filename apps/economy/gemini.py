@@ -53,6 +53,14 @@ MODEL_CHAINS = {
         "gemini-2.0-flash",
         "gemini-2.5-pro",
     ),
+    # Text in, AUDIO out — KeyConnectZ's server voice, for the languages a
+    # phone has no voice of its own for. A separate chain because the TTS
+    # models are separate names: asking gemini-2.5-flash for
+    # responseModalities:["AUDIO"] is a 400, not a fallback.
+    "tts": (
+        "gemini-2.5-flash-preview-tts",
+        "gemini-2.5-pro-preview-tts",
+    ),
 }
 
 # Proven this process: once a name answers, it goes to the front of the chain
