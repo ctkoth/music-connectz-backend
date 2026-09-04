@@ -45,6 +45,27 @@ class WhenUploadsAreNotDurableTests(TestCase):
         self.assertTrue(state["durable"])
         self.assertEqual(state["detail"], "")
 
+    @override_settings(STORAGES=LOCAL)
+    def test_a_mounted_persistent_disk_is_durable_too(self):
+        """The credential-free fix. A Render disk is local storage that
+        survives a deploy, and from in here it is indistinguishable from the
+        container's own directory — so it is an assertion by whoever mounted
+        it, and nothing else will be taken as one."""
+        with patch.dict("os.environ", {"RENDER": "true", "MEDIA_DURABLE": "1"}):
+            state = upload_storage_state()
+        self.assertTrue(state["durable"])
+        self.assertFalse(state["ephemeral"])
+        self.assertEqual(state["kept_by"], "a persistent disk")
+
+    @override_settings(STORAGES=LOCAL)
+    def test_saying_nothing_is_not_saying_it_is_durable(self):
+        """MEDIA_DURABLE has to be set deliberately. Anything short of that —
+        unset, empty, "0" — leaves the warning standing, because the cost of a
+        false "durable" is somebody's only copy of a take."""
+        for value in ("", "0", "no", "maybe"):
+            with patch.dict("os.environ", {"RENDER": "true", "MEDIA_DURABLE": value}):
+                self.assertTrue(upload_storage_state()["ephemeral"], value)
+
     @override_settings(STORAGES=BUCKET)
     def test_a_bucket_is_durable_even_on_render(self):
         with patch.dict("os.environ", {"RENDER": "true", "S3_BUCKET_NAME": "mcz"}):

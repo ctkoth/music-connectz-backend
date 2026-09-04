@@ -14,7 +14,7 @@ from datetime import timedelta
 from django.db.models import Case, Count, IntegerField, Sum, When
 from django.utils import timezone
 
-from .crosspost import coach_cap, coach_price, destinations_for, take_bytes_for
+from .crosspost import coach_cap, coach_price, destinations_for, take_state_for
 from .models import (
     CollabDeal,
     POST_COMMENT_UNLOCK_SEC,
@@ -102,12 +102,16 @@ def media_slots(p):
 _UNSET = object()
 
 
-def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_bytes=_UNSET,
+def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_UNSET,
                cap=None):
     vibe = up - down
     media = media_slots(p)
-    if take_bytes is _UNSET:
-        take_bytes = take_bytes_for([(p, media)]).get(p.id)
+    if take_state is _UNSET:
+        take_state = take_state_for([(p, media)]).get(p.id)
+    take_bytes = (take_state or {}).get("bytes")
+    # Known gone, because something went and looked — never because a player
+    # failed. See crosspost.take_state_for.
+    take_missing = bool((take_state or {}).get("missing"))
     n_collabs = p.collab_deals.count() if collabs is None else collabs
     flagged = down >= HIDE_FLAG_MIN_DOWN and down >= up * HIDE_FLAG_RATIO
     return {
@@ -128,6 +132,14 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_bytes=_U
         # One of each, resolved for the client so it renders every attachment
         # rather than only the primary one.
         "media": media,
+        # The recording this post carries is not in storage any more. The row
+        # outlived the bytes, so the card must say so instead of rendering a
+        # player that sits at 0:00 and explains nothing — and it has to say it
+        # HERE, next to the post, where the member might still have the file.
+        "take_missing": take_missing,
+        # Which slot the lost recording filled, so the client replaces that
+        # player and leaves the ones that still work alone.
+        "take_kind": (take_state or {}).get("kind", "") if take_missing else "",
         "slots": list(MEDIA_SLOTS),
         "score": p.score or {},
         "genre": p.genre,
@@ -153,7 +165,8 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_bytes=_U
         "open_in": "collabz",
         "destinations": destinations_for(p, request.user, media,
                                          price=price, collabs=n_collabs,
-                                         take_bytes=take_bytes, cap=cap),
+                                         take_bytes=take_bytes, cap=cap,
+                                         take_missing=take_missing),
         "skill_cost_cents": p.skill_cost_cents,
         "joins": p.joins.count() if p.visibility == "restricted" else 0,
         "shares": p.shares.count(),
@@ -422,11 +435,11 @@ class PostsView(APIView):
         cap = coach_cap(request.user)
         # How big each post's take is, in one query for the whole feed. Without
         # it the coach door is offered on a track the coach cannot read, and the
-        # member finds out by pressing the button — see take_bytes_for.
-        sizes = take_bytes_for([(p, media_slots(p)) for p in visible])
+        # member finds out by pressing the button — see take_state_for.
+        sizes = take_state_for([(p, media_slots(p)) for p in visible])
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
                             collabs=deals.get(p.id, 0), price=price, cap=cap,
-                            take_bytes=sizes.get(p.id))
+                            take_state=sizes.get(p.id))
                  for p in visible]
 
         now = timezone.now()
@@ -580,9 +593,11 @@ class PostOpenView(APIView):
             return Response({"detail": "you can't view this post"},
                             status=status.HTTP_403_FORBIDDEN)
         media = media_slots(p)
+        state = take_state_for([(p, media)]).get(p.id) or {}
         dests = destinations_for(p, request.user, media,
                                  collabs=p.collab_deals.count(),
-                                 take_bytes=take_bytes_for([(p, media)]).get(p.id))
+                                 take_bytes=state.get("bytes"),
+                                 take_missing=bool(state.get("missing")))
         return Response({
             "post_id": p.id,
             "title": p.title,

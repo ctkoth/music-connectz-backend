@@ -43,6 +43,19 @@ FEATURES = {
         "tier": TIER_PREMIUM, "label": "Game builds", "emoji": "🕹️",
         "blurb": "Build games in any language except C++.",
     },
+    # JournalZ. The diary itself is free and always will be — a paywall on
+    # writing something down would make the app's most private surface its most
+    # grasping one. What a tier buys is what you can DO with a year of entries
+    # once you have one, which is a thing only a member who already kept the
+    # habit has any use for.
+    "journalz_lookback": {
+        "tier": TIER_PREMIUM, "label": "On This Day", "emoji": "🕰️",
+        "blurb": "This date in every year you've kept, side by side.",
+    },
+    "journalz_export": {
+        "tier": TIER_PREMIUM, "label": "Journal export", "emoji": "📦",
+        "blurb": "Your whole journal out as one file — Markdown or JSON, attachments listed.",
+    },
     "pick_unlimited": {
         "tier": TIER_PREMIUM, "label": "PickConnectZ pins", "emoji": "📌",
         "blurb": "Pin as many features to the footer as you like. Free picks 2; AI fills the rest.",

@@ -249,6 +249,17 @@ class Upload(models.Model):
     size_bytes = models.PositiveBigIntegerField(default=0)
     content_type = models.CharField(max_length=120, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
+    # When storage was found not to have this file. The row outlives the bytes
+    # — that is the whole shape of the ephemeral-disk bug — and until this
+    # existed the app had nowhere to WRITE DOWN what it had already discovered.
+    # The coach hit a missing take, answered 410, and then forgot, so the feed
+    # went on offering a player and a "coach it" door for a file that was
+    # established as gone thirty seconds earlier.
+    #
+    # Null means "no reason to think it is missing", NOT "checked and present".
+    # Nothing walks storage on the read path; this is only ever stamped by
+    # something that actually went looking and came back empty.
+    missing_since = models.DateTimeField(null=True, blank=True, db_index=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -262,7 +273,56 @@ MB = 1024 * 1024
 
 
 def storage_used_bytes(user):
-    return Upload.objects.filter(user=user).aggregate(t=models.Sum("size_bytes"))["t"] or 0
+    """Bytes this member is actually storing.
+
+    Files known to be gone are not counted. Charging somebody quota for a
+    recording the platform lost is billing them for our own failure, and it is
+    the kind of number that is only ever noticed by the member it is wrong for.
+    The row stays — it is the record of what was lost and the thing that lets a
+    post say so — but it stops taking up room.
+    """
+    return (Upload.objects.filter(user=user, missing_since__isnull=True)
+            .aggregate(t=models.Sum("size_bytes"))["t"] or 0)
+
+
+def mark_upload_missing(upload):
+    """Record that storage did not have this file. Never raises.
+
+    Called from the paths that ACTUALLY went and looked — the coach reading a
+    take, the reconcile sweep — and from nowhere else. A read path must never
+    guess this: "we could not play it" is not "it is not there", which is the
+    exact mistake the Boss Take card used to make with an <audio> element.
+
+    Never raises, because every caller is already handling a worse failure and
+    a bookkeeping write must not become the thing that turns a clean 410 into
+    a 500.
+    """
+    from django.utils import timezone
+
+    try:
+        if upload is None or getattr(upload, "pk", None) is None:
+            return False
+        if upload.missing_since:
+            return False
+        # update(), not save(): the caller is mid-exception on a file handle
+        # and has no business re-writing the whole row.
+        Upload.objects.filter(pk=upload.pk, missing_since__isnull=True).update(
+            missing_since=timezone.now())
+        return True
+    except Exception:                                    # pragma: no cover
+        return False
+
+
+def mark_upload_found(upload):
+    """The file is back (restored, re-uploaded over the same path). Clear the
+    mark rather than leaving a post saying its audio is gone while it plays."""
+    try:
+        if upload is None or getattr(upload, "pk", None) is None:
+            return False
+        return bool(Upload.objects.filter(pk=upload.pk, missing_since__isnull=False)
+                    .update(missing_since=None))
+    except Exception:                                    # pragma: no cover
+        return False
 
 
 def wallet_for(user):
@@ -617,6 +677,19 @@ class Profile(models.Model):
     # default follows an upgrade or a lapse without anything having to migrate
     # the stored value. Always read it through catalog.ai_model_for().
     ai_model = models.CharField(max_length=16, blank=True, default="")
+    # VoiceZ — how hard the app talks to THIS member. Three independent
+    # switches rather than one "tone" dropdown, because they are genuinely
+    # independent: somebody can want the slang and not the swearing, or the
+    # swearing and not a screen full of emoji.
+    #
+    # Defaults say what the house voice is. Slang and emoji are ON because
+    # that is how Music ConnectZ already talks and turning them off is the
+    # deliberate act. `voice_explicit` is OFF and stays off until asked for —
+    # and `may_be_explicit()` below is what stops asking being enough on its
+    # own, because this platform starts at 13.
+    voice_explicit = models.BooleanField(default=False)
+    voice_emoji = models.BooleanField(default=True)
+    voice_slang = models.BooleanField(default=True)
     links = models.JSONField(default=list, blank=True)  # [{label, url}] public links
     # Location (opt-in) for in-person CollabZ / VenueZ distance filtering.
     share_location = models.BooleanField(default=False)
@@ -650,6 +723,23 @@ def profile_age(p):
         return today.year - y - ((today.month, today.day) < (m, d))
     except (ValueError, TypeError):
         return None
+
+
+# The age the explicit voice needs. Not a number typed into a view: the gate
+# and the reason for it belong next to the field they govern.
+EXPLICIT_MIN_AGE = 18
+
+
+def may_be_explicit(p):
+    """Whether this member may turn the explicit voice on at all.
+
+    A toggle the client can set is a request, not a permission. AdZ already
+    treats an unknown age as under-age rather than over it, and the same
+    answer is the right one here: no birthday means no, because the failure
+    we can't take back is swearing at a thirteen-year-old.
+    """
+    age = profile_age(p)
+    return age is not None and age >= EXPLICIT_MIN_AGE
 
 
 # Last MMDD of each sign, in calendar order — e.g. Capricorn runs through Jan 19,
@@ -2203,6 +2293,51 @@ def key_translate_state(user):
     return used, KEY_TRANSLATE_DAILY_CHARS, max(0, KEY_TRANSLATE_DAILY_CHARS - used)
 
 
+class KeyVoiceUse(models.Model):
+    """One voice run — a clip transcribed, or text read aloud by the server.
+
+    Same job `KeyTranslation` does for translate: the daily allowance, and an
+    honest record of what the keyboard has been doing. `units` is clips for
+    "transcribe" and characters for "speak", because that is the unit each
+    action comes in — you speak in clips and you read text, and one unit
+    pretending to cover both would be a number nobody could check.
+
+    The DEVICE voice is never recorded here. It costs us nothing, so metering
+    it would be counting something we do not pay for in order to charge for it.
+    """
+    KIND_TRANSCRIBE = "transcribe"
+    KIND_SPEAK = "speak"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="key_voice_uses")
+    kind = models.CharField(max_length=12)
+    lang = models.CharField(max_length=12, blank=True, default="")
+    units = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["user", "kind", "created_at"])]
+
+
+def key_voice_state(user, kind):
+    """(used, cap, remaining) for one voice action — published BEFORE the button.
+
+    A rolling 24 hours, like translate, so nobody's allowance resets at a
+    timezone they did not pick.
+    """
+    from datetime import timedelta
+
+    from .catalog import key_voice_limits
+
+    rows = KeyVoiceUse.objects.filter(
+        user=user, kind=kind, created_at__gte=timezone.now() - timedelta(hours=24))
+    used = sum(rows.values_list("units", flat=True))
+    limits = key_voice_limits(membership_for(user).tier)
+    cap = limits["clips"] if kind == KeyVoiceUse.KIND_TRANSCRIBE else limits["chars"]
+    return used, cap, max(0, cap - used)
+
+
 # ---- BattleZ ----
 #
 # BattleZ has been named in the app since the tab bar was written and has never
@@ -3393,3 +3528,168 @@ class GameAsset(models.Model):
 
     def __str__(self):
         return f"{self.game_id}:{self.path}"
+
+
+# ---- JournalZ 📔 — the diary, and the one app whose default is silence.
+#
+# Every other surface in Music ConnectZ publishes. PostZ, CollabZ, BattleZ,
+# DirectZ — you make a thing and the room sees it. A diary is the opposite
+# promise, and the promise is the product: an entry is PRIVATE unless the member
+# does something deliberate to change that.
+#
+# Which is why the tagging on it is careful rather than clever. An entry can tag
+# members and a place like a post can, but a tag on a private entry is a note to
+# yourself: nobody is notified, nobody can read it, and the coordinates never
+# leave the author. Sharing is what turns a tag into a mention — see
+# `journalz.py`, where that transition is the only place a notification is sent.
+#
+# `mood` and `weather` carry the two things Diarium-style journals have always
+# kept beside the words. They are FACTS about the day, recorded by the member —
+# not scores. Nothing in this app rates a journal entry, and nothing should: a
+# number on somebody's diary is the exact shape of the failure CLAUDE.md names,
+# a score you could get a good one of without getting good at anything.
+JOURNAL_MOODS = [
+    ("great", "Great 😄"), ("good", "Good 🙂"), ("ok", "OK 😐"),
+    ("low", "Low 🙁"), ("rough", "Rough 😣"),
+]
+JOURNAL_MOOD_KEYS = [k for k, _ in JOURNAL_MOODS]
+
+# What one entry can carry, before the tier caps bite. Hard ceilings on the
+# JSON columns so a client bug can't write a megabyte of tags.
+JOURNAL_MAX_TAGS = 60
+JOURNAL_MAX_PEOPLE = 30
+JOURNAL_MAX_ITEMS = 10
+
+
+class JournalEntry(models.Model):
+    """One day, written down. Private by default — see the module note above."""
+
+    VIS_PRIVATE = "private"
+    VIS_RESTRICTED = "restricted"
+    VIS_PUBLIC = "public"
+    # Same three words PostZ uses, in the same order, because a member who has
+    # learned what "restricted" means on a post should not have to learn it
+    # again here. The DEFAULT is the difference: a post is public, a diary
+    # entry is not.
+    VIS_CHOICES = [(VIS_PRIVATE, "Just me"), (VIS_RESTRICTED, "Members only"),
+                   (VIS_PUBLIC, "Public")]
+
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="journal_entries")
+    # The day the entry is ABOUT, which is not always the day it was written —
+    # writing up Saturday on Sunday morning is the normal case, not the edge
+    # one. `created_at` keeps the writing time; this keeps the day it belongs to,
+    # and every calendar, streak and On-This-Day read goes through it.
+    day = models.DateField(db_index=True)
+    title = models.CharField(max_length=160, blank=True, default="")
+    # TextField for the same reason Profile.bio is one: the cap belongs to the
+    # member's tier (unlimited at StatZ), so no column width can express it.
+    body = models.TextField(blank=True, default="")
+    mood = models.CharField(max_length=12, blank=True, default="", choices=JOURNAL_MOODS)
+    weather = models.CharField(max_length=40, blank=True, default="")
+    # Free-text tags, lowercased on the way in. The member's own vocabulary,
+    # not a fixed taxonomy — a diary that only accepts the app's words is a form.
+    tags = models.JSONField(default=list, blank=True)
+    # Usernames tagged on the entry. Kept as names rather than a join table for
+    # the same reason Post.contributors is: an entry is a document, and a
+    # deleted account should leave the sentence it was written in intact. The
+    # rows that MATTER — who was told — are JournalMention.
+    people = models.JSONField(default=list, blank=True)
+    # Where it happened. The name always travels with a shared entry; the
+    # coordinates only do when `place_exact` is on. Off by default, because
+    # "the pub on Dorset Road" and "51.4571, -2.5891" are not the same
+    # disclosure and only one of them is a place a stranger can wait at.
+    place_name = models.CharField(max_length=120, blank=True, default="")
+    place_lat = models.FloatField(null=True, blank=True)
+    place_lng = models.FloatField(null=True, blank=True)
+    place_exact = models.BooleanField(default=False)
+    # Attachments, in PostZ's `items` shape [{url, type, title, lyrics}] so a
+    # shared entry hands its media straight to `create_post` and the coach can
+    # read a take off a journal entry without it being posted first.
+    items = models.JSONField(default=list, blank=True)
+    visibility = models.CharField(max_length=12, choices=VIS_CHOICES, default=VIS_PRIVATE)
+    # The post this entry was published as, when it was. SET_NULL so deleting
+    # the post never takes the diary entry with it — the entry is the original
+    # and the post is the copy, never the other way round.
+    shared_post = models.ForeignKey("Post", on_delete=models.SET_NULL, null=True,
+                                    blank=True, related_name="journal_entries")
+    created_at = models.DateTimeField(auto_now_add=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-day", "-created_at")
+        indexes = [models.Index(fields=["author", "day"])]
+
+    def __str__(self):
+        return f"{self.day} {self.title or '(untitled)'} <{self.author}>"
+
+    @property
+    def is_private(self):
+        return self.visibility == self.VIS_PRIVATE
+
+
+class JournalMention(models.Model):
+    """A member who was actually TOLD they were tagged in an entry.
+
+    Separate from `JournalEntry.people` on purpose, and the separation is the
+    privacy rule made structural: `people` is what the author wrote down, this
+    is what left the author's account. A private entry has names in `people` and
+    no rows here, and that is what makes tagging safe to offer on a diary.
+
+    One row per (entry, member), so re-sharing an entry can't notify the same
+    person twice — the same discipline PostShare uses for its reward.
+    """
+    entry = models.ForeignKey(JournalEntry, on_delete=models.CASCADE,
+                              related_name="mentions")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="journal_mentions")
+    notified_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("entry", "user")
+        ordering = ("-notified_at",)
+
+    def __str__(self):
+        return f"{self.entry_id} → {self.user}"
+
+
+# Steps on the join funnel, in the order a visitor actually clears them.
+# A closed set on purpose — see FunnelEventView.ALLOWED_KINDS — so a typo on
+# the client can't quietly start a new, never-analysed event kind.
+FUNNEL_KINDS = (
+    ("landing_view", "Landing page viewed"),
+    ("try_view", "Trial take screen opened"),
+    ("try_scored", "Trial take scored"),
+    # Someone handed their score to somebody else. The only step here that
+    # points OUTWARD — every other kind measures a visitor moving down the
+    # funnel, this one measures them widening the top of it.
+    ("try_shared", "Trial score shared"),
+    ("register_view", "Register screen opened"),
+    ("register_success", "Account created"),
+    ("login_success", "Logged in"),
+)
+
+
+class FunnelEvent(models.Model):
+    """One step of the join funnel, from a visitor who may have no account yet.
+
+    Before this there was no way to answer "where do people drop off before
+    joining" except by guessing — no analytics of any kind ran on the
+    logged-out path. `anon_id` is a UUID the client makes up and keeps in
+    localStorage; it identifies a BROWSER for one session's worth of funnel
+    steps, never a person, and nothing here is exported or joined against
+    Users — see FunnelSummaryView, which only ever returns counts.
+    """
+    kind = models.CharField(max_length=20, choices=FUNNEL_KINDS, db_index=True)
+    anon_id = models.CharField(max_length=64, db_index=True)
+    # Free-form, small, server-validated shape per kind (e.g. {"app_key": "singz"}
+    # on a trial event) — never free text a visitor typed, which is what keeps
+    # this from becoming a place PII could land by accident.
+    meta = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.kind} @ {self.created_at:%Y-%m-%d %H:%M}"
