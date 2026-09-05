@@ -97,7 +97,12 @@ class PublicUserSerializer(serializers.ModelSerializer):
         return self._economy(obj, "profile").onboarded
 
     def get_personas(self, obj):
-        return self._economy(obj, "profile").personas or []
+        # Through the normalizer, not straight off the column: a row that was
+        # written before the write path was fixed still holds a persona as the
+        # printed form of a dict, and serving it raw is what put
+        # "{'name': 'Independent Artist', ...}" on somebody's own profile.
+        from apps.economy.personaz import personas_of
+        return personas_of(self._economy(obj, "profile"))
 
     def get_nationalities(self, obj):
         return self._economy(obj, "profile").nationalities or []

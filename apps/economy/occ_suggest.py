@@ -39,14 +39,13 @@ from .models import (
     recheck_badges,
 )
 from .occ_spec import tier_at_least
+from .personaz import personas_of
 
 
 def _unpriced_skills(user):
     """Skills the member claims with no rate — posts using them cost nothing."""
     out = []
-    for persona in (profile_for(user).personas or []):
-        if not isinstance(persona, dict):
-            continue
+    for persona in personas_of(profile_for(user)):
         for s in (persona.get("skills") or []):
             if isinstance(s, dict) and s.get("name") and not s.get("rate_cents"):
                 out.append(s["name"])

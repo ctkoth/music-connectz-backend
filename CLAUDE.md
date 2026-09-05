@@ -41,11 +41,14 @@ its resource emoji.
 
 ### Known violations, not yet fixed
 
-- **CallZ** — no live 1:1 calling surface exists yet (LessonZ's "CallZ"
-  delivery method is priced the same as remote/in-person on the same booking
-  flow — it isn't a per-minute connect). Whenever a real call feature ships,
-  the other member's rate has to be visible before it connects, same as
-  everywhere else.
+- *(none open on this list.)* CallZ was here for the whole life of this file —
+  no live 1:1 surface existed, LessonZ's "CallZ" was a delivery method on a
+  booking priced the same as remote or in-person, so there was no per-minute
+  rate to state because there was no call. It ships now: `apps/economy/callz.py`
+  publishes the callee's rate, the caller's balance and the minutes they can
+  afford BEFORE anything rings, the running cost is on screen during the call,
+  and the receipt matches the quote. The rate is snapshot at ring so it cannot
+  move under a call in progress.
 
 Previously listed here and since fixed, client-side — BossTake's "Send it to
 the coach", OCC chat, DirectZ craft, and KeyConnectZ translate all render the
@@ -92,12 +95,26 @@ So the rule, in practice:
 - **XP and badges may reward effort. Ratings and skill levels may not.** Turning
   up is worth something; it is not worth being called good.
 
-### Known violation, not yet fixed
+### Known violation — closed
 
-- **`directz_ai_rating`** — see above. It had never run in production because
-  nothing posted to DirectZ; the composer added in `claude/occ-agent-loop` means
-  it now will, at scale. Either it measures the video or it stops calling itself
-  craft.
+- **`directz_ai_rating` is deleted.** This entry outlived the fix by some weeks,
+  which is worth noticing on its own: a "not yet fixed" list nobody re-checks
+  sends the next reader to fix something twice.
+
+  What actually happened: `directz_craft.py` replaced it with a model that
+  WATCHES the video and scores framing, editing, lighting, sound and story —
+  none of which can be satisfied by filling in a form. Migration 0073 nulled
+  every score the old formula had already written, because fixing the code that
+  makes a number and leaving the number on screen fixes the future and keeps
+  the past. And `directz_display_rating` has three states rather than two:
+  users / ai / **nothing**, and when it is nothing the rating is None and
+  callers render the absence.
+
+  The function then sat deprecated, kept by a docstring saying old rows still
+  carried its numbers — untrue from the moment 0073 ran. It is gone now, and
+  `test_directz_craft` pins both its absence and that nothing calls it, because
+  a discredited scoring function within reach of an import is one somebody will
+  reach for.
 
 ---
 
@@ -381,6 +398,130 @@ profiles, and `prompt_for("drumz", ...)` was tested and correct, while
 `INSTRUMENTS` is in `INSTRUMENT_APP_KEYS`, and the coach/trial/SkillZ routes
 actually resolve for each — so a future instrument added to one list and not
 the other fails a test instead of shipping a coach nobody can reach.
+
+## A limit that stops a member doing anything is not a limit, it's a door out
+
+`catalog.py` and `models.py` hold about a dozen ladders, and the audit that
+produced this section found three of them answering "nothing" to somebody on
+the day they arrived. The rule they broke is the one to check every new limit
+against:
+
+**A tier limit says how MUCH, how OFTEN or how FAST. It may never say whether.**
+A member who cannot do a thing at all does not upgrade — they leave, and they
+leave believing the app is broken rather than that it is paid.
+
+The three, and what each looked like from the inside:
+
+- **`PROMPT_ALLOWANCE["free"]` was 1** — one AI run a day across the coach, OCC,
+  DirectZ and every Gemini surface combined. The ANONYMOUS trial door hands a
+  stranger the same one (`TRIAL_PER_IP_HOURS`), so registering bought literally
+  nothing on the axis people arrive for. It is 3.
+- **Passive Energy was `reach_median // divisor` with no floor**, and
+  `reach_median` is 0 until an external account is VERIFIED — so the app
+  published "⚡ regenerates hourly at reach ÷ tier", showed a new member their
+  rate, and the rate was 0. `ENERGY_FLOOR_PER_HOUR` is the floor; reach still
+  decides how fast it goes, the floor decides that it goes.
+- **PromptZ could be bought with cash and nothing else.** Every free way to earn
+  here — rating, referring, AdZ, OfferZ, OnboardZ — pays in 🍥, and 🍥 could not
+  reach the AI. `catalog.SPINAZ_PER_PROMPTZ` (10:1) is the door; cash stays the
+  fast lane and the subscription stays the shortcut.
+
+And the inverse failure, in the same audit, which is what makes the first one
+affordable to fix:
+
+- **The allowance capped the COUNT and not the PRICE.** `charge_ai_usage` let a
+  free daily prompt cover whatever the run cost, and the run's cost is the
+  member's own engine choice — so StatZ's 10/day on Fable (15c) was $45/mo of
+  model spend against a $15/mo subscription, while the margin comment beside
+  `PROMPT_ALLOWANCE` reasoned at the 3c floor and described a ladder that did
+  not exist. `DAILY_PROMPT_MAX_CENTS` is what one free prompt is worth. Dearer
+  engines are paid for, which is what PromptZ is for.
+
+So, when adding or moving a limit:
+
+- **State it in a unit the member can check** — clips, characters, runs a day,
+  MB. `KEY_TRANSCRIBE_DAILY_CLIPS` and `KEY_SPEAK_DAILY_CHARS` are two numbers
+  rather than one on purpose.
+- **A number that gates a capability needs a floor, not just a formula.** Any
+  ladder derived from something a new member cannot have yet — reach, ratings,
+  followers, history — starts at zero for everyone who has just arrived, which
+  is precisely the audience it is supposed to be recruiting.
+- **Anything metered by a cost must cap the cost, not only the count.** Or the
+  ladder is whatever the most expensive path happens to be.
+- **Check the free tier against the logged-out door.** If the anonymous trial
+  gives as much as an account does, the account is not a step up, and the
+  signup form is a wall in front of nothing.
+- **Never lower a live limit without a plan for the members already over it** —
+  the `TIER_LIMITS` note says this about storage and it is true of all of them.
+
+### Known limit still owed a decision (Corey's, not the code's)
+
+**Premium's allowance is pinned by Premium's price, and Premium's price is
+pinned by the founding discount.** The founding seat is half of StatZ
+($7.50/mo), and `catalog.py` asserts founding StatZ must cost more than
+Premium — so Premium cannot exceed $7.50, and at $6/mo its AI allowance cannot
+widen much past 5/day before the model cost eats the subscription (5/day at
+`DAILY_PROMPT_MAX_CENTS` is $4.50/mo of the $6). Free went to 3 and Premium
+stayed at 5, which is a thin gap. Making the founding discount LIFETIME-ONLY
+would unpin the monthly ladder. That is a pricing decision, so the code
+records it here rather than making it.
+
+## A profile field has two writers, and only one of them used to clean
+
+`POST /api/economy/profile/` wrote every name in `social.PROFILE_FIELDS`
+**straight off the request body** — `setattr(p, f, d[f])`, with `substances`
+the single exception — while `PATCH /api/auth/me/` normalized the same fields
+properly. Two writers for one column, one of them a passthrough.
+
+That is where `"{'name': 'Independent Artist', 'emoji': '🎤', 'skills': []}"`
+came from: a persona reached the profile as the **printed form of a dict**,
+58 characters, which fits under the 60-character cap a persona name is
+truncated to — so it was stored whole and served back verbatim, and the
+member's own card rendered machine noise where a persona should be.
+
+**It broke quietly, and that is the part worth remembering.** Every consumer of
+`profile.personas` guards with `if not isinstance(persona, dict): continue` —
+postz's skill pricing, questz's rate check, occ_suggest, social's rate range
+and experience metric, publicz's public card. Those guards are correct and are
+why nothing ever 500'd. They are also why nobody noticed: a member in this
+state saw no error, just a persona that read as noise, their priced skills
+silently absent from what a post costs, their experience metric blank, and
+their public card one persona short. **Nothing to report, so nothing got
+reported.** A defensive `continue` over member data hides the corruption it
+protects you from — so the guard belongs in a normalizer that repairs, not at
+each call site that skips.
+
+Three more things rode in through the same gap:
+
+- **`links` was unvalidated**, and it is rendered as `<a href>` on the member
+  card *and* on the logged-out public profile. A stored `javascript:` there is
+  executable on a page a stranger can open — React warns about one and puts it
+  in the DOM anyway.
+- **Nothing capped a list**, so a profile row could be made arbitrarily large,
+  and that row is serialized into every member card and search result.
+- **`birthday` skipped the zodiac recompute and the explicit-voice revocation**
+  that the same edit performs on `/api/auth/me/`. The read path re-applies the
+  age gate (`test_voice`), which is why that one was contained rather than
+  exploitable — but a second writer that forgets what the first one does stays
+  contained by luck.
+
+So:
+
+- **`apps/economy/personaz.py` is the one shape.** `clean_persona`, `clean_link`
+  and the `personas_of` / `links_of` read helpers live together, and
+  `accounts.views` imports the same `clean_persona` rather than defining a
+  second one. A field with two endpoints gets one cleaner, not two.
+- **Repair on read, not only on write.** Fixing a writer does nothing for what
+  it already wrote, and a member stays broken until they happen to save again.
+  `socialData.js` already says this about localStorage; it is just as true of a
+  column. Links especially: a refused URL must not be one un-run command away
+  from being served.
+- **`manage.py repair_profiles [--write]`** is the sweep that makes the
+  read-side repair stop being needed. Dry by default, like `reconcile_uploads`,
+  and it NAMES each link it refused rather than binning it silently.
+- **Recovery parses, it never evaluates.** `ast.literal_eval` handles literals
+  only, so a persona name cannot become code execution on a profile save.
+  A name that merely looks like a dict is kept as typed.
 
 ## Tier limits live on the server
 
