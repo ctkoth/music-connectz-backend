@@ -18,6 +18,7 @@ from .models import (
     profile_for,
     wallet_for,
 )
+from .personaz import personas_of
 
 
 class AccountExportView(APIView):
@@ -39,7 +40,7 @@ class AccountExportView(APIView):
             "profile": {
                 "display_name": p.display_name, "bio": p.bio, "location": p.location,
                 "gender": p.gender, "birthday": p.birthday, "sign": p.sign,
-                "nationalities": p.nationalities, "traits": p.traits, "personas": p.personas,
+                "nationalities": p.nationalities, "traits": p.traits, "personas": personas_of(p),
                 "links": p.links, "external_followers": p.external_followers,
             },
             "social": {"following": following, "followers": followers},

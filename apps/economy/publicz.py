@@ -32,6 +32,7 @@ from .models import (
     can_view_post,
     item_rating_median,
 )
+from .personaz import links_of, personas_of
 
 
 def public_post_dict(p):
@@ -56,7 +57,7 @@ def public_post_dict(p):
         "author": p.author.username,
         "title": p.title,
         "description": p.description,
-        "links": p.links or [],
+        "links": links_of(p),
         "media_type": p.media_type,
         "media_url": p.media_url,
         "is_album": p.is_album,
@@ -79,9 +80,7 @@ def public_profile_dict(p):
     inside the app and are nobody's business from outside it.
     """
     personas = []
-    for persona in (p.personas or []):
-        if not isinstance(persona, dict):
-            continue
+    for persona in personas_of(p):
         skills = []
         for s in (persona.get("skills") or []):
             if isinstance(s, dict) and s.get("name"):
@@ -105,7 +104,7 @@ def public_profile_dict(p):
         # chose to show, and only what the badge is — never what it pays.
         "badge_title": p.badge_title,
         "badges": [public_badge_chip(b) for b in badges_for(p.user, only_visible=True)],
-        "links": p.links or [],
+        "links": links_of(p),
         "public": True,
     }
 

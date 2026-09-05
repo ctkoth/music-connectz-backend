@@ -12,7 +12,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.economy.models import Post, TrialTake, profile_for
+from apps.economy.models import TRIAL_MAX_MB, Post, TrialTake, profile_for
 
 User = get_user_model()
 PW = "hunter2hunter2"
@@ -194,7 +194,10 @@ class TrialTakeTests(TestCase):
         self.assertEqual(resp.status_code, 200, resp.content)
         self.assertTrue(resp.data["free"])
         self.assertTrue(resp.data["available"])
-        self.assertEqual(resp.data["max_mb"], 8)
+        # The number, not a literal — this read 8 and so pinned the trial to a
+        # ceiling set before the Files API path existed. What matters is that
+        # the offer STATES it, and that it is the one the door enforces.
+        self.assertEqual(resp.data["max_mb"], TRIAL_MAX_MB)
         self.assertIn("difficulties", resp.data)
 
     @patch("apps.economy.trial._key", return_value="k")

@@ -8,7 +8,9 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import AI_MODEL_COSTS, SPECZ_CATALOG, ai_cost, cashout_rate, limits_for
+from .catalog import (AI_MODEL_COSTS, SPECZ_APP_KEYS, SPECZ_APPS,
+                      SPECZ_LABEL_MAX, SPECZ_PRICE_SPINAZ, SPECZ_VALUE_MAX,
+                      ai_cost, cashout_rate, limits_for)
 from .media import stable_media_url
 from .models import (
     DEV_TAX,
@@ -24,9 +26,11 @@ from .models import (
     Transaction,
     Upload,
     charge_ai_usage,
+    DAILY_PROMPT_MAX_CENTS,
     daily_prompt_state,
     energy_for_topup,
     ENERGY_TOPUP_MULT,
+    log_resource,
     membership_for,
     split_cents,
     storage_used_bytes,
@@ -234,8 +238,11 @@ class StatsView(APIView):
                 "my_energy": w.energy,
                 "my_spinaz": w.spinaz,
                 "my_promptz": w.promptz,  # prepaid AI credits (persist)
-                # Free daily prompts by tier (free 1 / premium 5 / statz 10) — reset daily, don't stack.
+                # Free daily prompts by tier (free 3 / premium 5 / statz 10) — reset daily, don't stack.
                 "my_promptz_daily": prompt_allowance,
+                # What one of them is worth. Published because "you have 3 left"
+                # is not the whole price when a dearer engine is billed anyway.
+                "my_promptz_daily_max_cents": DAILY_PROMPT_MAX_CENTS,
                 "my_promptz_daily_used": prompts_used,
                 "my_promptz_daily_remaining": prompts_remaining,
                 "dev_tax_rate": m.dev_tax_rate,
@@ -524,6 +531,66 @@ class PromptzBuyView(APIView):
         return Response({"wallet": WalletSerializer(w).data, "granted": granted})
 
 
+class PromptzConvertView(APIView):
+    """GET / POST { spinaz } — turn earned SpinaZ into prepaid PromptZ at
+    catalog.SPINAZ_PER_PROMPTZ to 1.
+
+    GET states the rate and what the member's balance is worth BEFORE they
+    spend it, because a price discovered by paying it is a bill. POST does it.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _rate(self, w):
+        from .catalog import SPINAZ_PER_PROMPTZ
+        have = max(0, w.spinaz or 0)
+        return {
+            "spinaz_per_promptz": SPINAZ_PER_PROMPTZ,
+            "spinaz": have,
+            # What pressing it would get them, at everything they hold.
+            "max_promptz": have // SPINAZ_PER_PROMPTZ,
+            "note": f"{SPINAZ_PER_PROMPTZ} 🍥 → 1 🏷️. Earn 🍥 by rating, "
+                    f"referring and OfferZ — no card needed.",
+        }
+
+    def get(self, request):
+        return Response(self._rate(wallet_for(request.user)))
+
+    def post(self, request):
+        from .catalog import SPINAZ_PER_PROMPTZ
+
+        spend = int((request.data or {}).get("spinaz") or 0)
+        if spend <= 0:
+            return Response({"detail": "spinaz required"}, status=status.HTTP_400_BAD_REQUEST)
+        # Refuse a spend that would round down to nothing rather than taking it
+        # and granting zero — a conversion that silently eats 9 🍥 is theft with
+        # a rounding excuse.
+        if spend < SPINAZ_PER_PROMPTZ:
+            return Response(
+                {"detail": f"That converts to nothing — {SPINAZ_PER_PROMPTZ} 🍥 is the "
+                           f"smallest that buys 1 🏷️.",
+                 "spinaz_per_promptz": SPINAZ_PER_PROMPTZ},
+                status=status.HTTP_400_BAD_REQUEST)
+        w = wallet_for(request.user)
+        if (w.spinaz or 0) < spend:
+            return Response({"detail": f"That's {spend} 🍥 and you have {w.spinaz or 0}.",
+                             "spinaz": w.spinaz or 0},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
+        # Charge only for whole PromptZ. The remainder stays in their wallet.
+        granted = spend // SPINAZ_PER_PROMPTZ
+        charged = granted * SPINAZ_PER_PROMPTZ
+        w.spinaz -= charged
+        w.promptz = (w.promptz or 0) + granted
+        w.save(update_fields=["spinaz", "promptz", "updated_at"])
+        Transaction.objects.create(
+            user=request.user, kind=Transaction.KIND_PURCHASE, amount_cents=0,
+            dev_tax_cents=0, note=f"−{charged} 🍥 → +{granted} 🏷️",
+        )
+        return Response({"wallet": WalletSerializer(w).data,
+                         "granted": granted, "charged": charged,
+                         **self._rate(w)})
+
+
 class LimitsView(APIView):
     """Per-tier caps for the client to enforce (char/upload/storage), plus the
     one policy answer the client can't work out for itself."""
@@ -565,83 +632,210 @@ class LimitsView(APIView):
 
 
 class SpecZView(APIView):
-    """GET the SpecZ catalog with owned flags; POST buys an item (StatZ only)."""
+    """GET your SpecZ and what one costs; POST writes one; DELETE removes one.
+
+    A SpecZ is a label and a value the member writes and attaches to an app —
+    "Preferred BPM: 140-150, dark strings" on PostZ. It was authored in the tab
+    and saved to `localStorage`: no API call, no balance touched, nothing on
+    the server. Meanwhile MembershipZ sold the SpecZ marketplace as THE
+    StatZ-only perk, so the one thing advertised as worth a subscription was
+    the one thing that charged nothing and did not survive a new browser.
+    """
 
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        owned = set(request.user.specz_purchases.values_list("item_id", flat=True))
-        items = [
-            {"id": iid, "name": d["name"], "price_cents": d["price_cents"], "owned": iid in owned}
-            for iid, d in SPECZ_CATALOG.items()
+    def _mine(self, user):
+        return [
+            {"id": p.id, "app_key": p.app_key, "label": p.label, "value": p.value,
+             "price_spinaz": p.price_spinaz, "created_at": p.created_at}
+            for p in user.specz_purchases.all()[:200]
         ]
-        return Response({"items": items})
+
+    def get(self, request):
+        w = wallet_for(request.user)
+        have = w.spinaz or 0
+        return Response({
+            "items": self._mine(request.user),
+            "price_spinaz": SPECZ_PRICE_SPINAZ,
+            "spinaz": have,
+            # Whether they can afford it travels WITH the price, so the tab
+            # states it on the button instead of after it is pressed.
+            "affordable": have >= SPECZ_PRICE_SPINAZ,
+            "apps": SPECZ_APPS,
+            "label_max": SPECZ_LABEL_MAX,
+            "value_max": SPECZ_VALUE_MAX,
+            "tier": membership_for(request.user).tier,
+            "tier_required": TIER_STATZ,
+        })
 
     def post(self, request):
-        m = membership_for(request.user)
-        if m.tier != TIER_STATZ:
-            return Response({"detail": "SpecZ is a StatZ-only marketplace"}, status=status.HTTP_403_FORBIDDEN)
-        item_id = str(request.data.get("item_id", ""))
-        item = SPECZ_CATALOG.get(item_id)
-        if not item:
-            return Response({"detail": "unknown item"}, status=status.HTTP_400_BAD_REQUEST)
-        if request.user.specz_purchases.filter(item_id=item_id).exists():
-            return Response({"detail": "already owned"}, status=status.HTTP_409_CONFLICT)
+        if membership_for(request.user).tier != TIER_STATZ:
+            return Response({"detail": "SpecZ is a StatZ-only marketplace"},
+                            status=status.HTTP_403_FORBIDDEN)
+        d = request.data or {}
+        app_key = str(d.get("app_key", "")).strip()
+        if app_key not in SPECZ_APP_KEYS:
+            return Response({"detail": "Pick an app to attach it to.",
+                             "apps": SPECZ_APPS}, status=status.HTTP_400_BAD_REQUEST)
+        label = str(d.get("label", "")).strip()
+        value = str(d.get("value", "")).strip()
+        if not label or not value:
+            return Response({"detail": "A SpecZ needs both a label and a value."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        # Refuse over-length rather than silently truncating. A save handler
+        # that quietly cuts what somebody typed and answers "saved" is the
+        # worst bug class in this app and has shipped twice.
+        if len(label) > SPECZ_LABEL_MAX or len(value) > SPECZ_VALUE_MAX:
+            return Response(
+                {"detail": f"Label is up to {SPECZ_LABEL_MAX} characters and value up to {SPECZ_VALUE_MAX}.",
+                 "label_max": SPECZ_LABEL_MAX, "value_max": SPECZ_VALUE_MAX},
+                status=status.HTTP_400_BAD_REQUEST)
         w = wallet_for(request.user)
-        price = item["price_cents"]
-        if w.money_cents < price:
-            return Response({"detail": "insufficient balance"}, status=status.HTTP_402_PAYMENT_REQUIRED)
-        dev, _ = split_cents(price, m.dev_tax_rate)  # developer tax recorded on the sale
-        w.money_cents -= price
-        w.save(update_fields=["money_cents", "updated_at"])
-        SpecZPurchase.objects.create(user=request.user, item_id=item_id, price_cents=price, dev_tax_cents=dev)
-        Transaction.objects.create(
-            user=request.user, kind=Transaction.KIND_PURCHASE, amount_cents=-price,
-            dev_tax_cents=dev, note=f"SpecZ: {item['name']}",
+        have = w.spinaz or 0
+        if have < SPECZ_PRICE_SPINAZ:
+            # Name both numbers. "Insufficient balance" makes somebody go and
+            # count their own SpinaZ to work out how short they are.
+            return Response(
+                {"detail": f"That's {SPECZ_PRICE_SPINAZ} 🍥 and you have {have}.",
+                 "price_spinaz": SPECZ_PRICE_SPINAZ, "spinaz": have},
+                status=status.HTTP_402_PAYMENT_REQUIRED)
+        # Charge only once everything above has passed, so a refused SpecZ is
+        # never a paid one — the rule the coach bills on.
+        w.spinaz = have - SPECZ_PRICE_SPINAZ
+        w.save(update_fields=["spinaz", "updated_at"])
+        p = SpecZPurchase.objects.create(
+            user=request.user, app_key=app_key, label=label, value=value,
+            price_spinaz=SPECZ_PRICE_SPINAZ,
         )
-        return Response({"wallet": WalletSerializer(w).data, "item_id": item_id, "dev_tax_cents": dev})
+        # Through log_resource so it lands in LogZ as a SpinaZ movement with
+        # its reason, like every other spend. A purchase that moves a balance
+        # and leaves no row is how "where did my SpinaZ go" starts.
+        log_resource(request.user, Transaction.RES_SPINAZ, -SPECZ_PRICE_SPINAZ,
+                     f"SpecZ on {app_key}: {label}")
+        return Response({"item": {"id": p.id, "app_key": p.app_key, "label": p.label,
+                                  "value": p.value, "price_spinaz": p.price_spinaz,
+                                  "created_at": p.created_at},
+                         "wallet": WalletSerializer(w).data, "spinaz": w.spinaz},
+                        status=status.HTTP_201_CREATED)
+
+    def delete(self, request, pk=None):
+        p = request.user.specz_purchases.filter(pk=pk).first()
+        if not p:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        p.delete()
+        # Deliberately no refund, and the tab says so before the button. Buying
+        # it back costs the same as buying it did; a delete that quietly
+        # returned the SpinaZ would make the price meaningless.
+        return Response({"deleted": pk, "refunded_spinaz": 0,
+                         "spinaz": wallet_for(request.user).spinaz})
 
 
 class RoyaltiesView(APIView):
-    """GET royalty balance + ledger."""
+    """GET royalty balance, ledger, and what each cashout plan would actually pay.
+
+    The plans ship WITH their arithmetic already done for this member. Cashing
+    out costs a percentage that depends on the plan and on the member's tier,
+    so a client that wanted to state the price before the button — which is the
+    rule — would otherwise have to hold its own copy of the tax table, and a
+    tier number retyped in the client is exactly how "20 free prompts" reached
+    nine places and drifted.
+
+    So the server answers the whole question: for this balance, at this tier,
+    each plan's rate, what it takes, and what lands. Same shape as the
+    KeyConnectZ allowance ladder — publish the ladder before either button is
+    pressed, so "quarterly keeps all of it" is a thing the member can SEE
+    rather than a thing they discover by picking the wrong one.
+    """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         w = wallet_for(request.user)
+        tier = membership_for(request.user).tier
+        gross = w.royalties_cents
+        plans = []
+        for plan in ("instant", "weekly", "monthly", "quarterly"):
+            rate = cashout_rate(plan, tier)
+            tax = round(gross * rate)
+            plans.append({
+                "plan": plan,
+                "rate": rate,
+                "rate_percent": round(rate * 100, 2),
+                # The two numbers the member is actually choosing between.
+                "tax_cents": tax,
+                "net_cents": gross - tax,
+            })
         entries = [
             {"kind": e.kind, "amount_cents": e.amount_cents, "tax_cents": e.tax_cents, "source": e.source, "created_at": e.created_at}
             for e in request.user.royalty_entries.all()[:50]
         ]
-        return Response({"royalties_cents": w.royalties_cents, "royalties": w.royalties, "entries": entries})
+        return Response({
+            "royalties_cents": gross, "royalties": w.royalties,
+            "tier": tier, "plans": plans, "entries": entries,
+            # Nothing accrues on its own yet. Saying so is the honest version of
+            # an empty screen — a member with 0 needs to know whether that means
+            # "you have earned nothing" or "nothing pays into this yet".
+            "accrual_is_live": False,
+        })
 
 
 class RoyaltyAccrueView(APIView):
-    """Accrue royalties to a user (called when their media earns; open for testing)."""
+    """Credit royalties to a member. OWNER ONLY.
+
+    This said "open for testing" and was exactly that: any authenticated member
+    could POST an arbitrary `amount_cents` to their own balance, and
+    `RoyaltyCashoutView` below moves that balance into `money_cents` — which
+    pays other members (`pay_between`), buys PromptZ, and settles CollabZ
+    deals. So the two endpoints together were an open mint, and the money did
+    not stay in the account that printed it.
+
+    Nothing here was ever load-bearing for a member: no client has ever called
+    it, and royalties do not accrue automatically yet (`accrual_is_live` above
+    says so out loud). Closing it costs nobody anything and had to happen
+    before any screen pointed at this balance.
+
+    `username` lets the owner credit the member whose media actually earned,
+    which is the job this endpoint exists to do — crediting only yourself was
+    never the useful version of it.
+    """
 
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        ensure_owner(request.user)
+        if not is_owner(request.user):
+            return Response({"detail": "Only the platform owner credits royalties."},
+                            status=status.HTTP_403_FORBIDDEN)
         try:
             amount_cents = int(request.data.get("amount_cents"))
         except (TypeError, ValueError):
             return Response({"detail": "amount_cents (integer) required"}, status=status.HTTP_400_BAD_REQUEST)
         if amount_cents <= 0:
             return Response({"detail": "amount must be positive"}, status=status.HTTP_400_BAD_REQUEST)
-        w = wallet_for(request.user)
+        target = request.user
+        username = str(request.data.get("username") or "").strip()
+        if username:
+            target = User.objects.filter(username__iexact=username).first()
+            if not target:
+                return Response({"detail": f"No member called {username}."},
+                                status=status.HTTP_404_NOT_FOUND)
+        w = wallet_for(target)
         w.royalties_cents += amount_cents
         w.save(update_fields=["royalties_cents", "updated_at"])
         RoyaltyEntry.objects.create(
-            user=request.user, kind=RoyaltyEntry.KIND_ACCRUAL, amount_cents=amount_cents,
+            user=target, kind=RoyaltyEntry.KIND_ACCRUAL, amount_cents=amount_cents,
             source=str(request.data.get("source", ""))[:200],
         )
-        return Response({"royalties_cents": w.royalties_cents, "royalties": w.royalties})
+        return Response({"username": target.username,
+                         "royalties_cents": w.royalties_cents, "royalties": w.royalties})
 
 
 class RoyaltyCashoutView(APIView):
     """Cash out royalties into the wallet, applying the plan's tax.
 
-    Plans: instant (15%), weekly (per-tier 10/5/2), monthly (1%), quarterly (0%).
+    Plans: instant (15%), weekly (per-tier 10/5/3), monthly (1%), quarterly (0%).
+    The rates live in `catalog.cashout_rate` and are published, already
+    applied to this balance, by RoyaltiesView above — never retyped here.
     """
 
     permission_classes = [IsAuthenticated]
