@@ -10,6 +10,7 @@ from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
 from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .callz import CallDetailView, CallRateView, CallsView
+from .sharecard import post_card, profile_card
 from .soundz import SoundZView
 from .distributez import TranscodeView, LyricsView
 from .adz import AdzView, AdDetailView, AdRewardView
@@ -184,6 +185,11 @@ urlpatterns = [
     path("callz/", CallsView.as_view(), name="economy-callz"),
     path("callz/<int:pk>/", CallDetailView.as_view(), name="economy-call"),
     path("callz/<int:pk>/<str:action>/", CallDetailView.as_view(), name="economy-call-action"),
+    # Link previews. These are NOT under /api/ on purpose — they are the same
+    # addresses a person shares, served as HTML to whatever cannot run
+    # JavaScript. See sharecard.py and the vercel.json note in the PR.
+    path("share/u/<str:username>", profile_card, name="share-profile"),
+    path("share/p/<int:pk>", post_card, name="share-post"),
     path("soundz/", SoundZView.as_view(), name="economy-soundz"),
     path("specz/", SpecZView.as_view(), name="economy-specz"),
     path("specz/buy/", SpecZView.as_view(), name="economy-specz-buy"),
