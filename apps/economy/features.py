@@ -14,10 +14,11 @@ TIER_ORDER = [TIER_FREE, TIER_PREMIUM, TIER_STATZ, TIER_DEBUG]
 
 FEATURES = {
     # The four that thread through every app, MCZ and OCC alike.
-    "logz": {
-        "tier": TIER_PREMIUM, "label": "LogZ", "emoji": "🪵",
-        "blurb": "What Music ConnectZ did — every move, by day, week, month or a range you pick.",
-    },
+    # LogZ is deliberately NOT here. It was a Premium gate, and what it gated
+    # was a member's own record of what the platform did to their balances —
+    # "where did my SpinaZ go" answered with an upsell. `catalog.LOGZ_HISTORY_DAYS`
+    # replaced it: everyone sees their ledger, and the tier buys how far back
+    # it goes. That is a "how much", which a tier may say; "whether" it may not.
     "tellz": {
         "tier": TIER_PREMIUM, "label": "TellZ", "emoji": "🗣️",
         "blurb": "What you input — every prompt and post you made, across any app or all of them.",

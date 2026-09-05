@@ -14,6 +14,7 @@ from datetime import timedelta
 from django.db.models import Case, Count, IntegerField, Sum, When
 from django.utils import timezone
 
+from .viewz import views_for_posts
 from .crosspost import coach_cap, coach_price, destinations_for, take_state_for
 from .models import (
     CollabDeal,
@@ -104,7 +105,7 @@ _UNSET = object()
 
 
 def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_UNSET,
-               cap=None):
+               cap=None, views=None):
     vibe = up - down
     media = media_slots(p)
     if take_state is _UNSET:
@@ -173,6 +174,12 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
         "shares": p.shares.count(),
         "up": up, "down": down, "vibe": vibe, "flagged": flagged,
         "rating": item_rating_median(f"post:{p.id}"),
+        # 👁️ ViewZ. One viewer per day, never the author's own looks — see
+        # viewz.py. Counted for the whole feed in ONE query, like the take
+        # sizes above; per-card it would be a hundred round trips behind a
+        # number that exists to be glanced at.
+        "view_count": (views_for_posts([p.id]).get(p.id, 0) if views is None
+                       else views.get(p.id, 0)),
         "created_at": p.created_at.isoformat(),
         "edited_at": p.edited_at.isoformat() if p.edited_at else None,
         "edit_history": p.edit_history or [],
@@ -436,9 +443,11 @@ class PostsView(APIView):
         # it the coach door is offered on a track the coach cannot read, and the
         # member finds out by pressing the button — see take_state_for.
         sizes = take_state_for([(p, media_slots(p)) for p in visible])
+        # 👁️ for the whole page in one query, same reason as the sizes above.
+        views = views_for_posts([p.id for p in visible])
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
                             collabs=deals.get(p.id, 0), price=price, cap=cap,
-                            take_state=sizes.get(p.id))
+                            take_state=sizes.get(p.id), views=views)
                  for p in visible]
 
         now = timezone.now()
@@ -653,7 +662,7 @@ class PostJoinView(APIView):
             return False
         if PostJoin.objects.filter(post__author=p.author, rewarded=True, joined_at__gte=day_ago).count() >= JOIN_REWARD_DAILY_CAP_PER_AUTHOR:
             return False
-        award_spinaz(p.author, RESTRICTED_JOIN_REWARD_SPINAZ, note=f"Restricted join on '{p.title}'")
+        award_spinaz(p.author, RESTRICTED_JOIN_REWARD_SPINAZ, note=f"Restricted join on '{p.title}'", open_in="postz")
         join.rewarded = True
         join.save(update_fields=["rewarded"])
         notify(p.author, "join", f"@{user.username} joined '{p.title}' — you earned +{RESTRICTED_JOIN_REWARD_SPINAZ} 🍥", actor=user, item_id=f"post:{p.id}")

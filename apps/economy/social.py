@@ -38,6 +38,8 @@ from .models import (
     haversine_km,
     Follow,
     follow_counts,
+    follow_counts_by_user,
+    medians_by_user,
     relationship,
     energy_rate_per_hour,
     notify,
@@ -529,13 +531,21 @@ def profile_max_experience(p):
     return best
 
 
-def _profile_card(p, request=None, badges=None):
+def _profile_card(p, request=None, badges=None, counts=None, medians=None):
     """Compact card for search results.
 
-    `badges` lets a listing pass in rows it has already loaded in bulk; left
-    alone, the card fetches its own.
+    `badges`, `counts` and `medians` let a listing pass in rows it has already
+    loaded in bulk; left alone, the card fetches its own. A directory that
+    renders a hundred cards is the reason all three exist — every one of them
+    is several queries a card otherwise, which is a number nobody notices
+    until something finally lists members.
     """
     m = getattr(p.user, "membership", None)
+    if medians is None:
+        medians = {"attractiveness": attractiveness_median(p.user),
+                   "overall": overall_median(p.user)}
+    if counts is None:
+        counts = follow_counts(p.user)
     return {
         "username": p.user.username,
         "display_name": p.display_name or p.user.username,
@@ -546,9 +556,9 @@ def _profile_card(p, request=None, badges=None):
         "nationalities": p.nationalities,
         "sober": p.sober,
         "attracted_to": p.attracted_to,
-        "median": attractiveness_median(p.user),
-        "attractiveness": attractiveness_median(p.user),
-        "overall": overall_median(p.user),
+        "median": medians["attractiveness"],
+        "attractiveness": medians["attractiveness"],
+        "overall": medians["overall"],
         "age": profile_age(p),
         "shares_location": bool(p.share_location and p.lat is not None and p.lng is not None),
         "tier": m.tier if m else "free",
@@ -561,7 +571,7 @@ def _profile_card(p, request=None, badges=None):
         # profile is the surface that switch exists to control.
         "badge_title": p.badge_title,
         "badges": worn_badges(p.user, badges),
-        **follow_counts(p.user),
+        **counts,
     }
 
 
@@ -983,10 +993,83 @@ class MemberProfileView(APIView):
         return Response(_profile_full(p, request, recheck=True))
 
 
+# The orders a member may put the directory in.
+#
+# The viewer sets the order, so the orders are PUBLISHED with the results
+# rather than hardcoded in a client — same reason tier numbers come off
+# /limits/ instead of being retyped into copy. Each carries the sentence that
+# says what it actually sorts by, because "Top rated" and "Rated by the most
+# people" are different lists and a label alone cannot tell them apart.
+#
+# `nearest` is offered only to a member who shares their own location: an
+# order that silently does nothing is worse than one that isn't there.
+MEMBER_ORDERS = [
+    {"key": "nearest", "label": "Nearest", "note": "Closest first — needs your location shared.", "needs": "location"},
+    {"key": "active", "label": "Recently active", "note": "Whoever was here most recently."},
+    {"key": "newest", "label": "Newest", "note": "Most recently joined."},
+    {"key": "rated", "label": "Highest rated", "note": "Overall rating median. Unrated members come last."},
+    {"key": "followers", "label": "Most followed", "note": "Music ConnectZ followers."},
+    {"key": "experience", "label": "Most experienced", "note": "Years on their longest-held skill."},
+    {"key": "name", "label": "A–Z", "note": "By username."},
+]
+MEMBER_ORDER_KEYS = {o["key"] for o in MEMBER_ORDERS}
+
+# How many cards one response carries. The count of everyone who MATCHED is
+# reported separately, because "100 members" next to a list of 100 when there
+# are 4,000 is a lie the member cannot see.
+MEMBER_PAGE = 100
+MEMBER_SCAN = 2000
+
+
+def _desc_str(iso):
+    """Sort an ISO timestamp NEWEST first inside an ascending sort.
+
+    Reversing the whole sort would also reverse the "no value last" half of
+    every key, which is the one part that must not flip. Inverting each
+    character keeps one ascending sort doing both jobs."""
+    return tuple(-ord(ch) for ch in (iso or ""))
+
+
+def _sort_members(results, order, origin_shared, boosted):
+    """Put the cards in the order the viewer asked for.
+
+    Sorting happens here rather than in SQL because three of the seven keys
+    (rating, distance, experience) are computed in Python and none of them is
+    a column. Every key sorts unrated/unknown LAST — a member with no rating
+    is not a member with a rating of zero, and floating them to the top of
+    "Highest rated" would make the order meaningless.
+    """
+    last = lambda v: (v is None, )                      # noqa: E731 — "no value goes last"
+
+    if order == "nearest" and origin_shared:
+        results.sort(key=lambda c: (c.get("distance_km") is None, c.get("distance_km") or 0))
+    elif order == "active":
+        results.sort(key=lambda c: (c.get("last_seen") is None, _desc_str(c.get("last_seen"))))
+    elif order == "newest":
+        results.sort(key=lambda c: (c.get("joined") is None, _desc_str(c.get("joined"))))
+    elif order == "rated":
+        results.sort(key=lambda c: (*last(c.get("overall")), -(c.get("overall") or 0)))
+    elif order == "followers":
+        results.sort(key=lambda c: -(c.get("followers") or 0))
+    elif order == "experience":
+        results.sort(key=lambda c: (*last(c.get("experience_years")), -(c.get("experience_years") or 0)))
+    elif order == "name":
+        results.sort(key=lambda c: (c.get("username") or "").lower())
+    elif origin_shared:
+        results.sort(key=lambda c: (c.get("distance_km") is None, c.get("distance_km") or 0))
+    else:
+        results.sort(key=lambda c: c.get("username") not in boosted)
+    return results
+
+
 class MembersView(APIView):
     """Search members by multi-select metrics: regions, genders, signs, sober.
 
     OR within a metric, AND across metrics — mirrors the client filter.
+
+    `?sort=` puts the results in one of `MEMBER_ORDERS`; the list of orders
+    ships with the response so the client offers exactly what the server can
+    do.
     """
 
     permission_classes = [IsAuthenticated]
@@ -1028,11 +1111,23 @@ class MembersView(APIView):
         me = profile_for(request.user)
         origin = (me.lat, me.lng) if (me.share_location and me.lat is not None) else (None, None)
 
+        order = (request.query_params.get("sort") or "").strip().lower()
+        if order not in MEMBER_ORDER_KEYS:
+            order = ""
+
         results = []
-        qs = list(Profile.objects.exclude(user=request.user).exclude(user_id__in=blocked_user_ids(request.user)).select_related("user")[:500])
-        # Every card wears its badges, so load them for the whole page in one
-        # query. Per-card would be five hundred of them behind one search.
+        base = (Profile.objects
+                .exclude(user=request.user)
+                .exclude(user_id__in=blocked_user_ids(request.user))
+                .select_related("user", "user__membership"))
+        qs = list(base[:MEMBER_SCAN])
+        # Every card wears its badges, and carries follower counts and two
+        # medians. Loaded for the whole page here: per-card, this listing was
+        # about seven queries a member, which is thousands behind one search
+        # and was invisible only because nothing in the app listed members.
         worn = worn_badges_by_user(p.user_id for p in qs)
+        counts = follow_counts_by_user(p.user for p in qs)
+        medians = medians_by_user(p.user_id for p in qs)
         for p in qs:
             if regions and not (set(regions) & set(p.regions or [])):
                 continue
@@ -1057,17 +1152,36 @@ class MembersView(APIView):
             # The distance GATE lives in the spec above; this is the number
             # shown on the card. Computed once in member_metrics either way.
             dist = metrics.get("km")
-            card = _profile_card(p, request, badges=worn.get(p.user_id, []))
+            card = _profile_card(p, request, badges=worn.get(p.user_id, []),
+                                 counts=counts.get(p.user_id),
+                                 medians=medians.get(p.user_id))
             card["distance_km"] = dist
+            # The two orders that sort by time need the times on the card, and
+            # a directory that offers "Recently active" without showing it is
+            # asking to be taken on trust.
+            m = getattr(p.user, "membership", None)
+            card["last_seen"] = m.last_seen.isoformat() if (m and m.last_seen) else None
+            card["joined"] = p.user.date_joined.isoformat() if p.user.date_joined else None
             results.append(card)
-        # Nearest first when a distance origin exists. Distance WINS over the
-        # Sexy badge's boost on purpose: "who is near me" is a real need, and
-        # being rated attractive is not a reason to bury someone closer.
-        if origin[0] is not None:
-            results.sort(key=lambda c: (c.get("distance_km") is None, c.get("distance_km") or 0))
-        else:
-            from .models import Badge
-            boosted = set(Badge.objects.filter(key="sexy", visible=True)
-                          .values_list("user__username", flat=True))
-            results.sort(key=lambda c: c.get("username") not in boosted)
-        return Response({"members": results[:100], "origin_shared": origin[0] is not None})
+        # With no order chosen: nearest first when a distance origin exists.
+        # Distance WINS over the Sexy badge's boost on purpose — "who is near
+        # me" is a real need, and being rated attractive is not a reason to
+        # bury someone closer.
+        from .models import Badge
+        boosted = set(Badge.objects.filter(key="sexy", visible=True)
+                      .values_list("user__username", flat=True))
+        shared = origin[0] is not None
+        _sort_members(results, order, shared, boosted)
+        # `matched` is everyone the filters kept; `members` is the page. A
+        # count that only ever equals the page length would tell a member the
+        # platform has exactly one hundred people on it.
+        return Response({
+            "members": results[:MEMBER_PAGE],
+            "matched": len(results),
+            "scanned": len(qs),
+            "scan_limit": MEMBER_SCAN,
+            "page_size": MEMBER_PAGE,
+            "origin_shared": shared,
+            "sort": order or ("nearest" if shared else ""),
+            "orders": [o for o in MEMBER_ORDERS if o.get("needs") != "location" or shared],
+        })

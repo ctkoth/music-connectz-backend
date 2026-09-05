@@ -140,6 +140,12 @@ class Transaction(models.Model):
     amount_cents = models.IntegerField(help_text="Signed: positive credit, negative debit")
     dev_tax_cents = models.PositiveIntegerField(default=0)
     note = models.CharField(max_length=200, blank=True, default="")
+    # Where this movement came from, so a balance leads back to the action that
+    # changed it. Same "tab" / "tab:anchor" shape `goToSpot` already takes, and
+    # the same rule as Observation: whatever STORES a thing stores where it
+    # came from. Blank is allowed and means exactly "we don't know" — a link
+    # guessed from the note text would be a dead end wearing a door's clothes.
+    open_in = models.CharField(max_length=64, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -1231,7 +1237,7 @@ class LinkClick(models.Model):
         unique_together = ("counter", "clicker", "day")
 
 
-def award_spinaz(user, amount, note=""):
+def award_spinaz(user, amount, note="", open_in=""):
     """Credit SpinAZ to a user's wallet and record it.
 
     The `note` every caller already passes used to be accepted and thrown
@@ -1241,20 +1247,20 @@ def award_spinaz(user, amount, note=""):
     w = wallet_for(user)
     w.spinaz = (w.spinaz or 0) + int(amount)
     w.save(update_fields=["spinaz", "updated_at"])
-    log_resource(user, Transaction.RES_SPINAZ, int(amount), note or "SpinaZ")
+    log_resource(user, Transaction.RES_SPINAZ, int(amount), note or "SpinaZ", open_in)
     return w.spinaz
 
 
-def award_energy(user, amount, note=""):
+def award_energy(user, amount, note="", open_in=""):
     """Credit Energy to a user's wallet, and record it."""
     w = wallet_for(user)
     w.energy = (w.energy or 0) + int(amount)
     w.save(update_fields=["energy", "updated_at"])
-    log_resource(user, Transaction.RES_ENERGY, int(amount), note or "Energy")
+    log_resource(user, Transaction.RES_ENERGY, int(amount), note or "Energy", open_in)
     return w.energy
 
 
-def log_resource(user, resource, amount, note=""):
+def log_resource(user, resource, amount, note="", open_in=""):
     """One line in LogZ: what moved, which way, and when.
 
     Best-effort — a ledger write must never be the reason a reward fails to
@@ -1271,6 +1277,7 @@ def log_resource(user, resource, amount, note=""):
             amount_cents=int(amount) if resource == Transaction.RES_MONEY else 0,
             dev_tax_cents=0,
             note=str(note)[:200],
+            open_in=str(open_in or "")[:64],
         )
     except Exception:  # pragma: no cover - never break a reward over its log
         return None
@@ -1304,8 +1311,8 @@ def record_referral(referrer, joinee):
     if Referral.objects.filter(joinee=joinee).exists():
         return None
     ref = Referral.objects.create(referrer=referrer, joinee=joinee)
-    award_spinaz(referrer, REFERRAL_REWARD_REFERRER_SPINAZ, "referral (referrer)")
-    award_spinaz(joinee, REFERRAL_REWARD_JOINEE_SPINAZ, "referral (welcome)")
+    award_spinaz(referrer, REFERRAL_REWARD_REFERRER_SPINAZ, "referral (referrer)", open_in="earnz")
+    award_spinaz(joinee, REFERRAL_REWARD_JOINEE_SPINAZ, "referral (welcome)", open_in="earnz")
     return ref
 
 
@@ -1335,7 +1342,7 @@ def reward_for_rating(user, what=""):
     if paid >= cap:
         return 0
     note = f"{RATING_NOTE} — {what}" if what else RATING_NOTE
-    award_energy(user, RATING_REWARD_ENERGY, note)
+    award_energy(user, RATING_REWARD_ENERGY, note, open_in="postz")
     return RATING_REWARD_ENERGY
 
 
@@ -1353,8 +1360,8 @@ def complete_onboarding(user):
     p.onboarded = True
     p.onboarded_at = timezone.now()
     p.save(update_fields=["onboarded", "onboarded_at", "updated_at"])
-    award_spinaz(user, ONBOARD_REWARD_SPINAZ, "onboarding")
-    award_energy(user, ONBOARD_REWARD_ENERGY, "onboarding")
+    award_spinaz(user, ONBOARD_REWARD_SPINAZ, "onboarding", open_in="onboardz")
+    award_energy(user, ONBOARD_REWARD_ENERGY, "onboarding", open_in="onboardz")
     return {"spinaz": ONBOARD_REWARD_SPINAZ, "energy": ONBOARD_REWARD_ENERGY, "already": False}
 
 
@@ -1501,7 +1508,7 @@ def pay_bug_bounty(bug, by=None):
     """
     if bug.paid_at or bug.status != BugReport.STATUS_SQUASHED:
         return False
-    award_spinaz(bug.reporter, BUG_BOUNTY_SPINAZ, note=f"BugZ bounty: {bug.title}"[:200])
+    award_spinaz(bug.reporter, BUG_BOUNTY_SPINAZ, note=f"BugZ bounty: {bug.title}"[:200], open_in="bugz")
     grant_badge(bug.reporter, "bug_hunter", by=by)
     bug.paid_at = timezone.now()
     bug.save(update_fields=["paid_at", "updated_at"])
@@ -1585,7 +1592,7 @@ class Follow(models.Model):
         unique_together = ("follower", "following")
 
 
-def social_sources(user):
+def social_sources(user, mcz_followers=None):
     """Every follower source that counts toward reach: the Music ConnectZ
     follower count (always verified — it's our own number) plus each connected
     external account from Profile.links that has been VERIFIED (real count +
@@ -1593,10 +1600,16 @@ def social_sources(user):
     flagged so callers can exclude them from the median (anti-cheat: nobody
     games reach by typing a stranger's big follower number).
 
-    Each source: {label, followers, verified}."""
-    mcz_followers = len(set(
-        Follow.objects.filter(following=user).values_list("follower_id", flat=True)
-    ))
+    Each source: {label, followers, verified}.
+
+    `mcz_followers` lets a caller that has already counted followers for a
+    whole page hand the number in rather than making this re-count it one
+    member at a time — see `follow_counts_by_user`.
+    """
+    if mcz_followers is None:
+        mcz_followers = len(set(
+            Follow.objects.filter(following=user).values_list("follower_id", flat=True)
+        ))
     sources = [{"label": "Music ConnectZ", "followers": mcz_followers, "verified": True}]
     p = getattr(user, "mcz_profile", None)
     for link in (getattr(p, "links", None) or []):
@@ -1621,23 +1634,28 @@ def social_sources(user):
     return sources
 
 
-def reach_median(user):
+def reach_median(user, sources=None):
     """Median follower count across all VERIFIED sources. Median (not sum) so a
     single huge account can't dominate — it's the typical reach across the
-    creator's proven presence. Unverified links are excluded."""
-    counts = [s["followers"] for s in social_sources(user) if s.get("verified")]
+    creator's proven presence. Unverified links are excluded.
+
+    `sources` accepts a list `social_sources` already produced, so a caller
+    that needs both does not build it twice."""
+    if sources is None:
+        sources = social_sources(user)
+    counts = [s["followers"] for s in sources if s.get("verified")]
     m = _median(counts)
     return int(m) if m is not None else 0
 
 
-def follow_counts(user):
-    """followers / following / friends(mutual) / fans(one-way) for a user, plus
-    verified external social sources and the median reach across them."""
-    following_ids = set(Follow.objects.filter(follower=user).values_list("following_id", flat=True))
-    follower_ids = set(Follow.objects.filter(following=user).values_list("follower_id", flat=True))
+def _counts_from(user, follower_ids, following_ids):
+    """The follow_counts payload, once the two id sets are in hand.
+
+    Split out so one member and a whole page of them agree about the arithmetic
+    — the page version differs only in where the sets came from."""
     friends = following_ids & follower_ids           # mutual
     fans = follower_ids - following_ids              # follow you, you don't follow back
-    sources = social_sources(user)
+    sources = social_sources(user, mcz_followers=len(follower_ids))
     verified_external = sum(
         s["followers"] for s in sources
         if s.get("verified") and s["label"] != "Music ConnectZ"
@@ -1648,11 +1666,72 @@ def follow_counts(user):
         "friends": len(friends),
         "fans": len(fans),
         "sources": sources,
-        "reach_median": reach_median(user),
+        "reach_median": reach_median(user, sources),
         # Back-compat: external_followers = sum of verified externals.
         "external_followers": verified_external,
         "total_followers": len(follower_ids) + verified_external,
     }
+
+
+def follow_counts(user):
+    """followers / following / friends(mutual) / fans(one-way) for a user, plus
+    verified external social sources and the median reach across them."""
+    following_ids = set(Follow.objects.filter(follower=user).values_list("following_id", flat=True))
+    follower_ids = set(Follow.objects.filter(following=user).values_list("follower_id", flat=True))
+    return _counts_from(user, follower_ids, following_ids)
+
+
+def follow_counts_by_user(users):
+    """`follow_counts` for a whole page of members, in ONE query.
+
+    Every member card carries follower counts, and `follow_counts` costs three
+    Follow queries a member — which was invisible while nothing listed members
+    and becomes three hundred queries the moment something does. The member
+    directory is that something.
+
+    Returns {user_id: counts}. `users` must be model instances, because
+    `social_sources` reads each one's profile links; pass rows that already
+    have their profile loaded and this makes no extra queries at all.
+    """
+    users = list(users)
+    ids = [u.id for u in users]
+    followers, following = {i: set() for i in ids}, {i: set() for i in ids}
+    if ids:
+        pairs = Follow.objects.filter(
+            models.Q(follower_id__in=ids) | models.Q(following_id__in=ids)
+        ).values_list("follower_id", "following_id")
+        for a, b in pairs:
+            if a in following:
+                following[a].add(b)
+            if b in followers:
+                followers[b].add(a)
+    return {u.id: _counts_from(u, followers[u.id], following[u.id]) for u in users}
+
+
+def medians_by_user(user_ids):
+    """Attractiveness + overall medians for a page of members, in 3 queries.
+
+    Same reason as `follow_counts_by_user`: `attractiveness_median` and
+    `overall_median` are two and one query EACH, and a directory asks for both
+    on every row. A median needs every score, so this fetches the scores in
+    bulk and does the median arithmetic through the same `_median` the
+    per-member helpers use — the number cannot differ between the two paths.
+    """
+    ids = list(user_ids)
+    attract = {i: [] for i in ids}
+    overall = {i: [] for i in ids}
+    if ids:
+        for uid, score in AttractivenessRating.objects.filter(
+                target_id__in=ids).values_list("target_id", "score"):
+            attract[uid].append(score)
+        for uid, score in FaceRating.objects.filter(
+                face__owner_id__in=ids).values_list("face__owner_id", "score"):
+            attract[uid].append(score)
+        for uid, score in OverallRating.objects.filter(
+                target_id__in=ids).values_list("target_id", "score"):
+            overall[uid].append(score)
+    return {i: {"attractiveness": _median(attract[i]), "overall": _median(overall[i])}
+            for i in ids}
 
 
 # The floor under passive Energy, per hour, by tier.
@@ -1692,6 +1771,90 @@ def energy_rate_per_hour(user):
 # not a savings account. A member gone a week comes back to a day's worth.
 ENERGY_CATCHUP_HOURS = 24
 
+# ---- Energy is a daily refill, not a balance that piles up ----
+#
+# The comment above already said the intention — "it regenerates like mana, it
+# is not a savings account" — and the code did the opposite. Passive Energy
+# accrued every hour forever, with no ceiling, so a member who left a tab open
+# for a month came back to thousands and nothing on the platform cost enough to
+# spend it on. An unbounded resource stops being a resource; it becomes a
+# number that goes up, which is the decoration this codebase keeps deleting.
+#
+# So passive Energy TOPS UP TOWARD A DAILY CEILING and stops. One day of not
+# spending is a full tank, not a bigger one.
+#
+# `ENERGY_DAILY_HOURS` is the ceiling expressed in hours of the member's own
+# rate, so it stays tiered without a second table to keep in sync with
+# `energy_rate_per_hour` — Free's floor of 2/hr becomes 48 a day, StatZ's 20/hr
+# becomes 480, and a member with real verified reach gets more than either.
+ENERGY_DAILY_HOURS = 24
+
+# The day turns at 04:20 in New York, for everybody, everywhere.
+#
+# ONE clock, not a per-member one. A rolling 24-hour window means every member
+# has a different reset, so "how long until my Energy is back" has a different
+# answer for each of them and no screen can state it — and two people comparing
+# notes get different numbers with nothing wrong. A fixed wall-clock moment is
+# a fact the app can print: the ladder resets at 4:20 Eastern, and that is the
+# same sentence for a member in Lagos as in Atlanta.
+#
+# The zone is named rather than a fixed offset so the moment does not slide by
+# an hour twice a year: EST and EDT are both "America/New_York", and pinning
+# -05:00 would make it 3:20 or 5:20 depending on the season.
+ENERGY_RESET_TZ = "America/New_York"
+ENERGY_RESET_HOUR = 4
+ENERGY_RESET_MINUTE = 20
+
+
+def energy_day_start(now=None):
+    """The most recent 04:20 America/New_York, as an aware UTC datetime.
+
+    Everything about the daily allowance hangs off this: what "today" means for
+    the cap, and how far back an arriving member may be paid for.
+    """
+    from datetime import timedelta, timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+
+    from django.utils import timezone
+
+    zone = ZoneInfo(ENERGY_RESET_TZ)
+    local = (now or timezone.now()).astimezone(zone)
+    start = local.replace(hour=ENERGY_RESET_HOUR, minute=ENERGY_RESET_MINUTE,
+                          second=0, microsecond=0)
+    if start > local:
+        # Before this morning's 4:20 — the current energy day began yesterday.
+        # Subtracting a day and re-normalizing through the zone keeps it at
+        # 4:20 LOCAL across a DST change rather than drifting to 3:20 or 5:20.
+        start = (start - timedelta(days=1)).astimezone(zone)
+        start = start.replace(hour=ENERGY_RESET_HOUR, minute=ENERGY_RESET_MINUTE,
+                              second=0, microsecond=0)
+    return start.astimezone(dt_timezone.utc)
+
+
+def energy_next_reset(now=None):
+    """When the allowance next comes back. Published so a member who is capped
+    is told WHEN, rather than being left to discover it."""
+    from datetime import timedelta, timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo(ENERGY_RESET_TZ)
+    nxt = (energy_day_start(now).astimezone(zone) + timedelta(days=1))
+    nxt = nxt.replace(hour=ENERGY_RESET_HOUR, minute=ENERGY_RESET_MINUTE,
+                      second=0, microsecond=0)
+    return nxt.astimezone(dt_timezone.utc)
+
+# Accrual needs somebody to be HERE. `Membership.last_seen` is stamped on every
+# stats call, so this is "have they opened the app recently", not "do they have
+# an account". Without it, passive income is paid to people who left — which
+# rewards absence, and quietly pays the accounts most likely to be abandoned.
+ENERGY_ACTIVE_WINDOW_HOURS = 48
+
+
+def energy_daily_cap(user):
+    """The ceiling passive Energy tops up to. Zero rate means no ceiling to
+    hit, which is correct: nothing accrues, so nothing needs bounding."""
+    return energy_rate_per_hour(user) * ENERGY_DAILY_HOURS
+
 
 def settle_energy(user):
     """Pay the passive Energy owed since the last settlement. Returns the wallet.
@@ -1705,6 +1868,22 @@ def settle_energy(user):
     refreshes every ten minutes must earn exactly what one who refreshes once a
     day earns. Advancing the clock to `now` would round their partial hour away
     on every single page load, which is worse than not accruing at all.
+
+    THREE RULES, and the second and third are the new ones:
+
+    1. Whole hours, remainder kept (above).
+    2. It TOPS UP toward `energy_daily_cap`, it does not pile up. A day of not
+       spending is a full tank, never a bigger one — mana, as the constant
+       above always claimed and the code never did.
+    3. It only accrues for somebody who has BEEN HERE. Passive income paid to
+       an absent account rewards absence.
+
+    What it never does is take Energy away. A member over the cap — from
+    rating, QuestZ, shares, link clicks, OnboardZ — keeps every point of it.
+    That was EARNED, and the cap is a ceiling on what the platform hands out
+    for free, not a ceiling on what somebody worked for. Wiping it would be
+    exactly the retroactive-shrink `TIER_LIMITS` warns about, done to the one
+    resource members are told to go and earn.
     """
     from datetime import timedelta
 
@@ -1717,18 +1896,93 @@ def settle_energy(user):
         w.energy_accrued_at = now
         w.save(update_fields=["energy_accrued_at", "updated_at"])
         return w
-    hours = int((now - w.energy_accrued_at).total_seconds() // 3600)
-    if hours <= 0:
+    # The day turns at 04:20 New York, so hours from BEFORE that boundary are
+    # not owed — yesterday's allowance expired with yesterday. Without this the
+    # clock is a rolling 24 hours and somebody away for a week is paid a week's
+    # catch-up the moment they return, which is the accrual this replaces.
+    day_start = energy_day_start(now)
+    crossed_reset = w.energy_accrued_at < day_start
+    since = max(w.energy_accrued_at, day_start)
+    hours = int((now - since).total_seconds() // 3600)
+    if hours <= 0 and not crossed_reset:
         return w
-    w.energy_accrued_at = w.energy_accrued_at + timedelta(hours=hours)
+    # Whole hours since the later of the last settlement and this morning's
+    # 4:20. Past a crossed boundary there is nothing owed for yesterday, so the
+    # clock simply moves to the boundary and the reset below does the rest.
+    hours = max(hours, 0)
+    # The clock advances either way. Not advancing it for an inactive member
+    # would let the hours bank silently and pay out the moment they returned,
+    # which is the behaviour this is replacing.
+    w.energy_accrued_at = since + timedelta(hours=hours)
     w.save(update_fields=["energy_accrued_at", "updated_at"])
-    granted = energy_rate_per_hour(user) * min(hours, ENERGY_CATCHUP_HOURS)
-    if granted:
+
+    seen = getattr(membership_for(user), "last_seen", None)
+    active = bool(seen) and (now - seen) <= timedelta(hours=ENERGY_ACTIVE_WINDOW_HOURS)
+    if not active:
+        return w
+
+    cap = energy_daily_cap(user)
+    if cap <= 0:
+        return w
+    # Top up to the ceiling, never past it, and never negative — a member above
+    # the cap through earning simply gains nothing passive until they spend.
+    room = cap - (w.energy or 0)
+    if room <= 0:
+        return w
+    # Crossing 04:20 RESETS, it does not drip. A member returning after the
+    # boundary is topped straight up to the day's ceiling rather than being
+    # made to sit through the hours they were away — "your ⚡ comes back at
+    # 4:20 AM Eastern" has to be true at 4:21, or it is not a reset, it is a
+    # slow refill with a start time nobody can see.
+    #
+    # Inside a day the hourly rate still governs, so reach and tier still
+    # decide how fast a spent tank comes back. Both sentences the app prints
+    # are true: it resets daily, and it regenerates hourly at reach ÷ tier.
+    if crossed_reset:
+        granted = room
+    else:
+        granted = min(energy_rate_per_hour(user) * min(hours, ENERGY_CATCHUP_HOURS), room)
+    if granted > 0:
         # Through award_energy so it lands in LogZ. A balance that changes
         # while you were away, with no line saying why, reads as a bug.
-        award_energy(user, granted, f"Passive Energy — {min(hours, ENERGY_CATCHUP_HOURS)}h at reach")
+        award_energy(user, granted, f"Passive Energy — topped up toward {cap} ⚡", open_in="membershipz")
         w.refresh_from_db()
     return w
+
+
+# ---- ViewZ ----
+class ViewSession(models.Model):
+    """One viewer looking at one thing, on one day.
+
+    The row is the unit of a view. Uniqueness across (target, viewer,
+    anon_key, day) is what makes a "view" mean a person rather than a page
+    load — refreshing bumps `beats` and `last_beat_at` and moves no count.
+
+    `beats` is kept because it is the difference between somebody who glanced
+    and somebody who stayed, which is a real thing about attention and costs
+    one integer to keep.
+    """
+
+    target = models.CharField(max_length=64, db_index=True)   # "post:12", "tab:postz"
+    viewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="view_sessions", null=True, blank=True)
+    # Logged-out viewers, keyed by a client-side id. Clearable, so the count
+    # built from it is a floor and the API says so.
+    anon_key = models.CharField(max_length=32, blank=True, default="")
+    day = models.DateField()
+    started_at = models.DateTimeField()
+    last_beat_at = models.DateTimeField()
+    beats = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        unique_together = ("target", "viewer", "anon_key", "day")
+        indexes = [
+            models.Index(fields=["target", "last_beat_at"]),   # "watching now"
+            models.Index(fields=["target", "started_at"]),     # the timeline
+        ]
+
+    def __str__(self):
+        return f"ViewSession<{self.target} {self.viewer_id or self.anon_key} {self.day}>"
 
 
 def relationship(me, other):

@@ -134,6 +134,32 @@ KEY_SPEAK_DAILY_CHARS = {
     TIER_DEBUG: 10 ** 8,
 }
 
+# How far back your own ledger goes, by tier.
+#
+# LogZ used to be a Premium FEATURE — a Free member asking where their SpinaZ
+# went got a 403. That is the "it may never say whether" rule broken on the
+# worst possible surface: this is not a capability we are renting out, it is
+# the member's own record of what the platform did to their balances. Worse,
+# `occ_spec.py` had already published SpinaZ and Energy as things a FREE member
+# opens IN LOGZ, so the app advertised a door and then locked it.
+#
+# So the ladder is DEPTH, which is a "how much": thirty days is enough to check
+# a referral paid and to find yesterday's charge; a year is what you want when
+# you are reconciling a quarter; everything is what an accountant wants. Nobody
+# is ever unable to see today.
+LOGZ_HISTORY_DAYS = {
+    TIER_FREE: 30,
+    TIER_PREMIUM: 366,
+    TIER_STATZ: None,      # None = all of it
+    TIER_DEBUG: None,
+}
+
+
+def logz_history_days(tier):
+    """Days of ledger this tier can see. None means everything."""
+    return LOGZ_HISTORY_DAYS.get(tier, LOGZ_HISTORY_DAYS[TIER_FREE])
+
+
 # One clip is one thing said, not a recording session. Sixty seconds is a long
 # sentence and a short voice note, and it is what keeps a clip inside a single
 # request without anyone re-deriving the transport's limits.

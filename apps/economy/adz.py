@@ -138,7 +138,7 @@ class AdRewardView(APIView):
             return Response({"rewarded": False, "reason": "own_ad"})
 
         reward = c.payout_cents
-        award_spinaz(request.user, reward, note=f"Watched '{c.title}'")
+        award_spinaz(request.user, reward, note=f"Watched '{c.title}'", open_in="adz")
         view.rewarded = True
         view.reward_spinaz = reward
         view.save(update_fields=["rewarded", "reward_spinaz"])

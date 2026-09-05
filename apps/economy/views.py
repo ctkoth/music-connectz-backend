@@ -30,8 +30,12 @@ from .models import (
     charge_ai_usage,
     DAILY_PROMPT_MAX_CENTS,
     daily_prompt_state,
+    energy_daily_cap,
     energy_for_topup,
+    energy_next_reset,
+    energy_rate_per_hour,
     ENERGY_TOPUP_MULT,
+    PROMPT_ALLOWANCE,
     log_resource,
     membership_for,
     split_cents,
@@ -247,6 +251,25 @@ class StatsView(APIView):
                 "my_promptz_daily_max_cents": DAILY_PROMPT_MAX_CENTS,
                 "my_promptz_daily_used": prompts_used,
                 "my_promptz_daily_remaining": prompts_remaining,
+                # The whole ladder, not just this member's rung. The header
+                # tooltip used to spell it out in copy — "free 1 · premium 5 ·
+                # statZ 10" — and Free had been 3 for weeks. That is precisely
+                # the drift the "never hardcode a tier number in copy" rule
+                # exists for, so the numbers ship from the table that defines
+                # them and the copy reads them.
+                "promptz_daily_ladder": [
+                    {"tier": t, "per_day": n} for t, n in PROMPT_ALLOWANCE.items()
+                ],
+                # Energy is a daily refill, so the pill can say what it refills
+                # TO and how fast — a balance with no ceiling on screen is a
+                # number nobody can plan against.
+                "my_energy_rate_per_hour": energy_rate_per_hour(request.user),
+                "my_energy_daily_cap": energy_daily_cap(request.user),
+                # ONE reset moment for everybody: 04:20 America/New_York. A
+                # rolling window gives every member a different answer to
+                # "when does my ⚡ come back", so no screen could print it.
+                "energy_reset_at": energy_next_reset(),
+                "energy_reset_note": "⚡ resets at 4:20 AM Eastern, for everyone.",
                 "dev_tax_rate": m.dev_tax_rate,
             }
         )
@@ -765,7 +788,7 @@ class SpecZView(APIView):
         # its reason, like every other spend. A purchase that moves a balance
         # and leaves no row is how "where did my SpinaZ go" starts.
         log_resource(request.user, Transaction.RES_SPINAZ, -SPECZ_PRICE_SPINAZ,
-                     f"SpecZ on {app_key}: {label}")
+                     f"SpecZ on {app_key}: {label}", open_in="specz")
         return Response({"item": {"id": p.id, "app_key": p.app_key, "label": p.label,
                                   "value": p.value, "price_spinaz": p.price_spinaz,
                                   "created_at": p.created_at},

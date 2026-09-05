@@ -3,6 +3,8 @@ from django.urls import path, re_path
 from .directz_app import DirectZWorksView, DirectZRateView
 from .media import MediaFileView
 from .questz import QuestBoardView, QuestClaimView
+from .journal_diarium import (JournalCalendarView, JournalInsightsView,
+                              JournalPromptsView)
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
 from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
@@ -11,6 +13,7 @@ from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
+from .trial import TrialClaimView
 from .soundz import SoundZView
 from .distributez import TranscodeView, LyricsView
 from .adz import AdzView, AdDetailView, AdRewardView
@@ -82,6 +85,8 @@ from .payments import (
     StripeCheckoutView,
     StripeWebhookView,
 )
+from .viewz import ViewZMineView, ViewZView
+from .watchpay import WatchPriceView
 from .social import (
     MemberProfileView,
     MembersView,
@@ -190,6 +195,8 @@ urlpatterns = [
     # JavaScript. See sharecard.py and the vercel.json note in the PR.
     path("share/u/<str:username>", profile_card, name="share-profile"),
     path("share/p/<int:pk>", post_card, name="share-post"),
+    # A take made at the door, claimed by whoever just signed in.
+    path("trial/claim/", TrialClaimView.as_view(), name="economy-trial-claim"),
     path("soundz/", SoundZView.as_view(), name="economy-soundz"),
     path("specz/", SpecZView.as_view(), name="economy-specz"),
     path("specz/buy/", SpecZView.as_view(), name="economy-specz-buy"),
@@ -247,6 +254,9 @@ urlpatterns = [
     path("social/verify/", SocialVerifyView.as_view(), name="economy-social-verify"),
     # What the AI couldn't confirm goes to a person, not to a wall.
     path("social/reviews/", SocialReviewQueueView.as_view(), name="economy-social-reviews"),
+    path("watchprice/", WatchPriceView.as_view(), name="economy-watchprice"),
+    path("viewz/", ViewZView.as_view(), name="economy-viewz"),
+    path("viewz/mine/", ViewZMineView.as_view(), name="economy-viewz-mine"),
     path("members/", MembersView.as_view(), name="economy-members"),
     path("members/<str:username>/", MemberProfileView.as_view(), name="economy-member"),
     # RateZ — every rating, classified for what it actually measures.
@@ -285,6 +295,12 @@ urlpatterns = [
     # quotes what it costs and who it tells before it does either.
     path("journalz/", JournalZView.as_view(), name="economy-journalz"),
     path("journalz/cost/", JournalCostView.as_view(), name="economy-journalz-cost"),
+    # The three a diary app has and a text-box-with-a-date does not. Free at
+    # every tier: reading your own diary is not a capability we rent to you,
+    # which is the argument that took the gate off LogZ.
+    path("journalz/calendar/", JournalCalendarView.as_view(), name="economy-journalz-calendar"),
+    path("journalz/insights/", JournalInsightsView.as_view(), name="economy-journalz-insights"),
+    path("journalz/prompts/", JournalPromptsView.as_view(), name="economy-journalz-prompts"),
     # On This Day and the formatted export — Premium, through the standard gate.
     path("journalz/lookback/", JournalLookbackView.as_view(), name="economy-journalz-lookback"),
     path("journalz/export/", JournalExportView.as_view(), name="economy-journalz-export"),

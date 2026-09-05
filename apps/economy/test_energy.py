@@ -4,7 +4,7 @@
 profile published an hourly rate, the wallet never moved, and a StatZ member
 with real reach sat at 0 ⚡ forever.
 """
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -26,10 +26,45 @@ from apps.economy.models import (
 User = get_user_model()
 PW = "hunter2hunter2"
 
+# The energy day turns at 04:20 America/New_York, so a test that says "three
+# hours ago" would mean something different depending on the hour the suite
+# happens to run at — inside the day before lunch, across the boundary at
+# dawn. So `now` is pinned, for every test in this file, to 04:00 EDT: 23h40m
+# after the boundary, which is the widest in-day window there is. Anything
+# further back than that crosses the reset, which is exactly what the
+# crossing tests want.
+PINNED_NOW = datetime(2026, 6, 15, 8, 0, tzinfo=dt_timezone.utc)   # 04:00 EDT
 
-class SettleEnergyTests(TestCase):
+
+def seen(user, hours_ago=0):
+    """Mark a member as having been here — what `/api/auth/stats/` does."""
+    from apps.economy.models import membership_for
+    m = membership_for(user)
+    m.last_seen = timezone.now() - timedelta(hours=hours_ago)
+    m.save(update_fields=["last_seen"])
+    return m
+
+
+class PinnedClock:
+    """Freeze `timezone.now()` for the duration of a test."""
+
     def setUp(self):
+        super().setUp()
+        real = timezone.now
+        timezone.now = lambda: PINNED_NOW
+        self.addCleanup(setattr, timezone, "now", real)
+
+
+
+class SettleEnergyTests(PinnedClock, TestCase):
+    def setUp(self):
+        super().setUp()
         self.user = User.objects.create_user("k", "k@e.com", PW)
+        # Passive Energy only accrues for somebody who has BEEN HERE, and
+        # `last_seen` is stamped by the stats call these tests don't make.
+        # `test_energy_daily` is where the absent case is pinned; here the
+        # member is present, so the tests are about the arithmetic.
+        seen(self.user)
 
     def rate_of(self, n):
         """Pin the hourly rate, so these tests are about the accrual and not
@@ -113,19 +148,26 @@ class SettleEnergyTests(TestCase):
         self.assertIn("Passive Energy", row.note)
 
     def test_it_does_not_disturb_energy_earned_other_ways(self):
+        """100 ⚡ earned by rating, with a daily cap of 48, stays 100.
+
+        The passive top-up is a ceiling on what the platform HANDS OUT, not a
+        ceiling on what somebody worked for — so above the cap it grants
+        nothing and takes nothing. It used to add on top with no ceiling at
+        all, which is the unbounded accrual the cap exists to end."""
         self.rate_of(2)
         settle_energy(self.user)
         w = wallet_for(self.user)
         w.energy = 100
         w.save(update_fields=["energy"])
         self.clock_back(self.user, 1)
-        self.assertEqual(settle_energy(self.user).energy, 102)
+        self.assertEqual(settle_energy(self.user).energy, 100)
 
 
-class EnergyRateByTierTests(TestCase):
+class EnergyRateByTierTests(PinnedClock, TestCase):
     """Free = reach/10, Premium = reach/5, StatZ = reach/1."""
 
     def setUp(self):
+        super().setUp()
         self.user = User.objects.create_user("r", "r@e.com", PW)
         import apps.economy.models as m
         orig = m.reach_median
@@ -146,13 +188,15 @@ class EnergyRateByTierTests(TestCase):
         self.assertEqual(energy_rate_per_hour(self.user), 100)
 
 
-class EnergyReachesTheClientTests(TestCase):
+class EnergyReachesTheClientTests(PinnedClock, TestCase):
     """Settling in the model is worthless if no endpoint calls it."""
 
     def setUp(self):
+        super().setUp()
         self.client = APIClient()
         self.user = User.objects.create_user("c", "c@e.com", PW)
         self.client.force_authenticate(self.user)
+        seen(self.user)
         import apps.economy.models as m
         orig = m.energy_rate_per_hour
         m.energy_rate_per_hour = lambda user: 9

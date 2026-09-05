@@ -22,13 +22,14 @@ import secrets
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .gemini import _key
 from .instruments import DIFFICULTIES, profile_for_app
 from .models import (
+    claim_trial_take,
     TRIAL_CLAIM_DAYS,
     TRIAL_MAX_MB,
     TRIAL_PER_IP_HOURS,
@@ -167,4 +168,45 @@ class TrialTakeDetailView(APIView):
             "claimed": bool(take.claimed_by_id),
             "open_in": f"{take.app_key}:coach",
             "created_at": take.created_at.isoformat(),
+        })
+
+class TrialClaimView(APIView):
+    """POST { token } — attach a take made at the door to the account signed in now.
+
+    `claim_trial_take` has existed since the trial door shipped and had exactly
+    one caller: the REGISTER serializer. So a stranger who recorded a take and
+    then created an account kept it, and a member who recorded a take and then
+    SIGNED IN lost it.
+
+    That is backwards on the one path most likely to happen. The trial door is
+    what gets shared — a scored take posted to a group chat, a `/try` link on a
+    flyer — and the people most likely to follow a shared MCZ link are the
+    people who already have an MCZ account. They were the only ones the door
+    threw away.
+
+    Same function, same idempotence, same best-effort contract: a stale or
+    already-claimed token is a quiet None, never an error, because the take is
+    a bonus and losing it must not look like a broken sign-in.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        token = str((request.data or {}).get("token") or "").strip()[:64]
+        take = claim_trial_take(request.user, token)
+        if not take:
+            # 200, not 404. The client fires this on every sign-in that has a
+            # pending token, and most of those are already claimed — a red
+            # error on a routine no-op teaches people to ignore errors.
+            return Response({"claimed": False,
+                             "detail": "That take was already claimed or has expired."})
+        return Response({
+            "claimed": True,
+            # The score lives inside `result`, not as a column — read it the
+            # way the rest of the codebase does rather than inventing a field.
+            "take": {"id": take.id, "app_key": take.app_key,
+                     "score": (take.result or {}).get("score")},
+            # Nothing is a dead end: the take is theirs now, so say where to go
+            # and do something with it.
+            "open_in": f"{take.app_key}:coach",
         })

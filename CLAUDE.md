@@ -21,7 +21,7 @@ its resource emoji.
 
 | Resource | Emoji | Where |
 |---|---|---|
-| Energy | ⚡ | mana; regenerates hourly at reach ÷ tier |
+| Energy | ⚡ | mana; refills hourly at reach ÷ tier, toward a daily ceiling |
 | SpinaZ | 🍥 | coin; earned by rating, referring, AdZ/OfferZ |
 | PromptZ | 🏷️ | prepaid AI credits; daily free allowance is separate |
 | Money | 💵 | real cash balance, in cents server-side |
@@ -422,6 +422,257 @@ So, when adding or moving a limit:
   signup form is a wall in front of nothing.
 - **Never lower a live limit without a plan for the members already over it** —
   the `TIER_LIMITS` note says this about storage and it is true of all of them.
+
+### Energy is a refill, not a savings account
+
+The constant said so from the start — "it regenerates like mana" — and the code
+did the opposite: passive Energy accrued every hour forever with **no ceiling**.
+A member who left a tab open for a month came back to thousands, and nothing on
+the platform costs enough to spend that on. An unbounded resource stops being a
+resource, and every price denominated in it stops meaning anything.
+
+`ENERGY_DAILY_HOURS` × the hourly rate is the ceiling (`energy_daily_cap`), and
+`settle_energy` tops up TOWARD it.
+
+**The day turns at 04:20 America/New_York, for everybody, everywhere.** A
+rolling 24-hour window means every member has a different reset, so "when does
+my ⚡ come back" has a different answer for each of them and no screen can
+print it — and two people comparing notes get different numbers with nothing
+wrong. `energy_day_start` / `energy_next_reset` are that one moment, and
+`/api/auth/stats/` publishes it. The zone is NAMED, not a fixed offset: EST and
+EDT are both `America/New_York`, and pinning −05:00 makes it 3:20 or 5:20
+depending on the season — a bug that ships in spring and gets reported in
+November by somebody who can't describe it.
+
+**Crossing the boundary RESETS; inside a day it drips.** "Your ⚡ comes back at
+4:20 Eastern" has to be true at 4:21, or it is not a reset, it is a slow refill
+with a start time nobody can see — so a member who crosses the boundary is
+topped straight to the ceiling. Within a day the hourly rate still governs, so
+reach and tier still decide how fast a spent tank refills. Both sentences the
+app prints are true at once.
+
+Three more rules, and the third is the one that protects members rather than
+the economy:
+
+- **The clock advances either way.** Returning early without moving
+  `energy_accrued_at` would bank the same hours to be granted twice.
+- **Idle does not earn.** A refill needs `Membership.last_seen` inside
+  `ENERGY_ACTIVE_WINDOW_HOURS`; a tab left open in a drawer is not a session.
+- **The cap NEVER takes anything.** Energy earned by rating, QuestZ, shares or
+  OnboardZ sits above the ceiling untouched — `granted` is clamped to the room
+  under the cap and floors at zero. Lowering a live limit without a plan for
+  the members already over it is the one thing the limits note forbids, and
+  "delete their balance" is not a plan.
+
+## ViewZ — the first question anybody asks, answered honestly
+
+A creator had ratings (which need somebody to act) and comments (which need
+somebody to care) and **no answer at all to "did anyone see it?"** Silence
+reads as "nobody", and "nobody" is why people stop posting.
+
+`viewz.py`. The number is held to the same test as every other number here —
+*could somebody get a good one without getting good?* A hit counter fails it in
+one refresh, so:
+
+- **A view is a viewer-day.** `ViewSession` is unique on
+  (target, viewer, anon_key, day). Refreshing bumps `beats` and moves no count;
+  coming back tomorrow does move it, because that genuinely is more attention.
+- **The author's own looks never count.** Checking your own post is not reach,
+  and letting it count makes the first number every creator sees a lie told by
+  their own thumb.
+- **`watching` is live and separate.** It is the number that changes behaviour
+  — "3 people are here right now" is an invitation; "128 total" is a receipt.
+- **Logged-out viewers count once per browser**, keyed by `X-MCZ-Viewer`. That
+  id is clearable, so the count is a FLOOR, and the response says so in `note`
+  rather than presenting a floor as a total. Presenting a floor as a total is
+  the same class of dishonesty as an "AI craft estimate" computed from how many
+  form fields somebody filled in.
+- **The timeline reports the quiet hours.** `lanes_for` returns every bucket
+  including the empty ones: a timeline with the silence removed lies about the
+  shape of the day, and the flat stretch is half of what makes the spike
+  legible.
+
+Two performance rules it inherits from the feed: `views_for_posts` counts a
+whole page in one query (the feed's query-count test is why), and the client
+beats on a TAB, never per card — thirty cards each holding a heartbeat is
+thirty requests every half minute, and "it scrolled past on your screen" is an
+impression, not a view.
+
+The day it buckets on is `local_day` — the same 04:20 clock Energy resets on.
+Two different day boundaries would mean a member's views and their ⚡ reset at
+different times and nobody would ever work out why.
+
+## Paying creators for being read: rent by time, own by length
+
+Corey's proposal, verbatim: *ViewZ pays creators — 10% of their skill-used
+price per hour, or buy the manga to read whenever for 10% of the skill price
+and not pay the hourly.* `watchpay.py` is that, with one number changed and the
+reason written down.
+
+**Why it is possible at all:** it is two systems that already exist, joined.
+ViewZ already measures attention HONESTLY — heartbeats, `document.hidden`, a
+session that stops counting when nobody is looking — which is exactly what
+billing by the hour needs and what a wall clock cannot give you. CallZ already
+meters money by the minute with the rate published before it rings, the running
+cost on screen and a receipt matching the quote. **Reading a manga by the hour
+is CallZ with a page instead of a voice.**
+
+**Why 10%/10% could not ship:** if an hour costs 10% of the skill rate and
+buying costs 10% of the skill rate, buying costs exactly ONE HOUR of renting —
+so nobody ever rents and the hourly path is dead the day it ships. The two
+prices come off different things now:
+
+- **Renting is priced by TIME** — `READER_SHARE` (Corey's 10%) of the creator's
+  hourly rate, prorated per second like a call.
+- **Owning is priced by the WORK'S LENGTH** — a full read-through at that rate
+  × `KEEP_MULTIPLIER`. A ninety-minute MovieZ costing more to keep than a
+  forty-second ReelZ is the sentence anybody expects to be true, and the flat
+  share makes it false.
+- **`credit_toward_buy`** puts what you already spent renting against the
+  purchase. "Am I wasting money by not buying" is the hesitation that kills
+  metered media, and the answer being "no, it all counts" is worth more than
+  the few cents.
+
+**The real risk, named: this prices off a number the creator TYPES.**
+`profile_skill_rate` is self-declared, so deriving what a reader pays from it
+fails the test every number here answers to — could a member get a good one
+without getting good? Three guards, and the third is still owed:
+
+1. It uses the CHEAPEST priced skill (`profile_skill_rate` picks `min`), so
+   padding one expensive skill moves nothing.
+2. `MAX_READ_CENTS_PER_HOUR` caps it, for the same reason
+   `DAILY_PROMPT_MAX_CENTS` exists: a ladder with no ceiling is whatever the
+   dearest person on the platform typed.
+3. **Not built yet — price off a rate somebody has actually been PAID.** A
+   completed CollabZ or LessonZ deal is evidence; a profile field is an
+   aspiration. Until that lands the cap is doing the work alone.
+
+Three more rules the module holds:
+
+- **An unpriced creator is FREE, not defaulted.** Somebody who has not asked
+  for money is not asking for money; inventing a rate on their behalf puts a
+  paywall on their work that they never chose.
+- **The first `FREE_MINUTES` are free at every tier.** You cannot judge a manga
+  from its cover, and a paywall in front of the first page sells nothing to
+  somebody who has never read you — the same argument as the `/try` door.
+- **`PRICED_KINDS` is a allowlist.** A surface must not be able to start
+  charging by being added to a URL. **MangaZ is absent because MangaZ does not
+  exist**; the day the app ships it is one line here.
+
+`GET /api/economy/watchprice/?target=directz:<id>` is a QUOTE and nothing else
+— it moves no money and opens no session, because a price you can only learn by
+starting to pay one is not a published price. The meter itself (a session, a
+settlement, an entitlement check on read) is the next piece and is deliberately
+not half-built here.
+
+## JournalZ needed the parts a diary APP has, not another text box with a date
+
+`journalz.py` already had the hard half: private by default, a day the entry is
+ABOUT rather than the day it was typed, moods, weather, free-text tags, people
+who are only ever notified on a share, a place whose coordinates stay home
+unless you say otherwise, attachments, search, On This Day, export.
+
+What was missing is the way you LOOK at the whole thing.
+`journal_diarium.py` is that, and all three are free at every tier — reading
+your own diary is not a capability we rent to you, the same argument that took
+the gate off LogZ. What Premium buys here stays On This Day and export.
+
+- **`/journalz/calendar/`** — the month, day by day. Scrolling a list works for
+  the last fortnight and fails completely at "what was I doing last March",
+  which is the question a diary exists to answer. **Every cell is a door**: a
+  kept day opens what you wrote, a missed one opens the composer set to that
+  date, and a future day offers nothing because a diary records what happened
+  (a plan is TaskZ's job). Thirty cells that do nothing is wallpaper, not
+  navigation. A bad `?month=` is this month rather than a 400 — a calendar that
+  errors on a typo is one you cannot page with a keyboard.
+- **`/journalz/insights/`** — what the diary contains, counted. Days kept,
+  entries, streak, longest run, moods, tags, people, places. **Nothing is
+  scored** and the response says so: a number on somebody's diary is the exact
+  `directz_ai_rating` failure, with the extra problem that a diary is the one
+  place in this app nobody is performing. Mood is a DISTRIBUTION, never an
+  average — "your average mood is 3.2" is a claim nobody made. Every row is a
+  door: a person opens their profile, a tag opens that search.
+  `_longest_streak` is computed from the days rather than stored, so it cannot
+  drift from the diary it measures.
+
+### The prompt is the thing a standalone diary app structurally cannot do
+
+Every diary app on earth can ask "how was your day?". A generic prompt is a
+blank page with a question mark on it, and it is why diaries get abandoned in
+February: **opening one costs you the work of remembering.**
+
+Music ConnectZ already knows. The ledger records every resource that moved and
+— since `Transaction.open_in` — where it moved, so `/journalz/prompts/` draws
+the member's actual day: the take they recorded, the posts they rated, the
+battle they entered, the 🍥 that arrived and why. Each prompt carries the words
+to start AND the door back to the thing it is about. That is the
+cross-pollination rule pointed at the app most likely to be a dead end.
+
+Two rules it must keep:
+
+- **Never invent a day.** A member who did nothing gets the plain opener, not a
+  fabricated highlight. A prompt about a thing that did not happen is worse
+  than a blank page — now the app is wrong as well as empty.
+- **A prompt is a suggestion, never a ghostwriter.** It hands over a first LINE
+  and a link. Anything further would be the app keeping the diary, which is not
+  a feature, it is a different product.
+
+### The gate that was hiding a member's own record
+
+**LogZ was Premium-only.** A Free member asking "where did my SpinaZ go" got a
+403 with an upsell in it — and `occ_spec.py` had *already* published SpinaZ and
+Energy as things a Free member opens IN LOGZ, so the app advertised the door
+and locked it. That is "it may never say whether" broken on the one surface
+that is not a capability we rent out: it is the member's own account of what
+the platform did to their balances.
+
+`catalog.LOGZ_HISTORY_DAYS` replaced the gate. Everyone sees their ledger;
+**depth** is the ladder — Free 30 days, Premium 366, StatZ everything — which
+is a "how much" and allowed. Three things about it that are load-bearing:
+
+- The response says `history_label` ("the last 30 days") and `hidden_by_tier`
+  (how many rows are outside the window). **A limit that hides rows must say it
+  hid them** — silence reads as "nothing happened", which is a different and
+  worse claim than "there is more, further back".
+- The totals are computed over the VISIBLE window, not the whole ledger. A
+  running total over rows the member is not shown is a number nobody can check.
+- `logz` is gone from `features.FEATURES` entirely, and `test_logz` pins its
+  absence. A stale row there would put the lock back on the client's tile even
+  though the endpoint answers everybody.
+
+### A balance leads back to the action that changed it — now literally
+
+`Transaction.open_in` (migration 0085) carries the same `"tab"` / `"tab:anchor"`
+shape `goToSpot` takes, and `award_spinaz` / `award_energy` / `log_resource`
+all accept it. A referral row opens EarnZ, a rating reward opens PostZ, a
+BattleZ wager opens BattleZ.
+
+**Blank means "we don't know", and renders as a plain row.** Deriving a
+destination from the note text would send somebody to the wrong app, which is
+worse than not offering the trip — the same rule `Upload.missing_since` follows
+about only something that WENT AND LOOKED being allowed to stamp it.
+
+### Members were listable and nothing listed them
+
+`/api/economy/members/` — filters, range gates, distance, badges — had **no
+caller in the mounted frontend at all.** Social ConnectZ rendered six invented
+creators from a hardcoded array. Two things followed from nobody using it:
+
+- It answered in one fixed order. `MEMBER_ORDERS` is the viewer's choice now
+  (nearest / active / newest / rated / followers / experience / A–Z), published
+  WITH the results so a client cannot offer a sort the server can't do, and
+  every key sorts "no value" LAST — a member with no rating is not a member
+  rated zero.
+- It was about **seven queries a member**: two medians and three Follow queries
+  per card, on up to 500 rows. `follow_counts_by_user` and `medians_by_user`
+  do the page in one and three queries respectively, and `_profile_card` takes
+  them pre-loaded exactly as it already did for badges. `test_members_order`
+  pins a ceiling rather than an exact count, because what matters is that no
+  query runs once per member.
+
+`matched` and `scanned` ship beside `members` for the same reason as
+`hidden_by_tier`: a count that only ever equals the page length would tell a
+member the platform has exactly one hundred people on it.
 
 ### Known limit still owed a decision (Corey's, not the code's)
 
