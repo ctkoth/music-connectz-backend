@@ -43,6 +43,35 @@ services:
         sync: false
       - key: APPLE_OAUTH_CLIENT_ID
         sync: false
+      # The five OAUTH2_PROVIDERS in apps/accounts/oauth.py (spotify,
+      # microsoft, facebook, soundcloud, twitter) never had a placeholder
+      # here, so this file — the one place every other credential this app
+      # needs is listed — understated what OAuth actually needs by five
+      # providers. Each needs BOTH vars; provider_status() in oauth.py keeps
+      # a button hidden rather than live-but-failing on only one being set.
+      - key: SPOTIFY_OAUTH_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: FACEBOOK_OAUTH_CLIENT_ID
+        sync: false
+      - key: FACEBOOK_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: SOUNDCLOUD_OAUTH_CLIENT_ID
+        sync: false
+      - key: SOUNDCLOUD_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: TWITTER_OAUTH_CLIENT_ID
+        sync: false
+      - key: TWITTER_OAUTH_CLIENT_SECRET
+        sync: false
+      # Discord and Reddit have their own placeholders in
+      # claude/oauth-discord-reddit (#127) — not duplicated here to avoid
+      # two branches fighting over the same four keys when both land.
       # ---- KEEPING MEMBERS' UPLOADS -------------------------------------
       # This container's disk is rebuilt on every deploy. With neither of the
       # two options below in force, every track, video and cover any member has
@@ -70,6 +99,9 @@ services:
         value: /var/mcz-media
       - key: MEDIA_DURABLE
         value: "1"
+      # Object storage for user uploads (S3 / Cloudflare R2). Set these to
+      # persist FileZ uploads across deploys; leave unset to use the local
+      # (ephemeral) filesystem. For R2 also set S3_ENDPOINT_URL.
       - key: S3_BUCKET_NAME
         sync: false
       - key: S3_ACCESS_KEY_ID
