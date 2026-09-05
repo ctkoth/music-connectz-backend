@@ -1,5 +1,7 @@
 from datetime import timedelta
 
+import re
+
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import status
@@ -274,6 +276,11 @@ class PublicStatsView(APIView):
         })
 
 
+# A channel name: letters, digits, dash, underscore. Anything else is not a
+# channel, it is somebody putting data in a URL.
+_SRC_OK = re.compile(r"^[a-z0-9][a-z0-9_-]{0,23}$")
+
+
 class FunnelEventView(APIView):
     """One step of the join funnel, logged by a visitor who may have no
     account yet: POST /api/auth/funnel/.
@@ -291,14 +298,30 @@ class FunnelEventView(APIView):
     ALLOWED_KINDS = {k for k, _ in FUNNEL_KINDS}
     # Per kind, the only meta keys accepted and how each is coerced. Anything
     # else in the posted meta is dropped, not stored.
+    # Where somebody came FROM. A `?src=` on any entry URL, kept to a short
+    # slug so it is a channel name and never a tracking payload.
+    #
+    # Without this the funnel counts arrivals and cannot say which of them a
+    # given post, flyer or ad produced — so every channel looks identical at
+    # zero, and the first thing marketing money buys is an unanswerable
+    # question. It is deliberately NOT a full UTM set: source is the one field
+    # that changes a decision, and campaign/medium/term/content would be four
+    # more columns nobody reads.
+    _SRC = lambda v: (str(v).strip().lower()[:24] or None) if _SRC_OK.match(str(v).strip().lower()[:24] or "") else None
+
     META_SHAPE = {
-        "try_view": {"app_key": lambda v: v if v in ("singz", "rapz") else None},
-        "try_scored": {"app_key": lambda v: v if v in ("singz", "rapz") else None},
+        "landing_view": {"src": _SRC},
+        "try_view": {"app_key": lambda v: v if v in ("singz", "rapz") else None,
+                     "src": _SRC},
+        "try_scored": {"app_key": lambda v: v if v in ("singz", "rapz") else None,
+                       "src": _SRC},
         "try_shared": {"app_key": lambda v: v if v in ("singz", "rapz") else None},
         "register_view": {
             "has_ref": lambda v: bool(v),
             "has_trial": lambda v: bool(v),
+            "src": _SRC,
         },
+        "registered": {"src": _SRC},
     }
 
     def post(self, request):
@@ -365,11 +388,42 @@ class FunnelSummaryView(APIView):
         for kind in steps:
             steps[kind]["pct_of_base"] = round(100 * steps[kind]["unique"] / base, 1)
 
+        # Per channel. A count of arrivals that cannot say WHERE THEY CAME FROM
+        # makes every channel look identical at zero, which is exactly the
+        # state this platform is in — and the first thing marketing money buys
+        # is otherwise an unanswerable question.
+        #
+        # Counted on unique browsers per source, and carried through to the
+        # steps that matter: reaching the trial, getting a score, registering.
+        # A source with arrivals and no scores is a channel sending the wrong
+        # people; one with scores and no registers is a door problem, not a
+        # traffic problem, and those need opposite responses.
+        by_src = {}
+        for row in rows.exclude(meta__src=None).values("kind", "anon_id", "meta"):
+            src = (row["meta"] or {}).get("src")
+            if not src:
+                continue
+            entry = by_src.setdefault(src, {k: set() for k, _ in FUNNEL_KINDS})
+            entry[row["kind"]].add(row["anon_id"])
+        sources = sorted(
+            ({"src": src,
+              **{k: len(v) for k, v in kinds.items()},
+              "total": len(set().union(*kinds.values())) if any(kinds.values()) else 0}
+             for src, kinds in by_src.items()),
+            key=lambda r: -r["total"],
+        )
+
         return Response({
             "days": days,
             "since": since,
             "base_kind": base_kind,
             "steps": steps,
+            "sources": sources,
+            # Said out loud so an empty list reads as "nothing tagged" rather
+            # than "no traffic" — two very different problems.
+            "sources_note": ("Add ?src=<channel> to any link you post. Untagged "
+                             "arrivals are counted in the steps above but cannot "
+                             "be attributed to a channel."),
         })
 
 
