@@ -237,8 +237,8 @@ class BattleEnterView(APIView):
         )
         if b.entry_spinaz:
             # Entry goes to the host. Stated on the button before it's pressed.
-            award_spinaz(request.user, -b.entry_spinaz, f"BattleZ entry: {b.title}")
-            award_spinaz(b.host, b.entry_spinaz, f"BattleZ entry from @{request.user.username}")
+            award_spinaz(request.user, -b.entry_spinaz, f"BattleZ entry: {b.title}", open_in="battlez")
+            award_spinaz(b.host, b.entry_spinaz, f"BattleZ entry from @{request.user.username}", open_in="battlez")
         notify(b.host, "join", f"@{request.user.username} entered '{b.title}' ⚔️",
                actor=request.user, item_id=b.item_key)
         return Response({"entry": entry_dict(entry, request),
@@ -340,7 +340,7 @@ def settle_battle(battle):
     if winner_side is None:
         # Draw, or nobody qualified — hand every stake back untouched.
         for w in wagers:
-            award_spinaz(w.user, w.amount, f"BattleZ refund: {battle.title}")
+            award_spinaz(w.user, w.amount, f"BattleZ refund: {battle.title}", open_in="battlez")
             w.paid_out = w.amount
             w.save(update_fields=["paid_out"])
         battle.winner = None
@@ -355,14 +355,14 @@ def settle_battle(battle):
             for i, w in enumerate(sorted(winners, key=lambda x: x.amount)):
                 share = pot - handed if i == len(winners) - 1 else int(pot * w.amount / staked)
                 handed += 0 if i == len(winners) - 1 else share
-                award_spinaz(w.user, share, f"BattleZ win: {battle.title}")
+                award_spinaz(w.user, share, f"BattleZ win: {battle.title}", open_in="battlez")
                 w.paid_out = share
                 w.save(update_fields=["paid_out"])
         else:
             # Nobody backed the winner — the losers' stakes go back rather than
             # being pocketed by the house. We didn't earn them.
             for w in wagers:
-                award_spinaz(w.user, w.amount, f"BattleZ refund: {battle.title}")
+                award_spinaz(w.user, w.amount, f"BattleZ refund: {battle.title}", open_in="battlez")
                 w.paid_out = w.amount
                 w.save(update_fields=["paid_out"])
         battle.winner = (battle.host if winner_side == BattleWager.SIDE_HOST
@@ -521,7 +521,7 @@ class BattleWagerView(APIView):
         with transaction.atomic():
             # Held by the battle, not spent — a battle that never settles has to
             # be able to give every stake back.
-            award_spinaz(request.user, -amount, f"BattleZ wager: {b.title}")
+            award_spinaz(request.user, -amount, f"BattleZ wager: {b.title}", open_in="battlez")
             BattleWager.objects.create(battle=b, user=request.user, side=side, amount=amount)
             Battle.objects.filter(pk=b.pk).update(
                 held_wager_spinaz=models.F("held_wager_spinaz") + amount)

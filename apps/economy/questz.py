@@ -448,7 +448,7 @@ def claim(user, quest_id, when=None):
 
     # Through award_energy so it lands in LogZ with its reason — a balance that
     # moves for an unexplained reason is the thing LogZ exists to prevent.
-    award_energy(user, pays, note=f"QuestZ: {q['title']}")
+    award_energy(user, pays, note=f"QuestZ: {q['title']}", open_in="questz")
     return {"id": q["id"], "energy": pays, "streak_days": streak,
             "multiplier": streak_multiplier(streak)}, None
 

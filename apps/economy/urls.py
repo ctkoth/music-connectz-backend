@@ -11,6 +11,7 @@ from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
+from .trial import TrialClaimView
 from .soundz import SoundZView
 from .distributez import TranscodeView, LyricsView
 from .adz import AdzView, AdDetailView, AdRewardView
@@ -82,6 +83,7 @@ from .payments import (
     StripeCheckoutView,
     StripeWebhookView,
 )
+from .viewz import ViewZMineView, ViewZView
 from .social import (
     MemberProfileView,
     MembersView,
@@ -190,6 +192,8 @@ urlpatterns = [
     # JavaScript. See sharecard.py and the vercel.json note in the PR.
     path("share/u/<str:username>", profile_card, name="share-profile"),
     path("share/p/<int:pk>", post_card, name="share-post"),
+    # A take made at the door, claimed by whoever just signed in.
+    path("trial/claim/", TrialClaimView.as_view(), name="economy-trial-claim"),
     path("soundz/", SoundZView.as_view(), name="economy-soundz"),
     path("specz/", SpecZView.as_view(), name="economy-specz"),
     path("specz/buy/", SpecZView.as_view(), name="economy-specz-buy"),
@@ -247,6 +251,8 @@ urlpatterns = [
     path("social/verify/", SocialVerifyView.as_view(), name="economy-social-verify"),
     # What the AI couldn't confirm goes to a person, not to a wall.
     path("social/reviews/", SocialReviewQueueView.as_view(), name="economy-social-reviews"),
+    path("viewz/", ViewZView.as_view(), name="economy-viewz"),
+    path("viewz/mine/", ViewZMineView.as_view(), name="economy-viewz-mine"),
     path("members/", MembersView.as_view(), name="economy-members"),
     path("members/<str:username>/", MemberProfileView.as_view(), name="economy-member"),
     # RateZ — every rating, classified for what it actually measures.

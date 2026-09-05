@@ -141,6 +141,48 @@ LOGICZ_TABS = [
      "desc": "Found something broken? Post it. Only an admin can close it.", "apps": []},
     {"key": "onboardz", "name": "OnboardZ", "emoji": "🛂", "icon": "onboardz.png",
      "desc": "Start here. Every step links to the control that finishes it.", "apps": []},
+    # The five newest apps had no entry here at all, so pressing ⓘ on any of
+    # them fell through to "A Music ConnectZ app." — a tutorial that says
+    # nothing, on exactly the apps a member has never seen before. An app
+    # shipping without its own description is an app shipping half-explained.
+    {"key": "royaltiez", "name": "RoyaltieZ", "emoji": "💰", "icon": "royaltiez.png",
+     "desc": "What you're owed, and what it costs to get it out. Every plan's "
+             "rate is on screen before you pick one — the cut is not a surprise "
+             "at the end, it's the thing you chose.",
+     "apps": [
+         _app("Accrual", "📈", "What came in, and from which post.", True),
+         _app("Cashout", "🏦", "Move it to your money balance. The rate is stated first.", True),
+     ]},
+    {"key": "callz", "name": "CallZ", "emoji": "📞", "icon": "callz.png",
+     "desc": "A live 1:1, priced by the minute. You see their rate, your balance "
+             "and how many minutes you can afford BEFORE it rings — the running "
+             "cost stays on screen, and the receipt matches the quote. The rate "
+             "is locked at ring, so it can't move under a call in progress.",
+     "apps": [
+         _app("Ring", "🔔", "Quote first, then it rings.", True),
+         _app("Receipt", "🧾", "What it actually cost, next to what you were quoted.", True),
+     ]},
+    {"key": "gamez", "name": "GameZ", "emoji": "🎮", "icon": "gamez.png",
+     "desc": "The game layer, shown honestly. XP and badges reward turning up; "
+             "ratings and skill levels never do. If a number here looks good, "
+             "somebody got good.",
+     "apps": [
+         _app("SkillZ", "⭐", "XP and levels, per skill.", True),
+         _app("BadgeZ", "🎖️", "What you hold, and what each one actually does.", True),
+     ]},
+    {"key": "soundz", "name": "SoundZ", "emoji": "🔊", "icon": "soundz.png",
+     "desc": "Every action makes a sound so you know it landed without reading "
+             "anything. All of it is off with one switch, and Premium can retune "
+             "the pack — the sound is a confirmation, never a toll.",
+     "apps": [
+         _app("Packs", "🎚️", "Retune the set. Premium and StatZ.", True),
+         _app("Mute", "🔇", "One switch, everywhere.", True),
+     ]},
+    {"key": "funnelz", "name": "FunnelZ", "emoji": "📊", "icon": "funnelz.png",
+     "desc": "Owner-only. Landing → trial → register, measured from real events "
+             "and real unique visitors. No modelled numbers: if we didn't see "
+             "it happen, it isn't in here.",
+     "apps": []},
 ]
 
 

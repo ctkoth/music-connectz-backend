@@ -7,13 +7,16 @@ answer short of watching a number and remembering what it used to be.
 
 Every resource movement now lands here with its reason and its timestamp.
 """
+from datetime import timedelta
+
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from rest_framework import status
+from django.utils import timezone
 
-from .features import can_use, feature_map, gate_detail
+from .catalog import LOGZ_HISTORY_DAYS, logz_history_days
+from .features import feature_map
 from .models import Transaction, membership_for
 
 # The marks from CLAUDE.md. Served with the rows so the client never keeps its
@@ -44,6 +47,10 @@ def _row(t):
                    if resource == Transaction.RES_MONEY
                    else f"{'+' if amount > 0 else ''}{amount} {RESOURCE_EMOJI.get(resource, '')}",
         "note": t.note,
+        # Nothing is a dead end: a balance leads back to the action that moved
+        # it. Empty when the writer did not record one — an absent link is
+        # honest, a guessed one sends somebody to the wrong app.
+        "open_in": t.open_in or "",
     }
 
 
@@ -57,12 +64,17 @@ class LogZView(APIView):
 
     def get(self, request):
         tier = membership_for(request.user).tier
-        if not can_use(tier, "logz"):
-            # One wording for every gate, naming the tier AND what it buys —
-            # a member is never told "upgrade" without being told to what.
-            return Response(gate_detail("logz"), status=status.HTTP_403_FORBIDDEN)
+        # LogZ is not gated. It was Premium-only, which meant a Free member
+        # could not find out where their own SpinaZ went — the "it may never
+        # say whether" rule broken on the member's own record, while
+        # `occ_spec.py` was already advertising SpinaZ and Energy as things a
+        # Free member opens IN LOGZ. What laddders is DEPTH.
+        days = logz_history_days(tier)
+        since = timezone.now() - timedelta(days=days) if days else None
 
         qs = request.user.transactions.all()
+        if since:
+            qs = qs.filter(created_at__gte=since)
         resource = (request.query_params.get("resource") or "").lower()
         if resource in RESOURCE_EMOJI:
             qs = qs.filter(resource=resource)
@@ -73,10 +85,15 @@ class LogZView(APIView):
 
         rows = [_row(t) for t in qs.order_by("-created_at")[:limit]]
 
-        # Totals per resource across the WHOLE ledger, not just this page — a
-        # running total that only counts the rows on screen is a wrong number.
+        # Totals per resource across the whole VISIBLE ledger, not just this
+        # page — a running total that only counts the rows on screen is a wrong
+        # number. It counts what this tier can see, for the same reason: a
+        # total over rows the member is not shown cannot be checked.
         totals = {}
-        for t in request.user.transactions.all().only("resource", "amount", "amount_cents"):
+        window = request.user.transactions.all()
+        if since:
+            window = window.filter(created_at__gte=since)
+        for t in window.only("resource", "amount", "amount_cents"):
             r = t.resource or Transaction.RES_MONEY
             totals[r] = totals.get(r, 0) + (t.amount if t.amount else t.amount_cents)
 
@@ -91,6 +108,21 @@ class LogZView(APIView):
                 for k, v in RESOURCE_EMOJI.items()
             ],
             "count": qs.count(),
+            # What this tier can see, said in the unit a member can check —
+            # days — plus the whole ladder, so the number on screen and the
+            # reason for it arrive together.
+            "history_days": days,
+            "history_label": "everything" if not days else f"the last {days} days",
+            "history_ladder": [
+                {"tier": t, "days": d, "label": "everything" if not d else f"{d} days"}
+                for t, d in LOGZ_HISTORY_DAYS.items()
+            ],
+            "tier": tier,
+            # Rows older than the window still exist and still count; saying so
+            # is the difference between a limit and a disappearance.
+            "hidden_by_tier": (
+                request.user.transactions.filter(created_at__lt=since).count() if since else 0
+            ),
         })
 
 

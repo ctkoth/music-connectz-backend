@@ -100,8 +100,12 @@ class SpecTests(TestCase):
         # above them.
         tabs = {t["key"]: t for t in self.spec()["tabs"]}
         self.assertFalse(tabs["gitz"]["allowed"])
-        self.assertFalse(tabs["logz"]["allowed"])
         self.assertTrue(tabs["taskz"]["allowed"])
+        # LogZ used to be the second locked example here. It is open to
+        # everybody now — a member's own record of what the platform did to
+        # their balances is not a feature we rent to them; the tier buys how
+        # far BACK it goes (catalog.LOGZ_HISTORY_DAYS), which is a "how much".
+        self.assertTrue(tabs["logz"]["allowed"])
         # 21 from the spec + WorkZ, which the spec's own rule (nothing is a
         # dead end) demanded once OCC started producing things.
         self.assertEqual(len(tabs), 22)
