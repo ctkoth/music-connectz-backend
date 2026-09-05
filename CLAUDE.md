@@ -565,6 +565,58 @@ starting to pay one is not a published price. The meter itself (a session, a
 settlement, an entitlement check on read) is the next piece and is deliberately
 not half-built here.
 
+## JournalZ needed the parts a diary APP has, not another text box with a date
+
+`journalz.py` already had the hard half: private by default, a day the entry is
+ABOUT rather than the day it was typed, moods, weather, free-text tags, people
+who are only ever notified on a share, a place whose coordinates stay home
+unless you say otherwise, attachments, search, On This Day, export.
+
+What was missing is the way you LOOK at the whole thing.
+`journal_diarium.py` is that, and all three are free at every tier — reading
+your own diary is not a capability we rent to you, the same argument that took
+the gate off LogZ. What Premium buys here stays On This Day and export.
+
+- **`/journalz/calendar/`** — the month, day by day. Scrolling a list works for
+  the last fortnight and fails completely at "what was I doing last March",
+  which is the question a diary exists to answer. **Every cell is a door**: a
+  kept day opens what you wrote, a missed one opens the composer set to that
+  date, and a future day offers nothing because a diary records what happened
+  (a plan is TaskZ's job). Thirty cells that do nothing is wallpaper, not
+  navigation. A bad `?month=` is this month rather than a 400 — a calendar that
+  errors on a typo is one you cannot page with a keyboard.
+- **`/journalz/insights/`** — what the diary contains, counted. Days kept,
+  entries, streak, longest run, moods, tags, people, places. **Nothing is
+  scored** and the response says so: a number on somebody's diary is the exact
+  `directz_ai_rating` failure, with the extra problem that a diary is the one
+  place in this app nobody is performing. Mood is a DISTRIBUTION, never an
+  average — "your average mood is 3.2" is a claim nobody made. Every row is a
+  door: a person opens their profile, a tag opens that search.
+  `_longest_streak` is computed from the days rather than stored, so it cannot
+  drift from the diary it measures.
+
+### The prompt is the thing a standalone diary app structurally cannot do
+
+Every diary app on earth can ask "how was your day?". A generic prompt is a
+blank page with a question mark on it, and it is why diaries get abandoned in
+February: **opening one costs you the work of remembering.**
+
+Music ConnectZ already knows. The ledger records every resource that moved and
+— since `Transaction.open_in` — where it moved, so `/journalz/prompts/` draws
+the member's actual day: the take they recorded, the posts they rated, the
+battle they entered, the 🍥 that arrived and why. Each prompt carries the words
+to start AND the door back to the thing it is about. That is the
+cross-pollination rule pointed at the app most likely to be a dead end.
+
+Two rules it must keep:
+
+- **Never invent a day.** A member who did nothing gets the plain opener, not a
+  fabricated highlight. A prompt about a thing that did not happen is worse
+  than a blank page — now the app is wrong as well as empty.
+- **A prompt is a suggestion, never a ghostwriter.** It hands over a first LINE
+  and a link. Anything further would be the app keeping the diary, which is not
+  a feature, it is a different product.
+
 ### The gate that was hiding a member's own record
 
 **LogZ was Premium-only.** A Free member asking "where did my SpinaZ go" got a

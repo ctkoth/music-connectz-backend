@@ -3,6 +3,8 @@ from django.urls import path, re_path
 from .directz_app import DirectZWorksView, DirectZRateView
 from .media import MediaFileView
 from .questz import QuestBoardView, QuestClaimView
+from .journal_diarium import (JournalCalendarView, JournalInsightsView,
+                              JournalPromptsView)
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
 from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
@@ -293,6 +295,12 @@ urlpatterns = [
     # quotes what it costs and who it tells before it does either.
     path("journalz/", JournalZView.as_view(), name="economy-journalz"),
     path("journalz/cost/", JournalCostView.as_view(), name="economy-journalz-cost"),
+    # The three a diary app has and a text-box-with-a-date does not. Free at
+    # every tier: reading your own diary is not a capability we rent to you,
+    # which is the argument that took the gate off LogZ.
+    path("journalz/calendar/", JournalCalendarView.as_view(), name="economy-journalz-calendar"),
+    path("journalz/insights/", JournalInsightsView.as_view(), name="economy-journalz-insights"),
+    path("journalz/prompts/", JournalPromptsView.as_view(), name="economy-journalz-prompts"),
     # On This Day and the formatted export — Premium, through the standard gate.
     path("journalz/lookback/", JournalLookbackView.as_view(), name="economy-journalz-lookback"),
     path("journalz/export/", JournalExportView.as_view(), name="economy-journalz-export"),
