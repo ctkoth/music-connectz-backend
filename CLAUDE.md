@@ -95,12 +95,26 @@ So the rule, in practice:
 - **XP and badges may reward effort. Ratings and skill levels may not.** Turning
   up is worth something; it is not worth being called good.
 
-### Known violation, not yet fixed
+### Known violation — closed
 
-- **`directz_ai_rating`** — see above. It had never run in production because
-  nothing posted to DirectZ; the composer added in `claude/occ-agent-loop` means
-  it now will, at scale. Either it measures the video or it stops calling itself
-  craft.
+- **`directz_ai_rating` is deleted.** This entry outlived the fix by some weeks,
+  which is worth noticing on its own: a "not yet fixed" list nobody re-checks
+  sends the next reader to fix something twice.
+
+  What actually happened: `directz_craft.py` replaced it with a model that
+  WATCHES the video and scores framing, editing, lighting, sound and story —
+  none of which can be satisfied by filling in a form. Migration 0073 nulled
+  every score the old formula had already written, because fixing the code that
+  makes a number and leaving the number on screen fixes the future and keeps
+  the past. And `directz_display_rating` has three states rather than two:
+  users / ai / **nothing**, and when it is nothing the rating is None and
+  callers render the absence.
+
+  The function then sat deprecated, kept by a docstring saying old rows still
+  carried its numbers — untrue from the moment 0073 ran. It is gone now, and
+  `test_directz_craft` pins both its absence and that nothing calls it, because
+  a discredited scoring function within reach of an import is one somebody will
+  reach for.
 
 ---
 

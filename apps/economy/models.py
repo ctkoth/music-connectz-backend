@@ -1788,39 +1788,28 @@ def directz_band_for(sec):
     return None
 
 
-def directz_ai_rating(work):
-    """DEPRECATED — do not call this for a rating. See `directz_craft.py`.
-
-    It called itself "a deterministic AI craft estimate" and measured contributor
-    count, skills listed, description length, money spent and duration fit. None
-    of that is craft: a weak video with five contributors and a padded
-    description scored ~8, a good one-person video with a terse description
-    scored ~4. It taught members to pad the form, which is the failure
-    `CLAUDE.md`'s third rule names.
-
-    Kept only because a handful of old rows were seeded by it and the number is
-    still on them; nothing should produce a NEW one. A work whose video cannot be
-    watched now carries no rating at all, which is the honest answer.
-    """
-    contribs = work.get("contributors") if isinstance(work, dict) else work.contributors
-    desc = work.get("description") if isinstance(work, dict) else work.description
-    dur = work.get("duration_sec") if isinstance(work, dict) else work.duration_sec
-    fmt = work.get("fmt") if isinstance(work, dict) else work.fmt
-    contribs = contribs or []
-    n_people = len(contribs)
-    n_skills = sum(len(c.get("skills") or []) for c in contribs)
-    worth = sum((float(s.get("price") or 0) for c in contribs for s in (c.get("skills") or [])))
-    # Duration-fit: does the length match the format band?
-    lo, hi = DIRECTZ_BANDS.get(fmt, (0, 10 ** 9))
-    fit = 1.0 if (dur and lo <= dur <= hi) else 0.4
-    score = (
-        3.0
-        + min(n_people, 5) * 0.7        # collaboration breadth
-        + min(n_skills, 8) * 0.35       # skills brought
-        + min(len(desc or ""), 300) / 300 * 1.5  # described intent
-        + min(worth, 500) / 500 * 1.0   # investment
-    ) * fit
-    return round(max(1.0, min(10.0, score)), 1)
+# `directz_ai_rating` was deleted here, and its absence is the point.
+#
+# It called itself "a deterministic AI craft estimate" and measured contributor
+# count, skills listed, description length, money spent and duration fit. None
+# of that is craft: a weak video with five contributors and a padded description
+# scored ~8, a good one-person video with a terse description scored ~4. It
+# taught members to pad the form, which is the failure `CLAUDE.md`'s third rule
+# names — could a member get a good number without getting good? There, yes,
+# trivially.
+#
+# It was replaced by `directz_craft.py`, which sends the video to a model that
+# WATCHES it, and migration 0073 nulled every score the old formula had already
+# written. The function then sat here deprecated, justified by a docstring
+# saying old rows still carried its numbers — and that was no longer true the
+# moment 0073 ran. So the only thing keeping it was a comment that had gone
+# stale about the code above it.
+#
+# Deleted rather than left deprecated, because a discredited scoring function
+# in reach of an import is a scoring function somebody will reach for. There is
+# nothing to deprecate: a work whose video cannot be watched carries NO rating,
+# which is the honest answer, and `test_directz_craft` pins that this does not
+# come back.
 
 
 def directz_display_rating(work):
