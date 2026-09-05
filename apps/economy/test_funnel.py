@@ -121,3 +121,79 @@ class FunnelSummaryTests(TestCase):
         for kind, _ in FUNNEL_KINDS:
             self.assertIn(kind, r.data["steps"])
             self.assertEqual(r.data["steps"][kind]["events"], 0)
+
+
+class ChannelAttributionTests(TestCase):
+    """`?src=` — which channel produced which arrival.
+
+    Without it the funnel counts arrivals and cannot say which post, flyer or
+    ad produced them, so every channel looks identical at zero — which is
+    exactly the state this platform was in when the marketing plan was written.
+    The first thing marketing money buys is otherwise an unanswerable question.
+    """
+
+    EVENT = "/api/auth/funnel/"
+    SUMMARY = "/api/auth/funnel/summary/"
+
+    def setUp(self):
+        self.owner = User.objects.create_superuser("owner2", "o2@e.com", "hunter2hunter2")
+        self.client = APIClient()
+
+    def fire(self, kind, anon, src=None, **meta):
+        body = {"kind": kind, "anon_id": anon, "meta": {**meta}}
+        if src is not None:
+            body["meta"]["src"] = src
+        return self.client.post(self.EVENT, body, format="json")
+
+    def summary(self):
+        c = APIClient()
+        c.force_authenticate(self.owner)
+        return c.get(self.SUMMARY).data
+
+    def test_a_source_is_stored_on_the_arrival(self):
+        self.fire("landing_view", "a1", src="reddit")
+        self.assertEqual(FunnelEvent.objects.get(kind="landing_view").meta["src"], "reddit")
+
+    def test_a_source_is_a_channel_name_not_a_payload(self):
+        # Short slug only. Anything else is somebody putting data in a URL.
+        self.fire("landing_view", "a2", src="<script>alert(1)</script>")
+        self.assertEqual(FunnelEvent.objects.get(kind="landing_view").meta, {})
+        self.fire("landing_view", "a3", src="x" * 200)
+        self.assertEqual(FunnelEvent.objects.filter(kind="landing_view").last().meta, {})
+
+    def test_it_is_lowercased_so_two_spellings_are_one_channel(self):
+        self.fire("landing_view", "a4", src="  Reddit  ")
+        self.assertEqual(FunnelEvent.objects.last().meta["src"], "reddit")
+
+    def test_the_summary_breaks_the_funnel_down_by_channel(self):
+        # reddit sends people who score; flyer sends people who bounce. Those
+        # need opposite responses, and one number cannot tell them apart.
+        self.fire("landing_view", "r1", src="reddit")
+        self.fire("try_scored", "r1", src="reddit")
+        self.fire("landing_view", "f1", src="flyer")
+        self.fire("landing_view", "f2", src="flyer")
+
+        rows = {r["src"]: r for r in self.summary()["sources"]}
+        self.assertEqual(rows["reddit"]["try_scored"], 1)
+        self.assertEqual(rows["flyer"]["landing_view"], 2)
+        self.assertEqual(rows["flyer"]["try_scored"], 0)
+
+    def test_sources_are_ordered_by_how_many_people_they_sent(self):
+        for i in range(3):
+            self.fire("landing_view", f"b{i}", src="big")
+        self.fire("landing_view", "s1", src="small")
+        self.assertEqual([r["src"] for r in self.summary()["sources"]], ["big", "small"])
+
+    def test_one_browser_is_one_person_per_channel(self):
+        # Refreshing five times is not five people.
+        for _ in range(5):
+            self.fire("landing_view", "same", src="reddit")
+        self.assertEqual(self.summary()["sources"][0]["landing_view"], 1)
+
+    def test_untagged_traffic_is_still_counted_just_not_attributed(self):
+        self.fire("landing_view", "u1")
+        d = self.summary()
+        self.assertEqual(d["steps"]["landing_view"]["unique"], 1)
+        self.assertEqual(d["sources"], [])
+        # And the empty list says which of the two problems it is.
+        self.assertIn("Untagged", d["sources_note"])
