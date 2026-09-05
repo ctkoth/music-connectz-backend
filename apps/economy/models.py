@@ -817,6 +817,24 @@ class Profile(models.Model):
     voice_explicit = models.BooleanField(default=False)
     voice_emoji = models.BooleanField(default=True)
     voice_slang = models.BooleanField(default=True)
+
+    # SoundZ. What the app SOUNDS like, stored on the account rather than in
+    # localStorage, because it is sold as a Premium perk — and a perk that
+    # evaporates when you open the app on your phone is not a perk, it is a
+    # browser setting somebody paid for.
+    #
+    # The server stores the CHOICE and never the waveforms. A pack is a set of
+    # oscillator settings and those live in `src/sound.js`, where they can be
+    # heard while they are edited; a copy of them here would be a second source
+    # of truth for something this file cannot play. So validation is of SHAPE
+    # (a plausible slug, a bounded map) and the client decides whether it knows
+    # the name — an unrecognised pack falls back to the house sound rather than
+    # failing.
+    sound_pack = models.CharField(max_length=32, blank=True, default="")
+    # {sound_key: pack_key} — one sound taken from a different pack. The whole
+    # point of "customize" rather than "choose": a member who likes the house
+    # set but wants a louder coin should not have to change all of it.
+    sound_overrides = models.JSONField(default=dict, blank=True)
     links = models.JSONField(default=list, blank=True)  # [{label, url}] public links
     # Location (opt-in) for in-person CollabZ / VenueZ distance filtering.
     share_location = models.BooleanField(default=False)
