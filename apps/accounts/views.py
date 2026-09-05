@@ -309,8 +309,9 @@ class OAuthConfigView(APIView):
     configured with, so the login buttons can read them at runtime instead of
     relying on build-time VITE_* vars. Client IDs are public; secrets stay here.
     Covers every provider the backend can complete a sign-in for — the id_token
-    verifiers (google/apple), GitHub, and the generic code-flow providers
+    verifiers (google), GitHub, and the generic code-flow providers
     (spotify/microsoft/facebook/soundcloud/twitter).
+    Note: Apple OAuth is temporarily disabled; verify_apple() is retained for re-enabling.
 
     This is also the only diagnostic for "every button says it isn't available".
     It is deliberately open: the login screen is signed-out, so it cannot need
@@ -345,14 +346,15 @@ class OAuthConfigView(APIView):
         # every screen stays silent about why. So say it here. Client IDs are
         # public, so naming the shape gives nothing away.
         warnings = []
-        g = cfg["google"]
+        g = cfg.get("google", "")
         if g and not g.endswith(".apps.googleusercontent.com"):
             warnings.append(
                 "GOOGLE_OAUTH_CLIENT_ID doesn't look like a Google client ID — those "
                 "end in .apps.googleusercontent.com. Check you pasted the client ID "
                 "and not the client secret."
             )
-        if cfg["apple"] and "." not in cfg["apple"]:
+        # Apple is temporarily disabled; skip the Services ID validation
+        if cfg.get("apple") and "." not in cfg.get("apple", ""):
             warnings.append(
                 "APPLE_OAUTH_CLIENT_ID should be the Services ID (a reverse-domain "
                 "string), not the Team ID."
