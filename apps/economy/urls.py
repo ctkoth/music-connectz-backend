@@ -84,6 +84,7 @@ from .payments import (
     StripeWebhookView,
 )
 from .viewz import ViewZMineView, ViewZView
+from .watchpay import WatchPriceView
 from .social import (
     MemberProfileView,
     MembersView,
@@ -251,6 +252,7 @@ urlpatterns = [
     path("social/verify/", SocialVerifyView.as_view(), name="economy-social-verify"),
     # What the AI couldn't confirm goes to a person, not to a wall.
     path("social/reviews/", SocialReviewQueueView.as_view(), name="economy-social-reviews"),
+    path("watchprice/", WatchPriceView.as_view(), name="economy-watchprice"),
     path("viewz/", ViewZView.as_view(), name="economy-viewz"),
     path("viewz/mine/", ViewZMineView.as_view(), name="economy-viewz-mine"),
     path("members/", MembersView.as_view(), name="economy-members"),

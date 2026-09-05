@@ -502,6 +502,69 @@ The day it buckets on is `local_day` — the same 04:20 clock Energy resets on.
 Two different day boundaries would mean a member's views and their ⚡ reset at
 different times and nobody would ever work out why.
 
+## Paying creators for being read: rent by time, own by length
+
+Corey's proposal, verbatim: *ViewZ pays creators — 10% of their skill-used
+price per hour, or buy the manga to read whenever for 10% of the skill price
+and not pay the hourly.* `watchpay.py` is that, with one number changed and the
+reason written down.
+
+**Why it is possible at all:** it is two systems that already exist, joined.
+ViewZ already measures attention HONESTLY — heartbeats, `document.hidden`, a
+session that stops counting when nobody is looking — which is exactly what
+billing by the hour needs and what a wall clock cannot give you. CallZ already
+meters money by the minute with the rate published before it rings, the running
+cost on screen and a receipt matching the quote. **Reading a manga by the hour
+is CallZ with a page instead of a voice.**
+
+**Why 10%/10% could not ship:** if an hour costs 10% of the skill rate and
+buying costs 10% of the skill rate, buying costs exactly ONE HOUR of renting —
+so nobody ever rents and the hourly path is dead the day it ships. The two
+prices come off different things now:
+
+- **Renting is priced by TIME** — `READER_SHARE` (Corey's 10%) of the creator's
+  hourly rate, prorated per second like a call.
+- **Owning is priced by the WORK'S LENGTH** — a full read-through at that rate
+  × `KEEP_MULTIPLIER`. A ninety-minute MovieZ costing more to keep than a
+  forty-second ReelZ is the sentence anybody expects to be true, and the flat
+  share makes it false.
+- **`credit_toward_buy`** puts what you already spent renting against the
+  purchase. "Am I wasting money by not buying" is the hesitation that kills
+  metered media, and the answer being "no, it all counts" is worth more than
+  the few cents.
+
+**The real risk, named: this prices off a number the creator TYPES.**
+`profile_skill_rate` is self-declared, so deriving what a reader pays from it
+fails the test every number here answers to — could a member get a good one
+without getting good? Three guards, and the third is still owed:
+
+1. It uses the CHEAPEST priced skill (`profile_skill_rate` picks `min`), so
+   padding one expensive skill moves nothing.
+2. `MAX_READ_CENTS_PER_HOUR` caps it, for the same reason
+   `DAILY_PROMPT_MAX_CENTS` exists: a ladder with no ceiling is whatever the
+   dearest person on the platform typed.
+3. **Not built yet — price off a rate somebody has actually been PAID.** A
+   completed CollabZ or LessonZ deal is evidence; a profile field is an
+   aspiration. Until that lands the cap is doing the work alone.
+
+Three more rules the module holds:
+
+- **An unpriced creator is FREE, not defaulted.** Somebody who has not asked
+  for money is not asking for money; inventing a rate on their behalf puts a
+  paywall on their work that they never chose.
+- **The first `FREE_MINUTES` are free at every tier.** You cannot judge a manga
+  from its cover, and a paywall in front of the first page sells nothing to
+  somebody who has never read you — the same argument as the `/try` door.
+- **`PRICED_KINDS` is a allowlist.** A surface must not be able to start
+  charging by being added to a URL. **MangaZ is absent because MangaZ does not
+  exist**; the day the app ships it is one line here.
+
+`GET /api/economy/watchprice/?target=directz:<id>` is a QUOTE and nothing else
+— it moves no money and opens no session, because a price you can only learn by
+starting to pay one is not a published price. The meter itself (a session, a
+settlement, an entitlement check on read) is the next piece and is deliberately
+not half-built here.
+
 ### The gate that was hiding a member's own record
 
 **LogZ was Premium-only.** A Free member asking "where did my SpinaZ go" got a
