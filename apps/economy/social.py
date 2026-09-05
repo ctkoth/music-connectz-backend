@@ -50,11 +50,14 @@ from .models import (
     Badge,
     badge_effects,
     recheck_badges,
+    may_be_explicit,
+    zodiac_for,
 )
 from .badgez import worn_badges, worn_badges_by_user
 from .catalog import over_char_limit
 from .gates import GATE_KEYS, clean_gates, failing_gate, member_metrics, refusal
 from .serializers import WalletSerializer
+from .personaz import clean_link, clean_persona, links_of, personas_of
 
 User = get_user_model()
 VALID_TYPES = {"party", "openmic", "theater", "show", "custom"}
@@ -350,6 +353,58 @@ PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign
                   "external_followers")
 
 
+# Everything in PROFILE_FIELDS used to be written STRAIGHT off the request
+# body — `setattr(p, f, d[f])`, with `substances` the single exception. That is
+# the writer that produced "{'name': 'Independent Artist', 'emoji': '🎤',
+# 'skills': []}" as the name of somebody's persona: `/api/auth/me/` normalizes
+# a persona and this endpoint did not, so whichever client used this door wrote
+# whatever it happened to be holding, and the profile column kept it.
+#
+# Three other things rode in through the same gap, and each is worse than the
+# one that got noticed:
+#
+#   * `links` is rendered as `<a href>` on the member card AND on the
+#     logged-out public profile. An unvalidated URL there is a stored
+#     `javascript:` waiting for the next person to open somebody's page —
+#     React warns about it and still puts it in the DOM.
+#   * Nothing capped a list, so a profile row could be made arbitrarily large,
+#     and that row is serialized into every member card and search result.
+#   * `birthday` set here skipped the zodiac recompute and the explicit-voice
+#     revocation that the same edit performs on `/api/auth/me/`, so the sign
+#     went stale and a stored `voice_explicit` outlived the birthday that
+#     justified it. (The READ still re-applies the age gate, which is why that
+#     one was contained rather than exploitable — but a second writer that
+#     forgets what the first one does is a bug that only stays contained by
+#     luck.)
+#
+# One cleaner per field, in the one place both writers can reach.
+def clean_profile_field(field, value):
+    """The stored form of one PROFILE_FIELDS value, from whatever came in."""
+    if field == "substances":
+        return clean_substances(value)
+    if field == "personas":
+        return [clean_persona(x) for x in value][:50] if isinstance(value, list) else []
+    if field == "links":
+        if not isinstance(value, list):
+            return []
+        return [l for l in (clean_link(x) for x in value[:50]) if l]
+    if field in ("nationalities", "regions", "traits", "attracted_to"):
+        return [str(x)[:60] for x in value][:30] if isinstance(value, list) else []
+    if field == "asexual":
+        return bool(value)
+    if field == "external_followers":
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+    if field == "birthday":
+        # Recomputed below alongside `sign`, so the two cannot disagree.
+        return str(value or "").strip()[:10] if isinstance(value, str) else ""
+    if field in ("display_name", "location", "gender", "sign"):
+        return str(value or "")[:120]
+    return value
+
+
 def _avatar_url(p, request):
     try:
         return request.build_absolute_uri(p.avatar.url) if p.avatar else None
@@ -447,9 +502,7 @@ def profile_skill_rate(p, pick=min):
     honest answer is their cheapest skill, not their dearest.
     """
     rates = []
-    for persona in (p.personas or []):
-        if not isinstance(persona, dict):
-            continue
+    for persona in personas_of(p):
         for s in (persona.get("skills") or []):
             if isinstance(s, dict) and s.get("rate_cents"):
                 try:
@@ -463,14 +516,12 @@ def profile_max_experience(p):
     """A member's greatest skill experience in years — max over every skill's
     summed stints. None when nothing is dated."""
     best = None
-    for persona in (p.personas or []):
-        # A persona is either {"key", "name", "skills": [...]} or, from before
-        # the skill picker existed, a bare key string. The string form carries
-        # no dates and simply doesn't count — but calling .get() on it raised
-        # AttributeError, and this runs inside _profile_card, so viewing ANY
-        # member who had picked a PersonaZ answered 500.
-        if not isinstance(persona, dict):
-            continue
+    # A persona is either {"key", "name", "skills": [...]} or, from before the
+    # skill picker existed, a bare key string; `personas_of` turns both — and
+    # the printed-dict form that a since-fixed writer left behind — into the
+    # one shape. Skipping the non-dicts here instead is what threw this
+    # member's dated skills away, silently, on the metric that measures them.
+    for persona in personas_of(p):
         for skill in (persona.get("skills") or []):
             yrs = _skill_years(skill)
             if yrs is not None and (best is None or yrs > best):
@@ -534,7 +585,7 @@ def _profile_full(p, request, recheck=False):
     card.update({
         "bio": p.bio, "location": p.location, "birthday": p.birthday,
         "substances": p.substances, "asexual": p.asexual, "traits": p.traits,
-        "personas": p.personas, "links": p.links, "mine": mine,
+        "personas": personas_of(p), "links": links_of(p), "mine": mine,
         "my_attractiveness": AttractivenessRating.objects.filter(rater=request.user, target=p.user).values_list("score", flat=True).first(),
         "my_overall": OverallRating.objects.filter(rater=request.user, target=p.user).values_list("score", flat=True).first(),
         "overall_count": OverallRating.objects.filter(target=p.user).count(),
@@ -740,7 +791,14 @@ class ProfileView(APIView):
         # at the top of that request their age was still unknown.
         for f in PROFILE_FIELDS:
             if f in d:
-                setattr(p, f, clean_substances(d[f]) if f == "substances" else d[f])
+                setattr(p, f, clean_profile_field(f, d[f]))
+        if "birthday" in d:
+            # The same two consequences /api/auth/me/ applies to this edit. A
+            # second writer that forgets them leaves the sign stale and an
+            # explicit voice standing on a birthday that no longer earns it.
+            p.sign = zodiac_for(p.birthday)
+            if p.voice_explicit and not may_be_explicit(p):
+                p.voice_explicit = False
         minor = profile_is_minor(p)
         blocked = [f for f in ADULT_ONLY_PROFILE_FIELDS if minor and f in d]
         if minor:

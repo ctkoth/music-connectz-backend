@@ -38,6 +38,7 @@ be argued with.
 from datetime import timedelta
 
 from django.utils import timezone
+from .personaz import personas_of
 
 DAILY = "daily"
 WEEKLY = "weekly"
@@ -172,9 +173,7 @@ def _journaled(user, since):
 
 def _priced_a_skill(user, _since):
     from .models import profile_for
-    for persona in (profile_for(user).personas or []):
-        if not isinstance(persona, dict):
-            continue
+    for persona in personas_of(profile_for(user)):
         for s in (persona.get("skills") or []):
             if isinstance(s, dict) and int(s.get("rate_cents") or 0) > 0:
                 return 1

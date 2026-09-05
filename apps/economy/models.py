@@ -5,6 +5,8 @@ transaction) is enforced here, server-side, so the client can't bypass it.
 
 Rates match the frontend: Free 10% · Premium 5% · StatZ 2%.
 """
+import os
+
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
@@ -148,17 +150,104 @@ class Transaction(models.Model):
 
 
 class SpecZPurchase(models.Model):
+    """One piece of metadata a member wrote and attached to an app.
+
+    Was a row saying which of six catalog products you owned. Nothing produced
+    those products and nothing read this table, so the row was the whole
+    purchase. It holds the SpecZ itself now — the label and the value the
+    member typed — which is the part that was real all along and was living in
+    their browser's localStorage.
+    """
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="specz_purchases"
     )
-    item_id = models.CharField(max_length=64)
-    price_cents = models.PositiveIntegerField()
-    dev_tax_cents = models.PositiveIntegerField(default=0)
+    # A tab key, so the SpecZ can link back to the app it describes.
+    app_key = models.CharField(max_length=32)
+    label = models.CharField(max_length=60)
+    value = models.CharField(max_length=200)
+    # Paid in SpinaZ. No dev-tax column: SpinaZ is never dev-taxed anywhere in
+    # this codebase (`split_participants`), and a column that can only ever
+    # hold 0 is decoration wearing a measurement's clothes.
+    price_spinaz = models.PositiveIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ("user", "item_id")
+        # No unique_together any more. The old one was ("user", "item_id") —
+        # buy each catalog product once. A member may write as many SpecZ as
+        # they like; the SpinaZ price is the only cap it needs.
         ordering = ["-created_at"]
+
+
+class Call(models.Model):
+    """One 1:1 call, and the money that moves through it.
+
+    CallZ was sold at the top tier and did not exist. LessonZ had a "CallZ"
+    delivery option on a booking, priced the same as remote or in-person —
+    a dropdown, not a connect — which is why `CLAUDE.md` has listed it as an
+    open cost/gain violation the whole time: there was no per-minute rate to
+    state before a call because there was no call.
+
+    Three things about this row are the feature, and none of them are the video:
+
+      * `rate_cents_per_min` is SNAPSHOT AT RING. The callee's rate comes from
+        their own priced skills, and a rate that could move while the call is
+        running is a price discovered by paying it.
+      * `held_cents` is escrow, taken from the caller when the callee ANSWERS
+        and not before. Nobody pays for a call that was never picked up, and
+        the callee is never owed by somebody who cannot pay.
+      * `last_seen_at` is what stops escrow being held forever by a browser
+        that closed mid-call. Any read settles a call nobody has touched in
+        `CALL_STALE_SECONDS`, the same way `settle_energy` pays what is owed on
+        read rather than waiting for a cron that does not exist.
+
+    The SDP and ICE columns are the signalling channel. This app runs on
+    gunicorn with no ASGI and no channels layer, so there are no WebSockets to
+    signal over — both sides poll this row instead. That is slower to connect
+    than a socket and it is honest: the media itself is peer-to-peer once the
+    handshake lands, so the polling only costs the first few seconds.
+    """
+
+    STATUS_RINGING = "ringing"
+    STATUS_LIVE = "live"
+    STATUS_ENDED = "ended"
+    STATUS_DECLINED = "declined"
+    STATUS_MISSED = "missed"
+    STATUS_CHOICES = [
+        (STATUS_RINGING, "Ringing"), (STATUS_LIVE, "Live"), (STATUS_ENDED, "Ended"),
+        (STATUS_DECLINED, "Declined"), (STATUS_MISSED, "Missed"),
+    ]
+
+    caller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="calls_made")
+    callee = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="calls_received")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_RINGING)
+
+    rate_cents_per_min = models.PositiveIntegerField(default=0)
+    held_cents = models.PositiveIntegerField(default=0)
+    charged_cents = models.PositiveIntegerField(default=0)
+    billed_seconds = models.PositiveIntegerField(default=0)
+
+    # WebRTC handshake, exchanged by polling this row.
+    offer_sdp = models.TextField(blank=True, default="")
+    answer_sdp = models.TextField(blank=True, default="")
+    caller_ice = models.JSONField(default=list, blank=True)
+    callee_ice = models.JSONField(default=list, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    end_reason = models.CharField(max_length=32, blank=True, default="")
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["callee", "status"]),
+                   models.Index(fields=["caller", "status"])]
+
+    def __str__(self):
+        return f"{self.caller_id}->{self.callee_id} {self.status}"
 
 
 class RoyaltyEntry(models.Model):
@@ -467,7 +556,41 @@ def award_promptz(user, amount, note="PromptZ"):
 # $15/mo subscription, and $18 against $7.50 for a founding seat. At 10/day it
 # is $9 against $15 — a real margin, and still twice what Premium gets. Anyone
 # who wants more buys prepaid PromptZ, which is priced to cover itself.
-PROMPT_ALLOWANCE = {"free": 1, "premium": 5, "statz": 10, "debug": 10 ** 6}
+#
+# Free is 3, not 1. One was the same allowance the ANONYMOUS trial door hands a
+# stranger (one scored take per IP per day, TRIAL_PER_IP_HOURS), so registering
+# bought nothing at all on the axis people arrive for — the account was strictly
+# more work for the same thing. Three is the smallest number that is visibly an
+# allowance rather than a demo: a take coached, a follow-up asked, a lyric
+# looked at, in one sitting. At DAILY_PROMPT_MAX_CENTS below that is 9c a day of
+# model cost for a member paying nothing, and only for one who spends all three
+# every day.
+PROMPT_ALLOWANCE = {"free": 3, "premium": 5, "statz": 10, "debug": 10 ** 6}
+
+# What ONE free daily prompt is allowed to be worth, in cents.
+#
+# The allowance used to cover whatever the run cost, and the run's price is the
+# member's own engine choice — so a StatZ member's 10 free prompts a day on
+# Fable (15c) was $45/mo of model cost against a $15/mo subscription, and the
+# margin note above, which reasons at the 3c floor, was describing a ladder that
+# did not exist. The COUNT was capped and the PRICE was not.
+#
+# 3c covers every engine a Free member can pick (Haiku 2c), the coach and the
+# other Gemini surfaces (ai_cost("standard") = 3c), and Corey GPT (1c). Sonnet,
+# Opus and Fable are dearer than an allowance and are paid for in PromptZ or
+# cash, which is what PromptZ is for. So the tier buys HOW MANY runs and the
+# engine is what costs money, both knowable before either is chosen — the same
+# shape as KeyConnectZ's allowance ladder.
+DAILY_PROMPT_MAX_CENTS = int(os.environ.get("DAILY_PROMPT_MAX_CENTS", "3"))
+
+
+def daily_prompt_covers(cost_cents):
+    """True when a free daily prompt may pay for a run at this price.
+
+    Callers that need to SAY whether a run will be free — before it is made,
+    per the cost/gain rule — must ask this and not merely whether prompts remain.
+    """
+    return 0 < int(cost_cents or 0) <= DAILY_PROMPT_MAX_CENTS
 
 
 def daily_prompt_state(user):
@@ -485,9 +608,12 @@ def daily_prompt_state(user):
     return allowance, (w.prompts_used_today or 0), remaining
 
 
-def _consume_daily_prompt(user):
-    """Spend one of today's free prompts if any remain. Returns True if one was
-    consumed (the caller should treat the run as free), else False."""
+def _consume_daily_prompt(user, cost_cents):
+    """Spend one of today's free prompts if any remain AND this run is inside
+    what an allowance is worth. Returns True if one was consumed (the caller
+    should treat the run as free), else False."""
+    if not daily_prompt_covers(cost_cents):
+        return False
     _, _, remaining = daily_prompt_state(user)  # also handles the daily reset
     if remaining <= 0:
         return False
@@ -499,16 +625,17 @@ def _consume_daily_prompt(user):
 
 def charge_ai_usage(user, cost_cents, note="AI usage", count_daily=False):
     """Debit the *minimum* cost to cover an AI model run — pure pass-through, no
-    developer tax. When `count_daily` is set (a genuine prompt run), the day's
-    free allowance is spent first and the run is free; otherwise spends prepaid
-    PromptZ (1 PromptZ = 1¢), then cash. Returns remaining money_cents, or None
+    developer tax. When `count_daily` is set (a genuine prompt run) and the run is
+    inside DAILY_PROMPT_MAX_CENTS, the day's free allowance is spent first and
+    the run is free; otherwise spends prepaid PromptZ (1 PromptZ = 1¢), then cash. Returns remaining money_cents, or None
     if the member can't afford it even with PromptZ (caller returns 402)."""
     cost_cents = int(cost_cents or 0)
     w = wallet_for(user)
     if cost_cents <= 0:
         return w.money_cents
-    # A free daily prompt covers the whole run before any paid balance is touched.
-    if count_daily and _consume_daily_prompt(user):
+    # A free daily prompt covers a run priced like an allowance before any paid
+    # balance is touched. A dearer engine is the member's choice and their bill.
+    if count_daily and _consume_daily_prompt(user, cost_cents):
         Transaction.objects.create(
             user=user, kind=Transaction.KIND_SPEND, amount_cents=0,
             dev_tax_cents=0, note=(note + " · daily prompt 🏷️")[:200],
@@ -1510,14 +1637,33 @@ def follow_counts(user):
     }
 
 
+# The floor under passive Energy, per hour, by tier.
+#
+# `reach_median` is 0 until a member VERIFIES an external account, so without
+# this every new member's hourly rate was exactly 0 — the app published "⚡
+# regenerates hourly at reach ÷ tier", showed them the number, and the number
+# was nothing. Reach is the right way to scale income and the wrong way to
+# START it: you cannot verify a following on day one, which made the one
+# resource that gates nothing feel like the one that gated everything.
+#
+# So reach still decides how fast it goes; the floor decides that it goes.
+# Free is 2/hour — 48 a day, enough to post through a session, and it arrives
+# whether or not anybody has heard of you yet. The tier multiplies the floor by
+# the same shape it multiplies reach, so upgrading is still worth it on day one
+# and not only after somebody gets famous.
+ENERGY_FLOOR_PER_HOUR = {TIER_FREE: 2, TIER_PREMIUM: 6, TIER_STATZ: 20, TIER_DEBUG: 20}
+
+
 def energy_rate_per_hour(user):
     """Hourly passive energy by tier, from the MEDIAN reach across a creator's
     verified sources (Music ConnectZ + verified external accounts):
-    Free = median/10, Premium = median/5, StatZ = median/1."""
+    Free = median/10, Premium = median/5, StatZ = median/1 — or the tier's
+    floor, whichever is larger."""
     reach = reach_median(user)
     m = membership_for(user)
     divisor = {TIER_FREE: 10, TIER_PREMIUM: 5, TIER_STATZ: 1, TIER_DEBUG: 1}.get(m.tier, 10)
-    base = reach // divisor
+    floor = ENERGY_FLOOR_PER_HOUR.get(m.tier, ENERGY_FLOOR_PER_HOUR[TIER_FREE])
+    base = max(reach // divisor, floor)
     # BadgeZ effects are read HERE, by the thing they affect. A badge whose
     # multiplier lived only in its description would be a sticker.
     mult = badge_effects(user).get("energy_multiplier", 1.0)
@@ -1642,39 +1788,28 @@ def directz_band_for(sec):
     return None
 
 
-def directz_ai_rating(work):
-    """DEPRECATED — do not call this for a rating. See `directz_craft.py`.
-
-    It called itself "a deterministic AI craft estimate" and measured contributor
-    count, skills listed, description length, money spent and duration fit. None
-    of that is craft: a weak video with five contributors and a padded
-    description scored ~8, a good one-person video with a terse description
-    scored ~4. It taught members to pad the form, which is the failure
-    `CLAUDE.md`'s third rule names.
-
-    Kept only because a handful of old rows were seeded by it and the number is
-    still on them; nothing should produce a NEW one. A work whose video cannot be
-    watched now carries no rating at all, which is the honest answer.
-    """
-    contribs = work.get("contributors") if isinstance(work, dict) else work.contributors
-    desc = work.get("description") if isinstance(work, dict) else work.description
-    dur = work.get("duration_sec") if isinstance(work, dict) else work.duration_sec
-    fmt = work.get("fmt") if isinstance(work, dict) else work.fmt
-    contribs = contribs or []
-    n_people = len(contribs)
-    n_skills = sum(len(c.get("skills") or []) for c in contribs)
-    worth = sum((float(s.get("price") or 0) for c in contribs for s in (c.get("skills") or [])))
-    # Duration-fit: does the length match the format band?
-    lo, hi = DIRECTZ_BANDS.get(fmt, (0, 10 ** 9))
-    fit = 1.0 if (dur and lo <= dur <= hi) else 0.4
-    score = (
-        3.0
-        + min(n_people, 5) * 0.7        # collaboration breadth
-        + min(n_skills, 8) * 0.35       # skills brought
-        + min(len(desc or ""), 300) / 300 * 1.5  # described intent
-        + min(worth, 500) / 500 * 1.0   # investment
-    ) * fit
-    return round(max(1.0, min(10.0, score)), 1)
+# `directz_ai_rating` was deleted here, and its absence is the point.
+#
+# It called itself "a deterministic AI craft estimate" and measured contributor
+# count, skills listed, description length, money spent and duration fit. None
+# of that is craft: a weak video with five contributors and a padded description
+# scored ~8, a good one-person video with a terse description scored ~4. It
+# taught members to pad the form, which is the failure `CLAUDE.md`'s third rule
+# names — could a member get a good number without getting good? There, yes,
+# trivially.
+#
+# It was replaced by `directz_craft.py`, which sends the video to a model that
+# WATCHES it, and migration 0073 nulled every score the old formula had already
+# written. The function then sat here deprecated, justified by a docstring
+# saying old rows still carried its numbers — and that was no longer true the
+# moment 0073 ran. So the only thing keeping it was a comment that had gone
+# stale about the code above it.
+#
+# Deleted rather than left deprecated, because a discredited scoring function
+# in reach of an import is a scoring function somebody will reach for. There is
+# nothing to deprecate: a work whose video cannot be watched carries NO rating,
+# which is the honest answer, and `test_directz_craft` pins that this does not
+# come back.
 
 
 def directz_display_rating(work):
@@ -2023,8 +2158,23 @@ SIGNIFICANT_AT = 3
 # dead end — the thing they made in the door opens inside SingZ/RapZ.
 #
 # It costs real money to run (Gemini), and an unauthenticated endpoint that
-# spends money is a bill anybody with curl can run up. Hence both caps below.
-TRIAL_MAX_MB = 8
+# spends money is a bill anybody with curl can run up. Hence the caps below.
+#
+# The SIZE cap was 8MB, which predated the coach learning to upload a take to
+# the Files API instead of base64ing it into the request. `score_take` picks
+# that path by size and says so in its own comment — "the trial door gets the
+# same lift for free" — so 8 stopped being a transport limit a while ago and
+# has just been a stale number since.
+#
+# It is 100 now because that is the FREE tier's own `upload_mb`. The trial is
+# supposed to be the product, and a door that refuses a take the free account
+# it is advertising would have accepted is a lie about the product — somebody
+# gets told their 47MB verse is too big, signs up, and finds out it never was.
+#
+# The real abuse control is TRIAL_PER_IP_HOURS below, which caps the COUNT;
+# size only decides how big one already-rate-limited take may be. Env-tunable
+# so it can be dialled down in a hurry without a deploy.
+TRIAL_MAX_MB = int(os.environ.get("TRIAL_MAX_MB", "100"))
 TRIAL_PER_IP_HOURS = 24          # one free scored take per address per day
 TRIAL_CLAIM_DAYS = 30            # a token stays claimable this long
 

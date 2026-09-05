@@ -83,11 +83,13 @@ class EarnView(APIView):
             _way("restricted", "Someone joins your restricted post",
                  RESTRICTED_JOIN_REWARD_SPINAZ, "spinaz",
                  tab="social", target="social-compose"),
+            # Always available now: ENERGY_FLOOR_PER_HOUR means the rate is
+            # never 0, so this stopped being a locked row a new member reads as
+            # "not for you" and became a number that grows when they verify.
             _way("passive", "Passive Energy, hourly", rate, "energy",
                  tab="profilez", target="profile-reach",
-                 available=rate > 0,
-                 reason="" if rate > 0 else "Verify a social account to build reach.",
-                 note="Paid by the hour from your median reach, tier-scaled."),
+                 note="Paid by the hour, tier-scaled. Verify a social account "
+                      "and your median reach raises it above the floor."),
             _way("onboard", "Finish OnboardZ", ONBOARD_REWARD_SPINAZ, "spinaz",
                  tab="onboardz", target="",
                  available=not onboarded,
@@ -107,9 +109,23 @@ class EarnView(APIView):
             rows = Transaction.objects.filter(user=request.user, resource=res, amount__gt=0)
             earned[res] = sum(rows.values_list("amount", flat=True))
 
+        # What the 🍥 in that list is FOR. A screen that shows somebody five
+        # ways to earn a currency and no door out of it is a read-only surface
+        # wearing an earn screen's clothes — and until PromptZ could be bought
+        # with SpinaZ there genuinely wasn't one.
+        from .catalog import SPINAZ_PER_PROMPTZ
+
         return Response({
             "ways": ways,
             "available": [w for w in ways if w["available"]],
             "earned_total": earned,
             "energy_per_hour": rate,
+            "spend": [{
+                "key": "promptz",
+                "label": "Turn SpinaZ into PromptZ",
+                "cost": {"resource": "spinaz", "amount": SPINAZ_PER_PROMPTZ},
+                "gain": {"resource": "promptz", "amount": 1},
+                "tab": "walletz", "target": "promptz-convert",
+                "note": "AI credits, earned rather than bought. No card needed.",
+            }],
         })

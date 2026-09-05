@@ -29,6 +29,8 @@ from .catalog import (
 from .models import (
     can_afford_ai,
     charge_ai_usage,
+    DAILY_PROMPT_MAX_CENTS,
+    daily_prompt_covers,
     daily_prompt_state,
     membership_for,
     profile_for,
@@ -193,14 +195,24 @@ class OccChatView(APIView):
         # vocal coach and the Gemini surfaces have honoured it all along.
         # Read before spending, because charge_ai_usage consumes it.
         _, _, daily_left = daily_prompt_state(request.user)
-        covered_free = bool(cost) and daily_left > 0
+        # Whether prompts REMAIN is only half of it — the allowance also has a
+        # ceiling, and this member may have picked an engine above it.
+        covered_free = daily_prompt_covers(cost) and daily_left > 0
 
         # Check affordability up front so we don't call the model then fail to bill.
-        if cost and not daily_left and not can_afford_ai(request.user, cost):
+        if cost and not covered_free and not can_afford_ai(request.user, cost):
+            # Two different walls, and telling somebody the wrong one sends them
+            # to wait until tomorrow for an allowance that was never going to
+            # cover this engine. Say which it is.
+            why = ("today's free prompts are spent"
+                   if daily_prompt_covers(cost)
+                   else f"a free daily prompt covers up to {DAILY_PROMPT_MAX_CENTS} 🏷️ "
+                        f"— switch engine to run it free")
             return Response(
                 {"detail": f"{model_spec['emoji']} {model_spec['name']} costs "
-                           f"{cost} 🏷️ a message and today's free prompts are spent.",
+                           f"{cost} 🏷️ a message and {why}.",
                  "cost_cents": cost, "engine": model_key,
+                 "daily_prompt_max_cents": DAILY_PROMPT_MAX_CENTS,
                  "open_in": "modelz"},
                 status=status.HTTP_402_PAYMENT_REQUIRED,
             )
@@ -345,6 +357,9 @@ class OccChatView(APIView):
                # A run that cost nothing has to say so, or the member assumes
                # they were charged and stops asking.
                "free_prompt": covered_free,
+               # And what an allowance is worth, so a member on a dear engine
+               # can see WHY it wasn't free rather than guessing.
+               "daily_prompt_max_cents": DAILY_PROMPT_MAX_CENTS,
                # Say when history was dropped to stay inside the size budget.
                # Silently forgetting the start of a conversation is worse than
                # forgetting it out loud.
