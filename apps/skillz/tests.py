@@ -8,8 +8,12 @@ User = get_user_model()
 
 # The frontend renders <InstrumentZ appKey="…"> and builds basePath as
 # /api/<appKey>, so a key it renders without a mount here 404s the whole panel.
-# Keep this list in step with TABS in the frontend's src/App.jsx.
-FRONTEND_INSTRUMENT_KEYS = ["singz", "rapz"]
+# Keep this list in step with TABS in the frontend's src/App.jsx — this is a
+# hand-maintained mirror across two repos, so it drifts silently rather than
+# failing a build; it already caught one incomplete instrument rollout
+# (INSTRUMENT_APP_KEYS grown to 7 without this list, or the reverse) before
+# it reached a PR.
+FRONTEND_INSTRUMENT_KEYS = ["singz", "rapz", "guitarz", "bassz", "keyz", "drumz", "violinz"]
 
 
 class InstrumentSkillZRoutesTests(TestCase):
@@ -30,4 +34,8 @@ class InstrumentSkillZRoutesTests(TestCase):
                     self.assertEqual(resp.status_code, 200, f"/api/{key}/skillz/{leaf}/")
 
     def test_unmounted_key_still_404s(self):
-        self.assertEqual(self.client.get("/api/drumz/skillz/profile/").status_code, 404)
+        # drumz used to be this test's example — it's a real, mounted
+        # instrument now, which is the fix this same change makes. A key
+        # that will never be a real instrument is what "unmounted" actually
+        # needs to mean here.
+        self.assertEqual(self.client.get("/api/kazoozz/skillz/profile/").status_code, 404)
