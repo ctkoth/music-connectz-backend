@@ -1591,6 +1591,111 @@ class AccountClaim(models.Model):
         return f"AccountClaim<{self.claimant} -> {self.target}: {self.status}>"
 
 
+# ---- Where an account was made from, and who else was there ----
+#
+# An address is the weakest useful signal this app has, and it is weak in BOTH
+# directions, which is the part that decides everything below:
+#
+# * **Sharing one proves nothing.** A studio, a rehearsal room, a college music
+#   department, a label office — every one of those is a room full of different
+#   people on one wifi, and they are this platform's core audience rather than
+#   its edge case. Mobile carriers put tens of thousands of subscribers behind
+#   a single IPv4 address, most heavily in exactly the markets KeyConnectZ
+#   shipped Yorùbá, Igbo, Hausa and Amharic voices for. And the app's own
+#   referral loop pays +300 🍥 / +100 🍥 for signing your mate up right here on
+#   your phone, which is the same address by definition.
+# * **Not sharing one proves nothing either.** A mobile IP rotates through the
+#   day, so one person is routinely on several.
+#
+# So an address NEVER groups anybody and NEVER deletes anything. It raises a
+# `DupeFlag` for a person to look at, and it strengthens a group that already
+# exists for a reason that stands on its own. The asymmetry is the whole
+# argument: a wrong delete destroys somebody's music, journal and cash balance
+# with no undo, and a wrong keep means a duplicate lives a little longer.
+class AccountIP(models.Model):
+    """An address an account has been seen from. Bounded and pruned."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="addresses")
+    # CharField rather than GenericIPAddressField: a proxy hands us whatever it
+    # hands us, and a malformed XFF header must not be able to 500 a signup.
+    ip = models.CharField(max_length=64, db_index=True)
+    # The address the account was CREATED from. Kept forever where a plain
+    # sighting is pruned, because it is the only one that says anything about
+    # how the account came to exist.
+    signup = models.BooleanField(default=False)
+    hits = models.PositiveIntegerField(default=1)
+    first_seen = models.DateTimeField(auto_now_add=True)
+    last_seen = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "ip")
+        indexes = [models.Index(fields=["ip", "user"])]
+
+    def __str__(self):
+        return f"{self.user_id}@{self.ip}"
+
+
+class SharedAddress(models.Model):
+    """An address the owner has said is a shared one — a studio, a school.
+
+    Without this the queue is unusable at exactly the places this app lives:
+    one college wifi would raise a flag on every signup forever, the owner
+    would stop reading the queue, and the feature would be worse than not
+    having it. Marking the address once ends it.
+    """
+
+    ip = models.CharField(max_length=64, unique=True)
+    note = models.CharField(max_length=200, blank=True, default="")
+    added_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                 null=True, blank=True, related_name="shared_addresses")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.ip
+
+
+class DupeFlag(models.Model):
+    """A new account made from an address that already had one. For review.
+
+    Raised by the system, unlike `AccountClaim`, which a member files about
+    their own other account. Both land in the same owner queue and neither
+    deletes anything on its own — this one exists so a duplicate is caught
+    without waiting for somebody to come forward, which is the only thing an
+    address is actually good for.
+    """
+
+    OPEN, CLEARED, ACTIONED = "open", "cleared", "actioned"
+    STATUS_CHOICES = [(OPEN, "Open"), (CLEARED, "Cleared"), (ACTIONED, "Actioned")]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="dupe_flags")
+    ip = models.CharField(max_length=64, db_index=True)
+    # Who else was on that address when this account appeared, and anything
+    # STRONGER than the address that ties them together. Recorded rather than
+    # recomputed: the owner reviews the case as it was, and a member who
+    # changes their email later does not silently rewrite it.
+    others = models.JSONField(default=list, blank=True)
+    signals = models.JSONField(default=list, blank=True)
+    # True when something stronger than the address agreed — same email, or the
+    # same email on a linked sign-in. That is the difference between "worth a
+    # look" and "almost certainly the same person", and it decides whether the
+    # new member hears anything at all.
+    strong = models.BooleanField(default=False, db_index=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=OPEN, db_index=True)
+    resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                    null=True, blank=True, related_name="dupe_flags_resolved")
+    resolved_note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-strong", "-created_at"]
+
+    def __str__(self):
+        return f"DupeFlag<{self.user} @ {self.ip}: {self.status}>"
+
+
 # ---- Direct messages ----
 class Message(models.Model):
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="messages_sent")

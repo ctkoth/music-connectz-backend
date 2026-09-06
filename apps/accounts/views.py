@@ -1,3 +1,4 @@
+import logging
 import re
 
 from django.contrib.auth import get_user_model
@@ -25,6 +26,7 @@ from .serializers import (
 )
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 def _unique_username(base):
@@ -45,8 +47,34 @@ def _unique_username(base):
 _clean_persona = clean_persona
 
 
-def _user_from_oauth(info):
+def _note_signup(user, request):
+    """Record the signup address and raise a DupeZ flag if it is not the first.
+
+    Swallows everything. A duplicate check is a hint for a human to read later;
+    it may never be the reason somebody could not create an account.
+    """
+    try:
+        from apps.economy.dupez import flag_signup
+        flag_signup(user, request)
+    except Exception:  # noqa: BLE001 — a hint must never break a signup
+        logger.exception("dupez: could not flag signup for %s", getattr(user, "id", "?"))
+
+
+def _note_seen(user, request):
+    """Record an address a returning account was seen from. Same guarantee."""
+    try:
+        from apps.economy.dupez import remember_address
+        remember_address(user, request)
+    except Exception:  # noqa: BLE001
+        logger.exception("dupez: could not record address for %s", getattr(user, "id", "?"))
+
+
+def _user_from_oauth(info, with_created=False):
     """Find-or-create a user from a verified OAuth payload, return (user).
+
+    `with_created` returns `(user, created)` instead, so a caller can tell a
+    brand-new account from a returning one — DupeZ needs the difference, and
+    every other caller keeps the original single-value shape.
 
     Matching an existing account by email hands the caller that account, so we
     only do it when the provider actually ASSERTED the address is verified.
@@ -57,8 +85,9 @@ def _user_from_oauth(info):
         provider=info["provider"], provider_uid=info["uid"]
     ).first()
     if identity:
-        return identity.user
+        return (identity.user, False) if with_created else identity.user
 
+    made = False
     user = None
     if info.get("email"):
         match = User.objects.filter(email__iexact=info["email"]).first()
@@ -74,6 +103,7 @@ def _user_from_oauth(info):
         user = match
 
     if not user:
+        made = True
         base = info.get("name") or (info["email"].split("@")[0] if info.get("email") else info["provider"])
         user = User.objects.create_user(
             username=_unique_username(base),
@@ -90,7 +120,7 @@ def _user_from_oauth(info):
         provider_uid=info["uid"],
         defaults={"user": user, "email": info.get("email", "")},
     )
-    return user
+    return (user, made) if with_created else user
 
 
 class RegisterView(APIView):
@@ -100,6 +130,11 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        # DupeZ: note where this account was made from, and raise a flag if
+        # another account was made from the same place. It flags — it never
+        # blocks a signup and never deletes anything, and it is wrapped
+        # because a duplicate check must not be able to fail a registration.
+        _note_signup(user, request)
         tokens = issue_tokens(user)
         return Response(
             {"user": PublicUserSerializer(user).data, **tokens},
@@ -114,6 +149,7 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data["user"]
+        _note_seen(user, request)
         tokens = issue_tokens(user)
         return Response({"user": PublicUserSerializer(user).data, **tokens})
 
@@ -365,10 +401,14 @@ class OAuthLoginView(APIView):
                 )
             # Linking lives inside the same try so a refused link answers 400
             # with its reason, not a 500.
-            user = _user_from_oauth(info)
+            user, made = _user_from_oauth(info, with_created=True)
         except OAuthError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Signing in with a different provider is how most duplicates on this
+        # platform get made, so an account created HERE is the one worth
+        # noticing — the same call, gated on whether the account is new.
+        _note_signup(user, request) if made else _note_seen(user, request)
         tokens = issue_tokens(user)
         return Response({"user": PublicUserSerializer(user).data, **tokens})
 

@@ -11,8 +11,8 @@ from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
 from .rulez import RulezView
-from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZReviewView,
-                    DupeZView)
+from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView,
+                    DupeZReviewView, DupeZView)
 from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
 from .soundz import SoundZView
@@ -330,6 +330,9 @@ urlpatterns = [
     path("dupez/claim/", DupeZClaimView.as_view(), name="economy-dupez-claim"),
     path("dupez/review/", DupeZReviewView.as_view(), name="economy-dupez-review"),
     path("dupez/delete/", DupeZDeleteView.as_view(), name="economy-dupez-delete"),
+    # The system-raised half of the queue: a new account made from an address
+    # another account was made from. A flag, never a block and never a delete.
+    path("dupez/flags/", DupeZFlagsView.as_view(), name="economy-dupez-flags"),
     # A collab is where the finished master usually lands, so it releases too.
     path("collab/<int:pk>/distribute/", CollabDistributeView.as_view(), name="economy-collab-distribute"),
     # The work going back and forth: v1 down, v2 up.

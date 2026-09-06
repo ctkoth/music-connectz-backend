@@ -36,6 +36,9 @@ collect three lots of onboarding, merge them into one. The duplicate's game
 balance dies with the duplicate, which is the only answer that does not pay
 for the thing the rule forbids.
 """
+import os
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
@@ -46,8 +49,11 @@ from rest_framework.views import APIView
 
 from .models import (
     AccountClaim,
+    AccountIP,
+    DupeFlag,
     JournalEntry,
     Post,
+    SharedAddress,
     Upload,
     membership_for,
     notify,
@@ -73,7 +79,25 @@ SIGNAL_LABELS = {
     "oauth_provider_uid": ("Same third-party account linked", STRONG),
     "same_referrer": ("Referred by the same member", WEAK),
     "referral_chain": ("One referred the other", WEAK),
+    # Weak, and it is the most important weak one to keep weak. See the note
+    # above `AccountIP` for why a shared address proves nothing in a music app:
+    # a studio, a college, a carrier's NAT and the app's own referral loop all
+    # produce it, and every one of those is a room of different people.
+    "same_address": ("Signed up from the same address", WEAK),
 }
+
+# How many accounts an address may accumulate before it is obviously a shared
+# one rather than one person. Past this, flagging every new signup is noise
+# that makes the owner stop reading the queue — which is worse than not
+# flagging at all. Env-tunable so it can be dialled without a deploy, the way
+# `TRIAL_MAX_MB` is.
+ADDRESS_CROWD = int(os.environ.get("DUPEZ_ADDRESS_CROWD", "8"))
+
+# How many addresses to remember per account, and for how long. An address log
+# that grows without limit is a tracking database nobody asked for; these two
+# numbers are what keep it a duplicate check.
+ADDRESS_KEEP_PER_USER = 12
+ADDRESS_KEEP_DAYS = 180
 
 
 def _email(u):
@@ -87,6 +111,17 @@ def _oauth_emails(u):
 
 def _oauth_uids(u):
     return {(i.provider, i.provider_uid) for i in u.oauth_identities.all()}
+
+
+def _ips(u):
+    """Addresses this account SIGNED UP from. Not every address it has visited.
+
+    A sighting is where somebody happened to be; a signup address is where the
+    account came from, which is the only one that says anything about how it
+    came to exist. Comparing every sighting would put two members who once used
+    the same café on the same list.
+    """
+    return {a.ip for a in u.addresses.all() if a.signup and a.ip}
 
 
 def signals_between(a, b):
@@ -113,6 +148,10 @@ def signals_between(a, b):
 
     for provider, uid in sorted(_oauth_uids(a) & _oauth_uids(b)):
         out.append({"key": "oauth_provider_uid", "detail": provider})
+
+    shared_ips = _ips(a) & _ips(b)
+    for ip in sorted(shared_ips):
+        out.append({"key": "same_address", "detail": ip})
 
     ra = getattr(a, "referred_by", None)
     rb = getattr(b, "referred_by", None)
@@ -290,6 +329,105 @@ def delete_duplicate(target, keep=None, *, by, reason=""):
         "deleted": username, "kept": keep.username if keep else None,
         "swept": swept, "was": card, "by": by.username, "reason": reason,
     }
+
+
+# ---- Addresses: recording one, and flagging a signup ----------------------
+
+
+def client_ip(request):
+    """The caller's address, best effort. Never raises, never blocks a signup.
+
+    An address is a hint for a human to look at, so a proxy sending something
+    unexpected costs us a hint and must not cost somebody their registration.
+    """
+    try:
+        fwd = (request.META.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
+        return (fwd or request.META.get("REMOTE_ADDR") or "")[:64]
+    except (AttributeError, TypeError):
+        return ""
+
+
+def remember_address(user, request, *, signup=False):
+    """Record where this account was seen, and prune what is no longer needed.
+
+    Bounded on purpose. An address log that grows forever is a tracking
+    database nobody asked for, and this one exists for a single question:
+    was this account made from somewhere another account was made from.
+    """
+    ip = client_ip(request)
+    if not user or not ip:
+        return None
+    row, created = AccountIP.objects.get_or_create(
+        user=user, ip=ip, defaults={"signup": signup})
+    if not created:
+        row.hits += 1
+        # `signup` only ever goes true. An account created here and visited
+        # again later is still an account created here.
+        if signup and not row.signup:
+            row.signup = True
+        row.save(update_fields=["hits", "signup", "last_seen"])
+
+    # Prune: sightings age out, signup addresses never do.
+    cutoff = timezone.now() - timedelta(days=ADDRESS_KEEP_DAYS)
+    AccountIP.objects.filter(user=user, signup=False, last_seen__lt=cutoff).delete()
+    extra = list(AccountIP.objects.filter(user=user, signup=False)
+                 .order_by("-last_seen")[ADDRESS_KEEP_PER_USER:]
+                 .values_list("id", flat=True))
+    if extra:
+        AccountIP.objects.filter(id__in=extra).delete()
+    return row
+
+
+def flag_signup(user, request):
+    """Raise a DupeFlag when a new account is made where another one was.
+
+    Deliberately ONLY a flag. Nothing is blocked, nothing is deleted, and the
+    new member is told nothing unless something stronger than the address
+    agrees — because on a studio wifi or a carrier's NAT the honest reading of
+    "somebody else signed up here" is "somebody else lives here", and messaging
+    a legitimate new member about it is an accusation dressed as a courtesy.
+    """
+    remember_address(user, request, signup=True)
+    ip = client_ip(request)
+    if not ip or SharedAddress.objects.filter(ip=ip).exists():
+        return None
+
+    others = list(
+        User.objects.filter(addresses__ip=ip, addresses__signup=True)
+        .exclude(id=user.id).distinct()
+        .prefetch_related("oauth_identities").select_related("referred_by")[:ADDRESS_CROWD + 1]
+    )
+    if not others:
+        return None
+    if len(others) >= ADDRESS_CROWD:
+        # A crowd is a place, not a person. Flagging every signup from a
+        # college or a rehearsal room would fill the queue with the members
+        # this platform exists for, and a queue nobody can read is one nobody
+        # reads the real entries in either.
+        return None
+
+    signals, strong = [], False
+    for other in others:
+        sig = signals_between(user, other)
+        if has_strong(sig):
+            strong = True
+        signals.append({"username": other.username, "signals": sig})
+
+    flag = DupeFlag.objects.create(
+        user=user, ip=ip, others=[o.username for o in others],
+        signals=signals, strong=strong,
+    )
+    if strong:
+        # Only now, and phrased as the rule rather than an accusation: at this
+        # point something other than the address agrees, so the likeliest
+        # reader is somebody who genuinely already has an account and would
+        # rather have one than two.
+        r = rule("one_account") or {}
+        notify(user, "system",
+               (r.get("rule") or "One person, one account.")
+               + " Open DupeZ if one of these is already yours.",
+               item_id="dupez")
+    return flag
 
 
 # ---- Endpoints -------------------------------------------------------------
@@ -538,3 +676,72 @@ class DupeZDeleteView(APIView):
         except ValueError as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(receipt)
+
+
+class DupeZFlagsView(APIView):
+    """The system-raised half of the owner's queue. GET open flags; POST settles one.
+
+    Separate from `DupeZReviewView` because the two say different things: a
+    claim is a member asking, a flag is the platform noticing. Settling a flag
+    never deletes anything — the owner clears it, marks the address shared, or
+    goes and uses the delete endpoint deliberately. Nothing here is one tap
+    away from destroying an account.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not is_owner(request.user):
+            return Response({"detail": "owner only"}, status=status.HTTP_403_FORBIDDEN)
+        state = (request.query_params.get("status") or DupeFlag.OPEN).lower()
+        rows = DupeFlag.objects.select_related("user")
+        if state != "all":
+            rows = rows.filter(status=state)
+        out = []
+        for f in rows[:100]:
+            out.append({
+                "id": f.id,
+                "user": f.user.username,
+                "account": account_card(f.user),
+                "ip": f.ip,
+                "others": f.others,
+                "signals": f.signals,
+                # Said in the row rather than left to the reader: an address on
+                # its own is not evidence of anything.
+                "strong": f.strong,
+                "status": f.status,
+                "created_at": f.created_at.isoformat(),
+                "resolved_note": f.resolved_note,
+            })
+        return Response({
+            "flags": out,
+            "shared_addresses": list(
+                SharedAddress.objects.values("ip", "note", "created_at")[:200]),
+            "crowd": ADDRESS_CROWD,
+            "rule": rule("one_account"),
+        })
+
+    def post(self, request):
+        if not is_owner(request.user):
+            return Response({"detail": "owner only"}, status=status.HTTP_403_FORBIDDEN)
+        d = request.data or {}
+        flag = DupeFlag.objects.filter(id=d.get("id")).select_related("user").first()
+        if not flag:
+            return Response({"detail": "no such flag"}, status=status.HTTP_404_NOT_FOUND)
+        note = str(d.get("note", ""))[:2000]
+        if d.get("shared"):
+            # One studio, one college, one carrier NAT — marked once and it
+            # stops raising flags forever. This is what keeps the queue
+            # readable, which is what keeps it read.
+            SharedAddress.objects.get_or_create(
+                ip=flag.ip, defaults={"note": note or "marked shared from a flag",
+                                      "added_by": request.user})
+            DupeFlag.objects.filter(ip=flag.ip, status=DupeFlag.OPEN).update(
+                status=DupeFlag.CLEARED, resolved_by=request.user,
+                resolved_note=note or "shared address", resolved_at=timezone.now())
+            return Response({"cleared_address": flag.ip})
+        flag.status = DupeFlag.CLEARED if d.get("action", "clear") == "clear" else DupeFlag.ACTIONED
+        flag.resolved_by, flag.resolved_note = request.user, note
+        flag.resolved_at = timezone.now()
+        flag.save(update_fields=["status", "resolved_by", "resolved_note", "resolved_at"])
+        return Response({"flag": flag.id, "status": flag.status})
