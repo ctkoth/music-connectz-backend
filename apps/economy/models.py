@@ -147,6 +147,20 @@ class Transaction(models.Model):
     amount_cents = models.IntegerField(help_text="Signed: positive credit, negative debit")
     dev_tax_cents = models.PositiveIntegerField(default=0)
     note = models.CharField(max_length=200, blank=True, default="")
+    # WHERE the movement came from. The cross-pollination rule says anything
+    # that stores a thing stores where it came from, and this — the one table
+    # that records every resource movement in the app — did not. So a LogZ row
+    # could say "+300 🍥 referral (referrer)" and offer nowhere to go with it:
+    # the note named the reason in prose and nothing could turn that back into
+    # a door.
+    #
+    # Blank is a real state and means "the writer didn't say", which is the
+    # truth for every row written before this and for any caller that doesn't
+    # pass one. It is never INFERRED from the note — a guessed origin is a door
+    # that opens on the wrong screen, and the rule about not asserting what you
+    # only inferred applies to navigation as much as to errors.
+    app_key = models.CharField(max_length=24, blank=True, default="")
+    target = models.CharField(max_length=60, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -546,11 +560,20 @@ def can_afford_ai(user, cost_cents):
     return (w.promptz or 0) + (w.money_cents or 0) >= cost_cents
 
 
-def award_promptz(user, amount, note="PromptZ"):
-    """Grant prepaid AI credits (1 PromptZ = 1¢ of AI spend)."""
+def award_promptz(user, amount, note="PromptZ", *, app_key="", target=""):
+    """Grant prepaid AI credits (1 PromptZ = 1¢ of AI spend), and record it.
+
+    It did not record it. SpinaZ and Energy have written a LogZ line since LogZ
+    shipped; PromptZ moved silently, so "where did my 🏷️ come from" — bought,
+    swapped from 🍥 at SPINAZ_PER_PROMPTZ, or granted — had no answer except
+    watching the number. Same bug LogZ exists to fix, left open on one
+    resource because this helper predates it and nothing re-checked.
+    """
     w = wallet_for(user)
     w.promptz = (w.promptz or 0) + int(amount)
     w.save(update_fields=["promptz", "updated_at"])
+    log_resource(user, Transaction.RES_PROMPTZ, int(amount), note or "PromptZ",
+                 app_key=app_key, target=target)
     return w.promptz
 
 
@@ -1241,7 +1264,7 @@ class LinkClick(models.Model):
         unique_together = ("counter", "clicker", "day")
 
 
-def award_spinaz(user, amount, note=""):
+def award_spinaz(user, amount, note="", *, app_key="", target=""):
     """Credit SpinAZ to a user's wallet and record it.
 
     The `note` every caller already passes used to be accepted and thrown
@@ -1251,20 +1274,22 @@ def award_spinaz(user, amount, note=""):
     w = wallet_for(user)
     w.spinaz = (w.spinaz or 0) + int(amount)
     w.save(update_fields=["spinaz", "updated_at"])
-    log_resource(user, Transaction.RES_SPINAZ, int(amount), note or "SpinaZ")
+    log_resource(user, Transaction.RES_SPINAZ, int(amount), note or "SpinaZ",
+                 app_key=app_key, target=target)
     return w.spinaz
 
 
-def award_energy(user, amount, note=""):
+def award_energy(user, amount, note="", *, app_key="", target=""):
     """Credit Energy to a user's wallet, and record it."""
     w = wallet_for(user)
     w.energy = (w.energy or 0) + int(amount)
     w.save(update_fields=["energy", "updated_at"])
-    log_resource(user, Transaction.RES_ENERGY, int(amount), note or "Energy")
+    log_resource(user, Transaction.RES_ENERGY, int(amount), note or "Energy",
+                 app_key=app_key, target=target)
     return w.energy
 
 
-def log_resource(user, resource, amount, note=""):
+def log_resource(user, resource, amount, note="", *, app_key="", target=""):
     """One line in LogZ: what moved, which way, and when.
 
     Best-effort — a ledger write must never be the reason a reward fails to
@@ -1281,6 +1306,9 @@ def log_resource(user, resource, amount, note=""):
             amount_cents=int(amount) if resource == Transaction.RES_MONEY else 0,
             dev_tax_cents=0,
             note=str(note)[:200],
+            # Blank when the caller didn't say. Never guessed from the note.
+            app_key=str(app_key or "")[:24],
+            target=str(target or "")[:60],
         )
     except Exception:  # pragma: no cover - never break a reward over its log
         return None
@@ -1314,8 +1342,10 @@ def record_referral(referrer, joinee):
     if Referral.objects.filter(joinee=joinee).exists():
         return None
     ref = Referral.objects.create(referrer=referrer, joinee=joinee)
-    award_spinaz(referrer, REFERRAL_REWARD_REFERRER_SPINAZ, "referral (referrer)")
-    award_spinaz(joinee, REFERRAL_REWARD_JOINEE_SPINAZ, "referral (welcome)")
+    award_spinaz(referrer, REFERRAL_REWARD_REFERRER_SPINAZ, "referral (referrer)",
+                 app_key="profilez", target="referral-code")
+    award_spinaz(joinee, REFERRAL_REWARD_JOINEE_SPINAZ, "referral (welcome)",
+                 app_key="profilez", target="referral-code")
     return ref
 
 
@@ -1363,8 +1393,8 @@ def complete_onboarding(user):
     p.onboarded = True
     p.onboarded_at = timezone.now()
     p.save(update_fields=["onboarded", "onboarded_at", "updated_at"])
-    award_spinaz(user, ONBOARD_REWARD_SPINAZ, "onboarding")
-    award_energy(user, ONBOARD_REWARD_ENERGY, "onboarding")
+    award_spinaz(user, ONBOARD_REWARD_SPINAZ, "onboarding", app_key="onboardz")
+    award_energy(user, ONBOARD_REWARD_ENERGY, "onboarding", app_key="onboardz")
     return {"spinaz": ONBOARD_REWARD_SPINAZ, "energy": ONBOARD_REWARD_ENERGY, "already": False}
 
 
@@ -1511,7 +1541,8 @@ def pay_bug_bounty(bug, by=None):
     """
     if bug.paid_at or bug.status != BugReport.STATUS_SQUASHED:
         return False
-    award_spinaz(bug.reporter, BUG_BOUNTY_SPINAZ, note=f"BugZ bounty: {bug.title}"[:200])
+    award_spinaz(bug.reporter, BUG_BOUNTY_SPINAZ,
+                 note=f"BugZ bounty: {bug.title}"[:200], app_key="bugz")
     grant_badge(bug.reporter, "bug_hunter", by=by)
     bug.paid_at = timezone.now()
     bug.save(update_fields=["paid_at", "updated_at"])

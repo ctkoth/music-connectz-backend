@@ -654,7 +654,8 @@ class PostJoinView(APIView):
             return False
         if PostJoin.objects.filter(post__author=p.author, rewarded=True, joined_at__gte=day_ago).count() >= JOIN_REWARD_DAILY_CAP_PER_AUTHOR:
             return False
-        award_spinaz(p.author, RESTRICTED_JOIN_REWARD_SPINAZ, note=f"Restricted join on '{p.title}'")
+        award_spinaz(p.author, RESTRICTED_JOIN_REWARD_SPINAZ,
+                     note=f"Restricted join on '{p.title}'", app_key="postz")
         join.rewarded = True
         join.save(update_fields=["rewarded"])
         notify(p.author, "join", f"@{user.username} joined '{p.title}' — you earned +{RESTRICTED_JOIN_REWARD_SPINAZ} 🍥", actor=user, item_id=f"post:{p.id}")

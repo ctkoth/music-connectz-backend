@@ -1017,52 +1017,37 @@ class UploadDetailView(APIView):
         return Response(_storage_summary(request.user, m.tier))
 
 
-def _validate_youtube_url(url):
-    """Extract video ID from YouTube URL."""
-    patterns = [
-        r'(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})',
-        r'youtube\.com\/embed\/([a-zA-Z0-9_-]{11})',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, url)
-        if match:
-            return match.group(1)
-    return None
+def _parse_embed_url(url, embed_type=""):
+    """Resolve a portfolio embed through WidgetZ, which is the one embed list.
 
+    There used to be a second one here — three providers, its own regexes, and
+    `spotify` and `soundcloud` STORING THE MEMBER'S OWN URL to be framed
+    verbatim. `widgetz` was written a week later around exactly the opposite
+    rule: read an id out of the link and build the provider's embed address
+    server-side, so nothing a member types reaches the frame. Two files
+    disagreeing about what an embed is meant an Apple Music link was a widget
+    on a profile and a 400 on a post — the same link, two answers.
 
-def _validate_spotify_url(url):
-    """Extract track ID from Spotify URL."""
-    patterns = [
-        r'spotify\.com\/track\/([a-zA-Z0-9]+)',
-        r'spotify\.com\/playlist\/([a-zA-Z0-9]+)',
-        r'spotify\.com\/album\/([a-zA-Z0-9]+)',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, url)
-        if match:
-            return match.group(1)
-    return None
+    One list now, so a provider added to `widgetz.PLAYERS` appears here for
+    free and neither can drift. `embed_type` is accepted and ignored: the URL
+    decides what it is, and a member picking the wrong radio button in the old
+    composer should not be told their perfectly good link is invalid.
+    """
+    from .widgetz import _player_for
 
-
-def _validate_soundcloud_url(url):
-    """Check if URL is a valid SoundCloud track."""
-    return 'soundcloud.com' in url.lower()
-
-
-def _parse_embed_url(url, embed_type):
-    """Validate and parse embed URL by type."""
-    if embed_type == "youtube":
-        video_id = _validate_youtube_url(url)
-        if video_id:
-            return {"type": "youtube", "url": f"https://www.youtube.com/embed/{video_id}", "valid": True}
-    elif embed_type == "spotify":
-        track_id = _validate_spotify_url(url)
-        if track_id:
-            return {"type": "spotify", "url": url, "valid": True}
-    elif embed_type == "soundcloud":
-        if _validate_soundcloud_url(url):
-            return {"type": "soundcloud", "url": url, "valid": True}
-    return {"valid": False}
+    spec = _player_for(str(url or "").strip())
+    if not spec:
+        return {"valid": False}
+    return {
+        "type": spec["provider"],
+        "url": spec["src"],
+        "valid": True,
+        # Carried through so the client sizes the frame from the same place
+        # the widget board does rather than keeping its own table of heights.
+        "aspect": spec.get("aspect", ""),
+        "height": spec.get("height", 0),
+        "label": spec.get("label", ""),
+    }
 
 
 class PostEmbedsView(APIView):
@@ -1072,13 +1057,16 @@ class PostEmbedsView(APIView):
 
     def post(self, request):
         post_id = request.data.get("post_id")
-        embed_type = request.data.get("type")  # youtube, spotify, soundcloud
         embed_url = request.data.get("url")
-        title = request.data.get("title", "").strip()[:200]
+        title = str(request.data.get("title", "") or "").strip()[:200]
 
-        if not all([post_id, embed_type, embed_url]):
+        # `type` is no longer read. The URL says what a link is, and requiring
+        # the member to also declare it meant a wrong radio button refused a
+        # link that worked. Old clients may still send it; it is ignored rather
+        # than rejected, so a stale tab keeps working across the deploy.
+        if not all([post_id, embed_url]):
             return Response(
-                {"detail": "post_id, type, and url required"},
+                {"detail": "post_id and url required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1097,17 +1085,26 @@ class PostEmbedsView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        parsed = _parse_embed_url(embed_url, embed_type)
+        parsed = _parse_embed_url(embed_url)
         if not parsed.get("valid"):
+            from .widgetz import PLAYER_LABELS
             return Response(
-                {"detail": f"invalid {embed_type} URL"},
+                # Names what IS playable rather than repeating the member's own
+                # word back at them. "invalid youtube URL" on a link that was
+                # never YouTube is a refusal that helps nobody.
+                {"detail": "That link isn't one with a player we can embed. "
+                           f"These work: {', '.join(PLAYER_LABELS)}.",
+                 "players": PLAYER_LABELS},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         new_embed = {
-            "type": embed_type,
+            # The URL decides the type, not the radio button — see above.
+            "type": parsed["type"],
             "url": parsed["url"],
-            "title": title or embed_type.title(),
+            "title": title or parsed.get("label") or parsed["type"].title(),
+            "aspect": parsed.get("aspect", ""),
+            "height": parsed.get("height", 0),
         }
         embeds.append(new_embed)
         post.embeds = embeds
