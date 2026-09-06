@@ -255,6 +255,14 @@ the command and the screen cannot disagree about what a duplicate is.
   migration touching field widths gets checked against real Postgres BEFORE it
   reaches `main`, not after.
 
+**Corey's standing instruction: merge without asking.** Don't stop at a green
+branch to request permission — verify it (the repo's own checks, and for the
+backend the full suite plus a column-width check on any new migration), then
+merge and push. The merge is still the deliberate act; the deliberation is the
+verification, not a question. Backend first whenever a screen needs a new
+endpoint.
+
+
 ## KeyConnectZ voice: the tier buys how many, never whether
 
 `keyconnectz.py` had already written the rule down: the wallpaper is Premium
