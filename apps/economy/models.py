@@ -2074,6 +2074,32 @@ class RewardGrant(models.Model):
         indexes = [models.Index(fields=["provider", "-created_at"])]
 
 
+# ---- SoundCloud Engagement Rewards (likes, reposts, comments) ----------------
+# Portfolio Showcase: members earn for engagement on their SoundCloud tracks.
+class SoundCloudEngagement(models.Model):
+    KIND_LIKE = "like"
+    KIND_REPOST = "repost"
+    KIND_COMMENT = "comment"
+    KIND_CHOICES = [
+        (KIND_LIKE, "Like"),
+        (KIND_REPOST, "Repost"),
+        (KIND_COMMENT, "Comment"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="soundcloud_engagements")
+    track_id = models.CharField(max_length=100)  # SoundCloud track ID
+    track_url = models.CharField(max_length=500)  # SoundCloud track URL
+    track_title = models.CharField(max_length=500, blank=True, default="")
+    kind = models.CharField(max_length=12, choices=KIND_CHOICES)
+    rewarded = models.BooleanField(default=False)  # Whether this engagement was rewarded
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "track_id", "kind")  # One reward per track per kind per user
+        indexes = [models.Index(fields=["user", "kind", "-created_at"])]
+        ordering = ("-created_at",)
+
+
 # ---- ObservationZ — HabitZ 🫠 / CodeZ 🧩 / PathZ 🛤️ / MistakeZ 😢
 #
 # Four tabs, one shape: notice something happen, tally it, surface what repeats
