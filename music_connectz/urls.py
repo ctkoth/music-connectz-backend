@@ -8,6 +8,7 @@ from django.urls import include, path, re_path
 from django.views.static import serve as static_serve
 
 from apps.economy.views import (
+    AllMembersView,
     FunnelEventView,
     FunnelSummaryView,
     PublicStatsView,
@@ -78,6 +79,7 @@ urlpatterns = [
     path("", health, name="health"),
     path("admin/", admin.site.urls),
     path("api/auth/stats/", StatsView.as_view(), name="auth-stats"),
+    path("api/auth/stats/all/", AllMembersView.as_view(), name="auth-stats-all"),
     # No session required — the landing page's real member/online count.
     path("api/auth/public-stats/", PublicStatsView.as_view(), name="auth-public-stats"),
     # No session required — a step on the join funnel, logged by a visitor

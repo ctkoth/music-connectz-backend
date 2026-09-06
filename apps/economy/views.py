@@ -252,6 +252,21 @@ class StatsView(APIView):
         )
 
 
+class AllMembersView(APIView):
+    """GET /api/auth/stats/all/ — list all members ordered by join date.
+    Used by CommunityBar to show clickable member list."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        members = list(
+            User.objects.all()
+            .order_by("date_joined")
+            .values_list("username", flat=True)
+        )
+        return Response({"members": members})
+
+
 class PublicStatsView(APIView):
     """Real member/online counts for a visitor who has no session yet.
 
