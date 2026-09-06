@@ -10,6 +10,9 @@ from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
 from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
+from .rulez import RulezView
+from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZReviewView,
+                    DupeZView)
 from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
 from .soundz import SoundZView
@@ -317,6 +320,16 @@ urlpatterns = [
     # POST resolves one link into the widget it becomes.
     path("widgetz/", WidgetZView.as_view(), name="economy-widgetz"),
     path("widgetz/open/", WidgetOpenView.as_view(), name="economy-widgetz-open"),
+    # The house rules, in one place so no screen retypes one. Open logged-out:
+    # the one about how many accounts a person gets is needed on the signup
+    # form, which is the one screen where nobody is signed in yet.
+    path("rulez/", RulezView.as_view(), name="economy-rulez"),
+    # DupeZ — one person, one account. Groups, the member's claim on their own
+    # other account, the owner's review queue, and the owner override.
+    path("dupez/", DupeZView.as_view(), name="economy-dupez"),
+    path("dupez/claim/", DupeZClaimView.as_view(), name="economy-dupez-claim"),
+    path("dupez/review/", DupeZReviewView.as_view(), name="economy-dupez-review"),
+    path("dupez/delete/", DupeZDeleteView.as_view(), name="economy-dupez-delete"),
     # A collab is where the finished master usually lands, so it releases too.
     path("collab/<int:pk>/distribute/", CollabDistributeView.as_view(), name="economy-collab-distribute"),
     # The work going back and forth: v1 down, v2 up.

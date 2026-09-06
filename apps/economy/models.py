@@ -111,6 +111,12 @@ class Transaction(models.Model):
     # royalties, and putting both in one bucket would make either impossible to
     # total. These are the "intelligence royalties" the Owner badge names.
     KIND_INTELLIGENCE = "intelligence"
+    # Cash moved between two accounts rather than in or out of the platform —
+    # today, a duplicate account's balance swept to the one being kept before
+    # it is deleted. Its own kind because it is neither funds arriving nor a
+    # reward: totalling it as either would overstate what the platform took in
+    # by exactly the amount that only ever moved sideways.
+    KIND_TRANSFER = "transfer"
     KIND_CHOICES = [
         (KIND_ADD, "Add funds"),
         (KIND_PURCHASE, "Purchase"),
@@ -118,6 +124,7 @@ class Transaction(models.Model):
         (KIND_REWARD, "Reward"),
         (KIND_SPEND, "Spend"),
         (KIND_INTELLIGENCE, "Intelligence royalty"),
+        (KIND_TRANSFER, "Transfer"),
     ]
 
     # Which resource moved. Money was the only thing ever recorded, so SpinaZ
@@ -1519,6 +1526,69 @@ def notify(user, kind, text, actor=None, item_id=""):
     if not user or (actor and actor.id == user.id):
         return None
     return Notification.objects.create(user=user, actor=actor, kind=kind, text=text[:280], item_id=item_id or "")
+
+
+# ---- DupeZ: one person, more than one account ----
+#
+# Two accounts belonging to the same person is not, by itself, misconduct — it
+# is what OAuth produces when somebody signs in with Google in June and with
+# SoundCloud in August. What it costs them is real though: their work is split
+# across two profiles, their reach counts twice as two people and once as
+# nobody, and neither account is the one they meant to build.
+#
+# The fix is a deletion, and a deletion is the most irreversible thing this app
+# can do to a member. So it is never automatic and never inferred:
+#
+# * **A claim is made by a person, about their own other account.** Nothing in
+#   the codebase decides two accounts are the same and acts on it.
+# * **The owner decides.** Except for the one case a member can prove on their
+#   own (the two accounts carry the same email), a claim is a request, and it
+#   sits here until the owner approves or refuses it.
+# * **It is refused in writing.** `resolved_note` is why, and the claimant is
+#   notified either way — a queue somebody's account disappears into without a
+#   word is worse than no queue.
+class AccountClaim(models.Model):
+    """"That other account is also me" — a request to delete it, pending review.
+
+    Deliberately NOT a BugReport. BugZ's queue is public by design ("everyone
+    sees the queue", so nobody files the same thing twice), and a claim names
+    two accounts and the evidence tying them together — publishing it would
+    tell the whole platform which handles belong to the same person, about
+    every member who ever filed one.
+    """
+
+    OPEN, APPROVED, REFUSED, WITHDRAWN = "open", "approved", "refused", "withdrawn"
+    STATUS_CHOICES = [(OPEN, "Open"), (APPROVED, "Approved"),
+                      (REFUSED, "Refused"), (WITHDRAWN, "Withdrawn")]
+
+    claimant = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                 related_name="account_claims")
+    # The account the claimant says is also theirs, and wants gone. Kept as a
+    # FK so it cannot name an account that does not exist — and CASCADE because
+    # once the target is deleted (by this claim or any other route) the claim
+    # has nothing left to be about.
+    target = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="claims_against")
+    note = models.TextField(blank=True, default="")
+    # What actually tied the two accounts together when the claim was filed,
+    # recorded rather than recomputed: the owner reviews the evidence as it was,
+    # and a signal that has since changed does not silently rewrite the case.
+    signals = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=OPEN, db_index=True)
+    resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                    null=True, blank=True, related_name="claims_resolved")
+    resolved_note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        # One open claim per pair. Re-filing is editing the one you have, not
+        # a second queue entry saying the same thing.
+        unique_together = ("claimant", "target")
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"AccountClaim<{self.claimant} -> {self.target}: {self.status}>"
 
 
 # ---- Direct messages ----

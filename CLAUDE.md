@@ -152,6 +152,86 @@ give them the link. A read-only surface is usually an unfinished one.
 
 ---
 
+## One person, one account (Corey's rule — a platform rule, not a design one)
+
+**Every member gets one account. Duplicate accounts are not accepted.**
+
+It is written down for members in `apps/economy/rulez.py` and served by
+`GET /api/economy/rulez/` — open logged-out, because the screen that most needs
+it is the signup form, where nobody is signed in yet. **No screen retypes it.**
+A rule stated in three places reads three ways within a year, and a rule people
+are held to has to be one they were actually told.
+
+The reason is the one the substance rule already gives: everything here is
+counted per person — reach, ratings, referral rewards, the daily AI allowance,
+one vote in a battle. A second account is a second helping of all of it, and
+every one of those numbers stops meaning anything the moment it can be doubled.
+
+### Enforcement is a deletion, so it is deliberately narrow
+
+`apps/economy/dupez.py` is what `rulez.one_account`'s `enforced_by` names, and
+that field exists so a rule cannot quietly become a wish: grep the key and you
+find both ends. Four things hold it:
+
+- **Nothing is inferred and acted on.** `signals_between` returns the FACTS two
+  accounts share — same email, same email on a linked sign-in, same referrer —
+  each labelled and weighted strong or weak. **Never a score.** A "78% likely
+  duplicate" is the substance rule's exact failure case with an irreversible
+  action behind it.
+- **A member may only ask about their OWN other account.** There is no "report
+  this person for having two" — that door gets used for something else inside a
+  week.
+- **The owner decides, except where the member can prove it.** Same email on
+  both accounts is your own mess and you may close the other one yourself.
+  Anything weaker is an `AccountClaim` and it waits. Refusals are written down
+  and the claimant is told either way: a queue somebody's account disappears
+  into without a word is worse than no queue.
+- **Weak signals never group anybody.** Two friends who joined on the same
+  invite are two people, and an accusation built out of a coincidence is worse
+  than a duplicate nobody noticed.
+
+### A delete may destroy work. It may never destroy money.
+
+`AccountDeleteView` has always wiped a wallet holding real cash without a word.
+Survivable when it is your own account and your own decision; not survivable
+here, where the account being deleted is usually not the one pressing the
+button. So `delete_duplicate` **refuses** when money or royalties would be lost
+and there is no account named to sweep them to, and the refusal states the
+amount.
+
+**Money and royalties sweep. Energy, SpinaZ, PromptZ and XP do not**, and that
+line is the whole design: cash is the member's and destroying it is taking it,
+but the game resources are exactly what a second account exists to farm.
+Sweeping those would make the tidy-up the payout — three accounts, three lots
+of onboarding, merged into one. A duplicate's game balance dies with it.
+
+A swept balance writes a `Transaction` (`KIND_TRANSFER`, its own kind so it is
+not totalled as revenue that only ever moved sideways), because a balance that
+appears with no reason behind it is what LogZ exists to stop.
+
+### It is not a BugZ report, and that was a real decision
+
+BugZ's queue is **public on purpose** — "everyone sees the queue", so nobody
+files the same thing twice. A claim names two accounts and the evidence tying
+them together, so filing one there would publish which handles belong to the
+same person, for every member who ever came forward under the rule that asks
+them to. `AccountClaim` has its own owner-only queue, following
+`moderation.ReportView`.
+
+### What the old finder got wrong
+
+`manage.py find_duplicate_accounts` could not find the case it existed for. It
+queried `oauthidentity__email` — the reverse name is `oauth_identities` — so
+that branch raised `FieldError` the moment a real cross-email duplicate
+existed, meaning it only ever "worked" on a platform that had none. It also
+looked for one OAuth identity on two accounts, which
+`unique_together = ("provider", "provider_uid")` forbids. And `--notify`
+printed to stdout and then said "✓ Notifications sent to N users" having sent
+nothing.
+
+It reports and stops now, off the same `dupez` detection the screen uses, so
+the command and the screen cannot disagree about what a duplicate is.
+
 ## Deployment
 
 **Both repos auto-deploy from `main`. Merging to `main` IS the deploy.**
