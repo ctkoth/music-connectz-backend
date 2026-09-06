@@ -9,6 +9,7 @@ from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView)
 from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
+from .widgetz import WidgetOpenView, WidgetZView
 from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
 from .soundz import SoundZView
@@ -311,6 +312,11 @@ urlpatterns = [
     path("playlistz/<int:pk>/collaborators/", PlaylistCollaboratorsView.as_view(), name="economy-playlist-collaborators"),
     path("link/click/", LinkClickView.as_view(), name="economy-link-click"),
     path("link/tallies/", LinkTalliesView.as_view(), name="economy-link-tallies"),
+    # WidgetZ — a link that opens on the screen instead of taking the member
+    # off it. GET is the policy (who may frame a page, what a visit pays);
+    # POST resolves one link into the widget it becomes.
+    path("widgetz/", WidgetZView.as_view(), name="economy-widgetz"),
+    path("widgetz/open/", WidgetOpenView.as_view(), name="economy-widgetz-open"),
     # A collab is where the finished master usually lands, so it releases too.
     path("collab/<int:pk>/distribute/", CollabDistributeView.as_view(), name="economy-collab-distribute"),
     # The work going back and forth: v1 down, v2 up.

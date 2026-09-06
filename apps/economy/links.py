@@ -35,6 +35,18 @@ User = get_user_model()
 SAFE_BROWSING_URL = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
 
 
+def scan_available():
+    """Whether a scan can actually happen — i.e. whether a key is configured.
+
+    Separated from the scan itself because `safe_browsing_check` answers
+    "safe" when it cannot look, which is the right answer for a click (we do
+    not block a member on our own outage) and the wrong one for anything that
+    treats a verdict as a permission. WidgetZ frames a page only when the scan
+    CLEARED it, and a link nobody scanned cleared nothing.
+    """
+    return bool(getattr(settings, "SAFE_BROWSING_API_KEY", "") or "")
+
+
 def _client_ip(request):
     fwd = request.META.get("HTTP_X_FORWARDED_FOR", "")
     if fwd:
@@ -95,7 +107,14 @@ class LinkClickView(APIView):
         # Scan once (or if a previous scan errored and left it unscanned).
         if not counter.scanned:
             safe, threat = safe_browsing_check(url)
-            counter.safe, counter.threat, counter.scanned = safe, threat, True
+            counter.safe, counter.threat = safe, threat
+            # Only a scan that RAN marks the row scanned. This used to set the
+            # flag either way, so a deploy with no key recorded every link as
+            # checked and clean — the docstring above already said we never
+            # claim a link is scanned when it isn't, and the column said we do.
+            # Nothing read it closely enough to catch that until WidgetZ, which
+            # frames a page only on a real verdict.
+            counter.scanned = scan_available()
         counter.clicks = (counter.clicks or 0) + 1
         counter.save()
 
