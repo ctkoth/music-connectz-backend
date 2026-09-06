@@ -15,16 +15,14 @@ from rest_framework import status
 
 from .features import can_use, feature_map, gate_detail
 from .models import Transaction, membership_for
+from .resources import BY_RESOURCE
 
-# The marks from CLAUDE.md. Served with the rows so the client never keeps its
-# own copy — a resource with two symbols is the bug we already fixed once.
-RESOURCE_EMOJI = {
-    Transaction.RES_MONEY: "💵",
-    Transaction.RES_SPINAZ: "🍥",
-    Transaction.RES_ENERGY: "⚡",
-    Transaction.RES_PROMPTZ: "🏷️",
-    Transaction.RES_XP: "⭐",
-}
+# The marks, served with the rows so the client never keeps its own copy — a
+# resource with two symbols is the bug we already fixed once. They live in
+# `resources.py` now rather than here: this module was the closest thing the
+# server had to one place for them, which meant every other module that needed
+# a mark typed the character again.
+RESOURCE_EMOJI = dict(BY_RESOURCE)
 PAGE = 100
 
 

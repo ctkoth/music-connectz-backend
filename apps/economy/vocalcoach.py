@@ -227,12 +227,17 @@ def _clamp(v, lo=1, hi=10):
         return None
 
 
-def score_take(app_key, f, content_type, *, genre, target, difficulty, style=None):
+def score_take(app_key, f, content_type, *, genre, target, difficulty, style=None,
+               user=None):
     """Send one take to the model. Returns (payload, error) — exactly one is None.
 
     Shared by the member coach and the no-account trial, deliberately: a trial
     that grades on an easier rubric is a lie about the product, and the first
     real take would contradict it.
+
+    `user` only decides the VOICE the prose comes back in, never the rubric —
+    which is the same reason the trial shares this function at all. None is the
+    trial, and it gets the house default.
     """
     key = _key()
     if not key:
@@ -249,6 +254,13 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         difficulty=difficulty if difficulty in DIFFICULTIES else "builder",
         style=str(style or "")[:60] or None,
     )
+    # The house voice for the PROSE inside the scored fields, from the member's
+    # own row — the short form, not the full preamble. `prompt_for` states the
+    # JSON contract, so it goes LAST and is the instruction nearest the model's
+    # answer; a voice note that displaced it would risk a take that scored fine
+    # coming back unparseable.
+    from .voice import prose_voice
+    prompt = f"{prose_voice(user)}\n\n{prompt}"
     # Normalise BEFORE the call. An unsupported container is a refusal we can
     # give instantly and explain, rather than a round trip that comes back as a
     # generic failure the member reads as "my take was bad".
@@ -552,6 +564,9 @@ class SingZCoachView(APIView):
                 self.app_key, f, content_type,
                 genre=genre, target=data.get("range"),
                 difficulty=data.get("difficulty"), style=data.get("style"),
+                # Only the voice the prose comes back in. The rubric is the
+                # same one the logged-out trial is scored on.
+                user=request.user,
             )
         except Exception:
             # Almost always a recording that is no longer in storage. Say that,

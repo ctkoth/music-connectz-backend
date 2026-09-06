@@ -1591,6 +1591,39 @@ class AccountClaim(models.Model):
         return f"AccountClaim<{self.claimant} -> {self.target}: {self.status}>"
 
 
+# ---- How the app talks to this member ----
+#
+# The voice was OCC's alone and it arrived on every request as a client field,
+# so it was per-app, per-call, and forgotten the moment somebody opened a
+# different screen. A member who turned the emoji down in OCC met the founder
+# voice at full volume in the coach five seconds later.
+#
+# It is a row now, read by every surface where a model writes something a
+# member reads. Set once, followed everywhere. See `voice.py` for what a member
+# may change — and for the four rules, which are in every prompt at every
+# setting because they are what the app promises rather than how it sounds.
+class VoicePrefs(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name="voice")
+    # Defaults ARE the house style. A member who never opens the setting gets
+    # the founder voice with the emoji on, which is the product as designed;
+    # the setting exists for the contract they are writing in OCC, not to make
+    # them opt in to the app having a voice.
+    style = models.CharField(max_length=12, default="corey")
+    emoji = models.CharField(max_length=8, default="heavy")
+    depth = models.CharField(max_length=8, default="normal")
+    slang = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"VoicePrefs<{self.user}: {self.style}/{self.emoji}>"
+
+
+def voice_prefs_for(user):
+    prefs, _ = VoicePrefs.objects.get_or_create(user=user)
+    return prefs
+
+
 # ---- Where an account was made from, and who else was there ----
 #
 # An address is the weakest useful signal this app has, and it is weak in BOTH

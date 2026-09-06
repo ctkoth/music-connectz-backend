@@ -11,6 +11,7 @@ from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
 from .rulez import RulezView
+from .voice import VoiceZView
 from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView,
                     DupeZReviewView, DupeZView)
 from .callz import CallDetailView, CallRateView, CallsView
@@ -324,6 +325,8 @@ urlpatterns = [
     # the one about how many accounts a person gets is needed on the signup
     # form, which is the one screen where nobody is signed in yet.
     path("rulez/", RulezView.as_view(), name="economy-rulez"),
+    # One voice, set once and followed by every surface a model writes through.
+    path("voicez/", VoiceZView.as_view(), name="economy-voicez"),
     # DupeZ — one person, one account. Groups, the member's claim on their own
     # other account, the owner's review queue, and the owner override.
     path("dupez/", DupeZView.as_view(), name="economy-dupez"),
