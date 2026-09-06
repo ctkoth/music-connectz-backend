@@ -134,13 +134,46 @@ class MeView(APIView):
     def patch(self, request):
         """Update the member's editable profile fields (personas, birthday →
         drives ZodiacZ + the AdZ age gate, nationalities, and basic display
-        bits) on the searchable economy profile. Returns the updated user."""
+        bits) on the searchable economy profile. Returns the updated user.
+
+        Premium members can also update their username/handle via the `username`
+        field. Free members cannot."""
         from apps.economy.catalog import over_char_limit
         from apps.economy.models import (EXPLICIT_MIN_AGE, may_be_explicit,
                                          membership_for, profile_for, zodiac_for)
         p = profile_for(request.user)
         data = request.data or {}
         changed = []
+
+        # Handle username updates (Premium only)
+        if "username" in data:
+            new_username = data.get("username", "").strip()
+            member = membership_for(request.user)
+
+            # Premium-only check
+            if member.tier != "premium":
+                return Response(
+                    {"detail": "Only Premium members can customize their handle. Upgrade in MembershipZ."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            # Validate format: alphanumeric + underscore, 3-20 chars
+            if not re.match(r"^[a-zA-Z0-9_]{3,20}$", new_username):
+                return Response(
+                    {"detail": "Handle must be 3-20 characters: letters, numbers, and underscores only."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Check availability (case-insensitive)
+            if User.objects.filter(username__iexact=new_username).exclude(id=request.user.id).exists():
+                return Response(
+                    {"detail": f"The handle '{new_username}' is taken. Try another."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            request.user.username = new_username
+            request.user.save(update_fields=["username"])
+            changed.append("username")
         if isinstance(data.get("personas"), list):
             # A persona is {"key", "name", "skills": [{"name", "start"}]} once
             # the member has used the skill picker, or a bare key string from
@@ -220,6 +253,42 @@ class MeView(APIView):
         username = user.username
         user.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UsernameAvailabilityView(APIView):
+    """GET /api/auth/check-username/?username=<handle> — check if a username is
+    available. Returns {available: bool, reason: str | null}."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        username = request.query_params.get("username", "").strip()
+
+        # Validate format first
+        if not re.match(r"^[a-zA-Z0-9_]{3,20}$", username):
+            return Response({
+                "available": False,
+                "reason": "Must be 3-20 characters: letters, numbers, and underscores only.",
+            })
+
+        # Check if current user's own username
+        if username.lower() == request.user.username.lower():
+            return Response({
+                "available": False,
+                "reason": "This is already your handle.",
+            })
+
+        # Check availability
+        if User.objects.filter(username__iexact=username).exists():
+            return Response({
+                "available": False,
+                "reason": "This handle is taken.",
+            })
+
+        return Response({
+            "available": True,
+            "reason": None,
+        })
 
 
 class ReferralsView(APIView):
