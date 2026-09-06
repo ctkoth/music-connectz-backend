@@ -373,6 +373,80 @@ class OAuthLoginView(APIView):
         return Response({"user": PublicUserSerializer(user).data, **tokens})
 
 
+class OAuthLinkView(APIView):
+    """POST /api/auth/oauth/<provider>/link/ — link an OAuth provider to the
+    current user's account. For authenticated users only. Requires the user to
+    already have an account before linking.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, provider):
+        data = request.data or {}
+        try:
+            # Verify the OAuth credential (same as login)
+            if provider == "google":
+                info = verify_google(data.get("credential") or data.get("id_token"))
+            elif provider == "github":
+                info = exchange_github(
+                    data.get("code"), data.get("redirect_uri", "")
+                )
+            elif provider == "apple":
+                info = verify_apple(data.get("id_token") or data.get("credential"))
+            elif provider in OAUTH2_PROVIDERS:
+                info = exchange_oauth2(
+                    provider,
+                    data.get("code"),
+                    data.get("redirect_uri", ""),
+                    data.get("code_verifier", ""),
+                )
+            else:
+                return Response(
+                    {"detail": f"Unsupported provider '{provider}'."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Check if this OAuth identity is already linked to another account
+            existing_identity = OAuthIdentity.objects.filter(
+                provider=info["provider"], provider_uid=info["uid"]
+            ).first()
+
+            if existing_identity:
+                if existing_identity.user_id == request.user.id:
+                    # Already linked to this account
+                    return Response(
+                        {"detail": f"{provider.title()} is already linked to your account."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                else:
+                    # Linked to a different account
+                    return Response(
+                        {
+                            "detail": f"This {provider.title()} account is already linked to another user. "
+                            "Please use a different account or contact support."
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            # Link this OAuth identity to the current user
+            OAuthIdentity.objects.create(
+                user=request.user,
+                provider=info["provider"],
+                provider_uid=info["uid"],
+                email=info.get("email", ""),
+            )
+
+            return Response(
+                {
+                    "detail": f"{provider.title()} successfully linked to your account.",
+                    "user": PublicUserSerializer(request.user).data,
+                }
+            )
+
+        except OAuthError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+
 class OAuthConfigView(APIView):
     """GET /api/auth/oauth-config/ — the PUBLIC OAuth client IDs the backend is
     configured with, so the login buttons can read them at runtime instead of
