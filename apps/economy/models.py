@@ -1090,6 +1090,9 @@ class Post(models.Model):
     # `items` carry multiple media entries [{url, type, title, lyrics}].
     is_album = models.BooleanField(default=False)
     items = models.JSONField(default=list, blank=True)
+    # Portfolio showcase: embedded media from YouTube, Spotify, SoundCloud
+    # [{type: "youtube"|"spotify"|"soundcloud", url, title}]
+    embeds = models.JSONField(default=list, blank=True)
     # Optional scored-take payload (e.g. RapZ/SingZ lab result) for context on the post.
     score = models.JSONField(default=dict, blank=True)
     visibility = models.CharField(max_length=12, choices=VIS_CHOICES, default="public")

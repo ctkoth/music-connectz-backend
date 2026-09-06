@@ -106,6 +106,7 @@ from .views import (
     MembershipView,
     OwnerClaimView,
     OwnerRevenueView,
+    PostEmbedsView,
     PromptzBuyView,
     PromptzConvertView,
     RoyaltiesView,
@@ -279,6 +280,7 @@ urlpatterns = [
     path("postz/<int:pk>/distribute/", PostDistributeView.as_view(), name="economy-postz-distribute"),
     path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
     path("postz/<int:pk>/delete/", PostDeleteView.as_view(), name="economy-postz-delete"),
+    path("postz/embeds/", PostEmbedsView.as_view(), name="economy-postz-embeds"),
     path("submissions/", SubmissionsView.as_view(), name="economy-submissions"),
     # JournalZ — the diary. Private by default, which is the one thing here
     # that isn't like PostZ, so the share is its own deliberate endpoint and

@@ -76,14 +76,14 @@ UNLIMITED_CHARS = 10 ** 9
 # over the new number — a quota that retroactively shrinks turns somebody's
 # stored work into an error message they didn't cause.
 TIER_LIMITS = {
-    TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500},
-    TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120},
+    TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500, "embeds_per_post": 3},
+    TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 999},
     # StatZ writes without a character cap — the client already advertised this
     # ("StatZ char limit: Unlimited") while the server was still cutting at
     # 5000, so a StatZ member was told one thing and refused another.
-    TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400},
+    TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999},
     # Owner god-mode: effectively unlimited.
-    TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760},
+    TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760, "embeds_per_post": 999},
 }
 
 

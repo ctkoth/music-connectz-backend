@@ -23,6 +23,7 @@ from .models import (
     TIER_STATZ,
     FunnelEvent,
     Membership,
+    Post,
     RoyaltyEntry,
     SpecZPurchase,
     Transaction,
@@ -1014,3 +1015,133 @@ class UploadDetailView(APIView):
         u.delete()
         m = membership_for(request.user)
         return Response(_storage_summary(request.user, m.tier))
+
+
+def _validate_youtube_url(url):
+    """Extract video ID from YouTube URL."""
+    patterns = [
+        r'(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})',
+        r'youtube\.com\/embed\/([a-zA-Z0-9_-]{11})',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _validate_spotify_url(url):
+    """Extract track ID from Spotify URL."""
+    patterns = [
+        r'spotify\.com\/track\/([a-zA-Z0-9]+)',
+        r'spotify\.com\/playlist\/([a-zA-Z0-9]+)',
+        r'spotify\.com\/album\/([a-zA-Z0-9]+)',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _validate_soundcloud_url(url):
+    """Check if URL is a valid SoundCloud track."""
+    return 'soundcloud.com' in url.lower()
+
+
+def _parse_embed_url(url, embed_type):
+    """Validate and parse embed URL by type."""
+    if embed_type == "youtube":
+        video_id = _validate_youtube_url(url)
+        if video_id:
+            return {"type": "youtube", "url": f"https://www.youtube.com/embed/{video_id}", "valid": True}
+    elif embed_type == "spotify":
+        track_id = _validate_spotify_url(url)
+        if track_id:
+            return {"type": "spotify", "url": url, "valid": True}
+    elif embed_type == "soundcloud":
+        if _validate_soundcloud_url(url):
+            return {"type": "soundcloud", "url": url, "valid": True}
+    return {"valid": False}
+
+
+class PostEmbedsView(APIView):
+    """POST adds an embed to a post; DELETE removes one. Portfolio showcase."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        post_id = request.data.get("post_id")
+        embed_type = request.data.get("type")  # youtube, spotify, soundcloud
+        embed_url = request.data.get("url")
+        title = request.data.get("title", "").strip()[:200]
+
+        if not all([post_id, embed_type, embed_url]):
+            return Response(
+                {"detail": "post_id, type, and url required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            post = Post.objects.get(id=post_id, author=request.user)
+        except Post.DoesNotExist:
+            return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        m = membership_for(request.user)
+        lim = limits_for(m.tier)
+        embeds = post.embeds or []
+
+        if len(embeds) >= lim.get("embeds_per_post", 3):
+            return Response(
+                {"detail": f"embed limit ({lim.get('embeds_per_post', 3)}) reached for {m.tier} tier"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        parsed = _parse_embed_url(embed_url, embed_type)
+        if not parsed.get("valid"):
+            return Response(
+                {"detail": f"invalid {embed_type} URL"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        new_embed = {
+            "type": embed_type,
+            "url": parsed["url"],
+            "title": title or embed_type.title(),
+        }
+        embeds.append(new_embed)
+        post.embeds = embeds
+        post.save(update_fields=["embeds"])
+
+        return Response(
+            {"embeds": embeds, "limit": lim.get("embeds_per_post", 3)},
+            status=status.HTTP_201_CREATED,
+        )
+
+    def delete(self, request):
+        post_id = request.data.get("post_id")
+        embed_index = request.data.get("index")
+
+        if post_id is None or embed_index is None:
+            return Response(
+                {"detail": "post_id and index required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            post = Post.objects.get(id=post_id, author=request.user)
+        except Post.DoesNotExist:
+            return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        embeds = post.embeds or []
+        if embed_index < 0 or embed_index >= len(embeds):
+            return Response(
+                {"detail": "invalid embed index"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        embeds.pop(embed_index)
+        post.embeds = embeds
+        post.save(update_fields=["embeds"])
+
+        return Response({"embeds": embeds})
