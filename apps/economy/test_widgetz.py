@@ -79,6 +79,20 @@ class PlayerTests(TestCase):
         self.assertEqual(w["mode"], "player")
         self.assertTrue(w["src"].startswith("https://w.soundcloud.com/player/?url="))
 
+    def test_an_apple_song_is_a_bar_and_an_album_is_a_list(self):
+        song = widgetz.widget_for(
+            "https://music.apple.com/us/album/thriller/1234?i=5678", TIER_FREE)
+        album = widgetz.widget_for("https://music.apple.com/us/album/thriller/1234", TIER_FREE)
+        self.assertEqual(song["height"], 175)
+        self.assertEqual(album["height"], 450)
+
+    def test_a_soundcloud_redirect_link_is_not_framed(self):
+        # on.soundcloud.com/xyz is a redirect. Resolving it would mean fetching
+        # a URL a member supplied, server-side, which is a much bigger thing
+        # than a player — so it opens outside instead.
+        w = widgetz.widget_for("https://on.soundcloud.com/abc123", TIER_FREE)
+        self.assertEqual(w["mode"], "outside")
+
     def test_the_other_players_resolve(self):
         for url, provider in (
             ("https://music.apple.com/us/album/thriller/1234", "apple"),

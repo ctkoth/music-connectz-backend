@@ -167,6 +167,11 @@ def _soundcloud(u):
     parts = [p for p in u.path.split("/") if p]
     if not parts:
         return None
+    # `on.soundcloud.com/xyz` is a redirect, not an address the widget can
+    # resolve — following it would mean a server-side fetch of a link a member
+    # supplied, which is a much bigger thing than a player. It opens outside.
+    if _host(u.geturl()) != "soundcloud.com":
+        return None
     clean = f"https://soundcloud.com{u.path}"
     return {
         "provider": "soundcloud", "label": "SoundCloud",
@@ -179,10 +184,15 @@ def _soundcloud(u):
 def _apple(u):
     if not u.path.strip("/"):
         return None
+    # `?i=<track id>` is how Apple points at ONE song inside an album, and it
+    # is the difference between a 175px bar and a 450px track list. Read from
+    # the parsed query rather than by looking for "i=" in the string, which
+    # also matches the tail of every other parameter name.
+    one_song = bool(parse_qs(u.query or "").get("i"))
     return {
         "provider": "apple", "label": "Apple Music",
         "src": f"https://embed.music.apple.com{u.path}" + (f"?{u.query}" if u.query else ""),
-        "height": 175 if "?i=" in (u.geturl() or "") or "i=" in (u.query or "") else 450,
+        "height": 175 if one_song else 450,
         "min_px": 280,
     }
 
