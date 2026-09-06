@@ -1,8 +1,10 @@
+from unittest import mock
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from apps.economy.features import can_use
+from apps.economy.features import FEATURES, can_use, required_tier
 from apps.economy.models import (TIER_FREE, TIER_PREMIUM, TIER_STATZ, Transaction,
                                  award_energy, award_spinaz, complete_onboarding,
                                  membership_for, record_referral, wallet_for)
@@ -123,22 +125,51 @@ class FeatureGateTests(TestCase):
     def _tier(self, t):
         m = membership_for(self.user); m.tier = t; m.save(update_fields=["tier", "updated_at"])
 
-    def test_logz_is_a_premium_feature(self):
+    def test_logz_is_open_at_every_tier_and_must_stay_that_way(self):
+        """LogZ was Premium and was deliberately unlocked. Do not put it back.
+
+        A member who cannot read their own ledger cannot answer "did my
+        referral pay?" or "what took that ⚡" about their OWN account. That is
+        the ladder rule's "whether", not its "how much" — and the app's own
+        cross-pollination note leans on it: a balance is supposed to lead back
+        to the action that changed it, which is a door LogZ is the other side
+        of.
+
+        This test used to assert the opposite and was left behind when the
+        table changed, so it failed on main for weeks reading exactly like an
+        instruction to re-gate the feature. It now fails the other way, which
+        is the way that protects members.
+        """
+        for t in (TIER_FREE, TIER_PREMIUM, TIER_STATZ):
+            self._tier(t)
+            self.assertEqual(self.client.get(URL).status_code, 200, t)
+        self.assertEqual(required_tier("logz"), TIER_FREE)
+
+    def test_a_gate_that_does_fire_says_what_the_tier_buys(self):
+        # The 403 body used to be exercised through LogZ. LogZ no longer
+        # refuses anybody, so the machinery is checked against a feature that
+        # genuinely is gated — otherwise unlocking a feature quietly deletes
+        # the only coverage of how every other gate speaks.
         self._tier(TIER_FREE)
-        resp = self.client.get(URL)
+        resp = self.client.get("/api/economy/journalz/lookback/")
         self.assertEqual(resp.status_code, 403, resp.content)
         self.assertEqual(resp.data["required_tier"], TIER_PREMIUM)
-        self.assertEqual(resp.data["feature"], "logz")
+        self.assertEqual(resp.data["feature"], "journalz_lookback")
+        self.assertIn("On This Day", resp.data["detail"])
+        self.assertIn("Premium", resp.data["detail"])
+        self.assertTrue(resp.data["blurb"], "a gate must say what it unlocks, not just 'upgrade'")
 
-    def test_the_403_says_what_the_tier_buys(self):
-        self._tier(TIER_FREE)
-        body = self.client.get(URL).data
-        self.assertIn("LogZ", body["detail"])
-        self.assertTrue(body["blurb"], "a gate must say what it unlocks, not just 'upgrade'")
-
-    def test_premium_and_statz_both_open_it(self):
-        for t in (TIER_PREMIUM, TIER_STATZ):
-            self._tier(t)
+    def test_the_view_reads_the_table_rather_than_hardcoding_the_answer(self):
+        # `LogZView` still runs `can_use`, and that is deliberate: the check is
+        # table-driven, so it costs nothing while LogZ is free and it keeps the
+        # table honest if the tier ever moves. Pinned here because a check that
+        # can never fire today is exactly the kind of thing somebody deletes as
+        # dead code — and deleting it would let features.py say "premium" while
+        # the endpoint served everybody.
+        with mock.patch.dict(FEATURES["logz"], {"tier": TIER_PREMIUM}):
+            self._tier(TIER_FREE)
+            self.assertEqual(self.client.get(URL).status_code, 403)
+            self._tier(TIER_PREMIUM)
             self.assertEqual(self.client.get(URL).status_code, 200)
 
     def test_can_use_is_a_ladder_not_an_equality(self):

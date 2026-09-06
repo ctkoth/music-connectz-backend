@@ -14,6 +14,16 @@ TIER_ORDER = [TIER_FREE, TIER_PREMIUM, TIER_STATZ, TIER_DEBUG]
 
 FEATURES = {
     # The four that thread through every app, MCZ and OCC alike.
+    #
+    # LogZ is FREE and needs to stay that way. It was Premium, and being
+    # Premium meant a member could not answer "did my referral pay?" or "what
+    # took that ⚡" about their OWN account — which is the ladder rule's
+    # "whether", not its "how much". The cross-pollination rule leans on it
+    # too: a balance is supposed to lead back to the action that changed it,
+    # and LogZ is the other side of that door.
+    #
+    # What a tier may sell here is depth, export or filters — how MUCH ledger,
+    # never whether there is one. `test_logz` pins this from the other side.
     "logz": {
         "tier": TIER_FREE, "label": "LogZ", "emoji": "🪵",
         "blurb": "What Music ConnectZ did — every move you made and when.",
