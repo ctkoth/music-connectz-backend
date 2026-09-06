@@ -1,4 +1,5 @@
 """CoachZ: Teaching studio for voice coaches to rate student takes."""
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.db.models import Count, Avg, Q
 from rest_framework import status
@@ -7,8 +8,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
-    CoachProfile, StudentRelationship, TakeRating, Post, Transaction, User
+    CoachProfile, StudentRelationship, TakeRating, Post, Transaction
 )
+
+User = get_user_model()
 
 
 class CoachStudioView(APIView):
