@@ -1,6 +1,7 @@
 from django.urls import path, re_path
 
-from .directz_app import DirectZWorksView, DirectZRateView
+from .directz_app import (DirectZCopyrightView, DirectZWorksView,
+                          DirectZRateView)
 from .media import MediaFileView
 from .questz import QuestBoardView, QuestClaimView
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
@@ -336,6 +337,10 @@ urlpatterns = [
     # The system-raised half of the queue: a new account made from an address
     # another account was made from. A flag, never a block and never a delete.
     path("dupez/flags/", DupeZFlagsView.as_view(), name="economy-dupez-flags"),
+    # What was heard in a DirectZ work's audio, and the member's answer to it.
+    # A match is named before they publish — never after, and never a block.
+    path("directz/<int:pk>/copyright/", DirectZCopyrightView.as_view(),
+         name="economy-directz-copyright"),
     # A collab is where the finished master usually lands, so it releases too.
     path("collab/<int:pk>/distribute/", CollabDistributeView.as_view(), name="economy-collab-distribute"),
     # The work going back and forth: v1 down, v2 up.

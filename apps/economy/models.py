@@ -1985,6 +1985,19 @@ class DirectZWork(models.Model):
     # story — plus the verdict and what to fix. See directz_craft.CRAFT_SCORES.
     craft = models.JSONField(default=dict, blank=True)
     rating_note = models.CharField(max_length=200, blank=True, default="")
+    # What a recognition provider heard in the audio, and what the member said
+    # about it. Three states, and the difference between the first two is the
+    # whole point: `unscanned` is our check not running, `clear` is a check
+    # that ran and found nothing, and only one of those is worth anything to
+    # somebody about to publish. See `copyrightz.py`.
+    #
+    # A match is never a finding of infringement — on a music platform the most
+    # likely match is the member's OWN release — so nothing here blocks or
+    # hides a work. It names what matched, and `copyright_claim` is the
+    # member's answer travelling with it.
+    copyright_state = models.CharField(max_length=12, default="unscanned", db_index=True)
+    copyright = models.JSONField(default=dict, blank=True)
+    copyright_claim = models.CharField(max_length=16, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

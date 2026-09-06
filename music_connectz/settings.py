@@ -274,6 +274,15 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 # the lookup returned "" on every deploy regardless of what the dashboard said
 # and no link was ever scanned. Adding a key to Render did nothing until this
 # line existed.
+# Copyright recognition for DirectZ uploads (economy/copyrightz.py). Without
+# these a work stays `unscanned` — its own state, which never reads as "clear".
+# A language model's opinion about whether audio is copyrighted is the
+# number-with-nothing-behind-it the substance rule forbids, attached to a legal
+# question; recognition is a fingerprint database or it is nothing.
+ACRCLOUD_ACCESS_KEY = os.environ.get("ACRCLOUD_ACCESS_KEY", "").strip()
+ACRCLOUD_ACCESS_SECRET = os.environ.get("ACRCLOUD_ACCESS_SECRET", "").strip()
+ACRCLOUD_HOST = os.environ.get("ACRCLOUD_HOST", "identify-eu-west-1.acrcloud.com").strip()
+
 WEB_RISK_API_KEY = os.environ.get("WEB_RISK_API_KEY", "").strip()
 SAFE_BROWSING_API_KEY = os.environ.get("SAFE_BROWSING_API_KEY", "").strip()
 

@@ -59,6 +59,24 @@ services:
       #
       # SAFE_BROWSING_API_KEY still works for a non-commercial deployment of
       # this code. Web Risk wins when both are set.
+      # ---- COPYRIGHT DETECTION ON DIRECTZ UPLOADS -----------------------
+      # Recognition is a fingerprint database, not something a model can be
+      # asked to guess at. Without these a DirectZ work stays `unscanned`,
+      # which is its own state and never reads as "clear" — the member is told
+      # the check didn't run rather than being handed a pass they'd publish on.
+      # Sign up at acrcloud.com, make an Audio & Video Recognition project, and
+      # take the access key/secret from it. ACRCLOUD_HOST is the region's
+      # identify host (default identify-eu-west-1.acrcloud.com).
+      #
+      # The check also needs ffmpeg on the host to cut a 15s audio sample out
+      # of a video — the same dependency DistributeZ's transcode needs, and it
+      # says separately when that is what is missing.
+      - key: ACRCLOUD_ACCESS_KEY
+        sync: false
+      - key: ACRCLOUD_ACCESS_SECRET
+        sync: false
+      - key: ACRCLOUD_HOST
+        sync: false
       - key: WEB_RISK_API_KEY
         sync: false
       - key: SAFE_BROWSING_API_KEY
