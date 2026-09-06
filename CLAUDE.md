@@ -216,6 +216,58 @@ Two things that must not rot:
 Like the coach's upload path, **the TTS transport has never run against
 Google** — CI has no key. `tools/keyvoice_live_check.sh` is the check that can.
 
+## WidgetZ: the tier buys WHERE a link opens, never whether
+
+`apps/economy/widgetz.py` turns a link into one of four answers, and the split
+is about **who wrote the URL being framed**:
+
+- **player** — a provider with a documented embed endpoint. The id is read out
+  of the member's link and the provider's own player URL is built HERE, so
+  nothing a member types reaches the frame. Available at every tier for exactly
+  that reason. `test_widgetz` pins it: a link with junk appended still frames
+  the clean embed.
+- **internal** — one of our own public addresses. Never framed; the client
+  opens the real screen, which beats an iframe of ourselves at every tier.
+- **page** — an arbitrary site framed whole. **StatZ, and only for a URL the
+  malware scan cleared.** A page inside our chrome borrows our chrome's
+  credibility, which is what makes a framed login form worth building for
+  somebody who wants one; the scan is the floor and the tier is who we hand a
+  general-purpose frame to.
+- **outside** — everything else, in a new tab. **This is what keeps the ladder
+  rule intact.** No member loses a link; every tier opens every link. A refused
+  page widget returns the link with the reason attached, so a Free member is
+  told what StatZ would have done rather than finding a control that quietly
+  behaves differently from the one beside it.
+
+### An unscanned link cleared nothing
+
+`links.scan_available()` exists because `safe_browsing_check` answers "safe"
+when it *cannot look* — the right answer for a click (we don't block a member
+on our own outage) and the wrong one for anything treating a verdict as a
+permission. With no `SAFE_BROWSING_API_KEY`, a page widget is refused for
+everyone, StatZ included, with that as the stated reason.
+
+The same fix corrected a quiet lie: `LinkClickView` set `counter.scanned = True`
+whether or not a scan ran, so a deploy with no key recorded every link on the
+platform as checked and clean. The docstring already said we never claim a link
+is scanned when it isn't; the column said we do. Nothing read it closely enough
+to catch that until something needed the verdict to mean something.
+
+### The sandbox pair that must never be granted together
+
+`allow-scripts` + `allow-same-origin` lets a sandboxed frame remove its own
+sandbox. `SANDBOX` has scripts and not same-origin, which is what makes a page
+widget a viewer rather than a tenant. `allow-popups` is out too — a framed page
+that can open a window is one that can open a window over ours.
+
+### What cannot be detected, and is therefore said out loud
+
+Whether a site permits framing is the site's call (`X-Frame-Options`,
+`frame-ancestors`) and there is no way to ask ahead of time — from inside the
+page a refused frame and a slow one are identical. So `may_refuse` travels with
+the spec and the client keeps "open it in a tab" on screen, rather than a
+detection we would have to invent and would get wrong.
+
 ## Uploads have to outlive a deploy, and there are two ways to make them
 
 Render's web filesystem is part of the container, and the container is rebuilt
