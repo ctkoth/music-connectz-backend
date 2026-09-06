@@ -3890,3 +3890,74 @@ class FunnelEvent(models.Model):
 
     def __str__(self):
         return f"{self.kind} @ {self.created_at:%Y-%m-%d %H:%M}"
+
+
+class CoachProfile(models.Model):
+    """Coaching studio: track student relationships and portfolio."""
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="coach_profile"
+    )
+    bio = models.TextField(max_length=500, blank=True, default="")
+    specializations = models.JSONField(
+        default=list, blank=True, help_text="List of instruments/styles coached"
+    )
+    students_count = models.IntegerField(default=0, db_index=True)
+    takes_rated = models.IntegerField(default=0)
+    avg_rating_quality = models.FloatField(null=True, blank=True)  # 1-5 from student feedback
+
+    # Referral bonuses tracking
+    referral_spinaz_earned = models.IntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Coach {self.user} ({self.students_count} students)"
+
+
+class StudentRelationship(models.Model):
+    """Track student-coach relationships."""
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="coach_relationships"
+    )
+    coach = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="students"
+    )
+    referral_code = models.CharField(max_length=20, unique=True, blank=True, default="")
+
+    takes_submitted = models.IntegerField(default=0)
+    takes_rated = models.IntegerField(default=0)
+
+    joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("student", "coach")
+        ordering = ("-joined_at",)
+
+    def __str__(self):
+        return f"{self.student} → {self.coach}"
+
+
+class TakeRating(models.Model):
+    """Coach rating of a student's vocal take (pitch, timing, tone)."""
+    coach = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="take_ratings"
+    )
+    take = models.ForeignKey("Post", on_delete=models.CASCADE, related_name="coach_ratings")
+
+    # Substance-first: measure real dimensions, not feelings
+    pitch_accuracy = models.IntegerField(null=True, blank=True, help_text="0-100%")
+    timing_accuracy = models.IntegerField(null=True, blank=True, help_text="0-100%")
+    tone_quality = models.IntegerField(null=True, blank=True, help_text="0-100%")
+
+    # Coach commentary
+    notes = models.TextField(max_length=1000, blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("coach", "take")
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.coach} rated {self.take_id}"

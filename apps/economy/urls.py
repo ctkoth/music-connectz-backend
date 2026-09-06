@@ -13,6 +13,7 @@ from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
 from .soundz import SoundZView
 from .soundcloud_engagement import SoundCloudEngagementView
+from .coachz import CoachStudioView, RateStudentTakeView, AddStudentView
 from .distributez import TranscodeView, LyricsView
 from .adz import AdzView, AdDetailView, AdRewardView
 from .rewards import (AdmobConfigView, AdmobSsvView, OfferzView,
@@ -194,6 +195,9 @@ urlpatterns = [
     path("share/p/<int:pk>", post_card, name="share-post"),
     path("soundz/", SoundZView.as_view(), name="economy-soundz"),
     path("soundcloud/engagement/", SoundCloudEngagementView.as_view(), name="economy-soundcloud-engagement"),
+    path("coachz/studio/", CoachStudioView.as_view(), name="economy-coachz-studio"),
+    path("coachz/rate/", RateStudentTakeView.as_view(), name="economy-coachz-rate"),
+    path("coachz/add-student/", AddStudentView.as_view(), name="economy-coachz-add-student"),
     path("specz/", SpecZView.as_view(), name="economy-specz"),
     path("specz/buy/", SpecZView.as_view(), name="economy-specz-buy"),
     # Removing one is a DELETE on the thing itself, not a POST to /remove/.
