@@ -43,6 +43,26 @@ services:
         sync: false
       - key: APPLE_OAUTH_CLIENT_ID
         sync: false
+      # ---- SCANNING MEMBER LINKS ----------------------------------------
+      # WidgetZ will not frame an outside page until one of these has CLEARED
+      # its URL, and the +5⚡ link reward is never paid on a flagged link. With
+      # neither set, every link is unscanned: it still opens, in a new tab,
+      # and no page widget is offered to anybody.
+      #
+      # Set WEB_RISK_API_KEY. Google's terms put Safe Browsing v4 at
+      # "non-commercial use only — not for sale or revenue generating
+      # purposes", and this platform sells subscriptions, so v4 is the wrong
+      # product here however well it works; it is deprecated besides. Web Risk
+      # is the commercial successor: enable the Web Risk API on a Cloud project
+      # with billing on, make an API key, restrict it to that one API. Free to
+      # 100k lookups a month, then $0.50 per 1,000.
+      #
+      # SAFE_BROWSING_API_KEY still works for a non-commercial deployment of
+      # this code. Web Risk wins when both are set.
+      - key: WEB_RISK_API_KEY
+        sync: false
+      - key: SAFE_BROWSING_API_KEY
+        sync: false
       # ---- KEEPING MEMBERS' UPLOADS -------------------------------------
       # This container's disk is rebuilt on every deploy. With neither of the
       # two options below in force, every track, video and cover any member has

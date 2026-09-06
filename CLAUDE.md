@@ -244,14 +244,48 @@ is about **who wrote the URL being framed**:
 `links.scan_available()` exists because `safe_browsing_check` answers "safe"
 when it *cannot look* — the right answer for a click (we don't block a member
 on our own outage) and the wrong one for anything treating a verdict as a
-permission. With no `SAFE_BROWSING_API_KEY`, a page widget is refused for
-everyone, StatZ included, with that as the stated reason.
+permission. With no scanner key, a page widget is refused for everyone, StatZ
+included, with that as the stated reason.
 
-The same fix corrected a quiet lie: `LinkClickView` set `counter.scanned = True`
-whether or not a scan ran, so a deploy with no key recorded every link on the
-platform as checked and clean. The docstring already said we never claim a link
-is scanned when it isn't; the column said we do. Nothing read it closely enough
-to catch that until something needed the verdict to mean something.
+Two quiet lies came out of building on it:
+
+- `LinkClickView` set `counter.scanned = True` whether or not a scan ran, so a
+  deploy with no key recorded every link on the platform as checked and clean.
+  The docstring already said we never claim a link is scanned when it isn't;
+  the column said we do.
+- **The key was never readable.** `settings.SAFE_BROWSING_API_KEY` was fetched
+  with a `getattr` default and never defined in `settings.py`, so it was "" on
+  every deploy however the dashboard was set. No member link has ever been
+  scanned, and there was nothing to notice — an unscanned link and a clean one
+  both come back safe. `test_link_scan` now asserts the settings *exist*, which
+  is the dullest test in the suite and the one that would have caught it.
+
+### Set WEB_RISK_API_KEY, not SAFE_BROWSING_API_KEY
+
+Google's terms put Safe Browsing v4 at "non-commercial use only — not for sale
+or revenue generating purposes", and this platform sells subscriptions, so v4
+is the wrong product here however well it works; it is deprecated besides.
+**Web Risk is its commercial successor** — enable the Web Risk API on a Cloud
+project with billing on, make an API key, restrict it to that one API. Free to
+100k lookups a month, then $0.50 per 1,000.
+
+`links.scanner()` picks: Web Risk when its key is set, Safe Browsing when only
+that one is (a non-commercial deployment of this code is entitled to it), and
+"" when neither. The two speak differently and the difference is easy to get
+backwards — Web Risk's `uris:search` is a **GET** with the URL in the query and
+an empty `{}` body meaning clean; v4's `threatMatches:find` is a POST with a
+`threatInfo` document. Posting a v4 body at Web Risk is a 400, and a 400 comes
+back from `safe_browsing_check` as "safe", so getting it wrong looks exactly
+like a platform where nothing is ever flagged. `test_link_scan` pins the method
+on both.
+
+**And a stub cannot tell you the key works.** `tools/linkscan_live_check.sh` is
+the check that can — it looks up a URL Google publishes as a known threat and
+fails if the answer comes back clean. That direction is the whole point: a
+scanner that says "clean" to everything passes any check that only ever asks
+about clean things, and this failure mode is invisible from the app, because
+`safe_browsing_check` answers "safe" on an error too. Run it after setting a
+key, after rotating one, and after touching the scan.
 
 ### The sandbox pair that must never be granted together
 

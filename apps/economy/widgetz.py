@@ -32,8 +32,9 @@ still returns the link with `mode: "outside"`, which is precisely what every
 tier has today: it opens in a new tab. The tier buys where it opens, not
 whether it opens, which is the ladder rule this file has to answer to.
 
-**An unscanned link has not cleared anything.** With no `SAFE_BROWSING_API_KEY`
-configured there is no verdict, and a `page` widget is refused for everyone,
+**An unscanned link has not cleared anything.** With no scanner key configured
+(`WEB_RISK_API_KEY`, or `SAFE_BROWSING_API_KEY` for a non-commercial
+deployment) there is no verdict, and a `page` widget is refused for everyone,
 including StatZ, with that as the stated reason. Treating "we never looked" as
 "it's fine" would make the scan requirement decorative — and a decorative
 safety check is worse than none, because it is the one people trust.

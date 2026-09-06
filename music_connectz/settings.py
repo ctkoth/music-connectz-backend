@@ -257,6 +257,26 @@ APPLE_OAUTH_CLIENT_ID = os.environ.get("APPLE_OAUTH_CLIENT_ID", "").strip()
 # Set GEMINI_API_KEY on Render; endpoints 503 cleanly until then.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
+# Malware / phishing scanning for member links (economy/links.py). WidgetZ will
+# not frame an outside page until one of these has CLEARED its URL, and the
+# +5⚡ link reward is never paid on a flagged link.
+#
+# Set WEB_RISK_API_KEY. Google's terms put Safe Browsing v4 at "non-commercial
+# use only — not for sale or revenue generating purposes" and this platform
+# sells subscriptions, so v4 is the wrong product here whatever it costs; it is
+# deprecated besides. Web Risk is its commercial successor and is free to
+# 100k lookups a month on a Cloud project with billing enabled.
+#
+# SAFE_BROWSING_API_KEY still works for a non-commercial deployment of this
+# code. Web Risk wins when both are set.
+#
+# **Both of these were read with a getattr default and never defined here**, so
+# the lookup returned "" on every deploy regardless of what the dashboard said
+# and no link was ever scanned. Adding a key to Render did nothing until this
+# line existed.
+WEB_RISK_API_KEY = os.environ.get("WEB_RISK_API_KEY", "").strip()
+SAFE_BROWSING_API_KEY = os.environ.get("SAFE_BROWSING_API_KEY", "").strip()
+
 # Modal — the sandbox OCC runs code in. This is the one thing OCC could never
 # do: execute a member's code. It needs a container per run, which is real
 # infrastructure with a real bill, so it stays off until BOTH tokens are set.

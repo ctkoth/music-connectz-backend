@@ -24,7 +24,10 @@ from apps.economy import widgetz
 
 User = get_user_model()
 PW = "hunter2hunter2"
-KEYED = dict(SAFE_BROWSING_API_KEY="test-key")
+# A configured scanner. Either key does it — `links.scanner()` is what the
+# gate asks — and these tests stub the verdict rather than the transport, so
+# which one is set does not change what they prove.
+KEYED = dict(WEB_RISK_API_KEY="test-key", SAFE_BROWSING_API_KEY="")
 
 
 def as_tier(user, tier):
@@ -183,19 +186,19 @@ class PageGateTests(TestCase):
 class UnscannedTests(TestCase):
     """No key, no verdict, no frame — including for StatZ."""
 
-    @override_settings(SAFE_BROWSING_API_KEY="")
+    @override_settings(WEB_RISK_API_KEY="", SAFE_BROWSING_API_KEY="")
     def test_without_a_scanner_a_page_widget_is_refused_and_says_so(self):
         w = widgetz.widget_for("https://example.com/press", TIER_STATZ)
         self.assertEqual(w["mode"], "outside")
         self.assertEqual(w["gate"], "unscanned")
 
-    @override_settings(SAFE_BROWSING_API_KEY="")
+    @override_settings(WEB_RISK_API_KEY="", SAFE_BROWSING_API_KEY="")
     def test_a_player_still_works_with_no_scanner(self):
         # Players do not depend on the scan: the URL is one this file wrote.
         w = widgetz.widget_for("https://youtu.be/dQw4w9WgXcQ", TIER_FREE)
         self.assertEqual(w["mode"], "player")
 
-    @override_settings(SAFE_BROWSING_API_KEY="")
+    @override_settings(WEB_RISK_API_KEY="", SAFE_BROWSING_API_KEY="")
     def test_an_unscannable_link_is_never_recorded_as_scanned(self):
         # The flag means "we looked". A deploy with no key used to set it
         # anyway, which turned "never checked" into "checked and clean" for
