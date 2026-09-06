@@ -130,6 +130,7 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
         "media_url": p.media_url,
         "is_album": p.is_album,
         "items": p.items or [],
+        "embeds": p.embeds or [],
         # One of each, resolved for the client so it renders every attachment
         # rather than only the primary one.
         "media": media,

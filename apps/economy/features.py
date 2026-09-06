@@ -15,8 +15,8 @@ TIER_ORDER = [TIER_FREE, TIER_PREMIUM, TIER_STATZ, TIER_DEBUG]
 FEATURES = {
     # The four that thread through every app, MCZ and OCC alike.
     "logz": {
-        "tier": TIER_PREMIUM, "label": "LogZ", "emoji": "🪵",
-        "blurb": "What Music ConnectZ did — every move, by day, week, month or a range you pick.",
+        "tier": TIER_FREE, "label": "LogZ", "emoji": "🪵",
+        "blurb": "What Music ConnectZ did — every move you made and when.",
     },
     "tellz": {
         "tier": TIER_PREMIUM, "label": "TellZ", "emoji": "🗣️",

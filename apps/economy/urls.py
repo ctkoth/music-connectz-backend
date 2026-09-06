@@ -12,6 +12,8 @@ from .links import LinkClickView, LinkTalliesView
 from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
 from .soundz import SoundZView
+from .soundcloud_engagement import SoundCloudEngagementView
+from .coachz import CoachStudioView, RateStudentTakeView, AddStudentView
 from .distributez import TranscodeView, LyricsView
 from .adz import AdzView, AdDetailView, AdRewardView
 from .rewards import (AdmobConfigView, AdmobSsvView, OfferzView,
@@ -106,6 +108,7 @@ from .views import (
     MembershipView,
     OwnerClaimView,
     OwnerRevenueView,
+    PostEmbedsView,
     PromptzBuyView,
     PromptzConvertView,
     RoyaltiesView,
@@ -191,6 +194,10 @@ urlpatterns = [
     path("share/u/<str:username>", profile_card, name="share-profile"),
     path("share/p/<int:pk>", post_card, name="share-post"),
     path("soundz/", SoundZView.as_view(), name="economy-soundz"),
+    path("soundcloud/engagement/", SoundCloudEngagementView.as_view(), name="economy-soundcloud-engagement"),
+    path("coachz/studio/", CoachStudioView.as_view(), name="economy-coachz-studio"),
+    path("coachz/rate/", RateStudentTakeView.as_view(), name="economy-coachz-rate"),
+    path("coachz/add-student/", AddStudentView.as_view(), name="economy-coachz-add-student"),
     path("specz/", SpecZView.as_view(), name="economy-specz"),
     path("specz/buy/", SpecZView.as_view(), name="economy-specz-buy"),
     # Removing one is a DELETE on the thing itself, not a POST to /remove/.
@@ -279,6 +286,7 @@ urlpatterns = [
     path("postz/<int:pk>/distribute/", PostDistributeView.as_view(), name="economy-postz-distribute"),
     path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
     path("postz/<int:pk>/delete/", PostDeleteView.as_view(), name="economy-postz-delete"),
+    path("postz/embeds/", PostEmbedsView.as_view(), name="economy-postz-embeds"),
     path("submissions/", SubmissionsView.as_view(), name="economy-submissions"),
     # JournalZ — the diary. Private by default, which is the one thing here
     # that isn't like PostZ, so the share is its own deliberate endpoint and
