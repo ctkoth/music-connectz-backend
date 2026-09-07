@@ -124,6 +124,12 @@ from .views import (
     UploadDetailView,
     UploadsView,
     WalletView,
+    PracticeSessionView,
+    DrumPatternView,
+    DrumPatternDetailView,
+    PublicDrumPatternView,
+    ToolPreferenceView,
+    PatternShareView,
 )
 
 urlpatterns = [
@@ -381,4 +387,11 @@ urlpatterns = [
     path("autotopup/", AutoTopUpView.as_view(), name="economy-autotopup"),
     path("autotopup/<int:pk>/cancel/", AutoTopUpCancelView.as_view(), name="economy-autotopup-cancel"),
     path("identity/", IdentityView.as_view(), name="economy-identity"),
+    # MetZ, TunerZ, ChordZ, DrumZ — practice tool tracking and cross-pollination
+    path("metz/sessions/", PracticeSessionView.as_view(), name="economy-metz-sessions"),
+    path("drumz/patterns/", DrumPatternView.as_view(), name="economy-drumz-patterns"),
+    path("drumz/patterns/<int:pattern_id>/", DrumPatternDetailView.as_view(), name="economy-drumz-pattern"),
+    path("drumz/patterns/public/", PublicDrumPatternView.as_view(), name="economy-drumz-patterns-public"),
+    path("metz/preferences/", ToolPreferenceView.as_view(), name="economy-metz-preferences"),
+    path("drumz/share/", PatternShareView.as_view(), name="economy-drumz-share"),
 ]

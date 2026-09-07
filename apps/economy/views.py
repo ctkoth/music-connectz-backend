@@ -40,6 +40,13 @@ from .models import (
     wallet_for,
 )
 from .serializers import TransactionSerializer, WalletSerializer
+from .serializers_metz import (
+    PracticeSessionSerializer,
+    DrumPatternSerializer,
+    ToolPreferenceSerializer,
+    PatternShareSerializer,
+)
+from .models import PracticeSession, DrumPattern, ToolPreference, PatternShare
 
 User = get_user_model()
 VALID_TIERS = {t[0] for t in TIER_CHOICES}
@@ -1142,3 +1149,118 @@ class PostEmbedsView(APIView):
         post.save(update_fields=["embeds"])
 
         return Response({"embeds": embeds})
+
+
+class PracticeSessionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = PracticeSessionSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(user=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def get(self, request):
+        sessions = PracticeSession.objects.filter(user=request.user).order_by("-created_at")
+        serializer = PracticeSessionSerializer(sessions, many=True)
+        return Response(serializer.data)
+
+
+class DrumPatternView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = DrumPatternSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(user=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def get(self, request):
+        patterns = DrumPattern.objects.filter(user=request.user).order_by("-created_at")
+        serializer = DrumPatternSerializer(patterns, many=True)
+        return Response(serializer.data)
+
+
+class DrumPatternDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pattern_id):
+        try:
+            pattern = DrumPattern.objects.get(id=pattern_id, user=request.user)
+        except DrumPattern.DoesNotExist:
+            return Response({"detail": "pattern not found"}, status=status.HTTP_404_NOT_FOUND)
+        serializer = DrumPatternSerializer(pattern)
+        return Response(serializer.data)
+
+    def put(self, request, pattern_id):
+        try:
+            pattern = DrumPattern.objects.get(id=pattern_id, user=request.user)
+        except DrumPattern.DoesNotExist:
+            return Response({"detail": "pattern not found"}, status=status.HTTP_404_NOT_FOUND)
+        serializer = DrumPatternSerializer(pattern, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pattern_id):
+        try:
+            pattern = DrumPattern.objects.get(id=pattern_id, user=request.user)
+        except DrumPattern.DoesNotExist:
+            return Response({"detail": "pattern not found"}, status=status.HTTP_404_NOT_FOUND)
+        pattern.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PublicDrumPatternView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        patterns = DrumPattern.objects.filter(is_public=True).order_by("-created_at")
+        serializer = DrumPatternSerializer(patterns, many=True)
+        return Response(serializer.data)
+
+
+class ToolPreferenceView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        preference, _ = ToolPreference.objects.get_or_create(user=request.user)
+        serializer = ToolPreferenceSerializer(preference)
+        return Response(serializer.data)
+
+    def put(self, request):
+        preference, _ = ToolPreference.objects.get_or_create(user=request.user)
+        serializer = ToolPreferenceSerializer(preference, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PatternShareView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        pattern_id = request.data.get("pattern_id")
+        try:
+            pattern = DrumPattern.objects.get(id=pattern_id, user=request.user)
+        except DrumPattern.DoesNotExist:
+            return Response({"detail": "pattern not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        pattern.shares_count += 1
+        pattern.save(update_fields=["shares_count"])
+
+        share = PatternShare.objects.create(
+            pattern=pattern,
+            shared_by=request.user,
+        )
+        serializer = PatternShareSerializer(share)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def get(self, request):
+        shares = PatternShare.objects.filter(shared_by=request.user).order_by("-created_at")
+        serializer = PatternShareSerializer(shares, many=True)
+        return Response(serializer.data)

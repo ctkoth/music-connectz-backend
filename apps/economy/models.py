@@ -4213,3 +4213,76 @@ class TakeRating(models.Model):
 
     def __str__(self):
         return f"{self.coach} rated {self.take_id}"
+
+
+class PracticeSession(models.Model):
+    KIND_METZ = "metz"
+    KIND_TUNERZ = "tunerz"
+    KIND_CHORDZ = "chordz"
+    KIND_DRUMZ = "drumz"
+
+    KIND_CHOICES = [
+        (KIND_METZ, "MetZ - Metronome"),
+        (KIND_TUNERZ, "TunerZ - Pitch Detection"),
+        (KIND_CHORDZ, "ChordZ - Chord Library"),
+        (KIND_DRUMZ, "DrumZ - Beat Pad"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="practice_sessions")
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES)
+    duration_seconds = models.IntegerField(default=0)
+    bpm = models.IntegerField(null=True, blank=True)
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.user} practiced {self.kind} for {self.duration_seconds}s"
+
+
+class DrumPattern(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="drum_patterns")
+    name = models.CharField(max_length=100)
+    kit_name = models.CharField(max_length=50, default="acoustic")
+    bpm = models.IntegerField(default=120)
+    pattern_length = models.IntegerField(default=16)
+    pattern_data = models.JSONField(default=list)
+    is_public = models.BooleanField(default=False)
+    shares_count = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.user}: {self.name} ({self.kit_name})"
+
+
+class ToolPreference(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="tool_preferences")
+    metz_settings = models.JSONField(default=dict, blank=True)
+    tunerz_settings = models.JSONField(default=dict, blank=True)
+    chordz_settings = models.JSONField(default=dict, blank=True)
+    drumz_settings = models.JSONField(default=dict, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Preferences for {self.user}"
+
+
+class PatternShare(models.Model):
+    pattern = models.ForeignKey(DrumPattern, on_delete=models.CASCADE, related_name="shares")
+    shared_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="pattern_shares_given")
+    shared_with = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="pattern_shares_received", null=True, blank=True)
+    app_key = "drumz"
+    target = models.CharField(max_length=200, default="drumz:patterns")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"Pattern {self.pattern.id} shared by {self.shared_by}"
