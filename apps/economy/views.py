@@ -46,8 +46,9 @@ from .serializers_metz import (
     ToolPreferenceSerializer,
     PatternShareSerializer,
     DrillTakeSerializer,
+    TakeAnalysisSerializer,
 )
-from .models import PracticeSession, DrumPattern, ToolPreference, PatternShare, DrillTake
+from .models import PracticeSession, DrumPattern, ToolPreference, PatternShare, DrillTake, TakeAnalysis
 
 User = get_user_model()
 VALID_TIERS = {t[0] for t in TIER_CHOICES}
@@ -1341,3 +1342,16 @@ class CoachObservationsView(APIView):
             result.append(row)
 
         return Response({"coaching": result})
+
+
+class TakeAnalysisView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, upload_id):
+        try:
+            analysis = TakeAnalysis.objects.get(upload__id=upload_id, upload__post__user=request.user)
+        except TakeAnalysis.DoesNotExist:
+            return Response({"detail": "Analysis not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = TakeAnalysisSerializer(analysis)
+        return Response(serializer.data)

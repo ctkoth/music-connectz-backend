@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import PracticeSession, DrumPattern, ToolPreference, PatternShare, DrillTake
+from .models import PracticeSession, DrumPattern, ToolPreference, PatternShare, DrillTake, TakeAnalysis
 
 
 class PracticeSessionSerializer(serializers.ModelSerializer):
@@ -64,3 +64,20 @@ class DrillTakeSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["id", "improvement", "created_at"]
+
+
+class TakeAnalysisSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TakeAnalysis
+        fields = [
+            "id",
+            "detected_notes",
+            "weak_notes",
+            "timing_issues",
+            "overall_pitch_accuracy",
+            "analysis_status",
+            "error_message",
+            "created_at",
+            "analyzed_at",
+        ]
+        read_only_fields = fields

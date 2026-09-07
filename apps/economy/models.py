@@ -4308,3 +4308,25 @@ class DrillTake(models.Model):
 
     def __str__(self):
         return f"{self.user} drilled {self.weak_note} (acc {self.accuracy_percent}%)"
+
+
+class TakeAnalysis(models.Model):
+    upload = models.OneToOneField(Upload, on_delete=models.CASCADE, related_name="analysis")
+    detected_notes = models.JSONField(default=list, help_text="[{note, freq, cents_off, timestamp}]")
+    weak_notes = models.JSONField(default=list, help_text="[{note, freq, cents_off}] notes consistently off")
+    timing_issues = models.JSONField(default=dict, help_text="{rushing_count, dragging_count}")
+    overall_pitch_accuracy = models.IntegerField(default=0, help_text="0-100% pitch accuracy")
+    analysis_status = models.CharField(
+        max_length=20,
+        choices=[("pending", "Pending"), ("done", "Done"), ("failed", "Failed")],
+        default="pending"
+    )
+    error_message = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    analyzed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"Analysis for {self.upload.id} ({self.analysis_status})"

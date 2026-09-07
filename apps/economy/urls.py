@@ -132,6 +132,7 @@ from .views import (
     PatternShareView,
     DrillTakeView,
     CoachObservationsView,
+    TakeAnalysisView,
 )
 
 urlpatterns = [
@@ -398,4 +399,5 @@ urlpatterns = [
     path("drumz/share/", PatternShareView.as_view(), name="economy-drumz-share"),
     path("tunerz/drills/", DrillTakeView.as_view(), name="economy-tunerz-drills"),
     path("coach/observations/", CoachObservationsView.as_view(), name="economy-coach-observations"),
+    path("takes/<int:upload_id>/analysis/", TakeAnalysisView.as_view(), name="economy-take-analysis"),
 ]
