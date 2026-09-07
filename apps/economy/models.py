@@ -4287,3 +4287,24 @@ class PatternShare(models.Model):
 
     def __str__(self):
         return f"Pattern {self.pattern.id} shared by {self.shared_by}"
+
+
+class DrillTake(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="drill_takes")
+    weak_note = models.CharField(max_length=10)
+    original_frequency = models.FloatField()
+    original_cents_off = models.IntegerField()
+    accuracy_percent = models.IntegerField(default=0, help_text="0-100 accuracy % when ending the drill")
+    duration_seconds = models.IntegerField(default=0)
+    final_frequency = models.FloatField(null=True, blank=True, help_text="Last detected frequency in Hz")
+    final_cents_off = models.IntegerField(null=True, blank=True, help_text="Deviation from target at end of drill")
+    improvement = models.IntegerField(null=True, blank=True, help_text="Cents closer to target: original - final")
+    key_context = models.CharField(max_length=20, null=True, blank=True, help_text="Musical key (e.g., A major)")
+    bpm_context = models.IntegerField(null=True, blank=True, help_text="Song BPM from coach context")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.user} drilled {self.weak_note} (acc {self.accuracy_percent}%)"

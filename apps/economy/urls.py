@@ -130,6 +130,7 @@ from .views import (
     PublicDrumPatternView,
     ToolPreferenceView,
     PatternShareView,
+    DrillTakeView,
 )
 
 urlpatterns = [
@@ -394,4 +395,5 @@ urlpatterns = [
     path("drumz/patterns/public/", PublicDrumPatternView.as_view(), name="economy-drumz-patterns-public"),
     path("metz/preferences/", ToolPreferenceView.as_view(), name="economy-metz-preferences"),
     path("drumz/share/", PatternShareView.as_view(), name="economy-drumz-share"),
+    path("tunerz/drills/", DrillTakeView.as_view(), name="economy-tunerz-drills"),
 ]

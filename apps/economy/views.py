@@ -45,8 +45,9 @@ from .serializers_metz import (
     DrumPatternSerializer,
     ToolPreferenceSerializer,
     PatternShareSerializer,
+    DrillTakeSerializer,
 )
-from .models import PracticeSession, DrumPattern, ToolPreference, PatternShare
+from .models import PracticeSession, DrumPattern, ToolPreference, PatternShare, DrillTake
 
 User = get_user_model()
 VALID_TIERS = {t[0] for t in TIER_CHOICES}
@@ -1263,4 +1264,47 @@ class PatternShareView(APIView):
     def get(self, request):
         shares = PatternShare.objects.filter(shared_by=request.user).order_by("-created_at")
         serializer = PatternShareSerializer(shares, many=True)
+        return Response(serializer.data)
+
+
+class DrillTakeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        weak_note = request.data.get("weak_note")
+        original_frequency = request.data.get("original_frequency")
+        original_cents_off = request.data.get("original_cents_off")
+        accuracy_percent = request.data.get("accuracy_percent", 0)
+        duration_seconds = request.data.get("duration_seconds", 0)
+        final_frequency = request.data.get("final_frequency")
+        final_cents_off = request.data.get("final_cents_off")
+        key_context = request.data.get("key_context")
+        bpm_context = request.data.get("bpm_context")
+
+        improvement = None
+        if original_cents_off is not None and final_cents_off is not None:
+            improvement = abs(original_cents_off) - abs(final_cents_off)
+
+        drill_take = DrillTake.objects.create(
+            user=request.user,
+            weak_note=weak_note,
+            original_frequency=float(original_frequency) if original_frequency else 0,
+            original_cents_off=int(original_cents_off) if original_cents_off is not None else 0,
+            accuracy_percent=int(accuracy_percent) if accuracy_percent else 0,
+            duration_seconds=int(duration_seconds) if duration_seconds else 0,
+            final_frequency=float(final_frequency) if final_frequency else None,
+            final_cents_off=int(final_cents_off) if final_cents_off is not None else None,
+            key_context=key_context,
+            bpm_context=int(bpm_context) if bpm_context else None,
+        )
+
+        serializer = DrillTakeSerializer(drill_take)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def get(self, request):
+        note_filter = request.query_params.get("note")
+        drills = DrillTake.objects.filter(user=request.user).order_by("-created_at")
+        if note_filter:
+            drills = drills.filter(weak_note=note_filter)
+        serializer = DrillTakeSerializer(drills, many=True)
         return Response(serializer.data)
