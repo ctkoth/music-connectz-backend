@@ -1308,3 +1308,36 @@ class DrillTakeView(APIView):
             drills = drills.filter(weak_note=note_filter)
         serializer = DrillTakeSerializer(drills, many=True)
         return Response(serializer.data)
+
+
+class CoachObservationsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .models import Observation
+        from .observationz import _row
+        from django.utils import timezone
+
+        kind = "coach"
+        qs = request.user.observations.filter(kind=kind).order_by("-last_seen")
+
+        now = timezone.now()
+        result = []
+        for obs in qs[:100]:
+            row = _row(obs, now)
+            weak_note = row.get("key", "").split("_")[-1] if row.get("key") else None
+
+            drills = []
+            if weak_note:
+                drills_qs = DrillTake.objects.filter(
+                    user=request.user,
+                    weak_note=weak_note
+                ).order_by("-created_at")[:5]
+                drills = DrillTakeSerializer(drills_qs, many=True).data
+
+            row["drills"] = drills
+            row["best_accuracy"] = max([d["accuracy_percent"] for d in drills], default=0)
+            row["total_practice_seconds"] = sum(d["duration_seconds"] for d in drills)
+            result.append(row)
+
+        return Response({"coaching": result})
