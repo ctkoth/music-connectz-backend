@@ -177,3 +177,44 @@ class CrossPollinationTests(TestCase):
         record_observation(self.user, "habit", "x", app_key="rapz")
         record_observation(self.user, "habit", "x")          # later, no context
         self.assertEqual(self.client.get(URL).data["observations"][0]["app_key"], "rapz")
+
+
+class KindMetaTests(TestCase):
+    """Every observation kind must be serveable.
+
+    `KINDS` is derived from `OBSERVATION_KINDS` in models.py; `KIND_META` is
+    typed by hand next to the view. Adding a kind to the model and forgetting
+    the meta is therefore a KeyError on a live endpoint rather than a missing
+    label — which is what OBS_COACH did: `GET /api/economy/observationz/`
+    raised for every member who had consented to anything, and no test noticed
+    because none of them asked for the list with the new kind present.
+    """
+
+    def test_every_kind_has_meta(self):
+        from apps.economy.observationz import KIND_META, KINDS
+        for kind in KINDS:
+            with self.subTest(kind=kind):
+                meta = KIND_META.get(kind)
+                self.assertIsNotNone(
+                    meta, f"OBSERVATION_KINDS has '{kind}' with no KIND_META entry")
+                for field in ("emoji", "label", "blurb"):
+                    self.assertTrue(meta.get(field), f"{kind} has no {field}")
+
+    def test_no_meta_for_a_kind_that_does_not_exist(self):
+        """The other direction: a stale entry means a kind was renamed."""
+        from apps.economy.observationz import KIND_META, KINDS
+        self.assertEqual(set(KIND_META) - set(KINDS), set())
+
+    def test_the_list_endpoint_serves_all_of_them(self):
+        """The actual 500. Consent to every kind, then ask for the list."""
+        user = get_user_model().objects.create_user(
+            username="kindmeta", password="pw")
+        from apps.economy.observationz import KINDS
+        for kind in KINDS:
+            ObservationConsent.objects.create(user=user, kind=kind, enabled=True)
+
+        client = APIClient()
+        client.force_authenticate(user=user)
+        r = client.get("/api/economy/observationz/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual({k["key"] for k in r.data["kinds"]}, set(KINDS))
