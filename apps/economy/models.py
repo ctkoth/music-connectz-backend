@@ -2362,10 +2362,11 @@ class SoundCloudEngagement(models.Model):
 # unless they asked for it. Nothing is recorded without an explicit opt-in per
 # kind, and every kind can be wiped. Consent bolted on afterwards leaves you
 # holding data you were never allowed to keep.
-OBS_HABIT, OBS_CODE, OBS_PATH, OBS_MISTAKE = "habit", "code", "path", "mistake"
+OBS_HABIT, OBS_CODE, OBS_PATH, OBS_MISTAKE, OBS_COACH = "habit", "code", "path", "mistake", "coach"
 OBSERVATION_KINDS = [
     (OBS_HABIT, "HabitZ"), (OBS_CODE, "CodeZ"),
     (OBS_PATH, "PathZ"), (OBS_MISTAKE, "MistakeZ"),
+    (OBS_COACH, "CoachZ Feedback"),
 ]
 
 

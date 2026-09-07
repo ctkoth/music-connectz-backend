@@ -40,10 +40,12 @@ from .models import (
     TIER_FREE,
     TIER_PREMIUM,
     TIER_STATZ,
+    OBS_COACH,
     can_afford_ai,
     daily_prompt_state,
     mark_upload_missing,
     membership_for,
+    record_observation,
     wallet_for,
 )
 
@@ -374,6 +376,58 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     }, None
 
 
+def record_coaching_observations(user, payload):
+    """Cross-pollination: low scores suggest practice tools.
+
+    Best-effort: observations never fail the coach. Silent no-op if consent
+    isn't given (see record_observation).
+    """
+    if not user or not getattr(user, "is_authenticated", True):
+        return
+
+    try:
+        scores = payload.get("scores", {})
+
+        # Pitch accuracy low: suggest TunerZ
+        pitch = scores.get("pitch_accuracy")
+        if pitch is not None and pitch < 65:
+            record_observation(
+                user,
+                kind=OBS_COACH,
+                key="pitch-low",
+                label=f"Work on pitch accuracy (currently {pitch}%)",
+                app_key="tunerz",
+                target="tunerz:pitch-tuner",
+            )
+
+        # Timing accuracy low: suggest MetZ
+        timing = scores.get("timing_accuracy")
+        if timing is not None and timing < 65:
+            record_observation(
+                user,
+                kind=OBS_COACH,
+                key="timing-low",
+                label=f"Practice rhythm/timing (currently {timing}%)",
+                app_key="metz",
+                target="metz:metronome",
+            )
+
+        # Tone quality low: suggest another round of coaching or MetZ for rhythm stability
+        tone = scores.get("tone_quality")
+        if tone is not None and tone < 65:
+            record_observation(
+                user,
+                kind=OBS_COACH,
+                key="tone-low",
+                label=f"Develop vocal control (currently {tone}%)",
+                app_key="singz",
+                target="singz:coach",
+            )
+    except Exception:
+        # Observations are best-effort. Never let them fail the coach.
+        logger.exception("Failed to record coaching observations")
+
+
 class SingZCoachView(APIView):
     """The Boss Take coach for any InstrumentZ app.
 
@@ -642,6 +696,11 @@ class SingZCoachView(APIView):
                 "saved_to_post": self._save_to_post(post, request.user, payload,
                                                     self.app_key),
             })
+
+        # Cross-pollination: low scores suggest practice tools for improvement.
+        # Best-effort, never blocks the coach response.
+        record_coaching_observations(request.user, payload)
+
         return Response(out)
 
     def _take_from_post(self, request):
