@@ -2309,6 +2309,147 @@ class CollabDeal(models.Model):
         return all(p.get("funded") for p in self.payers())
 
 
+# ---- VenueZ — CollabZ that happens in a room ------------------------------
+# CollabZ is work sent back and forth; VenueZ is the same deal when the people
+# are in the same place. It reuses CollabDeal for the money rather than
+# growing a second escrow, because two ways to hold somebody's cash is one
+# more than anybody can audit.
+#
+# ONE RULE decides which way the money goes, and it reads the same in both
+# directions: **whoever RECEIVES the skill pays for it, and the price comes
+# from whoever PROVIDES it.**
+#
+#   performance — the visitor came to see the host, so the visitor pays, and
+#                 the rate is the HOST's own PersonaZ price.
+#   session  🤝 — the host wanted the room full of players, so the host pays,
+#                 and the rate is the VISITOR's own PersonaZ price.
+#   free        — nobody pays. It is still a booking, because who is coming
+#                 and whether the host said yes are the parts that matter
+#                 when strangers are meeting at an address.
+#
+# The rate is always the PROVIDER's own number, never typed by the other side
+# into a form — the same reason post_cost_cents prices a post from the
+# member's own rates rather than from the request body.
+class VenueEvent(models.Model):
+    KIND_PERFORMANCE = "performance"
+    KIND_SESSION = "session"
+    KIND_FREE = "free"
+    KIND_CHOICES = [
+        (KIND_PERFORMANCE, "Performance — the visitor pays the host"),
+        (KIND_SESSION, "Session — the host pays the visitor"),
+        (KIND_FREE, "Free — nobody pays"),
+    ]
+
+    BASIS_HOUR = "hour"
+    BASIS_TOTAL = "total"
+    BASIS_CHOICES = [(BASIS_HOUR, "Per hour"), (BASIS_TOTAL, "Agreed total")]
+
+    STATUS_OPEN = "open"
+    STATUS_FULL = "full"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_DONE = "done"
+    STATUS_CHOICES = [
+        (STATUS_OPEN, "Open"), (STATUS_FULL, "Full"),
+        (STATUS_CANCELLED, "Cancelled"), (STATUS_DONE, "Done"),
+    ]
+
+    host = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="venue_events")
+    kind = models.CharField(max_length=12, choices=KIND_CHOICES, db_index=True)
+    title = models.CharField(max_length=160)
+    description = models.TextField(blank=True, default="")
+
+    # WHERE, in two halves, and the split is a safety rule not a UI choice.
+    # `area` is public — a city or a neighbourhood, enough to decide whether
+    # you can get there. `address` is the doorstep and is released ONLY to a
+    # visitor whose booking the host has accepted. A public address on a
+    # listing that says when the owner will be out is a different product
+    # from the one this is meant to be.
+    area = models.CharField(max_length=120)
+    address = models.CharField(max_length=300, blank=True, default="")
+
+    starts_at = models.DateTimeField(db_index=True)
+    hours = models.PositiveSmallIntegerField(default=1)
+    basis = models.CharField(max_length=8, choices=BASIS_CHOICES, default=BASIS_HOUR)
+    # What the provider is bringing. Priced from the PROVIDER's PersonaZ rates
+    # at quote time and snapshotted onto the booking, so a rate edited after
+    # somebody books cannot move the price of a booking already agreed.
+    skills = models.JSONField(default=list, blank=True)
+    capacity = models.PositiveSmallIntegerField(default=1)
+
+    # An IRL room is not a feed. A venue that serves alcohol or is otherwise
+    # adults-only says so here and the booking path enforces it, rather than
+    # leaving it to a line in the description that nothing reads.
+    min_age = models.PositiveSmallIntegerField(default=0)
+
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES,
+                              default=STATUS_OPEN, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["starts_at"]
+
+    def __str__(self):
+        return f"{self.title} ({self.kind}) <{self.host}>"
+
+    def provider_side(self):
+        """Which side brings the skill being paid for: "host", "visitor", or "".
+
+        A side rather than a user, because on a session the provider is a
+        different person for every booking and the event cannot name them.
+        """
+        if self.kind == self.KIND_PERFORMANCE:
+            return "host"
+        if self.kind == self.KIND_SESSION:
+            return "visitor"
+        return ""
+
+    def paid(self):
+        return self.kind in (self.KIND_PERFORMANCE, self.KIND_SESSION)
+
+
+class VenueBooking(models.Model):
+    """One visitor at one event, and the agreement that got them in the door."""
+    STATUS_REQUESTED = "requested"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_DECLINED = "declined"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_ATTENDED = "attended"
+    STATUS_NO_SHOW = "no_show"
+    STATUS_CHOICES = [
+        (STATUS_REQUESTED, "Requested"), (STATUS_ACCEPTED, "Accepted"),
+        (STATUS_DECLINED, "Declined"), (STATUS_CANCELLED, "Cancelled"),
+        (STATUS_ATTENDED, "Attended"), (STATUS_NO_SHOW, "No show"),
+    ]
+
+    event = models.ForeignKey(VenueEvent, on_delete=models.CASCADE,
+                              related_name="bookings")
+    visitor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name="venue_bookings")
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES,
+                              default=STATUS_REQUESTED, db_index=True)
+
+    # The quote, frozen. Both sides saw these numbers before either committed,
+    # so neither a PersonaZ rate change nor an edit to the event can move what
+    # was agreed — the price on the button has to be the price that is charged.
+    skills = models.JSONField(default=list, blank=True)
+    hours = models.PositiveSmallIntegerField(default=1)
+    quoted_cents = models.PositiveIntegerField(default=0)
+    payer_is_host = models.BooleanField(default=False)
+
+    # The money lives in CollabZ's escrow, not in a second one here.
+    deal = models.OneToOneField(CollabDeal, on_delete=models.SET_NULL, null=True,
+                                blank=True, related_name="venue_booking")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("event", "visitor")
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.visitor} @ {self.event_id} ({self.status})"
+
+
 # --- Rewarded ads (AdMob SSV) & offerwall (OfferZ) grants -------------------
 # One row per external reward callback, keyed by the provider's unique
 # transaction id, so a replayed callback can never pay a user twice.
