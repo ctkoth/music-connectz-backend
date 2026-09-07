@@ -42,5 +42,3 @@ class EconomyConfig(AppConfig):
         # log nobody reads twice.
         from .storage_health import warn_once
         warn_once()
-        # Register signals for take analysis
-        from . import signals_take_analysis  # noqa: F401

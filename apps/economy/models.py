@@ -4315,7 +4315,12 @@ class TakeAnalysis(models.Model):
     detected_notes = models.JSONField(default=list, help_text="[{note, freq, cents_off, timestamp}]")
     weak_notes = models.JSONField(default=list, help_text="[{note, freq, cents_off}] notes consistently off")
     timing_issues = models.JSONField(default=dict, help_text="{rushing_count, dragging_count}")
-    overall_pitch_accuracy = models.IntegerField(default=0, help_text="0-100% pitch accuracy")
+    # Null means nothing was measurable — no voiced frame in the take. It is
+    # NOT zero: telling somebody they sang 0% in tune when what happened is
+    # that we never heard a note is a fake number, and a fake one ends the
+    # question an empty one invites.
+    overall_pitch_accuracy = models.IntegerField(
+        null=True, blank=True, help_text="0-100% of sung frames in tune; null if nothing was measurable")
     analysis_status = models.CharField(
         max_length=20,
         choices=[("pending", "Pending"), ("done", "Done"), ("failed", "Failed")],

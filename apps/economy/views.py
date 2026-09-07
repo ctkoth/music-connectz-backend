@@ -14,6 +14,7 @@ from .catalog import (AI_MODEL_COSTS, SPECZ_APP_KEYS, SPECZ_APPS,
                       SPECZ_LABEL_MAX, SPECZ_PRICE_SPINAZ, SPECZ_VALUE_MAX,
                       ai_cost, cashout_rate, limits_for)
 from .media import stable_media_url
+from . import take_analyzer
 from .models import (
     DEV_TAX,
     FUNNEL_KINDS,
@@ -1345,13 +1346,33 @@ class CoachObservationsView(APIView):
 
 
 class TakeAnalysisView(APIView):
+    """What the recording itself says about the pitch and the timing.
+
+    Computed on the first request that asks for it, not when the file lands.
+    There is no worker here, so analysing on upload would have meant seconds
+    of DSP inside the POST that saves the file — and `Upload` is the row
+    behind every avatar, cover and video on the platform, not just takes.
+
+    Owner-only. A post is public; a breakdown of where its author sang flat
+    is not.
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request, upload_id):
-        try:
-            analysis = TakeAnalysis.objects.get(upload__id=upload_id, upload__post__user=request.user)
-        except TakeAnalysis.DoesNotExist:
-            return Response({"detail": "Analysis not found"}, status=status.HTTP_404_NOT_FOUND)
+        upload = Upload.objects.filter(id=upload_id, user=request.user).first()
+        if upload is None:
+            return Response({"detail": "That recording isn't yours or isn't here."},
+                            status=status.HTTP_404_NOT_FOUND)
 
-        serializer = TakeAnalysisSerializer(analysis)
-        return Response(serializer.data)
+        if not take_analyzer.analyzable(upload):
+            return Response({"detail": "That upload isn't a recording."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        analysis = TakeAnalysis.objects.filter(upload=upload).first()
+        if analysis is None or analysis.analysis_status not in ("done", "failed"):
+            analysis = take_analyzer.analyze_take_audio(upload.id)
+            if analysis is None:
+                return Response({"detail": "That upload isn't a recording."},
+                                status=status.HTTP_404_NOT_FOUND)
+
+        return Response(TakeAnalysisSerializer(analysis).data)
