@@ -66,3 +66,25 @@ class HealthTests(TestCase):
         has to point at it rather than let "configured" read as "working".
         """
         self.assertIn("coach_live_check", self._body()["ai"]["detail"])
+
+    def test_reports_whether_copyright_scanning_can_run(self):
+        """A surface that silently never scans is the link-scanner bug again.
+
+        readiness() already names which half is missing — a provider or
+        ffmpeg — so the health endpoint carries it rather than leaving "is
+        copyright checking on?" answerable only from the Render dashboard.
+        """
+        body = self._body()
+        self.assertIn("copyright", body)
+        self.assertIn("ready", body["copyright"])
+        # Not configured here, and it must say so rather than imply clear.
+        if body["copyright"]["ready"] is False:
+            self.assertTrue(body["copyright"]["why"])
+
+    def test_the_acrcloud_secret_is_never_published(self):
+        from django.test import override_settings
+        with override_settings(ACRCLOUD_ACCESS_KEY="ak-live-999",
+                               ACRCLOUD_ACCESS_SECRET="sec-live-888"):
+            raw = self.client.get("/").content.decode()
+        self.assertNotIn("sec-live-888", raw)
+        self.assertNotIn("ak-live-999", raw)

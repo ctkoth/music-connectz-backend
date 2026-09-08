@@ -77,11 +77,20 @@ def health(_request):
         ai_configured = bool(_key())
     except Exception:                                    # pragma: no cover
         ai_configured = None
+    # Whether a submission can be checked against commercial recordings at
+    # all. Same argument as the AI key: it decides whether a whole surface
+    # works, and readiness() already names which half is missing.
+    try:
+        from apps.economy.copyrightz import readiness
+        copyright_state = readiness()
+    except Exception:                                    # pragma: no cover
+        copyright_state = {"ready": None, "why": "could not be determined"}
     return JsonResponse(
         {
             "service": "music-connectz-backend",
             "status": "ok",
             "uploads": uploads,
+            "copyright": copyright_state,
             "ai": {
                 "configured": ai_configured,
                 "detail": (
