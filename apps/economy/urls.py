@@ -69,7 +69,8 @@ from .releasez import (CollabDistributeView, PostDistributeView, ReleaseDetailVi
                        ReleaseSubmitView, ReleasesView)
 from .collab_files import CollabFileDetailView, CollabFilesView
 from .venuez import (VenueBookView, VenueBookingCancelView,
-                     VenueBookingRespondView, VenueDetailView, VenueListView)
+                     VenueBookingRespondView, VenueDetailView, VenueListView,
+                     VenueRateView)
 from .collab_post import CollabNeedsView, CollabPostView
 from .ai_models import AiModelView
 from .badgez import BadgeGiftView, BadgezView
@@ -367,6 +368,9 @@ urlpatterns = [
          name="economy-venue-respond"),
     path("venuez/bookings/<int:pk>/cancel/", VenueBookingCancelView.as_view(),
          name="economy-venue-cancel"),
+    # Attendance-gated, unlike a battle and unlike a collab split. Somebody
+    # who was not in the room has nothing to report about it.
+    path("venuez/<int:pk>/rate/", VenueRateView.as_view(), name="economy-venue-rate"),
     # The work going back and forth: v1 down, v2 up.
     # A finished collab becomes ONE post, owned by everyone who made it.
     path("collab/<int:pk>/post/", CollabPostView.as_view(), name="economy-collab-post"),

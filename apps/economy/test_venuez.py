@@ -349,3 +349,78 @@ class Endpoints(TestCase):
         self.client.force_login(self.visitor)
         row = self.client.get(f"/api/economy/venuez/{ev.id}/").json()
         self.assertTrue(row["open_in"])
+
+
+class WhoMayRate(TestCase):
+    """A rating needs knowledge and no stake — and a venue is the case where
+    the public has neither."""
+
+    def setUp(self):
+        self.host = User.objects.create_user(username="rh", password="pw")
+        self.guest = User.objects.create_user(username="rg", password="pw")
+        self.stranger = User.objects.create_user(username="rs", password="pw")
+        self.ev = _event(self.host, VenueEvent.KIND_FREE,
+                         starts_at=timezone.now() - timedelta(hours=3))
+        self.b = VenueBooking.objects.create(
+            event=self.ev, visitor=self.guest,
+            status=VenueBooking.STATUS_ACCEPTED)
+
+    def _rate(self, who, score=9, **body):
+        self.client.force_login(who)
+        return self.client.post(f"/api/economy/venuez/{self.ev.id}/rate/",
+                                {"score": score, **body}, "application/json")
+
+    def test_somebody_who_was_there_may_rate_it(self):
+        self.assertEqual(self._rate(self.guest).status_code, 200)
+        from .models import item_rating_median
+        self.assertEqual(item_rating_median(f"venue:{self.ev.id}"), 9)
+
+    def test_a_stranger_may_not(self):
+        """Rating a room you were never in is rating the description."""
+        r = self._rate(self.stranger)
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("were there", r.json()["detail"])
+
+    def test_asking_for_a_seat_is_not_attending(self):
+        VenueBooking.objects.filter(pk=self.b.pk).update(
+            status=VenueBooking.STATUS_REQUESTED)
+        self.assertEqual(self._rate(self.guest).status_code, 403)
+
+    def test_you_cannot_rate_a_night_that_has_not_happened(self):
+        VenueEvent.objects.filter(pk=self.ev.pk).update(
+            starts_at=timezone.now() + timedelta(days=2))
+        r = self._rate(self.guest)
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("once it's happened", r.json()["detail"])
+
+    def test_the_host_rates_guests_not_their_own_night(self):
+        r = self._rate(self.host)
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("hosted it", r.json()["detail"])
+
+        # But they may rate somebody who came.
+        self.assertEqual(self._rate(self.host, booking=self.b.id).status_code, 200)
+        from .models import item_rating_median
+        self.assertEqual(item_rating_median(f"venueguest:{self.b.id}"), 9)
+
+    def test_a_guest_cannot_rate_another_guest(self):
+        self.assertEqual(
+            self._rate(self.stranger, booking=self.b.id).status_code, 403)
+
+    def test_a_score_outside_1_to_10_is_refused(self):
+        for bad in (0, 11, -3):
+            with self.subTest(score=bad):
+                self.assertEqual(self._rate(self.guest, score=bad).status_code, 400)
+
+    def test_rating_again_replaces_rather_than_stacks(self):
+        self._rate(self.guest, score=3)
+        self._rate(self.guest, score=8)
+        from .models import ItemRating
+        self.assertEqual(
+            ItemRating.objects.filter(item_id=f"venue:{self.ev.id}").count(), 1)
+
+    def test_the_listing_says_why_you_cannot_rate_yet(self):
+        self.client.force_login(self.stranger)
+        row = self.client.get(f"/api/economy/venuez/{self.ev.id}/").json()
+        self.assertFalse(row["rating"]["can_rate"])
+        self.assertTrue(row["rating"]["why_not"])

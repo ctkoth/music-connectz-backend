@@ -211,6 +211,8 @@ def event_dict(event, viewer):
         "can_book": ok,
         "why_not": why,
         "my_booking": booking_dict(my, viewer) if my else None,
+        # Who was there is who may judge it — see the note above VENUE_ITEM.
+        "rating": venue_rating_state(event, viewer),
         "bookings": ([booking_dict(b, viewer) for b in
                       event.bookings.select_related("visitor")[:100]]
                      if mine else []),
@@ -397,3 +399,107 @@ class VenueBookingCancelView(APIView):
         b.save(update_fields=["status"])
         return Response({"booking": booking_dict(b, request.user),
                          "venue": event_dict(b.event, request.user)})
+
+
+# ---- Who may rate a night ---------------------------------------------------
+# One rule decides it, and it lands differently in each app:
+#
+#     A rating needs KNOWLEDGE and no STAKE.
+#
+# * A collab's split is re-cut by ratings, so money follows them — and
+#   `rating_split` already excludes the deal's own members for exactly that
+#   reason. Outsiders can hear the finished track (knowledge) and gain nothing
+#   from the split (no stake). Correct as it stands; do not open it up.
+# * A battle is a public verdict on public work. Anyone can hear it, nobody is
+#   paid by the outcome. Open.
+# * A VENUE is the opposite of both, and that is why this exists. The thing
+#   being rated is an evening in a room, which somebody who was not in the
+#   room has NO knowledge of. Letting the public rate it would be rating the
+#   description — a score off form completeness, which is precisely what the
+#   substance rule forbids.
+#
+# So: attendance-gated, and two-sided, because the host and the visitor were
+# both there and each knows something the other cannot report about themselves.
+VENUE_ITEM = "venue:%d"
+GUEST_ITEM = "venueguest:%d"
+
+
+def venue_rating_state(event, viewer):
+    """Whether this member may rate this night, and what it is rated so far."""
+    from .models import ItemRating, item_rating_median
+
+    happened = event.starts_at <= timezone.now()
+    attended = event.bookings.filter(
+        visitor=viewer,
+        status__in=[VenueBooking.STATUS_ACCEPTED, VenueBooking.STATUS_ATTENDED],
+    ).exists()
+
+    why = ""
+    if not happened:
+        why = "You can rate it once it's happened."
+    elif event.host_id == viewer.id:
+        why = "You hosted it — rate the people who came instead."
+    elif not attended:
+        why = "Only people who were there can rate it."
+
+    return {
+        "item": VENUE_ITEM % event.id,
+        "median": item_rating_median(VENUE_ITEM % event.id),
+        "count": ItemRating.objects.filter(item_id=VENUE_ITEM % event.id).count(),
+        "can_rate": not why,
+        "why_not": why,
+        "mine": (ItemRating.objects
+                 .filter(item_id=VENUE_ITEM % event.id, user=viewer)
+                 .values_list("score", flat=True).first()),
+    }
+
+
+class VenueRateView(APIView):
+    """Rate the night, or rate somebody who came to it.
+
+    The gate is attendance and it is checked HERE, not on the client: an
+    outsider rating a room they were never in is the substance rule's failure
+    case, and a screen that merely hides the control does not stop a POST.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        from .models import ItemRating
+
+        event = VenueEvent.objects.select_related("host").filter(pk=pk).first()
+        if not event:
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            score = int((request.data or {}).get("score", 0))
+        except (TypeError, ValueError):
+            score = 0
+        if not 1 <= score <= 10:
+            return Response({"detail": "score must be 1-10"},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        # The host rating a guest, or a guest rating the night.
+        guest_booking_id = (request.data or {}).get("booking")
+        if guest_booking_id:
+            b = event.bookings.filter(pk=guest_booking_id).first()
+            if event.host_id != request.user.id or not b:
+                return Response({"detail": "Only the host rates who came."},
+                                status=status.HTTP_403_FORBIDDEN)
+            if b.status not in (VenueBooking.STATUS_ACCEPTED,
+                                VenueBooking.STATUS_ATTENDED):
+                return Response({"detail": "They weren't let in."},
+                                status=status.HTTP_409_CONFLICT)
+            if event.starts_at > timezone.now():
+                return Response({"detail": "It hasn't happened yet."},
+                                status=status.HTTP_409_CONFLICT)
+            item = GUEST_ITEM % b.id
+        else:
+            state = venue_rating_state(event, request.user)
+            if not state["can_rate"]:
+                return Response({"detail": state["why_not"]},
+                                status=status.HTTP_403_FORBIDDEN)
+            item = state["item"]
+
+        ItemRating.objects.update_or_create(
+            user=request.user, item_id=item, defaults={"score": score})
+        return Response({"venue": event_dict(event, request.user)})
