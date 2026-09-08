@@ -8,6 +8,7 @@ from django.urls import include, path, re_path
 from django.views.static import serve as static_serve
 
 from apps.economy.views import (
+    AllMembersView,
     FunnelEventView,
     FunnelSummaryView,
     PublicStatsView,
@@ -57,11 +58,42 @@ def health(_request):
         uploads = upload_storage_state()
     except Exception:                                    # pragma: no cover
         uploads = {"durable": None, "detail": "could not be determined"}
+    # Whether the AI surfaces can actually run, for the same reason uploads
+    # are reported here: it is a fact about the deployment that decides
+    # whether a headline feature works, and until now the only way to learn
+    # it was to open the Render dashboard or to press the button and get a
+    # 503. The coach, OCC, DirectZ craft and KeyConnectZ all hang off this
+    # one key.
+    #
+    # A BOOLEAN, never the key and never its length. This endpoint is open to
+    # anybody, and "configured" is the whole question — any detail beyond it
+    # is a fact about a secret, published.
+    #
+    # And it says CONFIGURED, not working: a key that is set can still be
+    # revoked, out of quota or restricted to the wrong API, and this cannot
+    # see any of that. tools/coach_live_check.sh is the only thing that can.
+    try:
+        from apps.economy.gemini import _key
+        ai_configured = bool(_key())
+    except Exception:                                    # pragma: no cover
+        ai_configured = None
     return JsonResponse(
         {
             "service": "music-connectz-backend",
             "status": "ok",
             "uploads": uploads,
+            "ai": {
+                "configured": ai_configured,
+                "detail": (
+                    "GEMINI_API_KEY is set — surfaces will attempt a real call. "
+                    "Set does not mean working; run tools/coach_live_check.sh."
+                    if ai_configured else
+                    "GEMINI_API_KEY is NOT set — the coach, OCC, DirectZ craft "
+                    "and KeyConnectZ voice all 503 until it is."
+                    if ai_configured is False else
+                    "could not be determined"
+                ),
+            },
             "endpoints": [
                 "/api/auth/register/",
                 "/api/auth/login/",
@@ -78,6 +110,7 @@ urlpatterns = [
     path("", health, name="health"),
     path("admin/", admin.site.urls),
     path("api/auth/stats/", StatsView.as_view(), name="auth-stats"),
+    path("api/auth/stats/all/", AllMembersView.as_view(), name="auth-stats-all"),
     # No session required — the landing page's real member/online count.
     path("api/auth/public-stats/", PublicStatsView.as_view(), name="auth-public-stats"),
     # No session required — a step on the join funnel, logged by a visitor

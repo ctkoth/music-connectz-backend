@@ -111,6 +111,12 @@ class Transaction(models.Model):
     # royalties, and putting both in one bucket would make either impossible to
     # total. These are the "intelligence royalties" the Owner badge names.
     KIND_INTELLIGENCE = "intelligence"
+    # Cash moved between two accounts rather than in or out of the platform —
+    # today, a duplicate account's balance swept to the one being kept before
+    # it is deleted. Its own kind because it is neither funds arriving nor a
+    # reward: totalling it as either would overstate what the platform took in
+    # by exactly the amount that only ever moved sideways.
+    KIND_TRANSFER = "transfer"
     KIND_CHOICES = [
         (KIND_ADD, "Add funds"),
         (KIND_PURCHASE, "Purchase"),
@@ -118,6 +124,7 @@ class Transaction(models.Model):
         (KIND_REWARD, "Reward"),
         (KIND_SPEND, "Spend"),
         (KIND_INTELLIGENCE, "Intelligence royalty"),
+        (KIND_TRANSFER, "Transfer"),
     ]
 
     # Which resource moved. Money was the only thing ever recorded, so SpinaZ
@@ -140,6 +147,20 @@ class Transaction(models.Model):
     amount_cents = models.IntegerField(help_text="Signed: positive credit, negative debit")
     dev_tax_cents = models.PositiveIntegerField(default=0)
     note = models.CharField(max_length=200, blank=True, default="")
+    # WHERE the movement came from. The cross-pollination rule says anything
+    # that stores a thing stores where it came from, and this — the one table
+    # that records every resource movement in the app — did not. So a LogZ row
+    # could say "+300 🍥 referral (referrer)" and offer nowhere to go with it:
+    # the note named the reason in prose and nothing could turn that back into
+    # a door.
+    #
+    # Blank is a real state and means "the writer didn't say", which is the
+    # truth for every row written before this and for any caller that doesn't
+    # pass one. It is never INFERRED from the note — a guessed origin is a door
+    # that opens on the wrong screen, and the rule about not asserting what you
+    # only inferred applies to navigation as much as to errors.
+    app_key = models.CharField(max_length=24, blank=True, default="")
+    target = models.CharField(max_length=60, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -539,11 +560,20 @@ def can_afford_ai(user, cost_cents):
     return (w.promptz or 0) + (w.money_cents or 0) >= cost_cents
 
 
-def award_promptz(user, amount, note="PromptZ"):
-    """Grant prepaid AI credits (1 PromptZ = 1¢ of AI spend)."""
+def award_promptz(user, amount, note="PromptZ", *, app_key="", target=""):
+    """Grant prepaid AI credits (1 PromptZ = 1¢ of AI spend), and record it.
+
+    It did not record it. SpinaZ and Energy have written a LogZ line since LogZ
+    shipped; PromptZ moved silently, so "where did my 🏷️ come from" — bought,
+    swapped from 🍥 at SPINAZ_PER_PROMPTZ, or granted — had no answer except
+    watching the number. Same bug LogZ exists to fix, left open on one
+    resource because this helper predates it and nothing re-checked.
+    """
     w = wallet_for(user)
     w.promptz = (w.promptz or 0) + int(amount)
     w.save(update_fields=["promptz", "updated_at"])
+    log_resource(user, Transaction.RES_PROMPTZ, int(amount), note or "PromptZ",
+                 app_key=app_key, target=target)
     return w.promptz
 
 
@@ -1090,6 +1120,9 @@ class Post(models.Model):
     # `items` carry multiple media entries [{url, type, title, lyrics}].
     is_album = models.BooleanField(default=False)
     items = models.JSONField(default=list, blank=True)
+    # Portfolio showcase: embedded media from YouTube, Spotify, SoundCloud
+    # [{type: "youtube"|"spotify"|"soundcloud", url, title}]
+    embeds = models.JSONField(default=list, blank=True)
     # Optional scored-take payload (e.g. RapZ/SingZ lab result) for context on the post.
     score = models.JSONField(default=dict, blank=True)
     visibility = models.CharField(max_length=12, choices=VIS_CHOICES, default="public")
@@ -1231,7 +1264,7 @@ class LinkClick(models.Model):
         unique_together = ("counter", "clicker", "day")
 
 
-def award_spinaz(user, amount, note=""):
+def award_spinaz(user, amount, note="", *, app_key="", target=""):
     """Credit SpinAZ to a user's wallet and record it.
 
     The `note` every caller already passes used to be accepted and thrown
@@ -1241,20 +1274,22 @@ def award_spinaz(user, amount, note=""):
     w = wallet_for(user)
     w.spinaz = (w.spinaz or 0) + int(amount)
     w.save(update_fields=["spinaz", "updated_at"])
-    log_resource(user, Transaction.RES_SPINAZ, int(amount), note or "SpinaZ")
+    log_resource(user, Transaction.RES_SPINAZ, int(amount), note or "SpinaZ",
+                 app_key=app_key, target=target)
     return w.spinaz
 
 
-def award_energy(user, amount, note=""):
+def award_energy(user, amount, note="", *, app_key="", target=""):
     """Credit Energy to a user's wallet, and record it."""
     w = wallet_for(user)
     w.energy = (w.energy or 0) + int(amount)
     w.save(update_fields=["energy", "updated_at"])
-    log_resource(user, Transaction.RES_ENERGY, int(amount), note or "Energy")
+    log_resource(user, Transaction.RES_ENERGY, int(amount), note or "Energy",
+                 app_key=app_key, target=target)
     return w.energy
 
 
-def log_resource(user, resource, amount, note=""):
+def log_resource(user, resource, amount, note="", *, app_key="", target=""):
     """One line in LogZ: what moved, which way, and when.
 
     Best-effort — a ledger write must never be the reason a reward fails to
@@ -1271,6 +1306,9 @@ def log_resource(user, resource, amount, note=""):
             amount_cents=int(amount) if resource == Transaction.RES_MONEY else 0,
             dev_tax_cents=0,
             note=str(note)[:200],
+            # Blank when the caller didn't say. Never guessed from the note.
+            app_key=str(app_key or "")[:24],
+            target=str(target or "")[:60],
         )
     except Exception:  # pragma: no cover - never break a reward over its log
         return None
@@ -1304,8 +1342,10 @@ def record_referral(referrer, joinee):
     if Referral.objects.filter(joinee=joinee).exists():
         return None
     ref = Referral.objects.create(referrer=referrer, joinee=joinee)
-    award_spinaz(referrer, REFERRAL_REWARD_REFERRER_SPINAZ, "referral (referrer)")
-    award_spinaz(joinee, REFERRAL_REWARD_JOINEE_SPINAZ, "referral (welcome)")
+    award_spinaz(referrer, REFERRAL_REWARD_REFERRER_SPINAZ, "referral (referrer)",
+                 app_key="profilez", target="referral-code")
+    award_spinaz(joinee, REFERRAL_REWARD_JOINEE_SPINAZ, "referral (welcome)",
+                 app_key="profilez", target="referral-code")
     return ref
 
 
@@ -1353,8 +1393,8 @@ def complete_onboarding(user):
     p.onboarded = True
     p.onboarded_at = timezone.now()
     p.save(update_fields=["onboarded", "onboarded_at", "updated_at"])
-    award_spinaz(user, ONBOARD_REWARD_SPINAZ, "onboarding")
-    award_energy(user, ONBOARD_REWARD_ENERGY, "onboarding")
+    award_spinaz(user, ONBOARD_REWARD_SPINAZ, "onboarding", app_key="onboardz")
+    award_energy(user, ONBOARD_REWARD_ENERGY, "onboarding", app_key="onboardz")
     return {"spinaz": ONBOARD_REWARD_SPINAZ, "energy": ONBOARD_REWARD_ENERGY, "already": False}
 
 
@@ -1501,7 +1541,8 @@ def pay_bug_bounty(bug, by=None):
     """
     if bug.paid_at or bug.status != BugReport.STATUS_SQUASHED:
         return False
-    award_spinaz(bug.reporter, BUG_BOUNTY_SPINAZ, note=f"BugZ bounty: {bug.title}"[:200])
+    award_spinaz(bug.reporter, BUG_BOUNTY_SPINAZ,
+                 note=f"BugZ bounty: {bug.title}"[:200], app_key="bugz")
     grant_badge(bug.reporter, "bug_hunter", by=by)
     bug.paid_at = timezone.now()
     bug.save(update_fields=["paid_at", "updated_at"])
@@ -1516,6 +1557,207 @@ def notify(user, kind, text, actor=None, item_id=""):
     if not user or (actor and actor.id == user.id):
         return None
     return Notification.objects.create(user=user, actor=actor, kind=kind, text=text[:280], item_id=item_id or "")
+
+
+# ---- DupeZ: one person, more than one account ----
+#
+# Two accounts belonging to the same person is not, by itself, misconduct — it
+# is what OAuth produces when somebody signs in with Google in June and with
+# SoundCloud in August. What it costs them is real though: their work is split
+# across two profiles, their reach counts twice as two people and once as
+# nobody, and neither account is the one they meant to build.
+#
+# The fix is a deletion, and a deletion is the most irreversible thing this app
+# can do to a member. So it is never automatic and never inferred:
+#
+# * **A claim is made by a person, about their own other account.** Nothing in
+#   the codebase decides two accounts are the same and acts on it.
+# * **The owner decides.** Except for the one case a member can prove on their
+#   own (the two accounts carry the same email), a claim is a request, and it
+#   sits here until the owner approves or refuses it.
+# * **It is refused in writing.** `resolved_note` is why, and the claimant is
+#   notified either way — a queue somebody's account disappears into without a
+#   word is worse than no queue.
+class AccountClaim(models.Model):
+    """"That other account is also me" — a request to delete it, pending review.
+
+    Deliberately NOT a BugReport. BugZ's queue is public by design ("everyone
+    sees the queue", so nobody files the same thing twice), and a claim names
+    two accounts and the evidence tying them together — publishing it would
+    tell the whole platform which handles belong to the same person, about
+    every member who ever filed one.
+    """
+
+    OPEN, APPROVED, REFUSED, WITHDRAWN = "open", "approved", "refused", "withdrawn"
+    STATUS_CHOICES = [(OPEN, "Open"), (APPROVED, "Approved"),
+                      (REFUSED, "Refused"), (WITHDRAWN, "Withdrawn")]
+
+    claimant = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                 related_name="account_claims")
+    # The account the claimant says is also theirs, and wants gone. Kept as a
+    # FK so it cannot name an account that does not exist — and CASCADE because
+    # once the target is deleted (by this claim or any other route) the claim
+    # has nothing left to be about.
+    target = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="claims_against")
+    note = models.TextField(blank=True, default="")
+    # What actually tied the two accounts together when the claim was filed,
+    # recorded rather than recomputed: the owner reviews the evidence as it was,
+    # and a signal that has since changed does not silently rewrite the case.
+    signals = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=OPEN, db_index=True)
+    resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                    null=True, blank=True, related_name="claims_resolved")
+    resolved_note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        # One open claim per pair. Re-filing is editing the one you have, not
+        # a second queue entry saying the same thing.
+        unique_together = ("claimant", "target")
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"AccountClaim<{self.claimant} -> {self.target}: {self.status}>"
+
+
+# ---- How the app talks to this member ----
+#
+# The voice was OCC's alone and it arrived on every request as a client field,
+# so it was per-app, per-call, and forgotten the moment somebody opened a
+# different screen. A member who turned the emoji down in OCC met the founder
+# voice at full volume in the coach five seconds later.
+#
+# It is a row now, read by every surface where a model writes something a
+# member reads. Set once, followed everywhere. See `voice.py` for what a member
+# may change — and for the four rules, which are in every prompt at every
+# setting because they are what the app promises rather than how it sounds.
+class VoicePrefs(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name="voice")
+    # Defaults ARE the house style. A member who never opens the setting gets
+    # the founder voice with the emoji on, which is the product as designed;
+    # the setting exists for the contract they are writing in OCC, not to make
+    # them opt in to the app having a voice.
+    style = models.CharField(max_length=12, default="corey")
+    emoji = models.CharField(max_length=8, default="heavy")
+    depth = models.CharField(max_length=8, default="normal")
+    slang = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"VoicePrefs<{self.user}: {self.style}/{self.emoji}>"
+
+
+def voice_prefs_for(user):
+    prefs, _ = VoicePrefs.objects.get_or_create(user=user)
+    return prefs
+
+
+# ---- Where an account was made from, and who else was there ----
+#
+# An address is the weakest useful signal this app has, and it is weak in BOTH
+# directions, which is the part that decides everything below:
+#
+# * **Sharing one proves nothing.** A studio, a rehearsal room, a college music
+#   department, a label office — every one of those is a room full of different
+#   people on one wifi, and they are this platform's core audience rather than
+#   its edge case. Mobile carriers put tens of thousands of subscribers behind
+#   a single IPv4 address, most heavily in exactly the markets KeyConnectZ
+#   shipped Yorùbá, Igbo, Hausa and Amharic voices for. And the app's own
+#   referral loop pays +300 🍥 / +100 🍥 for signing your mate up right here on
+#   your phone, which is the same address by definition.
+# * **Not sharing one proves nothing either.** A mobile IP rotates through the
+#   day, so one person is routinely on several.
+#
+# So an address NEVER groups anybody and NEVER deletes anything. It raises a
+# `DupeFlag` for a person to look at, and it strengthens a group that already
+# exists for a reason that stands on its own. The asymmetry is the whole
+# argument: a wrong delete destroys somebody's music, journal and cash balance
+# with no undo, and a wrong keep means a duplicate lives a little longer.
+class AccountIP(models.Model):
+    """An address an account has been seen from. Bounded and pruned."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="addresses")
+    # CharField rather than GenericIPAddressField: a proxy hands us whatever it
+    # hands us, and a malformed XFF header must not be able to 500 a signup.
+    ip = models.CharField(max_length=64, db_index=True)
+    # The address the account was CREATED from. Kept forever where a plain
+    # sighting is pruned, because it is the only one that says anything about
+    # how the account came to exist.
+    signup = models.BooleanField(default=False)
+    hits = models.PositiveIntegerField(default=1)
+    first_seen = models.DateTimeField(auto_now_add=True)
+    last_seen = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "ip")
+        indexes = [models.Index(fields=["ip", "user"])]
+
+    def __str__(self):
+        return f"{self.user_id}@{self.ip}"
+
+
+class SharedAddress(models.Model):
+    """An address the owner has said is a shared one — a studio, a school.
+
+    Without this the queue is unusable at exactly the places this app lives:
+    one college wifi would raise a flag on every signup forever, the owner
+    would stop reading the queue, and the feature would be worse than not
+    having it. Marking the address once ends it.
+    """
+
+    ip = models.CharField(max_length=64, unique=True)
+    note = models.CharField(max_length=200, blank=True, default="")
+    added_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                 null=True, blank=True, related_name="shared_addresses")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.ip
+
+
+class DupeFlag(models.Model):
+    """A new account made from an address that already had one. For review.
+
+    Raised by the system, unlike `AccountClaim`, which a member files about
+    their own other account. Both land in the same owner queue and neither
+    deletes anything on its own — this one exists so a duplicate is caught
+    without waiting for somebody to come forward, which is the only thing an
+    address is actually good for.
+    """
+
+    OPEN, CLEARED, ACTIONED = "open", "cleared", "actioned"
+    STATUS_CHOICES = [(OPEN, "Open"), (CLEARED, "Cleared"), (ACTIONED, "Actioned")]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="dupe_flags")
+    ip = models.CharField(max_length=64, db_index=True)
+    # Who else was on that address when this account appeared, and anything
+    # STRONGER than the address that ties them together. Recorded rather than
+    # recomputed: the owner reviews the case as it was, and a member who
+    # changes their email later does not silently rewrite it.
+    others = models.JSONField(default=list, blank=True)
+    signals = models.JSONField(default=list, blank=True)
+    # True when something stronger than the address agreed — same email, or the
+    # same email on a linked sign-in. That is the difference between "worth a
+    # look" and "almost certainly the same person", and it decides whether the
+    # new member hears anything at all.
+    strong = models.BooleanField(default=False, db_index=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=OPEN, db_index=True)
+    resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                    null=True, blank=True, related_name="dupe_flags_resolved")
+    resolved_note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-strong", "-created_at"]
+
+    def __str__(self):
+        return f"DupeFlag<{self.user} @ {self.ip}: {self.status}>"
 
 
 # ---- Direct messages ----
@@ -1774,6 +2016,19 @@ class DirectZWork(models.Model):
     # story — plus the verdict and what to fix. See directz_craft.CRAFT_SCORES.
     craft = models.JSONField(default=dict, blank=True)
     rating_note = models.CharField(max_length=200, blank=True, default="")
+    # What a recognition provider heard in the audio, and what the member said
+    # about it. Three states, and the difference between the first two is the
+    # whole point: `unscanned` is our check not running, `clear` is a check
+    # that ran and found nothing, and only one of those is worth anything to
+    # somebody about to publish. See `copyrightz.py`.
+    #
+    # A match is never a finding of infringement — on a music platform the most
+    # likely match is the member's OWN release — so nothing here blocks or
+    # hides a work. It names what matched, and `copyright_claim` is the
+    # member's answer travelling with it.
+    copyright_state = models.CharField(max_length=12, default="unscanned", db_index=True)
+    copyright = models.JSONField(default=dict, blank=True)
+    copyright_claim = models.CharField(max_length=16, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -2071,6 +2326,32 @@ class RewardGrant(models.Model):
         indexes = [models.Index(fields=["provider", "-created_at"])]
 
 
+# ---- SoundCloud Engagement Rewards (likes, reposts, comments) ----------------
+# Portfolio Showcase: members earn for engagement on their SoundCloud tracks.
+class SoundCloudEngagement(models.Model):
+    KIND_LIKE = "like"
+    KIND_REPOST = "repost"
+    KIND_COMMENT = "comment"
+    KIND_CHOICES = [
+        (KIND_LIKE, "Like"),
+        (KIND_REPOST, "Repost"),
+        (KIND_COMMENT, "Comment"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="soundcloud_engagements")
+    track_id = models.CharField(max_length=100)  # SoundCloud track ID
+    track_url = models.CharField(max_length=500)  # SoundCloud track URL
+    track_title = models.CharField(max_length=500, blank=True, default="")
+    kind = models.CharField(max_length=12, choices=KIND_CHOICES)
+    rewarded = models.BooleanField(default=False)  # Whether this engagement was rewarded
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "track_id", "kind")  # One reward per track per kind per user
+        indexes = [models.Index(fields=["user", "kind", "-created_at"])]
+        ordering = ("-created_at",)
+
+
 # ---- ObservationZ — HabitZ 🫠 / CodeZ 🧩 / PathZ 🛤️ / MistakeZ 😢
 #
 # Four tabs, one shape: notice something happen, tally it, surface what repeats
@@ -2081,10 +2362,11 @@ class RewardGrant(models.Model):
 # unless they asked for it. Nothing is recorded without an explicit opt-in per
 # kind, and every kind can be wiped. Consent bolted on afterwards leaves you
 # holding data you were never allowed to keep.
-OBS_HABIT, OBS_CODE, OBS_PATH, OBS_MISTAKE = "habit", "code", "path", "mistake"
+OBS_HABIT, OBS_CODE, OBS_PATH, OBS_MISTAKE, OBS_COACH = "habit", "code", "path", "mistake", "coach"
 OBSERVATION_KINDS = [
     (OBS_HABIT, "HabitZ"), (OBS_CODE, "CodeZ"),
     (OBS_PATH, "PathZ"), (OBS_MISTAKE, "MistakeZ"),
+    (OBS_COACH, "CoachZ Feedback"),
 ]
 
 
@@ -3861,3 +4143,168 @@ class FunnelEvent(models.Model):
 
     def __str__(self):
         return f"{self.kind} @ {self.created_at:%Y-%m-%d %H:%M}"
+
+
+class CoachProfile(models.Model):
+    """Coaching studio: track student relationships and portfolio."""
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="coach_profile"
+    )
+    bio = models.TextField(max_length=500, blank=True, default="")
+    specializations = models.JSONField(
+        default=list, blank=True, help_text="List of instruments/styles coached"
+    )
+    students_count = models.IntegerField(default=0, db_index=True)
+    takes_rated = models.IntegerField(default=0)
+    avg_rating_quality = models.FloatField(null=True, blank=True)  # 1-5 from student feedback
+
+    # Referral bonuses tracking
+    referral_spinaz_earned = models.IntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Coach {self.user} ({self.students_count} students)"
+
+
+class StudentRelationship(models.Model):
+    """Track student-coach relationships."""
+    student = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="coach_relationships"
+    )
+    coach = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="students"
+    )
+    referral_code = models.CharField(max_length=20, unique=True, blank=True, default="")
+
+    takes_submitted = models.IntegerField(default=0)
+    takes_rated = models.IntegerField(default=0)
+
+    joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("student", "coach")
+        ordering = ("-joined_at",)
+
+    def __str__(self):
+        return f"{self.student} → {self.coach}"
+
+
+class TakeRating(models.Model):
+    """Coach rating of a student's vocal take (pitch, timing, tone)."""
+    coach = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="take_ratings"
+    )
+    take = models.ForeignKey("Post", on_delete=models.CASCADE, related_name="coach_ratings")
+
+    # Substance-first: measure real dimensions, not feelings
+    pitch_accuracy = models.IntegerField(null=True, blank=True, help_text="0-100%")
+    timing_accuracy = models.IntegerField(null=True, blank=True, help_text="0-100%")
+    tone_quality = models.IntegerField(null=True, blank=True, help_text="0-100%")
+
+    # Coach commentary
+    notes = models.TextField(max_length=1000, blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("coach", "take")
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.coach} rated {self.take_id}"
+
+
+class PracticeSession(models.Model):
+    KIND_METZ = "metz"
+    KIND_TUNERZ = "tunerz"
+    KIND_CHORDZ = "chordz"
+    KIND_DRUMZ = "drumz"
+
+    KIND_CHOICES = [
+        (KIND_METZ, "MetZ - Metronome"),
+        (KIND_TUNERZ, "TunerZ - Pitch Detection"),
+        (KIND_CHORDZ, "ChordZ - Chord Library"),
+        (KIND_DRUMZ, "DrumZ - Beat Pad"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="practice_sessions")
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES)
+    duration_seconds = models.IntegerField(default=0)
+    bpm = models.IntegerField(null=True, blank=True)
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.user} practiced {self.kind} for {self.duration_seconds}s"
+
+
+class DrumPattern(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="drum_patterns")
+    name = models.CharField(max_length=100)
+    kit_name = models.CharField(max_length=50, default="acoustic")
+    bpm = models.IntegerField(default=120)
+    pattern_length = models.IntegerField(default=16)
+    pattern_data = models.JSONField(default=list)
+    is_public = models.BooleanField(default=False)
+    shares_count = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.user}: {self.name} ({self.kit_name})"
+
+
+class ToolPreference(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="tool_preferences")
+    metz_settings = models.JSONField(default=dict, blank=True)
+    tunerz_settings = models.JSONField(default=dict, blank=True)
+    chordz_settings = models.JSONField(default=dict, blank=True)
+    drumz_settings = models.JSONField(default=dict, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Preferences for {self.user}"
+
+
+class PatternShare(models.Model):
+    pattern = models.ForeignKey(DrumPattern, on_delete=models.CASCADE, related_name="shares")
+    shared_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="pattern_shares_given")
+    shared_with = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="pattern_shares_received", null=True, blank=True)
+    app_key = "drumz"
+    target = models.CharField(max_length=200, default="drumz:patterns")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"Pattern {self.pattern.id} shared by {self.shared_by}"
+
+
+class DrillTake(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="drill_takes")
+    weak_note = models.CharField(max_length=10)
+    original_frequency = models.FloatField()
+    original_cents_off = models.IntegerField()
+    accuracy_percent = models.IntegerField(default=0, help_text="0-100 accuracy % when ending the drill")
+    duration_seconds = models.IntegerField(default=0)
+    final_frequency = models.FloatField(null=True, blank=True, help_text="Last detected frequency in Hz")
+    final_cents_off = models.IntegerField(null=True, blank=True, help_text="Deviation from target at end of drill")
+    improvement = models.IntegerField(null=True, blank=True, help_text="Cents closer to target: original - final")
+    key_context = models.CharField(max_length=20, null=True, blank=True, help_text="Musical key (e.g., A major)")
+    bpm_context = models.IntegerField(null=True, blank=True, help_text="Song BPM from coach context")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.user} drilled {self.weak_note} (acc {self.accuracy_percent}%)"

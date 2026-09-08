@@ -72,6 +72,44 @@ services:
       # Discord and Reddit have their own placeholders in
       # claude/oauth-discord-reddit (#127) — not duplicated here to avoid
       # two branches fighting over the same four keys when both land.
+      # ---- SCANNING MEMBER LINKS ----------------------------------------
+      # WidgetZ will not frame an outside page until one of these has CLEARED
+      # its URL, and the +5⚡ link reward is never paid on a flagged link. With
+      # neither set, every link is unscanned: it still opens, in a new tab,
+      # and no page widget is offered to anybody.
+      #
+      # Set WEB_RISK_API_KEY. Google's terms put Safe Browsing v4 at
+      # "non-commercial use only — not for sale or revenue generating
+      # purposes", and this platform sells subscriptions, so v4 is the wrong
+      # product here however well it works; it is deprecated besides. Web Risk
+      # is the commercial successor: enable the Web Risk API on a Cloud project
+      # with billing on, make an API key, restrict it to that one API. Free to
+      # 100k lookups a month, then $0.50 per 1,000.
+      #
+      # SAFE_BROWSING_API_KEY still works for a non-commercial deployment of
+      # this code. Web Risk wins when both are set.
+      # ---- COPYRIGHT DETECTION ON DIRECTZ UPLOADS -----------------------
+      # Recognition is a fingerprint database, not something a model can be
+      # asked to guess at. Without these a DirectZ work stays `unscanned`,
+      # which is its own state and never reads as "clear" — the member is told
+      # the check didn't run rather than being handed a pass they'd publish on.
+      # Sign up at acrcloud.com, make an Audio & Video Recognition project, and
+      # take the access key/secret from it. ACRCLOUD_HOST is the region's
+      # identify host (default identify-eu-west-1.acrcloud.com).
+      #
+      # The check also needs ffmpeg on the host to cut a 15s audio sample out
+      # of a video — the same dependency DistributeZ's transcode needs, and it
+      # says separately when that is what is missing.
+      - key: ACRCLOUD_ACCESS_KEY
+        sync: false
+      - key: ACRCLOUD_ACCESS_SECRET
+        sync: false
+      - key: ACRCLOUD_HOST
+        sync: false
+      - key: WEB_RISK_API_KEY
+        sync: false
+      - key: SAFE_BROWSING_API_KEY
+        sync: false
       # ---- KEEPING MEMBERS' UPLOADS -------------------------------------
       # This container's disk is rebuilt on every deploy. With neither of the
       # two options below in force, every track, video and cover any member has

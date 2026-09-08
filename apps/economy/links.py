@@ -1,13 +1,34 @@
 """Member link clicks — tally, +5⚡ reward for clicking another member's link,
-and a best-effort Google Safe Browsing malware/phishing scan.
+and a best-effort malware/phishing scan.
 
 The reward mirrors the restricted-join anti-fraud pattern: a genuine visitor
 (distinct clicker, >=30s dwell) earns 5⚡ once per link per day, capped per day
-so it can't be farmed. Unsafe links (per Safe Browsing) are flagged and never
-reward. The scan is best-effort — with no SAFE_BROWSING_API_KEY set, links are
-treated as unscanned/safe so the feature degrades cleanly.
+so it can't be farmed. Unsafe links are flagged and never reward. The scan is
+best-effort — with no key set, links are treated as unscanned so the feature
+degrades cleanly and WidgetZ refuses to frame a page nobody checked.
+
+## Two scanners, and which one this platform is actually allowed to use
+
+**Web Risk (`WEB_RISK_API_KEY`) is the one to set.** Google's own terms put
+Safe Browsing v4 at "non-commercial use only — not for sale or revenue
+generating purposes", and Music ConnectZ sells subscriptions, so v4 is the
+wrong product here however well it works. v4 is also deprecated. Web Risk is
+its commercial successor: same verdicts, a Cloud project with billing enabled,
+free to 100k lookups a month.
+
+Safe Browsing (`SAFE_BROWSING_API_KEY`) is still supported because it was here
+first and because a non-commercial deployment of this code is entitled to it.
+When both keys are set Web Risk wins — the licensed one should be the one that
+answers.
+
+**Neither key was readable until now.** `settings.SAFE_BROWSING_API_KEY` was
+looked up with a `getattr` default and never defined in `settings.py`, so the
+lookup returned "" on every deploy no matter what the dashboard said. Every
+link on the platform went unscanned, silently, and setting the variable would
+have changed nothing. Both names are read from the environment now.
 """
 import json
+import urllib.parse
 import urllib.request
 import urllib.error
 
@@ -33,6 +54,43 @@ from .models import (
 User = get_user_model()
 
 SAFE_BROWSING_URL = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
+WEB_RISK_URL = "https://webrisk.googleapis.com/v1/uris:search"
+
+# The same four verdicts from both scanners, so a caller never has to know
+# which one answered. Web Risk has no POTENTIALLY_HARMFUL_APPLICATION — that
+# one is Android-specific and v4-only — so it asks for the three it has.
+THREAT_TYPES = ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE"]
+
+
+def _key(name):
+    return (getattr(settings, name, "") or "").strip()
+
+
+def scanner():
+    """Which scanner is configured: "webrisk", "safebrowsing", or "".
+
+    Web Risk wins when both are set. It is the one this platform is licensed
+    for — Safe Browsing v4 is non-commercial-only by Google's terms — so if
+    somebody has gone to the trouble of setting it, it should be the one that
+    answers rather than sitting behind a key that happened to be there first.
+    """
+    if _key("WEB_RISK_API_KEY"):
+        return "webrisk"
+    if _key("SAFE_BROWSING_API_KEY"):
+        return "safebrowsing"
+    return ""
+
+
+def scan_available():
+    """Whether a scan can actually happen — i.e. whether a key is configured.
+
+    Separated from the scan itself because `safe_browsing_check` answers
+    "safe" when it cannot look, which is the right answer for a click (we do
+    not block a member on our own outage) and the wrong one for anything that
+    treats a verdict as a permission. WidgetZ frames a page only when the scan
+    CLEARED it, and a link nobody scanned cleared nothing.
+    """
+    return bool(scanner())
 
 
 def _client_ip(request):
@@ -42,35 +100,65 @@ def _client_ip(request):
     return request.META.get("REMOTE_ADDR")
 
 
-def safe_browsing_check(url):
-    """Return (safe: bool, threat: str). Best-effort; needs SAFE_BROWSING_API_KEY.
-    On any error or missing key, returns (True, "") — we don't block on our own
-    outage, but we also never claim a link is scanned when it isn't."""
-    key = getattr(settings, "SAFE_BROWSING_API_KEY", "") or ""
-    if not key or not url:
-        return True, ""
+NETWORK_ERRORS = (urllib.error.URLError, ValueError, TimeoutError, OSError)
+
+
+def _web_risk(url, key):
+    """Web Risk `uris:search` — a GET, and an empty body means clean."""
+    query = urllib.parse.urlencode(
+        [("key", key), ("uri", url)] + [("threatTypes", t) for t in THREAT_TYPES])
+    req = urllib.request.Request(f"{WEB_RISK_URL}?{query}")
+    with urllib.request.urlopen(req, timeout=4) as resp:
+        data = json.loads(resp.read().decode() or "{}")
+    threats = ((data.get("threat") or {}).get("threatTypes")) or []
+    return (False, threats[0]) if threats else (True, "")
+
+
+def _safe_browsing(url, key):
+    """Safe Browsing v4 `threatMatches:find` — a POST, no matches means clean."""
     payload = {
         "client": {"clientId": "music-connectz", "clientVersion": "1.0"},
         "threatInfo": {
-            "threatTypes": ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
+            # POTENTIALLY_HARMFUL_APPLICATION is v4-only, so it is asked for
+            # here and not in the shared list.
+            "threatTypes": THREAT_TYPES + ["POTENTIALLY_HARMFUL_APPLICATION"],
             "platformTypes": ["ANY_PLATFORM"],
             "threatEntryTypes": ["URL"],
             "threatEntries": [{"url": url}],
         },
     }
-    try:
-        req = urllib.request.Request(
-            f"{SAFE_BROWSING_URL}?key={key}",
-            data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=4) as resp:
-            data = json.loads(resp.read().decode() or "{}")
-        matches = data.get("matches") or []
-        if matches:
-            return False, matches[0].get("threatType", "THREAT")
+    req = urllib.request.Request(
+        f"{SAFE_BROWSING_URL}?key={key}",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=4) as resp:
+        data = json.loads(resp.read().decode() or "{}")
+    matches = data.get("matches") or []
+    return (False, matches[0].get("threatType", "THREAT")) if matches else (True, "")
+
+
+def safe_browsing_check(url):
+    """Return (safe: bool, threat: str) from whichever scanner is configured.
+
+    Best-effort by design: on any error, a timeout or no key at all it returns
+    (True, "") — we do not block a member on our own outage. That is why it is
+    never the thing that decides a permission; `scan_available()` and the
+    `scanned` column are, and they say whether anybody actually looked.
+
+    The name is unchanged although it now speaks to two scanners: it is the
+    call site vocabulary across links, widgetz and the tests, and renaming it
+    to say "google" or "webrisk" would tie every caller to whichever product
+    the billing account happens to be on.
+    """
+    which = scanner()
+    if not which or not url:
         return True, ""
-    except (urllib.error.URLError, ValueError, TimeoutError, OSError):
+    try:
+        if which == "webrisk":
+            return _web_risk(url, _key("WEB_RISK_API_KEY"))
+        return _safe_browsing(url, _key("SAFE_BROWSING_API_KEY"))
+    except NETWORK_ERRORS:
         return True, ""  # scan unavailable — don't punish the link
 
 
@@ -95,7 +183,14 @@ class LinkClickView(APIView):
         # Scan once (or if a previous scan errored and left it unscanned).
         if not counter.scanned:
             safe, threat = safe_browsing_check(url)
-            counter.safe, counter.threat, counter.scanned = safe, threat, True
+            counter.safe, counter.threat = safe, threat
+            # Only a scan that RAN marks the row scanned. This used to set the
+            # flag either way, so a deploy with no key recorded every link as
+            # checked and clean — the docstring above already said we never
+            # claim a link is scanned when it isn't, and the column said we do.
+            # Nothing read it closely enough to catch that until WidgetZ, which
+            # frames a page only on a real verdict.
+            counter.scanned = scan_available()
         counter.clicks = (counter.clicks or 0) + 1
         counter.save()
 

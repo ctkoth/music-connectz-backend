@@ -40,10 +40,12 @@ from .models import (
     TIER_FREE,
     TIER_PREMIUM,
     TIER_STATZ,
+    OBS_COACH,
     can_afford_ai,
     daily_prompt_state,
     mark_upload_missing,
     membership_for,
+    record_observation,
     wallet_for,
 )
 
@@ -227,12 +229,17 @@ def _clamp(v, lo=1, hi=10):
         return None
 
 
-def score_take(app_key, f, content_type, *, genre, target, difficulty, style=None):
+def score_take(app_key, f, content_type, *, genre, target, difficulty, style=None,
+               user=None):
     """Send one take to the model. Returns (payload, error) — exactly one is None.
 
     Shared by the member coach and the no-account trial, deliberately: a trial
     that grades on an easier rubric is a lie about the product, and the first
     real take would contradict it.
+
+    `user` only decides the VOICE the prose comes back in, never the rubric —
+    which is the same reason the trial shares this function at all. None is the
+    trial, and it gets the house default.
     """
     key = _key()
     if not key:
@@ -249,6 +256,13 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         difficulty=difficulty if difficulty in DIFFICULTIES else "builder",
         style=str(style or "")[:60] or None,
     )
+    # The house voice for the PROSE inside the scored fields, from the member's
+    # own row — the short form, not the full preamble. `prompt_for` states the
+    # JSON contract, so it goes LAST and is the instruction nearest the model's
+    # answer; a voice note that displaced it would risk a take that scored fine
+    # coming back unparseable.
+    from .voice import prose_voice
+    prompt = f"{prose_voice(user)}\n\n{prompt}"
     # Normalise BEFORE the call. An unsupported container is a refusal we can
     # give instantly and explain, rather than a round trip that comes back as a
     # generic failure the member reads as "my take was bad".
@@ -360,6 +374,102 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         "fixes": listy(parsed.get("fixes")),
         "next_drill": str(parsed.get("next_drill", ""))[:300],
     }, None
+
+
+def record_coaching_observations(user, payload, song_key=None, song_bpm=None):
+    """Cross-pollination: low scores suggest practice tools with drill context.
+
+    When pitch is weak, extract specific notes the member struggled with and
+    link to TunerZ with context (the exact note, frequency, how far off).
+
+    Best-effort: observations never fail the coach. Silent no-op if consent
+    isn't given (see record_observation).
+    """
+    if not user or not getattr(user, "is_authenticated", True):
+        return
+
+    try:
+        scores = payload.get("scores", {})
+        weak_notes = payload.get("weak_notes", [])
+
+        # Pitch accuracy low: suggest TunerZ with weak note details if available
+        pitch = scores.get("pitch_accuracy")
+        if pitch is not None and pitch < 65:
+            # If model extracted weak notes, link to each one
+            if weak_notes:
+                for note_data in weak_notes[:3]:  # Max 3 to avoid spam
+                    try:
+                        note_name = str(note_data.get("note", "")).strip()
+                        frequency = note_data.get("frequency")
+                        cents_off = note_data.get("cents_off", 0)
+
+                        if not note_name or not frequency:
+                            continue
+
+                        # Key context for observation label
+                        key_str = f" in {song_key}" if song_key else ""
+                        cents_desc = "flat" if cents_off < 0 else "sharp"
+                        label = f"Practice {note_name}{key_str} ({abs(cents_off)}¢ {cents_desc})"
+
+                        # Build target with drill context as query params
+                        # Frontend will parse these and pre-tune TunerZ
+                        params = f"note={note_name}&freq={frequency}&cents={cents_off}"
+                        if song_key:
+                            params += f"&key={song_key.replace(' ', '+')}"
+                        if song_bpm:
+                            params += f"&bpm={song_bpm}"
+                        target = f"tunerz:drill?{params}"
+
+                        record_observation(
+                            user,
+                            kind=OBS_COACH,
+                            key=f"pitch-{note_name.lower().replace('#', 's').replace('b', 'f')}",
+                            label=label,
+                            app_key="tunerz",
+                            target=target,
+                        )
+                    except (TypeError, ValueError):
+                        continue
+            else:
+                # No specific notes extracted, generic pitch suggestion
+                record_observation(
+                    user,
+                    kind=OBS_COACH,
+                    key="pitch-low",
+                    label=f"Work on pitch accuracy (currently {pitch}%)",
+                    app_key="tunerz",
+                    target="tunerz:pitch-tuner",
+                )
+
+        # Timing accuracy low: suggest MetZ
+        timing = scores.get("timing_accuracy")
+        if timing is not None and timing < 65:
+            target = "metz:metronome"
+            if song_bpm:
+                target += f"?bpm={song_bpm}"
+            record_observation(
+                user,
+                kind=OBS_COACH,
+                key="timing-low",
+                label=f"Practice rhythm/timing (currently {timing}%)",
+                app_key="metz",
+                target=target,
+            )
+
+        # Tone quality low: suggest another round of coaching
+        tone = scores.get("tone_quality")
+        if tone is not None and tone < 65:
+            record_observation(
+                user,
+                kind=OBS_COACH,
+                key="tone-low",
+                label=f"Develop vocal control (currently {tone}%)",
+                app_key="singz",
+                target="singz:coach",
+            )
+    except Exception:
+        # Observations are best-effort. Never let them fail the coach.
+        logger.exception("Failed to record coaching observations")
 
 
 class SingZCoachView(APIView):
@@ -552,6 +662,9 @@ class SingZCoachView(APIView):
                 self.app_key, f, content_type,
                 genre=genre, target=data.get("range"),
                 difficulty=data.get("difficulty"), style=data.get("style"),
+                # Only the voice the prose comes back in. The rubric is the
+                # same one the logged-out trial is scored on.
+                user=request.user,
             )
         except Exception:
             # Almost always a recording that is no longer in storage. Say that,
@@ -627,6 +740,15 @@ class SingZCoachView(APIView):
                 "saved_to_post": self._save_to_post(post, request.user, payload,
                                                     self.app_key),
             })
+
+        # Cross-pollination: low scores suggest practice tools for improvement.
+        # Pass song context (key, BPM) if available for richer drill links.
+        song_key = data.get("key") or (post.genre if post else "")
+        song_bpm = None
+        if post and hasattr(post, 'bpm'):
+            song_bpm = post.bpm
+        record_coaching_observations(request.user, payload, song_key=song_key, song_bpm=song_bpm)
+
         return Response(out)
 
     def _take_from_post(self, request):

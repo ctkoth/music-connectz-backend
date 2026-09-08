@@ -12,6 +12,7 @@ from datetime import timedelta
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
+from django.core.exceptions import ImproperlyConfigured
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -23,8 +24,24 @@ KIND_META = {
     "code": {"emoji": "🧩", "label": "CodeZ", "blurb": "Acronyms, typos and slang you type that mean something else."},
     "path": {"emoji": "🛤️", "label": "PathZ", "blurb": "Routes you take, across every device you use."},
     "mistake": {"emoji": "😢", "label": "MistakeZ", "blurb": "Errors the AI made — kept so it stops making them."},
+    "coach": {"emoji": "👑", "label": "CoachZ", "blurb": "What the coach heard in your takes — kept so a weak note leads to a drill."},
 }
 KINDS = [k for k, _ in OBSERVATION_KINDS]
+
+# KINDS is DERIVED from the model and KIND_META is typed by hand, so adding a
+# kind in models.py and forgetting it here is a KeyError on a live endpoint,
+# not a missing label. That is exactly what happened when OBS_COACH was added:
+# `GET /api/economy/observationz/` raised for every member with consent, and
+# nothing failed until something asked for the list.
+#
+# Checked at import so a deploy cannot start serving a half-known list. It is
+# a programming error either way; the only choice is whether it surfaces in
+# the build or in somebody's request.
+_missing = [k for k in KINDS if k not in KIND_META]
+if _missing:  # pragma: no cover - a deploy-time guard, not a runtime path
+    raise ImproperlyConfigured(
+        f"OBSERVATION_KINDS has no KIND_META entry for: {', '.join(_missing)}. "
+        f"Every kind needs an emoji, a label and a blurb before it can be served.")
 
 
 def _significance(obs, now):
