@@ -108,12 +108,19 @@ class ReadsRealFields(TestCase):
         self.assertIn("server", row.error_message)
 
     def test_unreadable_audio_fails_the_row_not_the_request(self):
-        """Junk bytes are a failed analysis, never an exception."""
+        """Junk bytes are a failed analysis, never an exception.
+
+        And the failure has to SAY something. audioread's NoBackendError —
+        which is precisely what a truncated or undecodable file raises — has
+        an empty str(), so this once stored "" and the client rendered
+        "Analysis unavailable:" with nothing after the colon.
+        """
         up = _upload(self.user, body=b"not audio at all")
         row = take_analyzer.analyze_take_audio(up.id)
         self.assertIsNotNone(row)
         self.assertEqual(row.analysis_status, "failed")
-        self.assertTrue(row.error_message)
+        self.assertTrue(row.error_message, "a failure with no reason is a blank screen")
+        self.assertGreater(len(row.error_message), 10)
 
 
 class PitchMath(TestCase):
@@ -158,6 +165,75 @@ class PitchMath(TestCase):
         kept = take_analyzer._sampled(rows, take_analyzer.MAX_STORED_NOTES)
         self.assertEqual(len(kept), take_analyzer.MAX_STORED_NOTES)
         self.assertEqual(kept[0], rows[0])
+
+
+class ItActuallyHears(TestCase):
+    """The only test here that proves the analyser measures anything.
+
+    Every other test in this file pins the plumbing — that the right field is
+    read, that a failure lands on the row, that an unpriced case is named.
+    None of them would notice if the pitch maths were wrong, because none of
+    them ever hand it a sound.
+
+    This one synthesises a tone at a KNOWN frequency and asserts the analyser
+    says so. It is the same argument tools/coach_live_check.sh makes about the
+    Gemini transport: a suite that only ever tests the protocol it believes in
+    cannot tell you the belief is wrong.
+    """
+
+    def setUp(self):
+        if not take_analyzer.HAS_LIBROSA:
+            self.skipTest("librosa not installed")
+
+    def _take(self, *freqs, secs=2.0, sr=22050):
+        """A wav of pure tones, one per frequency, back to back."""
+        import numpy as np
+        parts = []
+        for f in freqs:
+            t = np.linspace(0, secs, int(sr * secs), endpoint=False)
+            parts.append(0.5 * np.sin(2 * np.pi * f * t))
+        return np.concatenate(parts).astype("float32"), sr
+
+    def _contour(self, *freqs):
+        return take_analyzer.detect_pitch_contour(*self._take(*freqs))
+
+    def test_it_names_the_note_it_was_given(self):
+        rows = self._contour(440.0)
+        self.assertTrue(rows, "no voiced frames found in a pure tone")
+        notes = {r["note"] for r in rows}
+        self.assertIn("A4", notes)
+        # Within a couple of cents across the whole steady tone.
+        self.assertLessEqual(
+            max(abs(r["cents_off"]) for r in rows if r["note"] == "A4"), 5)
+
+    def test_it_measures_how_flat_a_flat_note_is(self):
+        """Synthesised 40 cents flat; the reported number has to agree."""
+        e4_flat = 329.63 * (2 ** (-40 / 1200))
+        weak = take_analyzer.identify_weak_notes(self._contour(e4_flat))
+        self.assertEqual(len(weak), 1)
+        self.assertEqual(weak[0]["note"], "E4")
+        self.assertAlmostEqual(weak[0]["cents_off"], -40, delta=5)
+
+    def test_an_in_tune_take_is_not_flagged(self):
+        """The failure that would make the whole feature noise."""
+        self.assertEqual(take_analyzer.identify_weak_notes(self._contour(440.0)), [])
+
+    def test_accuracy_tracks_how_much_was_in_tune(self):
+        """Half in tune, half 40 cents flat — the number lands near half."""
+        e4_flat = 329.63 * (2 ** (-40 / 1200))
+        acc = take_analyzer.calculate_pitch_accuracy(self._contour(440.0, e4_flat))
+        self.assertIsNotNone(acc)
+        self.assertGreater(acc, 30)
+        self.assertLess(acc, 70)
+
+    def test_silence_is_not_scored_as_singing(self):
+        """yin would have invented a pitch here; pyin's voiced flag must not."""
+        import numpy as np
+        silence = np.zeros(22050 * 2, dtype="float32")
+        rows = take_analyzer.detect_pitch_contour(silence, 22050)
+        self.assertEqual(rows, [])
+        # And no voiced frame means no verdict, rather than a damning 0%.
+        self.assertIsNone(take_analyzer.calculate_pitch_accuracy(rows))
 
 
 class Endpoint(TestCase):

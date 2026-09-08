@@ -32,3 +32,35 @@ anthropic>=0.40
 # MODAL_TOKEN_SECRET are set; until then the run endpoint 503s with the reason
 # and /occ/spec/ reports can_execute=False.
 modal>=1.5
+# Pitch and timing analysis of a take (apps/economy/take_analyzer.py). Unlike
+# every optional dependency above, this one has no key to leave unset — it is
+# either installed or the analysis endpoint says it is unavailable, which is
+# what take_analyzer's HAS_LIBROSA branch is for.
+#
+# It is the heaviest thing in this file BY FAR and that is worth stating
+# plainly rather than discovering on a deploy: it pulls numpy, scipy, numba,
+# llvmlite, soundfile, audioread, joblib and scikit-learn. Expect the build to
+# get materially longer and the image materially larger.
+#
+# Two consequences that are NOT theoretical:
+#   * Memory. numba + scipy per gunicorn worker is a real resident-set jump,
+#     and render.yaml runs 2 workers. If the service starts OOMing after this
+#     lands, this is the first thing to suspect and the instance size is the
+#     fix, not a code change.
+#   * Time. librosa.pyin on a full take runs for tens of seconds. Analysis is
+#     lazy-on-read precisely so this never sits inside an upload, but it does
+#     hold one of `--workers 2 --threads 4` while it runs. If takes get long
+#     or concurrent, that is the ceiling to watch.
+#
+# Upper bound because 0.11 moved defaults around in the pitch API and a major
+# bump here changes NUMBERS WE SHOW MEMBERS, which is a thing to test rather
+# than to receive on a Tuesday.
+librosa>=0.10.1,<0.12
+# Pinned explicitly rather than left to librosa's resolver: numpy 2.0 was a
+# breaking release across this whole scientific stack, and "whatever pip picked
+# that day" is not a thing to leave decided by build order.
+numpy>=1.24,<3
+# librosa reads wav/flac through this and falls back to audioread for mp3/m4a.
+# Named here because take_analyzer._load_audio depends on a real file path
+# existing for that fallback, which is why it spools to a temp file on a bucket.
+soundfile>=0.12

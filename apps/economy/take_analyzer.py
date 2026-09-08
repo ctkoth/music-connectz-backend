@@ -101,10 +101,27 @@ def analyze_take_audio(upload_id):
         analysis.save()
     except Exception as e:
         analysis.analysis_status = "failed"
-        analysis.error_message = str(e)[:500]
+        analysis.error_message = _why(e)
         analysis.save(update_fields=["analysis_status", "error_message"])
 
     return analysis
+
+
+def _why(exc):
+    """A reason a member can read. Never an empty string.
+
+    `str(exc)` is EMPTY for some of the exceptions most likely to land here —
+    audioread's NoBackendError, which is exactly what an unreadable or
+    truncated file raises. That put "Analysis unavailable:" on screen with
+    nothing after the colon: a failure that does not say what failed, which is
+    worse than no message because it reads as a broken screen rather than a
+    broken file.
+    """
+    name = type(exc).__name__
+    if name == "NoBackendError":
+        return ("That file couldn't be decoded — it may be truncated, or in a "
+                "format this server has no decoder for.")
+    return (str(exc) or name)[:500]
 
 
 def _load_audio(upload):
