@@ -272,6 +272,11 @@ urlpatterns = [
     path("social/react/", SocialView.as_view(), {"action": "react"}, name="economy-social-react"),
     path("social/comment/", SocialView.as_view(), {"action": "comment"}, name="economy-social-comment"),
     path("social/rate/", SocialView.as_view(), {"action": "rate"}, name="economy-social-rate"),
+    # The player's heartbeat. Rating a track you never played was possible for
+    # every post older than a minute — the age window gated the post, not the
+    # listener. See models.ListenProgress.
+    path("social/listened/", SocialView.as_view(), {"action": "listened"},
+         name="economy-social-listened"),
     path("social/verify/", SocialVerifyView.as_view(), name="economy-social-verify"),
     # What the AI couldn't confirm goes to a person, not to a wall.
     path("social/reviews/", SocialReviewQueueView.as_view(), name="economy-social-reviews"),

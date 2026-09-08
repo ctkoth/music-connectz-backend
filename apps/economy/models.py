@@ -1064,6 +1064,32 @@ def contributor_item_key(deal_id, username):
 POST_RATE_UNLOCK_SEC = 30
 POST_COMMENT_UNLOCK_SEC = 60
 
+# How much of a track you have to have PLAYED before you may rate it.
+#
+# The unlock windows above are a floor on the post's age and stop an author's
+# friends rating at the moment it lands. They are not a listening test, and
+# were doing duty as one — see ListenProgress. This is the listening test.
+#
+# Twenty seconds, or the whole thing if it is shorter. Not a percentage of the
+# duration: the duration is reported by the same client that reports the
+# seconds, so scaling the requirement by it would let a spoofed "this is 3
+# seconds long" shrink the requirement to nothing. A flat number cannot be
+# argued down, and `finished` covers the short-work case honestly.
+LISTEN_REQUIRED_SEC = 20
+
+# The most one heartbeat may add, whatever it claims and whatever the clock
+# says.
+#
+# It matches the client's flush interval (listen.js, FLUSH_EVERY_MS) and has
+# to. The FIRST heartbeat for an item has no previous beat to measure against,
+# so it is taken at face value up to this cap — set it to the full
+# requirement and one fabricated call would unlock rating instantly. At ten,
+# the requirement needs at least two beats, and every beat after the first is
+# clamped to real elapsed time. The worst a script can do is reach twenty
+# seconds of credit in ten seconds of real time; an honest listener reaches it
+# in twenty.
+LISTEN_MAX_STEP_SEC = 10
+
 
 def post_interaction_block(item_id, user, kind):
     """Why `user` may not rate/comment on `item_id` yet, or None if they may.
@@ -1103,7 +1129,39 @@ def post_interaction_block(item_id, user, kind):
         left = int(unlock - age) + 1
         return {"detail": f"{'Rating' if kind == 'rate' else 'Commenting'} opens {unlock}s after a post lands — {left}s to go.",
                 "unlock_seconds": unlock, "seconds_left": left}
+
+    # And then the part the age window was standing in for: have you heard it?
+    #
+    # Rating only. Commenting on a track you skipped is a normal thing to do —
+    # "what's the sample?" needs no listen — but scoring it is a judgement,
+    # and a judgement of something you did not hear is the substance rule's
+    # failure case with a number attached.
+    if kind == "rate" and heard_enough_required(post):
+        heard = ListenProgress.objects.filter(
+            user=user, item_id=item_id).first()
+        if not (heard and (heard.finished or heard.seconds >= LISTEN_REQUIRED_SEC)):
+            got = heard.seconds if heard else 0
+            return {"detail": f"Give it a listen first — {LISTEN_REQUIRED_SEC}s of it, "
+                              f"and you're {max(0, LISTEN_REQUIRED_SEC - got)}s short.",
+                    "listen_required_sec": LISTEN_REQUIRED_SEC,
+                    "listened_sec": got}
     return None
+
+
+def heard_enough_required(post):
+    """Whether this post is the kind you have to listen to before rating.
+
+    Lyrics and images have nothing to play, so a listening gate on them would
+    be a wall in front of nothing — the exact shape of limit the tier rules
+    forbid. Only a post carrying audio or video is gated.
+    """
+    kind = (post.media_type or "").lower()
+    if kind in ("audio", "video"):
+        return bool(post.media_url)
+    media = getattr(post, "media", None)
+    if isinstance(media, dict):
+        return bool(media.get("audio") or media.get("video"))
+    return False
 
 
 class Post(models.Model):
@@ -2114,6 +2172,86 @@ class Reaction(models.Model):
 
     class Meta:
         unique_together = ("user", "item_id")
+
+
+class ListenProgress(models.Model):
+    """How long this member has actually PLAYED this item.
+
+    The rating windows were the post's AGE — 30 seconds after it landed and
+    anybody could rate it. That gates the first minute of a post's life and
+    nothing after: a post three days old had no gate at all, and a feed could
+    be scrolled and fifty tracks rated in fifty seconds without one of them
+    being played. The rule people were told ("rating opens 30s after posting")
+    was true and did almost nothing.
+
+    This is the thing that was actually meant: you may judge it once you have
+    heard some of it.
+
+    **Seconds are clamped to the wall clock, server-side, and that is what
+    makes it worth having.** The client reports how long it played — so a
+    determined person can lie — but `add()` will not accept more seconds than
+    have actually elapsed since the last heartbeat. Claiming thirty seconds
+    two seconds after the last one credits two. Listening therefore costs real
+    time even when it is scripted, which turns "rate fifty tracks in a minute"
+    into "sit through fifty tracks".
+
+    It is not proof of attention and does not pretend to be. It is the same
+    good-faith signal, with the same limits, as the +5 energy link reward.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="listen_progress")
+    item_id = models.CharField(max_length=160, db_index=True)
+    seconds = models.PositiveIntegerField(default=0)
+    # Whether the player reported reaching the end. A 12-second beat cannot
+    # yield 20 seconds of listening, so finishing it has to count as having
+    # heard it — otherwise the gate is impossible on short work.
+    finished = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "item_id")
+
+    def __str__(self):
+        return f"{self.user} heard {self.seconds}s of {self.item_id}"
+
+
+def record_listen(user, item_id, claimed_sec, finished=False):
+    """Credit listening time, clamped to what could actually have happened.
+
+    Returns the ListenProgress row.
+
+    Three clamps, and the middle one is the whole point:
+
+      * The claim itself is bounded, so one call cannot bank an hour.
+      * It is bounded by WALL-CLOCK TIME since the last heartbeat. The client
+        says how long it played; the server checks that much time has really
+        passed. Claiming thirty seconds two seconds after the previous
+        heartbeat credits two. A script can lie about playing and still
+        cannot lie about the clock.
+      * The first heartbeat gets its claim at face value up to the step cap,
+        because there is no previous beat to measure against — which is why
+        the cap matters more than it looks.
+    """
+    now = timezone.now()
+    row, made = ListenProgress.objects.get_or_create(
+        user=user, item_id=item_id[:160])
+
+    try:
+        claimed = max(0, int(claimed_sec))
+    except (TypeError, ValueError):
+        claimed = 0
+    allowed = min(claimed, LISTEN_MAX_STEP_SEC)
+    if not made:
+        elapsed = (now - row.updated_at).total_seconds()
+        # One second of slack for the round trip, so an honest heartbeat sent
+        # every 5s is not shaved to 4 forever.
+        allowed = min(allowed, int(elapsed) + 1)
+
+    row.seconds = min(row.seconds + max(0, allowed), 60 * 60)
+    if finished:
+        row.finished = True
+    row.save(update_fields=["seconds", "finished", "updated_at"])
+    return row
 
 
 class ItemRating(models.Model):

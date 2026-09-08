@@ -52,6 +52,7 @@ from .models import (
     recheck_badges,
     may_be_explicit,
     zodiac_for,
+    ListenProgress, record_listen, LISTEN_REQUIRED_SEC,
 )
 from .badgez import worn_badges, worn_badges_by_user
 from .catalog import over_char_limit
@@ -626,6 +627,7 @@ class SocialView(APIView):
             for c in SocialComment.objects.filter(item_id=item).select_related("user")[:100]
         ]
         my_r = ItemRating.objects.filter(user=request.user, item_id=item).first()
+        heard = ListenProgress.objects.filter(user=request.user, item_id=item).first()
         return {
             "item": item, "up": ups, "down": downs, "my": mine.value if mine else 0, "comments": comments,
             "rating": item_rating_median(item), "my_rating": my_r.score if my_r else None,
@@ -633,6 +635,12 @@ class SocialView(APIView):
             "my_rating_at": my_r.created_at.isoformat() if (my_r and my_r.created_at) else None,
             "my_rating_edited_at": my_r.edited_at.isoformat() if (my_r and my_r.edited_at) else None,
             "my_rating_history": (my_r.edit_history or []) if my_r else [],
+            # How far through it this member is, so the control can say "12s
+            # to go" rather than only refusing once pressed. The condition
+            # belongs beside the button, not in the error.
+            "listened_sec": heard.seconds if heard else 0,
+            "listen_finished": bool(heard and heard.finished),
+            "listen_required_sec": LISTEN_REQUIRED_SEC,
         }
 
     def get(self, request):
@@ -669,6 +677,17 @@ class SocialView(APIView):
         item = str((request.data or {}).get("item", "")).strip()[:160]
         if not item:
             return Response({"detail": "item required"}, status=status.HTTP_400_BAD_REQUEST)
+        if action == "listened":
+            # A heartbeat from the player: "I played N more seconds of this".
+            # Credited through record_listen, which clamps the claim to the
+            # wall clock — see ListenProgress. The client is trusted to say it
+            # was playing, and NOT trusted about how long.
+            row = record_listen(request.user, item,
+                                (request.data or {}).get("seconds", 0),
+                                bool((request.data or {}).get("finished")))
+            return Response({"item": item, "listened_sec": row.seconds,
+                             "finished": row.finished,
+                             "listen_required_sec": LISTEN_REQUIRED_SEC})
         if action == "react":
             try:
                 value = int((request.data or {}).get("value", 0))
