@@ -207,3 +207,145 @@ class TheAddress(TestCase):
         VenueBooking.objects.create(event=self.ev, visitor=self.visitor,
                                     status=VenueBooking.STATUS_DECLINED)
         self.assertEqual(venuez.address_for(self.ev, self.visitor), "")
+
+
+class Endpoints(TestCase):
+    """The booking lifecycle, and the two rules that must survive it."""
+
+    def setUp(self):
+        self.host = User.objects.create_user(username="eh", password="pw")
+        self.visitor = User.objects.create_user(username="ev", password="pw")
+        self.other = User.objects.create_user(username="eo", password="pw")
+        _priced(self.host, Mixing=5000)
+        _priced(self.visitor, Mixing=700)
+
+    def _mk(self, kind=VenueEvent.KIND_PERFORMANCE, **kw):
+        return _event(self.host, kind, address="12 Real Street", **kw)
+
+    def test_the_listing_quotes_the_price_before_anybody_books(self):
+        """Cost up front: the price is ON the listing, not behind the button."""
+        ev = self._mk()
+        self.client.force_login(self.visitor)
+        row = next(v for v in self.client.get("/api/economy/venuez/").json()["venues"]
+                   if v["id"] == ev.id)
+        self.assertEqual(row["quote"]["amount_cents"], 10000)
+        self.assertEqual(row["quote"]["payer"], "visitor")
+        self.assertTrue(row["can_book"])
+
+    def test_a_session_quotes_the_host_as_the_payer(self):
+        """The arrow turns; the screen has to turn with it."""
+        ev = self._mk(VenueEvent.KIND_SESSION)
+        self.client.force_login(self.visitor)
+        row = self.client.get(f"/api/economy/venuez/{ev.id}/").json()
+        self.assertEqual(row["quote"]["payer"], "host")
+        self.assertEqual(row["quote"]["amount_cents"], 1400)   # visitor's rate
+
+    def test_the_address_is_not_on_the_public_listing(self):
+        ev = self._mk()
+        self.client.force_login(self.visitor)
+        self.assertEqual(
+            self.client.get(f"/api/economy/venuez/{ev.id}/").json()["address"], "")
+
+    def test_booking_freezes_the_quote_and_accepting_opens_the_door(self):
+        ev = self._mk()
+        self.client.force_login(self.visitor)
+        r = self.client.post(f"/api/economy/venuez/{ev.id}/book/", {}, "application/json")
+        self.assertEqual(r.status_code, 201)
+        booking = r.json()["booking"]
+        self.assertEqual(booking["quoted_cents"], 10000)
+        self.assertEqual(booking["status"], "requested")
+
+        # Still no address — asking is not being let in.
+        self.assertEqual(
+            self.client.get(f"/api/economy/venuez/{ev.id}/").json()["address"], "")
+
+        self.client.force_login(self.host)
+        r = self.client.post(f"/api/economy/venuez/bookings/{booking['id']}/respond/",
+                             {"accept": True}, "application/json")
+        self.assertEqual(r.status_code, 200)
+
+        self.client.force_login(self.visitor)
+        self.assertEqual(
+            self.client.get(f"/api/economy/venuez/{ev.id}/").json()["address"],
+            "12 Real Street")
+
+    def test_a_rate_change_cannot_move_an_agreed_booking(self):
+        """The frozen quote is the difference between a price and a bill."""
+        ev = self._mk()
+        self.client.force_login(self.visitor)
+        bid = self.client.post(f"/api/economy/venuez/{ev.id}/book/", {},
+                               "application/json").json()["booking"]["id"]
+        _priced(self.host, Mixing=99999)          # host triples their rate after
+        b = VenueBooking.objects.get(pk=bid)
+        self.assertEqual(b.quoted_cents, 10000)
+
+    def test_only_the_host_answers_a_booking(self):
+        ev = self._mk()
+        self.client.force_login(self.visitor)
+        bid = self.client.post(f"/api/economy/venuez/{ev.id}/book/", {},
+                               "application/json").json()["booking"]["id"]
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.post(
+            f"/api/economy/venuez/bookings/{bid}/respond/",
+            {"accept": True}, "application/json").status_code, 404)
+
+    def test_you_cannot_ask_twice(self):
+        ev = self._mk()
+        self.client.force_login(self.visitor)
+        self.client.post(f"/api/economy/venuez/{ev.id}/book/", {}, "application/json")
+        self.assertEqual(self.client.post(
+            f"/api/economy/venuez/{ev.id}/book/", {}, "application/json").status_code,
+            409)
+
+    def test_an_under_age_visitor_is_refused_at_acceptance_too(self):
+        """A birthday can be edited between asking and being let in."""
+        ev = self._mk(min_age=21)
+        p = profile_for(self.visitor)
+        today = timezone.now().date()
+        p.birthday = today.replace(year=today.year - 30).isoformat()
+        p.save()
+
+        self.client.force_login(self.visitor)
+        bid = self.client.post(f"/api/economy/venuez/{ev.id}/book/", {},
+                               "application/json").json()["booking"]["id"]
+        p.birthday = today.replace(year=today.year - 16).isoformat()
+        p.save()
+
+        self.client.force_login(self.host)
+        r = self.client.post(f"/api/economy/venuez/bookings/{bid}/respond/",
+                             {"accept": True}, "application/json")
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("21+", r.json()["detail"])
+
+    def test_cancelling_the_venue_does_not_delete_the_booking(self):
+        """Somebody who was accepted needs to SEE that it's off."""
+        ev = self._mk()
+        self.client.force_login(self.visitor)
+        bid = self.client.post(f"/api/economy/venuez/{ev.id}/book/", {},
+                               "application/json").json()["booking"]["id"]
+        self.client.force_login(self.host)
+        self.client.delete(f"/api/economy/venuez/{ev.id}/")
+        self.assertTrue(VenueBooking.objects.filter(pk=bid).exists())
+        self.assertEqual(VenueEvent.objects.get(pk=ev.id).status, "cancelled")
+
+    def test_creating_needs_a_real_kind_and_a_future_date(self):
+        self.client.force_login(self.host)
+        base = {"title": "x", "area": "Denver",
+                "starts_at": (timezone.now() + timedelta(days=1)).isoformat()}
+        self.assertEqual(self.client.post(
+            "/api/economy/venuez/", {**base, "kind": "nonsense"},
+            "application/json").status_code, 400)
+        self.assertEqual(self.client.post(
+            "/api/economy/venuez/",
+            {**base, "kind": "free",
+             "starts_at": (timezone.now() - timedelta(days=1)).isoformat()},
+            "application/json").status_code, 400)
+        self.assertEqual(self.client.post(
+            "/api/economy/venuez/", {**base, "kind": "free"},
+            "application/json").status_code, 201)
+
+    def test_a_venue_is_not_a_dead_end(self):
+        ev = self._mk()
+        self.client.force_login(self.visitor)
+        row = self.client.get(f"/api/economy/venuez/{ev.id}/").json()
+        self.assertTrue(row["open_in"])

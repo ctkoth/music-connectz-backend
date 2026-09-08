@@ -68,6 +68,8 @@ from .occ_suggest import OccSuggestView
 from .releasez import (CollabDistributeView, PostDistributeView, ReleaseDetailView,
                        ReleaseSubmitView, ReleasesView)
 from .collab_files import CollabFileDetailView, CollabFilesView
+from .venuez import (VenueBookView, VenueBookingCancelView,
+                     VenueBookingRespondView, VenueDetailView, VenueListView)
 from .collab_post import CollabNeedsView, CollabPostView
 from .ai_models import AiModelView
 from .badgez import BadgeGiftView, BadgezView
@@ -355,6 +357,16 @@ urlpatterns = [
          name="economy-directz-copyright"),
     # A collab is where the finished master usually lands, so it releases too.
     path("collab/<int:pk>/distribute/", CollabDistributeView.as_view(), name="economy-collab-distribute"),
+    # VenueZ — CollabZ when everyone is in the same room. The quote is on the
+    # listing, not behind the booking, because the price of turning up has to
+    # be readable before anybody agrees to turn up.
+    path("venuez/", VenueListView.as_view(), name="economy-venuez"),
+    path("venuez/<int:pk>/", VenueDetailView.as_view(), name="economy-venue"),
+    path("venuez/<int:pk>/book/", VenueBookView.as_view(), name="economy-venue-book"),
+    path("venuez/bookings/<int:pk>/respond/", VenueBookingRespondView.as_view(),
+         name="economy-venue-respond"),
+    path("venuez/bookings/<int:pk>/cancel/", VenueBookingCancelView.as_view(),
+         name="economy-venue-cancel"),
     # The work going back and forth: v1 down, v2 up.
     # A finished collab becomes ONE post, owned by everyone who made it.
     path("collab/<int:pk>/post/", CollabPostView.as_view(), name="economy-collab-post"),
