@@ -152,6 +152,86 @@ give them the link. A read-only surface is usually an unfinished one.
 
 ---
 
+## One person, one account (Corey's rule — a platform rule, not a design one)
+
+**Every member gets one account. Duplicate accounts are not accepted.**
+
+It is written down for members in `apps/economy/rulez.py` and served by
+`GET /api/economy/rulez/` — open logged-out, because the screen that most needs
+it is the signup form, where nobody is signed in yet. **No screen retypes it.**
+A rule stated in three places reads three ways within a year, and a rule people
+are held to has to be one they were actually told.
+
+The reason is the one the substance rule already gives: everything here is
+counted per person — reach, ratings, referral rewards, the daily AI allowance,
+one vote in a battle. A second account is a second helping of all of it, and
+every one of those numbers stops meaning anything the moment it can be doubled.
+
+### Enforcement is a deletion, so it is deliberately narrow
+
+`apps/economy/dupez.py` is what `rulez.one_account`'s `enforced_by` names, and
+that field exists so a rule cannot quietly become a wish: grep the key and you
+find both ends. Four things hold it:
+
+- **Nothing is inferred and acted on.** `signals_between` returns the FACTS two
+  accounts share — same email, same email on a linked sign-in, same referrer —
+  each labelled and weighted strong or weak. **Never a score.** A "78% likely
+  duplicate" is the substance rule's exact failure case with an irreversible
+  action behind it.
+- **A member may only ask about their OWN other account.** There is no "report
+  this person for having two" — that door gets used for something else inside a
+  week.
+- **The owner decides, except where the member can prove it.** Same email on
+  both accounts is your own mess and you may close the other one yourself.
+  Anything weaker is an `AccountClaim` and it waits. Refusals are written down
+  and the claimant is told either way: a queue somebody's account disappears
+  into without a word is worse than no queue.
+- **Weak signals never group anybody.** Two friends who joined on the same
+  invite are two people, and an accusation built out of a coincidence is worse
+  than a duplicate nobody noticed.
+
+### A delete may destroy work. It may never destroy money.
+
+`AccountDeleteView` has always wiped a wallet holding real cash without a word.
+Survivable when it is your own account and your own decision; not survivable
+here, where the account being deleted is usually not the one pressing the
+button. So `delete_duplicate` **refuses** when money or royalties would be lost
+and there is no account named to sweep them to, and the refusal states the
+amount.
+
+**Money and royalties sweep. Energy, SpinaZ, PromptZ and XP do not**, and that
+line is the whole design: cash is the member's and destroying it is taking it,
+but the game resources are exactly what a second account exists to farm.
+Sweeping those would make the tidy-up the payout — three accounts, three lots
+of onboarding, merged into one. A duplicate's game balance dies with it.
+
+A swept balance writes a `Transaction` (`KIND_TRANSFER`, its own kind so it is
+not totalled as revenue that only ever moved sideways), because a balance that
+appears with no reason behind it is what LogZ exists to stop.
+
+### It is not a BugZ report, and that was a real decision
+
+BugZ's queue is **public on purpose** — "everyone sees the queue", so nobody
+files the same thing twice. A claim names two accounts and the evidence tying
+them together, so filing one there would publish which handles belong to the
+same person, for every member who ever came forward under the rule that asks
+them to. `AccountClaim` has its own owner-only queue, following
+`moderation.ReportView`.
+
+### What the old finder got wrong
+
+`manage.py find_duplicate_accounts` could not find the case it existed for. It
+queried `oauthidentity__email` — the reverse name is `oauth_identities` — so
+that branch raised `FieldError` the moment a real cross-email duplicate
+existed, meaning it only ever "worked" on a platform that had none. It also
+looked for one OAuth identity on two accounts, which
+`unique_together = ("provider", "provider_uid")` forbids. And `--notify`
+printed to stdout and then said "✓ Notifications sent to N users" having sent
+nothing.
+
+It reports and stops now, off the same `dupez` detection the screen uses, so
+the command and the screen cannot disagree about what a duplicate is.
+
 ## Deployment
 
 **Both repos auto-deploy from `main`. Merging to `main` IS the deploy.**
@@ -174,6 +254,14 @@ give them the link. A read-only surface is usually an unfinished one.
   migrations now applying unattended, that gap is the one to respect: a
   migration touching field widths gets checked against real Postgres BEFORE it
   reaches `main`, not after.
+
+**Corey's standing instruction: merge without asking.** Don't stop at a green
+branch to request permission — verify it (the repo's own checks, and for the
+backend the full suite plus a column-width check on any new migration), then
+merge and push. The merge is still the deliberate act; the deliberation is the
+verification, not a question. Backend first whenever a screen needs a new
+endpoint.
+
 
 ## KeyConnectZ voice: the tier buys how many, never whether
 
@@ -215,6 +303,92 @@ Two things that must not rot:
 
 Like the coach's upload path, **the TTS transport has never run against
 Google** — CI has no key. `tools/keyvoice_live_check.sh` is the check that can.
+
+## WidgetZ: the tier buys WHERE a link opens, never whether
+
+`apps/economy/widgetz.py` turns a link into one of four answers, and the split
+is about **who wrote the URL being framed**:
+
+- **player** — a provider with a documented embed endpoint. The id is read out
+  of the member's link and the provider's own player URL is built HERE, so
+  nothing a member types reaches the frame. Available at every tier for exactly
+  that reason. `test_widgetz` pins it: a link with junk appended still frames
+  the clean embed.
+- **internal** — one of our own public addresses. Never framed; the client
+  opens the real screen, which beats an iframe of ourselves at every tier.
+- **page** — an arbitrary site framed whole. **StatZ, and only for a URL the
+  malware scan cleared.** A page inside our chrome borrows our chrome's
+  credibility, which is what makes a framed login form worth building for
+  somebody who wants one; the scan is the floor and the tier is who we hand a
+  general-purpose frame to.
+- **outside** — everything else, in a new tab. **This is what keeps the ladder
+  rule intact.** No member loses a link; every tier opens every link. A refused
+  page widget returns the link with the reason attached, so a Free member is
+  told what StatZ would have done rather than finding a control that quietly
+  behaves differently from the one beside it.
+
+### An unscanned link cleared nothing
+
+`links.scan_available()` exists because `safe_browsing_check` answers "safe"
+when it *cannot look* — the right answer for a click (we don't block a member
+on our own outage) and the wrong one for anything treating a verdict as a
+permission. With no scanner key, a page widget is refused for everyone, StatZ
+included, with that as the stated reason.
+
+Two quiet lies came out of building on it:
+
+- `LinkClickView` set `counter.scanned = True` whether or not a scan ran, so a
+  deploy with no key recorded every link on the platform as checked and clean.
+  The docstring already said we never claim a link is scanned when it isn't;
+  the column said we do.
+- **The key was never readable.** `settings.SAFE_BROWSING_API_KEY` was fetched
+  with a `getattr` default and never defined in `settings.py`, so it was "" on
+  every deploy however the dashboard was set. No member link has ever been
+  scanned, and there was nothing to notice — an unscanned link and a clean one
+  both come back safe. `test_link_scan` now asserts the settings *exist*, which
+  is the dullest test in the suite and the one that would have caught it.
+
+### Set WEB_RISK_API_KEY, not SAFE_BROWSING_API_KEY
+
+Google's terms put Safe Browsing v4 at "non-commercial use only — not for sale
+or revenue generating purposes", and this platform sells subscriptions, so v4
+is the wrong product here however well it works; it is deprecated besides.
+**Web Risk is its commercial successor** — enable the Web Risk API on a Cloud
+project with billing on, make an API key, restrict it to that one API. Free to
+100k lookups a month, then $0.50 per 1,000.
+
+`links.scanner()` picks: Web Risk when its key is set, Safe Browsing when only
+that one is (a non-commercial deployment of this code is entitled to it), and
+"" when neither. The two speak differently and the difference is easy to get
+backwards — Web Risk's `uris:search` is a **GET** with the URL in the query and
+an empty `{}` body meaning clean; v4's `threatMatches:find` is a POST with a
+`threatInfo` document. Posting a v4 body at Web Risk is a 400, and a 400 comes
+back from `safe_browsing_check` as "safe", so getting it wrong looks exactly
+like a platform where nothing is ever flagged. `test_link_scan` pins the method
+on both.
+
+**And a stub cannot tell you the key works.** `tools/linkscan_live_check.sh` is
+the check that can — it looks up a URL Google publishes as a known threat and
+fails if the answer comes back clean. That direction is the whole point: a
+scanner that says "clean" to everything passes any check that only ever asks
+about clean things, and this failure mode is invisible from the app, because
+`safe_browsing_check` answers "safe" on an error too. Run it after setting a
+key, after rotating one, and after touching the scan.
+
+### The sandbox pair that must never be granted together
+
+`allow-scripts` + `allow-same-origin` lets a sandboxed frame remove its own
+sandbox. `SANDBOX` has scripts and not same-origin, which is what makes a page
+widget a viewer rather than a tenant. `allow-popups` is out too — a framed page
+that can open a window is one that can open a window over ours.
+
+### What cannot be detected, and is therefore said out loud
+
+Whether a site permits framing is the site's call (`X-Frame-Options`,
+`frame-ancestors`) and there is no way to ask ahead of time — from inside the
+page a refused frame and a slow one are identical. So `may_refuse` travels with
+the spec and the client keeps "open it in a tab" on screen, rather than a
+detection we would have to invent and would get wrong.
 
 ## Uploads have to outlive a deploy, and there are two ways to make them
 

@@ -123,7 +123,13 @@ LOGICZ_TABS = [
     {"key": "offerz", "name": "OfferZ", "emoji": "🎁", "icon": "offerz.png",
      "desc": "Offers that pay SpinaZ for doing something outside the app.", "apps": []},
     {"key": "logz", "name": "LogZ", "emoji": "🪵", "icon": "logz.png",
-     "desc": "What was done, by day, week, month, or a range you pick.", "apps": []},
+     # "by day, week, month, or a range you pick" described filters LogZ does
+     # not have — it narrows by resource and caps a page, and that is all. The
+     # same claim was corrected in features.py when LogZ was unlocked and this
+     # copy was left behind, which is how a member ends up reading a promise on
+     # one screen and meeting a different app on the next.
+     "desc": "Every move your balances made, and when. Narrow it to one resource.",
+     "apps": []},
     {"key": "journalz", "name": "JournalZ", "emoji": "📔", "icon": "journalz.png",
      "desc": "The diary. Every other tab here publishes — this one keeps its mouth "
              "shut until you tell it not to. Tag people and a place like a post; "

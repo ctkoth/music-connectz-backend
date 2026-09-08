@@ -1,5 +1,5 @@
 """
-Server-side OAuth verification for Google, GitHub, and Apple.
+Server-side OAuth verification for Google and GitHub.
 
 Each verifier returns a normalized dict:
     {"provider", "uid", "email", "name", "avatar_url"}
@@ -8,7 +8,9 @@ or raises OAuthError with a user-safe message.
 Env vars expected (set on Render):
     GOOGLE_OAUTH_CLIENT_ID
     GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET
-    APPLE_OAUTH_CLIENT_ID         (the Services ID / audience)
+
+Note: Apple OAuth support is retained but temporarily disabled pending
+configuration fixes. Use OAUTH2_PROVIDERS for Spotify, SoundCloud, etc.
 """
 import os
 
@@ -259,8 +261,8 @@ OAUTH2_PROVIDERS = {
 def provider_requirements():
     needs = {
         "google": ("GOOGLE_OAUTH_CLIENT_ID",),          # ID token, verified by audience
-        "apple": ("APPLE_OAUTH_CLIENT_ID",),            # Services ID = the audience
         "github": ("GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET"),
+        # "apple": temporarily disabled; verify_apple() retained for re-enabling
     }
     for name in OAUTH2_PROVIDERS:
         needs[name] = (f"{name.upper()}_OAUTH_CLIENT_ID",

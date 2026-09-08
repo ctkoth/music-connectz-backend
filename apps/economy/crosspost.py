@@ -452,3 +452,109 @@ def post_take(post, media):
                             "coach can't read it. Record or attach it in the "
                             "coach and it'll be scored.")
     return up, kind, ""
+
+
+# ---- A LogZ row is a fact, and a fact needs somewhere to go -----------------
+#
+# LogZ was the app that made every other balance leadable-back-to — and was
+# itself the most read-only surface in the codebase. A member could see
+# "+300 🍥 referral (referrer)" and do nothing with it: not tell the person, not
+# keep it, not post it, not open the app it came from. The rule the app applies
+# to a post applies here, and this is the same one list applying it.
+#
+# Two kinds of door, and the difference matters:
+#
+# * **Back** — the app the movement came FROM. Only offered when the writer
+#   said so (`Transaction.app_key`). It is never inferred from the note: a
+#   guessed origin is a door that opens on the wrong screen, and "never assert
+#   what you only inferred" is as true of navigation as it is of errors.
+# * **Out** — post it, send it, keep it. Available for any row, because they
+#   are made out of the line itself rather than out of where it came from.
+
+# Tab key → what the label calls it. Only apps that actually mount a tab, so a
+# recorded origin can never become a door onto a 404.
+LOG_ORIGINS = {
+    "postz": "PostZ", "battlez": "BattleZ", "collabz": "CollabZ",
+    "adz": "AdZ", "offerz": "OfferZ", "questz": "QuestZ", "occ": "OCC",
+    "singz": "SingZ", "rapz": "RapZ", "directz": "DirectZ", "lessonz": "LessonZ",
+    "membershipz": "MembershipZ", "royaltiez": "RoyaltieZ", "callz": "CallZ",
+    "bugz": "BugZ", "playlistz": "PlaylistZ", "journalz": "JournalZ",
+    "socialconnectz": "Social ConnectZ", "gamez": "GameZ", "labelz": "LabelZ",
+    "mimez": "MimeZ", "coachz": "CoachZ", "profilez": "ProfileZ",
+}
+
+
+def log_line(row):
+    """One LogZ row as the sentence a member would actually send somebody.
+
+    Built here rather than in each destination so the post, the DM and the
+    journal entry all say the same thing — three wordings for one fact is how
+    a member ends up unable to tell whether they are looking at the same
+    movement twice.
+    """
+    when = (row.get("at") or "")
+    when = when[:10] if isinstance(when, str) else ""
+    note = (row.get("note") or "").strip()
+    return f"{row.get('display', '')}{f' — {note}' if note else ''}{f' ({when})' if when else ''}".strip()
+
+
+def log_destinations(row, *, app_key="", target=""):
+    """Where one LogZ row can go, with what each does, stated before the tap.
+
+    Same shape as a post's destinations — `app`, `target`, `action`, `what`,
+    `needs`, `cost`, `carry` — so a client renders both with one component and
+    a door added to either kind cannot come out looking like a different
+    feature.
+    """
+    line = log_line(row)
+    out = []
+
+    if app_key and app_key in LOG_ORIGINS:
+        out.append({
+            "app": app_key,
+            "label": f"Open it in {LOG_ORIGINS[app_key]}",
+            "target": target or "",
+            "action": "open",
+            "what": f"The {LOG_ORIGINS[app_key]} screen this movement came from.",
+            "needs": [],
+            # Nothing moves, so there is nothing to price. Said rather than
+            # omitted: a blank cost and an unstated one look identical.
+            "cost": {"free": True, "what": "opens the screen — nothing is spent"},
+            "carry": {},
+        })
+
+    out.append({
+        "app": "postz",
+        "label": "Post it",
+        "target": "post-compose",
+        "action": "seed",
+        "what": "Starts a post with this line in it. Posting still costs what "
+                "posting costs — the price is on the post button, not here.",
+        "needs": [],
+        "cost": {"free": True, "what": "composing is free; the post states its own price"},
+        "carry": {"text": line},
+    })
+    out.append({
+        "app": "messagez",
+        "label": "Send it to someone",
+        "target": "message-compose",
+        "action": "seed",
+        "what": "Opens a message with this line in it — for showing a "
+                "collaborator the split landed, or a referrer that it paid.",
+        "needs": [],
+        "cost": {"free": True, "what": "free"},
+        "carry": {"text": line},
+    })
+    out.append({
+        "app": "journalz",
+        "label": "Keep it in JournalZ",
+        "target": "journal-compose",
+        "action": "seed",
+        "what": "Writes it into today's entry. The diary is private and free at "
+                "every tier — what a tier buys is what you can do with a year "
+                "of it, never the writing.",
+        "needs": [],
+        "cost": {"free": True, "what": "free at every tier"},
+        "carry": {"text": line},
+    })
+    return out

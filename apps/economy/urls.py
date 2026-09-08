@@ -1,6 +1,7 @@
 from django.urls import path, re_path
 
-from .directz_app import DirectZWorksView, DirectZRateView
+from .directz_app import (DirectZCopyrightView, DirectZWorksView,
+                          DirectZRateView)
 from .media import MediaFileView
 from .questz import QuestBoardView, QuestClaimView
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
@@ -9,9 +10,16 @@ from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView)
 from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
+from .widgetz import WidgetOpenView, WidgetZView
+from .rulez import RulezView
+from .voice import VoiceZView
+from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView,
+                    DupeZReviewView, DupeZView)
 from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
 from .soundz import SoundZView
+from .soundcloud_engagement import SoundCloudEngagementView
+from .coachz import CoachStudioView, RateStudentTakeView, AddStudentView
 from .distributez import TranscodeView, LyricsView
 from .adz import AdzView, AdDetailView, AdRewardView
 from .rewards import (AdmobConfigView, AdmobSsvView, OfferzView,
@@ -32,7 +40,7 @@ from .playlistz import (PlaylistCollaboratorsView, PlaylistDetailView,
 from .moderation import ReportView, BlockView
 from .account import AccountExportView, AccountDeleteView
 from .messages_view import MessagesView
-from .logz import FeaturesView, LogZView
+from .logz import FeaturesView, LogZExportView, LogZView
 from .observationz import ObservationConsentView, ObservationZView
 from .social_verify import SocialReviewQueueView, SocialVerifyView
 from .parcel import ParcelCampaignView
@@ -106,6 +114,7 @@ from .views import (
     MembershipView,
     OwnerClaimView,
     OwnerRevenueView,
+    PostEmbedsView,
     PromptzBuyView,
     PromptzConvertView,
     RoyaltiesView,
@@ -115,6 +124,13 @@ from .views import (
     UploadDetailView,
     UploadsView,
     WalletView,
+    PracticeSessionView,
+    DrumPatternView,
+    DrumPatternDetailView,
+    PublicDrumPatternView,
+    ToolPreferenceView,
+    PatternShareView,
+    DrillTakeView,
 )
 
 urlpatterns = [
@@ -191,6 +207,10 @@ urlpatterns = [
     path("share/u/<str:username>", profile_card, name="share-profile"),
     path("share/p/<int:pk>", post_card, name="share-post"),
     path("soundz/", SoundZView.as_view(), name="economy-soundz"),
+    path("soundcloud/engagement/", SoundCloudEngagementView.as_view(), name="economy-soundcloud-engagement"),
+    path("coachz/studio/", CoachStudioView.as_view(), name="economy-coachz-studio"),
+    path("coachz/rate/", RateStudentTakeView.as_view(), name="economy-coachz-rate"),
+    path("coachz/add-student/", AddStudentView.as_view(), name="economy-coachz-add-student"),
     path("specz/", SpecZView.as_view(), name="economy-specz"),
     path("specz/buy/", SpecZView.as_view(), name="economy-specz-buy"),
     # Removing one is a DELETE on the thing itself, not a POST to /remove/.
@@ -233,6 +253,9 @@ urlpatterns = [
     path("notifications/", NotificationsView.as_view(), name="economy-notifications"),
     path("messages/", MessagesView.as_view(), name="economy-messages"),
     path("logz/", LogZView.as_view(), name="economy-logz"),
+    # A ledger you can read and not act on is the read-only surface the
+    # cross-pollination rule calls unfinished. This is the acting-on.
+    path("logz/export/", LogZExportView.as_view(), name="economy-logz-export"),
     path("features/", FeaturesView.as_view(), name="economy-features"),
     path("observationz/", ObservationZView.as_view(), name="economy-observationz"),
     path("observationz/consent/", ObservationConsentView.as_view(), name="economy-observationz-consent"),
@@ -279,6 +302,7 @@ urlpatterns = [
     path("postz/<int:pk>/distribute/", PostDistributeView.as_view(), name="economy-postz-distribute"),
     path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
     path("postz/<int:pk>/delete/", PostDeleteView.as_view(), name="economy-postz-delete"),
+    path("postz/embeds/", PostEmbedsView.as_view(), name="economy-postz-embeds"),
     path("submissions/", SubmissionsView.as_view(), name="economy-submissions"),
     # JournalZ — the diary. Private by default, which is the one thing here
     # that isn't like PostZ, so the share is its own deliberate endpoint and
@@ -303,6 +327,30 @@ urlpatterns = [
     path("playlistz/<int:pk>/collaborators/", PlaylistCollaboratorsView.as_view(), name="economy-playlist-collaborators"),
     path("link/click/", LinkClickView.as_view(), name="economy-link-click"),
     path("link/tallies/", LinkTalliesView.as_view(), name="economy-link-tallies"),
+    # WidgetZ — a link that opens on the screen instead of taking the member
+    # off it. GET is the policy (who may frame a page, what a visit pays);
+    # POST resolves one link into the widget it becomes.
+    path("widgetz/", WidgetZView.as_view(), name="economy-widgetz"),
+    path("widgetz/open/", WidgetOpenView.as_view(), name="economy-widgetz-open"),
+    # The house rules, in one place so no screen retypes one. Open logged-out:
+    # the one about how many accounts a person gets is needed on the signup
+    # form, which is the one screen where nobody is signed in yet.
+    path("rulez/", RulezView.as_view(), name="economy-rulez"),
+    # One voice, set once and followed by every surface a model writes through.
+    path("voicez/", VoiceZView.as_view(), name="economy-voicez"),
+    # DupeZ — one person, one account. Groups, the member's claim on their own
+    # other account, the owner's review queue, and the owner override.
+    path("dupez/", DupeZView.as_view(), name="economy-dupez"),
+    path("dupez/claim/", DupeZClaimView.as_view(), name="economy-dupez-claim"),
+    path("dupez/review/", DupeZReviewView.as_view(), name="economy-dupez-review"),
+    path("dupez/delete/", DupeZDeleteView.as_view(), name="economy-dupez-delete"),
+    # The system-raised half of the queue: a new account made from an address
+    # another account was made from. A flag, never a block and never a delete.
+    path("dupez/flags/", DupeZFlagsView.as_view(), name="economy-dupez-flags"),
+    # What was heard in a DirectZ work's audio, and the member's answer to it.
+    # A match is named before they publish — never after, and never a block.
+    path("directz/<int:pk>/copyright/", DirectZCopyrightView.as_view(),
+         name="economy-directz-copyright"),
     # A collab is where the finished master usually lands, so it releases too.
     path("collab/<int:pk>/distribute/", CollabDistributeView.as_view(), name="economy-collab-distribute"),
     # The work going back and forth: v1 down, v2 up.
@@ -340,4 +388,12 @@ urlpatterns = [
     path("autotopup/", AutoTopUpView.as_view(), name="economy-autotopup"),
     path("autotopup/<int:pk>/cancel/", AutoTopUpCancelView.as_view(), name="economy-autotopup-cancel"),
     path("identity/", IdentityView.as_view(), name="economy-identity"),
+    # MetZ, TunerZ, ChordZ, DrumZ — practice tool tracking and cross-pollination
+    path("metz/sessions/", PracticeSessionView.as_view(), name="economy-metz-sessions"),
+    path("drumz/patterns/", DrumPatternView.as_view(), name="economy-drumz-patterns"),
+    path("drumz/patterns/<int:pattern_id>/", DrumPatternDetailView.as_view(), name="economy-drumz-pattern"),
+    path("drumz/patterns/public/", PublicDrumPatternView.as_view(), name="economy-drumz-patterns-public"),
+    path("metz/preferences/", ToolPreferenceView.as_view(), name="economy-metz-preferences"),
+    path("drumz/share/", PatternShareView.as_view(), name="economy-drumz-share"),
+    path("tunerz/drills/", DrillTakeView.as_view(), name="economy-tunerz-drills"),
 ]
