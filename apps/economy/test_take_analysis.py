@@ -343,6 +343,29 @@ class ItActuallyHears(TestCase):
         self.assertEqual(out["rushing_count"], 0, out)
         self.assertEqual(out["dragging_count"], 0, out)
 
+    def test_arrhythmic_onsets_get_no_timing_verdict(self):
+        """Onsets with no grid behind them must not produce a number.
+
+        Free singing has onsets — breaths, consonants, phrase starts — and
+        fitting a grid to them yields rushing/dragging counts made of noise.
+        """
+        import random
+        random.seed(7)
+        t, times = 0.0, []
+        for _ in range(16):
+            t += random.uniform(0.12, 0.95)
+            times.append(t)
+        y, sr = self._clicks(times)
+        out = take_analyzer.detect_timing_issues(y, sr)
+        self.assertFalse(out["pulse"], out)
+        self.assertEqual(out["rushing_count"], 0)
+        self.assertEqual(out["dragging_count"], 0)
+        self.assertIn("pulse", out["detail"])
+
+    def test_a_steady_take_is_recognised_as_having_one(self):
+        y, sr = self._clicks([i * 0.5 for i in range(16)])
+        self.assertTrue(take_analyzer.detect_timing_issues(y, sr)["pulse"])
+
     def test_a_take_with_no_pulse_says_nothing_rather_than_guessing(self):
         import numpy as np
         y = np.zeros(22050, dtype="float32")

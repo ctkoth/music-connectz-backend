@@ -311,7 +311,7 @@ def detect_timing_issues(y, sr, hop_length=512):
     count of dragged notes does not.
     """
     quiet = {"rushing_count": 0, "dragging_count": 0, "tempo_bpm": None,
-             "onsets": 0}
+             "onsets": 0, "pulse": False, "detail": ""}
     try:
         env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
         onsets = librosa.onset.onset_detect(onset_envelope=env, sr=sr,
@@ -375,6 +375,23 @@ def detect_timing_issues(y, sr, hop_length=512):
         deltas = onset_times - (slope * k + intercept)
         step = float(slope)
 
+        # Does this take HAVE a pulse to be early or late against?
+        #
+        # Free singing has onsets — breaths, consonants, phrase starts — but
+        # no grid. Without this gate a grid gets fitted to that anyway and
+        # rushing/dragging counts fall out of noise, which is a number where
+        # the honest answer is "there is no beat here to measure you against".
+        # Same shape as the accuracy floor: refuse the verdict rather than
+        # invent one.
+        #
+        # A quarter of a subdivision is the line. Inside it the onsets are
+        # sitting on a grid; outside it they are not, and no amount of fitting
+        # makes them.
+        spread = float(np.std(deltas))
+        if spread > step * PULSE_FIT_TOLERANCE:
+            return {**quiet, "onsets": int(onset_times.size), "pulse": False,
+                    "detail": "No steady pulse in this take to measure timing against."}
+
         # A fifth of a subdivision either way is "on time" — around 60ms at
         # 100bpm, which is about where a listener starts to hear it.
         tol = step * 0.2
@@ -383,6 +400,8 @@ def detect_timing_issues(y, sr, hop_length=512):
             "dragging_count": int(np.sum(deltas > tol)),
             "tempo_bpm": int(round(tempo)) or None,
             "onsets": int(onset_times.size),
+            "pulse": True,
+            "detail": "",
         }
     except Exception:
         return quiet
@@ -399,6 +418,11 @@ def detect_timing_issues(y, sr, hop_length=512):
 # the honest answer: an absent number invites a real take, a fake one ends the
 # question.
 MIN_NOTES_FOR_ACCURACY = 8
+
+# How far onsets may sit off the fitted grid before we admit there is no grid.
+# A quarter of a subdivision — inside that they are playing to a pulse, outside
+# it they are not, and fitting harder does not create one.
+PULSE_FIT_TOLERANCE = 0.25
 
 
 def calculate_pitch_accuracy(detected_notes, cent_threshold=5):
