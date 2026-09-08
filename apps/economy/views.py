@@ -23,6 +23,7 @@ from .models import (
     TIER_STATZ,
     FunnelEvent,
     Membership,
+    Post,
     RoyaltyEntry,
     SpecZPurchase,
     Transaction,
@@ -39,6 +40,14 @@ from .models import (
     wallet_for,
 )
 from .serializers import TransactionSerializer, WalletSerializer
+from .serializers_metz import (
+    PracticeSessionSerializer,
+    DrumPatternSerializer,
+    ToolPreferenceSerializer,
+    PatternShareSerializer,
+    DrillTakeSerializer,
+)
+from .models import PracticeSession, DrumPattern, ToolPreference, PatternShare, DrillTake
 
 User = get_user_model()
 VALID_TIERS = {t[0] for t in TIER_CHOICES}
@@ -250,6 +259,21 @@ class StatsView(APIView):
                 "dev_tax_rate": m.dev_tax_rate,
             }
         )
+
+
+class AllMembersView(APIView):
+    """GET /api/auth/stats/all/ — list all members ordered by join date.
+    Used by CommunityBar to show clickable member list."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        members = list(
+            User.objects.all()
+            .order_by("date_joined")
+            .values_list("username", flat=True)
+        )
+        return Response({"members": members})
 
 
 class PublicStatsView(APIView):
@@ -999,3 +1023,288 @@ class UploadDetailView(APIView):
         u.delete()
         m = membership_for(request.user)
         return Response(_storage_summary(request.user, m.tier))
+
+
+def _parse_embed_url(url, embed_type=""):
+    """Resolve a portfolio embed through WidgetZ, which is the one embed list.
+
+    There used to be a second one here — three providers, its own regexes, and
+    `spotify` and `soundcloud` STORING THE MEMBER'S OWN URL to be framed
+    verbatim. `widgetz` was written a week later around exactly the opposite
+    rule: read an id out of the link and build the provider's embed address
+    server-side, so nothing a member types reaches the frame. Two files
+    disagreeing about what an embed is meant an Apple Music link was a widget
+    on a profile and a 400 on a post — the same link, two answers.
+
+    One list now, so a provider added to `widgetz.PLAYERS` appears here for
+    free and neither can drift. `embed_type` is accepted and ignored: the URL
+    decides what it is, and a member picking the wrong radio button in the old
+    composer should not be told their perfectly good link is invalid.
+    """
+    from .widgetz import _player_for
+
+    spec = _player_for(str(url or "").strip())
+    if not spec:
+        return {"valid": False}
+    return {
+        "type": spec["provider"],
+        "url": spec["src"],
+        "valid": True,
+        # Carried through so the client sizes the frame from the same place
+        # the widget board does rather than keeping its own table of heights.
+        "aspect": spec.get("aspect", ""),
+        "height": spec.get("height", 0),
+        "label": spec.get("label", ""),
+    }
+
+
+class PostEmbedsView(APIView):
+    """POST adds an embed to a post; DELETE removes one. Portfolio showcase."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        post_id = request.data.get("post_id")
+        embed_url = request.data.get("url")
+        title = str(request.data.get("title", "") or "").strip()[:200]
+
+        # `type` is no longer read. The URL says what a link is, and requiring
+        # the member to also declare it meant a wrong radio button refused a
+        # link that worked. Old clients may still send it; it is ignored rather
+        # than rejected, so a stale tab keeps working across the deploy.
+        if not all([post_id, embed_url]):
+            return Response(
+                {"detail": "post_id and url required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            post = Post.objects.get(id=post_id, author=request.user)
+        except Post.DoesNotExist:
+            return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        m = membership_for(request.user)
+        lim = limits_for(m.tier)
+        embeds = post.embeds or []
+
+        if len(embeds) >= lim.get("embeds_per_post", 3):
+            return Response(
+                {"detail": f"embed limit ({lim.get('embeds_per_post', 3)}) reached for {m.tier} tier"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        parsed = _parse_embed_url(embed_url)
+        if not parsed.get("valid"):
+            from .widgetz import PLAYER_LABELS
+            return Response(
+                # Names what IS playable rather than repeating the member's own
+                # word back at them. "invalid youtube URL" on a link that was
+                # never YouTube is a refusal that helps nobody.
+                {"detail": "That link isn't one with a player we can embed. "
+                           f"These work: {', '.join(PLAYER_LABELS)}.",
+                 "players": PLAYER_LABELS},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        new_embed = {
+            # The URL decides the type, not the radio button — see above.
+            "type": parsed["type"],
+            "url": parsed["url"],
+            "title": title or parsed.get("label") or parsed["type"].title(),
+            "aspect": parsed.get("aspect", ""),
+            "height": parsed.get("height", 0),
+        }
+        embeds.append(new_embed)
+        post.embeds = embeds
+        post.save(update_fields=["embeds"])
+
+        return Response(
+            {"embeds": embeds, "limit": lim.get("embeds_per_post", 3)},
+            status=status.HTTP_201_CREATED,
+        )
+
+    def delete(self, request):
+        post_id = request.data.get("post_id")
+        embed_index = request.data.get("index")
+
+        if post_id is None or embed_index is None:
+            return Response(
+                {"detail": "post_id and index required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            post = Post.objects.get(id=post_id, author=request.user)
+        except Post.DoesNotExist:
+            return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        embeds = post.embeds or []
+        if embed_index < 0 or embed_index >= len(embeds):
+            return Response(
+                {"detail": "invalid embed index"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        embeds.pop(embed_index)
+        post.embeds = embeds
+        post.save(update_fields=["embeds"])
+
+        return Response({"embeds": embeds})
+
+
+class PracticeSessionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = PracticeSessionSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(user=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def get(self, request):
+        sessions = PracticeSession.objects.filter(user=request.user).order_by("-created_at")
+        serializer = PracticeSessionSerializer(sessions, many=True)
+        return Response(serializer.data)
+
+
+class DrumPatternView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = DrumPatternSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(user=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def get(self, request):
+        patterns = DrumPattern.objects.filter(user=request.user).order_by("-created_at")
+        serializer = DrumPatternSerializer(patterns, many=True)
+        return Response(serializer.data)
+
+
+class DrumPatternDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pattern_id):
+        try:
+            pattern = DrumPattern.objects.get(id=pattern_id, user=request.user)
+        except DrumPattern.DoesNotExist:
+            return Response({"detail": "pattern not found"}, status=status.HTTP_404_NOT_FOUND)
+        serializer = DrumPatternSerializer(pattern)
+        return Response(serializer.data)
+
+    def put(self, request, pattern_id):
+        try:
+            pattern = DrumPattern.objects.get(id=pattern_id, user=request.user)
+        except DrumPattern.DoesNotExist:
+            return Response({"detail": "pattern not found"}, status=status.HTTP_404_NOT_FOUND)
+        serializer = DrumPatternSerializer(pattern, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pattern_id):
+        try:
+            pattern = DrumPattern.objects.get(id=pattern_id, user=request.user)
+        except DrumPattern.DoesNotExist:
+            return Response({"detail": "pattern not found"}, status=status.HTTP_404_NOT_FOUND)
+        pattern.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PublicDrumPatternView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        patterns = DrumPattern.objects.filter(is_public=True).order_by("-created_at")
+        serializer = DrumPatternSerializer(patterns, many=True)
+        return Response(serializer.data)
+
+
+class ToolPreferenceView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        preference, _ = ToolPreference.objects.get_or_create(user=request.user)
+        serializer = ToolPreferenceSerializer(preference)
+        return Response(serializer.data)
+
+    def put(self, request):
+        preference, _ = ToolPreference.objects.get_or_create(user=request.user)
+        serializer = ToolPreferenceSerializer(preference, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PatternShareView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        pattern_id = request.data.get("pattern_id")
+        try:
+            pattern = DrumPattern.objects.get(id=pattern_id, user=request.user)
+        except DrumPattern.DoesNotExist:
+            return Response({"detail": "pattern not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        pattern.shares_count += 1
+        pattern.save(update_fields=["shares_count"])
+
+        share = PatternShare.objects.create(
+            pattern=pattern,
+            shared_by=request.user,
+        )
+        serializer = PatternShareSerializer(share)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def get(self, request):
+        shares = PatternShare.objects.filter(shared_by=request.user).order_by("-created_at")
+        serializer = PatternShareSerializer(shares, many=True)
+        return Response(serializer.data)
+
+
+class DrillTakeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        weak_note = request.data.get("weak_note")
+        original_frequency = request.data.get("original_frequency")
+        original_cents_off = request.data.get("original_cents_off")
+        accuracy_percent = request.data.get("accuracy_percent", 0)
+        duration_seconds = request.data.get("duration_seconds", 0)
+        final_frequency = request.data.get("final_frequency")
+        final_cents_off = request.data.get("final_cents_off")
+        key_context = request.data.get("key_context")
+        bpm_context = request.data.get("bpm_context")
+
+        improvement = None
+        if original_cents_off is not None and final_cents_off is not None:
+            improvement = abs(original_cents_off) - abs(final_cents_off)
+
+        drill_take = DrillTake.objects.create(
+            user=request.user,
+            weak_note=weak_note,
+            original_frequency=float(original_frequency) if original_frequency else 0,
+            original_cents_off=int(original_cents_off) if original_cents_off is not None else 0,
+            accuracy_percent=int(accuracy_percent) if accuracy_percent else 0,
+            duration_seconds=int(duration_seconds) if duration_seconds else 0,
+            final_frequency=float(final_frequency) if final_frequency else None,
+            final_cents_off=int(final_cents_off) if final_cents_off is not None else None,
+            key_context=key_context,
+            bpm_context=int(bpm_context) if bpm_context else None,
+        )
+
+        serializer = DrillTakeSerializer(drill_take)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def get(self, request):
+        note_filter = request.query_params.get("note")
+        drills = DrillTake.objects.filter(user=request.user).order_by("-created_at")
+        if note_filter:
+            drills = drills.filter(weak_note=note_filter)
+        serializer = DrillTakeSerializer(drills, many=True)
+        return Response(serializer.data)

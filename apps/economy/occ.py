@@ -227,10 +227,16 @@ class OccChatView(APIView):
         # string you have already joined. Fixed parts first (the voice and the
         # courses are what OCC *is*), then the member's own additions, which are
         # what gets shortened when the budget bites.
-        fixed = f"{VOICE_STYLE.get(model_voice, VOICE_STYLE['corey-gpt'])}\n\n{COURSES}"
-        # AAVE colloquialisms only apply to the Corey voice, and only when opted in.
-        if slang and model_voice == "corey-gpt":
-            fixed += f"\n\n{AAVE_STYLE}"
+        # One voice, from the member's own row, so a setting changed here holds
+        # in the coach and everywhere else a model writes to them. `override`
+        # is this request's dial — switching to terse technical mode for one
+        # task must not change what they get on every other screen.
+        from .voice import voice_prompt
+        _STYLE_BACK = {"corey-gpt": "corey", "standard": "standard", "technical": "technical"}
+        fixed = voice_prompt(request.user, override={
+            "style": _STYLE_BACK.get(model_voice, "corey"),
+            "slang": slang,
+        }) + f"\n\n{COURSES}"
         if suggest:
             fixed += f"\n\n{SUGGEST_STYLE}"
 

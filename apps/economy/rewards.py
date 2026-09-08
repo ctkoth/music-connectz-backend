@@ -146,7 +146,7 @@ class AdmobSsvView(APIView):
             defaults={"user": user, "spinaz": amount},
         )
         if created:
-            award_spinaz(user, amount, note="Rewarded ad (AdMob)")
+            award_spinaz(user, amount, note="Rewarded ad (AdMob)", app_key="adz")
         return Response({"ok": True})
 
 
@@ -241,5 +241,5 @@ class OfferzCallbackView(APIView):
             defaults={"user": user, "spinaz": amount},
         )
         if created:
-            award_spinaz(user, amount, note="OfferZ offerwall")
+            award_spinaz(user, amount, note="OfferZ offerwall", app_key="offerz")
         return Response({"ok": True})

@@ -146,6 +146,19 @@ will build a warm-up around."""
     range_field = (
         '\n  "range_profile": "<what their range reads as and what it suits - or say the take was too short to tell>",'
         if p["ranges"] else "")
+
+    # For pitch-based instruments, ask for weak note extraction for practice tool linking
+    has_pitch = "pitch" in p["scores"] or "intonation" in p["scores"]
+    weak_notes_section = ("""
+If pitch accuracy below 70%, name 1-3 most problematic notes with what you heard:
+- "weak_notes": [{"note": "E", "frequency": 330, "cents_off": -45}, ...]. \
+Note is the letter + octave if hearable (E, F#, A3, etc). Frequency in Hz. \
+Cents_off: negative = flat, positive = sharp. If pitch is 70+, return []."""
+                          if has_pitch else "")
+    weak_notes_field = (
+        '\n  "weak_notes": [{"note": "...", "frequency": 330, "cents_off": 0}, ...],'
+        if has_pitch else "")
+
     return f"""You are the Music ConnectZ {p['coach']}. You are listening to one \
 recorded take from a member training in {p['label']}.
 
@@ -182,7 +195,7 @@ number and not coaching:
 - "now": what this take actually IS right now — their current qualities, in \
 {p['label']}'s own terms, the honest read a stranger would give it.
 - "goal": what they are aiming at from here, pitched at "{difficulty}" and at \
-{aim}. Concrete enough to know when they have hit it.{range_ask}{style_ask}
+{aim}. Concrete enough to know when they have hit it.{range_ask}{style_ask}{weak_notes_section}
 
 Return ONLY valid JSON, no markdown fence, in exactly this shape:
 {{
@@ -194,5 +207,6 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "verdict": "<one sentence in that voice, what this take actually is>",
   "strengths": ["<what genuinely worked, named specifically>", "..."],
   "fixes": ["<the moment it goes wrong, and the fix — the two that matter most, worst first>", "..."],
-  "next_drill": "<one drill to run before the next take: what to do, how many reps>"
+  "next_drill": "<one drill to run before the next take: what to do, how many reps>",{weak_notes_field}
+  "weak_notes": []
 }}"""
