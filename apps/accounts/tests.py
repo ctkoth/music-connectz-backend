@@ -161,3 +161,104 @@ class OAuthVerifierShapeTests(TestCase):
             os.environ.pop("SPOTIFY_OAUTH_CLIENT_SECRET", None)
         self.assertIn("email_verified", info)
         self.assertIs(info["email_verified"], False)
+
+    def test_discord_trusts_its_own_verified_flag(self):
+        # Discord is the one provider here whose profile response actually
+        # says whether the address was confirmed — the generic default of
+        # False must not stomp on that.
+        import apps.accounts.oauth as oauth_mod
+
+        class FakeResp:
+            status_code = 200
+            def json(self):
+                return {"access_token": "t"}
+
+        orig_post, orig_get = oauth_mod.requests.post, oauth_mod.requests.get
+        oauth_mod.requests.post = lambda *a, **k: FakeResp()
+        oauth_mod.requests.get = lambda *a, **k: type(
+            "R", (), {"json": lambda self: {
+                "id": "99", "email": "d@example.com", "verified": True,
+                "username": "dee", "global_name": "Dee", "avatar": "abc123",
+            }}
+        )()
+        try:
+            import os
+            os.environ["DISCORD_OAUTH_CLIENT_ID"] = "id"
+            os.environ["DISCORD_OAUTH_CLIENT_SECRET"] = "secret"
+            info = oauth_mod.exchange_oauth2("discord", "code", "https://x/cb")
+        finally:
+            oauth_mod.requests.post, oauth_mod.requests.get = orig_post, orig_get
+            os.environ.pop("DISCORD_OAUTH_CLIENT_ID", None)
+            os.environ.pop("DISCORD_OAUTH_CLIENT_SECRET", None)
+        self.assertIs(info["email_verified"], True)
+        self.assertEqual(info["name"], "Dee")
+        self.assertEqual(info["avatar_url"], "https://cdn.discordapp.com/avatars/99/abc123.png")
+
+    def test_discord_unverified_email_does_not_claim_verification(self):
+        import apps.accounts.oauth as oauth_mod
+
+        class FakeResp:
+            status_code = 200
+            def json(self):
+                return {"access_token": "t"}
+
+        orig_post, orig_get = oauth_mod.requests.post, oauth_mod.requests.get
+        oauth_mod.requests.post = lambda *a, **k: FakeResp()
+        oauth_mod.requests.get = lambda *a, **k: type(
+            "R", (), {"json": lambda self: {
+                "id": "99", "email": "d@example.com", "verified": False,
+                "username": "dee", "avatar": None,
+            }}
+        )()
+        try:
+            import os
+            os.environ["DISCORD_OAUTH_CLIENT_ID"] = "id"
+            os.environ["DISCORD_OAUTH_CLIENT_SECRET"] = "secret"
+            info = oauth_mod.exchange_oauth2("discord", "code", "https://x/cb")
+        finally:
+            oauth_mod.requests.post, oauth_mod.requests.get = orig_post, orig_get
+            os.environ.pop("DISCORD_OAUTH_CLIENT_ID", None)
+            os.environ.pop("DISCORD_OAUTH_CLIENT_SECRET", None)
+        self.assertIs(info["email_verified"], False)
+        self.assertEqual(info["avatar_url"], "")
+
+    def test_reddit_sends_its_mandatory_user_agent_on_both_requests(self):
+        # Reddit blocks the default requests User-Agent outright, and does it
+        # identically on the token exchange and the userinfo call — a header
+        # set on only one would fail silently on the other.
+        import apps.accounts.oauth as oauth_mod
+
+        seen_headers = []
+
+        class FakeResp:
+            status_code = 200
+            def json(self):
+                return {"access_token": "t"}
+
+        def fake_post(url, data=None, headers=None, auth=None, timeout=None):
+            seen_headers.append(("post", headers, auth))
+            return FakeResp()
+
+        def fake_get(url, headers=None, timeout=None):
+            seen_headers.append(("get", headers, None))
+            return type("R", (), {"json": lambda self: {"id": "t2_abc", "name": "u"}})()
+
+        orig_post, orig_get = oauth_mod.requests.post, oauth_mod.requests.get
+        oauth_mod.requests.post, oauth_mod.requests.get = fake_post, fake_get
+        try:
+            import os
+            os.environ["REDDIT_OAUTH_CLIENT_ID"] = "id"
+            os.environ["REDDIT_OAUTH_CLIENT_SECRET"] = "secret"
+            info = oauth_mod.exchange_oauth2("reddit", "code", "https://x/cb")
+        finally:
+            oauth_mod.requests.post, oauth_mod.requests.get = orig_post, orig_get
+            os.environ.pop("REDDIT_OAUTH_CLIENT_ID", None)
+            os.environ.pop("REDDIT_OAUTH_CLIENT_SECRET", None)
+        self.assertEqual(info["uid"], "t2_abc")
+        self.assertEqual(info["email"], "")
+        for method, headers, auth in seen_headers:
+            self.assertIn("User-Agent", headers, method)
+            self.assertEqual(headers["User-Agent"], "web:musicconnectz:v1.0 (by /u/musicconnectz)")
+        # Reddit requires Basic auth for the client credentials, not a body field.
+        post_auth = seen_headers[0][2]
+        self.assertEqual(post_auth, ("id", "secret"))
