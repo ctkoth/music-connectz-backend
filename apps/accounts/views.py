@@ -574,4 +574,4 @@ class UsersView(APIView):
 
         # Delete the user
         target.delete()
-        return Response({"detail": f"@{username} deleted"}, status=status.HTTP_204_NO_CONTENT)
+        return Response({"deleted": username}, status=status.HTTP_200_OK)
