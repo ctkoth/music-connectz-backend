@@ -14,6 +14,7 @@ from datetime import timedelta
 from django.db.models import Case, Count, IntegerField, Sum, When
 from django.utils import timezone
 
+from .catalog import edit_window_for
 from .crosspost import coach_cap, coach_price, destinations_for, take_state_for
 from .models import (
     CollabDeal,
@@ -156,6 +157,8 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
         "age_sec": int((timezone.now() - p.created_at).total_seconds()),
         "rate_unlock_sec": POST_RATE_UNLOCK_SEC,
         "comment_unlock_sec": POST_COMMENT_UNLOCK_SEC,
+        # How long the author can still edit this post.
+        "edit_unlock_sec": edit_window_for(p.author.membership.tier),
         # PostZ is for show, CollabZ is for collaboration — this is the count
         # of times somebody moved from one to the other on this post, and where
         # the client sends them to do it again.

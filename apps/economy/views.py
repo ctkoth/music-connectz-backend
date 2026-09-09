@@ -678,7 +678,7 @@ class LimitsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        from .catalog import chars_unlimited
+        from .catalog import chars_unlimited, edit_window_for
         from .models import third_party_ads_allowed
 
         m = membership_for(request.user)
@@ -708,6 +708,11 @@ class LimitsView(APIView):
         lim["journal"] = journal_limits_for(m.tier)
         lim["journal_by_tier"] = {t: v for t, v in JOURNAL_LIMITS.items()
                                   if t != TIER_DEBUG}
+        # Map embeds_per_post to embed_limit for frontend compatibility, and add
+        # the edit window duration for the client to render countdown timers.
+        if "embeds_per_post" in lim:
+            lim["embed_limit"] = lim.pop("embeds_per_post")
+        lim["edit_unlock_sec"] = edit_window_for(m.tier)
         return Response(lim)
 
 
