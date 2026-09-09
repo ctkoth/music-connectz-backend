@@ -740,8 +740,10 @@ class SocialView(APIView):
         elif action == "rate":
             try:
                 score = int((request.data or {}).get("score", 0))
+                visibility = str((request.data or {}).get("visibility", "restricted"))
             except (TypeError, ValueError):
                 score = 0
+                visibility = "restricted"
             if score == 0:
                 ItemRating.objects.filter(user=request.user, item_id=item).delete()
             elif 1 <= score <= 10:
@@ -751,7 +753,7 @@ class SocialView(APIView):
                 existing = ItemRating.objects.filter(user=request.user, item_id=item).first()
                 if existing is None:
                     ItemRating.objects.create(user=request.user, item_id=item, score=score)
-                    reward_for_rating(request.user, item)
+                    reward_for_rating(request.user, item, visibility=visibility)
                     self._rate_skills(item, request.user, score)
                     self._notify_target(item, "rate", f"@{request.user.username} rated your post {score}/10 ⭐", request.user)
                 else:

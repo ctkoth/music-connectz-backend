@@ -1365,17 +1365,17 @@ def award_spinaz(user, amount, note="", *, app_key="", target=""):
     return w.spinaz
 
 
-def award_energy(user, amount, note="", *, app_key="", target=""):
+def award_energy(user, amount, note="", *, app_key="", target="", visibility=""):
     """Credit Energy to a user's wallet, and record it."""
     w = wallet_for(user)
     w.energy = (w.energy or 0) + int(amount)
     w.save(update_fields=["energy", "updated_at"])
     log_resource(user, Transaction.RES_ENERGY, int(amount), note or "Energy",
-                 app_key=app_key, target=target)
+                 app_key=app_key, target=target, visibility=visibility)
     return w.energy
 
 
-def log_resource(user, resource, amount, note="", *, app_key="", target=""):
+def log_resource(user, resource, amount, note="", *, app_key="", target="", visibility=""):
     """One line in LogZ: what moved, which way, and when.
 
     Best-effort — a ledger write must never be the reason a reward fails to
@@ -1395,6 +1395,7 @@ def log_resource(user, resource, amount, note="", *, app_key="", target=""):
             # Blank when the caller didn't say. Never guessed from the note.
             app_key=str(app_key or "")[:24],
             target=str(target or "")[:60],
+            visibility=str(visibility or "restricted")[:12],
         )
     except Exception:  # pragma: no cover - never break a reward over its log
         return None
@@ -1453,8 +1454,11 @@ RATING_REWARD_DAILY_CAP = 20
 RATING_NOTE = "Rating"
 
 
-def reward_for_rating(user, what=""):
-    """Credit the rating reward, respecting the daily cap. Returns what landed."""
+def reward_for_rating(user, what="", visibility="public"):
+    """Credit the rating reward, respecting the daily cap. Returns what landed.
+
+    Public visibility earns +25% bonus on leaderboards.
+    """
     from datetime import timedelta
     if not user:
         return 0
@@ -1467,8 +1471,10 @@ def reward_for_rating(user, what=""):
     if paid >= cap:
         return 0
     note = f"{RATING_NOTE} — {what}" if what else RATING_NOTE
-    award_energy(user, RATING_REWARD_ENERGY, note)
-    return RATING_REWARD_ENERGY
+    multiplier = visibility_multiplier(visibility)
+    awarded = int(RATING_REWARD_ENERGY * multiplier)
+    award_energy(user, awarded, note, visibility=visibility)
+    return awarded
 
 
 ONBOARD_REWARD_SPINAZ = 150
