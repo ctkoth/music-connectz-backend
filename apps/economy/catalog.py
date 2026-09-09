@@ -77,7 +77,7 @@ UNLIMITED_CHARS = 10 ** 9
 # stored work into an error message they didn't cause.
 TIER_LIMITS = {
     TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500, "embeds_per_post": 3},
-    TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 999},
+    TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 15},
     # StatZ writes without a character cap — the client already advertised this
     # ("StatZ char limit: Unlimited") while the server was still cutting at
     # 5000, so a StatZ member was told one thing and refused another.
