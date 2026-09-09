@@ -177,3 +177,9 @@ services:
         sync: false
       - key: MODAL_TOKEN_SECRET
         sync: false
+
+crons:
+  - id: check-habits-and-notify
+    service: music-connectz-backend
+    schedule: "0 8 * * *"
+    command: "python manage.py check_habits_and_notify"
