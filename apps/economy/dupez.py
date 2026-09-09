@@ -446,7 +446,7 @@ class DupeZView(APIView):
 
     def get(self, request):
         me = request.user
-        owner = is_owner(me)
+        owner = is_owner(me) or is_owner_candidate(me)
         groups = duplicate_groups()
         if not owner:
             mine = []
