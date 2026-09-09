@@ -34,6 +34,17 @@ def split_cents(amount_cents, rate):
     return dev, amount_cents - dev
 
 
+def visibility_multiplier(visibility):
+    """Reward multiplier based on visibility. Public shows +25% bonus.
+
+    Public leaderboard entries earn 1.25x, incentivizing social proof.
+    Restricted/private earn 1.0x normal. Only public appears on leaderboards.
+    """
+    if visibility == "public":
+        return 1.25
+    return 1.0
+
+
 class Membership(models.Model):
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="membership"
@@ -136,6 +147,16 @@ class Transaction(models.Model):
         (RES_PROMPTZ, "PromptZ"), (RES_XP, "XP"),
     ]
 
+    # Visibility controls reward multiplier: public gets +25% bonus.
+    VIS_PUBLIC = "public"
+    VIS_RESTRICTED = "restricted"
+    VIS_PRIVATE = "private"
+    VISIBILITY_CHOICES = [
+        (VIS_PUBLIC, "Public"),
+        (VIS_RESTRICTED, "Restricted"),
+        (VIS_PRIVATE, "Private"),
+    ]
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="transactions"
     )
@@ -147,6 +168,9 @@ class Transaction(models.Model):
     amount_cents = models.IntegerField(help_text="Signed: positive credit, negative debit")
     dev_tax_cents = models.PositiveIntegerField(default=0)
     note = models.CharField(max_length=200, blank=True, default="")
+    # Public entries get +25% reward (visibility bonus), restricted/private normal.
+    # Only public entries appear on leaderboards.
+    visibility = models.CharField(max_length=12, choices=VISIBILITY_CHOICES, default=VIS_RESTRICTED)
     # WHERE the movement came from. The cross-pollination rule says anything
     # that stores a thing stores where it came from, and this — the one table
     # that records every resource movement in the app — did not. So a LogZ row
