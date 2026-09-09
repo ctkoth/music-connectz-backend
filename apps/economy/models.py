@@ -6,6 +6,7 @@ transaction) is enforced here, server-side, so the client can't bypass it.
 Rates match the frontend: Free 10% · Premium 5% · StatZ 2%.
 """
 import os
+from datetime import timedelta
 
 from django.conf import settings
 from django.db import models
@@ -3523,6 +3524,29 @@ def _funded_clean_deals(user):
     return n
 
 
+def _check_streak(user):
+    """3+ posts rated within a 7-day window."""
+    week_ago = timezone.now() - timedelta(days=7)
+    rated_posts = Post.objects.filter(
+        author=user,
+        ratings__created_at__gte=week_ago
+    ).distinct().count()
+    return rated_posts >= 3
+
+
+def _check_multi_craft(user):
+    """Posts eligible for BattleZ across 3+ different instruments."""
+    instruments = set()
+    for post in Post.objects.filter(author=user, battle_eligible_at__isnull=False):
+        skills = post.skills_used or []
+        for skill_dict in skills:
+            if isinstance(skill_dict, dict):
+                instrument = skill_dict.get("instrument")
+                if instrument:
+                    instruments.add(instrument)
+    return len(instruments) >= 3
+
+
 def _translations_done(user):
     return KeyTranslation.objects.filter(user=user).count()
 
@@ -3688,6 +3712,47 @@ BADGES = {
         "how": "Gifted when a BugZ report is accepted.",
         "effects": {"promptz_grant": 50},
         "effect_note": "+50 🏷️ PromptZ, once.",
+    },
+    # ---- progression badges ----
+    "battle_starter": {
+        "name": "Battle Starter", "emoji": "⚡", "title": "Battle Starter", "gifted": False,
+        "desc": "First post reaches BattleZ eligibility (5+ ratings).",
+        "how": "Get your first post to 5 ratings.",
+        "effects": {"achievement": True},
+        "effect_note": "Achievement unlocked.",
+        "check": lambda u: Post.objects.filter(author=u, battle_eligible_at__isnull=False).exists(),
+    },
+    "collab_architect": {
+        "name": "Collab Architect", "emoji": "🤝", "title": "Collab Architect", "gifted": False,
+        "desc": "First post hits CollabZ rating threshold.",
+        "how": "Get your first post's rating average to the CollabZ threshold for your tier.",
+        "effects": {"achievement": True},
+        "effect_note": "Achievement unlocked.",
+        "check": lambda u: Post.objects.filter(author=u, collab_eligible_at__isnull=False).exists(),
+    },
+    "streak": {
+        "name": "Streak", "emoji": "🔥", "title": "Streak", "gifted": False,
+        "desc": "3+ posts rated in a week.",
+        "how": "Post 3 different pieces and get each rated within a 7-day window.",
+        "effects": {"achievement": True},
+        "effect_note": "Achievement unlocked.",
+        "check": lambda u: _check_streak(u),
+    },
+    "rater_guild": {
+        "name": "Rater's Guild", "emoji": "⭐", "title": "Rater's Guild", "gifted": False,
+        "desc": "50+ ratings given to other members' work.",
+        "how": "Rate 50 posts.",
+        "effects": {"achievement": True},
+        "effect_note": "Achievement unlocked.",
+        "check": lambda u: _ratings_given(u) >= 50,
+    },
+    "multi_craft": {
+        "name": "Multi-Craft", "emoji": "🎯", "title": "Multi-Craft", "gifted": False,
+        "desc": "3+ instruments with posts eligible for BattleZ.",
+        "how": "Get posts to 5+ ratings across 3 different instruments.",
+        "effects": {"achievement": True},
+        "effect_note": "Achievement unlocked.",
+        "check": lambda u: _check_multi_craft(u),
     },
 }
 
