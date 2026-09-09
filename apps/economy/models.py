@@ -6,6 +6,7 @@ transaction) is enforced here, server-side, so the client can't bypass it.
 Rates match the frontend: Free 10% · Premium 5% · StatZ 2%.
 """
 import os
+from datetime import timedelta
 
 from django.conf import settings
 from django.db import models
@@ -32,6 +33,34 @@ def split_cents(amount_cents, rate):
     amount_cents = int(amount_cents or 0)
     dev = round(amount_cents * rate)
     return dev, amount_cents - dev
+
+
+def visibility_multiplier(visibility):
+    """Reward multiplier based on visibility. Public shows +25% bonus.
+
+    Public leaderboard entries earn 1.25x, incentivizing social proof.
+    Restricted/private earn 1.0x normal. Only public appears on leaderboards.
+    """
+    if visibility == "public":
+        return 1.25
+    return 1.0
+
+
+def collaboration_multiplier(post):
+    """Reward multiplier for collaborative work. +10% per extra contributor.
+
+    Team of 2 = 1.1x, team of 3 = 1.2x, etc.
+    Incentivizes working together while maintaining individual earnings cap.
+    """
+    if not post:
+        return 1.0
+    try:
+        collab_count = post.contributor_rows.count()
+        if collab_count > 1:
+            return 1.0 + (0.10 * (collab_count - 1))
+        return 1.0
+    except Exception:
+        return 1.0
 
 
 class Membership(models.Model):
@@ -136,6 +165,16 @@ class Transaction(models.Model):
         (RES_PROMPTZ, "PromptZ"), (RES_XP, "XP"),
     ]
 
+    # Visibility controls reward multiplier: public gets +25% bonus.
+    VIS_PUBLIC = "public"
+    VIS_RESTRICTED = "restricted"
+    VIS_PRIVATE = "private"
+    VISIBILITY_CHOICES = [
+        (VIS_PUBLIC, "Public"),
+        (VIS_RESTRICTED, "Restricted"),
+        (VIS_PRIVATE, "Private"),
+    ]
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="transactions"
     )
@@ -147,6 +186,9 @@ class Transaction(models.Model):
     amount_cents = models.IntegerField(help_text="Signed: positive credit, negative debit")
     dev_tax_cents = models.PositiveIntegerField(default=0)
     note = models.CharField(max_length=200, blank=True, default="")
+    # Public entries get +25% reward (visibility bonus), restricted/private normal.
+    # Only public entries appear on leaderboards.
+    visibility = models.CharField(max_length=12, choices=VISIBILITY_CHOICES, default=VIS_RESTRICTED)
     # WHERE the movement came from. The cross-pollination rule says anything
     # that stores a thing stores where it came from, and this — the one table
     # that records every resource movement in the app — did not. So a LogZ row
@@ -1220,6 +1262,9 @@ class Post(models.Model):
     # the author's off switch for the case where it isn't welcome.
     allow_in_playlists = models.BooleanField(default=True)
     skill_cost_cents = models.PositiveIntegerField(default=0)  # combined skill price of what's used
+    # Progression tracking: when did this post become eligible for next tier?
+    battle_eligible_at = models.DateTimeField(null=True, blank=True)  # when rating count/avg hit threshold
+    collab_eligible_at = models.DateTimeField(null=True, blank=True)  # when quality score hit threshold
     created_at = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(null=True, blank=True)
     edit_history = models.JSONField(default=list, blank=True)  # [{title, description, at}] prior versions
@@ -1271,7 +1316,61 @@ class DailySubmission(models.Model):
         unique_together = ("user", "day")
 
 
+# Post progression thresholds: when PostZ becomes BattleZ/CollabZ eligible
+# Rating count needed for BattleZ (5+ ratings = eligible for competitions)
+BATTLE_RATING_THRESHOLD = 5
+# Average rating needed for CollabZ (tier-gated: Free 8.0, Premium 7.0, StatZ 6.0)
+COLLAB_RATING_THRESHOLD = {"free": 8.0, "premium": 7.0, "statz": 6.0}
+
 SUBMISSION_DAILY_CAP = {"free": 5, "premium": 15, "statz": 50}
+
+
+def post_collab_threshold(post):
+    """Rating score needed for this post to become CollabZ-eligible.
+
+    Lower tier = higher bar. StatZ gets easiest access (6.0), Free toughest (8.0).
+    """
+    if not post or not post.author:
+        return 8.0
+    tier = membership_for(post.author).tier
+    return COLLAB_RATING_THRESHOLD.get(tier, 8.0)
+
+
+def post_is_battle_eligible(post):
+    """Whether post has enough ratings to join BattleZ."""
+    if not post:
+        return False
+    from .social import ItemRating
+    count = ItemRating.objects.filter(item_id=f"post:{post.id}").count()
+    return count >= BATTLE_RATING_THRESHOLD
+
+
+def post_is_collab_eligible(post):
+    """Whether post has high enough rating to qualify for DirectZ collab."""
+    if not post:
+        return False
+    from .social import item_rating_median
+    rating = item_rating_median(f"post:{post.id}")
+    if not rating:
+        return False
+    threshold = post_collab_threshold(post)
+    return rating >= threshold
+
+
+def check_post_progression(post):
+    """Check and update post eligibility for BattleZ and CollabZ."""
+    if not post:
+        return
+    try:
+        # Check BattleZ eligibility
+        if not post.battle_eligible_at and post_is_battle_eligible(post):
+            post.battle_eligible_at = timezone.now()
+        # Check CollabZ eligibility
+        if not post.collab_eligible_at and post_is_collab_eligible(post):
+            post.collab_eligible_at = timezone.now()
+        post.save(update_fields=["battle_eligible_at", "collab_eligible_at", "updated_at"])
+    except Exception:
+        pass
 
 
 def submission_cap_for(user):
@@ -1341,17 +1440,17 @@ def award_spinaz(user, amount, note="", *, app_key="", target=""):
     return w.spinaz
 
 
-def award_energy(user, amount, note="", *, app_key="", target=""):
+def award_energy(user, amount, note="", *, app_key="", target="", visibility=""):
     """Credit Energy to a user's wallet, and record it."""
     w = wallet_for(user)
     w.energy = (w.energy or 0) + int(amount)
     w.save(update_fields=["energy", "updated_at"])
     log_resource(user, Transaction.RES_ENERGY, int(amount), note or "Energy",
-                 app_key=app_key, target=target)
+                 app_key=app_key, target=target, visibility=visibility)
     return w.energy
 
 
-def log_resource(user, resource, amount, note="", *, app_key="", target=""):
+def log_resource(user, resource, amount, note="", *, app_key="", target="", visibility=""):
     """One line in LogZ: what moved, which way, and when.
 
     Best-effort — a ledger write must never be the reason a reward fails to
@@ -1371,6 +1470,7 @@ def log_resource(user, resource, amount, note="", *, app_key="", target=""):
             # Blank when the caller didn't say. Never guessed from the note.
             app_key=str(app_key or "")[:24],
             target=str(target or "")[:60],
+            visibility=str(visibility or "restricted")[:12],
         )
     except Exception:  # pragma: no cover - never break a reward over its log
         return None
@@ -1382,6 +1482,9 @@ def log_resource(user, resource, amount, note="", *, app_key="", target=""):
 # bonus. A member can only ever be referred once, and never by themselves.
 REFERRAL_REWARD_REFERRER_SPINAZ = 300
 REFERRAL_REWARD_JOINEE_SPINAZ = 100
+
+# Signup welcome bonus — awarded to every new user, on top of any referral bonus
+SIGNUP_WELCOME_SPINAZ = 15
 
 
 class Referral(models.Model):
@@ -1408,6 +1511,9 @@ def record_referral(referrer, joinee):
                  app_key="profilez", target="referral-code")
     award_spinaz(joinee, REFERRAL_REWARD_JOINEE_SPINAZ, "referral (welcome)",
                  app_key="profilez", target="referral-code")
+    notify(referrer, "referral",
+           f"@{joinee.username} joined via your invite. +{REFERRAL_REWARD_REFERRER_SPINAZ} 🍥 in your balance.",
+           actor=joinee, item_id="referral-code")
     return ref
 
 
@@ -1423,8 +1529,12 @@ RATING_REWARD_DAILY_CAP = 20
 RATING_NOTE = "Rating"
 
 
-def reward_for_rating(user, what=""):
-    """Credit the rating reward, respecting the daily cap. Returns what landed."""
+def reward_for_rating(user, what="", visibility="public", collab_multiplier=1.0):
+    """Credit the rating reward, respecting the daily cap. Returns what landed.
+
+    Public visibility earns +25% bonus on leaderboards.
+    Collaborative posts earn +10% per extra contributor (team bonus).
+    """
     from datetime import timedelta
     if not user:
         return 0
@@ -1437,8 +1547,10 @@ def reward_for_rating(user, what=""):
     if paid >= cap:
         return 0
     note = f"{RATING_NOTE} — {what}" if what else RATING_NOTE
-    award_energy(user, RATING_REWARD_ENERGY, note)
-    return RATING_REWARD_ENERGY
+    multiplier = visibility_multiplier(visibility) * collab_multiplier
+    awarded = int(RATING_REWARD_ENERGY * multiplier)
+    award_energy(user, awarded, note, visibility=visibility)
+    return awarded
 
 
 ONBOARD_REWARD_SPINAZ = 150
@@ -3412,6 +3524,29 @@ def _funded_clean_deals(user):
     return n
 
 
+def _check_streak(user):
+    """3+ posts rated within a 7-day window."""
+    week_ago = timezone.now() - timedelta(days=7)
+    rated_posts = Post.objects.filter(
+        author=user,
+        ratings__created_at__gte=week_ago
+    ).distinct().count()
+    return rated_posts >= 3
+
+
+def _check_multi_craft(user):
+    """Posts eligible for BattleZ across 3+ different instruments."""
+    instruments = set()
+    for post in Post.objects.filter(author=user, battle_eligible_at__isnull=False):
+        skills = post.skills_used or []
+        for skill_dict in skills:
+            if isinstance(skill_dict, dict):
+                instrument = skill_dict.get("instrument")
+                if instrument:
+                    instruments.add(instrument)
+    return len(instruments) >= 3
+
+
 def _translations_done(user):
     return KeyTranslation.objects.filter(user=user).count()
 
@@ -3577,6 +3712,47 @@ BADGES = {
         "how": "Gifted when a BugZ report is accepted.",
         "effects": {"promptz_grant": 50},
         "effect_note": "+50 🏷️ PromptZ, once.",
+    },
+    # ---- progression badges ----
+    "battle_starter": {
+        "name": "Battle Starter", "emoji": "⚡", "title": "Battle Starter", "gifted": False,
+        "desc": "First post reaches BattleZ eligibility (5+ ratings).",
+        "how": "Get your first post to 5 ratings.",
+        "effects": {"achievement": True},
+        "effect_note": "Achievement unlocked.",
+        "check": lambda u: Post.objects.filter(author=u, battle_eligible_at__isnull=False).exists(),
+    },
+    "collab_architect": {
+        "name": "Collab Architect", "emoji": "🤝", "title": "Collab Architect", "gifted": False,
+        "desc": "First post hits CollabZ rating threshold.",
+        "how": "Get your first post's rating average to the CollabZ threshold for your tier.",
+        "effects": {"achievement": True},
+        "effect_note": "Achievement unlocked.",
+        "check": lambda u: Post.objects.filter(author=u, collab_eligible_at__isnull=False).exists(),
+    },
+    "streak": {
+        "name": "Streak", "emoji": "🔥", "title": "Streak", "gifted": False,
+        "desc": "3+ posts rated in a week.",
+        "how": "Post 3 different pieces and get each rated within a 7-day window.",
+        "effects": {"achievement": True},
+        "effect_note": "Achievement unlocked.",
+        "check": lambda u: _check_streak(u),
+    },
+    "rater_guild": {
+        "name": "Rater's Guild", "emoji": "⭐", "title": "Rater's Guild", "gifted": False,
+        "desc": "50+ ratings given to other members' work.",
+        "how": "Rate 50 posts.",
+        "effects": {"achievement": True},
+        "effect_note": "Achievement unlocked.",
+        "check": lambda u: _ratings_given(u) >= 50,
+    },
+    "multi_craft": {
+        "name": "Multi-Craft", "emoji": "🎯", "title": "Multi-Craft", "gifted": False,
+        "desc": "3+ instruments with posts eligible for BattleZ.",
+        "how": "Get posts to 5+ ratings across 3 different instruments.",
+        "effects": {"achievement": True},
+        "effect_note": "Achievement unlocked.",
+        "check": lambda u: _check_multi_craft(u),
     },
 }
 

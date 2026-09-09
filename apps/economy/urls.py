@@ -7,7 +7,7 @@ from .questz import QuestBoardView, QuestClaimView
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
 from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
-                    PostJoinView, PostShareView, SubmissionsView)
+                    PostJoinView, PostShareView, SubmissionsView, PostProgressionView)
 from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
@@ -137,8 +137,10 @@ from .views import (
     DrillTakeView,
     CoachObservationsView,
     TakeAnalysisView,
+    LeaderboardsView,
+    InstrumentLeaderboardView,
 )
-from .habits import HabitCreateView
+from .habits import HabitCreateView, HabitCompleteView
 
 urlpatterns = [
     path("wallet/", WalletView.as_view(), name="economy-wallet"),
@@ -262,6 +264,7 @@ urlpatterns = [
     path("notifications/", NotificationsView.as_view(), name="economy-notifications"),
     path("messages/", MessagesView.as_view(), name="economy-messages"),
     path("habits/", HabitCreateView.as_view(), name="economy-habits"),
+    path("habits/<int:habit_id>/complete/", HabitCompleteView.as_view(), name="economy-habit-complete"),
     path("logz/", LogZView.as_view(), name="economy-logz"),
     # A ledger you can read and not act on is the read-only surface the
     # cross-pollination rule calls unfinished. This is the acting-on.
@@ -315,6 +318,8 @@ urlpatterns = [
     # A post populates a release: the song, the video, the cover and the lyrics
     # are already the four assets a distributor asks for.
     path("postz/<int:pk>/distribute/", PostDistributeView.as_view(), name="economy-postz-distribute"),
+    # Progress toward BattleZ/CollabZ eligibility: ratings needed and current progress.
+    path("postz/<int:pk>/progression/", PostProgressionView.as_view(), name="economy-postz-progression"),
     path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
     path("postz/<int:pk>/delete/", PostDeleteView.as_view(), name="economy-postz-delete"),
     path("postz/embeds/", PostEmbedsView.as_view(), name="economy-postz-embeds"),
@@ -426,4 +431,7 @@ urlpatterns = [
     path("tunerz/drills/", DrillTakeView.as_view(), name="economy-tunerz-drills"),
     path("coach/observations/", CoachObservationsView.as_view(), name="economy-coach-observations"),
     path("takes/<int:upload_id>/analysis/", TakeAnalysisView.as_view(), name="economy-take-analysis"),
+    # LeaderboardZ — competition drives conversions. All metrics are substance.
+    path("leaderboardz/", LeaderboardsView.as_view(), name="economy-leaderboardz"),
+    path("leaderboardz/xp/<str:app_key>/", InstrumentLeaderboardView.as_view(), name="economy-leaderboardz-xp"),
 ]

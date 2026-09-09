@@ -14,6 +14,7 @@ from datetime import timedelta
 from django.db.models import Case, Count, IntegerField, Sum, When
 from django.utils import timezone
 
+from .catalog import edit_window_for
 from .crosspost import coach_cap, coach_price, destinations_for, take_state_for
 from .models import (
     CollabDeal,
@@ -27,6 +28,7 @@ from .models import (
     RESTRICTED_JOIN_REWARD_SPINAZ,
     SHARE_REWARD_ENERGY,
     SHARE_MIN_ACTIVE_SECONDS,
+    BATTLE_RATING_THRESHOLD,
     award_spinaz,
     can_view_post,
     owns_post,
@@ -36,6 +38,9 @@ from .models import (
     submission_cap_for,
     submissions_used_today,
     wallet_for,
+    post_collab_threshold,
+    post_is_battle_eligible,
+    post_is_collab_eligible,
 )
 from .personaz import personas_of
 
@@ -156,6 +161,8 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
         "age_sec": int((timezone.now() - p.created_at).total_seconds()),
         "rate_unlock_sec": POST_RATE_UNLOCK_SEC,
         "comment_unlock_sec": POST_COMMENT_UNLOCK_SEC,
+        # How long the author can still edit this post.
+        "edit_unlock_sec": edit_window_for(p.author.membership.tier),
         # PostZ is for show, CollabZ is for collaboration — this is the count
         # of times somebody moved from one to the other on this post, and where
         # the client sends them to do it again.
@@ -751,3 +758,47 @@ class PostShareView(APIView):
         share.save(update_fields=["rewarded"])
         notify(p.author, "like", f"@{user.username} shared your post '{p.title}' 🔁", actor=user, item_id=f"post:{p.id}")
         return True
+
+
+class PostProgressionView(APIView):
+    """GET /api/economy/postz/<pk>/progression/ — progress toward BattleZ/CollabZ.
+
+    Returns what's needed to unlock each tier and current progress.
+    Drives UI that shows progress bars and "X of 5 ratings needed" messaging.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        p = Post.objects.filter(pk=pk).select_related("author").first()
+        if not p:
+            return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+        if not can_view_post(p, request.user):
+            return Response({"detail": "you can't view this post"}, status=status.HTTP_403_FORBIDDEN)
+
+        rating_count = p.ratings.count()
+        rating_avg = item_rating_median(p) or 0.0
+
+        battle_needed = BATTLE_RATING_THRESHOLD
+        collab_needed = post_collab_threshold(p)
+
+        battle_eligible = post_is_battle_eligible(p)
+        collab_eligible = post_is_collab_eligible(p)
+
+        return Response({
+            "post_id": p.id,
+            "battle": {
+                "needed": battle_needed,
+                "current": rating_count,
+                "eligible": battle_eligible,
+                "eligible_at": p.battle_eligible_at.isoformat() if p.battle_eligible_at else None,
+                "progress_percent": min(100, round((rating_count / battle_needed) * 100)) if battle_needed > 0 else 0,
+            },
+            "collab": {
+                "needed": collab_needed,
+                "current": rating_avg,
+                "eligible": collab_eligible,
+                "eligible_at": p.collab_eligible_at.isoformat() if p.collab_eligible_at else None,
+                "progress_percent": min(100, round((rating_avg / collab_needed) * 100)) if collab_needed > 0 else 0,
+            },
+        })

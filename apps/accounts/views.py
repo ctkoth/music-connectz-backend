@@ -553,3 +553,25 @@ class OAuthConfigView(APIView):
                     f"{name.title()} and failing on the way back."
                 )
         return Response({**cfg, "warnings": warnings, "needs": needs})
+
+
+class UsersView(APIView):
+    """DELETE /api/auth/users/{username}/ — owner can delete any account."""
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, username):
+        from apps.economy.dupez import is_owner_candidate, is_owner
+
+        # Check if caller is an owner
+        if not (is_owner(request.user) or is_owner_candidate(request.user)):
+            return Response({"detail": "owner only"}, status=status.HTTP_403_FORBIDDEN)
+
+        # Get the target user
+        target = User.objects.filter(username=username).first()
+        if not target:
+            return Response({"detail": "user not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Delete the user
+        target.delete()
+        return Response({"detail": f"@{username} deleted"}, status=status.HTTP_204_NO_CONTENT)

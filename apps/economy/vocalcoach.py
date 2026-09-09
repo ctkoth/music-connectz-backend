@@ -409,7 +409,7 @@ def record_coaching_observations(user, payload, song_key=None, song_bpm=None):
                         # Key context for observation label
                         key_str = f" in {song_key}" if song_key else ""
                         cents_desc = "flat" if cents_off < 0 else "sharp"
-                        label = f"Practice {note_name}{key_str} ({abs(cents_off)}¢ {cents_desc})"
+                        label = f"Develop {note_name}{key_str} ({abs(cents_off)}¢ {cents_desc})"
 
                         # Build target with drill context as query params
                         # Frontend will parse these and pre-tune TunerZ
@@ -436,7 +436,7 @@ def record_coaching_observations(user, payload, song_key=None, song_bpm=None):
                     user,
                     kind=OBS_COACH,
                     key="pitch-low",
-                    label=f"Work on pitch accuracy (currently {pitch}%)",
+                    label=f"Strengthen pitch accuracy (currently {pitch}%)",
                     app_key="tunerz",
                     target="tunerz:pitch-tuner",
                 )
@@ -451,7 +451,7 @@ def record_coaching_observations(user, payload, song_key=None, song_bpm=None):
                 user,
                 kind=OBS_COACH,
                 key="timing-low",
-                label=f"Practice rhythm/timing (currently {timing}%)",
+                label=f"Strengthen rhythm and timing (currently {timing}%)",
                 app_key="metz",
                 target=target,
             )
