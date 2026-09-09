@@ -1,4 +1,6 @@
 """Daily habits — the daily return loop that converts trial to active."""
+from datetime import timedelta
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -54,4 +56,33 @@ class HabitCreateView(APIView):
                 "created_at": habit.created_at.isoformat(),
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class HabitCompleteView(APIView):
+    """POST /api/economy/habits/{id}/complete/ — mark a habit as completed today."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, habit_id):
+        """Mark a habit as completed today and return remaining energy."""
+        try:
+            habit = Habit.objects.get(id=habit_id, user=request.user)
+        except Habit.DoesNotExist:
+            return Response(
+                {"detail": "Habit not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Mark as completed now
+        habit.last_completed = timezone.now()
+        habit.save()
+
+        return Response(
+            {
+                "id": habit.id,
+                "title": habit.title,
+                "last_completed": habit.last_completed.isoformat(),
+                "completed_today": True,
+            },
+            status=status.HTTP_200_OK,
         )
