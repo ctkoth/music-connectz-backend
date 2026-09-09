@@ -7,7 +7,7 @@ from .questz import QuestBoardView, QuestClaimView
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
 from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
-                    PostJoinView, PostShareView, SubmissionsView)
+                    PostJoinView, PostShareView, SubmissionsView, PostProgressionView)
 from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
@@ -318,6 +318,8 @@ urlpatterns = [
     # A post populates a release: the song, the video, the cover and the lyrics
     # are already the four assets a distributor asks for.
     path("postz/<int:pk>/distribute/", PostDistributeView.as_view(), name="economy-postz-distribute"),
+    # Progress toward BattleZ/CollabZ eligibility: ratings needed and current progress.
+    path("postz/<int:pk>/progression/", PostProgressionView.as_view(), name="economy-postz-progression"),
     path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
     path("postz/<int:pk>/delete/", PostDeleteView.as_view(), name="economy-postz-delete"),
     path("postz/embeds/", PostEmbedsView.as_view(), name="economy-postz-embeds"),

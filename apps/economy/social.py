@@ -753,7 +753,19 @@ class SocialView(APIView):
                 existing = ItemRating.objects.filter(user=request.user, item_id=item).first()
                 if existing is None:
                     ItemRating.objects.create(user=request.user, item_id=item, score=score)
-                    reward_for_rating(request.user, item, visibility=visibility)
+                    # Apply collaboration bonus if rating a post with multiple contributors
+                    collab_mult = 1.0
+                    if item.startswith("post:"):
+                        try:
+                            from .models import collaboration_multiplier, check_post_progression
+                            post_id = item.split(":")[1]
+                            post = Post.objects.get(id=post_id)
+                            collab_mult = collaboration_multiplier(post)
+                            # Check if this rating unlocks BattleZ or CollabZ
+                            check_post_progression(post)
+                        except Exception:
+                            pass
+                    reward_for_rating(request.user, item, visibility=visibility, collab_multiplier=collab_mult)
                     self._rate_skills(item, request.user, score)
                     self._notify_target(item, "rate", f"@{request.user.username} rated your post {score}/10 ⭐", request.user)
                 else:

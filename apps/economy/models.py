@@ -45,6 +45,23 @@ def visibility_multiplier(visibility):
     return 1.0
 
 
+def collaboration_multiplier(post):
+    """Reward multiplier for collaborative work. +10% per extra contributor.
+
+    Team of 2 = 1.1x, team of 3 = 1.2x, etc.
+    Incentivizes working together while maintaining individual earnings cap.
+    """
+    if not post:
+        return 1.0
+    try:
+        collab_count = post.contributor_rows.count()
+        if collab_count > 1:
+            return 1.0 + (0.10 * (collab_count - 1))
+        return 1.0
+    except Exception:
+        return 1.0
+
+
 class Membership(models.Model):
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="membership"
@@ -1244,6 +1261,9 @@ class Post(models.Model):
     # the author's off switch for the case where it isn't welcome.
     allow_in_playlists = models.BooleanField(default=True)
     skill_cost_cents = models.PositiveIntegerField(default=0)  # combined skill price of what's used
+    # Progression tracking: when did this post become eligible for next tier?
+    battle_eligible_at = models.DateTimeField(null=True, blank=True)  # when rating count/avg hit threshold
+    collab_eligible_at = models.DateTimeField(null=True, blank=True)  # when quality score hit threshold
     created_at = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(null=True, blank=True)
     edit_history = models.JSONField(default=list, blank=True)  # [{title, description, at}] prior versions
@@ -1295,7 +1315,61 @@ class DailySubmission(models.Model):
         unique_together = ("user", "day")
 
 
+# Post progression thresholds: when PostZ becomes BattleZ/CollabZ eligible
+# Rating count needed for BattleZ (5+ ratings = eligible for competitions)
+BATTLE_RATING_THRESHOLD = 5
+# Average rating needed for CollabZ (tier-gated: Free 8.0, Premium 7.0, StatZ 6.0)
+COLLAB_RATING_THRESHOLD = {"free": 8.0, "premium": 7.0, "statz": 6.0}
+
 SUBMISSION_DAILY_CAP = {"free": 5, "premium": 15, "statz": 50}
+
+
+def post_collab_threshold(post):
+    """Rating score needed for this post to become CollabZ-eligible.
+
+    Lower tier = higher bar. StatZ gets easiest access (6.0), Free toughest (8.0).
+    """
+    if not post or not post.author:
+        return 8.0
+    tier = membership_for(post.author).tier
+    return COLLAB_RATING_THRESHOLD.get(tier, 8.0)
+
+
+def post_is_battle_eligible(post):
+    """Whether post has enough ratings to join BattleZ."""
+    if not post:
+        return False
+    from .social import ItemRating
+    count = ItemRating.objects.filter(item_id=f"post:{post.id}").count()
+    return count >= BATTLE_RATING_THRESHOLD
+
+
+def post_is_collab_eligible(post):
+    """Whether post has high enough rating to qualify for DirectZ collab."""
+    if not post:
+        return False
+    from .social import item_rating_median
+    rating = item_rating_median(f"post:{post.id}")
+    if not rating:
+        return False
+    threshold = post_collab_threshold(post)
+    return rating >= threshold
+
+
+def check_post_progression(post):
+    """Check and update post eligibility for BattleZ and CollabZ."""
+    if not post:
+        return
+    try:
+        # Check BattleZ eligibility
+        if not post.battle_eligible_at and post_is_battle_eligible(post):
+            post.battle_eligible_at = timezone.now()
+        # Check CollabZ eligibility
+        if not post.collab_eligible_at and post_is_collab_eligible(post):
+            post.collab_eligible_at = timezone.now()
+        post.save(update_fields=["battle_eligible_at", "collab_eligible_at", "updated_at"])
+    except Exception:
+        pass
 
 
 def submission_cap_for(user):
@@ -1454,10 +1528,11 @@ RATING_REWARD_DAILY_CAP = 20
 RATING_NOTE = "Rating"
 
 
-def reward_for_rating(user, what="", visibility="public"):
+def reward_for_rating(user, what="", visibility="public", collab_multiplier=1.0):
     """Credit the rating reward, respecting the daily cap. Returns what landed.
 
     Public visibility earns +25% bonus on leaderboards.
+    Collaborative posts earn +10% per extra contributor (team bonus).
     """
     from datetime import timedelta
     if not user:
@@ -1471,7 +1546,7 @@ def reward_for_rating(user, what="", visibility="public"):
     if paid >= cap:
         return 0
     note = f"{RATING_NOTE} — {what}" if what else RATING_NOTE
-    multiplier = visibility_multiplier(visibility)
+    multiplier = visibility_multiplier(visibility) * collab_multiplier
     awarded = int(RATING_REWARD_ENERGY * multiplier)
     award_energy(user, awarded, note, visibility=visibility)
     return awarded
