@@ -137,6 +137,8 @@ from .views import (
     DrillTakeView,
     CoachObservationsView,
     TakeAnalysisView,
+    LeaderboardsView,
+    InstrumentLeaderboardView,
 )
 from .habits import HabitCreateView, HabitCompleteView
 
@@ -427,4 +429,7 @@ urlpatterns = [
     path("tunerz/drills/", DrillTakeView.as_view(), name="economy-tunerz-drills"),
     path("coach/observations/", CoachObservationsView.as_view(), name="economy-coach-observations"),
     path("takes/<int:upload_id>/analysis/", TakeAnalysisView.as_view(), name="economy-take-analysis"),
+    # LeaderboardZ — competition drives conversions. All metrics are substance.
+    path("leaderboardz/", LeaderboardsView.as_view(), name="economy-leaderboardz"),
+    path("leaderboardz/xp/<str:app_key>/", InstrumentLeaderboardView.as_view(), name="economy-leaderboardz-xp"),
 ]

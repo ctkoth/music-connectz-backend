@@ -1381,3 +1381,50 @@ class TakeAnalysisView(APIView):
                                 status=status.HTTP_404_NOT_FOUND)
 
         return Response(TakeAnalysisSerializer(analysis).data)
+
+
+class LeaderboardsView(APIView):
+    """GET /api/economy/leaderboards/ — all leaderboards for a period.
+
+    Returns top earners, practitioners, and competitors by multiple metrics.
+    Drives competition and motivates premium upgrades by showing concrete ROI.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from . import leaderboardz
+
+        period = request.query_params.get("period", "all")
+        period_days = {"week": 7, "month": 30, "all": None}.get(period, None)
+        limit = min(int(request.query_params.get("limit", 10)), 100)
+
+        return Response({
+            "period": period,
+            "period_days": period_days,
+            "spinaz_earners": leaderboardz.top_spinaz_earners(limit=limit, period_days=period_days),
+            "energy_earners": leaderboardz.top_energy_earners(limit=limit, period_days=period_days),
+            "raters": leaderboardz.top_raters(limit=limit, period_days=period_days),
+            "referrers": leaderboardz.top_referrers(limit=limit),
+            # Instrument-specific boards (singz, rapz, etc) on separate endpoints
+            "note": "Use /api/economy/leaderboards/xp/<app_key>/ for per-instrument SkillZ rankings",
+        })
+
+
+class InstrumentLeaderboardView(APIView):
+    """GET /api/economy/leaderboards/xp/<app_key>/ — top practitioners by instrument."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request, app_key):
+        from . import leaderboardz
+
+        period = request.query_params.get("period", "all")
+        period_days = {"week": 7, "month": 30, "all": None}.get(period, None)
+        limit = min(int(request.query_params.get("limit", 10)), 100)
+
+        return Response({
+            "app_key": app_key,
+            "period": period,
+            "leaders": leaderboardz.top_xp_earners_by_instrument(app_key, limit=limit, period_days=period_days),
+        })
