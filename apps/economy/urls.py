@@ -31,6 +31,7 @@ from .earn import EarnView
 from .battlez import (BattlesView, BattleChallengeView, BattleDetailView,
                       BattleEnterView, BattleRespondView, BattleSettleView,
                       BattleWagerView, MoneyBattleVoteView)
+from .opportunitiez import OpportunitieZView
 from .keyconnectz import (KeyboardView, KeySpeakView, KeyTranscribeView,
                           KeyTranslateView)
 from .playlistz import (PlaylistCollaboratorsView, PlaylistDetailView,
@@ -141,6 +142,8 @@ from .views import (
 urlpatterns = [
     path("wallet/", WalletView.as_view(), name="economy-wallet"),
     path("earn/", EarnView.as_view(), name="economy-earn"),
+    # OpportunitieZ — what other members are seeking, for collaborators to find.
+    path("opportunitiez/", OpportunitieZView.as_view(), name="economy-opportunitiez"),
     # BattleZ — a challenge, gated by the same five ranges as everything else.
     path("battlez/", BattlesView.as_view(), name="economy-battlez"),
     path("battlez/challenge/", BattleChallengeView.as_view(), name="economy-battle-challenge"),
