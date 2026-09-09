@@ -882,6 +882,10 @@ class Profile(models.Model):
     # the grant (SpinAZ + Energy) can never be claimed twice.
     onboarded = models.BooleanField(default=False)
     onboarded_at = models.DateTimeField(null=True, blank=True)
+    # What collaborators/promoters need to know: what help you're seeking,
+    # your current reach, and your rate. Format: {active, help_needed, status,
+    # current_reach, rate} — all optional and displayed only if active is True.
+    seeking = models.JSONField(default=dict, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
 
