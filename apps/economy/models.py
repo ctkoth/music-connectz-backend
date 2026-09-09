@@ -1408,6 +1408,9 @@ def record_referral(referrer, joinee):
                  app_key="profilez", target="referral-code")
     award_spinaz(joinee, REFERRAL_REWARD_JOINEE_SPINAZ, "referral (welcome)",
                  app_key="profilez", target="referral-code")
+    notify(referrer, "referral",
+           f"@{joinee.username} joined via your invite. +{REFERRAL_REWARD_REFERRER_SPINAZ} 🍥 in your balance.",
+           actor=joinee, item_id="referral-code")
     return ref
 
 
