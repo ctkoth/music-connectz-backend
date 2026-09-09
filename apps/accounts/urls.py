@@ -4,7 +4,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from .passwords import ForgotPasswordView, ResetPasswordView
 from .views import (LoginView, MeView, OAuthConfigView, OAuthLinkView,
                     OAuthLoginView, OnboardCompleteView, ReferralsView,
-                    RegisterView, UsernameAvailabilityView)
+                    RegisterView, UsernameAvailabilityView, UsersView)
 
 urlpatterns = [
     path("register/", RegisterView.as_view(), name="auth-register"),
@@ -19,4 +19,5 @@ urlpatterns = [
     path("check-username/", UsernameAvailabilityView.as_view(), name="auth-check-username"),
     path("referrals/", ReferralsView.as_view(), name="auth-referrals"),
     path("onboard/complete/", OnboardCompleteView.as_view(), name="auth-onboard-complete"),
+    path("users/<str:username>/", UsersView.as_view(), name="auth-users"),
 ]
