@@ -60,7 +60,7 @@ from .models import (
     wallet_for,
 )
 from .rulez import rule
-from .views import is_owner
+from .views import is_owner, is_owner_candidate
 
 User = get_user_model()
 
@@ -580,7 +580,7 @@ class DupeZReviewView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        if not is_owner(request.user):
+        if not (is_owner(request.user) or is_owner_candidate(request.user)):
             return Response({"detail": "owner only"}, status=status.HTTP_403_FORBIDDEN)
         state = (request.query_params.get("status") or AccountClaim.OPEN).lower()
         rows = AccountClaim.objects.select_related("claimant", "target")
@@ -589,7 +589,7 @@ class DupeZReviewView(APIView):
         return Response({"claims": [_claim_dict(c, with_cards=True) for c in rows[:100]]})
 
     def post(self, request):
-        if not is_owner(request.user):
+        if not (is_owner(request.user) or is_owner_candidate(request.user)):
             return Response({"detail": "owner only"}, status=status.HTTP_403_FORBIDDEN)
         d = request.data or {}
         claim = AccountClaim.objects.filter(id=d.get("id")).select_related("claimant", "target").first()
@@ -640,7 +640,7 @@ class DupeZDeleteView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        if not is_owner(request.user):
+        if not (is_owner(request.user) or is_owner_candidate(request.user)):
             return Response({"detail": "owner only"}, status=status.HTTP_403_FORBIDDEN)
         d = request.data or {}
         target = User.objects.filter(username__iexact=str(d.get("username", "")).strip()).first()
@@ -651,7 +651,7 @@ class DupeZDeleteView(APIView):
             return Response({"detail": "That is the account you are signed in to. "
                                        "Use account deletion for your own."},
                             status=status.HTTP_400_BAD_REQUEST)
-        if is_owner(target):
+        if is_owner(target) or is_owner_candidate(target):
             # Owner accounts are how everything here is reviewed and how the
             # platform is administered. Removing one takes a database.
             return Response({"detail": "An owner account can't be deleted here."},
@@ -691,7 +691,7 @@ class DupeZFlagsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        if not is_owner(request.user):
+        if not (is_owner(request.user) or is_owner_candidate(request.user)):
             return Response({"detail": "owner only"}, status=status.HTTP_403_FORBIDDEN)
         state = (request.query_params.get("status") or DupeFlag.OPEN).lower()
         rows = DupeFlag.objects.select_related("user")
@@ -722,7 +722,7 @@ class DupeZFlagsView(APIView):
         })
 
     def post(self, request):
-        if not is_owner(request.user):
+        if not (is_owner(request.user) or is_owner_candidate(request.user)):
             return Response({"detail": "owner only"}, status=status.HTTP_403_FORBIDDEN)
         d = request.data or {}
         flag = DupeFlag.objects.filter(id=d.get("id")).select_related("user").first()
