@@ -1383,6 +1383,9 @@ def log_resource(user, resource, amount, note="", *, app_key="", target=""):
 REFERRAL_REWARD_REFERRER_SPINAZ = 300
 REFERRAL_REWARD_JOINEE_SPINAZ = 100
 
+# Signup welcome bonus — awarded to every new user, on top of any referral bonus
+SIGNUP_WELCOME_SPINAZ = 15
+
 
 class Referral(models.Model):
     referrer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,

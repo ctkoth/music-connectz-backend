@@ -155,6 +155,10 @@ class RegisterSerializer(serializers.Serializer):
         Profile.objects.update_or_create(
             user=user, defaults={"phone": validated.get("phone", "")}
         )
+        # Welcome bonus for signing up — kickstart their balance
+        from apps.economy.models import award_spinaz, SIGNUP_WELCOME_SPINAZ
+        award_spinaz(user, SIGNUP_WELCOME_SPINAZ, "signup welcome bonus",
+                     app_key="profilez", target="signup")
         # Store the birthday on the searchable economy profile if provided.
         birthday = (validated.get("birthday") or "").strip()
         if birthday:
