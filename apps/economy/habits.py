@@ -4,7 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Habit
+from .models import Habit, UserPreferences
 
 
 class HabitCreateView(APIView):
@@ -12,7 +12,7 @@ class HabitCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        """Create a new habit for the user."""
+        """Create a new habit for the user and save onboarding preferences."""
         data = request.data
         title = (data.get("title") or "").strip()
         app_key = (data.get("app_key") or "singz").strip()
@@ -33,6 +33,17 @@ class HabitCreateView(APIView):
             app_key=app_key,
             frequency=frequency,
         )
+
+        # Save onboarding preferences if provided
+        if data.get("notifications_enabled") is not None or data.get("language") or data.get("sound_enabled") is not None:
+            prefs, _ = UserPreferences.objects.get_or_create(user=request.user)
+            if data.get("notifications_enabled") is not None:
+                prefs.notifications_enabled = data.get("notifications_enabled")
+            if data.get("language"):
+                prefs.language = data.get("language")
+            if data.get("sound_enabled") is not None:
+                prefs.sound_enabled = data.get("sound_enabled")
+            prefs.save()
 
         return Response(
             {

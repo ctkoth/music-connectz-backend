@@ -4610,6 +4610,27 @@ class Habit(models.Model):
         return f"{self.user} — {self.title} ({self.frequency})"
 
 
+class UserPreferences(models.Model):
+    """User onboarding preferences: notifications, language, sounds."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="onboarding_preferences")
+    notifications_enabled = models.BooleanField(default=True, help_text="Receive daily habit reminders")
+    LANGUAGE_CHOICES = [
+        ("en", "English"),
+        ("es", "Español"),
+        ("fr", "Français"),
+        ("de", "Deutsch"),
+        ("pt", "Português"),
+        ("ja", "日本語"),
+    ]
+    language = models.CharField(max_length=5, choices=LANGUAGE_CHOICES, default="en")
+    sound_enabled = models.BooleanField(default=True, help_text="Play sound effects")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user} — {self.language}, notifications={'on' if self.notifications_enabled else 'off'}"
+
+
 class TakeAnalysis(models.Model):
     upload = models.OneToOneField(Upload, on_delete=models.CASCADE, related_name="analysis")
     detected_notes = models.JSONField(default=list, help_text="[{note, freq, cents_off, timestamp}]")
