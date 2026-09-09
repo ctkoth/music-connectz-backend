@@ -138,6 +138,7 @@ from .views import (
     CoachObservationsView,
     TakeAnalysisView,
 )
+from .habits import HabitCreateView
 
 urlpatterns = [
     path("wallet/", WalletView.as_view(), name="economy-wallet"),
@@ -260,6 +261,7 @@ urlpatterns = [
     path("follow/", FollowView.as_view(), name="economy-follow"),
     path("notifications/", NotificationsView.as_view(), name="economy-notifications"),
     path("messages/", MessagesView.as_view(), name="economy-messages"),
+    path("habits/", HabitCreateView.as_view(), name="economy-habits"),
     path("logz/", LogZView.as_view(), name="economy-logz"),
     # A ledger you can read and not act on is the read-only surface the
     # cross-pollination rule calls unfinished. This is the acting-on.

@@ -4593,6 +4593,23 @@ class DrillTake(models.Model):
         return f"{self.user} drilled {self.weak_note} (acc {self.accuracy_percent}%)"
 
 
+class Habit(models.Model):
+    """Daily/weekly habits for members. Converts trial users to active members."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="habits")
+    title = models.CharField(max_length=100, help_text="e.g., 'Daily vocal warmup'")
+    app_key = models.CharField(max_length=20, default="singz", help_text="singz, rapz, etc")
+    FREQUENCY_CHOICES = [("daily", "Daily"), ("weekly", "Weekly")]
+    frequency = models.CharField(max_length=10, choices=FREQUENCY_CHOICES, default="daily")
+    last_completed = models.DateTimeField(null=True, blank=True, help_text="Last time user marked it done")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.user} — {self.title} ({self.frequency})"
+
+
 class TakeAnalysis(models.Model):
     upload = models.OneToOneField(Upload, on_delete=models.CASCADE, related_name="analysis")
     detected_notes = models.JSONField(default=list, help_text="[{note, freq, cents_off, timestamp}]")
