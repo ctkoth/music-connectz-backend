@@ -1527,7 +1527,7 @@ class Notification(models.Model):
     KIND_CHOICES = [
         ("follow", "Follow"), ("rate", "Rating"), ("like", "Like"),
         ("comment", "Comment"), ("join", "Restricted join"), ("pay", "Payment"),
-        ("message", "Message"), ("system", "System"),
+        ("message", "Message"), ("system", "System"), ("habit_reminder", "Habit reminder"),
     ]
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications")
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="notifications_sent")
