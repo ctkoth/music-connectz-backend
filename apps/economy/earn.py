@@ -20,6 +20,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
+    AD_REWARD_DAILY_CAP_PER_USER,
     LINK_CLICK_REWARD_ENERGY,
     ONBOARD_REWARD_ENERGY,
     ONBOARD_REWARD_SPINAZ,
@@ -95,9 +96,10 @@ class EarnView(APIView):
                  available=not onboarded,
                  reason="Already claimed." if onboarded else "",
                  note=f"Plus {ONBOARD_REWARD_ENERGY} Energy, once."),
-            _way("adz", "Watch a rewarded ad", 0, "spinaz",
+            _way("adz", "Watch a rewarded ad", 1, "spinaz",
                  tab="adz", target="", available=admob_on,
-                 reason="" if admob_on else "Rewarded ads aren't switched on yet."),
+                 reason="" if admob_on else "Rewarded ads aren't switched on yet.",
+                 note=f"Typical reward. Each ad pays 1+ SpinAZ. Up to {AD_REWARD_DAILY_CAP_PER_USER} rewarded ads per day."),
             _way("offerz", "Complete an offer", 0, "spinaz",
                  tab="offerz", target="", available=offerz_on,
                  reason="" if offerz_on else "The offerwall isn't switched on yet."),
