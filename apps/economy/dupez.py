@@ -260,6 +260,7 @@ def duplicate_groups(users=None):
         clusters.setdefault(find(u.id), []).append(u)
 
     groups = []
+    strong_pairs = set()  # Track which pairs had strong signals
     for members in clusters.values():
         if len(members) < 2:
             continue
@@ -273,12 +274,30 @@ def duplicate_groups(users=None):
                 sig = signals_between(a, b)
                 if sig:
                     pairs.append({"a": a.username, "b": b.username, "signals": sig})
+                    if has_strong(sig):
+                        strong_pairs.add((min(a.id, b.id), max(a.id, b.id)))
         groups.append({
             "accounts": [account_card(u) for u in members],
             "suggested_keep": members[0].username,
             "pairs": pairs,
         })
-    return groups
+
+    # Find weak-signal-only pairs (accounts with signals but no strong connection)
+    weak_pairs = []
+    checked = set()
+    for bucket in _candidate_pairs(users):
+        for i, a in enumerate(bucket):
+            for b in bucket[i + 1:]:
+                pair_id = (min(a.id, b.id), max(a.id, b.id))
+                if pair_id in checked or pair_id in strong_pairs:
+                    continue
+                checked.add(pair_id)
+                sig = signals_between(a, b)
+                if sig and not has_strong(sig):  # Only weak signals
+                    weak_pairs.append({"a": a.username, "b": b.username, "signals": sig})
+
+    # Return both strong groups and weak pairs
+    return {"groups": groups, "weak_pairs": weak_pairs}
 
 
 def _forfeit(card):
@@ -447,7 +466,10 @@ class DupeZView(APIView):
     def get(self, request):
         me = request.user
         owner = is_owner(me) or is_owner_candidate(me)
-        groups = duplicate_groups()
+        result = duplicate_groups()
+        groups = result["groups"]
+        weak_pairs = result["weak_pairs"]
+
         if not owner:
             mine = []
             for g in groups:
@@ -462,9 +484,12 @@ class DupeZView(APIView):
                 if all(has_strong(signals_between(me, u)) for u in others):
                     mine.append(g)
             groups = mine
+            weak_pairs = []  # Members don't see weak pairs
+
         return Response({
             "owner": owner,
             "groups": groups,
+            "weak_pairs": weak_pairs,
             # The rule these groups exist to enforce, served with them so the
             # screen never retypes it.
             "rule": rule("one_account"),
