@@ -1599,6 +1599,12 @@ def record_referral(referrer, joinee):
     notify(referrer, "referral",
            f"@{joinee.username} joined via your invite. +{REFERRAL_REWARD_REFERRER_SPINAZ} 🍥 in your balance.",
            actor=joinee, item_id="referral-code")
+
+    # ZodiacZ — Cancer brings people home. Fired on the REFERRER, who is the
+    # one who did the bringing; the joinee did not choose to be invited.
+    from .signbonus import try_award
+    try_award(referrer, "referral",
+              stretch=Referral.objects.filter(referrer=referrer).count() >= 3)
     return ref
 
 
@@ -1635,6 +1641,12 @@ def reward_for_rating(user, what="", visibility="public", collab_multiplier=1.0)
     multiplier = visibility_multiplier(visibility) * collab_multiplier
     awarded = int(RATING_REWARD_ENERGY * multiplier)
     award_energy(user, awarded, note, visibility=visibility)
+
+    # ZodiacZ — Libra weighs things. This is the one funnel every paying rating
+    # goes through, and `paid` is already the count of today's, so the fifth
+    # one is the stretch without a second query for it.
+    from .signbonus import try_award
+    try_award(user, "rate", stretch=paid + 1 >= 5)
     return awarded
 
 
@@ -5027,3 +5039,33 @@ class Payout(models.Model):
 
     def __str__(self):
         return f"{self.user} −{self.amount_cents}c {self.status}"
+
+
+class SignBonusAward(models.Model):
+    """One ZodiacZ bonus, paid once.
+
+    The row IS the dedup: `unique_together` on (user, sign, tier) is what makes
+    "once each" a fact rather than a check somebody can race. `awarded_on` is a
+    date rather than a timestamp because the cap it serves is a daily one, and
+    a date compares without a timezone argument at every call site.
+
+    `sign` is stored alongside the user rather than read back from the profile,
+    because a birthday can be corrected. A member who fixes theirs should not
+    be able to collect the same tier twice under a new sign, and the owner
+    reading this table later needs to know which sign actually paid.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="sign_bonuses")
+    sign = models.CharField(max_length=16)
+    tier = models.CharField(max_length=8)        # base | stretch
+    action = models.CharField(max_length=32)
+    amount = models.PositiveIntegerField(default=0)
+    awarded_on = models.DateField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "sign", "tier")
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.user} · {self.sign} · {self.tier} · +{self.amount}"

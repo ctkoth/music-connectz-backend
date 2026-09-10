@@ -449,6 +449,15 @@ class CollabDealsView(APIView):
                         if str(d.get("split_mode", "")).lower() == CollabDeal.SPLIT_RATING
                         else CollabDeal.SPLIT_WORTH),
         )
+        # ZodiacZ — Aquarius thinks in groups. `parts` includes the initiator,
+        # so "two or more OTHER people" is three on the deal and the stretch is
+        # five. Fired on the starter: they are the one who assembled the room.
+        # A deal needs two people minimum, and two is a pair — the sign is
+        # nudged at the crowd, so the base does not fire on the minimum.
+        if len(parts) >= 3:
+            from .signbonus import try_award
+            try_award(request.user, "collab_crowd", stretch=len(parts) >= 5)
+
         if source_post and source_post.author_id != request.user.id:
             notify(source_post.author, "system",
                    f"@{request.user.username} started a CollabZ deal on '{source_post.title}' 🤝",

@@ -249,9 +249,27 @@ class BattleEnterView(APIView):
             body["detail"] = f"Entering costs {body['energy_needed']} ⚡ and you have {body['energy_available']}."
             return Response(body, status=code)
 
+        # ZodiacZ, read BEFORE the entry exists — afterwards there is always
+        # at least one, so "was anyone here already" is unanswerable.
+        others_already = b.entries.exists()
+        was_challenged = bool(b.mode == Battle.MODE_1V1 and b.opponent_id == request.user.id)
+
         entry = BattleEntry.objects.create(
             battle=b, user=request.user, title=str(d.get("title", "") or "")[:160], **_media(d),
         )
+        from .signbonus import try_award
+        if not others_already:
+            # Aries — first blood. The stretch is the same action done FAST:
+            # first take up inside the hour the battle opened. "First" and
+            # "first while it's empty" would have been the same thing twice,
+            # which is a stretch nobody can miss and therefore not one.
+            within_hour = (timezone.now() - b.created_at) <= timedelta(hours=1)
+            try_award(request.user, "battle_first_in", stretch=within_hour)
+        # Leo — never alone on stage. A named opponent counts as somebody
+        # already there even before they have posted their take: being
+        # challenged by name is exactly the thing.
+        if others_already or was_challenged:
+            try_award(request.user, "battle_joins_others", stretch=was_challenged)
         if b.entry_spinaz:
             # Entry goes to the host. Stated on the button before it's pressed.
             award_spinaz(request.user, -b.entry_spinaz, f"BattleZ entry: {b.title}", app_key="battlez")

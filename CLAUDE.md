@@ -116,6 +116,54 @@ So the rule, in practice:
   a discredited scoring function within reach of an import is one somebody will
   reach for.
 
+### ZodiacZ bonuses — the substance rule applied to a horoscope
+
+`apps/economy/signbonus.py` is twelve bonuses, one per star sign, and the
+obvious version of it breaks the substance rule in the first line. "Leos get
+free SpinaZ" pays a **birthday** — nobody earned one, nobody can change one,
+and the test the rule gives ("could a member get a good number without getting
+good?") answers itself.
+
+So **every bonus pays an ACTION, and the sign only decides WHICH action you
+are nudged at.** A Leo and a Capricorn are pushed at different doors into the
+same building and both still have to walk through one. That lands it on the
+right side of the line CLAUDE.md already draws — *XP and badges may reward
+effort. Ratings and skill levels may not* — because 🍥 is exactly the resource
+effort is allowed to move.
+
+Four properties hold it, and each is here because dropping it turns the
+feature into a problem:
+
+- **All twelve are worth the same** — `BASE` 20 🍥, `STRETCH` 50 🍥, one pair
+  of numbers, not a table. A birthday is the one attribute a member cannot
+  change, so it must never be the reason somebody earns less. There is a test
+  asserting no bonus carries an amount of its own, because a per-sign number
+  is the change that would look harmless.
+- **It never touches a measurement.** No rating, no median, no skill level, no
+  leaderboard position moves. The sign flavours what you are nudged toward,
+  never what you are called.
+- **Once each, plus a daily cap.** `unique_together = (user, sign, tier)` caps
+  a member at 70 🍥 for life; `DAILY_CAP` is belt and braces for whoever adds
+  a thirteenth.
+- **The stretch is the SAME action, harder** — never a second action, and
+  never the base reworded. Aries's base is going first and its stretch is
+  going first *within the hour*; "first while it's empty" would have been the
+  same sentence twice and a stretch nobody can miss is not one.
+
+`try_award` swallows: a battle entry, a post and a rating all have to succeed
+whether or not the bonus does. And **only actions that already exist** get a
+bonus — every hook fires from a live call site (`postz.create_post`,
+`battlez.BattleEnterView`, `models.record_referral`, `models.reward_for_rating`,
+`skillz.training`, `venuez.VenueBookView`, `collab.CollabDealsView`), because a
+bonus for something nobody can do is decoration and this codebase already
+knows how those end up.
+
+`GET /api/economy/signbonus/` publishes **your own and all twelve**, and both
+halves are the point: yours because the cost/gain rule is about the gain being
+readable BEFORE you go and do the thing, and the other eleven because the
+fairness of this is only checkable by seeing them. Each row carries `tab`, so
+the screen offers the jump rather than naming an app and leaving you to find it.
+
 ---
 
 ## Cross-pollination (Corey's crux — applies to everything)

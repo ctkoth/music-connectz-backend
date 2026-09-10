@@ -406,6 +406,25 @@ def create_post(user, d):
     )
     if is_submission:
         record_submission(user)
+
+    # ZodiacZ. Four signs are nudged at something a post can be, so they are
+    # decided here where the post's shape is already known rather than by four
+    # callers each re-deriving it. `try_award` no-ops for every other sign.
+    from .signbonus import try_award
+    if freestyle:                                   # Pisces — out of nowhere
+        try_award(user, "freestyle",
+                  stretch=Post.objects.filter(author=user, freestyle=True).count() >= 3)
+    if score:                                       # Scorpio — judged on purpose
+        try:
+            overall = int(score.get("score") or 0)
+        except (TypeError, ValueError):
+            overall = 0
+        try_award(user, "post_scored", stretch=overall >= 8)
+    if len(items) > 1:                              # Gemini — more than one work
+        try_award(user, "post_album", stretch=len(items) >= 4)
+    if skills:                                      # Virgo — named the craft
+        try_award(user, "post_with_skills", stretch=len(skills) >= 3)
+
     return p, {"energy_charged": charged, "energy": w.energy}, None
 
 

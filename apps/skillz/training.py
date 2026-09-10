@@ -115,10 +115,23 @@ class _CompleteView(APIView):
         )
 
         xp_gain = drill.xp + max(0, min(score, 100))  # base + perf bonus, capped
+        was_level = profile.level
         profile.add_xp(xp_gain)
         profile.drills_completed += 1
         profile.touch_streak()
         profile.save()
+
+        # ZodiacZ — two signs are nudged at this one control, and both read the
+        # profile AFTER the save so they see the number the member just earned.
+        # Capricorn climbs (a level crossed, not XP gained — XP always goes up,
+        # so paying for it would be paying for turning up twice); Taurus keeps
+        # going (a streak, which is the only counter here that resets to 1 the
+        # day it is missed).
+        from apps.economy.signbonus import try_award
+        if profile.level > was_level:
+            try_award(request.user, "level_up", stretch=profile.level >= 5)
+        if profile.current_streak >= 7:
+            try_award(request.user, "streak", stretch=profile.current_streak >= 30)
 
         TrainingEvent.objects.create(
             profile=profile,

@@ -358,6 +358,13 @@ class VenueBookView(APIView):
             event=event, visitor=request.user, skills=skills, hours=hours,
             quoted_cents=q["amount_cents"], payer_is_host=q.get("payer_is_host", False),
         )
+
+        # ZodiacZ — Sagittarius goes. Every VenuZ room is a physical one, so
+        # asking for a seat IS the action; the stretch is the length of the
+        # booking, which is the only thing here we actually measure.
+        from .signbonus import try_award
+        try_award(request.user, "venue_book", stretch=hours >= 3)
+
         return Response({"booking": booking_dict(b, request.user),
                          "venue": event_dict(event, request.user), **energy},
                         status=status.HTTP_201_CREATED)
