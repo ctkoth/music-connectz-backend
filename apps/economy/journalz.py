@@ -606,6 +606,13 @@ class JournalZView(APIView):
             place_exact=bool(d.get("place_exact")),
             visibility=vis,
         )
+        # ZodiacZ — the Rabbit keeps the record. Counted off entries rather
+        # than consecutive days: a streak that resets punishes the week
+        # somebody had nothing to write, which is the opposite of the nudge.
+        from .signbonus import try_award
+        try_award(user, "journal",
+                  stretch=JournalEntry.objects.filter(author=user).count() >= 7)
+
         # Cross-pollination, in the direction CLAUDE.md's own example points:
         # what you keep writing about becomes something HabitZ can show you.
         # Silent unless the member switched that observation on themselves.

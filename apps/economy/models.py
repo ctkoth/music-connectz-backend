@@ -110,6 +110,16 @@ class Wallet(models.Model):
     # separate and persists.
     prompt_day = models.CharField(max_length=10, blank=True, default="")
     prompts_used_today = models.PositiveIntegerField(default=0)
+    # How many times this member has been REFUSED for having no allowance left,
+    # in a rolling week. FunnelZ's one paid offer is sold at this number, and
+    # the reason it is a stored count rather than a guess is the substance
+    # rule: "they seem to want more" is a story, "they met the ceiling three
+    # times" is a fact, and there ought to be a fact behind a price.
+    #
+    # Only the WALL is counted, never a successful run — a member who uses
+    # their three every day and is happy is not somebody to sell to.
+    prompt_walls = models.PositiveIntegerField(default=0)
+    prompt_walls_since = models.DateField(null=True, blank=True)
     # Up to when passive Energy has been paid. Settled lazily on read, the same
     # way the daily prompt counter rolls over — there is no scheduler on Render
     # and a resource that only accrues while a cron is healthy is a resource
@@ -685,6 +695,43 @@ def daily_prompt_state(user):
     return allowance, (w.prompts_used_today or 0), remaining
 
 
+def _record_prompt_wall(user):
+    """Count one refusal, in a rolling week.
+
+    Rolling rather than cumulative on purpose. A lifetime counter would mean a
+    member who hit the ceiling four times in their first month is sold to
+    forever, including long after they settled into a rhythm that suits them —
+    which is the definition of an offer that is no longer true when it is
+    shown, and rule 4 of `offerz_engine` exists to stop exactly that.
+
+    Cheap: one save on a request that was already going to answer "no".
+    """
+    from django.utils import timezone
+    w = wallet_for(user)
+    today = timezone.localdate()
+    since = w.prompt_walls_since
+    if not since or (today - since).days >= 7:
+        w.prompt_walls, w.prompt_walls_since = 1, today
+    else:
+        w.prompt_walls = (w.prompt_walls or 0) + 1
+    w.save(update_fields=["prompt_walls", "prompt_walls_since", "updated_at"])
+
+
+def prompt_walls_week(user):
+    """Refusals in the last seven days, zero once the window has rolled.
+
+    Read through this rather than off the column, so a stale window reads as
+    zero instead of as a number from a month ago that nothing has reset yet.
+    """
+    from django.utils import timezone
+    w = wallet_for(user)
+    if not w.prompt_walls_since:
+        return 0
+    if (timezone.localdate() - w.prompt_walls_since).days >= 7:
+        return 0
+    return w.prompt_walls or 0
+
+
 def _consume_daily_prompt(user, cost_cents):
     """Spend one of today's free prompts if any remain AND this run is inside
     what an allowance is worth. Returns True if one was consumed (the caller
@@ -693,6 +740,7 @@ def _consume_daily_prompt(user, cost_cents):
         return False
     _, _, remaining = daily_prompt_state(user)  # also handles the daily reset
     if remaining <= 0:
+        _record_prompt_wall(user)
         return False
     w = wallet_for(user)
     w.prompts_used_today = (w.prompts_used_today or 0) + 1
@@ -5069,3 +5117,28 @@ class SignBonusAward(models.Model):
 
     def __str__(self):
         return f"{self.user} · {self.sign} · {self.tier} · +{self.amount}"
+
+
+class OfferDismissal(models.Model):
+    """A member closed an offer, and it does not come back.
+
+    Rule 5 of `offerz_engine`, and the one that decides whether this feature is
+    a promotion or an obstruction. An offer that reappears after being shut is
+    not marketing, it is a thing being done TO somebody, and the only answer
+    they have left is to stop opening the app.
+
+    Keyed by the offer's string key rather than a foreign key: offers live in
+    code, not in the database, so a row here survives an offer being reworded
+    and a dismissal of a deleted offer is harmless dead weight rather than a
+    dangling reference.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="offer_dismissals")
+    offer_key = models.CharField(max_length=48)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "offer_key")
+
+    def __str__(self):
+        return f"{self.user} dismissed {self.offer_key}"

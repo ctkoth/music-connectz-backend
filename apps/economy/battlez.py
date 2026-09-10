@@ -560,6 +560,13 @@ class BattleWagerView(APIView):
             BattleWager.objects.create(battle=b, user=request.user, side=side, amount=amount)
             Battle.objects.filter(pk=b.pk).update(
                 held_wager_spinaz=models.F("held_wager_spinaz") + amount)
+        # ZodiacZ — the Tiger commits. Read off the stake that was actually
+        # held, not what was asked for. Imported here rather than relying on
+        # the one in BattleEnterView.post — a local import is local to its
+        # method, and a NameError on a wager is a member's stake refused.
+        from .signbonus import try_award
+        try_award(request.user, "wager", stretch=amount >= 100)
+
         b.refresh_from_db()
         return Response(battle_dict(b, request), status=status.HTTP_201_CREATED)
 

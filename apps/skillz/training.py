@@ -133,6 +133,13 @@ class _CompleteView(APIView):
         if profile.current_streak >= 7:
             try_award(request.user, "streak", stretch=profile.current_streak >= 30)
 
+        # ZodiacZ — the Monkey turns its hand. A TrainingProfile only exists
+        # once somebody has actually trained in that app, so counting rows IS
+        # counting apps tried; nothing is created by looking.
+        apps_tried = TrainingProfile.objects.filter(user=request.user).count()
+        if apps_tried >= 2:
+            try_award(request.user, "second_app", stretch=apps_tried >= 4)
+
         TrainingEvent.objects.create(
             profile=profile,
             drill_key=drill_key,

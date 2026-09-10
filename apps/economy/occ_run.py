@@ -148,6 +148,13 @@ class OccRunView(APIView):
         task.detail = (f"exit {result['exit_code']} · {result['seconds']}s · −{charged} ⚡")
         task.save(update_fields=["status", "progress", "run_seconds", "detail", "updated_at"])
 
+        # ZodiacZ — the Snake works it out. Past the charge line on purpose:
+        # if the run was not real enough to bill for, it was not real enough
+        # to pay for either. The stretch is a clean exit, which is the
+        # difference between setting it going and getting an answer.
+        from .signbonus import try_award
+        try_award(request.user, "occ_run", stretch=result.get("exit_code") == 0)
+
         # And it becomes WorkZ, so the output isn't trapped in a console pane.
         body = result["stdout"] or result["stderr"] or "(no output)"
         work = OccOutput.objects.create(

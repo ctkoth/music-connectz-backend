@@ -393,6 +393,11 @@ class KeyTranslateView(APIView):
             user=request.user, source_lang=source, target_lang=target, chars=len(text))
         used, cap, left = key_translate_state(request.user)
 
+        # ZodiacZ — the Horse crosses ground. Behind the meter for the same
+        # reason the meter is: a run that produced nothing is not a run.
+        from .signbonus import try_award
+        try_award(request.user, "translate", stretch=len(text) >= 200)
+
         # Remember the pair so the keyboard opens where it was left.
         skin = keyboard_skin_for(request.user)
         if skin.source_lang != source or skin.target_lang != target:

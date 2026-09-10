@@ -520,6 +520,16 @@ class CollabFundView(APIView):
                 deal.status = CollabDeal.STATUS_FUNDED
                 deal.auto_release_at = timezone.now() + timedelta(days=escrow_release_days(deal))
             deal.save(update_fields=["held_cents", "held_spinaz", "held_stake_spinaz", "participants", "status", "auto_release_at", "updated_at"])
+
+            # ZodiacZ — the Pig pays the table. The stretch is a deal where
+            # somebody else is owed more than you are: generosity is measured
+            # against what you get back, not against what you put in.
+            mine_worth = int(entry.get("worth_cents") or 0)
+            most_owed = max((int(p.get("worth_cents") or 0) for p in deal.participants
+                             if p.get("username") != request.user.username), default=0)
+            from .signbonus import try_award
+            try_award(request.user, "collab_fund", stretch=most_owed > mine_worth)
+
             return Response(deal_dict(deal, request.user))
 
 
@@ -539,6 +549,13 @@ class CollabDeliverView(APIView):
         deal.status = CollabDeal.STATUS_DELIVERED
         deal.delivered_at = timezone.now()
         deal.save(update_fields=["status", "delivered_at", "updated_at"])
+
+        # ZodiacZ — the Ox finishes. The stretch is delivering on a deal you
+        # did not start, which is the same work with none of the glory.
+        from .signbonus import try_award
+        try_award(request.user, "collab_deliver",
+                  stretch=deal.initiator_id != request.user.id)
+
         return Response(deal_dict(deal, request.user))
 
 

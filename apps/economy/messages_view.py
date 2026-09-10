@@ -182,7 +182,17 @@ class MessagesView(APIView):
         cap = limits_for(membership_for(me).tier)["char_limit"]
         if len(body) > cap:
             return Response({"detail": f"Message exceeds your {cap}-character limit — upgrade for more."}, status=status.HTTP_400_BAD_REQUEST)
+        # ZodiacZ — the Rooster speaks first. Both facts have to be read
+        # BEFORE the row exists: afterwards this conversation is never new and
+        # the distinct-recipient count is always one higher than the truth.
+        first_to_them = not Message.objects.filter(sender=me, recipient=other).exists()
+        spoken_to = (Message.objects.filter(sender=me)
+                     .values_list("recipient_id", flat=True).distinct().count())
+
         m = Message.objects.create(sender=me, recipient=other, body=body, media_url=media_url, media_type=media_type)
+        if first_to_them:
+            from .signbonus import try_award
+            try_award(me, "first_message", stretch=spoken_to + 1 >= 3)
         # Email BEFORE the notification is written: the "already told them"
         # check reads unread notifications, and this message's own row would
         # otherwise suppress its own email.

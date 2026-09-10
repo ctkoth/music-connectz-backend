@@ -666,6 +666,11 @@ class PromptzConvertView(APIView):
             user=request.user, kind=Transaction.KIND_PURCHASE, amount_cents=0,
             dev_tax_cents=0, note=f"−{charged} 🍥 → +{granted} 🏷️",
         )
+        # ZodiacZ — the Rat knows what a scrap is worth. Fired on the whole
+        # granted, not the spend, because five 🏷️ is the readable unit.
+        from .signbonus import try_award
+        try_award(request.user, "promptz_swap", stretch=granted >= 5)
+
         return Response({"wallet": WalletSerializer(w).data,
                          "granted": granted, "charged": charged,
                          **self._rate(w)})

@@ -158,11 +158,77 @@ bonus — every hook fires from a live call site (`postz.create_post`,
 bonus for something nobody can do is decoration and this codebase already
 knows how those end up.
 
-`GET /api/economy/signbonus/` publishes **your own and all twelve**, and both
-halves are the point: yours because the cost/gain rule is about the gain being
-readable BEFORE you go and do the thing, and the other eleven because the
-fairness of this is only checkable by seeing them. Each row carries `tab`, so
-the screen offers the jump rather than naming an app and leaving you to find it.
+#### The other zodiac — twelve more, somewhere else in the app
+
+`ANIMALS` is the same engine with the same two numbers, and what makes it
+worth adding rather than doubling the first list is that the two zodiacs
+disagree on a **different axis**: a star sign is a month and an animal is a
+year, so the pairing is 144 combinations rather than 12. Two members born five
+weeks apart share a sign and rarely an animal; two born eleven months apart
+share an animal and never a sign. Nobody is nudged at the same pair as the
+person beside them — and a push everybody gets is a push nobody notices.
+
+**The animal actions are deliberately elsewhere in the app.** The star signs
+cluster on posting, battling and being scored, because that is what a sign's
+character is about — how you show up. The animals sit on the parts a member
+can go a month without finding: escrow (`collab_deliver`, `collab_fund`),
+the journal, the bug queue, curation, translation, OCC, external verification,
+and the wallet's own 🍥 → 🏷️ door. A second zodiac aimed at the same twelve
+buttons would be a louder copy of the first; aimed at twelve different ones it
+is a map of the app. `test_signbonus` pins that: most of the animal tabs must
+be tabs no star sign names.
+
+Three things hold the two lists together:
+
+- **One column addresses both.** `SignBonusAward.sign` takes a star sign OR an
+  animal, and no name appears in both lists (no Aries is a Rat) — which is why
+  `unique_together (user, sign, tier)` still means once-each. There is a test
+  asserting the non-overlap, because it is load-bearing rather than a happy
+  accident.
+- **`_BY_ACTION` carries the KIND.** An action resolves to `("sign", key)` or
+  `("animal", key)`, so a star sign can never answer an animal's action, and
+  only one of the two lookups runs per call. A duplicated action key would
+  silently make one of the twenty-four unreachable, so the module asserts on
+  import rather than letting it ship.
+- **The daily cap spans both.** Still 3, deliberately, now the board is twice
+  the size — the cap's job is to stop somebody clearing it in one afternoon,
+  and raising it because there is more to clear would undo the only thing it
+  does. Once-each fixes the lifetime total at 140 🍥.
+
+**The stretch pays the base with it.** Every one of the twenty-four is built
+so the harder version includes the easier one — rating five today means you
+rated one; being challenged by name to a 1v1 means somebody was already there
+— so clearing the stretch first pays 70, not 50. Without that, a member whose
+FIRST attempt clears the stretch is left owed 20 until they happen to do a
+smaller version of the same thing, which reads as a punishment for doing well
+and lands hardest on whoever engages most.
+
+Two call sites are worth knowing about because they are the ones easy to get
+backwards:
+
+- **`social_verify._dragon` pays the LINK'S OWNER, never `request.user`.** On
+  the manual-approval path the person pressing the button is the platform
+  owner, and paying them for approving somebody else's account would be the
+  feature exactly inverted. It fires from three places because verification
+  has three genuinely different endings and no single line all of them cross.
+- **`keyconnectz` and `occ_run` fire BEHIND their own meters.** A run not real
+  enough to bill for is not real enough to pay for, which is the same rule
+  `vocalcoach` already follows in the other direction.
+
+
+`GET /api/economy/signbonus/` publishes **both of yours and all twenty-four**,
+and both halves are the point: yours because the cost/gain rule is about the
+gain being readable BEFORE you go and do the thing, and the other twenty-two
+because the fairness of this is only checkable by seeing them. Each row carries
+`tab`, so the screen offers the jump rather than naming an app and leaving you
+to find it.
+
+**The animal keys were added, never substituted.** `mine` and `all` keep the
+names they shipped with and `mine_animal` / `all_animals` sit beside them,
+because the screen reading this is in the other repo and the two deploy
+independently — renaming `mine` would blank a live panel for however long the
+frontend took to follow. An endpoint may grow keys ahead of its client; it may
+never lose one, and `test_signbonus` holds the old ones in place.
 
 ---
 
@@ -295,6 +361,75 @@ nothing.
 
 It reports and stops now, off the same `dupez` detection the screen uses, so
 the command and the screen cannot disagree about what a duplicate is.
+
+## FunnelZ offers: springing a sale is fine, springing a FAKE one is not
+
+FunnelZ has only ever MEASURED — `FunnelEvent` counts landing → try → register
+for a visitor with no account, owner-only, and nothing acted on it.
+`apps/economy/offerz_engine.py` is the other half: the promotions that reach a
+member who is already here, arriving without being asked for.
+
+The whole design is one distinction, and it is the substance rule with a price
+tag on it. *Could a member get a good number without getting good?* reads here
+as **could a member get a good deal without the deal being good?** A countdown
+that resets on reload, a "was $50" against a price nobody paid, a "last 3
+seats" that says 3 forever — each is decoration wearing a discount's clothes,
+and each is found out by the first person who looks twice. Selling
+subscriptions to musicians who have been sold to their whole careers, being
+caught once is the end of it.
+
+Five rules, and every offer answers to all five:
+
+1. **Cost and gain up front**, in the resource emoji, on the control. A
+   promotion is the one place it is most tempting to lead with the gain and
+   put the price in the small print.
+2. **A deadline that does not end is a lie.** `offers_for` drops an expired
+   offer AND `redeemable` refuses it — both directions, because the client
+   keeps whatever panel it already rendered, and an offer that still works
+   after it "ended" teaches members every deadline here is theatre.
+3. **Scarcity is counted, never claimed.** "3 left" comes from
+   `founding_status()["remaining"]`, a real row count, or it is not said.
+4. **It is TRUE when it is shown.** Every offer is computed from the member's
+   own state at request time. Nothing is blasted, scheduled or aimed at a
+   segment — a time-triggered promotion cannot answer this rule, because what
+   made it true was the date rather than the member. `test_funnel_offers`
+   asserts every `when` is a callable.
+5. **Dismissible, and it stays dismissed** (`OfferDismissal`). An offer that
+   comes back after being closed is not a promotion, it is an obstruction, and
+   the member's only answer is to stop opening the app.
+
+**Every CTA lands on the CONTROL, not the tab.** Each row carries
+`tab` + `target` and the panel uses `goToSpot`. "Go to MembershipZ" is where a
+funnel dies: the member arrives at the top of a screen they have never seen,
+hunts, and leaves. That is the cross-pollination rule applied to marketing —
+the difference between a funnel and a poster.
+
+Three things that must not rot:
+
+- **The context is built ONCE.** `_context` reads the wallet, membership,
+  profile and counts in one pass; eleven offers each calling `wallet_for`
+  would be eleven queries on a panel that renders in one. A `when` needing a
+  twelfth query is a `when` to re-think, not a query to add.
+- **A predicate that raises hides ONE offer, never the screen.** An offer
+  panel that 500s because a single check met an edge case is worse than one
+  promotion going unseen. Tested.
+- **`prompt_walls` counts the WALL, never a successful run.** It is the only
+  number a paid offer is sold at, so it has to be a fact — "they met the
+  ceiling three times" rather than "they seem engaged" — and it ROLLS over a
+  week, because a lifetime counter would keep selling to somebody long after
+  they settled into a rhythm that suits them, which is rule 4 broken by
+  arithmetic.
+
+**The free door always sits beside the paid one.** `prompts_wall_no_spinaz`
+exists so a member out of both AI and 🍥 is shown how to EARN some rather than
+how to spend some they do not have — the ladder rule as an offer, and the two
+are never shown together.
+
+`FunnelOfferRedeemView` grants nothing. The offers are doors; the thing behind
+each door keeps its own endpoint, its own price and its own checks, because a
+redeem that granted things would be a second place every one of those prices
+lives.
+
 
 ## Deployment
 

@@ -199,11 +199,16 @@ class PlaylistsView(APIView):
                  "char_limit": cap},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        # ZodiacZ — the Goat arranges. The base is on the playlist existing;
+        # the stretch (ten tracks) can only be true once items are added, so
+        # it fires from the items endpoint rather than being guessed here.
         pl = Playlist.objects.create(
             owner=request.user, title=title[:160], description=description,
             cover_url=str(d.get("cover_url", ""))[:600],
             visibility=_clean_visibility(d.get("visibility")),
         )
+        from .signbonus import try_award
+        try_award(request.user, "playlist")
         return Response(playlist_dict(pl, request), status=status.HTTP_201_CREATED)
 
 
@@ -321,6 +326,11 @@ class PlaylistItemsView(APIView):
             )
 
         pl.save(update_fields=["updated_at"])
+        # ZodiacZ — the Goat's stretch. The owner's own set, ten deep. Counted
+        # here because it is the only place the number can be true.
+        if pl.owner_id == request.user.id and pl.items.count() >= 10:
+            from .signbonus import try_award
+            try_award(request.user, "playlist", stretch=True)
         if pl.owner_id != request.user.id:
             notify(pl.owner, "system",
                    f"@{request.user.username} added a track to '{pl.title}' 🎵",

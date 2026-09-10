@@ -178,6 +178,33 @@ def _ai_identity(page_text, user, profile):
             "handle": str(data.get("handle") or "")[:120]}, str(data.get("reason") or "")[:500], None
 
 
+
+def _dragon(user, links):
+    """ZodiacZ — the Dragon proves its wingspan. Fired wherever a link BECOMES
+    verified, which is three places: the code-in-bio check, the identity match,
+    and the owner's manual approval.
+
+    Three call sites rather than one because verification has three genuinely
+    different endings and there is no single line all of them pass through.
+    Two things this must not get wrong:
+
+    * **It pays the LINK'S OWNER, never `request.user`.** On the manual path
+      the person pressing the button is the owner of the platform, and paying
+      them for approving somebody else's account would be the whole feature
+      backwards.
+    * **It counts the list, not the event.** A link that was already verified
+      and got re-checked is not a new one, and `links` is the array being
+      saved, so the count is the truth as of this save.
+
+    This is the most substantial bonus on either list: an unverified link is a
+    claim and a verified one is reach, and reach is what ⚡ regenerates on.
+    """
+    from .signbonus import try_award
+    n = sum(1 for l in (links or []) if isinstance(l, dict) and l.get("verified"))
+    if n >= 1:
+        try_award(user, "verified_link", stretch=n >= 3)
+
+
 class SocialVerifyView(APIView):
     """POST /api/economy/social/verify/
 
@@ -248,6 +275,7 @@ class SocialVerifyView(APIView):
                 link["followers"] = followers
             p.links = links
             p.save(update_fields=["links", "updated_at"])
+            _dragon(request.user, links)
             return Response({
                 "verified": True,
                 "followers": followers,
@@ -280,6 +308,7 @@ class SocialVerifyView(APIView):
                     link["followers"] = result["followers"]
                 p.links = links
                 p.save(update_fields=["links", "updated_at"])
+                _dragon(request.user, links)
                 SocialReview.objects.filter(user=request.user, url=url).delete()
                 return Response({
                     "verified": True, "verdict": "yes", "reason": reason,
@@ -384,6 +413,10 @@ class SocialReviewQueueView(APIView):
                 link["verified"] = False
             p.links = links
             p.save(update_fields=["links", "updated_at"])
+            # r.user, NOT request.user — the reviewer is the owner, and the
+            # bonus belongs to whoever's account was verified.
+            if decision == "approve":
+                _dragon(r.user, links)
 
         r.status = (SocialReview.STATUS_APPROVED if decision == "approve"
                     else SocialReview.STATUS_REJECTED)

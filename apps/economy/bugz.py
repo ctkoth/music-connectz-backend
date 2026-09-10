@@ -111,6 +111,12 @@ class BugzView(APIView):
             shot=shot or None,
             shot_type=shot_type,
         )
+        # ZodiacZ — the Dog says when something is wrong. The stretch is the
+        # attachment, which is genuinely the difference between a report that
+        # gets fixed and one that gets a reply asking what you were doing.
+        from .signbonus import try_award
+        try_award(request.user, "bug_report", stretch=bool(shot))
+
         return Response(bug_dict(bug, request), status=status.HTTP_201_CREATED)
 
 
