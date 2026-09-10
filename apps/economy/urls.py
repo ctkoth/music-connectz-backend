@@ -69,7 +69,7 @@ from .occ_suggest import OccSuggestView
 from .releasez import (CollabDistributeView, PostDistributeView, ReleaseDetailView,
                        ReleaseSubmitView, ReleasesView)
 from .collab_files import CollabFileDetailView, CollabFilesView
-from .venuez import (VenueBookView, VenueBookingCancelView,
+from .venuez import (VenueBookView, VenueBookingCancelView, VenueQuoteView,
                      VenueBookingRespondView, VenueDetailView, VenueListView,
                      VenueRateView)
 from .collab_post import CollabNeedsView, CollabPostView
@@ -379,6 +379,8 @@ urlpatterns = [
     path("venuez/", VenueListView.as_view(), name="economy-venuez"),
     path("venuez/<int:pk>/", VenueDetailView.as_view(), name="economy-venue"),
     path("venuez/<int:pk>/book/", VenueBookView.as_view(), name="economy-venue-book"),
+    # The price for the skills and hours actually asked for, before the ask.
+    path("venuez/<int:pk>/quote/", VenueQuoteView.as_view(), name="economy-venue-quote"),
     path("venuez/bookings/<int:pk>/respond/", VenueBookingRespondView.as_view(),
          name="economy-venue-respond"),
     path("venuez/bookings/<int:pk>/cancel/", VenueBookingCancelView.as_view(),
