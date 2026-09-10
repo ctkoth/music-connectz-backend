@@ -22,7 +22,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from .models import VenueBooking, VenueEvent
-from .postz import skill_prices
+from .postz import charge_skill_energy, skill_prices, skills_from
 
 
 def provider_for(event, visitor):
@@ -333,17 +333,33 @@ class VenueBookView(APIView):
                             status=status.HTTP_409_CONFLICT)
 
         d = request.data or {}
-        skills = [str(s).strip()[:80] for s in (d.get("skills") or [])
-                  if str(s).strip()][:40] or list(event.skills or [])
+        asked = skills_from(d)
+        skills = asked or list(event.skills or [])
         hours = _int(d, "hours", event.hours, 1, 24)
         q = quote_for(event, request.user, skills=skills, hours=hours)
+
+        # ⚡ is what it costs to PUT THIS UP, so the visitor asking for the seat
+        # pays it, out of their own rates — money's host/visitor direction is a
+        # separate question and `quote_for` above is the one that answers it.
+        # Charging the host here would have let anybody drain a host's ⚡ by
+        # asking for seats they never agreed to, and told them the host's
+        # balance while they did it.
+        #
+        # Only the skills the visitor NAMED are charged for. Falling back to the
+        # room's own list would bill somebody for a line they never wrote.
+        energy, denied = charge_skill_energy(request.user, asked)
+        if denied:
+            body, code = denied
+            body["detail"] = (f"Asking for this seat costs {body['energy_needed']} ⚡ "
+                              f"and you have {body['energy_available']}.")
+            return Response(body, status=code)
 
         b = VenueBooking.objects.create(
             event=event, visitor=request.user, skills=skills, hours=hours,
             quoted_cents=q["amount_cents"], payer_is_host=q.get("payer_is_host", False),
         )
         return Response({"booking": booking_dict(b, request.user),
-                         "venue": event_dict(event, request.user)},
+                         "venue": event_dict(event, request.user), **energy},
                         status=status.HTTP_201_CREATED)
 
 

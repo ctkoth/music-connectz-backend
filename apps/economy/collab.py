@@ -39,6 +39,7 @@ from .models import (
     profile_for,
     wallet_for,
 )
+from .postz import charge_skill_energy, skills_from
 from .views import is_owner
 
 User = get_user_model()
@@ -347,6 +348,9 @@ class CollabDealsView(APIView):
         out = [deal_dict(maybe_auto_release(d), me, days) for d in list(deals) + extra]
         return Response({"deals": out})
 
+    # Atomic because the ⚡ charge locks the wallet, and select_for_update
+    # outside a transaction locks nothing.
+    @transaction.atomic
     def post(self, request):
         d = request.data or {}
         title = str(d.get("title", "")).strip()[:160]
@@ -418,6 +422,19 @@ class CollabDealsView(APIView):
         for entry in settled:
             entry["funded"] = False
             entry["stake_paid"] = 0
+
+        # Starting the deal costs ⚡ equal to the combined price of the skills
+        # the starter says they are bringing, from their own rates.
+        # NOT named `refusal` — that is the gates helper imported at module
+        # level and called above, and a local of the same name would shadow it
+        # for the whole method.
+        energy, denied = charge_skill_energy(request.user, skills_from(d))
+        if denied:
+            body, code = denied
+            body["detail"] = (f"Starting this costs {body['energy_needed']} ⚡ "
+                              f"and you have {body['energy_available']}.")
+            return Response(body, status=code)
+
         deal = CollabDeal.objects.create(
             initiator=request.user, title=title, currency=currency,
             stake_spinaz=stake, participants=settled, status=CollabDeal.STATUS_DRAFT,
@@ -436,7 +453,8 @@ class CollabDealsView(APIView):
             notify(source_post.author, "system",
                    f"@{request.user.username} started a CollabZ deal on '{source_post.title}' 🤝",
                    actor=request.user, item_id=f"post:{source_post.id}")
-        return Response(deal_dict(deal, request.user), status=status.HTTP_201_CREATED)
+        return Response({**deal_dict(deal, request.user), **energy},
+                        status=status.HTTP_201_CREATED)
 
 
 class CollabDetailView(APIView):

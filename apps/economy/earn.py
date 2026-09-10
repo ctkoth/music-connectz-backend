@@ -55,6 +55,36 @@ def _way(key, label, gain, resource, *, tab, target="", available=True,
     }
 
 
+def _raise_rate(user, rate):
+    """The upgrade offer, priced in the thing being asked for: ⚡ per hour.
+
+    "Upgrade for more Energy" is a slogan; "12 ⚡/hr → 24 ⚡/hr" is a number the
+    member can check against the rate the app already shows them, and it is
+    computed from their OWN reach and badges rather than a headline figure that
+    would be someone else's. A tier that would not actually pay them more is
+    left out — an offer whose gain is zero is a nag.
+    """
+    from .models import TIER_FREE, TIER_PREMIUM, TIER_STATZ, energy_rate_per_hour, membership_for
+
+    ladder = [TIER_FREE, TIER_PREMIUM, TIER_STATZ]
+    mine = membership_for(user).tier
+    if mine not in ladder:          # debug/owner — nothing above them to sell
+        return {"tier": mine, "per_hour": rate, "options": []}
+
+    options = []
+    for tier in ladder[ladder.index(mine) + 1:]:
+        would = energy_rate_per_hour(user, tier=tier)
+        if would > rate:
+            options.append({
+                "tier": tier,
+                "per_hour": would,
+                "gain_per_hour": would - rate,
+                "tab": "membershipz",
+                "target": "",
+            })
+    return {"tier": mine, "per_hour": rate, "options": options}
+
+
 class EarnView(APIView):
     """GET /api/economy/earn/ — every way this member can earn, right now."""
 
@@ -122,6 +152,7 @@ class EarnView(APIView):
             "available": [w for w in ways if w["available"]],
             "earned_total": earned,
             "energy_per_hour": rate,
+            "raise_rate": _raise_rate(request.user, rate),
             "spend": [{
                 "key": "promptz",
                 "label": "Turn SpinaZ into PromptZ",

@@ -18,6 +18,7 @@ from .catalog import edit_window_for
 from .crosspost import coach_cap, coach_price, destinations_for, take_state_for
 from .models import (
     CollabDeal,
+    Wallet,
     POST_COMMENT_UNLOCK_SEC,
     POST_RATE_UNLOCK_SEC,
     Post,
@@ -281,6 +282,58 @@ def post_cost_cents(user, skills_used):
     if off and total:
         total = max(0, total - int(total * off / 100))
     return total, lines
+
+
+def skills_from(d, key="skills"):
+    """The skill names off a submission payload, bounded the way posts are."""
+    return [str(s).strip()[:80] for s in (d.get(key) or []) if str(s).strip()][:40]
+
+
+def charge_skill_energy(user, skills):
+    """Spend the combined price of `skills` as ⚡ on a submission.
+
+    BattleZ, VenueZ and CollabZ all price a submission the same way a post is
+    priced, so they charge it through here rather than each keeping their own
+    copy — three call sites that each read the wallet, compare and subtract is
+    three places for the comparison to drift, and the one that drifts is the one
+    nobody re-reads.
+
+    Unlike `create_post`, which lets the post through and takes what is there,
+    a submission is REFUSED when it cannot be afforded: an insufficient balance
+    has to be a wall for the paradigm to have anything to explain. The refusal
+    states the price, the balance and the gap and stops there — where to go earn
+    it is `/api/economy/earn/`'s answer, and a second list of ways to earn,
+    written out here in prose, is exactly how "20 free prompts" reached nine
+    files.
+
+    Caller must be inside a transaction: the wallet is locked so two entries
+    submitted at once cannot both pass the check against the same balance.
+
+    Returns (info, refusal). `refusal` is a (payload, status) pair or None,
+    matching `create_post`'s error shape.
+    """
+    cost, lines = post_cost_cents(user, skills)
+    if not cost:
+        return {"energy_cost": 0, "energy_charged": 0}, None
+
+    Wallet.objects.get_or_create(user=user)
+    w = Wallet.objects.select_for_update().get(user=user)
+    have = max(0, w.energy or 0)
+    if have < cost:
+        return {}, ({
+            "detail": f"This costs {cost} ⚡ and you have {have}.",
+            "insufficient": True,
+            "resource": "energy",
+            "cost": {"resource": "energy", "amount": cost},
+            "energy_needed": cost,
+            "energy_available": have,
+            "energy_short": cost - have,
+            "lines": lines,
+        }, status.HTTP_402_PAYMENT_REQUIRED)
+
+    w.energy = have - cost
+    w.save(update_fields=["energy", "updated_at"])
+    return {"energy_cost": cost, "energy_charged": cost, "energy": w.energy}, None
 
 
 def create_post(user, d):

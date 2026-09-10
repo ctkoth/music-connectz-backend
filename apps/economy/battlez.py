@@ -40,6 +40,7 @@ from .models import (
     profile_for,
     wallet_for,
 )
+from .postz import charge_skill_energy, skills_from
 
 User = get_user_model()
 
@@ -187,6 +188,10 @@ class BattleEnterView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    # Atomic because the ⚡ charge locks the wallet, and a lock outside a
+    # transaction is not one: two entries sent at once would otherwise both
+    # read the same balance and both be allowed to spend it.
+    @transaction.atomic
     def post(self, request, pk):
         b = Battle.objects.select_related("host").filter(pk=pk).first()
         if not b:
@@ -232,6 +237,18 @@ class BattleEnterView(APIView):
             )
 
         d = request.data or {}
+        # The take costs ⚡ equal to the combined price of the skills that went
+        # into it, from the entrant's OWN rates — the same rule, and the same
+        # code, that prices a post.
+        # NOT named `refusal` — that is the gates helper imported at module
+        # level and called above, and a local of the same name would shadow it
+        # for the whole method.
+        energy, denied = charge_skill_energy(request.user, skills_from(d))
+        if denied:
+            body, code = denied
+            body["detail"] = f"Entering costs {body['energy_needed']} ⚡ and you have {body['energy_available']}."
+            return Response(body, status=code)
+
         entry = BattleEntry.objects.create(
             battle=b, user=request.user, title=str(d.get("title", "") or "")[:160], **_media(d),
         )
@@ -242,7 +259,7 @@ class BattleEnterView(APIView):
         notify(b.host, "join", f"@{request.user.username} entered '{b.title}' ⚔️",
                actor=request.user, item_id=b.item_key)
         return Response({"entry": entry_dict(entry, request),
-                         "battle": battle_dict(b, request)},
+                         "battle": battle_dict(b, request), **energy},
                         status=status.HTTP_201_CREATED)
 
     def delete(self, request, pk):
