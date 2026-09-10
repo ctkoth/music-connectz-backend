@@ -537,6 +537,14 @@ class DupeZClaimView(APIView):
         note = str(d.get("note", ""))[:2000]
         same_email = any(s["key"] == "account_email" for s in signals)
 
+        # UNREACHABLE for anything created after `accounts_user_email_ci_uniq`
+        # (accounts.0002): the database refuses a second account on one
+        # address, so two live accounts can no longer share one and this signal
+        # cannot fire. Kept rather than deleted because it is still correct for
+        # a row that predates the index, and because dropping the index must
+        # not silently drop the self-serve path with it — test_dupez pins both
+        # halves. The money guard below is NOT tied to this branch: it lives in
+        # `delete_duplicate`, which every delete path goes through.
         if same_email:
             card = account_card(target)
             owed = _forfeit(card)
