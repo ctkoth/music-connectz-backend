@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
+    chinese_zodiac_for,
     Follow,
     ItemRating,
     JournalEntry,
@@ -40,6 +41,7 @@ class AccountExportView(APIView):
             "profile": {
                 "display_name": p.display_name, "bio": p.bio, "location": p.location,
                 "gender": p.gender, "birthday": p.birthday, "sign": p.sign,
+                "sign_cn": chinese_zodiac_for(p.birthday),
                 "nationalities": p.nationalities, "traits": p.traits, "personas": personas_of(p),
                 "links": p.links, "external_followers": p.external_followers,
             },

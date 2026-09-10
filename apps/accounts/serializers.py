@@ -32,6 +32,7 @@ class PublicUserSerializer(serializers.ModelSerializer):
     birthday = serializers.SerializerMethodField()
     age = serializers.SerializerMethodField()
     zodiac = serializers.SerializerMethodField()
+    zodiac_cn = serializers.SerializerMethodField()
     # VoiceZ. `voice_explicit_allowed` is served alongside the switch itself
     # so the client can explain a disabled toggle instead of letting somebody
     # flip it and watch it silently flip back.
@@ -78,6 +79,16 @@ class PublicUserSerializer(serializers.ModelSerializer):
     def get_zodiac(self, obj):
         return self._economy(obj, "profile").sign or ""
 
+    def get_zodiac_cn(self, obj):
+        """The animal, derived from the birthday rather than stored beside it.
+
+        `sign` is a column and needed a second writer to remember it, which is
+        how it got out of step once already. This reads the one source of
+        truth, so it cannot drift.
+        """
+        from apps.economy.models import chinese_zodiac_for
+        return chinese_zodiac_for(self._economy(obj, "profile").birthday)
+
     def get_is_owner(self, obj):
         return bool(obj.is_superuser or obj.is_staff)
 
@@ -112,7 +123,7 @@ class PublicUserSerializer(serializers.ModelSerializer):
         fields = (
             "id", "username", "email", "phone", "avatar_url", "is_owner",
             "tier", "spinaz", "energy", "onboarded", "personas", "nationalities",
-            "birthday", "age", "zodiac", "voice",
+            "birthday", "age", "zodiac", "zodiac_cn", "voice",
         )
 
 

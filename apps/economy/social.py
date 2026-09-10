@@ -51,6 +51,7 @@ from .models import (
     badge_effects,
     recheck_badges,
     may_be_explicit,
+    chinese_zodiac_for,
     zodiac_for,
     ListenProgress, record_listen, LISTEN_REQUIRED_SEC,
 )
@@ -543,6 +544,11 @@ def _profile_card(p, request=None, badges=None):
         "avatar": _avatar_url(p, request) if request else None,
         "gender": p.gender,
         "sign": p.sign,
+        # Derived from the birthday on read rather than stored beside it. A
+        # second column would need every writer of `birthday` to remember it —
+        # which is exactly how `sign` itself got out of step once already (see
+        # the two-writers note in CLAUDE.md).
+        "sign_cn": chinese_zodiac_for(p.birthday),
         "regions": p.regions,
         "nationalities": p.nationalities,
         "sober": p.sober,
@@ -1045,6 +1051,9 @@ class MembersView(APIView):
         regions = multi("regions")
         genders = multi("genders")
         signs = multi("signs")
+        # The other zodiac is a filter too — it is the one people in the
+        # diaspora this app is built for are more likely to search on.
+        signs_cn = multi("signs_cn")
         # SubstanceZ multi-select: substance keys the searcher wants sober-friendly.
         # A member passes if, on every selected substance, they are NOT active
         # ("use"/"sometimes"). Undeclared counts as sober-friendly.
@@ -1086,6 +1095,10 @@ class MembersView(APIView):
                 continue
             if signs and p.sign not in signs:
                 continue
+            if signs_cn:
+                cn = chinese_zodiac_for(p.birthday)
+                if not cn or cn["animal"] not in signs_cn:
+                    continue
             if sober_only and not p.sober:
                 continue
             if substances:

@@ -1070,6 +1070,86 @@ def zodiac_for(birthday):
     return "Capricorn"
 
 
+# ---- The other zodiac ------------------------------------------------------
+#
+# The Chinese zodiac runs on a 12-YEAR cycle, not a 12-month one, so it needs
+# the birth year rather than the month and day — except for one detail that is
+# the whole difficulty:
+#
+#   **The year turns at Chinese New Year, not on 1 January.**
+#
+# CNY lands anywhere from 21 Jan to 20 Feb, so somebody born 15 January 2000 is
+# a RABBIT (1999's animal), not a Dragon. Computing this as `year % 12` is
+# wrong for up to seven weeks of every single year — about one member in nine,
+# and always the same ones, which is the kind of error that gets noticed by
+# exactly the people it is about.
+#
+# So the boundary is looked up rather than assumed. The table below IS the
+# feature: it is the only part that can be wrong, and it should be checked
+# against a published almanac rather than trusted because it is in code. Years
+# outside it fall back to the year boundary and say so (`approximate`) instead
+# of quietly guessing — a sign somebody is told is theirs, wrongly, is worse
+# than one the app admits it is unsure of.
+CHINESE_ANIMALS = [
+    ("Rat", "🐀"), ("Ox", "🐂"), ("Tiger", "🐅"), ("Rabbit", "🐇"),
+    ("Dragon", "🐉"), ("Snake", "🐍"), ("Horse", "🐎"), ("Goat", "🐐"),
+    ("Monkey", "🐒"), ("Rooster", "🐓"), ("Dog", "🐕"), ("Pig", "🐖"),
+]
+
+# year -> (month, day) that the lunar new year began.
+CHINESE_NEW_YEAR = {
+    1940: (2, 8),  1941: (1, 27), 1942: (2, 15), 1943: (2, 5),  1944: (1, 25),
+    1945: (2, 13), 1946: (2, 2),  1947: (1, 22), 1948: (2, 10), 1949: (1, 29),
+    1950: (2, 17), 1951: (2, 6),  1952: (1, 27), 1953: (2, 14), 1954: (2, 3),
+    1955: (1, 24), 1956: (2, 12), 1957: (1, 31), 1958: (2, 18), 1959: (2, 8),
+    1960: (1, 28), 1961: (2, 15), 1962: (2, 5),  1963: (1, 25), 1964: (2, 13),
+    1965: (2, 2),  1966: (1, 21), 1967: (2, 9),  1968: (1, 30), 1969: (2, 17),
+    1970: (2, 6),  1971: (1, 27), 1972: (2, 15), 1973: (2, 3),  1974: (1, 23),
+    1975: (2, 11), 1976: (1, 31), 1977: (2, 18), 1978: (2, 7),  1979: (1, 28),
+    1980: (2, 16), 1981: (2, 5),  1982: (1, 25), 1983: (2, 13), 1984: (2, 2),
+    1985: (2, 20), 1986: (2, 9),  1987: (1, 29), 1988: (2, 17), 1989: (2, 6),
+    1990: (1, 27), 1991: (2, 15), 1992: (2, 4),  1993: (1, 23), 1994: (2, 10),
+    1995: (1, 31), 1996: (2, 19), 1997: (2, 7),  1998: (1, 28), 1999: (2, 16),
+    2000: (2, 5),  2001: (1, 24), 2002: (2, 12), 2003: (2, 1),  2004: (1, 22),
+    2005: (2, 9),  2006: (1, 29), 2007: (2, 18), 2008: (2, 7),  2009: (1, 26),
+    2010: (2, 14), 2011: (2, 3),  2012: (1, 23), 2013: (2, 10), 2014: (1, 31),
+    2015: (2, 19), 2016: (2, 8),  2017: (1, 28), 2018: (2, 16), 2019: (2, 5),
+    2020: (1, 25), 2021: (2, 12), 2022: (2, 1),  2023: (1, 22), 2024: (2, 10),
+    2025: (1, 29), 2026: (2, 17), 2027: (2, 6),  2028: (1, 26), 2029: (2, 13),
+    2030: (2, 3),
+}
+
+
+def chinese_zodiac_for(birthday):
+    """{"animal", "emoji", "approximate"} from a YYYY-MM-DD birthday, or None.
+
+    `approximate` is True only when the birthday falls in the window CNY can
+    land in AND the year is outside the table — the one case where the answer
+    is a guess. It travels with the value so a screen can say so; a caller that
+    ignores it gets the year-boundary answer, which is right for roughly eight
+    of every nine members and never silently claimed to be more than that.
+    """
+    try:
+        y, m, d = (int(x) for x in (birthday or "").split("-"))
+    except (ValueError, TypeError):
+        return None
+    if not (1 <= m <= 12 and 1 <= d <= 31):
+        return None
+
+    approximate = False
+    # 21 Jan – 20 Feb is the only window CNY can fall in, so it is the only one
+    # that needs looking up. Everything else is unambiguous.
+    if m == 1 or (m == 2 and d <= 20):
+        cny = CHINESE_NEW_YEAR.get(y)
+        if cny is None:
+            approximate = True
+        elif (m, d) < cny:
+            y -= 1                      # born before the turn: last year's animal
+
+    name, emoji = CHINESE_ANIMALS[(y - 2020) % 12]
+    return {"animal": name, "emoji": emoji, "approximate": approximate}
+
+
 def haversine_km(lat1, lng1, lat2, lng2):
     """Great-circle distance in km between two lat/lng points."""
     from math import radians, sin, cos, asin, sqrt
