@@ -12,7 +12,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from . import venuez
-from .models import Profile, VenueBooking, VenueEvent, profile_for
+from .models import Profile, VenueBooking, VenueEvent, profile_for, wallet_for
 
 User = get_user_model()
 
@@ -424,3 +424,86 @@ class WhoMayRate(TestCase):
         row = self.client.get(f"/api/economy/venuez/{self.ev.id}/").json()
         self.assertFalse(row["rating"]["can_rate"])
         self.assertTrue(row["rating"]["why_not"])
+
+
+class TheQuoteMatchesTheCharge(TestCase):
+    """The quote endpoint exists so the button can state its own price.
+
+    Its one job is to answer for the skills and hours ACTUALLY asked for, and
+    to answer the same thing the booking will then do. A quote that drifts from
+    the charge is worse than no quote — it is a promise the next screen breaks.
+    """
+
+    def setUp(self):
+        self.host = User.objects.create_user(username="qhost", password="pw")
+        self.visitor = User.objects.create_user(username="qvis", password="pw")
+        _priced(self.host, Mixing=5000, Mastering=3000)
+        _priced(self.visitor, Drums=400, Bass=250)
+        self.client.force_login(self.visitor)
+
+    def _quote(self, ev, **params):
+        q = "&".join(f"{k}={v}" for k, v in params.items())
+        return self.client.get(f"/api/economy/venuez/{ev.id}/quote/?{q}")
+
+    def test_naming_no_skills_quotes_the_rooms_own_list(self):
+        ev = _event(self.host, VenueEvent.KIND_PERFORMANCE)
+        d = self._quote(ev).json()
+        self.assertFalse(d["named"])
+        self.assertEqual(d["skills"], ["Mixing"])
+        self.assertEqual(d["quote"]["amount_cents"], 10000)   # host 5000 x 2h
+        # Nothing was named, so asking costs no ⚡ — the room's list is not a
+        # bill the visitor wrote.
+        self.assertEqual(d["energy"]["cost"], 0)
+
+    def test_hours_move_the_quote_because_they_move_the_charge(self):
+        ev = _event(self.host, VenueEvent.KIND_PERFORMANCE)
+        self.assertEqual(self._quote(ev, hours=1).json()["quote"]["amount_cents"], 5000)
+        self.assertEqual(self._quote(ev, hours=4).json()["quote"]["amount_cents"], 20000)
+
+    def test_a_session_prices_the_named_skills_off_the_visitors_own_rates(self):
+        ev = _event(self.host, VenueEvent.KIND_SESSION, hours=1)
+        d = self._quote(ev, skills="Drums,Bass").json()
+        self.assertTrue(d["named"])
+        self.assertTrue(d["quote"]["payer_is_host"])          # the host pays
+        self.assertEqual(d["quote"]["amount_cents"], 650)     # 400 + 250, theirs
+        # And the ⚡ for asking is the same two skills, off the same rates.
+        self.assertEqual(d["energy"]["cost"], 650)
+
+    def test_the_quoted_energy_is_what_the_booking_actually_takes(self):
+        """The property the endpoint exists for."""
+        ev = _event(self.host, VenueEvent.KIND_SESSION, hours=1)
+        w = wallet_for(self.visitor)
+        w.energy = 5000
+        w.save()
+        quoted = self._quote(ev, skills="Drums,Bass").json()["energy"]["cost"]
+        before = wallet_for(self.visitor).energy
+        r = self.client.post(f"/api/economy/venuez/{ev.id}/book/",
+                             {"skills": ["Drums", "Bass"]}, "application/json")
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(before - wallet_for(self.visitor).energy, quoted)
+
+    def test_an_unaffordable_ask_is_named_as_such_before_it_is_made(self):
+        ev = _event(self.host, VenueEvent.KIND_SESSION, hours=1)
+        w = wallet_for(self.visitor)
+        w.energy = 100
+        w.save()
+        d = self._quote(ev, skills="Drums,Bass").json()["energy"]
+        self.assertFalse(d["affordable"])
+        self.assertEqual(d["short"], 550)
+        # And the booking then refuses, rather than the quote having lied.
+        r = self.client.post(f"/api/economy/venuez/{ev.id}/book/",
+                             {"skills": ["Drums", "Bass"]}, "application/json")
+        self.assertEqual(r.status_code, 402)
+        self.assertTrue(r.json()["insufficient"])
+
+    def test_an_unpriced_skill_is_named_rather_than_dropped(self):
+        ev = _event(self.host, VenueEvent.KIND_SESSION, hours=1)
+        d = self._quote(ev, skills="Drums,Kazoo").json()
+        self.assertIn("Kazoo", d["quote"]["unpriced"])
+        self.assertEqual(d["quote"]["amount_cents"], 400)
+
+    def test_a_free_room_quotes_free_and_costs_no_energy(self):
+        ev = _event(self.host, VenueEvent.KIND_FREE)
+        d = self._quote(ev).json()
+        self.assertTrue(d["quote"]["free"])
+        self.assertEqual(d["energy"]["cost"], 0)

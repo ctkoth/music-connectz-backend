@@ -21,8 +21,8 @@ for the same reason: a price the counterparty can set is not a price.
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .models import VenueBooking, VenueEvent
-from .postz import charge_skill_energy, skill_prices, skills_from
+from .models import VenueBooking, VenueEvent, wallet_for
+from .postz import charge_skill_energy, post_cost_cents, skill_prices, skills_from
 
 
 def provider_for(event, visitor):
@@ -361,6 +361,54 @@ class VenueBookView(APIView):
         return Response({"booking": booking_dict(b, request.user),
                          "venue": event_dict(event, request.user), **energy},
                         status=status.HTTP_201_CREATED)
+
+
+class VenueQuoteView(APIView):
+    """GET what THIS booking costs, for the skills and hours actually asked for.
+
+    The quote on the listing is the room's own defaults. The moment a visitor
+    names their own skills or a different number of hours, that figure stops
+    being the one that will be charged — and a price that no longer matches the
+    button it sits above is the bill this rule exists to stop.
+
+    So it runs the SAME `quote_for` the booking runs, and prices the ⚡ off the
+    same `post_cost_cents`, rather than the screen doing arithmetic of its own.
+    Money and ⚡ are quoted together because they answer different questions and
+    a member is about to commit to both: money can be owed BY the host (a
+    session pays the visitor), while the ⚡ is always the asker's, for the skills
+    the asker named.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        event = VenueEvent.objects.select_related("host").filter(pk=pk).first()
+        if not event:
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # A GET carries them comma-joined, the way PostCostView takes them.
+        raw = request.query_params.get("skills", "")
+        asked = [s for s in (x.strip()[:80] for x in raw.split(",")) if s][:40]
+        skills = asked or list(event.skills or [])
+        hours = _int(request.query_params, "hours", event.hours, 1, 24)
+
+        # Only the named skills are charged in ⚡ — the rule the booking follows,
+        # quoted here by the same helper so the two cannot answer differently.
+        cost, lines = post_cost_cents(request.user, asked)
+        have = max(0, wallet_for(request.user).energy or 0)
+        return Response({
+            "quote": quote_for(event, request.user, skills=skills, hours=hours),
+            "energy": {
+                "cost": cost,
+                "lines": lines,
+                "available": have,
+                "affordable": have >= cost,
+                "short": max(0, cost - have),
+            },
+            # Which list priced it, so the screen can say whose skills these are
+            # rather than implying the member chose a list they never touched.
+            "skills": skills,
+            "named": bool(asked),
+        })
 
 
 class VenueBookingRespondView(APIView):
