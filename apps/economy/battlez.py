@@ -40,6 +40,7 @@ from .models import (
     profile_for,
     wallet_for,
 )
+from .postz import post_cost_cents
 
 User = get_user_model()
 
@@ -232,18 +233,45 @@ class BattleEnterView(APIView):
             )
 
         d = request.data or {}
+        # Entry costs energy = combined skill rates. Skills passed in request.
+        skills = [str(s).strip()[:80] for s in (d.get("skills") or [])
+                  if str(s).strip()][:40]
+        energy_cost, _lines = post_cost_cents(request.user, skills)
+        if energy_cost and (w.energy or 0) < energy_cost:
+            # Insufficient energy paradigm: show balance, needed, how to earn, CTA.
+            return Response({
+                "detail": f"Submitting this costs {energy_cost} ⚡ energy. You have {w.energy or 0}.",
+                "insufficient": True,
+                "energy_needed": energy_cost,
+                "energy_available": w.energy or 0,
+                "earning_actions": [
+                    {"label": "Rate others' work", "url": "/social/rate/"},
+                    {"label": "Refer friends", "url": "/account/refer/"},
+                    {"label": "Check leaderboard", "url": "/leaderboardz/"},
+                ],
+                "cost_breakdown": _lines,
+            }, status=status.HTTP_402_PAYMENT_REQUIRED)
+
         entry = BattleEntry.objects.create(
             battle=b, user=request.user, title=str(d.get("title", "") or "")[:160], **_media(d),
         )
+        # Deduct energy, capped at available (never go negative).
+        charged = 0
+        if energy_cost:
+            charged = min(energy_cost, max(0, w.energy))
+            w.energy -= charged
+            w.save(update_fields=["energy", "updated_at"])
         if b.entry_spinaz:
             # Entry goes to the host. Stated on the button before it's pressed.
             award_spinaz(request.user, -b.entry_spinaz, f"BattleZ entry: {b.title}", app_key="battlez")
             award_spinaz(b.host, b.entry_spinaz, f"BattleZ entry from @{request.user.username}", app_key="battlez")
         notify(b.host, "join", f"@{request.user.username} entered '{b.title}' ⚔️",
                actor=request.user, item_id=b.item_key)
-        return Response({"entry": entry_dict(entry, request),
-                         "battle": battle_dict(b, request)},
-                        status=status.HTTP_201_CREATED)
+        resp = {"entry": entry_dict(entry, request), "battle": battle_dict(b, request)}
+        if energy_cost or charged:
+            resp["energy_charged"] = charged
+            resp["energy_remaining"] = w.energy
+        return Response(resp, status=status.HTTP_201_CREATED)
 
     def delete(self, request, pk):
         """Withdraw. The entry fee is NOT returned — it was paid to the host for

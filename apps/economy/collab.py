@@ -39,6 +39,7 @@ from .models import (
     profile_for,
     wallet_for,
 )
+from .postz import post_cost_cents
 from .views import is_owner
 
 User = get_user_model()
@@ -418,6 +419,28 @@ class CollabDealsView(APIView):
         for entry in settled:
             entry["funded"] = False
             entry["stake_paid"] = 0
+
+        # Creating a collab deal costs energy = combined skill rates of initiator.
+        # Skills passed in request, optional.
+        skills = [str(s).strip()[:80] for s in (d.get("skills") or [])
+                  if str(s).strip()][:40]
+        energy_cost, _lines = post_cost_cents(request.user, skills)
+        if energy_cost:
+            w = wallet_for(request.user)
+            if (w.energy or 0) < energy_cost:
+                return Response({
+                    "detail": f"Creating a collab costs {energy_cost} ⚡ energy. You have {w.energy or 0}.",
+                    "insufficient": True,
+                    "energy_needed": energy_cost,
+                    "energy_available": w.energy or 0,
+                    "earning_actions": [
+                        {"label": "Rate others' work", "url": "/social/rate/"},
+                        {"label": "Refer friends", "url": "/account/refer/"},
+                        {"label": "Check leaderboard", "url": "/leaderboardz/"},
+                    ],
+                    "cost_breakdown": _lines,
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+
         deal = CollabDeal.objects.create(
             initiator=request.user, title=title, currency=currency,
             stake_spinaz=stake, participants=settled, status=CollabDeal.STATUS_DRAFT,
@@ -436,7 +459,18 @@ class CollabDealsView(APIView):
             notify(source_post.author, "system",
                    f"@{request.user.username} started a CollabZ deal on '{source_post.title}' 🤝",
                    actor=request.user, item_id=f"post:{source_post.id}")
-        return Response(deal_dict(deal, request.user), status=status.HTTP_201_CREATED)
+        # Deduct energy, capped at available (never go negative).
+        charged = 0
+        if energy_cost:
+            w = wallet_for(request.user)
+            charged = min(energy_cost, max(0, w.energy))
+            w.energy -= charged
+            w.save(update_fields=["energy", "updated_at"])
+        resp = deal_dict(deal, request.user)
+        if energy_cost or charged:
+            resp["energy_charged"] = charged
+            resp["energy_remaining"] = wallet_for(request.user).energy
+        return Response(resp, status=status.HTTP_201_CREATED)
 
 
 class CollabDetailView(APIView):
