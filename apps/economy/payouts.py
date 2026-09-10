@@ -233,7 +233,12 @@ class PayoutsView(APIView):
                 "quote": quote(request.user),
             }, status=status.HTTP_502_BAD_GATEWAY)
 
-        payout.provider_ref = getattr(tr, "id", None) or None
+        # Coerced rather than trusted: this is a CharField, and an SDK that
+        # hands back an object instead of a string would otherwise be written
+        # straight into it — Django resolves the value as a query expression
+        # and the payout is left PAID-but-unrecorded, which is the one state
+        # that makes a withdrawal impossible to trace afterwards.
+        payout.provider_ref = str(getattr(tr, "id", "") or "") or None
         payout.status = Payout.STATUS_PAID
         payout.completed_at = timezone.now()
         payout.save(update_fields=["provider_ref", "status", "completed_at"])
