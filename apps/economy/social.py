@@ -758,7 +758,13 @@ class SocialView(APIView):
                     post_author = None
                     if item.startswith("post:"):
                         try:
-                            from .models import collaboration_multiplier, check_post_progression, recheck_badges
+                            # NOT recheck_badges — it is imported at module level
+                            # and used below, outside this branch. Re-importing
+                            # it here makes it local to the whole method, so
+                            # rating anything that is not a post (a face, a
+                            # member, a battle entry) reached line 774 with the
+                            # name unbound and answered 500.
+                            from .models import collaboration_multiplier, check_post_progression
                             post_id = item.split(":")[1]
                             post = Post.objects.get(id=post_id)
                             post_author = post.author

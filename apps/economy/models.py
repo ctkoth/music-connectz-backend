@@ -2088,15 +2088,24 @@ def follow_counts(user):
 ENERGY_FLOOR_PER_HOUR = {TIER_FREE: 2, TIER_PREMIUM: 6, TIER_STATZ: 20, TIER_DEBUG: 20}
 
 
-def energy_rate_per_hour(user):
+ENERGY_REACH_DIVISOR = {TIER_FREE: 10, TIER_PREMIUM: 5, TIER_STATZ: 1, TIER_DEBUG: 1}
+
+
+def energy_rate_per_hour(user, tier=None):
     """Hourly passive energy by tier, from the MEDIAN reach across a creator's
     verified sources (Music ConnectZ + verified external accounts):
     Free = median/10, Premium = median/5, StatZ = median/1 — or the tier's
-    floor, whichever is larger."""
+    floor, whichever is larger.
+
+    `tier` answers "what would this be on Premium?" against the member's real
+    reach and badges. It is an override rather than a second function because
+    an upgrade offer quoting a rate the app would not actually pay is the
+    substance rule's failure case with a price tag on it.
+    """
     reach = reach_median(user)
-    m = membership_for(user)
-    divisor = {TIER_FREE: 10, TIER_PREMIUM: 5, TIER_STATZ: 1, TIER_DEBUG: 1}.get(m.tier, 10)
-    floor = ENERGY_FLOOR_PER_HOUR.get(m.tier, ENERGY_FLOOR_PER_HOUR[TIER_FREE])
+    tier = tier or membership_for(user).tier
+    divisor = ENERGY_REACH_DIVISOR.get(tier, 10)
+    floor = ENERGY_FLOOR_PER_HOUR.get(tier, ENERGY_FLOOR_PER_HOUR[TIER_FREE])
     base = max(reach // divisor, floor)
     # BadgeZ effects are read HERE, by the thing they affect. A badge whose
     # multiplier lived only in its description would be a sticker.

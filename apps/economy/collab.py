@@ -39,7 +39,7 @@ from .models import (
     profile_for,
     wallet_for,
 )
-from .postz import post_cost_cents
+from .postz import charge_skill_energy, skills_from
 from .views import is_owner
 
 User = get_user_model()
@@ -348,6 +348,9 @@ class CollabDealsView(APIView):
         out = [deal_dict(maybe_auto_release(d), me, days) for d in list(deals) + extra]
         return Response({"deals": out})
 
+    # Atomic because the ⚡ charge locks the wallet, and select_for_update
+    # outside a transaction locks nothing.
+    @transaction.atomic
     def post(self, request):
         d = request.data or {}
         title = str(d.get("title", "")).strip()[:160]
@@ -420,26 +423,17 @@ class CollabDealsView(APIView):
             entry["funded"] = False
             entry["stake_paid"] = 0
 
-        # Creating a collab deal costs energy = combined skill rates of initiator.
-        # Skills passed in request, optional.
-        skills = [str(s).strip()[:80] for s in (d.get("skills") or [])
-                  if str(s).strip()][:40]
-        energy_cost, _lines = post_cost_cents(request.user, skills)
-        if energy_cost:
-            w = wallet_for(request.user)
-            if (w.energy or 0) < energy_cost:
-                return Response({
-                    "detail": f"Creating a collab costs {energy_cost} ⚡ energy. You have {w.energy or 0}.",
-                    "insufficient": True,
-                    "energy_needed": energy_cost,
-                    "energy_available": w.energy or 0,
-                    "earning_actions": [
-                        {"label": "Rate others' work", "url": "/social/rate/"},
-                        {"label": "Refer friends", "url": "/account/refer/"},
-                        {"label": "Check leaderboard", "url": "/leaderboardz/"},
-                    ],
-                    "cost_breakdown": _lines,
-                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+        # Starting the deal costs ⚡ equal to the combined price of the skills
+        # the starter says they are bringing, from their own rates.
+        # NOT named `refusal` — that is the gates helper imported at module
+        # level and called above, and a local of the same name would shadow it
+        # for the whole method.
+        energy, denied = charge_skill_energy(request.user, skills_from(d))
+        if denied:
+            body, code = denied
+            body["detail"] = (f"Starting this costs {body['energy_needed']} ⚡ "
+                              f"and you have {body['energy_available']}.")
+            return Response(body, status=code)
 
         deal = CollabDeal.objects.create(
             initiator=request.user, title=title, currency=currency,
@@ -459,18 +453,8 @@ class CollabDealsView(APIView):
             notify(source_post.author, "system",
                    f"@{request.user.username} started a CollabZ deal on '{source_post.title}' 🤝",
                    actor=request.user, item_id=f"post:{source_post.id}")
-        # Deduct energy, capped at available (never go negative).
-        charged = 0
-        if energy_cost:
-            w = wallet_for(request.user)
-            charged = min(energy_cost, max(0, w.energy))
-            w.energy -= charged
-            w.save(update_fields=["energy", "updated_at"])
-        resp = deal_dict(deal, request.user)
-        if energy_cost or charged:
-            resp["energy_charged"] = charged
-            resp["energy_remaining"] = wallet_for(request.user).energy
-        return Response(resp, status=status.HTTP_201_CREATED)
+        return Response({**deal_dict(deal, request.user), **energy},
+                        status=status.HTTP_201_CREATED)
 
 
 class CollabDetailView(APIView):

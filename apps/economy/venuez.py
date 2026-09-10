@@ -21,8 +21,8 @@ for the same reason: a price the counterparty can set is not a price.
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .models import VenueBooking, VenueEvent, wallet_for
-from .postz import skill_prices, post_cost_cents
+from .models import VenueBooking, VenueEvent
+from .postz import charge_skill_energy, skill_prices, skills_from
 
 
 def provider_for(event, visitor):
@@ -333,52 +333,34 @@ class VenueBookView(APIView):
                             status=status.HTTP_409_CONFLICT)
 
         d = request.data or {}
-        # Skills for quote: use request skills or event defaults
-        skills_for_quote = [str(s).strip()[:80] for s in (d.get("skills") or [])
-                            if str(s).strip()][:40] or list(event.skills or [])
-        # Skills for energy charge: only if explicitly passed in request
-        skills_for_energy = [str(s).strip()[:80] for s in (d.get("skills") or [])
-                             if str(s).strip()][:40]
+        asked = skills_from(d)
+        skills = asked or list(event.skills or [])
         hours = _int(d, "hours", event.hours, 1, 24)
-        q = quote_for(event, request.user, skills=skills_for_quote, hours=hours)
+        q = quote_for(event, request.user, skills=skills, hours=hours)
 
-        # Booking costs energy for the payer (host or visitor depending on kind).
-        # Only charge energy if skills were explicitly passed in the request.
-        payer = event.host if q.get("payer_is_host") else request.user
-        energy_cost, _energy_lines = post_cost_cents(payer, skills_for_energy) if skills_for_energy else (0, [])
-        if energy_cost:
-            payer_wallet = wallet_for(payer)
-            if (payer_wallet.energy or 0) < energy_cost:
-                return Response({
-                    "detail": f"This booking costs {energy_cost} ⚡ energy. You have {payer_wallet.energy or 0}.",
-                    "insufficient": True,
-                    "payer_is_host": q.get("payer_is_host", False),
-                    "energy_needed": energy_cost,
-                    "energy_available": payer_wallet.energy or 0,
-                    "earning_actions": [
-                        {"label": "Rate others' work", "url": "/social/rate/"},
-                        {"label": "Refer friends", "url": "/account/refer/"},
-                        {"label": "Check leaderboard", "url": "/leaderboardz/"},
-                    ],
-                    "quote": q,
-                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+        # ⚡ is what it costs to PUT THIS UP, so the visitor asking for the seat
+        # pays it, out of their own rates — money's host/visitor direction is a
+        # separate question and `quote_for` above is the one that answers it.
+        # Charging the host here would have let anybody drain a host's ⚡ by
+        # asking for seats they never agreed to, and told them the host's
+        # balance while they did it.
+        #
+        # Only the skills the visitor NAMED are charged for. Falling back to the
+        # room's own list would bill somebody for a line they never wrote.
+        energy, denied = charge_skill_energy(request.user, asked)
+        if denied:
+            body, code = denied
+            body["detail"] = (f"Asking for this seat costs {body['energy_needed']} ⚡ "
+                              f"and you have {body['energy_available']}.")
+            return Response(body, status=code)
 
         b = VenueBooking.objects.create(
-            event=event, visitor=request.user, skills=skills_for_quote, hours=hours,
+            event=event, visitor=request.user, skills=skills, hours=hours,
             quoted_cents=q["amount_cents"], payer_is_host=q.get("payer_is_host", False),
         )
-        # Deduct energy from payer, capped at available.
-        charged = 0
-        if energy_cost:
-            payer_wallet = wallet_for(payer)
-            charged = min(energy_cost, max(0, payer_wallet.energy))
-            payer_wallet.energy -= charged
-            payer_wallet.save(update_fields=["energy", "updated_at"])
-        resp = {"booking": booking_dict(b, request.user), "venue": event_dict(event, request.user)}
-        if energy_cost or charged:
-            resp["energy_charged"] = charged
-            resp["energy_remaining"] = wallet_for(payer).energy
-        return Response(resp, status=status.HTTP_201_CREATED)
+        return Response({"booking": booking_dict(b, request.user),
+                         "venue": event_dict(event, request.user), **energy},
+                        status=status.HTTP_201_CREATED)
 
 
 class VenueBookingRespondView(APIView):

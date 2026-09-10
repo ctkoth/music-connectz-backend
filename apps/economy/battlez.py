@@ -40,7 +40,7 @@ from .models import (
     profile_for,
     wallet_for,
 )
-from .postz import post_cost_cents
+from .postz import charge_skill_energy, skills_from
 
 User = get_user_model()
 
@@ -188,6 +188,10 @@ class BattleEnterView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    # Atomic because the ⚡ charge locks the wallet, and a lock outside a
+    # transaction is not one: two entries sent at once would otherwise both
+    # read the same balance and both be allowed to spend it.
+    @transaction.atomic
     def post(self, request, pk):
         b = Battle.objects.select_related("host").filter(pk=pk).first()
         if not b:
@@ -233,45 +237,30 @@ class BattleEnterView(APIView):
             )
 
         d = request.data or {}
-        # Entry costs energy = combined skill rates. Skills passed in request.
-        skills = [str(s).strip()[:80] for s in (d.get("skills") or [])
-                  if str(s).strip()][:40]
-        energy_cost, _lines = post_cost_cents(request.user, skills)
-        if energy_cost and (w.energy or 0) < energy_cost:
-            # Insufficient energy paradigm: show balance, needed, how to earn, CTA.
-            return Response({
-                "detail": f"Submitting this costs {energy_cost} ⚡ energy. You have {w.energy or 0}.",
-                "insufficient": True,
-                "energy_needed": energy_cost,
-                "energy_available": w.energy or 0,
-                "earning_actions": [
-                    {"label": "Rate others' work", "url": "/social/rate/"},
-                    {"label": "Refer friends", "url": "/account/refer/"},
-                    {"label": "Check leaderboard", "url": "/leaderboardz/"},
-                ],
-                "cost_breakdown": _lines,
-            }, status=status.HTTP_402_PAYMENT_REQUIRED)
+        # The take costs ⚡ equal to the combined price of the skills that went
+        # into it, from the entrant's OWN rates — the same rule, and the same
+        # code, that prices a post.
+        # NOT named `refusal` — that is the gates helper imported at module
+        # level and called above, and a local of the same name would shadow it
+        # for the whole method.
+        energy, denied = charge_skill_energy(request.user, skills_from(d))
+        if denied:
+            body, code = denied
+            body["detail"] = f"Entering costs {body['energy_needed']} ⚡ and you have {body['energy_available']}."
+            return Response(body, status=code)
 
         entry = BattleEntry.objects.create(
             battle=b, user=request.user, title=str(d.get("title", "") or "")[:160], **_media(d),
         )
-        # Deduct energy, capped at available (never go negative).
-        charged = 0
-        if energy_cost:
-            charged = min(energy_cost, max(0, w.energy))
-            w.energy -= charged
-            w.save(update_fields=["energy", "updated_at"])
         if b.entry_spinaz:
             # Entry goes to the host. Stated on the button before it's pressed.
             award_spinaz(request.user, -b.entry_spinaz, f"BattleZ entry: {b.title}", app_key="battlez")
             award_spinaz(b.host, b.entry_spinaz, f"BattleZ entry from @{request.user.username}", app_key="battlez")
         notify(b.host, "join", f"@{request.user.username} entered '{b.title}' ⚔️",
                actor=request.user, item_id=b.item_key)
-        resp = {"entry": entry_dict(entry, request), "battle": battle_dict(b, request)}
-        if energy_cost or charged:
-            resp["energy_charged"] = charged
-            resp["energy_remaining"] = w.energy
-        return Response(resp, status=status.HTTP_201_CREATED)
+        return Response({"entry": entry_dict(entry, request),
+                         "battle": battle_dict(b, request), **energy},
+                        status=status.HTTP_201_CREATED)
 
     def delete(self, request, pk):
         """Withdraw. The entry fee is NOT returned — it was paid to the host for
