@@ -47,11 +47,28 @@ def resolve_collisions(apps, schema_editor):
     seeing in the deploy log rather than discovering from a support message.
     """
     User = apps.get_model("auth", "User")
+
+    # WHO keeps it matters more than it looks. An account with a usable
+    # password signs in BY that address and resets its password to it; an
+    # OAuth-only account (unusable password) never types it and gets in
+    # through the provider either way. So the password-holder keeps the
+    # address and the provider-only account gives it up — that is the
+    # assignment where nobody is locked out.
+    #
+    # Django marks an unusable password by prefixing the hash with "!", which
+    # is the same check `has_usable_password()` makes; the historical model
+    # this migration is handed has no methods, so it is spelled out.
+    def rank(row):
+        _uid, _email, password = row
+        return (0 if not (password or "").startswith("!") else 1, _uid)
+
+    rows = sorted(
+        User.objects.exclude(email="").values_list("id", "email", "password"),
+        key=rank,
+    )
+
     seen, cleared = {}, 0
-    # Oldest first, so the first time an address is seen is the one that keeps
-    # it. `id` rather than `date_joined`: it cannot be null and cannot tie.
-    for uid, email in (User.objects.exclude(email="")
-                       .order_by("id").values_list("id", "email")):
+    for uid, email, _pw in rows:
         key = (email or "").strip().lower()
         if not key:
             continue

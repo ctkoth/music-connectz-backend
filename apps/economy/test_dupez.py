@@ -14,6 +14,7 @@ when it is your own account and your own decision, and is not survivable when
 somebody else pressed the button.
 """
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError, transaction
 from django.test import RequestFactory, TestCase
 from rest_framework.test import APIClient
 
@@ -37,8 +38,26 @@ def member(name, email=""):
     return User.objects.create_user(name, email, PW)
 
 
+def _pair(one, two, shared="shared@gmail.com"):
+    """Two accounts the platform can tell are one person.
+
+    Since `accounts_user_email_ci_uniq` landed, two accounts CANNOT share an
+    address — so a duplicate pair is built the way a real one now arrives:
+    different addresses, one sign-in behind both. That is also the case this
+    module was written for ("Corey's three"), and it is equally strong.
+    """
+    a = member(one, f"{one}@x.com")
+    b = member(two, f"{two}@x.com")
+    oauth(a, "google", f"g-{one}", shared)
+    oauth(b, "soundcloud", f"s-{two}", shared)
+    return a, b
+
+
 def owner(name="boss"):
-    u = User.objects.create_user(name, "boss@mcz.net", PW)
+    # Per-name, because two accounts can no longer share an address — and a
+    # second owner is exactly what test_an_owner_account_cannot_be_deleted_here
+    # needs.
+    u = User.objects.create_user(name, f"{name}@mcz.net", PW)
     u.is_staff = u.is_superuser = True
     u.save(update_fields=["is_staff", "is_superuser"])
     return u
@@ -85,7 +104,13 @@ class SignalTests(TestCase):
     nobody can undo is the substance rule's exact failure case."""
 
     def test_the_same_account_email_is_a_strong_signal(self):
-        a, b = member("a", "same@x.com"), member("b", "SAME@x.com")
+        # Set in memory, not saved: the index now refuses a second account on
+        # one address, so this pair cannot EXIST (see SameEmailTests).
+        # `signals_between` reads the objects it is handed, so the detection
+        # itself is still exercised exactly as written — which keeps the branch
+        # honest for any row that predates the index.
+        a, b = member("a", "one@x.com"), member("b", "two@x.com")
+        a.email, b.email = "same@x.com", "SAME@x.com"
         sig = dupez.signals_between(a, b)
         self.assertEqual([s["key"] for s in sig], ["account_email"])
         self.assertTrue(dupez.has_strong(sig))
@@ -124,7 +149,8 @@ class SignalTests(TestCase):
         self.assertEqual(dupez.signals_between(member("a", ""), member("b", "")), [])
 
     def test_nothing_returns_a_likelihood(self):
-        a, b = member("a", "same@x.com"), member("b", "same@x.com")
+        a, b = member("a", "one@x.com"), member("b", "two@x.com")
+        a.email = b.email = "same@x.com"          # in memory; see above
         for s in dupez.signals_between(a, b):
             self.assertEqual(set(s), {"key", "detail", "label", "weight"})
 
@@ -133,15 +159,17 @@ class GroupTests(TestCase):
     def test_three_accounts_chained_by_different_signals_are_one_group(self):
         # a~b by email, b~c by sign-in. The owner gets one group of three, not
         # two overlapping pairs to reconcile by eye.
-        a, b, c = member("a", "same@x.com"), member("b", "same@x.com"), member("c", "other@x.com")
-        oauth(b, "google", "g1", "corey@gmail.com")
-        oauth(c, "github", "h1", "corey@gmail.com")
+        a, b, c = member("a", "one@x.com"), member("b", "two@x.com"), member("c", "other@x.com")
+        oauth(a, "spotify", "s1", "chain@gmail.com")
+        oauth(b, "google", "g1", "chain@gmail.com")     # a~b
+        oauth(b, "github", "h1", "corey@gmail.com")
+        oauth(c, "microsoft", "m1", "corey@gmail.com")  # b~c
         groups = dupez.duplicate_groups()
         self.assertEqual(len(groups), 1)
         self.assertEqual({x["username"] for x in groups[0]["accounts"]}, {"a", "b", "c"})
 
     def test_the_oldest_is_suggested_and_only_suggested(self):
-        a, b = member("a", "same@x.com"), member("b", "same@x.com")
+        a, b = _pair("a", "b")
         g = dupez.duplicate_groups()[0]
         self.assertEqual(g["suggested_keep"], "a")
         # It is a default in a form. Nothing in this module acts on it.
@@ -161,16 +189,16 @@ class GroupTests(TestCase):
 
 class MemberVisibilityTests(TestCase):
     def test_a_member_sees_only_their_own_group(self):
-        a, b = member("a", "same@x.com"), member("b", "same@x.com")
-        member("c", "c@x.com"), member("d", "c@x.com")  # somebody else's pair
+        a, b = _pair("a", "b")
+        _pair("c", "d", "someone@else.com")             # somebody else's pair
         r = client_for(a).get("/api/economy/dupez/")
         self.assertFalse(r.data["owner"])
         self.assertEqual(len(r.data["groups"]), 1)
         self.assertEqual({x["username"] for x in r.data["groups"][0]["accounts"]}, {"a", "b"})
 
     def test_the_owner_sees_every_group(self):
-        member("a", "same@x.com"), member("b", "same@x.com")
-        member("c", "c@x.com"), member("d", "c@x.com")
+        _pair("a", "b")
+        _pair("c", "d", "someone@else.com")
         r = client_for(owner()).get("/api/economy/dupez/")
         self.assertTrue(r.data["owner"])
         self.assertEqual(len(r.data["groups"]), 2)
@@ -178,47 +206,44 @@ class MemberVisibilityTests(TestCase):
     def test_a_member_never_sees_an_account_only_weakly_tied_to_them(self):
         # a and b share an email; c is chained in through b only. Showing c to
         # a would be a people-search built by accident.
-        a, b = member("a", "same@x.com"), member("b", "same@x.com")
+        a, b = _pair("a", "b")
         c = member("c", "other@x.com")
-        oauth(b, "google", "g1", "corey@gmail.com")
-        oauth(c, "github", "h1", "corey@gmail.com")
+        oauth(b, "github", "h1", "corey@gmail.com")
+        oauth(c, "microsoft", "m1", "corey@gmail.com")
         r = client_for(a).get("/api/economy/dupez/")
         self.assertEqual(r.data["groups"], [])
 
 
 class SameEmailTests(TestCase):
-    """Your own mess, your own email, your own tidy-up."""
+    """The self-serve tidy-up, and why it can no longer be reached.
 
-    def setUp(self):
-        self.me = member("me", "same@x.com")
-        self.dupe = member("dupe", "same@x.com")
-        self.c = client_for(self.me)
+    `ClaimView` branches on the `account_email` signal: both accounts on one
+    address is your own mess, so you may close the other yourself rather than
+    wait for a review. That branch is unreachable for anything created after
+    `accounts_user_email_ci_uniq` — the database refuses the second account, so
+    the state it exists for cannot arise.
 
-    def test_it_asks_before_it_deletes_and_shows_what_goes(self):
-        r = self.c.post("/api/economy/dupez/claim/", {"username": "dupe"}, format="json")
-        self.assertEqual(r.status_code, 409)
-        self.assertTrue(r.data["needs_confirm"])
-        self.assertEqual(r.data["account"]["username"], "dupe")
-        self.assertTrue(User.objects.filter(username="dupe").exists())
+    Prevention replacing detection is the better trade: a duplicate that cannot
+    be made needs no tidy-up. What remains is the cross-email case, which was
+    always a claim and still is — ClaimTests below covers it. Both halves are
+    pinned so the day somebody drops the index, the tests say what changed.
+    """
 
-    def test_confirmed_it_goes(self):
-        r = self.c.post("/api/economy/dupez/claim/",
-                        {"username": "dupe", "confirm": "DELETE"}, format="json")
-        self.assertEqual(r.status_code, 200)
-        self.assertFalse(User.objects.filter(username="dupe").exists())
-        self.assertEqual(AccountClaim.objects.count(), 0)
+    def test_the_database_refuses_a_second_account_on_one_address(self):
+        member("me", "same@x.com")
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                member("dupe", "SAME@x.com")
 
-    def test_money_turns_it_into_a_review_instead(self):
-        # The one thing a member may not do to themselves by accident.
-        w = wallet_for(self.dupe)
-        w.money_cents = 1250
-        w.save()
-        r = self.c.post("/api/economy/dupez/claim/",
-                        {"username": "dupe", "confirm": "DELETE"}, format="json")
+    def test_the_reachable_strong_signal_opens_a_claim_rather_than_deleting(self):
+        """No self-serve for a pair we INFERRED: the member never proved the
+        two are theirs, so somebody looks at it before anything is deleted."""
+        me, _ = _pair("me", "dupe")
+        r = client_for(me).post("/api/economy/dupez/claim/",
+                                {"username": "dupe"}, format="json")
         self.assertEqual(r.status_code, 202)
-        self.assertIn("12.50", r.data["detail"])
+        self.assertIn("claim", r.data)
         self.assertTrue(User.objects.filter(username="dupe").exists())
-        self.assertEqual(AccountClaim.objects.get().status, AccountClaim.OPEN)
 
 
 class ClaimTests(TestCase):
@@ -456,7 +481,7 @@ class AddressTests(TestCase):
         noticing on its own: a same-email duplicate can only have arrived
         through OAuth or an email edit, never through the signup form.
         """
-        a, b = member("first", "same@x.com"), member("second", "same@x.com")
+        a, b = _pair("first", "second")
         for u in (a, b):
             u.addresses.create(ip=ip, signup=True)
         return a, b
