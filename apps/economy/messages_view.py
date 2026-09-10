@@ -3,7 +3,11 @@
 Respects blocks, enforces the sender's tier character limit, and notifies the
 recipient. GET lists conversations (or a thread with ?with=username).
 """
+import logging
+
+from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.mail import send_mail
 from django.db.models import Q
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -15,9 +19,12 @@ from datetime import timedelta
 from django.utils import timezone
 
 from .catalog import limits_for, edit_window_for
-from .models import Message, blocked_user_ids, membership_for, notify
+from .models import (
+    Message, Notification, blocked_user_ids, membership_for, notify,
+)
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 def _msg(m, me):
@@ -34,6 +41,67 @@ def _msg(m, me):
         "edited_at": m.edited_at.isoformat() if m.edited_at else None,
         "edit_history": m.edit_history or [],
     }
+
+
+def _email_new_message(recipient, sender, body):
+    """Tell them by email as well as in-app — once, and never at the message's
+    expense.
+
+    `notify()` writes a Notification row and stops there, which is only any use
+    to somebody who happens to open the app. A direct message is the one thing
+    here that is *waiting on a person*, so it is worth reaching them where they
+    are.
+
+    Three refusals, in the order they actually come up:
+
+      * **No address.** Every account made through a provider that hands one
+        over has `''` — Twitter gives none at all. Nothing to send to.
+      * **Opted out.** A member who turned notifications off meant it.
+      * **Already told and not read.** Ten messages in a row is ONE email. A
+        second is worth nothing to somebody who has not opened the first, and
+        it is exactly how a product teaches people to filter it to spam.
+
+    Wrapped whole and never re-raised: the message is already saved and the
+    notification already written. A mail server having a bad day must not turn
+    a delivered message into a 500.
+    """
+    to = (getattr(recipient, "email", "") or "").strip()
+    if not to:
+        return False
+    try:
+        prefs = getattr(recipient, "onboarding_preferences", None)
+        if prefs is not None and not prefs.notifications_enabled:
+            return False
+        # Counted BEFORE this message's own notification is written, so the row
+        # we just made can never be the one that suppresses its own email.
+        if Notification.objects.filter(
+            user=recipient, actor=sender, kind="message", read=False
+        ).exists():
+            return False
+
+        preview = (body or "").strip().replace("\r", "")
+        if len(preview) > 300:
+            preview = preview[:297] + "..."
+
+        send_mail(
+            subject=f"@{sender.username} messaged you on Music ConnectZ",
+            message=(
+                f"Hi {recipient.username},\n\n"
+                f"@{sender.username} sent you a message:\n\n"
+                f"{preview}\n\n"
+                f"Reply here: {getattr(settings, 'FRONTEND_URL', '').rstrip('/')}/message\n\n"
+                "You're getting this because someone messaged you directly. "
+                "Turn these off in your preferences any time.\n\n"
+                "— Music ConnectZ"
+            ),
+            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+            recipient_list=[to],
+            fail_silently=False,
+        )
+        return True
+    except Exception:
+        logger.exception("Could not email @%s about a message", recipient.username)
+        return False
 
 
 class MessagesView(APIView):
@@ -115,5 +183,9 @@ class MessagesView(APIView):
         if len(body) > cap:
             return Response({"detail": f"Message exceeds your {cap}-character limit — upgrade for more."}, status=status.HTTP_400_BAD_REQUEST)
         m = Message.objects.create(sender=me, recipient=other, body=body, media_url=media_url, media_type=media_type)
+        # Email BEFORE the notification is written: the "already told them"
+        # check reads unread notifications, and this message's own row would
+        # otherwise suppress its own email.
+        _email_new_message(other, me, body)
         notify(other, "message", f"@{me.username} messaged you 💬", actor=me, item_id=f"dm:{me.username}")
         return Response(_msg(m, me), status=status.HTTP_201_CREATED)

@@ -2,6 +2,7 @@ import logging
 import re
 
 from django.contrib.auth import get_user_model
+from django.core import signing
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -69,7 +70,31 @@ def _note_seen(user, request):
         logger.exception("dupez: could not record address for %s", getattr(user, "id", "?"))
 
 
-def _user_from_oauth(info, with_created=False):
+# A provider hand-off we have verified but not yet acted on.
+#
+# An OAuth authorization code is single-use: the moment we exchange it, it is
+# spent. So a member who is ASKED "do you already have an account?" cannot be
+# made to answer by replaying the original request — the second POST carries
+# this instead. It is signed by us and short-lived, so it proves we did the
+# verification without trusting the client to hand back a uid.
+PENDING_SALT = "oauth-pending-choice"
+PENDING_MAX_AGE = 15 * 60
+
+
+def _pending_token(info):
+    return signing.dumps(info, salt=PENDING_SALT)
+
+
+def _read_pending(token):
+    try:
+        return signing.loads(token, salt=PENDING_SALT, max_age=PENDING_MAX_AGE)
+    except signing.SignatureExpired:
+        raise OAuthError("That took too long — start the sign-in again.")
+    except signing.BadSignature:
+        raise OAuthError("That sign-in could not be verified. Start again.")
+
+
+def _user_from_oauth(info, with_created=False, create=True):
     """Find-or-create a user from a verified OAuth payload, return (user).
 
     `with_created` returns `(user, created)` instead, so a caller can tell a
@@ -80,6 +105,18 @@ def _user_from_oauth(info, with_created=False):
     only do it when the provider actually ASSERTED the address is verified.
     A provider that lets someone set an arbitrary unverified email would
     otherwise be a way to take over any account by claiming its address.
+
+    `create=False` stops at the point where a NEW account would be opened and
+    returns `None` instead, so the caller can ask the member whether they
+    already have one. That question is only worth asking here — where we could
+    not tell — and not on the two paths above it, which know:
+
+      * a known `provider_uid` IS the member, decided by a unique constraint;
+      * a verified email match IS the member, and links silently.
+
+    Asking a returning member on every sign-in would be friction on the common
+    path and, worse, would train people to click through an identity question
+    — which is how a safeguard turns into a duplicate factory.
     """
     identity = OAuthIdentity.objects.filter(
         provider=info["provider"], provider_uid=info["uid"]
@@ -101,6 +138,13 @@ def _user_from_oauth(info, with_created=False):
                 "so sign in with your original method and link it from there."
             )
         user = match
+
+    if not user and not create:
+        # We genuinely cannot tell. Twitter reaches here EVERY time — its API
+        # returns no email at all, so before this there was nothing to match on
+        # and a second account was opened for an existing member every single
+        # time they used it.
+        return (None, False) if with_created else None
 
     if not user:
         made = True
@@ -379,6 +423,21 @@ class OAuthLoginView(APIView):
     def post(self, request, provider):
         data = request.data or {}
         try:
+            # Answering the "do you already have one?" question. The original
+            # authorization code was spent on the first exchange, so the answer
+            # carries the signed result of that exchange instead of re-running
+            # it. Never the client's own idea of who they are.
+            if data.get("pending"):
+                info = _read_pending(data["pending"])
+                if info.get("provider") != provider:
+                    raise OAuthError("That sign-in was for a different provider.")
+                user, made = _user_from_oauth(info, with_created=True, create=True)
+                _note_signup(user, request) if made else _note_seen(user, request)
+                return Response({
+                    "user": PublicUserSerializer(user).data,
+                    **issue_tokens(user),
+                })
+
             if provider == "google":
                 info = verify_google(data.get("credential") or data.get("id_token"))
             elif provider == "github":
@@ -401,9 +460,28 @@ class OAuthLoginView(APIView):
                 )
             # Linking lives inside the same try so a refused link answers 400
             # with its reason, not a 500.
-            user, made = _user_from_oauth(info, with_created=True)
+            user, made = _user_from_oauth(info, with_created=True, create=False)
         except OAuthError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if user is None:
+            # A new identity we could not tie to anybody. Ask rather than
+            # assume — but never refuse: a member whose only sign-in is a
+            # provider that hands over no email has to be able to join, or the
+            # safeguard becomes a limit that says WHETHER.
+            #
+            # 200, not an error: nothing went wrong, we just have a question.
+            return Response({
+                "needs_choice": True,
+                "provider": provider,
+                "email": info.get("email", ""),
+                "suggested_username": _unique_username(
+                    info.get("name")
+                    or (info["email"].split("@")[0] if info.get("email") else provider)
+                ),
+                "pending": _pending_token(info),
+                "detail": "Do you already have a Music ConnectZ account?",
+            })
 
         # Signing in with a different provider is how most duplicates on this
         # platform get made, so an account created HERE is the one worth
