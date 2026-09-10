@@ -26,28 +26,28 @@ RULES = [
         # Stated as the flat rule Corey asked for, and then the reason — in
         # that order, because a rule that opens with its excuse reads as
         # negotiable.
-        "rule": "Every member gets one account. Duplicate accounts are not allowed.",
+        "rule": "Every member gets one account 👤. Duplicate accounts are not allowed 🚫",
         "why": (
-            "Everything here is counted per person: reach, ratings, referral "
-            "rewards, the daily AI allowance, one vote in a battle. A second "
+            "Everything here is counted per person 📊: reach, ratings, referral "
+            "rewards ✅, the daily AI allowance, one vote 🗳️ in a battle. A second "
             "account is a second helping of all of it, and every one of those "
             "numbers stops meaning anything the moment they can be doubled. "
             "It also costs the member who has one — their work sits split "
-            "across two profiles and neither is the one they are building."
+            "across two profiles and neither is the one they are building 🏗️."
         ),
         "what_happens": (
-            "Tell us and it is sorted: say which account is yours in DupeZ and "
-            "the other one goes. Accounts kept deliberately to farm rewards or "
-            "vote twice are removed by the owner, and what they earned goes "
+            "Tell us and it is sorted ✅: say which account is yours in DupeZ and "
+            "the other one goes 🗑️. Accounts kept deliberately to farm rewards 🚜 or "
+            "vote twice 🗳️ are removed by the owner, and what they earned 💎 goes "
             "with them."
         ),
         # Signing in with Google in June and SoundCloud in August makes two
         # accounts without anybody meaning to. Saying so in the rule is the
         # difference between a member coming forward and hiding it.
         "note": (
-            "Ending up with two by accident is common — a different sign-in "
+            "Ending up with two by accident is common 🤷 — a different sign-in "
             "button is all it takes. That is not what this rule is about, and "
-            "owning up to it costs you nothing."
+            "owning up to it ✅ costs you nothing."
         ),
         "enforced_by": "apps/economy/dupez.py",
     },
