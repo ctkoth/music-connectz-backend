@@ -44,9 +44,21 @@ class OAuthConfigTests(TestCase):
         self.assertEqual(r.data["warnings"], [])
 
     @override_settings(APPLE_OAUTH_CLIENT_ID="ABCDE12345")
-    def test_an_apple_team_id_in_the_services_id_field_is_called_out(self):
-        w = self.client.get(URL).data["warnings"]
-        self.assertTrue(any("Services ID" in x for x in w), w)
+    def test_apple_is_disabled_so_its_settings_are_not_reported_on(self):
+        """Apple sign-in is off (see OAuthConfigView), and this used to assert
+        the Services-ID warning it would give if it were on.
+
+        It failed on every run for as long as Apple has been disabled, which is
+        worse than no test: two permanently red results teach everybody reading
+        the suite that red is the normal colour, and the next real failure
+        arrives in a list that already had failures in it.
+
+        So it pins what is actually true. Re-enabling Apple should flip this
+        test back rather than leave it lying in the other direction.
+        """
+        d = self.client.get(URL).data
+        self.assertNotIn("apple", d)
+        self.assertFalse(any("Services ID" in x for x in d["warnings"]), d["warnings"])
 
     @override_settings(GOOGLE_OAUTH_CLIENT_ID=GOOD)
     def test_it_needs_no_login(self):
@@ -104,8 +116,15 @@ class HalfConfiguredTests(TestCase):
         from apps.accounts.oauth import OAUTH2_PROVIDERS
 
         r = self.client.get(URL)
-        for name in ("google", "apple", "github", *OAUTH2_PROVIDERS):
+        # Apple is deliberately absent: the backend retains verify_apple() but
+        # OAuthConfigView does not offer it and the button grid has no Apple
+        # button either, so all three agree. It is listed here as excluded
+        # rather than silently dropped, because "a provider missing from the
+        # map" is exactly what this test exists to catch — the exclusion has to
+        # be the deliberate kind.
+        for name in ("google", "github", *OAUTH2_PROVIDERS):
             self.assertIn(name, r.data, name)
+        self.assertNotIn("apple", r.data)
 
     def test_a_code_flow_provider_configured_only_in_env_is_served(self):
         # spotify/microsoft/facebook/soundcloud/twitter have no settings entry
