@@ -13,7 +13,7 @@ from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
 from .rulez import RulezView
 from .voice import VoiceZView
-from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView,
+from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView, DupeZVerifyView,
                     DupeZReviewView, DupeZView)
 from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
@@ -368,6 +368,9 @@ urlpatterns = [
     path("dupez/", DupeZView.as_view(), name="economy-dupez"),
     path("dupez/claim/", DupeZClaimView.as_view(), name="economy-dupez-claim"),
     path("dupez/review/", DupeZReviewView.as_view(), name="economy-dupez-review"),
+    # The account being claimed answers for itself — a weak signal is a
+    # coincidence as often as a person, and they are the only party that knows.
+    path("dupez/verify/", DupeZVerifyView.as_view(), name="economy-dupez-verify"),
     path("dupez/delete/", DupeZDeleteView.as_view(), name="economy-dupez-delete"),
     # The system-raised half of the queue: a new account made from an address
     # another account was made from. A flag, never a block and never a delete.

@@ -535,41 +535,56 @@ class DupeZClaimView(APIView):
 
         signals = signals_between(request.user, target)
         note = str(d.get("note", ""))[:2000]
-        same_email = any(s["key"] == "account_email" for s in signals)
+        # SELF-SERVE needs proof, not a hunch — and `has_strong` is what
+        # "proof" means here. It was `account_email` alone, which
+        # `accounts_user_email_ci_uniq` (accounts.0002) then made unreachable:
+        # the database refuses a second account on one address, so two live
+        # accounts cannot share one and that signal can no longer fire. Gating
+        # on the strength rather than on the one signal keeps the path open for
+        # the case that DOES still happen, and is the case this module was
+        # written for — different addresses, one verified sign-in behind both.
+        #
+        # It is not a weaker bar. A shared provider identity means the same
+        # person authenticated with the provider on both accounts, which is at
+        # least as good as two rows agreeing on a string. Anything WEAK still
+        # waits for the owner, which is the whole reason weak signals never
+        # group anybody.
+        proven = has_strong(signals)
 
-        # UNREACHABLE for anything created after `accounts_user_email_ci_uniq`
-        # (accounts.0002): the database refuses a second account on one
-        # address, so two live accounts can no longer share one and this signal
-        # cannot fire. Kept rather than deleted because it is still correct for
-        # a row that predates the index, and because dropping the index must
-        # not silently drop the self-serve path with it — test_dupez pins both
-        # halves. The money guard below is NOT tied to this branch: it lives in
-        # `delete_duplicate`, which every delete path goes through.
-        if same_email:
+        if proven:
             card = account_card(target)
             owed = _forfeit(card)
-            if owed:
-                # The one thing a member may not do to themselves by accident.
-                # It becomes a claim so somebody looks at where the money goes.
-                return Response({
-                    "claim": _claim_dict(_open_claim(request.user, target, signals, note)),
-                    "detail": (f"That account holds {owed / 100:.2f}. It needs a review "
-                               f"so the balance moves to this account rather than vanishing."),
-                }, status=status.HTTP_202_ACCEPTED)
             if str(d.get("confirm", "")) != "DELETE":
                 return Response({
                     "needs_confirm": True,
                     "account": card,
-                    "detail": ('Both accounts use the same email, so you can close that one '
-                               'yourself. Send {"confirm": "DELETE"} to do it.'),
+                    # The cost/gain rule applied to the most expensive action in
+                    # the app: the whole list of what goes, and what arrives,
+                    # BEFORE the button that does it.
+                    "sweeps_cents": owed,
+                    "detail": (
+                        "Both accounts are provably yours, so you can close that "
+                        "one yourself."
+                        + (f" Its {owed / 100:.2f} moves to this account."
+                           if owed else "")
+                        + ' Send {"confirm": "DELETE"} to do it.'
+                    ),
                 }, status=status.HTTP_409_CONFLICT)
-            return Response(delete_duplicate(target, request.user, by=request.user,
-                                             reason="same email, closed by the member"))
+            # `keep` is the claimant, so the cash sweeps to THEM rather than
+            # being destroyed — and a member closing their own duplicate is not
+            # made to wait on a review to keep money that was already theirs.
+            # `delete_duplicate` is still the only thing that moves it, so the
+            # "may never destroy money" guard and the KIND_TRANSFER receipt are
+            # the same ones every other delete path goes through.
+            return Response(delete_duplicate(
+                target, request.user, by=request.user,
+                reason="provably the same person, closed by the member"))
 
         claim = _open_claim(request.user, target, signals, note)
         return Response({"claim": _claim_dict(claim), "detail": (
-            "Filed. The accounts use different emails, so this one is reviewed by "
-            "the owner before anything is deleted — you'll be told either way."
+            "Filed. Nothing here PROVES the two are the same person, so the other "
+            "account has to confirm it before anything is deleted. They've been "
+            "asked — you'll be told either way."
         )}, status=status.HTTP_202_ACCEPTED)
 
 
@@ -579,6 +594,14 @@ def _open_claim(claimant, target, signals, note):
         defaults={"note": note, "signals": signals, "status": AccountClaim.OPEN,
                   "resolved_by": None, "resolved_note": "", "resolved_at": None},
     )
+    # The person who actually KNOWS is the account being claimed. An owner
+    # looking at two weak signals is guessing from further away than they are,
+    # so they are asked rather than adjudicated — and asked in a notification
+    # that names what would happen, because the answer deletes an account.
+    notify(target, "system",
+           f"@{claimant.username} says this account is also theirs and wants to "
+           f"close it. Only you can confirm that.",
+           actor=claimant, item_id="dupez")
     return claim
 
 
@@ -778,3 +801,95 @@ class DupeZFlagsView(APIView):
         flag.resolved_at = timezone.now()
         flag.save(update_fields=["status", "resolved_by", "resolved_note", "resolved_at"])
         return Response({"flag": flag.id, "status": flag.status})
+
+
+class DupeZVerifyView(APIView):
+    """The account being claimed answers for itself.
+
+    A weak signal — two accounts on one invite, or one address — is a
+    coincidence as often as it is a person, and an owner reading it is guessing
+    from further away than the account itself is. So a weak claim asks the
+    TARGET, who is the only party that actually knows.
+
+    Two things this must not become:
+
+    * **A way to take somebody's account by asking nicely.** The answer deletes
+      an account and moves its balance, so the question states both in full and
+      the confirmation is explicit — the same bar the self-serve path uses on
+      somebody's own account.
+    * **A way to find out who somebody is.** The claimant's name is shown
+      because you cannot answer "is this you?" without it, and nothing else
+      about them is.
+
+    Saying no is final and costs the target nothing: the claim is refused and
+    their account is untouched. Saying nothing is also an answer — an
+    unanswered claim stays open for the owner's queue rather than lapsing into
+    a delete.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        rows = (AccountClaim.objects
+                .filter(target=request.user, status=AccountClaim.OPEN)
+                .select_related("claimant"))
+        return Response({"claims": [{
+            "id": c.id,
+            "claimant": c.claimant.username,
+            "note": c.note,
+            "signals": c.signals,
+            "created_at": c.created_at,
+            # What agreeing would do, before they agree to it.
+            "deletes": account_card(request.user),
+            "sweeps_cents": _forfeit(account_card(request.user)),
+        } for c in rows]})
+
+    def post(self, request):
+        d = request.data or {}
+        claim = AccountClaim.objects.filter(
+            pk=d.get("claim"), target=request.user, status=AccountClaim.OPEN
+        ).first()
+        if not claim:
+            return Response({"detail": "No open claim on this account."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        if not d.get("agree"):
+            claim.status = AccountClaim.REFUSED
+            claim.resolved_by = request.user
+            claim.resolved_note = str(d.get("note", ""))[:2000] or "Not me."
+            claim.resolved_at = timezone.now()
+            claim.save(update_fields=["status", "resolved_by", "resolved_note",
+                                      "resolved_at"])
+            notify(claim.claimant, "system",
+                   f"@{request.user.username} says that account isn't yours.",
+                   actor=request.user, item_id="dupez")
+            return Response({"claim": _claim_dict(claim),
+                             "detail": "Refused. Your account is untouched."})
+
+        card = account_card(request.user)
+        if str(d.get("confirm", "")) != "DELETE":
+            return Response({
+                "needs_confirm": True,
+                "account": card,
+                "sweeps_cents": _forfeit(card),
+                "detail": (
+                    f"This closes THIS account and everything on it."
+                    + (f" Its {_forfeit(card) / 100:.2f} moves to "
+                       f"@{claim.claimant.username}." if _forfeit(card) else "")
+                    + ' Send {"confirm": "DELETE"} if that is what you want.'
+                ),
+            }, status=status.HTTP_409_CONFLICT)
+
+        receipt = delete_duplicate(request.user, claim.claimant, by=request.user,
+                                   reason=f"confirmed by the account itself "
+                                          f"(claim #{claim.id})")
+        # The row outlives the account it was about — CASCADE would take the
+        # claim with the target and leave the claimant's side of the story with
+        # nothing behind it.
+        AccountClaim.objects.filter(pk=claim.pk).update(
+            status=AccountClaim.APPROVED, resolved_note="Confirmed by the target.",
+            resolved_at=timezone.now())
+        notify(claim.claimant, "system",
+               f"That account was confirmed as yours and closed.",
+               item_id="dupez")
+        return Response(receipt)

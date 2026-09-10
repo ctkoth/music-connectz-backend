@@ -53,6 +53,19 @@ def _pair(one, two, shared="shared@gmail.com"):
     return a, b
 
 
+def _weak_pair(one, two):
+    """Two accounts tied only by a coincidence — one invite between them.
+
+    Weak is the interesting case now: it is never self-serve, and it is not
+    the owner's guess either. The account being claimed answers for itself.
+    """
+    ref = member(f"ref-{one}", f"ref-{one}@x.com")
+    a, b = member(one, f"{one}@x.com"), member(two, f"{two}@x.com")
+    record_referral(ref, a)
+    record_referral(ref, b)
+    return a, b
+
+
 def owner(name="boss"):
     # Per-name, because two accounts can no longer share an address — and a
     # second owner is exactly what test_an_owner_account_cannot_be_deleted_here
@@ -214,19 +227,19 @@ class MemberVisibilityTests(TestCase):
         self.assertEqual(r.data["groups"], [])
 
 
-class SameEmailTests(TestCase):
-    """The self-serve tidy-up, and why it can no longer be reached.
+class SelfServeTests(TestCase):
+    """Closing your own duplicate, and keeping what was in it.
 
-    `ClaimView` branches on the `account_email` signal: both accounts on one
-    address is your own mess, so you may close the other yourself rather than
-    wait for a review. That branch is unreachable for anything created after
-    `accounts_user_email_ci_uniq` — the database refuses the second account, so
-    the state it exists for cannot arise.
+    The bar is PROOF, not a hunch: a strong signal means the same person
+    authenticated on both accounts. It used to be `account_email` alone, which
+    `accounts_user_email_ci_uniq` made unreachable — the database refuses a
+    second account on one address — so the gate is the strength now, which
+    keeps the path open for the case that still happens and is the one this
+    module was written for.
 
-    Prevention replacing detection is the better trade: a duplicate that cannot
-    be made needs no tidy-up. What remains is the cross-email case, which was
-    always a claim and still is — ClaimTests below covers it. Both halves are
-    pinned so the day somebody drops the index, the tests say what changed.
+    Weak signals still wait for the owner. Two friends on one invite are two
+    people, and an accusation built out of a coincidence is worse than a
+    duplicate nobody noticed.
     """
 
     def test_the_database_refuses_a_second_account_on_one_address(self):
@@ -235,26 +248,86 @@ class SameEmailTests(TestCase):
             with transaction.atomic():
                 member("dupe", "SAME@x.com")
 
-    def test_the_reachable_strong_signal_opens_a_claim_rather_than_deleting(self):
-        """No self-serve for a pair we INFERRED: the member never proved the
-        two are theirs, so somebody looks at it before anything is deleted."""
+    def test_it_asks_before_it_deletes_and_shows_what_goes(self):
         me, _ = _pair("me", "dupe")
         r = client_for(me).post("/api/economy/dupez/claim/",
                                 {"username": "dupe"}, format="json")
-        self.assertEqual(r.status_code, 202)
-        self.assertIn("claim", r.data)
+        self.assertEqual(r.status_code, 409)
+        self.assertTrue(r.data["needs_confirm"])
+        self.assertIn("account", r.data)
         self.assertTrue(User.objects.filter(username="dupe").exists())
+
+    def test_confirmed_it_goes(self):
+        me, _ = _pair("me", "dupe")
+        r = client_for(me).post("/api/economy/dupez/claim/",
+                                {"username": "dupe", "confirm": "DELETE"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(User.objects.filter(username="dupe").exists())
+
+    def test_the_money_comes_with_it(self):
+        """It was already theirs. Making them wait on a review to keep it is
+        the platform holding a member's own balance hostage to its paperwork."""
+        me, dupe = _pair("me", "dupe")
+        w = wallet_for(dupe)
+        w.money_cents, w.royalties_cents = 900, 350
+        w.save()
+        r = client_for(me).post("/api/economy/dupez/claim/",
+                                {"username": "dupe", "confirm": "DELETE"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        kept = wallet_for(me)
+        self.assertEqual(kept.money_cents, 900)
+        self.assertEqual(kept.royalties_cents, 350)
+        self.assertFalse(User.objects.filter(username="dupe").exists())
+
+    def test_the_sweep_is_stated_before_the_button(self):
+        me, dupe = _pair("me", "dupe")
+        w = wallet_for(dupe)
+        w.money_cents = 900
+        w.save()
+        r = client_for(me).post("/api/economy/dupez/claim/",
+                                {"username": "dupe"}, format="json")
+        self.assertEqual(r.data["sweeps_cents"], 900)
+        self.assertIn("9.00", r.data["detail"])
+
+    def test_the_swept_balance_is_written_down(self):
+        """A balance that appears with no reason behind it is what LogZ exists
+        to stop — and money arriving from a closed account is exactly that."""
+        me, dupe = _pair("me", "dupe")
+        w = wallet_for(dupe)
+        w.money_cents = 900
+        w.save()
+        client_for(me).post("/api/economy/dupez/claim/",
+                            {"username": "dupe", "confirm": "DELETE"}, format="json")
+        t = Transaction.objects.get(user=me, kind=Transaction.KIND_TRANSFER)
+        self.assertEqual(t.amount_cents, 900)
+
+    def test_a_weak_tie_is_never_self_serve(self):
+        """The owner decides, except where the member can prove it."""
+        ref = member("ref", "r@x.com")
+        a, b = member("a", "a@x.com"), member("b", "b@x.com")
+        record_referral(ref, a)
+        record_referral(ref, b)
+        r = client_for(a).post("/api/economy/dupez/claim/",
+                               {"username": "b", "confirm": "DELETE"}, format="json")
+        self.assertEqual(r.status_code, 202)          # filed, not deleted
+        self.assertTrue(User.objects.filter(username="b").exists())
+
+    def test_a_stranger_cannot_take_an_account_by_asking(self):
+        a, b = member("a", "a@x.com"), member("b", "b@x.com")
+        r = client_for(a).post("/api/economy/dupez/claim/",
+                               {"username": "b", "confirm": "DELETE"}, format="json")
+        self.assertEqual(r.status_code, 202)
+        self.assertTrue(User.objects.filter(username="b").exists())
 
 
 class ClaimTests(TestCase):
     def setUp(self):
-        self.me = member("me", "one@x.com")
-        self.other = member("other", "two@x.com")
-        oauth(self.me, "google", "g1", "corey@gmail.com")
-        oauth(self.other, "soundcloud", "s1", "corey@gmail.com")
+        # Weak on purpose: a strong pair is provable and self-serves, so it
+        # never reaches a queue at all.
+        self.me, self.other = _weak_pair("me", "other")
         self.c = client_for(self.me)
 
-    def test_different_emails_file_a_claim_and_delete_nothing(self):
+    def test_a_weak_tie_files_a_claim_and_deletes_nothing(self):
         r = self.c.post("/api/economy/dupez/claim/",
                         {"username": "other", "confirm": "DELETE", "note": "mine"},
                         format="json")
@@ -263,7 +336,7 @@ class ClaimTests(TestCase):
         claim = AccountClaim.objects.get()
         self.assertEqual(claim.status, AccountClaim.OPEN)
         # The evidence is recorded, not recomputed at review time.
-        self.assertEqual([s["key"] for s in claim.signals], ["oauth_email"])
+        self.assertEqual([s["key"] for s in claim.signals], ["same_referrer"])
 
     def test_refiling_edits_the_one_claim_rather_than_queueing_a_second(self):
         for note in ("first", "second"):
@@ -297,10 +370,9 @@ class ClaimTests(TestCase):
 class ReviewTests(TestCase):
     def setUp(self):
         self.boss = owner()
-        self.me = member("me", "one@x.com")
-        self.other = member("other", "two@x.com")
-        oauth(self.me, "google", "g1", "c@gmail.com")
-        oauth(self.other, "github", "h1", "c@gmail.com")
+        # Weak, so it reaches the queue at all — the owner's queue is the
+        # backstop for a claim the target never answered, not the first stop.
+        self.me, self.other = _weak_pair("me", "other")
         client_for(self.me).post("/api/economy/dupez/claim/",
                                  {"username": "other"}, format="json")
         self.claim = AccountClaim.objects.get()
@@ -317,7 +389,7 @@ class ReviewTests(TestCase):
         row = r.data["claims"][0]
         self.assertEqual(row["target_account"]["username"], "other")
         self.assertEqual(row["claimant_account"]["username"], "me")
-        self.assertEqual([s["key"] for s in row["signals"]], ["oauth_email"])
+        self.assertEqual([s["key"] for s in row["signals"]], ["same_referrer"])
 
     def test_approve_deletes_the_target(self):
         r = self.c.post("/api/economy/dupez/review/",
@@ -600,3 +672,80 @@ class FlagQueueTests(TestCase):
         self.assertTrue(User.objects.filter(username="second").exists())
         self.flag.refresh_from_db()
         self.assertEqual(self.flag.status, DupeFlag.CLEARED)
+
+
+class VerifyTests(TestCase):
+    """A weak claim is answered by the account it is about."""
+
+    def setUp(self):
+        self.me, self.them = _weak_pair("me", "them")
+        client_for(self.me).post("/api/economy/dupez/claim/",
+                                 {"username": "them"}, format="json")
+        self.claim = AccountClaim.objects.get()
+        self.c = client_for(self.them)
+
+    def test_the_target_is_told_there_is_a_question_for_them(self):
+        note = self.them.notifications.filter(item_id="dupez").first()
+        self.assertIsNotNone(note)
+        self.assertIn("me", note.text)
+
+    def test_they_see_what_agreeing_would_destroy(self):
+        w = wallet_for(self.them)
+        w.money_cents = 700
+        w.save()
+        r = self.c.get("/api/economy/dupez/verify/")
+        row = r.data["claims"][0]
+        self.assertEqual(row["claimant"], "me")
+        self.assertEqual(row["sweeps_cents"], 700)
+        self.assertIn("posts", row["deletes"])
+
+    def test_saying_no_refuses_it_and_touches_nothing(self):
+        r = self.c.post("/api/economy/dupez/verify/",
+                        {"claim": self.claim.id, "agree": False}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.claim.refresh_from_db()
+        self.assertEqual(self.claim.status, AccountClaim.REFUSED)
+        self.assertTrue(User.objects.filter(username="them").exists())
+
+    def test_agreeing_still_asks_before_it_deletes(self):
+        r = self.c.post("/api/economy/dupez/verify/",
+                        {"claim": self.claim.id, "agree": True}, format="json")
+        self.assertEqual(r.status_code, 409)
+        self.assertTrue(r.data["needs_confirm"])
+        self.assertTrue(User.objects.filter(username="them").exists())
+
+    def test_confirmed_it_closes_and_the_money_goes_to_the_claimant(self):
+        w = wallet_for(self.them)
+        w.money_cents = 700
+        w.save()
+        r = self.c.post("/api/economy/dupez/verify/",
+                        {"claim": self.claim.id, "agree": True, "confirm": "DELETE"},
+                        format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(User.objects.filter(username="them").exists())
+        self.assertEqual(wallet_for(self.me).money_cents, 700)
+
+    def test_only_the_target_may_answer(self):
+        """The claimant answering their own claim is the whole attack."""
+        r = client_for(self.me).post("/api/economy/dupez/verify/",
+                                     {"claim": self.claim.id, "agree": True,
+                                      "confirm": "DELETE"}, format="json")
+        self.assertEqual(r.status_code, 404)
+        self.assertTrue(User.objects.filter(username="them").exists())
+
+    def test_a_stranger_may_not_answer_it_either(self):
+        outsider = member("outsider", "o@x.com")
+        r = client_for(outsider).post("/api/economy/dupez/verify/",
+                                      {"claim": self.claim.id, "agree": True,
+                                       "confirm": "DELETE"}, format="json")
+        self.assertEqual(r.status_code, 404)
+        self.assertTrue(User.objects.filter(username="them").exists())
+
+    def test_an_already_answered_claim_cannot_be_answered_twice(self):
+        self.c.post("/api/economy/dupez/verify/",
+                    {"claim": self.claim.id, "agree": False}, format="json")
+        r = self.c.post("/api/economy/dupez/verify/",
+                        {"claim": self.claim.id, "agree": True, "confirm": "DELETE"},
+                        format="json")
+        self.assertEqual(r.status_code, 404)
+        self.assertTrue(User.objects.filter(username="them").exists())
