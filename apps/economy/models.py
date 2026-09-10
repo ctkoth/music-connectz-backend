@@ -146,6 +146,10 @@ class Transaction(models.Model):
     # reward: totalling it as either would overstate what the platform took in
     # by exactly the amount that only ever moved sideways.
     KIND_TRANSFER = "transfer"
+    # Money LEAVING the platform to a member's own bank. Its own kind because
+    # it is the only one that is not revenue, not a reward and not an internal
+    # move — totalling it as any of those would overstate all three.
+    KIND_PAYOUT = "payout"
     KIND_CHOICES = [
         (KIND_ADD, "Add funds"),
         (KIND_PURCHASE, "Purchase"),
@@ -154,6 +158,7 @@ class Transaction(models.Model):
         (KIND_SPEND, "Spend"),
         (KIND_INTELLIGENCE, "Intelligence royalty"),
         (KIND_TRANSFER, "Transfer"),
+        (KIND_PAYOUT, "Payout to bank"),
     ]
 
     # Which resource moved. Money was the only thing ever recorded, so SpinaZ
@@ -4841,3 +4846,104 @@ class TakeAnalysis(models.Model):
 
     def __str__(self):
         return f"Analysis for {self.upload.id} ({self.analysis_status})"
+
+
+# ---- Getting the money OUT ---------------------------------------------------
+#
+# Everything above moves money AROUND: a booking pays a host, a collab releases
+# escrow, a royalty cashout turns `royalties_cents` into `money_cents`. Every
+# one of those is a column in our own table moving to another column in our own
+# table. Until this, there was no way for a member to end up holding the money
+# anywhere but here — "get paid for it" meant store credit.
+#
+# Two rows, because they answer two different questions and have different
+# lifetimes: WHERE the money goes (once per member, and the provider owns the
+# bank details, not us) and WHAT was sent (once per withdrawal, kept forever).
+
+
+class PayoutAccount(models.Model):
+    """Where a member's withdrawals land — held by the provider, not by us.
+
+    We store an opaque account id and nothing else. No bank number, no sort
+    code, no tax form: those live with the provider, who is regulated to hold
+    them and who does the identity checks. The less of this we have, the less
+    of it we can lose.
+
+    `payouts_enabled` is the provider's answer, mirrored, never our guess.
+    Onboarding is a conversation between the member and the provider that can
+    pause for days on a document, so the flag is refreshed from them rather
+    than inferred from having reached the end of a form.
+    """
+    PROVIDER_STRIPE = "stripe"
+    PROVIDER_CHOICES = [(PROVIDER_STRIPE, "Stripe")]
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name="payout_account")
+    provider = models.CharField(max_length=12, choices=PROVIDER_CHOICES,
+                                default=PROVIDER_STRIPE)
+    account_id = models.CharField(max_length=120, blank=True, default="")
+    # The provider's verdict, not ours. False until they say otherwise.
+    payouts_enabled = models.BooleanField(default=False)
+    # What they still want, in their words, so a stalled onboarding can say why.
+    requirements = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user} → {self.provider}:{self.account_id or 'unlinked'}"
+
+
+class Payout(models.Model):
+    """One withdrawal, and the record of what happened to it.
+
+    Never deleted and never edited backwards. A member asking "where did my
+    $40 go" needs a row that says what was asked for, what was sent, what it
+    cost and what the provider said — a balance that changed with nothing
+    behind it is what LogZ exists to stop.
+
+    The money leaves the wallet when the row is written, in the same
+    transaction, and comes BACK if the provider refuses. That order is
+    deliberate and it is the whole safety design: paying first and debiting
+    afterwards can pay out money we then fail to charge for, which is
+    unrecoverable. Debiting first can at worst hold a member's money for the
+    seconds it takes to fail, and then return it.
+    """
+    STATUS_REQUESTED = "requested"   # money is out of the wallet, provider not yet told
+    STATUS_PAID = "paid"             # provider accepted it
+    STATUS_FAILED = "failed"         # provider refused; money returned
+    STATUS_CHOICES = [
+        (STATUS_REQUESTED, "Requested"),
+        (STATUS_PAID, "Paid"),
+        (STATUS_FAILED, "Failed — returned to wallet"),
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="payouts")
+    # Gross is what leaves the wallet; net is what they receive. Both stored,
+    # because a fee that has to be re-derived from two numbers is a fee that
+    # will eventually be re-derived wrongly.
+    amount_cents = models.PositiveIntegerField()
+    fee_cents = models.PositiveIntegerField(default=0)
+    net_cents = models.PositiveIntegerField()
+    provider = models.CharField(max_length=12, default=PayoutAccount.PROVIDER_STRIPE)
+    # Null rather than "" until the provider names it: several blank strings
+    # would collide under unique, several NULLs do not.
+    provider_ref = models.CharField(max_length=120, null=True, blank=True,
+                                    default=None, unique=True)
+    # Ours, generated per attempt, handed to the provider so a retry of the
+    # same withdrawal cannot become a second payment.
+    idempotency_key = models.CharField(max_length=64, unique=True)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES,
+                              default=STATUS_REQUESTED, db_index=True)
+    # The provider's words, kept verbatim. "It didn't work" is not an answer a
+    # member can act on; "your bank rejected the account number" is.
+    failure_reason = models.CharField(max_length=300, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["user", "-created_at"])]
+
+    def __str__(self):
+        return f"{self.user} −{self.amount_cents}c {self.status}"

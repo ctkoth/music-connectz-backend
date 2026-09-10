@@ -652,3 +652,17 @@ def occ_limits():
         "image_b64": OCC_MAX_IMAGE_B64,
         "image_types": list(OCC_IMAGE_TYPES),
     }
+
+
+# ---- Withdrawals -------------------------------------------------------------
+# The floor is operational, not a price: a provider charges to move money, and
+# paying that to shift 50 cents costs more than it moves. The ceiling is a
+# blast radius — one compromised session should not be able to drain a balance
+# in a single call.
+PAYOUT_MIN_CENTS = 2000          # $20
+PAYOUT_MAX_CENTS = 500_000       # $5,000 per withdrawal
+# What WE take. Zero, deliberately: a fee here is a cut of money a member has
+# already earned, and setting one is a pricing decision — recorded for Corey
+# rather than made here, the same way PROMPT_ALLOWANCE's ladder is. The
+# mechanism exists so the number lands in one place the day he wants one.
+PAYOUT_FEE_CENTS = 0

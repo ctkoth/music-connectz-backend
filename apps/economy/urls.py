@@ -73,6 +73,7 @@ from .venuez import (VenueBookView, VenueBookingCancelView, VenueQuoteView,
                      VenueBookingRespondView, VenueDetailView, VenueListView,
                      VenueRateView)
 from .collab_post import CollabNeedsView, CollabPostView
+from .payouts import PayoutConnectView, PayoutRefreshView, PayoutsView
 from .ai_models import AiModelView
 from .badgez import BadgeGiftView, BadgezView
 from .bugz import BugTriageView, BugzView
@@ -229,6 +230,10 @@ urlpatterns = [
     path("royalties/", RoyaltiesView.as_view(), name="economy-royalties"),
     path("royalties/accrue/", RoyaltyAccrueView.as_view(), name="economy-royalties-accrue"),
     path("royalties/cashout/", RoyaltyCashoutView.as_view(), name="economy-royalties-cashout"),
+    # Taking it OUT — the only path where money leaves the platform.
+    path("payouts/", PayoutsView.as_view(), name="economy-payouts"),
+    path("payouts/connect/", PayoutConnectView.as_view(), name="economy-payouts-connect"),
+    path("payouts/refresh/", PayoutRefreshView.as_view(), name="economy-payouts-refresh"),
     path("uploads/", UploadsView.as_view(), name="economy-uploads"),
     path("uploads/<int:pk>/", UploadDetailView.as_view(), name="economy-upload-detail"),
     # The address an upload is HANDED OUT under, and the only one anything

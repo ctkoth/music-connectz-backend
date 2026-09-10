@@ -65,6 +65,15 @@ def health(_request):
         uploads = upload_storage_state()
     except Exception:                                    # pragma: no cover
         uploads = {"durable": None, "detail": "could not be determined"}
+    # Whether money can move, for the same reason uploads are here. A missing
+    # STRIPE_WEBHOOK_SECRET is the quiet one: checkout works, Stripe takes the
+    # money, and the delivery that credits the wallet is refused — the member
+    # is charged and nothing arrives, and nothing inside the app can see it.
+    try:
+        from apps.economy.payments_health import payments_state
+        payments = payments_state()
+    except Exception:                                    # pragma: no cover
+        payments = {"ready": None, "problems": ["could not be determined"]}
     # Whether the AI surfaces can actually run, for the same reason uploads
     # are reported here: it is a fact about the deployment that decides
     # whether a headline feature works, and until now the only way to learn
@@ -97,6 +106,7 @@ def health(_request):
             "service": "music-connectz-backend",
             "status": "ok",
             "uploads": uploads,
+            "payments": payments,
             "copyright": copyright_state,
             "ai": {
                 "configured": ai_configured,
