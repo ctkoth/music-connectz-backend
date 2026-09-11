@@ -491,13 +491,29 @@ class SignBonusView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        # Earned state for all badges — so the client can show which ones the
+        # member has already earned when displaying the full grid. Read once per
+        # zodiac type rather than twenty-four separate queries.
+        earned_signs = set(SignBonusAward.objects.filter(user=request.user, sign__in=BONUSES.keys())
+                          .values_list("sign", "tier").distinct())
+        earned_animals = set(SignBonusAward.objects.filter(user=request.user, sign__in=ANIMALS.keys())
+                            .values_list("sign", "tier").distinct())
+
+        def _all_card(key, spec, earned_set, field_name):
+            """One bonus for the all-grid, with earned state."""
+            got = {tier for zodiac, tier in earned_set if zodiac == key}
+            return {field_name: key, **spec,
+                    "base_spinaz": BASE, "stretch_spinaz": STRETCH,
+                    "earned_base": "base" in got,
+                    "earned_stretch": "stretch" in got}
+
         return Response({
             "mine": bonus_for(request.user),
             "mine_animal": animal_bonus_for(request.user),
             "base_spinaz": BASE,
             "stretch_spinaz": STRETCH,
             "daily_cap": DAILY_CAP,
-            "all": [{"sign": s, **b} for s, b in BONUSES.items()],
-            "all_animals": [{"animal": a, **b} for a, b in ANIMALS.items()],
+            "all": [_all_card(s, b, earned_signs, "sign") for s, b in BONUSES.items()],
+            "all_animals": [_all_card(a, b, earned_animals, "animal") for a, b in ANIMALS.items()],
             "open_in": {"app_key": "zodiacz", "target": "zodiacz"},
         })
