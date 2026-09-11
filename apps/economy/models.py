@@ -973,6 +973,10 @@ class Profile(models.Model):
     # adult content. Never trust a self-reported birthday for this.
     verified_18plus = models.BooleanField(default=False, db_index=True)
     verified_18plus_at = models.DateTimeField(null=True, blank=True)
+    # Track when a verification session was started (so the frontend knows if
+    # it's pending vs. already done) and the session ID for debugging.
+    stripe_verification_session_id = models.CharField(max_length=200, blank=True, default="")
+    stripe_verification_attempted_at = models.DateTimeField(null=True, blank=True)
     # One-time onboarding reward: set when the member finishes the intro flow so
     # the grant (SpinAZ + Energy) can never be claimed twice.
     onboarded = models.BooleanField(default=False)
@@ -2310,6 +2314,111 @@ def relationship(me, other):
     they_follow = Follow.objects.filter(follower=other, following=me).exists()
     label = "friends" if (i_follow and they_follow) else "fan" if they_follow else "following" if i_follow else "none"
     return {"is_following": i_follow, "follows_me": they_follow, "label": label}
+
+
+# ---- GroupZ: the groups a member assembles BY HAND ----
+#
+# Only two of GroupZ's five tabs live here. FriendZ, FanZ and Blocked are
+# already kept above — `Follow` (mutual is a friend, one-way is a fan) and
+# `Block` — and `groupz.py` reads them live rather than copying them into rows
+# of its own. A second list of who your friends are is a second list to be
+# wrong: `follow_counts` would say one number, GroupZ another, and the DM rule
+# reads `Block`, so a private blocklist here would let a blocked member keep
+# messaging somebody the screen swore they had blocked.
+#
+# Partners and Custom have no graph behind them — nobody follows their way into
+# a group somebody named — so those are the two that need storing.
+class MemberGroup(models.Model):
+    """One hand-assembled group: Partners, or a custom one the owner named."""
+    KIND_PARTNERS = "partners"
+    KIND_CUSTOM = "custom"
+    KINDS = [(KIND_PARTNERS, "Partners"), (KIND_CUSTOM, "Custom")]
+
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="member_groups")
+    kind = models.CharField(max_length=16, choices=KINDS)
+    title = models.CharField(max_length=60, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["kind", "id"]
+
+    def __str__(self):
+        return f"{self.owner_id}:{self.kind}:{self.title or '-'}"
+
+
+class MemberGroupMember(models.Model):
+    """Somebody placed in one of those groups. Membership is one-directional
+    and private to the owner: being in a stranger's Partners list is not a
+    relationship, it is a note they made about you."""
+    group = models.ForeignKey(MemberGroup, on_delete=models.CASCADE, related_name="rows")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="in_member_groups")
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("group", "user")
+        ordering = ["id"]
+
+
+# ---- LabelZ: public label groups and the agreements they offer ----
+class Label(models.Model):
+    """A label somebody founded. Public — the whole point is being findable."""
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="labels_owned")
+    name = models.CharField(max_length=80)
+    bio = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.name
+
+
+class LabelContract(models.Model):
+    """One agreement, offered by a label to an artist, signed by typed name.
+
+    **The terms are frozen at offer.** `doc_sha256` is taken over the document
+    the label signed, and the artist signs the same hash — so an agreement
+    cannot be edited after somebody put their name to it. Without that the
+    signature means nothing, because the text it attested to could move
+    underneath it, and "e-signed" would be decoration on the one surface here
+    where a member is being asked to commit to something.
+
+    **The advance never moves through this platform.** `advance_display` is the
+    text both sides agreed, recorded so the document is complete; it is not
+    cents, it is not a `Wallet`, and nothing here settles it. Wiring it to
+    money later would make us a party to an agreement we only witness — and
+    would need escrow, refunds and a dispute process this does not have.
+    """
+    STATUS_OFFERED = "offered"
+    STATUS_SIGNED = "signed"
+    STATUS_DECLINED = "declined"
+    STATUSES = [(STATUS_OFFERED, "Offered"), (STATUS_SIGNED, "Signed"),
+                (STATUS_DECLINED, "Declined")]
+
+    label = models.ForeignKey(Label, on_delete=models.CASCADE, related_name="contracts")
+    artist = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="label_contracts")
+    title = models.CharField(max_length=120, default="Artist Agreement")
+    terms_text = models.TextField()
+    advance_display = models.CharField(max_length=60, blank=True, default="")
+    status = models.CharField(max_length=12, choices=STATUSES, default=STATUS_OFFERED)
+
+    # Typed names, kept verbatim with the moment each was typed. A signature
+    # with no timestamp is a name in a box.
+    owner_signed_name = models.CharField(max_length=120, blank=True, default="")
+    owner_signed_at = models.DateTimeField(null=True, blank=True)
+    artist_signed_name = models.CharField(max_length=120, blank=True, default="")
+    artist_signed_at = models.DateTimeField(null=True, blank=True)
+
+    doc_sha256 = models.CharField(max_length=64, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
 
 
 # ---- DirectZ video works (ReelZ / EpisodeZ / MovieZ) ----

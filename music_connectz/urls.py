@@ -14,6 +14,9 @@ from apps.economy.views import (
     PublicStatsView,
     StatsView,
 )
+from apps.economy.groupz import GroupMemberView, GroupZView
+from apps.economy.labelz import (LabelContractRespondView, LabelContractsView,
+                                 LabelZView)
 from apps.omviardz.wellknown import AssetLinksView
 
 # SkillZ training is generated per app_key. MimeZ/DirectZ/LessonZ mount their own
@@ -145,6 +148,15 @@ urlpatterns = [
     path("api/auth/funnel/summary/", FunnelSummaryView.as_view(), name="auth-funnel-summary"),
     path("api/auth/", include("apps.accounts.urls")),
     path("api/economy/", include("apps.economy.urls")),
+    # GroupZ and LabelZ answer at the root because that is where the shipped
+    # client asks for them — both screens were in the nav calling these paths
+    # before either backend existed.
+    path("api/groupz/", GroupZView.as_view(), name="groupz"),
+    path("api/groupz/<str:gid>/<str:action>/", GroupMemberView.as_view(), name="groupz-member"),
+    path("api/labelz/", LabelZView.as_view(), name="labelz"),
+    path("api/labelz/contracts/", LabelContractsView.as_view(), name="labelz-contracts"),
+    path("api/labelz/contracts/<int:pk>/<str:action>/", LabelContractRespondView.as_view(),
+         name="labelz-contract-respond"),
     path("api/mimez/", include("apps.mimez.urls")),
     path("api/directz/", include("apps.directz.urls")),
     path("api/lessonz/", include("apps.lessonz.urls")),

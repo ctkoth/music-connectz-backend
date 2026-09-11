@@ -76,23 +76,29 @@ def _verified_dob(session):
 
 def mark_18plus_from_session(session):
     """Called from the Stripe webhook on a verified session. Sets the profile
-    flag iff the verified DOB proves 18+. Idempotent."""
+    flag iff the verified DOB proves 18+. Idempotent.
+
+    Returns (ok, reason) so callers can log what happened.
+    """
     from django.contrib.auth import get_user_model
     meta = _pluck(session, "metadata") or {}
     uid = _pluck(meta, "user_id")
     if not uid:
-        return
+        return False, "No user_id in session metadata"
     user = get_user_model().objects.filter(pk=uid).first()
     if not user:
-        return
+        return False, f"User {uid} not found"
     age = _age_from_dob(_verified_dob(session))
-    if age is None or age < 18:
-        return
+    if age is None:
+        return False, "Could not read verified DOB from session"
+    if age < 18:
+        return False, f"User is {age}, under 18"
     p = profile_for(user)
     if not p.verified_18plus:
         p.verified_18plus = True
         p.verified_18plus_at = timezone.now()
         p.save(update_fields=["verified_18plus", "verified_18plus_at", "updated_at"])
+    return True, "Marked 18+ verified"
 
 
 class IdentityView(APIView):
@@ -102,9 +108,25 @@ class IdentityView(APIView):
 
     def get(self, request):
         p = profile_for(request.user)
+        # If a verification session was recently started but hasn't completed,
+        # report "pending" so the frontend can show "waiting for Stripe..." instead
+        # of falsely claiming verification failed.
+        status_text = ""
+        if p.verified_18plus:
+            status_text = "verified"
+        elif p.stripe_verification_attempted_at:
+            # Less than 10 minutes ago, it's probably still pending. After 10
+            # minutes with no webhook, something went wrong.
+            elapsed = timezone.now() - p.stripe_verification_attempted_at
+            if elapsed.total_seconds() < 600:
+                status_text = "pending"
+            else:
+                status_text = "failed"
         return Response({
             "verified_18plus": p.verified_18plus,
             "verified_at": p.verified_18plus_at.isoformat() if p.verified_18plus_at else None,
+            "status": status_text,  # "verified" | "pending" | "failed" | ""
+            "attempted_at": p.stripe_verification_attempted_at.isoformat() if p.stripe_verification_attempted_at else None,
             "stripe_enabled": bool(settings.STRIPE_SECRET_KEY),
         })
 
@@ -122,5 +144,10 @@ class IdentityView(APIView):
             options={"document": {"require_matching_selfie": True}},
             return_url=f"{settings.FRONTEND_URL}/?verify=done",
         )
+        # Record the attempt so the GET endpoint can tell the frontend whether
+        # verification is pending (started but webhook hasn't fired yet) or done.
+        p.stripe_verification_session_id = session.id
+        p.stripe_verification_attempted_at = timezone.now()
+        p.save(update_fields=["stripe_verification_session_id", "stripe_verification_attempted_at", "updated_at"])
         # `url` is the hosted verification flow the client redirects to.
         return Response({"url": session.url, "client_secret": session.client_secret, "id": session.id})
