@@ -122,6 +122,9 @@ def _contract_row(c):
         "doc_sha256": c.doc_sha256,
         "owner_signed_name": c.owner_signed_name,
         "artist_signed_name": c.artist_signed_name,
+        # Cross-pollination: after creating an offer, the label owner gets a link
+        # to watch the artist's response on this contract (or share with the artist).
+        "open_in": f"labelz?contract={c.id}",
     }
 
 
