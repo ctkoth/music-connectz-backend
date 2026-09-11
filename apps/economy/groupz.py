@@ -34,7 +34,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Block, Follow, MemberGroup, MemberGroupMember
+from .models import Block, Follow, MemberGroup, MemberGroupMember, TIER_FREE, TIER_PREMIUM, TIER_STATZ
 
 User = get_user_model()
 
@@ -66,6 +66,13 @@ DERIVED = {
                 "same block DMs read, so a blocked member can't message you.",
         "tab": "groupz",
     },
+}
+
+# Tier-based custom group limits.
+CUSTOM_GROUP_LIMITS = {
+    TIER_FREE: 1,
+    TIER_PREMIUM: 5,
+    TIER_STATZ: 10,
 }
 
 
@@ -101,7 +108,7 @@ def _graph(user):
     return following & followers, followers - following
 
 
-def _row(gid, kind, title, members, *, editable, note="", tab=""):
+def _row(gid, kind, title, members, *, editable, note="", tab="", icon=""):
     return {
         "id": gid,
         "kind": kind,
@@ -115,6 +122,7 @@ def _row(gid, kind, title, members, *, editable, note="", tab=""):
         "can_remove": editable,
         "note": note,
         "tab": tab,
+        "icon": icon,
     }
 
 
@@ -156,7 +164,7 @@ def groups_for(user):
     for g in stored:
         out.append(_row(g.id, g.kind, g.title if g.kind == KIND_CUSTOM else "",
                         sorted(_name(r.user) for r in g.rows.all()),
-                        editable=True))
+                        editable=True, icon=g.icon))
 
     out.append(_row(KIND_BLOCKED, KIND_BLOCKED, "",
                     sorted(b for b in blocked if b),
@@ -170,17 +178,29 @@ class GroupZView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response(groups_for(request.user))
+        groups = groups_for(request.user)
+        tier = request.user.membership.tier
+        custom_limit = CUSTOM_GROUP_LIMITS.get(tier, CUSTOM_GROUP_LIMITS[TIER_FREE])
+        custom_count = sum(1 for g in groups if g["kind"] == KIND_CUSTOM)
+        return Response({
+            "groups": groups,
+            "tier_limit": {
+                "kind": KIND_CUSTOM,
+                "limit": custom_limit,
+                "current": custom_count,
+            }
+        })
 
     def post(self, request):
         kind = str(request.data.get("kind") or "").strip().lower()
         title = str(request.data.get("title") or "").strip()[:60]
+        icon = str(request.data.get("icon") or "").strip()[:255]
 
         if kind in DERIVED:
             # Not an error the member caused, so it names what the group IS
             # rather than refusing flatly.
             return Response(
-                {"detail": f"{DERIVED[kind]['title']} isn't a group you create — "
+                {"detail": f"{DERIVED[kind]['title']} is not a group you create -- "
                            f"{DERIVED[kind]['note'][0].lower()}{DERIVED[kind]['note'][1:]}"},
                 status=status.HTTP_400_BAD_REQUEST)
         if kind not in (KIND_PARTNERS, KIND_CUSTOM):
@@ -190,20 +210,29 @@ class GroupZView(APIView):
             return Response({"detail": "Give the custom group a name."},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        # Partners is one group, not a list of them — the screen renders it as
+        # Partners is one group, not a list of them -- the screen renders it as
         # a single named box and a second would have no way to be told apart.
         if kind == KIND_PARTNERS:
             g, _ = MemberGroup.objects.get_or_create(owner=request.user, kind=kind,
                                                      defaults={"title": "Partners"})
         else:
+            # Check tier-based custom group limit.
+            tier = request.user.membership.tier
+            limit = CUSTOM_GROUP_LIMITS.get(tier, CUSTOM_GROUP_LIMITS[TIER_FREE])
+            existing_count = MemberGroup.objects.filter(owner=request.user, kind=KIND_CUSTOM).count()
+            if existing_count >= limit:
+                tier_names = {"free": "Free", "premium": "Premium", "statz": "StatZ"}
+                return Response(
+                    {"detail": f"Reached your {limit} custom group limit ({tier_names.get(tier, tier)})."},
+                    status=status.HTTP_400_BAD_REQUEST)
+
             if MemberGroup.objects.filter(owner=request.user, kind=kind,
                                           title__iexact=title).exists():
-                return Response({"detail": f"You already have a group called “{title}”."},
+                return Response({"detail": f"Already have a group called {repr(title)}."},
                                 status=status.HTTP_400_BAD_REQUEST)
-            g = MemberGroup.objects.create(owner=request.user, kind=kind, title=title)
-        return Response({"id": g.id, "kind": g.kind, "title": g.title},
+            g = MemberGroup.objects.create(owner=request.user, kind=kind, title=title, icon=icon)
+        return Response({"id": g.id, "kind": g.kind, "title": g.title, "icon": g.icon},
                         status=status.HTTP_201_CREATED)
-
 
 class GroupMemberView(APIView):
     """`POST /api/groupz/<gid>/add|remove/` — put somebody in, or take them out.

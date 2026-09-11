@@ -2338,6 +2338,8 @@ class MemberGroup(models.Model):
                               related_name="member_groups")
     kind = models.CharField(max_length=16, choices=KINDS)
     title = models.CharField(max_length=60, blank=True, default="")
+    # Custom icon for the group (Premium/StatZ only). Can be an emoji, icon name, or URL.
+    icon = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
