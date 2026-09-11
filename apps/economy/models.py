@@ -5253,3 +5253,132 @@ class OfferDismissal(models.Model):
 
     def __str__(self):
         return f"{self.user} dismissed {self.offer_key}"
+
+
+# ---------------------------------------------------------------------------
+# BodieZ — training log.
+#
+# These tables store what a member DID. Nothing here scores what they can do,
+# and that distinction is the whole design rather than a detail of it. A
+# logged lift is a number somebody typed about themselves: there is no
+# microphone, no model watching, nothing that can disagree with the claim. So
+# the substance rule's own test — could a member get a good number without
+# getting good? — answers itself the moment any of this is called a strength
+# score. `directz_ai_rating` at least measured real properties of a real
+# artifact and drew the wrong conclusion; a strength score off self-reported
+# sets would measure the typing.
+#
+# What IS true, and is therefore all `bodymap.py` will say: which muscle
+# groups a member's own log covers, how recently, how often, and how lopsided
+# it is against the rest of their own log. Those are facts about the log, and
+# a member reading them back is reading their own diary rather than a verdict.
+# ---------------------------------------------------------------------------
+
+# One list, shared by the log and by every read over it. A second copy is how
+# a filter and the rows it filters end up disagreeing about what a leg day is.
+MUSCLE_CHEST = "chest"
+MUSCLE_BACK = "back"
+MUSCLE_SHOULDERS = "shoulders"
+MUSCLE_BICEPS = "biceps"
+MUSCLE_TRICEPS = "triceps"
+MUSCLE_FOREARMS = "forearms"
+MUSCLE_QUADS = "quads"
+MUSCLE_HAMSTRINGS = "hamstrings"
+MUSCLE_GLUTES = "glutes"
+MUSCLE_CALVES = "calves"
+MUSCLE_CORE = "core"
+MUSCLE_CARDIO = "cardio"
+
+MUSCLE_GROUPS = [
+    (MUSCLE_CHEST, "Chest"),
+    (MUSCLE_BACK, "Back"),
+    (MUSCLE_SHOULDERS, "Shoulders"),
+    (MUSCLE_BICEPS, "Biceps"),
+    (MUSCLE_TRICEPS, "Triceps"),
+    (MUSCLE_FOREARMS, "Forearms"),
+    (MUSCLE_QUADS, "Quads"),
+    (MUSCLE_HAMSTRINGS, "Hamstrings"),
+    (MUSCLE_GLUTES, "Glutes"),
+    (MUSCLE_CALVES, "Calves"),
+    (MUSCLE_CORE, "Core"),
+    (MUSCLE_CARDIO, "Cardio"),
+]
+
+EQUIPMENT_CHOICES = [
+    ("barbell", "Barbell"),
+    ("dumbbell", "Dumbbell"),
+    ("machine", "Machine"),
+    ("cable", "Cable"),
+    ("bodyweight", "Bodyweight"),
+    ("bands", "Resistance bands"),
+    ("kettlebell", "Kettlebell"),
+    ("cardio", "Cardio machine"),
+    ("other", "Other"),
+]
+
+# The blueprint lists movement pattern as a filter axis beside muscle group,
+# and they are genuinely different questions: "have I trained my back" and
+# "have I done any pulling" disagree for somebody who only ever rows.
+PATTERN_CHOICES = [
+    ("push", "Push"),
+    ("pull", "Pull"),
+    ("squat", "Squat"),
+    ("hinge", "Hinge"),
+    ("lunge", "Lunge"),
+    ("carry", "Carry"),
+    ("core", "Core"),
+    ("cardio", "Cardio"),
+    ("other", "Other"),
+]
+
+
+class WorkoutSession(models.Model):
+    """One BodieZ training session.
+
+    Free to log at every tier. A cost here would be the ladder rule's own
+    failure case — a member who cannot record that they trained does not
+    upgrade, they stop opening the tab.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="workout_sessions")
+    started_at = models.DateTimeField(db_index=True)
+    duration_minutes = models.IntegerField(default=0)
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-started_at",)
+        indexes = [models.Index(fields=["user", "-started_at"])]
+
+    def __str__(self):
+        return f"{self.user} trained {self.started_at:%Y-%m-%d} ({self.duration_minutes}m)"
+
+
+class WorkoutSet(models.Model):
+    """One set inside a session.
+
+    `muscle_group`, `equipment` and `pattern` are closed choice lists rather
+    than free text, because they are what the metric filters on: a filter over
+    text somebody typed matches "Bench", "bench press" and "BP" as three
+    different muscles, which makes the filter worse than no filter.
+
+    `weight_lbs` is nullable on purpose — a bodyweight set has reps and no
+    weight, and storing 0 would make it look like a lift that failed.
+    """
+    session = models.ForeignKey(WorkoutSession, on_delete=models.CASCADE,
+                                related_name="sets")
+    exercise_name = models.CharField(max_length=80)
+    muscle_group = models.CharField(max_length=20, choices=MUSCLE_GROUPS, db_index=True)
+    equipment = models.CharField(max_length=20, choices=EQUIPMENT_CHOICES, default="other")
+    pattern = models.CharField(max_length=20, choices=PATTERN_CHOICES, default="other")
+    reps = models.IntegerField(default=0)
+    weight_lbs = models.FloatField(null=True, blank=True)
+    duration_seconds = models.IntegerField(default=0, help_text="Cardio/carry work measured in time, not reps")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("id",)
+        indexes = [models.Index(fields=["muscle_group"])]
+
+    def __str__(self):
+        return f"{self.exercise_name} — {self.muscle_group} ({self.reps}x{self.weight_lbs or 'bw'})"

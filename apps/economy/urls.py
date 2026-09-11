@@ -12,6 +12,7 @@ from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
 from .rulez import RulezView
+from .bodymap import BodyMapView, WorkoutSessionView
 from .offerz_engine import (FunnelCatalogView, FunnelOfferRedeemView,
                             FunnelOffersView)
 from .signbonus import SignBonusView
@@ -453,4 +454,7 @@ urlpatterns = [
     # LeaderboardZ — competition drives conversions. All metrics are substance.
     path("leaderboardz/", LeaderboardsView.as_view(), name="economy-leaderboardz"),
     path("leaderboardz/xp/<str:app_key>/", InstrumentLeaderboardView.as_view(), name="economy-leaderboardz-xp"),
+    # BodieZ — the training log and the filterable read over it.
+    path("bodiez/sessions/", WorkoutSessionView.as_view(), name="economy-bodiez-sessions"),
+    path("bodiez/bodymap/", BodyMapView.as_view(), name="economy-bodiez-bodymap"),
 ]
