@@ -34,7 +34,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Block, Follow, MemberGroup, MemberGroupMember, TIER_FREE, TIER_PREMIUM, TIER_STATZ
+from .models import (Block, Follow, MemberGroup, MemberGroupMember,
+                     TIER_FREE, TIER_PREMIUM, TIER_STATZ, membership_for)
 
 User = get_user_model()
 
@@ -179,7 +180,12 @@ class GroupZView(APIView):
 
     def get(self, request):
         groups = groups_for(request.user)
-        tier = request.user.membership.tier
+        # `user.membership` raises when the row has never been made, which is
+        # every member who has not touched a tiered surface yet — so reading it
+        # directly 500'd this whole tab for exactly the newest accounts. The
+        # file's own docstring is about GroupZ answering nothing and members
+        # concluding the app is broken; a 500 here is that again, louder.
+        tier = membership_for(request.user).tier
         custom_limit = CUSTOM_GROUP_LIMITS.get(tier, CUSTOM_GROUP_LIMITS[TIER_FREE])
         custom_count = sum(1 for g in groups if g["kind"] == KIND_CUSTOM)
         return Response({
@@ -217,7 +223,7 @@ class GroupZView(APIView):
                                                      defaults={"title": "Partners"})
         else:
             # Check tier-based custom group limit.
-            tier = request.user.membership.tier
+            tier = membership_for(request.user).tier
             limit = CUSTOM_GROUP_LIMITS.get(tier, CUSTOM_GROUP_LIMITS[TIER_FREE])
             existing_count = MemberGroup.objects.filter(owner=request.user, kind=KIND_CUSTOM).count()
             if existing_count >= limit:

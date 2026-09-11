@@ -12,6 +12,7 @@ from rest_framework.test import APITestCase
 
 from .models import (Block, Follow, MemberGroup, MemberGroupMember,
                      blocked_user_ids, follow_counts)
+from .groupz import CUSTOM_GROUP_LIMITS
 
 User = get_user_model()
 
@@ -31,8 +32,13 @@ class GroupZTests(APITestCase):
     def _get(self):
         r = self.client.get(reverse("groupz"))
         self.assertEqual(r.status_code, 200)
+        # The five used to BE the response. They are under "groups" now, beside
+        # the "tier_limit" the custom-group ladder needs — so every read here
+        # goes through this one helper rather than each test learning the
+        # envelope separately.
+        groups = r.data["groups"]
         return {g["kind"] if g["id"] in ("friends", "fans", "blocked") else g["id"]: g
-                for g in r.data}, r.data
+                for g in groups}, groups
 
     def test_all_five_kinds_present_even_when_empty(self):
         _, rows = self._get()
@@ -155,3 +161,36 @@ class GroupZTests(APITestCase):
     def test_requires_auth(self):
         self.client.force_authenticate(None)
         self.assertEqual(401, self.client.get(reverse("groupz")).status_code)
+
+    def test_a_member_with_no_membership_row_still_gets_the_tab(self):
+        """The dullest test here, and the one that would have caught it.
+
+        The tier ladder for custom groups is read on every GET. Reading it as
+        `user.membership.tier` raises for anybody whose Membership row has
+        never been made — which is every account that has not yet touched a
+        tiered surface — so the whole tab answered 500 for exactly the newest
+        members. `membership_for()` makes the row instead.
+
+        `self.me` deliberately has no Membership; asserting 200 and a free
+        ladder is what pins the accessor.
+        """
+        from .models import Membership, TIER_FREE
+        self.assertFalse(Membership.objects.filter(user=self.me).exists())
+
+        r = self.client.get(reverse("groupz"))
+        self.assertEqual(200, r.status_code)
+        self.assertEqual(CUSTOM_GROUP_LIMITS[TIER_FREE], r.data["tier_limit"]["limit"])
+        self.assertEqual(0, r.data["tier_limit"]["current"])
+
+    def test_the_five_stay_under_groups_so_a_client_keeps_working(self):
+        """`groups` and `tier_limit` are both required keys.
+
+        The response used to BE the list. It grew an envelope so the ladder
+        could travel with it, and an endpoint may grow keys but never lose
+        one — the screen reading this deploys separately, so a renamed key
+        blanks a live tab for as long as the frontend takes to follow.
+        """
+        r = self.client.get(reverse("groupz"))
+        self.assertIn("groups", r.data)
+        self.assertIn("tier_limit", r.data)
+        self.assertEqual({"kind", "limit", "current"}, set(r.data["tier_limit"]))
