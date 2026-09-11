@@ -486,3 +486,83 @@ class FunnelOfferRedeemView(APIView):
             return Response({"detail": why}, status=status.HTTP_409_CONFLICT)
         spec = OFFERS[key]
         return Response({"key": key, "tab": spec["tab"], "target": spec["target"]})
+
+
+class FunnelCatalogView(APIView):
+    """`GET /api/economy/offerz/catalog/` — every offer and its state, for the owner.
+
+    The member-facing endpoint answers "what is true for ME", capped at three.
+    That is the right answer for a member and the wrong one for whoever is
+    running the platform: from inside `/funnel/` there is no way to see the
+    offers that did NOT fire, which are exactly the ones worth looking at. An
+    offer nobody has ever matched is the decoration this module's own docstring
+    warns about, and it is invisible from the only surface that existed.
+
+    So this returns the whole catalogue, each row carrying:
+
+    * `why` — the reason it exists, which is written beside every offer in the
+      code and until now was never served anywhere. A promotion whose reason
+      lives only in a comment is one the next person rewords into something
+      that no longer has one.
+    * `live_for_me` — whether it is currently true for the caller, so the
+      owner can see the engine deciding rather than take it on trust.
+    * `dismissed_by` — how many members have DISMISSED it. Deliberately the only
+      count here: dismissals are the honest signal (somebody saw it and said
+      no), where "impressions" would need a write on every render and would
+      turn a read-only panel into a tracking surface.
+
+    Owner-only, following `moderation.ReportView` — the catalogue names what
+    the platform is selling and when, which is a business fact rather than a
+    member-facing one.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .models import OfferDismissal
+        from .views import is_owner
+
+        if not is_owner(request.user):
+            return Response({"detail": "Owner only."}, status=status.HTTP_403_FORBIDDEN)
+
+        ctx = _context(request.user)
+        live = set()
+        for key, spec in OFFERS.items():
+            try:
+                if spec["when"](ctx):
+                    live.add(key)
+            except Exception:                           # noqa: BLE001
+                pass
+
+        # One grouped query rather than one per offer — this is an owner
+        # screen, but it is still a screen.
+        from django.db.models import Count
+        counts = dict(OfferDismissal.objects.values_list("offer_key")
+                      .annotate(n=Count("id")).values_list("offer_key", "n"))
+
+        rows = []
+        for key, spec in OFFERS.items():
+            rows.append({
+                "key": key,
+                "step": spec["step"],
+                "title": _resolve(spec["title"], ctx),
+                "cta": spec["cta"],
+                "why": spec.get("why", ""),
+                "gain": spec.get("gain") or [],
+                "gain_note": spec.get("gain_note", ""),
+                "cost": spec.get("cost") or [],
+                "tab": spec["tab"],
+                "target": spec["target"],
+                "live_for_me": key in live,
+                "dismissed_by": counts.get(key, 0),
+                "ends_at": (spec["ends_at"].isoformat()
+                            if spec.get("ends_at") else None),
+            })
+        rows.sort(key=lambda r: (STEPS.index(r["step"]) if r["step"] in STEPS else 99,
+                                 r["key"]))
+        return Response({
+            "offers": rows,
+            "steps": STEPS,
+            "max_shown": MAX_SHOWN,
+            "base_note": "Nothing here is scheduled. Every row is decided by the "
+                         "member's own state at the moment it is asked for.",
+        })

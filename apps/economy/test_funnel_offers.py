@@ -322,3 +322,68 @@ class TheWallCounterIsAFactNotAGuess(TestCase):
         w.prompt_walls_since = timezone.localdate() - timedelta(days=30)
         w.save(update_fields=["prompt_walls", "prompt_walls_since", "updated_at"])
         self.assertEqual(prompt_walls_week(u), 0)
+
+
+class TheOwnerCatalogue(TestCase):
+    """The whole list, including the offers that did NOT fire.
+
+    The member endpoint answers "what is true for ME", capped at three — right
+    for a member, wrong for whoever runs the platform. An offer nobody has
+    ever matched is the decoration this module warns about, and until this
+    view existed it was invisible from the only surface there was.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def _owner(self):
+        u = member("boss")
+        u.is_staff = u.is_superuser = True
+        u.save(update_fields=["is_staff", "is_superuser"])
+        return u
+
+    def test_it_returns_every_offer_not_just_the_live_ones(self):
+        self.client.force_authenticate(self._owner())
+        r = self.client.get("/api/economy/offerz/catalog/")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(len(r.data["offers"]), len(fz.OFFERS))
+
+    def test_every_row_carries_the_reason_it_exists(self):
+        """`why` is written beside every offer in the code and was served
+        nowhere. A promotion whose reason lives only in a comment is one the
+        next person rewords into something that no longer has one."""
+        self.client.force_authenticate(self._owner())
+        r = self.client.get("/api/economy/offerz/catalog/")
+        for row in r.data["offers"]:
+            with self.subTest(offer=row["key"]):
+                self.assertTrue(row["why"].strip())
+
+    def test_it_says_which_are_live_so_the_engine_can_be_seen_deciding(self):
+        self.client.force_authenticate(self._owner())
+        r = self.client.get("/api/economy/offerz/catalog/")
+        rows = r.data["offers"]
+        live = {row["key"] for row in rows if row["live_for_me"]}
+        # A brand-new owner account matches the acquisition and activation
+        # offers, so some fire and some do not — which is the point: the
+        # screen shows the engine deciding rather than a list of everything.
+        self.assertTrue(live)
+        self.assertLess(len(live), len(rows))
+
+    def test_a_member_cannot_read_it(self):
+        """The catalogue names what the platform is selling and when — a
+        business fact rather than a member-facing one."""
+        self.client.force_authenticate(member("nosy"))
+        r = self.client.get("/api/economy/offerz/catalog/")
+        self.assertEqual(r.status_code, 403)
+
+    def test_dismissals_are_the_only_count_reported(self):
+        """Somebody saw it and said no is an honest signal. "Impressions"
+        would need a write on every render and would turn a read-only panel
+        into a tracking surface."""
+        u = member("shutit")
+        OfferDismissal.objects.create(user=u, offer_key="invite_pays_both")
+        self.client.force_authenticate(self._owner())
+        r = self.client.get("/api/economy/offerz/catalog/")
+        row = next(x for x in r.data["offers"] if x["key"] == "invite_pays_both")
+        self.assertEqual(row["dismissed_by"], 1)
+        self.assertNotIn("impressions", row)

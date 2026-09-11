@@ -12,7 +12,8 @@ from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
 from .rulez import RulezView
-from .offerz_engine import FunnelOfferRedeemView, FunnelOffersView
+from .offerz_engine import (FunnelCatalogView, FunnelOfferRedeemView,
+                            FunnelOffersView)
 from .signbonus import SignBonusView
 from .voice import VoiceZView
 from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView, DupeZVerifyView,
@@ -367,6 +368,8 @@ urlpatterns = [
     path("offerz/funnel/", FunnelOffersView.as_view(), name="economy-funnel-offers"),
     path("offerz/funnel/redeem/", FunnelOfferRedeemView.as_view(),
          name="economy-funnel-offer-redeem"),
+    path("offerz/catalog/", FunnelCatalogView.as_view(),
+         name="economy-funnel-catalog"),
     # One voice, set once and followed by every surface a model writes through.
     path("voicez/", VoiceZView.as_view(), name="economy-voicez"),
     # DupeZ — one person, one account. Groups, the member's claim on their own

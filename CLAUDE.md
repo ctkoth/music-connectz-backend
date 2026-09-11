@@ -430,6 +430,37 @@ each door keeps its own endpoint, its own price and its own checks, because a
 redeem that granted things would be a second place every one of those prices
 lives.
 
+### The owner sees the offers that DON'T fire, which is the half that matters
+
+`/offerz/funnel/` answers "what is true for ME", capped at three. Right for a
+member, useless for whoever runs the platform: from inside that panel there is
+no way to see an offer nobody has ever matched — which is exactly the
+decoration this section warns about, and it was invisible from the only
+surface that existed.
+
+`GET /api/economy/offerz/catalog/` is owner-only and returns the whole list,
+each row carrying:
+
+- **`why`** — the reason the offer exists. It is written beside every offer in
+  the code and, until this view, was served nowhere. A promotion whose reason
+  lives only in a comment is one the next person rewords into something that
+  no longer has one.
+- **`live_for_me`** — whether the engine says it is true for the caller right
+  now, so the owner watches it decide rather than taking it on trust.
+- **`dismissed_by`** — and that is the ONLY count. A dismissal is an honest
+  signal (somebody saw it and said no); "impressions" would need a write on
+  every render and would turn a read-only panel into a tracking surface.
+
+It lands in **FunnelZ**, beside the join-funnel measurement, because the two
+answer the same question from opposite ends: the measurement says where people
+stop and the catalogue says what the platform does about it. Split across two
+tabs, nobody looks at both — which is the only way either number means
+anything.
+
+That gap was worth noticing on its own: the offer engine shipped with its only
+surface living inside PostZ, so the feature had no tab, and the owner had
+nothing to pin.
+
 
 ## Deployment
 
