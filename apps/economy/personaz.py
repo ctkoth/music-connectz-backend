@@ -105,6 +105,13 @@ def clean_persona(raw):
             rate = max(0, int(s.get("rate_cents") or 0))
         except (TypeError, ValueError):
             rate = 0
+        # Similar artists — a list of artist names for this skill. Stored as
+        # strings, max 50 artists, 80 chars each.
+        similar_artists = []
+        for artist in (s.get("similar_artists") or [])[:50]:
+            art_name = str(artist or "")[:80].strip()
+            if art_name:
+                similar_artists.append(art_name)
         entry = {"name": name}
         if periods:
             entry["periods"] = periods
@@ -114,6 +121,8 @@ def clean_persona(raw):
                 entry["start"] = start
         if rate:
             entry["rate_cents"] = rate
+        if similar_artists:
+            entry["similar_artists"] = similar_artists
         skills.append(entry)
 
     key = str(raw.get("key") or raw.get("name") or "")[:60]

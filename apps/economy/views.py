@@ -1433,3 +1433,85 @@ class InstrumentLeaderboardView(APIView):
             "period": period,
             "leaders": leaderboardz.top_xp_earners_by_instrument(app_key, limit=limit, period_days=period_days),
         })
+
+
+class ArtistSearchView(APIView):
+    """GET /api/economy/artist-search/?q=eminem — autocomplete for similar artists.
+
+    Returns a ranked list of artists matching the query, including:
+    - Well-known artists from a curated list
+    - Similar artists already used by other members
+
+    Ranked by relevance: prefix matches first, then substring matches.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        query = (request.query_params.get("q") or "").strip().lower()
+        if not query or len(query) < 1:
+            return Response({"results": []})
+
+        # Curated list of well-known artists to seed results
+        curated_artists = [
+            "Eminem", "Beyoncé", "The Weeknd", "Drake", "Taylor Swift",
+            "Ariana Grande", "Kanye West", "Jay-Z", "Rihanna", "Ed Sheeran",
+            "Post Malone", "Kendrick Lamar", "Travis Scott", "Bad Bunny",
+            "Billie Eilish", "The Weeknd", "Harry Styles", "Dua Lipa",
+            "Doja Cat", "Lil Baby", "Playboi Carti", "Trippie Redd",
+            "Lil Pump", "Xxxtentacion", "Juice WRLD", "Ski Mask the Slump God",
+            "Lil Peep", "Lil Durk", "Gunna", "Roddy Ricch", "Ski Mask",
+            "Uzi", "Lil Uzi Vert", "Trippie", "Asap Rocky", "21 Savage",
+            "Gucci Mane", "Future", "Metro Boomin", "Tyler, the Creator",
+            "Frank Ocean", "Childish Gambino", "Chance the Rapper", "Logic",
+            "Juice", "Mac Miller", "The Alchemist", "Madlib", "MF DOOM",
+            "SOPHIE", "Arca", "Grimes", "FKA twigs", "Björk", "David Bowie",
+            "Prince", "Michael Jackson", "Prince", "Madonna", "Lady Gaga",
+            "Britney Spears", "Christina Aguilera", "Usher", "R. Kelly",
+            "Alicia Keys", "John Legend", "Usher", "Timberlake", "Pharrell",
+        ]
+
+        # Get all similar artists from profiles — these are user-entered
+        # and represent what members are associating with their skills
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        user_artists = set()
+
+        for user in User.objects.all():
+            try:
+                profile = user.profile
+                personas = profile.personas or []
+                if isinstance(personas, str):
+                    continue
+                for persona in personas:
+                    if not isinstance(persona, dict):
+                        continue
+                    for skill in persona.get("skills", []):
+                        if isinstance(skill, dict):
+                            for artist in skill.get("similar_artists", []):
+                                user_artists.add(artist)
+            except Exception:
+                pass
+
+        # Combine curated and user-entered artists
+        all_artists = list(set(curated_artists) | user_artists)
+
+        # Rank by relevance: prefix matches first, then substring
+        def rank(artist):
+            artist_lower = artist.lower()
+            if artist_lower.startswith(query):
+                return (0, artist_lower)  # prefix match, sort by name
+            elif query in artist_lower:
+                return (1, artist_lower)  # substring match
+            else:
+                return (2, artist_lower)  # no match (shouldn't get here)
+
+        # Filter and rank
+        matches = [a for a in all_artists if query in a.lower()]
+        matches.sort(key=rank)
+
+        # Limit to avoid huge responses
+        limit = min(int(request.query_params.get("limit", 20)), 100)
+        results = matches[:limit]
+
+        return Response({"results": results})

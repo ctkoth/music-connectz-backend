@@ -144,6 +144,7 @@ from .views import (
     TakeAnalysisView,
     LeaderboardsView,
     InstrumentLeaderboardView,
+    ArtistSearchView,
 )
 from .habits import HabitCreateView, HabitCompleteView
 
@@ -269,6 +270,7 @@ urlpatterns = [
     path("profile/avatar/", ProfileAvatarView.as_view(), name="economy-profile-avatar"),
     path("profile/rate/", ProfileRateView.as_view(), name="economy-profile-rate"),
     path("profile/location/", ProfileLocationView.as_view(), name="economy-profile-location"),
+    path("artist-search/", ArtistSearchView.as_view(), name="economy-artist-search"),
     path("follow/", FollowView.as_view(), name="economy-follow"),
     path("notifications/", NotificationsView.as_view(), name="economy-notifications"),
     path("messages/", MessagesView.as_view(), name="economy-messages"),
