@@ -5142,3 +5142,55 @@ class OfferDismissal(models.Model):
 
     def __str__(self):
         return f"{self.user} dismissed {self.offer_key}"
+
+
+class PersonalityResult(models.Model):
+    """MBTI personality test result for a user.
+
+    Stores both basic (4 questions) and detailed (8 questions) MBTI assessments.
+    Basic test costs −1 ⚡ (energy), detailed test costs −2 🏷️ (prompts).
+    """
+    BASIC = "basic"
+    DETAILED = "detailed"
+    TEST_TYPES = (
+        (BASIC, "Basic 4-Question Test"),
+        (DETAILED, "Detailed 8-Question Assessment"),
+    )
+
+    MBTI_TYPES = (
+        ("ISTJ", "The Logistician"),
+        ("ISFJ", "The Defender"),
+        ("INFJ", "The Advocate"),
+        ("INTJ", "The Architect"),
+        ("ISTP", "The Virtuoso"),
+        ("ISFP", "The Adventurer"),
+        ("INFP", "The Mediator"),
+        ("INTP", "The Logician"),
+        ("ESTP", "The Entrepreneur"),
+        ("ESFP", "The Entertainer"),
+        ("ENFP", "The Campaigner"),
+        ("ENTP", "The Debater"),
+        ("ESTJ", "The Executive"),
+        ("ESFJ", "The Consul"),
+        ("ENFJ", "The Protagonist"),
+        ("ENTJ", "The Commander"),
+    )
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                            related_name="personality_results")
+    test_type = models.CharField(max_length=16, choices=TEST_TYPES)
+    mbti_type = models.CharField(max_length=4, choices=MBTI_TYPES)
+    answers = models.JSONField(default=list, help_text="Raw answers from the test")
+    dimension_scores = models.JSONField(default=dict, null=True, blank=True,
+                                       help_text="Score for each MBTI dimension (E/I, S/N, T/F, J/P)")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["user", "-created_at"]),
+            models.Index(fields=["mbti_type"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user} · {self.get_test_type_display()} · {self.mbti_type}"

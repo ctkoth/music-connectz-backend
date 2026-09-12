@@ -1,5 +1,7 @@
 from django.urls import path, re_path
 
+from .personalitiez import (PersonalityBasicTestView, PersonalityDetailedTestView,
+                            PersonalityResultView)
 from .directz_app import (DirectZCopyrightView, DirectZWorksView,
                           DirectZRateView)
 from .media import MediaFileView
@@ -167,6 +169,13 @@ urlpatterns = [
     # GET keyz/ publishes it before either button is pressed.
     path("keyz/transcribe/", KeyTranscribeView.as_view(), name="economy-keyz-transcribe"),
     path("keyz/speak/", KeySpeakView.as_view(), name="economy-keyz-speak"),
+
+    # PersonalitieZ — MBTI personality assessment. Basic test costs −1 ⚡,
+    # detailed test costs −2 🏷️. Cost shown before the test is taken.
+    path("personalitiez/basic/", PersonalityBasicTestView.as_view(), name="economy-personalitiez-basic"),
+    path("personalitiez/detailed/", PersonalityDetailedTestView.as_view(), name="economy-personalitiez-detailed"),
+    path("personalitiez/results/", PersonalityResultView.as_view(), name="economy-personalitiez-results"),
+
     path("wallet/add/", AddFundsView.as_view(), name="economy-wallet-add"),
     path("owner/revenue/", OwnerRevenueView.as_view(), name="economy-owner-revenue"),
     path("membership/", MembershipView.as_view(), name="economy-membership"),
