@@ -431,3 +431,34 @@ class MemberShapeTests(TestCase):
         bands = {r["band"]: r["members"] for r in self.summary()["ages"]}
         self.assertGreaterEqual(bands["unset"], 1)
         self.assertEqual(sum(bands.values()), self.summary()["total"])
+
+
+class MicRefusalReasonTests(TestCase):
+    """"Denied" was the only story, and usually the wrong one.
+
+    getUserMedia fails for reasons that need opposite answers: a permission
+    genuinely refused, a device that does not exist, a camera another app is
+    holding, constraints we asked for that this hardware cannot meet, and a
+    page that is not on https. Reporting all five as "access was refused"
+    sends somebody to re-grant a permission they already granted.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def fire(self, why):
+        return self.client.post(EVENT, {
+            "kind": "try_mic_denied", "anon_id": "v1",
+            "meta": {"app_key": "rapz", "video": True, "why": why},
+        }, format="json")
+
+    def test_each_real_cause_is_stored(self):
+        for why in ("denied", "notfound", "inuse", "constrained", "insecure", "other"):
+            self.fire(why)
+        stored = {e.meta.get("why") for e in FunnelEvent.objects.all()}
+        self.assertEqual(stored, {"denied", "notfound", "inuse", "constrained",
+                                  "insecure", "other"})
+
+    def test_an_invented_reason_is_dropped(self):
+        self.fire("NotReadableError: could not start video source")
+        self.assertNotIn("why", FunnelEvent.objects.get().meta)
