@@ -1,5 +1,11 @@
 from django.urls import path, re_path
 
+from .personalitiez import (PersonalityBasicTestView, PersonalityDetailedTestView,
+                            PersonalityResultView)
+from .preferencesz import PreferencesZView
+from .substancesz import SubstancesZView
+from .vybeez_connectz import VybeZConnectzFunnelView, VybeZConnectzStatsView
+from .lilith import LilithMissionsView
 from .directz_app import (DirectZCopyrightView, DirectZWorksView,
                           DirectZRateView)
 from .media import MediaFileView
@@ -169,6 +175,27 @@ urlpatterns = [
     # GET keyz/ publishes it before either button is pressed.
     path("keyz/transcribe/", KeyTranscribeView.as_view(), name="economy-keyz-transcribe"),
     path("keyz/speak/", KeySpeakView.as_view(), name="economy-keyz-speak"),
+
+    # PersonalitieZ — MBTI personality assessment. Basic test costs −1 ⚡,
+    # detailed test costs −2 🏷️. Cost shown before the test is taken.
+    path("personalitiez/basic/", PersonalityBasicTestView.as_view(), name="economy-personalitiez-basic"),
+    path("personalitiez/detailed/", PersonalityDetailedTestView.as_view(), name="economy-personalitiez-detailed"),
+    path("personalitiez/results/", PersonalityResultView.as_view(), name="economy-personalitiez-results"),
+
+    # PreferencesZ — Sexual preferences for matching. Free.
+    path("preferencesz/", PreferencesZView.as_view(), name="economy-preferencesz"),
+
+    # SubstancesZ — Substance use preferences for matching. Free.
+    path("substancesz/", SubstancesZView.as_view(), name="economy-substancesz"),
+
+    # VybeZ ConnectZ — Compatibility matching funnel using PersonalitieZ, PreferencesZ, SubstancesZ. Free.
+    path("vybeez_connectz/funnel/", VybeZConnectzFunnelView.as_view(), name="economy-vybeez-funnel"),
+    path("vybeez_connectz/stats/", VybeZConnectzStatsView.as_view(), name="economy-vybeez-stats"),
+
+    # LilithZ — Adaptive mission system for user journey stages (onboarding → engagement → active).
+    # INFJ personality voice guiding engagement. Highest rewards for messaging new members (viral growth).
+    path("lilith/missions/", LilithMissionsView.as_view(), name="economy-lilith-missions"),
+
     path("wallet/add/", AddFundsView.as_view(), name="economy-wallet-add"),
     path("owner/revenue/", OwnerRevenueView.as_view(), name="economy-owner-revenue"),
     path("membership/", MembershipView.as_view(), name="economy-membership"),

@@ -666,3 +666,11 @@ PAYOUT_MAX_CENTS = 500_000       # $5,000 per withdrawal
 # rather than made here, the same way PROMPT_ALLOWANCE's ladder is. The
 # mechanism exists so the number lands in one place the day he wants one.
 PAYOUT_FEE_CENTS = 0
+
+
+# ---- PersonalitieZ -----------------------------------------------------------
+# MBTI personality testing with basic and detailed assessments.
+# Basic test: −1 ⚡ for quick 4-question assessment
+# Detailed test: −2 🏷️ for comprehensive 8-question assessment with AI analysis
+ENERGY_COST_BASIC_TEST = 1
+PROMPT_COST_DETAILED_TEST = 2

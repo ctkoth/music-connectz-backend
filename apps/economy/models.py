@@ -4772,6 +4772,54 @@ class FunnelEvent(models.Model):
     meta = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
+    # Enhanced funnel analytics
+    age = models.IntegerField(null=True, blank=True, db_index=True)
+    gender = models.CharField(
+        max_length=16,
+        choices=[
+            ("male", "Male"),
+            ("female", "Female"),
+            ("non_binary", "Non-binary"),
+            ("other", "Other"),
+            ("prefer_not", "Prefer not to say"),
+        ],
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    source = models.CharField(
+        max_length=32,
+        choices=[
+            ("organic", "Organic Search"),
+            ("paid_ads", "Paid Ads"),
+            ("social", "Social Media"),
+            ("referral", "Referral"),
+            ("direct", "Direct"),
+            ("other", "Other"),
+        ],
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    device = models.CharField(
+        max_length=16,
+        choices=[
+            ("mobile", "Mobile"),
+            ("tablet", "Tablet"),
+            ("desktop", "Desktop"),
+            ("other", "Other"),
+        ],
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    retention_days = models.IntegerField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Days between landing and first return visit",
+    )
+
     class Meta:
         ordering = ("-created_at",)
 
@@ -5163,3 +5211,176 @@ class OfferDismissal(models.Model):
 
     def __str__(self):
         return f"{self.user} dismissed {self.offer_key}"
+
+
+class PersonalityResult(models.Model):
+    """MBTI personality test result for a user.
+
+    Stores both basic (4 questions) and detailed (8 questions) MBTI assessments.
+    Basic test costs −1 ⚡ (energy), detailed test costs −2 🏷️ (prompts).
+    """
+    BASIC = "basic"
+    DETAILED = "detailed"
+    TEST_TYPES = (
+        (BASIC, "Basic 4-Question Test"),
+        (DETAILED, "Detailed 8-Question Assessment"),
+    )
+
+    MBTI_TYPES = (
+        ("ISTJ", "The Logistician"),
+        ("ISFJ", "The Defender"),
+        ("INFJ", "The Advocate"),
+        ("INTJ", "The Architect"),
+        ("ISTP", "The Virtuoso"),
+        ("ISFP", "The Adventurer"),
+        ("INFP", "The Mediator"),
+        ("INTP", "The Logician"),
+        ("ESTP", "The Entrepreneur"),
+        ("ESFP", "The Entertainer"),
+        ("ENFP", "The Campaigner"),
+        ("ENTP", "The Debater"),
+        ("ESTJ", "The Executive"),
+        ("ESFJ", "The Consul"),
+        ("ENFJ", "The Protagonist"),
+        ("ENTJ", "The Commander"),
+    )
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                            related_name="personality_results")
+    test_type = models.CharField(max_length=16, choices=TEST_TYPES)
+    mbti_type = models.CharField(max_length=4, choices=MBTI_TYPES)
+    answers = models.JSONField(default=list, help_text="Raw answers from the test")
+    dimension_scores = models.JSONField(default=dict, null=True, blank=True,
+                                       help_text="Score for each MBTI dimension (E/I, S/N, T/F, J/P)")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["user", "-created_at"]),
+            models.Index(fields=["mbti_type"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user} · {self.get_test_type_display()} · {self.mbti_type}"
+
+
+class UserVybeZPreferences(models.Model):
+    """User's VybeZ ConnectZ preferences for matching: gender interest, relationship type, and commitment.
+
+    Free to set, used for compatible matching in VybeZ ConnectZ.
+    """
+    GENDER_CHOICES = (
+        ("men", "Men"),
+        ("women", "Women"),
+        ("non_binary", "Non-binary"),
+        ("everyone", "Everyone"),
+    )
+
+    RELATIONSHIP_CHOICES = (
+        ("collabs", "Collaborations only"),
+        ("dating", "Dating / Romance"),
+        ("both", "Both"),
+    )
+
+    LONG_TERM_CHOICES = (
+        ("short", "Short-term / casual"),
+        ("long", "Long-term"),
+        ("either", "Either"),
+    )
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="vybez_preferences")
+    gender_interested = models.CharField(max_length=16, choices=GENDER_CHOICES, default="everyone")
+    relationship_type = models.CharField(max_length=16, choices=RELATIONSHIP_CHOICES, default="both")
+    long_term = models.CharField(max_length=16, choices=LONG_TERM_CHOICES, default="either")
+    updated_at = models.DateTimeField(auto_now=True, db_index=True)
+
+    class Meta:
+        verbose_name_plural = "VybeZ Preferences"
+
+    def __str__(self):
+        return f"{self.user} · vybez preferences"
+
+
+class UserVybeZSubstances(models.Model):
+    """User's substance use preferences for matching and compatibility.
+
+    Free to report, private to user, used for matching filters in VybeZ ConnectZ.
+    Tracks alcohol, cannabis, tobacco, and psychedelics use levels.
+    """
+    USE_CHOICES = (
+        ("none", "Don't use"),
+        ("occasionally", "Occasionally"),
+        ("regularly", "Regularly"),
+        ("prefer_not", "Prefer not to say"),
+    )
+
+    PSYCHEDELIC_CHOICES = (
+        ("never", "Never tried"),
+        ("tried", "Tried before"),
+        ("open", "Open to trying"),
+        ("prefer_not", "Prefer not to say"),
+    )
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="substances")
+    alcohol = models.CharField(max_length=16, choices=USE_CHOICES, default="prefer_not")
+    cannabis = models.CharField(max_length=16, choices=USE_CHOICES, default="prefer_not")
+    tobacco = models.CharField(max_length=16, choices=USE_CHOICES, default="prefer_not")
+    psychedelics = models.CharField(max_length=16, choices=PSYCHEDELIC_CHOICES, default="prefer_not")
+    updated_at = models.DateTimeField(auto_now=True, db_index=True)
+
+    class Meta:
+        verbose_name_plural = "User Substances"
+
+    def __str__(self):
+        return f"{self.user} · substances"
+
+
+class LilithMission(models.Model):
+    """Adaptive mission system for user journey stages.
+
+    Missions are personalized based on user account age:
+    - Onboarding (0-7 days): Profile completion, messaging new members, first takes
+    - Engagement (7-30 days): Weekly messaging targets, collabs, detailed feedback
+    - Active (30+ days): Mentoring, coaching others, community leadership
+
+    Lilith is an INFJ personality voice guiding users through engagement loops.
+    Highest-value actions: messaging new users (viral network growth).
+    """
+    STAGE_CHOICES = (
+        ("onboarding", "Onboarding"),
+        ("engagement", "Engagement"),
+        ("active", "Active Community Member"),
+    )
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="lilith_missions")
+    stage = models.CharField(max_length=16, choices=STAGE_CHOICES)
+    key = models.CharField(max_length=64)  # Mission identifier (message_new_user, collab, etc.)
+    title = models.CharField(max_length=128)
+    description = models.TextField()
+    action = models.CharField(max_length=64)  # What triggers completion tracking
+    action_target = models.PositiveIntegerField(default=1)  # How many times to trigger
+    reward_spinaz = models.PositiveIntegerField(default=0)
+    reward_energy = models.PositiveIntegerField(default=0)
+    is_priority = models.BooleanField(default=False)  # True for highest-value missions (new user messaging)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        unique_together = ("user", "key", "stage")
+        ordering = ["-is_priority", "created_at"]
+
+    def __str__(self):
+        return f"{self.user} · {self.key} · {self.stage}"
+
+
+class LilithProgress(models.Model):
+    """Tracks progress on multi-step missions."""
+    mission = models.OneToOneField(LilithMission, on_delete=models.CASCADE, related_name="progress_track")
+    progress = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.mission} · {self.progress}/{self.mission.action_target}"
