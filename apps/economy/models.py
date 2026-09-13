@@ -4751,6 +4751,54 @@ class FunnelEvent(models.Model):
     meta = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
+    # Enhanced funnel analytics
+    age = models.IntegerField(null=True, blank=True, db_index=True)
+    gender = models.CharField(
+        max_length=16,
+        choices=[
+            ("male", "Male"),
+            ("female", "Female"),
+            ("non_binary", "Non-binary"),
+            ("other", "Other"),
+            ("prefer_not", "Prefer not to say"),
+        ],
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    source = models.CharField(
+        max_length=32,
+        choices=[
+            ("organic", "Organic Search"),
+            ("paid_ads", "Paid Ads"),
+            ("social", "Social Media"),
+            ("referral", "Referral"),
+            ("direct", "Direct"),
+            ("other", "Other"),
+        ],
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    device = models.CharField(
+        max_length=16,
+        choices=[
+            ("mobile", "Mobile"),
+            ("tablet", "Tablet"),
+            ("desktop", "Desktop"),
+            ("other", "Other"),
+        ],
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+    retention_days = models.IntegerField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Days between landing and first return visit",
+    )
+
     class Meta:
         ordering = ("-created_at",)
 
@@ -5196,7 +5244,7 @@ class PersonalityResult(models.Model):
         return f"{self.user} · {self.get_test_type_display()} · {self.mbti_type}"
 
 
-class UserPreferences(models.Model):
+class UserVybeZPreferences(models.Model):
     """User's VybeZ ConnectZ preferences for matching: gender interest, relationship type, and commitment.
 
     Free to set, used for compatible matching in VybeZ ConnectZ.
@@ -5221,20 +5269,20 @@ class UserPreferences(models.Model):
     )
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
-                               related_name="preferences")
+                               related_name="vybez_preferences")
     gender_interested = models.CharField(max_length=16, choices=GENDER_CHOICES, default="everyone")
     relationship_type = models.CharField(max_length=16, choices=RELATIONSHIP_CHOICES, default="both")
     long_term = models.CharField(max_length=16, choices=LONG_TERM_CHOICES, default="either")
     updated_at = models.DateTimeField(auto_now=True, db_index=True)
 
     class Meta:
-        verbose_name_plural = "User Preferences"
+        verbose_name_plural = "VybeZ Preferences"
 
     def __str__(self):
-        return f"{self.user} · preferences"
+        return f"{self.user} · vybez preferences"
 
 
-class UserSubstances(models.Model):
+class UserVybeZSubstances(models.Model):
     """User's substance use preferences for matching and compatibility.
 
     Free to report, private to user, used for matching filters in VybeZ ConnectZ.

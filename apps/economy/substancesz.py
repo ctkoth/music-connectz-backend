@@ -1,7 +1,7 @@
 from django.db import transaction
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import UserSubstances
+from .models import UserVybeZSubstances
 
 
 SUBSTANCE_OPTIONS = {
@@ -43,7 +43,7 @@ class SubstancesZView(APIView):
         if not user.is_authenticated:
             return Response({"error": "Not authenticated"}, status=401)
 
-        substances = UserSubstances.objects.filter(user=user).first()
+        substances = UserVybeZSubstances.objects.filter(user=user).first()
         current_substances = {}
         if substances:
             current_substances = {
@@ -87,7 +87,7 @@ class SubstancesZView(APIView):
             return Response({"error": "Invalid psychedelics preference"}, status=400)
 
         # Update or create substance record
-        substances, created = UserSubstances.objects.get_or_create(user=user)
+        substances, created = UserVybeZSubstances.objects.get_or_create(user=user)
         if alcohol:
             substances.alcohol = alcohol
         if cannabis:

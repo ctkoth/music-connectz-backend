@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.contrib.auth import get_user_model
 from .models import (
-    PersonalityResult, UserPreferences, UserSubstances, Wallet
+    PersonalityResult, UserVybeZPreferences, UserVybeZSubstances, Wallet
 )
 
 User = get_user_model()
@@ -33,7 +33,7 @@ def calculate_compatibility_score(user1, user2, user1_prefs, user1_substances):
 
     # Preferences compatibility
     try:
-        u2_prefs = UserPreferences.objects.get(user=user2)
+        u2_prefs = UserVybeZPreferences.objects.get(user=user2)
 
         # Check gender interest
         if u2_prefs.gender_interested != "everyone":
@@ -57,12 +57,12 @@ def calculate_compatibility_score(user1, user2, user1_prefs, user1_substances):
             score += 15  # One is flexible
         else:
             score += 5   # Mismatched expectations
-    except UserPreferences.DoesNotExist:
+    except UserVybeZPreferences.DoesNotExist:
         score += 10  # No preference data
 
     # Substances compatibility
     try:
-        u2_substances = UserSubstances.objects.get(user=user2)
+        u2_substances = UserVybeZSubstances.objects.get(user=user2)
         substance_matches = 0
 
         # Simple matching: prefer users with same/similar substance choices
@@ -79,7 +79,7 @@ def calculate_compatibility_score(user1, user2, user1_prefs, user1_substances):
                 substance_matches += 1
 
         score += min(substance_matches * 5, 15)  # Up to +15 for substance alignment
-    except UserSubstances.DoesNotExist:
+    except UserVybeZSubstances.DoesNotExist:
         score += 5  # No substance data
 
     return min(score, 100)  # Cap at 100
@@ -99,8 +99,8 @@ class VybeZConnectzFunnelView(APIView):
 
         # Get user's preferences and substances
         try:
-            user_prefs = UserPreferences.objects.get(user=user)
-        except UserPreferences.DoesNotExist:
+            user_prefs = UserVybeZPreferences.objects.get(user=user)
+        except UserVybeZPreferences.DoesNotExist:
             return Response({
                 "error": "preferences_not_set",
                 "message": "Please set your preferences first",
@@ -108,8 +108,8 @@ class VybeZConnectzFunnelView(APIView):
             }, status=400)
 
         try:
-            user_substances = UserSubstances.objects.get(user=user)
-        except UserSubstances.DoesNotExist:
+            user_substances = UserVybeZSubstances.objects.get(user=user)
+        except UserVybeZSubstances.DoesNotExist:
             user_substances = None  # Substances are optional
 
         # Get all other users (limit to 20 for now)
@@ -121,18 +121,18 @@ class VybeZConnectzFunnelView(APIView):
         matches = []
         for other_user in all_users:
             try:
-                other_prefs = UserPreferences.objects.get(user=other_user)
-            except UserPreferences.DoesNotExist:
+                other_prefs = UserVybeZPreferences.objects.get(user=other_user)
+            except UserVybeZPreferences.DoesNotExist:
                 continue  # Skip users without preferences
 
             try:
-                other_substances = UserSubstances.objects.get(user=other_user)
-            except UserSubstances.DoesNotExist:
+                other_substances = UserVybeZSubstances.objects.get(user=other_user)
+            except UserVybeZSubstances.DoesNotExist:
                 other_substances = None
 
             score = calculate_compatibility_score(
                 user, other_user, user_prefs,
-                user_substances or UserSubstances(user=user)
+                user_substances or UserVybeZSubstances(user=user)
             )
 
             # Only return matches with reasonable compatibility (>40%)
@@ -200,15 +200,15 @@ class VybeZConnectzStatsView(APIView):
             pass
 
         try:
-            UserPreferences.objects.get(user=user)
+            UserVybeZPreferences.objects.get(user=user)
             profile_complete["preferences"] = True
-        except UserPreferences.DoesNotExist:
+        except UserVybeZPreferences.DoesNotExist:
             pass
 
         try:
-            UserSubstances.objects.get(user=user)
+            UserVybeZSubstances.objects.get(user=user)
             profile_complete["substances"] = True
-        except UserSubstances.DoesNotExist:
+        except UserVybeZSubstances.DoesNotExist:
             pass
 
         completion_pct = (sum(profile_complete.values()) / 3) * 100

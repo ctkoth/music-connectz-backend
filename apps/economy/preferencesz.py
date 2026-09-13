@@ -1,7 +1,7 @@
 from django.db import transaction
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import UserPreferences, Wallet
+from .models import UserVybeZPreferences, Wallet
 
 
 PREFERENCE_OPTIONS = {
@@ -35,7 +35,7 @@ class PreferencesZView(APIView):
         if not user.is_authenticated:
             return Response({"error": "Not authenticated"}, status=401)
 
-        prefs = UserPreferences.objects.filter(user=user).first()
+        prefs = UserVybeZPreferences.objects.filter(user=user).first()
         current_prefs = {}
         if prefs:
             current_prefs = {
@@ -70,7 +70,7 @@ class PreferencesZView(APIView):
             return Response({"error": "Invalid long-term preference"}, status=400)
 
         # Update or create preferences
-        prefs, created = UserPreferences.objects.get_or_create(user=user)
+        prefs, created = UserVybeZPreferences.objects.get_or_create(user=user)
         if gender_interested:
             prefs.gender_interested = gender_interested
         if relationship_type:

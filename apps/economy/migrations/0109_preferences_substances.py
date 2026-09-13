@@ -14,7 +14,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name="UserPreferences",
+            name="UserVybeZPreferences",
             fields=[
                 (
                     "id",
@@ -67,17 +67,17 @@ class Migration(migrations.Migration):
                     "user",
                     models.OneToOneField(
                         on_delete=django.db.models.deletion.CASCADE,
-                        related_name="preferences",
+                        related_name="vybez_preferences",
                         to=settings.AUTH_USER_MODEL,
                     ),
                 ),
             ],
             options={
-                "verbose_name_plural": "User Preferences",
+                "verbose_name_plural": "VybeZ Preferences",
             },
         ),
         migrations.CreateModel(
-            name="UserSubstances",
+            name="UserVybeZSubstances",
             fields=[
                 (
                     "id",
@@ -145,13 +145,13 @@ class Migration(migrations.Migration):
                     "user",
                     models.OneToOneField(
                         on_delete=django.db.models.deletion.CASCADE,
-                        related_name="substances",
+                        related_name="vybez_substances",
                         to=settings.AUTH_USER_MODEL,
                     ),
                 ),
             ],
             options={
-                "verbose_name_plural": "User Substances",
+                "verbose_name_plural": "VybeZ Substances",
             },
         ),
     ]
