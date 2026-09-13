@@ -456,6 +456,12 @@ class FunnelEventView(APIView):
         "try_send": {"app_key": _APP},
         "try_failed": {"app_key": _APP, "why": _WHY},
         "try_scored": {"app_key": _APP},
+        "quiz_view": {"depth": lambda x: x if x in ("basic", "advanced") else None},
+        "quiz_done": {"depth": lambda x: x if x in ("basic", "advanced") else None,
+                      # How many of the four axes came out said. A visitor who
+                      # finishes with two letters answered the middle on two
+                      # axes, which is a different thing from abandoning.
+                      "axes": lambda v: v if isinstance(v, int) and 0 <= v <= 4 else None},
         "try_shared": {"app_key": _APP},
         "register_view": {
             "has_ref": lambda v: bool(v),

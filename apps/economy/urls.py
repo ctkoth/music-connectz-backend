@@ -12,7 +12,7 @@ from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
 from .rulez import RulezView
-from .personalityz import PersonalityAxesView
+from .personalityz import PersonalityAxesView, PersonalityTestView
 from .trialdoorz import TrialDoorsView
 from .offerz_engine import (FunnelCatalogView, FunnelOfferRedeemView,
                             FunnelOffersView)
@@ -371,6 +371,8 @@ urlpatterns = [
     # PersonalitieZ axes — one list, read by the profile toggles, every
     # member search filter, and VybeZ.
     path("personalityz/", PersonalityAxesView.as_view(), name="economy-personalityz"),
+    # The questionnaire, open logged-out like the trial take.
+    path("personalityz/test/", PersonalityTestView.as_view(), name="economy-personalityz-test"),
     path("signbonus/", SignBonusView.as_view(), name="economy-signbonus"),
     path("offerz/funnel/", FunnelOffersView.as_view(), name="economy-funnel-offers"),
     path("offerz/funnel/redeem/", FunnelOfferRedeemView.as_view(),

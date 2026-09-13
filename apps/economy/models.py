@@ -929,6 +929,15 @@ class Profile(models.Model):
     # One CharField rather than four booleans because it is one answer a
     # member gives once, and because the filter reads it as a whole.
     personality = models.CharField(max_length=4, blank=True, default="", db_index=True)
+    # {"clarity": {axis: 0-100}, "depth": "basic"|"advanced"} from the
+    # questionnaire, or {} for a member who set their letters by hand.
+    #
+    # `clarity` is how CONSISTENTLY the answers pointed one way — never a
+    # quality, never ranked, and nothing may sort on it. It lives here because
+    # it is the only thing the 48-question version gives you that the
+    # 16-question one does not, and a difference that vanishes on reload is
+    # not a difference.
+    personality_detail = models.JSONField(default=dict, blank=True)
     personas = models.JSONField(default=list, blank=True)
     # The title being worn, from a badge held AND shown. Stored rather than
     # derived so a member with several can choose which one they lead with.
@@ -4744,6 +4753,12 @@ FUNNEL_KINDS = (
     ("try_send", "Trial take sent to the coach"),
     ("try_failed", "Trial take came back with no score"),
     ("try_scored", "Trial take scored"),
+    # The other trial door, and the one with no permission prompt in front of
+    # it. 87% of arrivals never opened the recorder at all, so the funnel
+    # needs to be able to see a visitor who took the questionnaire instead —
+    # otherwise the lower-floor door looks like no traffic.
+    ("quiz_view", "PersonalitieZ test opened"),
+    ("quiz_done", "PersonalitieZ test finished"),
     # Someone handed their score to somebody else. The only step here that
     # points OUTWARD — every other kind measures a visitor moving down the
     # funnel, this one measures them widening the top of it.

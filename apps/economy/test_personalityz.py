@@ -206,3 +206,120 @@ class ColumnWidthTests(TestCase):
         # And the cleaner never produces anything longer, whatever it is fed.
         for value in ("INFPX", "IIIIIIII", {"ie": "I", "ns": "N", "tf": "T", "jp": "J"}):
             self.assertLessEqual(len(pz.clean_code(value)), width)
+
+
+class TestBankTests(TestCase):
+    """The questionnaire. Balance is the whole thing.
+
+    An axis with more statements on one side measures agreeableness rather
+    than personality — people say yes more often than no, so an unbalanced
+    bank hands nearly everybody the same letter and looks like it is working.
+    """
+
+    def test_every_axis_is_balanced_at_every_depth(self):
+        from collections import Counter
+        for depth in pz.DEPTHS:
+            counts = Counter((q["axis"], q["side"]) for q in pz.questions(depth))
+            self.assertEqual(len(set(counts.values())), 1, f"{depth}: {counts}")
+            self.assertEqual(len(counts), 2 * len(pz.AXES), depth)
+
+    def test_agreeing_with_everything_yields_no_type_at_all(self):
+        # The acquiescence check, and the reason balance is asserted rather
+        # than eyeballed. On an unbalanced bank this person gets a full type.
+        for depth in pz.DEPTHS:
+            answers = {q["id"]: 2 for q in pz.questions(depth)}
+            self.assertEqual(pz.score(answers, depth)["code"], "", depth)
+
+    def test_disagreeing_with_everything_also_yields_nothing(self):
+        for depth in pz.DEPTHS:
+            answers = {q["id"]: -2 for q in pz.questions(depth)}
+            self.assertEqual(pz.score(answers, depth)["code"], "", depth)
+
+    def test_answering_one_way_on_one_axis_reads_that_way(self):
+        qs = pz.questions("basic")
+        answers = {q["id"]: (2 if q["side"] == "I" else -2)
+                   for q in qs if q["axis"] == "ie"}
+        out = pz.score(answers, "basic")
+        self.assertEqual(out["axes" if "axes" in out else "clarity"] and out["code"][0], "I")
+        self.assertEqual(out["clarity"]["ie"], 100)
+
+    def test_a_middle_answer_stays_unsaid_rather_than_guessing(self):
+        # Being genuinely in the middle is an answer, and a coin flip would
+        # put a letter on somebody that they never chose.
+        answers = {q["id"]: 0 for q in pz.questions("basic")}
+        out = pz.score(answers, "basic")
+        self.assertEqual(out["code"], "")
+        self.assertEqual(set(out["clarity"].values()), {0})
+
+    def test_clarity_is_consistency_and_never_a_ranking(self):
+        qs = pz.questions("advanced")
+        strong = {q["id"]: (2 if q["side"] == "I" else -2) for q in qs if q["axis"] == "ie"}
+        weak = dict(strong)
+        # Flip a third of them: same letter, lower clarity, not a worse person.
+        for q in [q for q in qs if q["axis"] == "ie"][:4]:
+            weak[q["id"]] = -weak[q["id"]]
+        a, b = pz.score(strong, "advanced"), pz.score(weak, "advanced")
+        self.assertEqual(a["code"][0], b["code"][0])
+        self.assertGreater(a["clarity"]["ie"], b["clarity"]["ie"])
+
+    def test_junk_answers_are_ignored_not_scored(self):
+        qs = pz.questions("basic")
+        answers = {q["id"]: "yes please" for q in qs}
+        answers["not-a-question"] = 2
+        answers[qs[0]["id"]] = 99          # outside the scale
+        out = pz.score(answers, "basic")
+        self.assertEqual(out["answered"], 0)
+        self.assertEqual(out["code"], "")
+
+
+class TestEndpointTests(TestCase):
+    URL = "/api/economy/personalityz/test/"
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_a_stranger_can_take_it(self):
+        r = self.client.get(self.URL)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.data["questions"]), 16)
+
+    def test_advanced_is_the_longer_one(self):
+        self.assertEqual(len(self.client.get(f"{self.URL}?depth=advanced").data["questions"]), 48)
+
+    def test_an_unknown_depth_falls_back_rather_than_erroring(self):
+        self.assertEqual(self.client.get(f"{self.URL}?depth=galaxy").data["depth"], "basic")
+
+    def test_it_says_neither_side_is_better_before_the_first_question(self):
+        self.assertIn("better", self.client.get(self.URL).data["note"])
+
+    def test_a_stranger_gets_a_result_and_is_told_it_was_not_saved(self):
+        qs = self.client.get(self.URL).data["questions"]
+        answers = {q["id"]: (2 if q["side"] in ("I", "N", "F", "P") else -2) for q in qs}
+        r = self.client.post(self.URL, {"answers": answers}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["code"], "INFP")
+        self.assertFalse(r.data["saved"])
+
+    def test_a_member_result_lands_on_the_profile(self):
+        user = User.objects.create_user("taker", "t@e.com", PW)
+        profile_for(user)
+        c = APIClient(); c.force_authenticate(user)
+        qs = c.get(self.URL).data["questions"]
+        answers = {q["id"]: (2 if q["side"] in ("E", "S", "T", "J") else -2) for q in qs}
+        r = c.post(self.URL, {"answers": answers}, format="json")
+        self.assertTrue(r.data["saved"])
+        p = profile_for(user)
+        self.assertEqual(p.personality, "ESTJ")
+        self.assertEqual(p.personality_detail["depth"], "basic")
+        self.assertEqual(p.personality_detail["clarity"]["ie"], 100)
+
+    def test_nothing_ranks_on_clarity(self):
+        # The line that keeps a questionnaire from becoming a score.
+        import subprocess
+        out = subprocess.run(["grep", "-rn", "clarity", "--include=*.py", "apps/"],
+                             capture_output=True, text=True).stdout
+        self.assertIn("personalityz", out)
+        for line in out.splitlines():
+            if "test_personalityz" in line or "personalityz.py" in line:
+                continue
+            self.assertNotRegex(line, r"order_by|sort|rank|median|leaderboard")
