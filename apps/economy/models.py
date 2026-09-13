@@ -920,6 +920,15 @@ class Profile(models.Model):
     attracted_to = models.JSONField(default=list, blank=True)     # partnerGenders
     asexual = models.BooleanField(default=False)
     traits = models.JSONField(default=list, blank=True)
+    # PersonalitieZ — four declared axes in four slots, "-" for one not said.
+    # A DECLARATION, never a measurement: see apps/economy/personalityz.py for
+    # why that distinction is what makes it allowed under the substance rule,
+    # and for the three lines that must not be crossed (it never moves a
+    # rating, nothing is inferred, and undeclared is a third state).
+    #
+    # One CharField rather than four booleans because it is one answer a
+    # member gives once, and because the filter reads it as a whole.
+    personality = models.CharField(max_length=4, blank=True, default="", db_index=True)
     personas = models.JSONField(default=list, blank=True)
     # The title being worn, from a badge held AND shown. Stored rather than
     # derived so a member with several can choose which one they lead with.
@@ -4722,6 +4731,18 @@ class JournalMention(models.Model):
 FUNNEL_KINDS = (
     ("landing_view", "Landing page viewed"),
     ("try_view", "Trial take screen opened"),
+    # Between opening the trial and getting a number there is a RECORDER, and
+    # for the whole life of this funnel it was one unmeasured step. Thirteen
+    # visitors opened the trial in a month and one got a score, and nothing
+    # here could say whether the other twelve refused the mic, recorded and
+    # never sent, or sent and were failed by the coach — three problems with
+    # three different fixes, indistinguishable from the only two rows that
+    # existed. Each of these is one thing that can go wrong, named.
+    ("try_record", "Trial recorder started"),
+    ("try_mic_denied", "Trial mic refused"),
+    ("try_attach", "Trial file attached"),
+    ("try_send", "Trial take sent to the coach"),
+    ("try_failed", "Trial take came back with no score"),
     ("try_scored", "Trial take scored"),
     # Someone handed their score to somebody else. The only step here that
     # points OUTWARD — every other kind measures a visitor moving down the

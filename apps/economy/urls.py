@@ -12,6 +12,8 @@ from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
 from .rulez import RulezView
+from .personalityz import PersonalityAxesView
+from .trialdoorz import TrialDoorsView
 from .offerz_engine import (FunnelCatalogView, FunnelOfferRedeemView,
                             FunnelOffersView)
 from .signbonus import SignBonusView
@@ -364,6 +366,11 @@ urlpatterns = [
     # the one about how many accounts a person gets is needed on the signup
     # form, which is the one screen where nobody is signed in yet.
     path("rulez/", RulezView.as_view(), name="economy-rulez"),
+    # Logged-out: which coaches a stranger can reach without an account.
+    path("trialdoorz/", TrialDoorsView.as_view(), name="economy-trial-doors"),
+    # PersonalitieZ axes — one list, read by the profile toggles, every
+    # member search filter, and VybeZ.
+    path("personalityz/", PersonalityAxesView.as_view(), name="economy-personalityz"),
     path("signbonus/", SignBonusView.as_view(), name="economy-signbonus"),
     path("offerz/funnel/", FunnelOffersView.as_view(), name="economy-funnel-offers"),
     path("offerz/funnel/redeem/", FunnelOfferRedeemView.as_view(),

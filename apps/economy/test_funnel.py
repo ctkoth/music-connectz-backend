@@ -197,3 +197,237 @@ class ChannelAttributionTests(TestCase):
         self.assertEqual(d["sources"], [])
         # And the empty list says which of the two problems it is.
         self.assertIn("Untagged", d["sources_note"])
+
+
+class RecorderStepsTests(TestCase):
+    """The trial recorder, measured.
+
+    A month of this funnel read: 103 landed, 13 opened the trial, 1 got a
+    score. Two rows for the step that loses 92% of everybody who wanted the
+    product — and no way at all to tell a refused mic from a recorded take
+    nobody sent from a take the coach failed. Three problems, three opposite
+    fixes, one indistinguishable number.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def fire(self, kind, anon="v1", **meta):
+        return self.client.post(
+            EVENT, {"kind": kind, "anon_id": anon, "meta": meta}, format="json",
+        )
+
+    def test_each_recorder_step_is_a_kind_of_its_own(self):
+        for kind in ("try_record", "try_mic_denied", "try_attach",
+                     "try_send", "try_failed"):
+            self.assertEqual(self.fire(kind, app_key="singz").status_code, 204, kind)
+        self.assertEqual(FunnelEvent.objects.count(), 5)
+
+    def test_the_camera_path_is_told_apart_from_the_mic(self):
+        # A second permission and a file an order of magnitude bigger. A cliff
+        # on one is not a cliff on the other, so they must not total together.
+        self.fire("try_record", app_key="singz", video=True)
+        self.assertEqual(FunnelEvent.objects.get().meta, {"app_key": "singz", "video": True})
+
+    def test_a_failure_carries_a_reason_from_a_closed_list(self):
+        self.fire("try_failed", app_key="rapz", why="too_big")
+        self.assertEqual(FunnelEvent.objects.get().meta["why"], "too_big")
+
+    def test_a_failure_reason_is_never_free_text(self):
+        # The reason decides what gets fixed. Free text here would be the one
+        # place a visitor's own words could land in this table.
+        self.fire("try_failed", app_key="rapz", why="the coach said my singing was bad")
+        self.assertNotIn("why", FunnelEvent.objects.get().meta)
+
+    def test_every_kind_fits_the_column(self):
+        # SQLite ignores varchar length and production is Postgres, so a kind
+        # longer than the column is invisible locally and a 500 in production.
+        from apps.economy.models import FUNNEL_KINDS
+        width = FunnelEvent._meta.get_field("kind").max_length
+        for kind, _ in FUNNEL_KINDS:
+            self.assertLessEqual(len(kind), width, kind)
+
+
+class HeadlineRateTests(TestCase):
+    """The three rates the platform turns on, pinned rather than derived.
+
+    Eleven step rows are a detail tab. Which of the three doors is shut is
+    the whole decision, and reading it off the rows means doing arithmetic
+    every time — which is how a funnel gets looked at once and never again.
+    """
+
+    def setUp(self):
+        self.owner = User.objects.create_superuser("boss3", "b3@e.com", PW)
+
+    def summary(self):
+        c = APIClient()
+        c.force_authenticate(self.owner)
+        return c.get(SUMMARY).data
+
+    def test_each_rate_carries_both_counts_and_not_only_a_percentage(self):
+        # A rate with no denominator behind it is decoration: 100% of two
+        # people is not a working funnel.
+        FunnelEvent.objects.create(kind="landing_view", anon_id="a")
+        FunnelEvent.objects.create(kind="landing_view", anon_id="b")
+        FunnelEvent.objects.create(kind="try_view", anon_id="a")
+
+        row = {r["key"]: r for r in self.summary()["headline"]}["try_view"]
+        self.assertEqual((row["from"], row["to"]), (2, 1))
+        self.assertEqual(row["pct"], 50.0)
+
+    def test_an_empty_step_reads_as_no_measurement_not_as_zero_percent(self):
+        # 0% against nobody reads as a broken product. It is an empty
+        # measurement, and the two need opposite responses.
+        row = {r["key"]: r for r in self.summary()["headline"]}["try_scored"]
+        self.assertEqual((row["from"], row["to"]), (0, 0))
+        self.assertIsNone(row["pct"])
+
+    def test_the_three_are_the_three_that_decide_what_to_work_on(self):
+        self.assertEqual([r["key"] for r in self.summary()["headline"]],
+                         ["try_view", "try_scored", "register_success"])
+
+
+class RegisterAttributionTests(TestCase):
+    """A registration has to name the channel that produced it.
+
+    `register_success` was shaped as "registered" — not a kind — so its `src`
+    was dropped on the way in and the per-channel table's register column was
+    structurally always zero. The one number a marketing spend is judged on
+    could not be non-zero however well the channel worked.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_superuser("boss4", "b4@e.com", PW)
+
+    def fire(self, kind, anon, src):
+        return self.client.post(
+            EVENT, {"kind": kind, "anon_id": anon, "meta": {"src": src}}, format="json",
+        )
+
+    def test_a_registration_keeps_its_channel(self):
+        self.fire("register_success", "r1", "reddit")
+        self.assertEqual(FunnelEvent.objects.get().meta, {"src": "reddit"})
+
+    def test_the_channel_table_can_show_a_registration(self):
+        self.fire("landing_view", "r1", "reddit")
+        self.fire("register_success", "r1", "reddit")
+        c = APIClient()
+        c.force_authenticate(self.owner)
+        rows = {r["src"]: r for r in c.get(SUMMARY).data["sources"]}
+        self.assertEqual(rows["reddit"]["register_success"], 1)
+
+    def test_a_login_keeps_its_channel_too(self):
+        self.fire("login_success", "r2", "flyer")
+        self.assertEqual(FunnelEvent.objects.get().meta, {"src": "flyer"})
+
+
+class DeviceShapeTests(TestCase):
+    """What kind of screen a step happened on.
+
+    The trial's first move is a browser mic dialog. A permission cliff on a
+    phone is not a cliff on a laptop, and one number covering both hides
+    whichever of the two is the actual problem — which is the position this
+    funnel was in for its whole life.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_superuser("boss5", "b5@e.com", PW)
+
+    def fire(self, kind, anon, dev):
+        return self.client.post(
+            EVENT, {"kind": kind, "anon_id": anon, "meta": {"dev": dev}}, format="json",
+        )
+
+    def summary(self):
+        c = APIClient()
+        c.force_authenticate(self.owner)
+        return c.get(SUMMARY).data
+
+    def test_a_shape_is_stored_on_any_step(self):
+        # Ambient: true of the visit, not of the step, so it rides every kind.
+        self.fire("landing_view", "d1", "phone")
+        self.fire("register_success", "d1", "phone")
+        self.assertEqual(FunnelEvent.objects.filter(meta__dev="phone").count(), 2)
+
+    def test_only_the_three_shapes_are_accepted(self):
+        # Anything else is a user agent by another name.
+        self.fire("landing_view", "d2", "iPhone15,3")
+        self.assertEqual(FunnelEvent.objects.get().meta, {})
+
+    def test_the_summary_splits_the_funnel_by_screen(self):
+        # Phones open the trial and never score; desktops score. Those are
+        # two different bugs and one number cannot tell them apart.
+        self.fire("try_view", "p1", "phone")
+        self.fire("try_view", "p2", "phone")
+        self.fire("try_view", "w1", "desktop")
+        self.fire("try_scored", "w1", "desktop")
+
+        rows = {r["dev"]: r for r in self.summary()["devices"]}
+        self.assertEqual(rows["phone"]["try_view"], 2)
+        self.assertEqual(rows["phone"]["try_scored"], 0)
+        self.assertEqual(rows["desktop"]["try_scored"], 1)
+
+    def test_an_unshaped_visit_is_counted_in_the_steps_but_not_the_split(self):
+        self.client.post(EVENT, {"kind": "landing_view", "anon_id": "old"}, format="json")
+        d = self.summary()
+        self.assertEqual(d["steps"]["landing_view"]["unique"], 1)
+        self.assertEqual(d["devices"], [])
+        self.assertIn("user agent", d["devices_note"])
+
+
+class MemberShapeTests(TestCase):
+    """Who actually joined — genders and age bands, off Profile.
+
+    Deliberately not part of the funnel rows: a FunnelEvent is a browser with
+    no account, so it has no age and no gender, and attaching either would
+    break the promise that nothing here is joined against Users.
+    """
+
+    def setUp(self):
+        self.owner = User.objects.create_superuser("boss6", "b6@e.com", PW)
+
+    def member(self, name, gender="", birthday=""):
+        from apps.economy.models import profile_for
+        u = User.objects.create_user(username=name, email=f"{name}@e.com", password=PW)
+        p = profile_for(u)
+        p.gender, p.birthday = gender, birthday
+        p.save()
+        return u
+
+    def summary(self):
+        c = APIClient()
+        c.force_authenticate(self.owner)
+        return c.get(SUMMARY).data["members"]
+
+    def test_the_denominator_travels_with_the_split(self):
+        # Percentages of two people are not a demographic, and `total` is what
+        # says so on a platform this size.
+        self.member("m1", "woman", "1995-04-02")
+        d = self.summary()
+        self.assertEqual(d["total"], User.objects.count())
+
+    def test_blanks_are_a_row_not_a_rounding_error(self):
+        # A split over the members who filled it in, shown as the membership,
+        # describes nobody.
+        self.member("m2", "man", "1990-01-01")
+        self.member("m3")
+        genders = {r["gender"]: r["members"] for r in self.summary()["genders"]}
+        self.assertEqual(genders["man"], 1)
+        self.assertGreaterEqual(genders["unset"], 1)
+
+    def test_an_age_is_a_band_and_never_a_date(self):
+        import datetime
+        born = datetime.date.today().replace(year=datetime.date.today().year - 30)
+        self.member("m4", "", born.isoformat())
+        bands = {r["band"]: r["members"] for r in self.summary()["ages"]}
+        self.assertEqual(bands["25-34"], 1)
+        # Nothing in the payload is a birthday.
+        self.assertNotIn("birthday", str(self.summary()))
+
+    def test_a_missing_birthday_lands_in_unset_not_in_a_band(self):
+        self.member("m5", "man")
+        bands = {r["band"]: r["members"] for r in self.summary()["ages"]}
+        self.assertGreaterEqual(bands["unset"], 1)
+        self.assertEqual(sum(bands.values()), self.summary()["total"])
