@@ -5315,3 +5315,51 @@ class UserVybeZSubstances(models.Model):
 
     def __str__(self):
         return f"{self.user} · substances"
+
+
+class LilithMission(models.Model):
+    """Adaptive mission system for user journey stages.
+
+    Missions are personalized based on user account age:
+    - Onboarding (0-7 days): Profile completion, messaging new members, first takes
+    - Engagement (7-30 days): Weekly messaging targets, collabs, detailed feedback
+    - Active (30+ days): Mentoring, coaching others, community leadership
+
+    Lilith is an INFJ personality voice guiding users through engagement loops.
+    Highest-value actions: messaging new users (viral network growth).
+    """
+    STAGE_CHOICES = (
+        ("onboarding", "Onboarding"),
+        ("engagement", "Engagement"),
+        ("active", "Active Community Member"),
+    )
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="lilith_missions")
+    stage = models.CharField(max_length=16, choices=STAGE_CHOICES)
+    key = models.CharField(max_length=64)  # Mission identifier (message_new_user, collab, etc.)
+    title = models.CharField(max_length=128)
+    description = models.TextField()
+    action = models.CharField(max_length=64)  # What triggers completion tracking
+    action_target = models.PositiveIntegerField(default=1)  # How many times to trigger
+    reward_spinaz = models.PositiveIntegerField(default=0)
+    reward_energy = models.PositiveIntegerField(default=0)
+    is_priority = models.BooleanField(default=False)  # True for highest-value missions (new user messaging)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        unique_together = ("user", "key", "stage")
+        ordering = ["-is_priority", "created_at"]
+
+    def __str__(self):
+        return f"{self.user} · {self.key} · {self.stage}"
+
+
+class LilithProgress(models.Model):
+    """Tracks progress on multi-step missions."""
+    mission = models.OneToOneField(LilithMission, on_delete=models.CASCADE, related_name="progress_track")
+    progress = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.mission} · {self.progress}/{self.mission.action_target}"

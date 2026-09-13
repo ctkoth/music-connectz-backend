@@ -5,6 +5,7 @@ from .personalitiez import (PersonalityBasicTestView, PersonalityDetailedTestVie
 from .preferencesz import PreferencesZView
 from .substancesz import SubstancesZView
 from .vybeez_connectz import VybeZConnectzFunnelView, VybeZConnectzStatsView
+from .lilith import LilithMissionsView
 from .directz_app import (DirectZCopyrightView, DirectZWorksView,
                           DirectZRateView)
 from .media import MediaFileView
@@ -188,6 +189,10 @@ urlpatterns = [
     # VybeZ ConnectZ — Compatibility matching funnel using PersonalitieZ, PreferencesZ, SubstancesZ. Free.
     path("vybeez_connectz/funnel/", VybeZConnectzFunnelView.as_view(), name="economy-vybeez-funnel"),
     path("vybeez_connectz/stats/", VybeZConnectzStatsView.as_view(), name="economy-vybeez-stats"),
+
+    # LilithZ — Adaptive mission system for user journey stages (onboarding → engagement → active).
+    # INFJ personality voice guiding engagement. Highest rewards for messaging new members (viral growth).
+    path("lilith/missions/", LilithMissionsView.as_view(), name="economy-lilith-missions"),
 
     path("wallet/add/", AddFundsView.as_view(), name="economy-wallet-add"),
     path("owner/revenue/", OwnerRevenueView.as_view(), name="economy-owner-revenue"),
