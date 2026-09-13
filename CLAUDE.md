@@ -462,6 +462,138 @@ surface living inside PostZ, so the feature had no tab, and the owner had
 nothing to pin.
 
 
+## The funnel could not see the step that was losing everybody
+
+Thirty days: 103 landed, 13 opened the trial, **1 got a score**, 0 registered.
+The offer engine, the founding seats, the zodiacs and the referral ladder are
+all downstream of a number that is one.
+
+Between `try_view` and `try_scored` there is a RECORDER, and it was one
+unmeasured step. Nothing in `FUNNEL_KINDS` could tell a refused mic from a
+take nobody sent from a take the coach failed — three problems with three
+opposite fixes, indistinguishable from the only two rows that existed. Five
+kinds now name them: `try_record`, `try_mic_denied`, `try_attach`, `try_send`,
+`try_failed`. `try_failed` carries a `why` from a closed list of slugs, never
+the sentence the visitor read — the reason decides what gets fixed, and free
+text is how a table that holds no PII starts holding some.
+
+*(The client-side half of that story is in the frontend's CLAUDE.md and is
+worth reading: the four recorder events had been added four days earlier
+under names this endpoint rejects as unknown kinds, by a commit that also
+left `track` unimported — so the Record button threw before `getUserMedia`
+and the trial recorded nothing at all. A closed set is right; a closed set is
+also why a client typo measures zero instead of measuring wrong.)*
+
+### Ambient keys, because a per-kind allowlist grows holes
+
+`src` and `dev` are true of the VISIT, not of the step, so they ride every
+kind via `AMBIENT` instead of being remembered per entry. That is not tidying:
+`register_success` and `login_success` were shaped under the key
+`"registered"`, which is not a kind, so **neither of them ever stored a
+`src`** — the per-channel table's register column was structurally always
+zero, and the one number a marketing spend is judged on could not be non-zero
+however well a channel worked. Listing those two would have fixed those two
+and left the next kind with the same hole.
+
+`dev` is `phone` / `tablet` / `desktop`, **measured on the client from screen
+width and `pointer: coarse`, never from a user agent** — the rule
+`useScreenShape.js` already follows, and it matters more here than anywhere
+else: the trial's first move is a browser mic dialog, and a permission cliff
+on a handset is not one on a laptop. One number covering both hides whichever
+is real.
+
+### The three rates, and who was on the other end
+
+`headline` pins landing → trial, trial → scored, scored → account above the
+step rows, each with BOTH counts: 100% of two people is not a working funnel
+and a bare percentage cannot say so. `pct` is `None`, never `0`, when nobody
+reached the top of a step — a 0% against no visitors reads as a broken
+product, and an empty measurement and a bad one need opposite responses.
+
+`members` answers "who stayed" rather than "who visits", and is deliberately
+NOT part of the funnel rows. A `FunnelEvent` is a browser with no account: it
+has no age and no gender, and attaching either would break the model's own
+promise that nothing there is joined against Users. So gender and age bands
+are counted off `Profile`, and three rules hold it — the denominator is
+ACCOUNTS (a `Profile` is created lazily, so counting those would drop members
+who never went near a screen that makes one), `unset` is a row rather than a
+rounding error, and an age is a band and never a date.
+
+## A route is not the same as a door
+
+`test_instrument_routes` pins that a scored profile in `instruments.py`
+becomes a route. `apps/economy/trialdoorz.py` pins the layer above it.
+
+`INSTRUMENT_APP_KEYS` mounts `/api/<key>/trial/` for **seven** instruments and
+the front door linked **two**. GuitarZ, BassZ, KeyZ, DrumZ and ViolinZ each
+had a working, scored, no-account coach that nothing on the internet pointed
+at — and it was invisible from the funnel by construction, because a step no
+visitor can reach never appears as a drop-off.
+
+`GET /api/economy/trialdoorz/` publishes them, read off the URL conf rather
+than typed into a list, and open logged-out for the same reason `rulez` is:
+the screen that needs it is the one nobody is signed in on. Each door carries
+what it scores, so a drummer can tell the place is for drummers — reading
+"pitch, breath, range" they would correctly conclude otherwise.
+
+`door_keys()` is also the funnel's `app_key` allowlist. It was the pair
+`("singz", "rapz")` typed into `views.py`, so the day a GuitarZ door opened
+its events would have arrived with the app dropped and read as no traffic at
+all.
+
+## PersonalitieZ: a declaration is allowed here precisely because it is not a score
+
+`apps/economy/personalityz.py` is four axes — I/E, N/S, T/F, J/P — declared by
+the member, stored as one four-slot code on `Profile.personality`, and
+filterable from the one member search every screen uses.
+
+The substance rule's test is "could a member get a good one without getting
+good?" This never has to answer it, because **there is no good one**: an axis
+has two sides and neither is better. That is the entire licence for the
+feature, so three lines hold it and none may be crossed later for convenience:
+
+- **It never touches a measurement.** No rating, median, skill level,
+  leaderboard position or price moves because somebody typed a letter. It
+  changes who you SEE and nothing about what anyone is CALLED.
+- **Nothing is inferred.** It is not scored from posts, takes or message
+  patterns. "We detected you're an Extravert" would be `directz_ai_rating`
+  wearing a personality quiz — a number derived from activity and presented as
+  a fact about a person. `test_personalityz` asserts no third writer exists.
+- **Undeclared is a third state, everywhere.** `-` is not "average" and not a
+  default. A member who answers two axes has given a complete answer to two
+  questions, not an incomplete answer to four.
+
+Four more things worth not undoing:
+
+- **A code is read positionally.** "PFNI" is "INFP" backwards and reads as
+  NOTHING, not as a reversal — a code that can mean two things is a filter
+  that is silently wrong. The module asserts on import that no two axes share
+  a letter, because that is what makes positional reading safe.
+- **Junk never refuses a save.** An unrecognised letter becomes "hasn't said".
+  A profile write must not 400 over one character, and a wrong letter silently
+  kept is worse than a blank.
+- **The undeclared never match a filter, and the searcher is TOLD.** A search
+  for Introverts that returned everybody who said nothing is a filter that
+  does not filter. But an empty grid has two completely different causes —
+  nobody matches, or nobody has said — and on a field this new the second is
+  almost always the real one, so `filter_reason` returns the count that was
+  hidden and why. Letting somebody conclude "there are no Introverts here"
+  from a field nobody has filled in is the emptiest kind of wrong.
+- **One filter, in `MembersView`.** Not in a dating app of its own.
+  `MembersView` IS the member search on this platform, so a filter added there
+  is one CollabZ, BattleZ, VenueZ, MessageZ and VybeZ all get. A personality
+  field that only worked in the dating screen would be the fourth copy of a
+  profile filter within a year.
+
+**Deliberately not called MBTI.** Myers-Briggs is somebody's trademark; the
+four letters are in general use. This ships as four axes with plain-English
+labels, no type nicknames and no personality descriptions — which is also the
+honest scope, since we are storing what a member told us rather than
+publishing a theory about them.
+
+One writer, reached twice: `clean_code` is imported by BOTH `social.py`'s
+`clean_profile_field` and `accounts/views.py`, per the two-writers note above.
+
 ## Deployment
 
 **Both repos auto-deploy from `main`. Merging to `main` IS the deploy.**

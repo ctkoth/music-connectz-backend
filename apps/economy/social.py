@@ -60,6 +60,9 @@ from .catalog import over_char_limit
 from .gates import GATE_KEYS, clean_gates, failing_gate, member_metrics, refusal
 from .serializers import WalletSerializer
 from .personaz import clean_link, clean_persona, links_of, personas_of
+from .personalityz import (AXES as PERSONALITY_AXES, as_dict as personality_dict,
+                           clean_code as clean_personality, filter_reason,
+                           matches as personality_matches, wanted_from)
 
 User = get_user_model()
 VALID_TYPES = {"party", "openmic", "theater", "show", "custom"}
@@ -352,7 +355,7 @@ ADULT_ONLY_PROFILE_FIELDS = ("attracted_to", "asexual")
 PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign",
                   "nationalities", "regions", "substances", "sober",
                   "attracted_to", "asexual", "traits", "personas", "links",
-                  "external_followers")
+                  "external_followers", "personality")
 
 
 # Everything in PROFILE_FIELDS used to be written STRAIGHT off the request
@@ -392,6 +395,11 @@ def clean_profile_field(field, value):
         return [l for l in (clean_link(x) for x in value[:50]) if l]
     if field in ("nationalities", "regions", "traits", "attracted_to"):
         return [str(x)[:60] for x in value][:30] if isinstance(value, list) else []
+    if field == "personality":
+        # One cleaner, reached by both writers. It takes the code or a
+        # per-axis dict and never refuses a save — an unrecognised letter
+        # becomes "hasn't said" rather than 400ing a profile edit.
+        return clean_personality(value)
     if field == "asexual":
         return bool(value)
     if field == "external_followers":
@@ -552,6 +560,12 @@ def _profile_card(p, request=None, badges=None):
         "regions": p.regions,
         "nationalities": p.nationalities,
         "sober": p.sober,
+        # The code AND the per-axis form, because the profile screen renders
+        # four toggles and the card renders one string. Neither should have to
+        # re-derive the other, and a client splitting the letters itself would
+        # be the second place the slot order lives.
+        "personality": p.personality,
+        "personality_axes": personality_dict(p.personality),
         "attracted_to": p.attracted_to,
         "median": attractiveness_median(p.user),
         "attractiveness": attractiveness_median(p.user),
@@ -1059,6 +1073,16 @@ class MembersView(APIView):
         # ("use"/"sometimes"). Undeclared counts as sober-friendly.
         substances = multi("substances")
         sober_only = request.query_params.get("sober") in ("1", "true", "True")
+        # PersonalitieZ: ?ie=I&tf=F, or ?personality=INFP for all four.
+        #
+        # It lands HERE rather than in a dating screen of its own because
+        # MembersView is the one member search on the platform — every surface
+        # that finds a person comes through it, so a filter added once is a
+        # filter CollabZ, BattleZ, VenueZ, MessageZ and VybeZ all get. A
+        # personality field that only worked in the dating app would be the
+        # fourth copy of a profile filter within a year.
+        personality_wanted = wanted_from(request.query_params)
+        personality_undeclared = 0
 
         def num(key):
             try:
@@ -1101,6 +1125,15 @@ class MembersView(APIView):
                     continue
             if sober_only and not p.sober:
                 continue
+            if personality_wanted and not personality_matches(p.personality, personality_wanted):
+                # Counted apart from an ordinary miss. An empty grid has two
+                # completely different causes — nobody matches, or nobody has
+                # said — and on a field this new the second is usually the
+                # real one. `filter_reason` is what stops a searcher
+                # concluding there are no Introverts here.
+                if not personality_dict(p.personality).keys() >= personality_wanted.keys():
+                    personality_undeclared += 1
+                continue
             if substances:
                 # Rows saved by the old client hold a list, not a dict.
                 subs = clean_substances(p.substances)
@@ -1129,4 +1162,8 @@ class MembersView(APIView):
             boosted = set(Badge.objects.filter(key="sexy", visible=True)
                           .values_list("user__username", flat=True))
             results.sort(key=lambda c: c.get("username") not in boosted)
-        return Response({"members": results[:100], "origin_shared": origin[0] is not None})
+        return Response({
+            "members": results[:100],
+            "origin_shared": origin[0] is not None,
+            "personality_note": filter_reason(personality_wanted, personality_undeclared),
+        })

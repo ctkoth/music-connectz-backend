@@ -307,6 +307,87 @@ class PublicStatsView(APIView):
 _SRC_OK = re.compile(r"^[a-z0-9][a-z0-9_-]{0,23}$")
 
 
+# Age brackets, wide on purpose. A funnel does not need anybody's birthday and
+# this never reports one — the narrower the bucket the closer a "breakdown"
+# gets to naming the person in it, which on a platform with two members is one
+# step away by definition.
+_AGE_BANDS = ((13, 17), (18, 24), (25, 34), (35, 44), (45, 54), (55, 200))
+
+
+def _member_shape():
+    """Who actually joined, by gender and by age band.
+
+    This is deliberately NOT part of the funnel rows above, and the difference
+    is the whole reason it is a separate block. A `FunnelEvent` is a BROWSER
+    with no account — it has no gender and no age, and there is nothing to
+    ask; the model's own docstring promises nothing here is ever joined
+    against Users, and attaching either to a visitor's row would break that
+    promise to get a number that does not exist anyway.
+
+    So it answers the question one step later: not "who visits" but "who
+    stayed". Read off `Profile`, counted, never listed.
+
+    Three things it will not do:
+
+    - **`unset` is a row, not a rounding error.** A gender split computed over
+      the third of members who filled it in, presented as the membership, is
+      the decoration this file's own rules forbid: it could look fine while
+      describing almost nobody. The blanks are counted and shown.
+    - **The denominator travels with it.** Percentages of two people are not a
+      demographic, and `total` is what says so.
+    - **No exact ages and no dates.** A band, or `unset`.
+    """
+    from apps.economy.models import Profile, profile_age
+
+    # `profile_age` rather than a second birthday parser here. One age
+    # implementation, in the module that owns the column.
+    # `.iterator()` because this walks every profile and the owner opens the
+    # screen, not a member: two rows today, and no reason for the query that
+    # answers "who joined" to be the one that runs out of memory at scale.
+    rows = Profile.objects.only("gender", "birthday").iterator(chunk_size=2000)
+    genders, ages = {}, {f"{lo}-{hi}" if hi < 200 else f"{lo}+": 0 for lo, hi in _AGE_BANDS}
+    ages["unset"] = 0
+    # ACCOUNTS, not profile rows. A Profile is made lazily, so counting those
+    # would quietly drop every member who has not been near a screen that
+    # creates one — and a denominator that moves with an unrelated code path
+    # is not a denominator.
+    total = User.objects.count()
+    counted = 0
+    for row in rows:
+        counted += 1
+        key = (row.gender or "").strip().lower() or "unset"
+        genders[key] = genders.get(key, 0) + 1
+        age = profile_age(row)
+        if age is None:
+            ages["unset"] += 1
+            continue
+        for lo, hi in _AGE_BANDS:
+            if lo <= age <= hi:
+                ages[f"{lo}-{hi}" if hi < 200 else f"{lo}+"] += 1
+                break
+    # Accounts with no profile row at all. They are members; they just have
+    # nothing filled in, which is what `unset` means.
+    missing = max(total - counted, 0)
+    if missing:
+        genders["unset"] = genders.get("unset", 0) + missing
+        ages["unset"] += missing
+    return {
+        "total": total,
+        "genders": sorted(({"gender": g, "members": n} for g, n in genders.items()),
+                          key=lambda r: (r["gender"] == "unset", -r["members"])),
+        "ages": [{"band": b, "members": n} for b, n in ages.items()],
+        "note": ("Members, not visitors — a browser with no account has no age and no "
+                 "gender to report, and nothing here is joined back to a funnel row. "
+                 "`unset` is counted rather than dropped: a split over the members who "
+                 "filled it in, shown as the membership, describes nobody."),
+    }
+
+
+def _door_keys():
+    from apps.economy.trialdoorz import door_keys
+    return door_keys()
+
+
 class FunnelEventView(APIView):
     """One step of the join funnel, logged by a visitor who may have no
     account yet: POST /api/auth/funnel/.
@@ -335,20 +416,56 @@ class FunnelEventView(APIView):
     # more columns nobody reads.
     _SRC = lambda v: (str(v).strip().lower()[:24] or None) if _SRC_OK.match(str(v).strip().lower()[:24] or "") else None
 
+    # Every mounted trial door, read from the routes rather than typed here.
+    # See trialdoorz.door_keys — a hardcoded pair meant a new door's events
+    # would arrive with the app dropped and read as no traffic at all.
+    _APP = lambda v: v if v in _door_keys() else None
+    # Why a take came back with no score, from a closed list. A slug, never
+    # the message the member saw: the reason is the thing that decides what to
+    # fix, and free text here would be the one place a visitor's own words
+    # could land in this table.
+    _WHY = lambda v: v if v in ("too_big", "refused", "network", "empty", "server") else None
+    # What KIND OF SCREEN this happened on, in three buckets.
+    #
+    # Measured by the client from width and `pointer: coarse`, never read off
+    # the user agent — which lies by design, and which the frontend's own
+    # useScreenShape.js already refuses to trust for exactly this reason. It
+    # matters here more than anywhere: the trial's first move is a browser mic
+    # dialog, and a permission cliff on a phone is not a cliff on a laptop.
+    # One number covering both hides whichever is the problem.
+    _DEV = lambda v: v if v in ("phone", "tablet", "desktop") else None
+
     META_SHAPE = {
-        "landing_view": {"src": _SRC},
-        "try_view": {"app_key": lambda v: v if v in ("singz", "rapz") else None,
-                     "src": _SRC},
-        "try_scored": {"app_key": lambda v: v if v in ("singz", "rapz") else None,
-                       "src": _SRC},
-        "try_shared": {"app_key": lambda v: v if v in ("singz", "rapz") else None},
+        "landing_view": {},
+        "try_view": {"app_key": _APP},
+        "try_record": {"app_key": _APP,
+                       # Camera or mic. The camera path asks for a second
+                       # permission and produces a file an order of magnitude
+                       # bigger, so a cliff on one of them is not a cliff on
+                       # the other and they must not be totalled together.
+                       "video": lambda v: bool(v)},
+        "try_mic_denied": {"app_key": _APP, "video": lambda v: bool(v)},
+        "try_attach": {"app_key": _APP},
+        "try_send": {"app_key": _APP},
+        "try_failed": {"app_key": _APP, "why": _WHY},
+        "try_scored": {"app_key": _APP},
+        "try_shared": {"app_key": _APP},
         "register_view": {
             "has_ref": lambda v: bool(v),
             "has_trial": lambda v: bool(v),
-            "src": _SRC,
         },
-        "registered": {"src": _SRC},
     }
+
+    # Ambient keys — true of the VISIT rather than of the step, so they ride
+    # every kind instead of being remembered per entry.
+    #
+    # `register_success` and `login_success` were shaped under the key
+    # "registered", which is not a kind, so neither of them stored a `src`:
+    # the per-channel table could never show a single registration against
+    # the channel that produced it, and the one column a marketing spend is
+    # judged on was structurally always zero. Listing them per kind would fix
+    # those two and leave the next kind somebody adds with the same hole.
+    AMBIENT = {"src": _SRC, "dev": _DEV}
 
     def post(self, request):
         kind = str(request.data.get("kind") or "")
@@ -357,7 +474,7 @@ class FunnelEventView(APIView):
             return Response({"detail": "Invalid event."}, status=status.HTTP_400_BAD_REQUEST)
 
         raw_meta = request.data.get("meta") or {}
-        shape = self.META_SHAPE.get(kind, {})
+        shape = {**self.AMBIENT, **self.META_SHAPE.get(kind, {})}
         meta = {}
         if isinstance(raw_meta, dict):
             for key, coerce in shape.items():
@@ -414,6 +531,38 @@ class FunnelSummaryView(APIView):
         for kind in steps:
             steps[kind]["pct_of_base"] = round(100 * steps[kind]["unique"] / base, 1)
 
+        # The three rates the whole platform turns on, pinned rather than left
+        # to be worked out from eleven rows. Everything else here is a detail:
+        # comparing plans, escrow and streaks is theatre while the number of
+        # people who ever hear a score is one.
+        #
+        # Each is stated as its two counts AND the rate, because a rate with
+        # no denominator behind it is the decoration this file's own docstring
+        # warns about — 100% of two people is not a working funnel.
+        def _rate(from_kind, to_kind, label, note):
+            top = steps[from_kind]["unique"]
+            got = steps[to_kind]["unique"]
+            return {
+                "key": to_kind,
+                "label": label,
+                "from_kind": from_kind, "to_kind": to_kind,
+                "from": top, "to": got,
+                # None, not 0, when nobody reached the top of the step. A 0%
+                # against no visitors reads as a broken product; it is an
+                # empty measurement, and the two need opposite responses.
+                "pct": round(100 * got / top, 1) if top else None,
+                "note": note,
+            }
+
+        headline = [
+            _rate("landing_view", "try_view", "Landing → trial opened",
+                  "How many arrivals ever start the one thing the page promises."),
+            _rate("try_view", "try_scored", "Trial opened → scored",
+                  "The recorder. Everything below is unreachable until this works."),
+            _rate("try_scored", "register_success", "Scored → account created",
+                  "Whether a number somebody is proud of is worth keeping."),
+        ]
+
         # Per channel. A count of arrivals that cannot say WHERE THEY CAME FROM
         # makes every channel look identical at zero, which is exactly the
         # state this platform is in — and the first thing marketing money buys
@@ -424,27 +573,48 @@ class FunnelSummaryView(APIView):
         # A source with arrivals and no scores is a channel sending the wrong
         # people; one with scores and no registers is a door problem, not a
         # traffic problem, and those need opposite responses.
-        by_src = {}
-        for row in rows.exclude(meta__src=None).values("kind", "anon_id", "meta"):
-            src = (row["meta"] or {}).get("src")
-            if not src:
-                continue
-            entry = by_src.setdefault(src, {k: set() for k, _ in FUNNEL_KINDS})
-            entry[row["kind"]].add(row["anon_id"])
-        sources = sorted(
-            ({"src": src,
-              **{k: len(v) for k, v in kinds.items()},
-              "total": len(set().union(*kinds.values())) if any(kinds.values()) else 0}
-             for src, kinds in by_src.items()),
-            key=lambda r: -r["total"],
-        )
+        #
+        # The same split answers the same question about the SCREEN, so one
+        # implementation serves both: a channel and a device are each one
+        # ambient fact about a visit, and a funnel broken down by neither is
+        # a funnel that can only say "people leave".
+        all_rows = list(rows.values("kind", "anon_id", "meta"))
+
+        def split_by(key, label):
+            buckets = {}
+            for row in all_rows:
+                value = (row["meta"] or {}).get(key)
+                if not value:
+                    continue
+                entry = buckets.setdefault(value, {k: set() for k, _ in FUNNEL_KINDS})
+                entry[row["kind"]].add(row["anon_id"])
+            return sorted(
+                ({label: value,
+                  **{k: len(v) for k, v in kinds.items()},
+                  "total": len(set().union(*kinds.values())) if any(kinds.values()) else 0}
+                 for value, kinds in buckets.items()),
+                key=lambda r: -r["total"],
+            )
+
+        sources = split_by("src", "src")
+        # A permission cliff on a phone is not a cliff on a laptop, and the
+        # trial's first move is a browser mic dialog. Totalled together, the
+        # one number hides whichever of the two is the actual problem.
+        devices = split_by("dev", "dev")
 
         return Response({
             "days": days,
             "since": since,
             "base_kind": base_kind,
+            "headline": headline,
             "steps": steps,
             "sources": sources,
+            "devices": devices,
+            "devices_note": ("Measured from the screen — width and whether the pointer is "
+                             "coarse — never from the user agent, which lies by design. "
+                             "Visits from before this shipped carry no shape and are "
+                             "counted in the steps above but not here."),
+            "members": _member_shape(),
             # Said out loud so an empty list reads as "nothing tagged" rather
             # than "no traffic" — two very different problems.
             "sources_note": ("Add ?src=<channel> to any link you post. Untagged "

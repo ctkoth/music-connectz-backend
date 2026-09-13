@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.economy.personaz import clean_persona
+from apps.economy.personalityz import clean_code as clean_personality
 
 from .models import OAuthIdentity, Profile
 from .oauth import (
@@ -262,6 +263,12 @@ class MeView(APIView):
             # start dates the whole experience metric is derived from.
             p.personas = [_clean_persona(x) for x in data["personas"]][:50]
             changed.append("personas")
+        if "personality" in data:
+            # The SAME cleaner the other writer uses. A field with two
+            # endpoints gets one cleaner — see the note above PROFILE_FIELDS
+            # in economy/social.py about what happens when it gets two.
+            p.personality = clean_personality(data["personality"])
+            changed.append("personality")
         if isinstance(data.get("nationalities"), list):
             p.nationalities = [str(x)[:60] for x in data["nationalities"]][:30]
             changed.append("nationalities")
