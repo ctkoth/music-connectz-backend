@@ -5194,3 +5194,76 @@ class PersonalityResult(models.Model):
 
     def __str__(self):
         return f"{self.user} · {self.get_test_type_display()} · {self.mbti_type}"
+
+
+class UserPreferences(models.Model):
+    """User's VybeZ ConnectZ preferences for matching: gender interest, relationship type, and commitment.
+
+    Free to set, used for compatible matching in VybeZ ConnectZ.
+    """
+    GENDER_CHOICES = (
+        ("men", "Men"),
+        ("women", "Women"),
+        ("non_binary", "Non-binary"),
+        ("everyone", "Everyone"),
+    )
+
+    RELATIONSHIP_CHOICES = (
+        ("collabs", "Collaborations only"),
+        ("dating", "Dating / Romance"),
+        ("both", "Both"),
+    )
+
+    LONG_TERM_CHOICES = (
+        ("short", "Short-term / casual"),
+        ("long", "Long-term"),
+        ("either", "Either"),
+    )
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="preferences")
+    gender_interested = models.CharField(max_length=16, choices=GENDER_CHOICES, default="everyone")
+    relationship_type = models.CharField(max_length=16, choices=RELATIONSHIP_CHOICES, default="both")
+    long_term = models.CharField(max_length=16, choices=LONG_TERM_CHOICES, default="either")
+    updated_at = models.DateTimeField(auto_now=True, db_index=True)
+
+    class Meta:
+        verbose_name_plural = "User Preferences"
+
+    def __str__(self):
+        return f"{self.user} · preferences"
+
+
+class UserSubstances(models.Model):
+    """User's substance use preferences for matching and compatibility.
+
+    Free to report, private to user, used for matching filters in VybeZ ConnectZ.
+    Tracks alcohol, cannabis, tobacco, and psychedelics use levels.
+    """
+    USE_CHOICES = (
+        ("none", "Don't use"),
+        ("occasionally", "Occasionally"),
+        ("regularly", "Regularly"),
+        ("prefer_not", "Prefer not to say"),
+    )
+
+    PSYCHEDELIC_CHOICES = (
+        ("never", "Never tried"),
+        ("tried", "Tried before"),
+        ("open", "Open to trying"),
+        ("prefer_not", "Prefer not to say"),
+    )
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="substances")
+    alcohol = models.CharField(max_length=16, choices=USE_CHOICES, default="prefer_not")
+    cannabis = models.CharField(max_length=16, choices=USE_CHOICES, default="prefer_not")
+    tobacco = models.CharField(max_length=16, choices=USE_CHOICES, default="prefer_not")
+    psychedelics = models.CharField(max_length=16, choices=PSYCHEDELIC_CHOICES, default="prefer_not")
+    updated_at = models.DateTimeField(auto_now=True, db_index=True)
+
+    class Meta:
+        verbose_name_plural = "User Substances"
+
+    def __str__(self):
+        return f"{self.user} · substances"

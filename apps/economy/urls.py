@@ -2,6 +2,9 @@ from django.urls import path, re_path
 
 from .personalitiez import (PersonalityBasicTestView, PersonalityDetailedTestView,
                             PersonalityResultView)
+from .preferencesz import PreferencesZView
+from .substancesz import SubstancesZView
+from .vybeez_connectz import VybeZConnectzFunnelView, VybeZConnectzStatsView
 from .directz_app import (DirectZCopyrightView, DirectZWorksView,
                           DirectZRateView)
 from .media import MediaFileView
@@ -175,6 +178,16 @@ urlpatterns = [
     path("personalitiez/basic/", PersonalityBasicTestView.as_view(), name="economy-personalitiez-basic"),
     path("personalitiez/detailed/", PersonalityDetailedTestView.as_view(), name="economy-personalitiez-detailed"),
     path("personalitiez/results/", PersonalityResultView.as_view(), name="economy-personalitiez-results"),
+
+    # PreferencesZ — Sexual preferences for matching. Free.
+    path("preferencesz/", PreferencesZView.as_view(), name="economy-preferencesz"),
+
+    # SubstancesZ — Substance use preferences for matching. Free.
+    path("substancesz/", SubstancesZView.as_view(), name="economy-substancesz"),
+
+    # VybeZ ConnectZ — Compatibility matching funnel using PersonalitieZ, PreferencesZ, SubstancesZ. Free.
+    path("vybeez_connectz/funnel/", VybeZConnectzFunnelView.as_view(), name="economy-vybeez-funnel"),
+    path("vybeez_connectz/stats/", VybeZConnectzStatsView.as_view(), name="economy-vybeez-stats"),
 
     path("wallet/add/", AddFundsView.as_view(), name="economy-wallet-add"),
     path("owner/revenue/", OwnerRevenueView.as_view(), name="economy-owner-revenue"),
