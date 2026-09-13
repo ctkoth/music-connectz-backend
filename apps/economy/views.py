@@ -434,6 +434,13 @@ class FunnelEventView(APIView):
     # dialog, and a permission cliff on a phone is not a cliff on a laptop.
     # One number covering both hides whichever is the problem.
     _DEV = lambda v: v if v in ("phone", "tablet", "desktop") else None
+    # Why the recorder never started. "Denied" was the only story this funnel
+    # could tell, and it was the wrong one most of the time: a camera held by
+    # another app throws NotReadableError and a machine without one throws
+    # NotFoundError. Those need opposite answers and one of them is not a
+    # permission problem at all.
+    _MIC = lambda v: v if v in ("denied", "notfound", "inuse", "constrained",
+                                "insecure", "other") else None
 
     META_SHAPE = {
         "landing_view": {},
@@ -444,7 +451,7 @@ class FunnelEventView(APIView):
                        # bigger, so a cliff on one of them is not a cliff on
                        # the other and they must not be totalled together.
                        "video": lambda v: bool(v)},
-        "try_mic_denied": {"app_key": _APP, "video": lambda v: bool(v)},
+        "try_mic_denied": {"app_key": _APP, "video": lambda v: bool(v), "why": _MIC},
         "try_attach": {"app_key": _APP},
         "try_send": {"app_key": _APP},
         "try_failed": {"app_key": _APP, "why": _WHY},

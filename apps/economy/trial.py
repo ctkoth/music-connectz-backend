@@ -80,6 +80,19 @@ class TrialCoachView(APIView):
             "free": True,
             "available": bool(_key()) and not mine and today < cap,
             "already_used": mine,
+            # Which "no" it is. `available: false` covers three completely
+            # different situations — the visitor spent today's take, the
+            # platform spent today's takes, or nobody set GEMINI_API_KEY — and
+            # a client that cannot tell them apart has to guess, which is how
+            # a screen ends up telling somebody the coach is down when their
+            # own allowance is simply used up.
+            "cap_reached": today >= cap,
+            # RapZ has a style picker and this door never sent the list, so
+            # the control did not render at all — the trial was quietly a less
+            # capable coach than the member one, on the screen whose whole job
+            # is showing strangers the product. Same shape as `ranges` above.
+            "style_label": profile["style_label"],
+            "styles": [{"key": k, "label": l} for k, l in profile["styles"]],
             "per_address": f"one free take every {TRIAL_PER_IP_HOURS} hours",
             "max_mb": TRIAL_MAX_MB,
             "claim_days": TRIAL_CLAIM_DAYS,
@@ -124,6 +137,11 @@ class TrialCoachView(APIView):
             self.app_key, f, content_type,
             genre=data.get("genre"), target=data.get("range"),
             difficulty=data.get("difficulty"),
+            # The other half of the same gap: even once the picker renders,
+            # this door was not forwarding the answer. A trial that grades on
+            # a different input than the product is the same lie as one that
+            # grades on an easier rubric, which is why score_take is shared.
+            style=data.get("style"),
         )
         if err:
             # A take the coach couldn't read doesn't burn the visitor's one

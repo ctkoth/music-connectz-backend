@@ -111,9 +111,18 @@ def gemini_mime(content_type):
     Two things go wrong between a browser and this call, and both were live:
 
     1. `MediaRecorder.mimeType` is a FULL media type — Chrome hands back
-       `audio/webm;codecs=opus`. The parameter rides through the Blob, the
-       multipart upload and Django untouched, and Gemini rejects the whole
-       request over it. Strip to the bare type.
+       `audio/webm;codecs=opus`, and Gemini rejects the whole request over the
+       parameter. Strip to the bare type.
+
+       Not, as this used to claim, because it "rides through Django
+       untouched": Django's multipart parser keeps only the base type on
+       `UploadedFile.content_type` and puts parameters in
+       `content_type_extra`, so on the upload path it is already gone
+       (`test_trial.RealBrowserRecordingTests` pins that with takes recorded
+       by a real browser). The split stays because this function is also
+       handed content types that did NOT come through that parser — a stored
+       Upload's own column, a post handed over from PostZ — and those keep
+       whatever was recorded.
     2. `audio/webm` is not on Gemini's audio list at all, though `video/webm`
        is. A browser-recorded take was therefore unscoreable on the two
        biggest browsers — which is exactly the "couldn't process that take"
