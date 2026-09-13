@@ -163,7 +163,19 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
         "rate_unlock_sec": POST_RATE_UNLOCK_SEC,
         "comment_unlock_sec": POST_COMMENT_UNLOCK_SEC,
         # How long the author can still edit this post.
-        "edit_unlock_sec": edit_window_for(p.author.membership.tier),
+        #
+        # `getattr`, not `p.author.membership.tier`. A Membership row is made
+        # lazily by `membership_for()`, so an author who has never been near a
+        # path that creates one simply has not got one — and the bare access
+        # raised RelatedObjectDoesNotExist, which is a 500 on every response
+        # carrying that post: the feed, the post itself, every edit and rate
+        # reply. It is the pattern social.py already uses for the same column,
+        # and it works because Django makes that exception a subclass of
+        # AttributeError precisely so `getattr` can absorb it.
+        #
+        # No tier means the free window, which is what a member with no
+        # membership row effectively has.
+        "edit_unlock_sec": edit_window_for(getattr(getattr(p.author, "membership", None), "tier", None)),
         # PostZ is for show, CollabZ is for collaboration — this is the count
         # of times somebody moved from one to the other on this post, and where
         # the client sends them to do it again.
@@ -479,7 +491,7 @@ class PostsView(APIView):
 
     def get(self, request):
         sort = (request.query_params.get("sort") or "hot").lower()
-        qs = Post.objects.select_related("author").exclude(visibility="private").order_by("-created_at")[:300]
+        qs = Post.objects.select_related("author", "author__membership").exclude(visibility="private").order_by("-created_at")[:300]
         mine = Post.objects.filter(author=request.user, visibility="private")
         # A collab post belongs to its contributors too, so a private one has
         # to reach them — `can_view_post` already allows it, but the query never
@@ -665,7 +677,7 @@ class PostOpenView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        p = Post.objects.filter(pk=pk).select_related("author").first()
+        p = Post.objects.filter(pk=pk).select_related("author", "author__membership").first()
         if not p:
             return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
         if not can_view_post(p, request.user):
@@ -695,7 +707,7 @@ class PostJoinView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        p = Post.objects.filter(pk=pk).select_related("author").first()
+        p = Post.objects.filter(pk=pk).select_related("author", "author__membership").first()
         if not p:
             return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
         if p.visibility != "restricted":
@@ -762,7 +774,7 @@ class PostDeleteView(APIView):
     def delete(self, request, pk):
         from .models import notify
         from .views import is_owner
-        p = Post.objects.filter(pk=pk).select_related("author").first()
+        p = Post.objects.filter(pk=pk).select_related("author", "author__membership").first()
         if not p:
             return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
         mine = p.author_id == request.user.id
@@ -791,7 +803,7 @@ class PostShareView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        p = Post.objects.filter(pk=pk).select_related("author").first()
+        p = Post.objects.filter(pk=pk).select_related("author", "author__membership").first()
         if not p:
             return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
         if not can_view_post(p, request.user):
@@ -842,7 +854,7 @@ class PostProgressionView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        p = Post.objects.filter(pk=pk).select_related("author").first()
+        p = Post.objects.filter(pk=pk).select_related("author", "author__membership").first()
         if not p:
             return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
         if not can_view_post(p, request.user):

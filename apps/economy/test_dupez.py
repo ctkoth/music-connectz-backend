@@ -150,7 +150,7 @@ class SignalTests(TestCase):
         sig = dupez.signals_between(a, b)
         self.assertEqual([s["key"] for s in sig], ["same_referrer"])
         self.assertFalse(dupez.has_strong(sig))
-        self.assertEqual(dupez.duplicate_groups(), [])
+        self.assertEqual(dupez.duplicate_groups()["groups"], [])
 
     def test_unrelated_accounts_share_nothing(self):
         self.assertEqual(dupez.signals_between(member("a", "a@x.com"),
@@ -177,13 +177,13 @@ class GroupTests(TestCase):
         oauth(b, "google", "g1", "chain@gmail.com")     # a~b
         oauth(b, "github", "h1", "corey@gmail.com")
         oauth(c, "microsoft", "m1", "corey@gmail.com")  # b~c
-        groups = dupez.duplicate_groups()
+        groups = dupez.duplicate_groups()["groups"]
         self.assertEqual(len(groups), 1)
         self.assertEqual({x["username"] for x in groups[0]["accounts"]}, {"a", "b", "c"})
 
     def test_the_oldest_is_suggested_and_only_suggested(self):
         a, b = _pair("a", "b")
-        g = dupez.duplicate_groups()[0]
+        g = dupez.duplicate_groups()["groups"][0]
         self.assertEqual(g["suggested_keep"], "a")
         # It is a default in a form. Nothing in this module acts on it.
         self.assertIn("accounts", g)
@@ -543,7 +543,7 @@ class AddressTests(TestCase):
         # accusation built out of a rehearsal room.
         self.signup("first", "a@x.com")
         self.signup("second", "b@x.com")
-        self.assertEqual(dupez.duplicate_groups(), [])
+        self.assertEqual(dupez.duplicate_groups()["groups"], [])
 
     def _pair_on_one_address(self, ip="7.7.7.7"):
         """Two accounts with a strong tie AND one address.
@@ -560,10 +560,16 @@ class AddressTests(TestCase):
 
     def test_an_address_strengthens_a_group_that_already_exists(self):
         self._pair_on_one_address()
-        g = dupez.duplicate_groups()
+        g = dupez.duplicate_groups()["groups"]
         self.assertEqual(len(g), 1)
         keys = {s["key"] for p in g[0]["pairs"] for s in p["signals"]}
-        self.assertEqual(keys, {"account_email", "same_address"})
+        # `oauth_email`, not `account_email`: `_pair` builds the tie through a
+        # shared sign-in, and its own docstring says why — since
+        # accounts_user_email_ci_uniq landed, two accounts CANNOT share an
+        # account email, so that is no longer a shape a real duplicate can
+        # arrive in. The helper was updated for the constraint and this
+        # assertion was not.
+        self.assertEqual(keys, {"oauth_email", "same_address"})
 
     def test_a_strong_agreement_tells_the_new_member_the_rule(self):
         a, b = self._pair_on_one_address()

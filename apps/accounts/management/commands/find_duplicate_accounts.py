@@ -40,7 +40,17 @@ class Command(BaseCommand):
                             help="Show the signals behind every pair.")
 
     def handle(self, *args, **options):
-        groups = duplicate_groups()
+        # `duplicate_groups()` returns {"groups": [...], "weak_pairs": [...]}
+        # now, and this took the whole dict. A dict with keys is always truthy,
+        # so the "no duplicates" branch became unreachable; `len()` counted the
+        # two KEYS and announced "2 group(s)" on a platform with none; and the
+        # loop below then iterated those keys and tried to subscript the string
+        # "groups", which is a TypeError. The command could not report a clean
+        # platform and could not report a dirty one.
+        #
+        # CLAUDE.md has a section on what the LAST version of this command got
+        # wrong. This is the next one, so: it reads the key.
+        groups = duplicate_groups()["groups"]
         if not groups:
             self.stdout.write(self.style.SUCCESS("No duplicate accounts found."))
             return
