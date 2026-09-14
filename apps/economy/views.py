@@ -866,7 +866,8 @@ class LimitsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        from .catalog import chars_unlimited, edit_window_for
+        from .catalog import (AVATAR_MAX_MB, chars_unlimited, edit_window_for,
+                              tier_ladder)
         from .models import third_party_ads_allowed
 
         m = membership_for(request.user)
@@ -875,6 +876,12 @@ class LimitsView(APIView):
         # So the client can print "Unlimited" instead of a nine-figure number.
         lim["char_limit_unlimited"] = chars_unlimited(m.tier)
         lim["dev_tax_rate"] = m.dev_tax_rate
+        # What a profile picture may weigh, and what every tier buys. Both were
+        # copied into the client by hand — one as `const AVATAR_MAX_MB = 8`,
+        # one as a whole upload ladder — and a limit typed in two places is one
+        # that drifts, with the client's copy being the one nobody updates.
+        lim["avatar_max_mb"] = AVATAR_MAX_MB
+        lim["tiers"] = tier_ladder()
         lim["storage_used_mb"] = round(storage_used_bytes(request.user) / MB, 2)
         # Whether a third-party ad frame may be rendered for this member.
         #

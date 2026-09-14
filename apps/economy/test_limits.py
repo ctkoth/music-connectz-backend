@@ -145,3 +145,60 @@ class TierUploadLimitsTests(TestCase):
         d = c.get("/api/singz/coach/").data
         self.assertEqual(d["max_mb"], MAX_MB)
         self.assertFalse(d["max_mb_is_tier_limit"])
+
+
+class PublishedNumbersTests(TestCase):
+    """Numbers the client had typed for itself, now served.
+
+    Two copies of a limit is the pattern this whole module exists to end, and
+    the client's copy is always the one nobody updates when the real one moves
+    — so the member is shown a number the server does not honour.
+    """
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+        self.u = get_user_model().objects.create_user("limz", "limz@mcz.test", "pw12345!")
+        self.c = APIClient()
+        self.c.force_authenticate(self.u)
+
+    def test_the_avatar_cap_is_served_and_matches_the_view_that_enforces_it(self):
+        from apps.economy.catalog import AVATAR_MAX_MB
+        from apps.economy.social import ProfileAvatarView
+        d = self.c.get("/api/economy/limits/").data
+        self.assertEqual(d["avatar_max_mb"], AVATAR_MAX_MB)
+        # The screen checks this before uploading and the view refuses it
+        # after. One number, or the two disagree.
+        self.assertEqual(ProfileAvatarView.MAX_MB, AVATAR_MAX_MB)
+
+    def test_the_whole_tier_ladder_is_served(self):
+        from apps.economy.catalog import TIER_LIMITS
+        tiers = self.c.get("/api/economy/limits/").data["tiers"]
+        for t in ("free", "premium", "statz"):
+            self.assertIn(t, tiers, t)
+            self.assertEqual(tiers[t]["upload_mb"], TIER_LIMITS[t]["upload_mb"])
+            self.assertEqual(tiers[t]["storage_mb"], TIER_LIMITS[t]["storage_mb"])
+
+    def test_the_price_comes_from_the_same_place_stripe_charges_from(self):
+        """A panel quoting a figure Stripe then charges differently is not a
+        drift bug, it is a member being shown a price that is not the price.
+        "$6/mo" and "$15/mo" were typed into TierUpgradePrompt.jsx."""
+        from apps.economy.catalog import PREMIUM_MONTH_CENTS, STATZ_MONTH_CENTS
+        tiers = self.c.get("/api/economy/limits/").data["tiers"]
+        self.assertEqual(tiers["free"]["month_cents"], 0)
+        self.assertEqual(tiers["premium"]["month_cents"], PREMIUM_MONTH_CENTS)
+        self.assertEqual(tiers["statz"]["month_cents"], STATZ_MONTH_CENTS)
+
+    def test_owner_god_mode_is_not_advertised(self):
+        """Publishing DEBUG would sell a tier nobody can buy, with numbers that
+        make every real tier look mean."""
+        self.assertNotIn("debug", self.c.get("/api/economy/limits/").data["tiers"])
+
+    def test_the_ladder_only_goes_up(self):
+        """A rung that buys less than the one below it is a pricing bug the
+        client would render as an upgrade."""
+        tiers = self.c.get("/api/economy/limits/").data["tiers"]
+        order = ["free", "premium", "statz"]
+        for key in ("upload_mb", "storage_mb", "embeds_per_post"):
+            vals = [tiers[t][key] for t in order]
+            self.assertEqual(vals, sorted(vals), f"{key} does not increase: {vals}")

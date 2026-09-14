@@ -87,6 +87,47 @@ TIER_LIMITS = {
 }
 
 
+# A profile picture is displayed at 56-80px, so a few MB is already generous.
+# It lives here rather than on the view because the CLIENT needs it too — it
+# was a `const AVATAR_MAX_MB = 8` in ProfileZ.jsx, a second copy of this exact
+# number, and two copies of a limit is the "20 free prompts in nine places"
+# pattern this whole module exists to end.
+AVATAR_MAX_MB = 8
+
+# The tiers a member can actually be sold, in ladder order. DEBUG is left out
+# deliberately: it is owner god-mode and publishing it would advertise a tier
+# nobody can buy, with numbers that would make every real tier look mean.
+PUBLIC_TIERS = [TIER_FREE, TIER_PREMIUM, TIER_STATZ]
+
+
+def tier_month_cents():
+    """What each public tier costs a month, in cents.
+
+    `TierUpgradePrompt.jsx` had "$6/mo" and "$15/mo" typed into it. A price is
+    the one number in this app that must never be wrong on a screen: an upgrade
+    panel quoting a figure Stripe then charges differently is not a drift bug,
+    it is a member being shown a price that is not the price.
+
+    Defined here where PREMIUM_MONTH_CENTS and STATZ_MONTH_CENTS already live,
+    so the panel, the checkout and the ladder cannot disagree.
+    """
+    return {TIER_FREE: 0, TIER_PREMIUM: PREMIUM_MONTH_CENTS, TIER_STATZ: STATZ_MONTH_CENTS}
+
+
+def tier_ladder():
+    """Every public tier's limits, for a client that has to say what a tier UP
+    would buy.
+
+    `TierUpgradePrompt.jsx` carried its own copy of this
+    (`upload_mb: {free: 100, premium: 1024, statz: 10240}`), which is the same
+    table typed twice — and the copy in the client is the one nobody updates
+    when the ladder moves, so a member would be sold a number the server does
+    not honour.
+    """
+    prices = tier_month_cents()
+    return {t: {**TIER_LIMITS[t], "month_cents": prices.get(t, 0)} for t in PUBLIC_TIERS}
+
+
 def limits_for(tier):
     return TIER_LIMITS.get(tier, TIER_LIMITS[TIER_FREE])
 

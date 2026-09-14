@@ -56,7 +56,7 @@ from .models import (
     ListenProgress, record_listen, LISTEN_REQUIRED_SEC,
 )
 from .badgez import worn_badges, worn_badges_by_user
-from .catalog import over_char_limit
+from .catalog import AVATAR_MAX_MB, over_char_limit
 from .gates import GATE_KEYS, clean_gates, failing_gate, member_metrics, refusal
 from .serializers import WalletSerializer
 from .personaz import clean_link, clean_persona, links_of, personas_of
@@ -946,7 +946,9 @@ class ProfileAvatarView(APIView):
 
     # A profile picture is displayed at 56–80px. Anything past a few MB is a
     # mistake or an abuse, whatever the member's upload tier allows elsewhere.
-    MAX_MB = 8
+    # From catalog, so the screen that checks it before uploading and the view
+    # that refuses it afterwards cannot disagree.
+    MAX_MB = AVATAR_MAX_MB
 
     def post(self, request):
         f = request.FILES.get("avatar")
