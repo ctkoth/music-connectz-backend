@@ -341,3 +341,80 @@ class ApiTests(TestCase):
         empty row for everybody who opened a coach is a table of nothing."""
         self.c.get("/api/singz/progress/")
         self.assertFalse(InstrumentProfile.objects.exists())
+
+
+class ColumnWidthTests(TestCase):
+    """Every string this code can write, against the column it goes in.
+
+    The dullest test in the file and the one that earns its place: the suite
+    runs on SQLite, **SQLite ignores varchar length**, and `build.sh` runs
+    `migrate --no-input` on every deploy — so a column one character too
+    narrow is invisible here and a 500 on Render, on a write nobody made until
+    a member did. CLAUDE.md says a migration touching field widths gets
+    checked against real Postgres before it reaches main; this is what can be
+    checked from anywhere, every time, rather than once by hand.
+
+    It covers the two new model families together because they were added in
+    the same pass and share the same failure: a value that grew past a width
+    nobody re-derived.
+    """
+
+    def _fits(self, model, field, values, label):
+        width = model._meta.get_field(field).max_length
+        for v in values:
+            self.assertLessEqual(
+                len(str(v)), width,
+                f"{model.__name__}.{field} is {width} but {label} can write "
+                f"{len(str(v))} chars: {v!r}")
+
+    def test_every_range_and_sensitivity_key_fits(self):
+        from .instruments import DIFFICULTIES, INSTRUMENTS, VOCAL_RANGES
+        keys = [k for k, _ in VOCAL_RANGES]
+        for field in ("range_class",):
+            self._fits(TakeScore, field, keys, "a vocal range key")
+        for field in ("confirmed_range", "goal_range"):
+            self._fits(InstrumentProfile, field, keys, "a vocal range key")
+        self._fits(InstrumentProfile, "fatigue_sensitivity",
+                   [k for k, _ in InstrumentProfile.SENSITIVITY], "a sensitivity key")
+        self._fits(TakeScore, "difficulty", DIFFICULTIES, "a difficulty")
+        # `weakest` holds a scoring dimension key, from every instrument.
+        dims = {k for p in INSTRUMENTS.values() for k in p["scores"]}
+        self._fits(TakeScore, "weakest", dims, "a scoring dimension key")
+        self._fits(TakeScore, "app_key", INSTRUMENTS, "an instrument key")
+
+    def test_a_note_name_fits(self):
+        """The widest a parsed note can be: letter, accidental, octave."""
+        self._fits(TakeScore, "low_note", ["A#8", "Gb0"], "a parsed note")
+        self._fits(TakeScore, "high_note", ["A#8", "Gb0"], "a parsed note")
+
+    def test_every_source_label_fits(self):
+        self._fits(TakeScore, "source", ["post", "journal", "upload"], "a take source")
+
+    def test_every_lilith_choice_and_payout_kind_fits(self):
+        from .models import BUCKETS, KINDS, LilithPayout, LilithSponsorship, LilithTask, SOURCES
+        from . import lilith_taskz as L
+        self._fits(LilithTask, "kind", [k for k, _ in KINDS], "a task kind")
+        self._fits(LilithTask, "bucket", [k for k, _ in BUCKETS], "a bucket")
+        self._fits(LilithTask, "source", [k for k, _ in SOURCES], "a task source")
+        # Every kind `_pay` is ever called with, including the two passed as
+        # bare strings rather than constants — which are exactly the ones a
+        # width check by eye misses.
+        kinds = [LilithPayout.KIND_SELF, LilithPayout.KIND_MILESTONE,
+                 LilithPayout.KIND_SPONSOR, LilithPayout.KIND_HELP,
+                 "task_xp", "collab_beginner"]
+        self._fits(LilithPayout, "kind", kinds, "a payout kind")
+        # And every refusal sentence, which is the widest free-ish text here.
+        self._fits(LilithSponsorship, "refused",
+                   ["graduated with the helper", "accounts strongly linked",
+                    "sponsorship older than the new-member window"],
+                   "a refusal reason")
+
+    def test_the_voice_lines_fit_nothing_narrower_than_they_are(self):
+        """VOICE is served, not stored — pinned so that stays true. The day a
+        line is written to a column, this test is the one that fails."""
+        from . import lilith_taskz as L
+        from .models import LilithPayout
+        self.assertFalse(
+            any(f.name == "said" for f in LilithPayout._meta.get_fields()),
+            "A VOICE line reached a column — give it a width and check it here.")
+        self.assertTrue(all(isinstance(v, str) for v in L.VOICE.values()))
