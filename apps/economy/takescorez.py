@@ -462,6 +462,54 @@ class ProgressView(APIView):
         return Response(progress(request.user, self.app_key))
 
 
+class GameProfileView(APIView):
+    """GET / PATCH /api/<key>/profile/ — the blueprint's per-app game profile.
+
+    The endpoint `GameProfilePanel.jsx` has been calling since it was written.
+    It 404'd, a bare `.catch(() => {})` swallowed it, and both the RapZ and
+    SingZ panels silently rendered nothing — a whole screen that looked like a
+    feature nobody had built, when the data was all there and only the door was
+    missing.
+    """
+    permission_classes = [IsAuthenticated]
+    app_key = "singz"
+
+    def get(self, request):
+        return Response(game_profile(request.user, self.app_key))
+
+    def patch(self, request):
+        d = request.data
+        row, _ = InstrumentProfile.objects.get_or_create(user=request.user,
+                                                         app_key=self.app_key)
+        fields = []
+        if "top_styles" in d:
+            # Three, the blueprint's number, enforced here rather than trusted
+            # from the client — the panel caps it at three and a panel is not
+            # a rule.
+            styles = [str(x)[:32] for x in (d.get("top_styles") or []) if str(x).strip()]
+            row.top_styles = styles[:3]
+            fields.append("top_styles")
+        for key, field in (("bpm_min", "bpm_low"), ("bpm_max", "bpm_high")):
+            if key in d:
+                try:
+                    n = int(d[key])
+                    setattr(row, field, n if 20 <= n <= 400 else None)
+                except (TypeError, ValueError):
+                    setattr(row, field, None)
+                fields.append(field)
+        for field in ("goal_low", "goal_high"):
+            if field in d:
+                # A note name or nothing. Junk clears rather than 400s, the
+                # same call `clean_code` makes about a personality letter: a
+                # profile write must not fail over one bad character.
+                v = str(d.get(field) or "").strip().upper()[:8]
+                setattr(row, field, v if _NOTE.fullmatch(v) else "")
+                fields.append(field)
+        if fields:
+            row.save(update_fields=fields + ["updated_at"])
+        return Response(game_profile(request.user, self.app_key))
+
+
 class GoalView(APIView):
     """POST /api/<key>/goal/ — the member's own declarations.
 
@@ -503,3 +551,71 @@ class GoalView(APIView):
         if fields:
             row.save(update_fields=fields + ["updated_at"])
         return Response(progress(request.user, self.app_key))
+
+
+# ------------------------------------------------- the game profile panel
+
+# How many takes at a difficulty, scoring at least this, unlock the one above.
+# The blueprint's rule for both apps — RapZ: "Boss Mode unlocks after passing 3
+# style runs in the previous difficulty"; SingZ: "Stage Boss unlocks only after
+# the user passes required Builder or Performer missions."
+#
+# It is computed from `TakeScore` rather than stored as a flag, for the reason
+# strain is: a flag is a number that can drift from what happened, and a
+# history can be argued with. It also means the unlock cannot be granted by
+# anything except takes that actually scored.
+BOSS_NEEDS_TAKES = 3
+BOSS_NEEDS_SCORE = 6
+BOSS_AT = "performer"
+
+
+def boss_unlocked(user, app_key):
+    """Has this member earned the top difficulty?
+
+    Deliberately NOT "have they done three takes" — three takes that scored
+    well. The substance rule's own test: turning up is worth something, but it
+    is not worth being called good, and an unlock is a claim about being good.
+    """
+    return TakeScore.objects.filter(
+        user=user, app_key=app_key, difficulty=BOSS_AT,
+        overall__gte=BOSS_NEEDS_SCORE,
+    ).count() >= BOSS_NEEDS_TAKES
+
+
+def game_profile(user, app_key):
+    """The blueprint's per-app profile, in the shape the panel already asks for.
+
+    Every value here already existed somewhere — the detected range in
+    `TakeScore`, the goal and BPM in `InstrumentProfile`, the fatigue read in
+    `strain()`. What was missing was the endpoint: `GameProfilePanel.jsx` has
+    been calling `/api/<key>/profile/` since it was written and getting a 404 a
+    bare `.catch(() => {})` swallowed, so both panels rendered nothing at all.
+
+    `range_work_allowed` is the SAME judgement `recovery_block` makes, read
+    from the same place. Two answers to "is this member straining" would
+    disagree, and the one on this panel is the one telling somebody it is safe
+    to push their voice.
+    """
+    row = profile_row(user, app_key)
+    heard = detected(user, app_key)
+    s = strain(user, app_key)
+    return {
+        "app_key": app_key,
+        "boss_unlocked": boss_unlocked(user, app_key),
+        # RapZ's half.
+        "top_styles": list(row.top_styles or []) if row else [],
+        "bpm_min": row.bpm_low if row else None,
+        "bpm_max": row.bpm_high if row else None,
+        # SingZ's half. The detected edges are what the coach HEARD; the goal
+        # edges are what the member SAID. Kept apart, like everywhere else.
+        "detected_low": heard["low"],
+        "detected_high": heard["high"],
+        "detected_range": heard["range"],
+        "goal_low": row.goal_low if row else "",
+        "goal_high": row.goal_high if row else "",
+        "goal_range": row.goal_range if row else "",
+        # Recovery overrides progression — the blueprint's rule, and the one
+        # thing on this panel a tier cannot buy past.
+        "range_work_allowed": s["level"] != "strain",
+        "strain": s,
+    }

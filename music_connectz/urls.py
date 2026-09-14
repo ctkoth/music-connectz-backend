@@ -50,9 +50,9 @@ except Exception:  # pragma: no cover - never take the deploy down
 # folding them together would mean an import error in the new module takes the
 # old feature off the platform.
 try:
-    from apps.economy.takescorez import GoalView, ProgressView
+    from apps.economy.takescorez import GameProfileView, GoalView, ProgressView
 except Exception:  # pragma: no cover - never take the deploy down
-    GoalView = ProgressView = None
+    GameProfileView = GoalView = ProgressView = None
 
 # The no-account trial take, and the public share endpoint the client has been
 # calling at this exact path since before it existed.
@@ -189,7 +189,13 @@ urlpatterns = [
 ] if ProgressView else []) + ([
     path(f"api/{key}/goal/", GoalView.as_view(app_key=key), name=f"{key}-goal")
     for key in INSTRUMENT_APP_KEYS
-] if GoalView else [])
+] if GoalView else []) + ([
+    # The game profile the RapZ and SingZ panels have been calling since they
+    # were written. Mounted for every instrument beside the coach, like the
+    # rest — a drummer has a BPM comfort range and a boss unlock too.
+    path(f"api/{key}/profile/", GameProfileView.as_view(app_key=key), name=f"{key}-profile")
+    for key in INSTRUMENT_APP_KEYS
+] if GameProfileView else [])
 
 # Serve user uploads. When S3/R2 is configured (S3_BUCKET_NAME), django-storages
 # serves media from the bucket and these URLs are absolute — this route isn't hit.

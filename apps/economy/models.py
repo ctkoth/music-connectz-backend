@@ -5464,6 +5464,16 @@ class InstrumentProfile(models.Model):
     # RapZ's onboarding: "Test BPM comfort range."
     bpm_low = models.PositiveIntegerField(null=True, blank=True)
     bpm_high = models.PositiveIntegerField(null=True, blank=True)
+    # RapZ's onboarding again: "Select top 3 intended rap styles." A
+    # declaration, like the ranges — what they are AIMING at, which is why it
+    # is stored rather than inferred from what they happen to have recorded.
+    top_styles = models.JSONField(default=list, blank=True)
+    # The goal range as NOTES rather than a class. `goal_range` is "tenor";
+    # this is the D3-A4 somebody is actually reaching for, which is the number
+    # a drill can be built against. Kept separately because a member can want
+    # a specific high note without claiming a whole voice class.
+    goal_low = models.CharField(max_length=8, blank=True, default="")
+    goal_high = models.CharField(max_length=8, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

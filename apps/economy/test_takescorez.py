@@ -418,3 +418,101 @@ class ColumnWidthTests(TestCase):
             any(f.name == "said" for f in LilithPayout._meta.get_fields()),
             "A VOICE line reached a column — give it a width and check it here.")
         self.assertTrue(all(isinstance(v, str) for v in L.VOICE.values()))
+
+
+class GameProfileTests(TestCase):
+    """`/api/<key>/profile/` — the endpoint two panels had been calling since
+    they were written.
+
+    It 404'd, a bare `.catch(() => {})` swallowed it, and the RapZ and SingZ
+    game profiles rendered nothing at all. Every value it serves already
+    existed somewhere; only the door was missing. That is the same shape as the
+    five trial coaches nothing linked to, and it is why the tab sweep that
+    found it is worth keeping.
+    """
+
+    def setUp(self):
+        self.u = member("gamer")
+        self.c = APIClient()
+        self.c.force_authenticate(self.u)
+
+    def test_it_is_mounted_for_every_instrument(self):
+        from music_connectz.urls import INSTRUMENT_APP_KEYS
+        for key in INSTRUMENT_APP_KEYS:
+            r = self.c.get(f"/api/{key}/profile/")
+            self.assertEqual(r.status_code, 200, key)
+            self.assertEqual(r.data["app_key"], key)
+
+    def test_it_serves_the_shape_the_panel_reads(self):
+        """The panel reads these exact keys. A response missing one is a panel
+        that renders blank, which is what it did for its whole life."""
+        d = self.c.get("/api/rapz/profile/").data
+        for k in ("top_styles", "bpm_min", "bpm_max", "boss_unlocked",
+                  "detected_low", "detected_high", "goal_low", "goal_high",
+                  "range_work_allowed"):
+            self.assertIn(k, d, k)
+
+    def test_top_styles_is_capped_at_three_by_the_server(self):
+        """The panel caps it at three, and a panel is not a rule."""
+        r = self.c.patch("/api/rapz/profile/",
+                         {"top_styles": ["trap", "drill", "boom-bap", "grime", "emo"]},
+                         format="json")
+        self.assertEqual(len(r.data["top_styles"]), 3)
+
+    def test_declarations_survive_a_reload(self):
+        self.c.patch("/api/rapz/profile/",
+                     {"top_styles": ["trap"], "bpm_min": 80, "bpm_max": 140},
+                     format="json")
+        d = self.c.get("/api/rapz/profile/").data
+        self.assertEqual(d["top_styles"], ["trap"])
+        self.assertEqual((d["bpm_min"], d["bpm_max"]), (80, 140))
+
+    def test_a_note_that_is_not_a_note_clears_rather_than_failing(self):
+        r = self.c.patch("/api/singz/profile/",
+                         {"goal_low": "A2", "goal_high": "banana"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["goal_low"], "A2")
+        self.assertEqual(r.data["goal_high"], "")
+
+    def test_what_was_heard_and_what_was_said_stay_apart(self):
+        """Collapsing them is how a goal quietly becomes a finding about you."""
+        self.c.patch("/api/singz/profile/", {"goal_low": "C3", "goal_high": "A4"},
+                     format="json")
+        TakeScore.objects.create(user=self.u, app_key="singz", range_class="bass",
+                                 low_note="E2", high_note="D4")
+        d = self.c.get("/api/singz/profile/").data
+        self.assertEqual((d["detected_low"], d["detected_high"]), ("E2", "D4"))
+        self.assertEqual((d["goal_low"], d["goal_high"]), ("C3", "A4"))
+
+    def test_range_work_is_paused_when_the_member_is_straining(self):
+        """The same judgement `recovery_block` makes, from the same place. Two
+        answers to "is this member straining" would disagree, and this is the
+        one telling somebody it is safe to push their voice."""
+        self.assertTrue(self.c.get("/api/singz/profile/").data["range_work_allowed"])
+        for i in range(4):
+            scored(self.u, hours_ago=i, pitch=8, tone=8, breath=2, range=8, agility=8)
+        self.assertFalse(self.c.get("/api/singz/profile/").data["range_work_allowed"])
+
+    def test_boss_needs_takes_that_actually_scored(self):
+        """Turning up is worth something; it is not worth being called good,
+        and an unlock is a claim about being good."""
+        from . import takescorez as K
+        for _ in range(K.BOSS_NEEDS_TAKES + 2):
+            TakeScore.objects.create(user=self.u, app_key="rapz",
+                                     difficulty=K.BOSS_AT, overall=K.BOSS_NEEDS_SCORE - 2)
+        self.assertFalse(self.c.get("/api/rapz/profile/").data["boss_unlocked"])
+        for _ in range(K.BOSS_NEEDS_TAKES):
+            TakeScore.objects.create(user=self.u, app_key="rapz",
+                                     difficulty=K.BOSS_AT, overall=K.BOSS_NEEDS_SCORE)
+        self.assertTrue(self.c.get("/api/rapz/profile/").data["boss_unlocked"])
+
+    def test_the_unlock_does_not_leak_between_instruments(self):
+        from . import takescorez as K
+        for _ in range(K.BOSS_NEEDS_TAKES):
+            TakeScore.objects.create(user=self.u, app_key="rapz",
+                                     difficulty=K.BOSS_AT, overall=10)
+        self.assertTrue(self.c.get("/api/rapz/profile/").data["boss_unlocked"])
+        self.assertFalse(self.c.get("/api/singz/profile/").data["boss_unlocked"])
+
+    def test_it_needs_an_account(self):
+        self.assertEqual(APIClient().get("/api/singz/profile/").status_code, 401)
