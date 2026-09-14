@@ -282,6 +282,83 @@ give them the link. A read-only surface is usually an unfinished one.
 
 ---
 
+## PartnerZ gets a benefit, never a stipend
+
+Corey asked whether PartnerZ should be paid "for upholding the economy by
+existing". The answer this codebase has to give is **no to a payout and yes to
+a benefit**, and the line between them is one question:
+
+> **Would this be worth anything to somebody faking it?**
+
+A 🍥 or ⚡ stipend for HOLDING the status answers yes, twice over. It pays a
+fixed past achievement forever — the substance rule inverted, because *could a
+member get a good number without getting good?* becomes "yes: by getting good
+once, in one week, in 2024". And the gate is passed once while the income never
+stops, which is an annuity behind a one-time door.
+
+`groupz.PARTNER_ESCROW_DAYS_OFF` answers no by construction. Escrow between
+PartnerZ releases four days sooner, which is worth nothing at all to somebody
+running two accounts: they own both wallets, so their own money reaching their
+own other account sooner is money moving from one pocket to another. It only
+pays when two genuinely separate people, with genuinely opposed interests, work
+together AGAIN — so it costs nothing while a partnership is idle and cannot be
+farmed while it is active.
+
+It follows the Patron badge exactly, because Patron already solved the same
+problem: the window is each PAYER'S own last chance to dispute, so **every payer
+has to be a PartnerZ of every payee**, and it is still floored at
+`ESCROW_MIN_RELEASE_DAYS`. Four rather than Patron's seven so the badge stays
+the stronger thing and the two stack down to the floor.
+
+### The hole this found, which is why the gate moved
+
+`payers()` returns `[]` when nobody pays, so `all_funded()` is `all([]) == True`
+— **one Fund call flips a zero-value deal to FUNDED, and `maybe_auto_release`
+releases it on its own.** Three empty deals between two accounts cost nothing,
+took no work and were PartnerZ. A list that is free to earn cannot carry a
+benefit, so the count now requires the escrow to have actually HELD something
+(money, SpinaZ or a stake), read before `release_deal` zeroes it.
+
+### Battles count, and the reason is the same reason
+
+Corey asked for battles alongside collabs. What makes it safe is not that a
+battle is hard — it is that `settle_battle` only sets a `winner` when a side
+cleared `BATTLE_MIN_RATINGS` judges, so somebody who is not one of the two of
+them had to turn up. A battle that settles as a **draw** is one nobody rated,
+and it does not count. Same shape as the collab rule: a third party settled it.
+
+### It is a tally now, not a scan
+
+`Partnership` is an ordered pair (`a_id < b_id`, so one row and never two that
+disagree) with two counters, incremented once by the thing that just settled.
+It replaced a Python scan of up to 2000 released deals per read, which was
+affordable for one tab and impossible for `escrow_release_days`, which has to
+answer per deal card.
+
+It is a **tally of events, not a second opinion** — which is the distinction
+`groupz.py`'s own docstring draws when it refuses to store FriendZ. Follow is a
+live table you can read cheaply; a settlement is an event that has to be
+counted when it happens. Both hooks are swallowed (the money has already moved
+and a tally must never be able to undo that), which means the tally can drift,
+which is why `manage.py rebuild_partnerships [--write]` exists — dry by default
+like `reconcile_uploads`, and it **replaces** rather than adds, because a
+counter you can only increase is one a double-fire corrupts permanently.
+Migration 0119 seeds it from the events that already happened; without it,
+shipping the tally would have silently emptied the tab for everybody who had
+already earned a place on it.
+
+### And the window is finally on the screen
+
+`auto_release_days` has been in `deal_dict` since CollabZ was written and **no
+screen ever read it**, so a payer funded a deal without being told how long
+their money sits or when their dispute window shuts. The cost of funding is the
+amount AND the days, and only the amount was on the button. `EscrowWindow` in
+`CollabZ.jsx` states both now, which is also the only place the PartnerZ
+benefit is visible — a window quietly four days shorter than the card beside it
+reads as a bug rather than a reward.
+
+---
+
 ## One person, one account (Corey's rule — a platform rule, not a design one)
 
 **Every member gets one account. Duplicate accounts are not accepted.**

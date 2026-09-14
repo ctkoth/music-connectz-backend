@@ -40,12 +40,15 @@ to them, and the response says which of the two just happened rather than
 claiming a friendship nobody agreed to.
 """
 from django.contrib.auth import get_user_model
+from django.db.models import F, Q
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Block, CollabDeal, Follow, Group, GroupMember, blocked_user_ids
+from .models import (Block, Follow, Group, GroupMember, Partnership,
+                     blocked_user_ids)
 
 User = get_user_model()
 
@@ -57,15 +60,50 @@ DERIVED = ("friends", "fans", "partners", "blocked")
 #
 # Corey's rule, and it is the strongest one on this tab. "Intend to work with
 # frequently" was a checkbox — you could type anybody in, so the list said what
-# you hoped rather than what you did. Three RELEASED collabs is a thing neither
-# of you can fake alone: the other person had to agree three times, and escrow
-# had to pay out three times. That is the substance rule applied to a
-# friendship — could a member get a good one without getting good? Not here.
+# you hoped rather than what you did. A finished work is a thing neither of you
+# can fake alone: the other person had to agree, and something outside the two
+# of you had to settle.
 #
 # FriendZ is the gate because Corey named it: partners come from friends. It
 # also means the two of you follow each other, so a partnership is never a
 # surprise to one side.
-PARTNER_COLLABS = 3
+#
+# TWO KINDS OF WORK COUNT, and each one has a settlement a pair of accounts
+# cannot manufacture between themselves:
+#
+# * A RELEASED CollabZ deal THAT HELD SOMETHING. Escrow paid out, and it had
+#   money, SpinaZ or a stake in it. A zero-value deal was not excluded for
+#   tidiness: `payers()` is empty when nobody pays, so `all_funded()` is
+#   `all([]) == True`, one Fund call flips an empty deal to FUNDED, and
+#   `maybe_auto_release` releases it on its own. Three of those cost nothing
+#   and took no work, which is the substance rule's failure case with a
+#   friendship attached.
+# * A SETTLED BattleZ battle WITH A WINNER. A winner means at least one side
+#   cleared BATTLE_MIN_RATINGS judges, so the room turned up. A battle that
+#   settles as a draw is one nobody watched, and it does not count.
+PARTNER_WORKS = 3
+
+# The one thing being a PartnerZ is worth, and it is deliberately not a payout.
+#
+# Corey asked whether PartnerZ should earn a bonus "for upholding the economy
+# by existing". The answer this codebase has to give is no: a per-day or
+# per-week payout for HOLDING a status pays a fixed past achievement forever,
+# which is the substance rule inverted — could a member get a good number
+# without getting good? Yes: by getting good once, in one week, and then never
+# again. It is also the exact shape of a farm, because the gate is passed once
+# and the income never stops.
+#
+# So the benefit is the opposite shape: it costs nothing while the partnership
+# is idle, and it only arrives when the two of them work together AGAIN. The
+# test every future PartnerZ benefit has to pass is **would this be worth
+# anything to somebody faking it?** Escrow speed answers no by construction —
+# a faker owns both wallets, so their money reaching their own other account
+# four days sooner is worth exactly zero. A 🍥 stipend answers yes.
+#
+# Four days rather than the floor, so Patron (7) stays the stronger badge and
+# the two stack down to ESCROW_MIN_RELEASE_DAYS rather than one making the
+# other pointless.
+PARTNER_ESCROW_DAYS_OFF = 4
 
 
 def _names(ids):
@@ -86,39 +124,64 @@ def _friends_and_fans(user):
     return following & followers, followers - following
 
 
-def collab_counts(user):
-    """{username: finished collabs with this member}, in one query.
+def _pair(u1, u2):
+    """The two ids, smallest first — a partnership is one row, never two."""
+    return (u1, u2) if u1 <= u2 else (u2, u1)
 
-    RELEASED only. A draft nobody funded is an intention and a funded one that
-    never paid out is an argument; a released deal is escrow that actually
-    settled, which is the only point at which two people demonstrably finished
-    something together.
 
-    Counted in Python rather than with `participants__contains`, which is
-    Postgres-only while the suite runs on SQLite — the same gap
-    `lilith_taskz._in_released_deal` documents. Bounded to deals touched since
-    this member joined, because a deal released before they existed cannot
-    name them.
+def note_work(user_ids, *, collabs=0, battles=0):
+    """Tally one finished work between every pair of these people.
+
+    Called BY the thing that just settled, once, at the moment it settles.
+    Swallowed by its callers: an escrow release and a battle result have to
+    land whether or not this does.
     """
-    me = user.username
-    counts = {}
-    rows = (CollabDeal.objects
-            .filter(status=CollabDeal.STATUS_RELEASED, updated_at__gte=user.date_joined)
-            .values("initiator__username", "participants")[:2000])
-    for row in rows:
-        names = {e.get("username") for e in (row["participants"] or [])
-                 if isinstance(e, dict) and e.get("username")}
-        if row["initiator__username"]:
-            names.add(row["initiator__username"])
-        if me not in names:
-            continue
-        for other in names - {me}:
-            counts[other] = counts.get(other, 0) + 1
-    return counts
+    ids = sorted({int(i) for i in user_ids if i})
+    for n, first in enumerate(ids):
+        for second in ids[n + 1:]:
+            a, b = _pair(first, second)
+            row, _ = Partnership.objects.get_or_create(a_id=a, b_id=b)
+            Partnership.objects.filter(pk=row.pk).update(
+                collabs=F("collabs") + collabs,
+                battles=F("battles") + battles,
+                updated_at=timezone.now())
+
+
+def works_with(user):
+    """{username: {"collabs": n, "battles": n, "works": n}} — one query.
+
+    Everybody this member has finished anything with, whether or not they are
+    a FriendZ. The refusal on the PartnerZ tab reads this to say how far along
+    the two of you actually are, which beats "you can't do that".
+    """
+    rows = (Partnership.objects
+            .filter(Q(a=user) | Q(b=user))
+            .select_related("a", "b"))
+    out = {}
+    for r in rows:
+        other = r.b if r.a_id == user.pk else r.a
+        out[other.username] = {"collabs": r.collabs, "battles": r.battles,
+                               "works": r.works}
+    return out
+
+
+def partner_ids(user):
+    """Ids of everybody at or over PARTNER_WORKS with this member — one query.
+
+    FriendZ is NOT applied here. This is the work half of the rule on its own,
+    because the escrow benefit reads it for people who are not on each other's
+    tab and `partners_of` is the place the friendship gate belongs.
+    """
+    rows = (Partnership.objects
+            .filter(Q(a=user) | Q(b=user))
+            .annotate(works=F("collabs") + F("battles"))
+            .filter(works__gte=PARTNER_WORKS)
+            .values_list("a_id", "b_id"))
+    return {b if a == user.pk else a for a, b in rows}
 
 
 def partners_of(user, friends_ids=None):
-    """FriendZ who have finished `PARTNER_COLLABS` collabs with this member.
+    """FriendZ who have finished PARTNER_WORKS works with this member.
 
     Derived rather than curated, so the list says what the two of you DID
     rather than what one of you hoped for.
@@ -127,12 +190,24 @@ def partners_of(user, friends_ids=None):
         friends_ids, _ = _friends_and_fans(user)
     if not friends_ids:
         return set()
-    counts = collab_counts(user)
-    earned = {n for n, c in counts.items() if c >= PARTNER_COLLABS}
-    if not earned:
+    return set(friends_ids) & partner_ids(user)
+
+
+def partner_pairs_among(user_ids):
+    """{frozenset({id, id}), ...} for every partnered pair in this set.
+
+    One query for a whole deal, so `collab.escrow_release_days` can ask "is
+    every payer a partner of every payee" without a scan per card.
+    """
+    ids = {int(i) for i in user_ids if i}
+    if len(ids) < 2:
         return set()
-    return set(User.objects.filter(id__in=friends_ids, username__in=earned)
-               .values_list("id", flat=True))
+    rows = (Partnership.objects
+            .filter(a_id__in=ids, b_id__in=ids)
+            .annotate(works=F("collabs") + F("battles"))
+            .filter(works__gte=PARTNER_WORKS)
+            .values_list("a_id", "b_id"))
+    return {frozenset((a, b)) for a, b in rows}
 
 
 def board(user):
@@ -155,8 +230,11 @@ def board(user):
          "members": _names(partners),
          # The rule, on the list, because a list you cannot edit has to say
          # what puts somebody on it or it reads as broken.
-         "note": f"FriendZ you've finished {PARTNER_COLLABS} collabs with. "
-                 f"Earned, not added — it says what you did, not who you meant to work with."},
+         # The rule, plus what it is worth, because a list you cannot edit has
+         # to say what puts somebody on it AND why you'd want them there.
+         "note": f"FriendZ you've finished {PARTNER_WORKS} works with — a CollabZ deal "
+                 f"that paid out, or a battle the room decided. Earned, not added. "
+                 f"Escrow between PartnerZ releases {PARTNER_ESCROW_DAYS_OFF} days sooner."},
     ]
 
     owned = list(Group.objects.filter(owner=user).prefetch_related("memberships__member"))
@@ -199,13 +277,16 @@ def change(user, gid, action, username):
 
     if gid == "partners":
         # Neither half of this is yours to type: the other person has to be a
-        # FriendZ (they follow you back) and escrow has to have settled between
-        # you three times. Saying how it is earned beats a refusal.
-        got = collab_counts(user).get(other.username, 0)
+        # FriendZ (they follow you back) and something has to have SETTLED
+        # between you three times. Saying how far along you are beats a
+        # refusal — the number is the whole answer to "why aren't they here".
+        got = works_with(user).get(other.username) or {}
+        done = int(got.get("works") or 0)
         return ({"detail": f"PartnerZ is earned, not added. You and @{other.username} have "
-                           f"finished {got} collab{'' if got == 1 else 's'} — "
-                           f"{PARTNER_COLLABS} released collabs between FriendZ and they land "
-                           f"here on their own."},
+                           f"finished {done} work{'' if done == 1 else 's'} together "
+                           f"({int(got.get('collabs') or 0)} paid-out collabs, "
+                           f"{int(got.get('battles') or 0)} decided battles) — "
+                           f"{PARTNER_WORKS} between FriendZ and they land here on their own."},
                 status.HTTP_400_BAD_REQUEST)
 
     if gid == "fans":

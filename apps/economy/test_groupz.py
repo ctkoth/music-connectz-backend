@@ -260,9 +260,10 @@ class PartnerZIsEarnedTests(TestCase):
     """PartnerZ comes from finished work, not from a checkbox.
 
     "Intend to work with frequently" was typed, so the list said what somebody
-    HOPED. Three released collabs is a thing neither side can fake alone: the
-    other person agreed three times and escrow settled three times. That is the
-    substance rule applied to a friendship.
+    HOPED. A settled work is a thing neither side can fake alone: the other
+    person had to agree, and something outside the two of them had to settle —
+    escrow paying out, or a room deciding a battle. That is the substance rule
+    applied to a friendship.
     """
 
     def setUp(self):
@@ -277,29 +278,60 @@ class PartnerZIsEarnedTests(TestCase):
         Follow.objects.create(follower=self.me, following=other)
         Follow.objects.create(follower=other, following=self.me)
 
-    def _collabs(self, other, n):
+    def _release(self, payer, payee, n=1, cents=1000):
+        """n deals that actually settled — through `release_deal`, not by
+        typing the status on, because the tally is written by the release."""
+        from .collab import release_deal
         from .models import CollabDeal
         for i in range(n):
-            CollabDeal.objects.create(
-                initiator=self.me, status=CollabDeal.STATUS_RELEASED,
-                title=f"deal {i}",
-                participants=[{"username": self.me.username}, {"username": other.username}])
+            d = CollabDeal.objects.create(
+                initiator=payer, status=CollabDeal.STATUS_FUNDED,
+                title=f"deal {i}", held_cents=cents,
+                participants=[
+                    {"username": payer.username, "pays_cents": cents, "funded": True},
+                    {"username": payee.username, "receives_cents": cents},
+                ])
+            release_deal(d)
+
+    def _empty_release(self, other, n=1):
+        """Deals nobody funded, released by the auto path. Free to make."""
+        from .collab import release_deal
+        from .models import CollabDeal
+        for i in range(n):
+            d = CollabDeal.objects.create(
+                initiator=self.me, status=CollabDeal.STATUS_FUNDED, title=f"free {i}",
+                participants=[{"username": self.me.username},
+                              {"username": other.username}])
+            release_deal(d)
 
     def partners(self):
         return next(g for g in self.c.get("/api/groupz/").data if g["kind"] == "partners")["members"]
 
     def test_a_friend_becomes_a_partner_at_the_threshold(self):
         self._friends(self.mate)
-        self._collabs(self.mate, self.G.PARTNER_COLLABS - 1)
+        self._release(self.me, self.mate, self.G.PARTNER_WORKS - 1)
         self.assertEqual(self.partners(), [])
-        self._collabs(self.mate, 1)
+        self._release(self.me, self.mate, 1)
         self.assertEqual(self.partners(), ["mate"])
 
     def test_collabs_without_friendship_are_not_a_partnership(self):
         """Corey's rule: partners come from FriendZ. It also means the two of
         you follow each other, so a partnership is never a surprise to one
         side."""
-        self._collabs(self.mate, self.G.PARTNER_COLLABS + 2)
+        self._release(self.me, self.mate, self.G.PARTNER_WORKS + 2)
+        self.assertEqual(self.partners(), [])
+
+    def test_a_deal_that_held_nothing_does_not_count(self):
+        """The hole this rule exists for.
+
+        `payers()` is empty when nobody pays, so `all_funded()` is `all([])`
+        — one Fund call flips an empty deal to FUNDED and `maybe_auto_release`
+        releases it on its own. Three of those cost nothing and took no work,
+        so PartnerZ would be free and the benefit hanging off it would be free
+        with it.
+        """
+        self._friends(self.mate)
+        self._empty_release(self.mate, self.G.PARTNER_WORKS + 5)
         self.assertEqual(self.partners(), [])
 
     def test_only_released_deals_count(self):
@@ -308,67 +340,260 @@ class PartnerZIsEarnedTests(TestCase):
         from .models import CollabDeal
         self._friends(self.mate)
         for st in (CollabDeal.STATUS_DRAFT, CollabDeal.STATUS_FUNDED, CollabDeal.STATUS_REFUNDED):
-            for _ in range(self.G.PARTNER_COLLABS):
+            for _ in range(self.G.PARTNER_WORKS):
                 CollabDeal.objects.create(
-                    initiator=self.me, status=st, title="x",
-                    participants=[{"username": self.me.username},
-                                  {"username": self.mate.username}])
+                    initiator=self.me, status=st, title="x", held_cents=1000,
+                    participants=[{"username": self.me.username, "pays_cents": 1000},
+                                  {"username": self.mate.username, "receives_cents": 1000}])
         self.assertEqual(self.partners(), [])
 
     def test_somebody_elses_deals_do_not_count(self):
         """Two other people finishing three collabs must not make either of
         them YOUR partner."""
-        from .models import CollabDeal
         a, b = member("aaa"), member("bbb")
         self._friends(a)
-        for _ in range(self.G.PARTNER_COLLABS):
-            CollabDeal.objects.create(initiator=a, status=CollabDeal.STATUS_RELEASED, title="x",
-                                      participants=[{"username": "aaa"}, {"username": "bbb"}])
+        self._release(a, b, self.G.PARTNER_WORKS)
         self.assertEqual(self.partners(), [])
 
     def test_it_counts_deals_you_did_not_start(self):
         """Being brought onto somebody else's deal is still finishing work
         together."""
-        from .models import CollabDeal
         self._friends(self.mate)
-        for _ in range(self.G.PARTNER_COLLABS):
-            CollabDeal.objects.create(
-                initiator=self.mate, status=CollabDeal.STATUS_RELEASED, title="x",
-                participants=[{"username": self.mate.username}, {"username": self.me.username}])
+        self._release(self.mate, self.me, self.G.PARTNER_WORKS)
         self.assertEqual(self.partners(), ["mate"])
 
     def test_you_cannot_add_a_partner_and_it_says_how_far_off_you_are(self):
         """A refusal that also answers "then how?" — the number is the point."""
         self._friends(self.mate)
-        self._collabs(self.mate, 1)
+        self._release(self.me, self.mate, 1)
         r = self.c.post("/api/groupz/partners/add/", {"username": "mate"}, format="json")
         self.assertEqual(r.status_code, 400)
         self.assertIn("earned, not added", r.data["detail"])
-        self.assertIn("finished 1 collab", r.data["detail"])
-        self.assertIn(str(self.G.PARTNER_COLLABS), r.data["detail"])
+        self.assertIn("finished 1 work", r.data["detail"])
+        self.assertIn(str(self.G.PARTNER_WORKS), r.data["detail"])
 
-    def test_the_note_states_the_rule(self):
+    def test_the_note_states_the_rule_and_what_it_is_worth(self):
         note = next(g for g in self.c.get("/api/groupz/").data
                     if g["kind"] == "partners")["note"]
-        self.assertIn(str(self.G.PARTNER_COLLABS), note)
+        self.assertIn(str(self.G.PARTNER_WORKS), note)
         self.assertIn("Earned, not added", note)
+        # The gain half of the cost/gain rule: a benefit nobody is told about
+        # changes nobody's behaviour.
+        self.assertIn(str(self.G.PARTNER_ESCROW_DAYS_OFF), note)
 
     def test_the_board_does_not_grow_a_query_per_collab(self):
         from django.db import connection
         from django.test.utils import CaptureQueriesContext
-        from .models import CollabDeal
+        from .models import Partnership
 
         def count_for(n):
-            CollabDeal.objects.all().delete()
+            Partnership.objects.all().delete()
+            self.G.note_work([self.me.pk, self.mate.pk], collabs=n)
             for i in range(n):
-                CollabDeal.objects.create(
-                    initiator=self.me, status=CollabDeal.STATUS_RELEASED, title=f"d{i}",
-                    participants=[{"username": self.me.username},
-                                  {"username": self.mate.username}])
+                other = member(f"extra{n}_{i}")
+                self.G.note_work([self.me.pk, other.pk], collabs=1)
             with CaptureQueriesContext(connection) as ctx:
                 self.c.get("/api/groupz/")
             return len(ctx.captured_queries)
 
         self._friends(self.mate)
         few, many = count_for(3), count_for(30)
-        self.assertEqual(few, many, f"{few} queries for 3 deals but {many} for 30")
+        self.assertEqual(few, many, f"{few} queries for 3 partnerships but {many} for 30")
+
+
+class PartnerZCountsBattlesTests(TestCase):
+    """A battle the room decided is work two people finished together.
+
+    Corey asked for battles alongside collabs, and the reason it is safe is
+    the same reason a funded collab is: a WINNER means at least one side
+    cleared BATTLE_MIN_RATINGS judges, so somebody who is not one of the two
+    of them had to turn up. A draw means nobody rated it, and a battle nobody
+    watched is not a working relationship.
+    """
+
+    def setUp(self):
+        from . import groupz
+        self.G = groupz
+        self.me = member("mc")
+        self.mate = member("rival")
+        Follow.objects.create(follower=self.me, following=self.mate)
+        Follow.objects.create(follower=self.mate, following=self.me)
+        self.c = APIClient()
+        self.c.force_authenticate(self.me)
+
+    def _battle(self, *, decided):
+        from .battlez import settle_battle
+        from .models import Battle, BattleEntry, ItemRating
+        b = Battle.objects.create(host=self.me, opponent=self.mate, title="round",
+                                  mode=Battle.MODE_1V1, status=Battle.STATUS_OPEN)
+        for u in (self.me, self.mate):
+            BattleEntry.objects.create(battle=b, user=u, title=u.username)
+        if decided:
+            from .battlez import BATTLE_MIN_RATINGS
+            entry = b.entries.filter(user=self.me).first()
+            for i in range(BATTLE_MIN_RATINGS):
+                ItemRating.objects.create(item_id=entry.item_key,
+                                          user=member(f"judge{b.pk}_{i}"), score=9)
+        return settle_battle(b)
+
+    def partners(self):
+        return next(g for g in self.c.get("/api/groupz/").data if g["kind"] == "partners")["members"]
+
+    def test_decided_battles_make_partners(self):
+        for _ in range(self.G.PARTNER_WORKS):
+            b = self._battle(decided=True)
+            self.assertIsNotNone(b.winner_id)
+        self.assertEqual(self.partners(), ["rival"])
+
+    def test_a_draw_nobody_judged_counts_for_nothing(self):
+        for _ in range(self.G.PARTNER_WORKS + 3):
+            b = self._battle(decided=False)
+            self.assertIsNone(b.winner_id)
+        self.assertEqual(self.partners(), [])
+
+    def test_battles_and_collabs_add_up_to_the_same_threshold(self):
+        """Three works, not three of each. A battle and two collabs is a
+        working relationship by any reading."""
+        from .collab import release_deal
+        from .models import CollabDeal
+        self._battle(decided=True)
+        for i in range(self.G.PARTNER_WORKS - 1):
+            release_deal(CollabDeal.objects.create(
+                initiator=self.me, status=CollabDeal.STATUS_FUNDED,
+                title=f"d{i}", held_cents=500,
+                participants=[{"username": "mc", "pays_cents": 500, "funded": True},
+                              {"username": "rival", "receives_cents": 500}]))
+        self.assertEqual(self.partners(), ["rival"])
+        row = self.G.works_with(self.me)["rival"]
+        self.assertEqual((row["collabs"], row["battles"]), (self.G.PARTNER_WORKS - 1, 1))
+
+
+class PartnerZEscrowBenefitTests(TestCase):
+    """The one thing PartnerZ is worth, and why it is this and not a payout.
+
+    A per-day 🍥 for HOLDING the status would pay a fixed past achievement
+    forever — the substance rule inverted, and an annuity behind a gate you
+    pass once. This benefit is worth nothing to somebody faking it: a faker
+    owns both wallets, so their own money reaching their own other account
+    sooner is worth exactly zero. It only pays when two genuinely separate
+    people work together AGAIN.
+    """
+
+    def setUp(self):
+        from django.conf import settings
+        from . import groupz
+        from .collab import deal_dict, escrow_release_days
+        self.G = groupz
+        self.days = escrow_release_days
+        self.deal_dict = deal_dict
+        self.base = settings.ESCROW_AUTO_RELEASE_DAYS
+        self.floor = settings.ESCROW_MIN_RELEASE_DAYS
+        self.payer = member("payer")
+        self.payee = member("payee")
+
+    def _deal(self, payer=None, payee=None, cents=1000):
+        from .models import CollabDeal
+        payer, payee = payer or self.payer, payee or self.payee
+        return CollabDeal.objects.create(
+            initiator=payer, status=CollabDeal.STATUS_FUNDED, title="x", held_cents=cents,
+            participants=[{"username": payer.username, "pays_cents": cents, "funded": True},
+                          {"username": payee.username, "receives_cents": cents}])
+
+    def _partner(self, a, b):
+        self.G.note_work([a.pk, b.pk], collabs=self.G.PARTNER_WORKS)
+
+    def test_strangers_get_the_full_window(self):
+        self.assertEqual(self.days(self._deal()), self.base)
+
+    def test_partners_release_sooner(self):
+        self._partner(self.payer, self.payee)
+        self.assertEqual(self.days(self._deal()),
+                         max(self.floor, self.base - self.G.PARTNER_ESCROW_DAYS_OFF))
+
+    def test_it_never_goes_under_the_floor(self):
+        self._partner(self.payer, self.payee)
+        self.assertGreaterEqual(self.days(self._deal()), self.floor)
+
+    def test_one_payer_who_is_not_a_partner_holds_the_window(self):
+        """The same narrowness the Patron badge has: the window is each
+        PAYER'S own protection, so a payer who has not earned the shortening
+        does not have it spent on their behalf."""
+        from .models import CollabDeal
+        other = member("copayer")
+        self._partner(self.payer, self.payee)
+        d = CollabDeal.objects.create(
+            initiator=self.payer, status=CollabDeal.STATUS_FUNDED, title="x", held_cents=2000,
+            participants=[{"username": "payer", "pays_cents": 1000, "funded": True},
+                          {"username": "copayer", "pays_cents": 1000, "funded": True},
+                          {"username": "payee", "receives_cents": 2000}])
+        self.assertEqual(self.days(d), self.base)
+
+    def test_a_payee_who_is_not_a_partner_holds_the_window(self):
+        from .models import CollabDeal
+        member("stranger")
+        self._partner(self.payer, self.payee)
+        d = CollabDeal.objects.create(
+            initiator=self.payer, status=CollabDeal.STATUS_FUNDED, title="x", held_cents=2000,
+            participants=[{"username": "payer", "pays_cents": 2000, "funded": True},
+                          {"username": "payee", "receives_cents": 1000},
+                          {"username": "stranger", "receives_cents": 1000}])
+        self.assertEqual(self.days(d), self.base)
+
+    def test_the_card_says_why_it_is_shorter(self):
+        """A shortened window with no reason on it reads as a bug, and a
+        benefit nobody can see arrive changes nobody's behaviour."""
+        self.assertFalse(self.deal_dict(self._deal(), self.payer)["auto_release_partnerz"])
+        self._partner(self.payer, self.payee)
+        row = self.deal_dict(self._deal(), self.payer)
+        self.assertTrue(row["auto_release_partnerz"])
+        self.assertLess(row["auto_release_days"], row["auto_release_default_days"])
+
+    def test_a_list_of_deals_does_not_re_ask_per_card(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        self._partner(self.payer, self.payee)
+        deals = [self._deal() for _ in range(6)]
+        cache = {}
+        with CaptureQueriesContext(connection) as ctx:
+            rows = [self.deal_dict(d, self.payer, cache) for d in deals]
+        self.assertTrue(all(r["auto_release_partnerz"] for r in rows))
+        self.assertLessEqual(len(ctx.captured_queries), 4,
+                             f"{len(ctx.captured_queries)} queries for 6 deals — per-card read")
+
+
+class RebuildPartnershipsTests(TestCase):
+    """The tally is written by the settlement, so it can be wrong in two ways
+    — a row that predates it, and an increment swallowed by an exception. The
+    sweep is what makes both temporary."""
+
+    def setUp(self):
+        from . import groupz
+        self.G = groupz
+        self.a, self.b = member("aa"), member("bb")
+
+    def test_dry_by_default(self):
+        from django.core.management import call_command
+        from .models import Partnership
+        self.G.note_work([self.a.pk, self.b.pk], collabs=9)   # a tally with no events
+        call_command("rebuild_partnerships")
+        self.assertEqual(Partnership.objects.get().collabs, 9)
+
+    def test_write_replaces_the_tally_with_the_events(self):
+        from django.core.management import call_command
+        from .models import Partnership
+        self.G.note_work([self.a.pk, self.b.pk], collabs=9)
+        call_command("rebuild_partnerships", "--write")
+        # No released deal exists, so the honest answer is no partnership.
+        self.assertFalse(Partnership.objects.exists())
+
+    def test_it_recovers_a_tally_that_never_got_written(self):
+        from django.core.management import call_command
+        from .models import CollabDeal, Partnership
+        for i in range(2):
+            CollabDeal.objects.create(
+                initiator=self.a, status=CollabDeal.STATUS_RELEASED, title=f"d{i}",
+                participants=[{"username": "aa", "pays_cents": 100, "funded": True},
+                              {"username": "bb", "receives_cents": 100}])
+        self.assertFalse(Partnership.objects.exists())
+        call_command("rebuild_partnerships", "--write")
+        self.assertEqual(Partnership.objects.get().collabs, 2)

@@ -116,6 +116,10 @@ def deal_dict(deal, me=None, days_cache=None):
         # is the only version of it worth showing a payer.
         "auto_release_days": escrow_release_days(deal, days_cache),
         "auto_release_default_days": settings.ESCROW_AUTO_RELEASE_DAYS,
+        # A shortened window with no reason on it reads as a bug. Naming the
+        # thing that shortened it is the gain half of the cost/gain rule: the
+        # benefit is only worth earning if somebody can see it arrive.
+        "auto_release_partnerz": _all_payers_partner_every_payee(deal, days_cache),
         "i_am_participant": bool(me and any(p.get("username") == me.username for p in deal.participants)),
         "i_am_payer": bool(me and any(p.get("username") == me.username and int(p.get("pays_cents") or 0) > 0 for p in deal.participants)),
     }
@@ -138,6 +142,17 @@ def escrow_release_days(deal, cache=None):
     So every payer has to hold it, and the shortest window any of them earns
     is still floored at ESCROW_MIN_RELEASE_DAYS.
 
+    PartnerZ shortens it too, under the same rule and for the same reason. Two
+    people with PARTNER_WORKS finished works between them have evidence the
+    dispute window is protecting against something that has not happened, and
+    it is still each PAYER'S OWN protection being spent — so every payer has to
+    be a PartnerZ of every person being paid, and the floor still holds.
+
+    That narrowness is also what makes the benefit unfarmable, which is the
+    whole reason PartnerZ gets this and not a 🍥 payout: somebody running two
+    accounts owns both wallets, so their own money arriving four days sooner is
+    worth exactly nothing to them. See `groupz.PARTNER_ESCROW_DAYS_OFF`.
+
     `cache` is a username -> days-off dict shared across a list of deals, so
     rendering someone's whole DealZ tab doesn't re-read the same badges once
     per card.
@@ -155,7 +170,48 @@ def escrow_release_days(deal, cache=None):
         cache.update({n: 0 for n in missing})
         for u in User.objects.filter(username__in=missing):
             cache[u.username] = int(badge_effects(u).get("escrow_days_off", 0) or 0)
-    return max(settings.ESCROW_MIN_RELEASE_DAYS, base - min(cache[n] for n in names))
+    off = min(cache[n] for n in names)
+    if _all_payers_partner_every_payee(deal, cache):
+        from .groupz import PARTNER_ESCROW_DAYS_OFF
+        off += PARTNER_ESCROW_DAYS_OFF
+    return max(settings.ESCROW_MIN_RELEASE_DAYS, base - off)
+
+
+def _all_payers_partner_every_payee(deal, cache=None):
+    """Is every payer on this deal a PartnerZ of everybody they're paying?
+
+    Two queries per distinct cast, memoised into the same `cache` the badge
+    lookup uses (under a tuple key, so it cannot collide with a username), so
+    a DealZ tab of deals between the same people costs them once.
+
+    False the moment anybody on it can't be resolved to an account — an
+    unknown participant is never assumed to be in a partnership, the same way
+    an unknown payer is never assumed to hold a badge.
+    """
+    payers = {p.get("username") for p in deal.payers() if p.get("username")}
+    payees = {p.get("username") for p in deal.participants
+              if p.get("username") and int(p.get("receives_cents") or 0) > 0}
+    payees -= payers          # paying yourself is not a relationship
+    if not payers or not payees:
+        return False
+    key = ("partnerz", frozenset(payers), frozenset(payees))
+    if cache is not None and key in cache:
+        return cache[key]
+    answer = _partner_lookup(payers, payees)
+    if cache is not None:
+        cache[key] = answer
+    return answer
+
+
+def _partner_lookup(payers, payees):
+    from .groupz import partner_pairs_among
+    ids = dict(User.objects.filter(username__in=payers | payees)
+               .values_list("username", "id"))
+    if len(ids) != len(payers | payees):
+        return False
+    pairs = partner_pairs_among(ids.values())
+    return all(frozenset((ids[a], ids[b])) in pairs
+               for a in payers for b in payees)
 
 
 def maybe_auto_release(deal):
@@ -276,6 +332,12 @@ def release_deal(deal, note="collab release"):
                             for e in deal.participants]) if u is not None]
     was_beginner = beginners_among(people)
 
+    # Read BEFORE the zeroing twenty lines down. PartnerZ counts a deal that
+    # actually held something: an empty deal costs nothing to make, funds
+    # itself (`payers()` is empty, so `all_funded()` is `all([])`) and
+    # auto-releases on its own, so counting one would make the list free.
+    moved = bool(deal.held_cents or deal.held_spinaz or deal.held_stake_spinaz)
+
     paid_out = 0
     for entry in deal.participants:
         user = User.objects.filter(username=entry.get("username")).first()
@@ -310,6 +372,15 @@ def release_deal(deal, note="collab release"):
     # is where the helping gets paid. Swallowed inside settle_together — the
     # escrow release must land whether or not a bonus does.
     settle_together(people, was_beginner)
+
+    # PartnerZ. Swallowed for the same reason: the money has already moved and
+    # a tally must never be able to undo that.
+    if moved:
+        try:
+            from .groupz import note_work
+            note_work([u.pk for u in people], collabs=1)
+        except Exception:
+            pass
     return deal
 
 

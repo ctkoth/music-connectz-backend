@@ -421,6 +421,18 @@ def settle_battle(battle):
                    (f"'{battle.title}' is settled — 👑 @{battle.winner.username} takes it"
                     if battle.winner else f"'{battle.title}' ended in a draw — every wager refunded"),
                    item_id=battle.item_key)
+
+    # PartnerZ counts a battle the ROOM decided. A winner means at least one
+    # side cleared BATTLE_MIN_RATINGS judges, which two accounts cannot
+    # manufacture between themselves; a draw means nobody rated it, and a
+    # battle nobody watched is not work two people finished together.
+    # Swallowed — the pool has already paid out.
+    if battle.winner_id:
+        try:
+            from .groupz import note_work
+            note_work(list(battle.entries.values_list("user_id", flat=True)), battles=1)
+        except Exception:
+            pass
     return battle
 
 

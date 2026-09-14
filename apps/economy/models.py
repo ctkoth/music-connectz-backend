@@ -5570,3 +5570,44 @@ class GroupMember(models.Model):
     class Meta:
         unique_together = ("group", "member")
         ordering = ("added_at",)
+
+
+class Partnership(models.Model):
+    """A tally of work two members have actually FINISHED together.
+
+    PartnerZ used to be recomputed on every read by scanning released deals in
+    Python — fine for one tab, impossible for anything that has to ask "are
+    these two partners?" while rendering a list. A benefit hangs off this now
+    (escrow between PartnerZ releases sooner), so the answer has to be one
+    query, not a scan.
+
+    This is a TALLY OF EVENTS, not a second opinion about the follow graph.
+    Nothing here decides anything on its own: a row is incremented once, by the
+    thing that just settled, at the moment it settles. `manage.py
+    rebuild_partnerships` recomputes the whole table from the events, so a
+    drift is fixable rather than permanent.
+
+    The pair is ORDERED — `a_id < b_id`, always — so a partnership is one row
+    and not two that can disagree.
+    """
+    a = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                          related_name="partnerships_a")
+    b = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                          related_name="partnerships_b")
+    # Two counters rather than one total, because the tab says what you did
+    # together and "3 works" cannot.
+    collabs = models.PositiveIntegerField(default=0)
+    battles = models.PositiveIntegerField(default=0)
+    first_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("a", "b")
+        ordering = ("-updated_at",)
+
+    @property
+    def works(self):
+        return self.collabs + self.battles
+
+    def __str__(self):
+        return f"Partnership<{self.a_id}+{self.b_id}> {self.collabs}c {self.battles}b"
