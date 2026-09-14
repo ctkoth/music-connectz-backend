@@ -54,6 +54,14 @@ try:
 except Exception:  # pragma: no cover - never take the deploy down
     GameProfileView = GoalView = ProgressView = None
 
+# GroupZ. Mounted at /api/groupz/ rather than under /api/economy/, because that
+# is where `GroupZ.jsx` has been calling since it was written — the tab has sat
+# on a spinner for its whole life against this exact path.
+try:
+    from apps.economy.groupz import GroupDeleteView, GroupMemberView, GroupsView
+except Exception:  # pragma: no cover - never take the deploy down
+    GroupDeleteView = GroupMemberView = GroupsView = None
+
 # The no-account trial take, and the public share endpoint the client has been
 # calling at this exact path since before it existed.
 try:
@@ -195,7 +203,13 @@ urlpatterns = [
     # rest — a drummer has a BPM comfort range and a boss unlock too.
     path(f"api/{key}/profile/", GameProfileView.as_view(app_key=key), name=f"{key}-profile")
     for key in INSTRUMENT_APP_KEYS
-] if GameProfileView else [])
+] if GameProfileView else []) + ([
+    path("api/groupz/", GroupsView.as_view(), name="groupz"),
+    # `<str:gid>` and not `<int:pk>`: FriendZ, FanZ and Blocked are derived
+    # rather than rows, so their ids are the words themselves.
+    path("api/groupz/<str:gid>/", GroupDeleteView.as_view(), name="groupz-one"),
+    path("api/groupz/<str:gid>/<str:action>/", GroupMemberView.as_view(), name="groupz-member"),
+] if GroupsView else [])
 
 # Serve user uploads. When S3/R2 is configured (S3_BUCKET_NAME), django-storages
 # serves media from the bucket and these URLs are absolute — this route isn't hit.

@@ -5520,3 +5520,50 @@ class EngagementPayout(models.Model):
 
     def __str__(self):
         return f"{self.user} · {self.kind} · {self.energy}⚡"
+
+
+# ------------------------------------------------------------------ GroupZ
+class Group(models.Model):
+    """One of a member's OWN groups.
+
+    The blueprint is specific: "editable groups LOCAL TO THE USER making the
+    groups". So a group is private to its owner — being in somebody's Partners
+    list is not a fact about you, it is a note they made about you, and you
+    can neither see it nor consent to it. That is also why there is no
+    invitation, no acceptance and no notification here.
+
+    Only the kinds a member genuinely CURATES get rows. FriendZ and FanZ are
+    derived from `Follow` (its own docstring: "mutual follows are friends; a
+    one-way follower is a fan") and Blocked delegates to `Block`, which six
+    other surfaces already enforce. A GroupZ row for any of those three would
+    be a second answer to a question the platform already answers — and the
+    Blocked one would be the dangerous kind, where a member reads "blocked" on
+    this tab and the blocked person can still DM them.
+    """
+    KIND_PARTNERS = "partners"
+    KIND_CUSTOM = "custom"
+    KINDS = [(KIND_PARTNERS, "Partners"), (KIND_CUSTOM, "Custom")]
+
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="groupz")
+    kind = models.CharField(max_length=16, choices=KINDS, default=KIND_CUSTOM)
+    title = models.CharField(max_length=120, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("kind", "created_at")
+        indexes = [models.Index(fields=["owner", "kind"])]
+
+    def __str__(self):
+        return f"{self.owner} · {self.title or self.kind}"
+
+
+class GroupMember(models.Model):
+    group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name="memberships")
+    member = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="group_memberships")
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("group", "member")
+        ordering = ("added_at",)
