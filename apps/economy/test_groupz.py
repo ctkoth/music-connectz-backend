@@ -36,10 +36,10 @@ class BoardTests(TestCase):
     def group(self, kind):
         return next(g for g in self.c.get("/api/groupz/").data if g["kind"] == kind)
 
-    def test_the_derived_three_always_exist(self):
+    def test_the_derived_four_always_exist(self):
         """There is nothing to create — the thing they read from is always
         there, so a brand-new member opens the tab to a working board."""
-        for k in ("friends", "fans", "blocked"):
+        for k in ("friends", "fans", "partners", "blocked"):
             self.assertIn(k, self.kinds())
 
     def test_friends_are_mutual_follows(self):
@@ -163,11 +163,12 @@ class OwnedGroupTests(TestCase):
         self.c = APIClient()
         self.c.force_authenticate(self.me)
 
-    def test_partners_is_one_list_not_a_folder(self):
-        """"People I intend to work with frequently" is one list."""
-        self.c.post("/api/groupz/", {"kind": "partners"}, format="json")
-        self.c.post("/api/groupz/", {"kind": "partners"}, format="json")
-        self.assertEqual(Group.objects.filter(owner=self.me, kind="partners").count(), 1)
+    def test_partners_cannot_be_created_as_a_list(self):
+        """It is derived from finished collabs now — a stored one would be the
+        thing it replaced."""
+        r = self.c.post("/api/groupz/", {"kind": "partners"}, format="json")
+        self.assertEqual(r.status_code, 200)   # a derived kind already exists
+        self.assertEqual(Group.objects.filter(owner=self.me, kind="partners").count(), 0)
 
     def test_custom_groups_need_a_name_and_there_can_be_many(self):
         self.assertEqual(self.c.post("/api/groupz/", {"kind": "custom"}, format="json").status_code, 400)
@@ -176,24 +177,24 @@ class OwnedGroupTests(TestCase):
         self.assertEqual(Group.objects.filter(owner=self.me, kind="custom").count(), 2)
 
     def test_members_add_and_remove(self):
-        self.c.post("/api/groupz/", {"kind": "partners"}, format="json")
-        gid = next(g["id"] for g in self.c.get("/api/groupz/").data if g["kind"] == "partners")
+        self.c.post("/api/groupz/", {"kind": "custom", "title": "crew"}, format="json")
+        gid = next(g["id"] for g in self.c.get("/api/groupz/").data if g["kind"] == "custom")
         self.c.post(f"/api/groupz/{gid}/add/", {"username": "mate"}, format="json")
         self.assertEqual(GroupMember.objects.filter(group_id=int(gid)).count(), 1)
         self.c.post(f"/api/groupz/{gid}/remove/", {"username": "mate"}, format="json")
         self.assertEqual(GroupMember.objects.filter(group_id=int(gid)).count(), 0)
 
     def test_adding_twice_is_not_two_rows(self):
-        self.c.post("/api/groupz/", {"kind": "partners"}, format="json")
-        gid = next(g["id"] for g in self.c.get("/api/groupz/").data if g["kind"] == "partners")
+        self.c.post("/api/groupz/", {"kind": "custom", "title": "crew"}, format="json")
+        gid = next(g["id"] for g in self.c.get("/api/groupz/").data if g["kind"] == "custom")
         for _ in range(3):
             self.c.post(f"/api/groupz/{gid}/add/", {"username": "mate"}, format="json")
         self.assertEqual(GroupMember.objects.filter(group_id=int(gid)).count(), 1)
 
     def test_a_blocked_member_cannot_be_added_to_a_group(self):
         Block.objects.create(blocker=self.me, blocked=self.them)
-        self.c.post("/api/groupz/", {"kind": "partners"}, format="json")
-        gid = next(g["id"] for g in self.c.get("/api/groupz/").data if g["kind"] == "partners")
+        self.c.post("/api/groupz/", {"kind": "custom", "title": "crew"}, format="json")
+        gid = next(g["id"] for g in self.c.get("/api/groupz/").data if g["kind"] == "custom")
         r = self.c.post(f"/api/groupz/{gid}/add/", {"username": "mate"}, format="json")
         self.assertEqual(r.status_code, 403)
         self.assertIn("Unblock", r.data["detail"])
@@ -203,9 +204,9 @@ class OwnedGroupTests(TestCase):
         r = self.c.post(f"/api/groupz/{theirs.pk}/add/", {"username": "mate"}, format="json")
         self.assertEqual(r.status_code, 404)
 
-    def test_the_derived_three_cannot_be_deleted(self):
+    def test_the_derived_four_cannot_be_deleted(self):
         """A 404 would be untrue of a list the member is looking at."""
-        for k in ("friends", "fans", "blocked"):
+        for k in ("friends", "fans", "partners", "blocked"):
             r = self.c.delete(f"/api/groupz/{k}/")
             self.assertEqual(r.status_code, 400, k)
             self.assertIn("aren't lists you can delete", r.data["detail"])
@@ -253,3 +254,121 @@ class EdgeTests(TestCase):
         few, many = count_for(2), count_for(20)
         self.assertEqual(few, many,
                          f"{few} queries for 2 friends but {many} for 20 — per-member read")
+
+
+class PartnerZIsEarnedTests(TestCase):
+    """PartnerZ comes from finished work, not from a checkbox.
+
+    "Intend to work with frequently" was typed, so the list said what somebody
+    HOPED. Three released collabs is a thing neither side can fake alone: the
+    other person agreed three times and escrow settled three times. That is the
+    substance rule applied to a friendship.
+    """
+
+    def setUp(self):
+        from . import groupz
+        self.G = groupz
+        self.me = member("worker")
+        self.mate = member("mate")
+        self.c = APIClient()
+        self.c.force_authenticate(self.me)
+
+    def _friends(self, other):
+        Follow.objects.create(follower=self.me, following=other)
+        Follow.objects.create(follower=other, following=self.me)
+
+    def _collabs(self, other, n):
+        from .models import CollabDeal
+        for i in range(n):
+            CollabDeal.objects.create(
+                initiator=self.me, status=CollabDeal.STATUS_RELEASED,
+                title=f"deal {i}",
+                participants=[{"username": self.me.username}, {"username": other.username}])
+
+    def partners(self):
+        return next(g for g in self.c.get("/api/groupz/").data if g["kind"] == "partners")["members"]
+
+    def test_a_friend_becomes_a_partner_at_the_threshold(self):
+        self._friends(self.mate)
+        self._collabs(self.mate, self.G.PARTNER_COLLABS - 1)
+        self.assertEqual(self.partners(), [])
+        self._collabs(self.mate, 1)
+        self.assertEqual(self.partners(), ["mate"])
+
+    def test_collabs_without_friendship_are_not_a_partnership(self):
+        """Corey's rule: partners come from FriendZ. It also means the two of
+        you follow each other, so a partnership is never a surprise to one
+        side."""
+        self._collabs(self.mate, self.G.PARTNER_COLLABS + 2)
+        self.assertEqual(self.partners(), [])
+
+    def test_only_released_deals_count(self):
+        """A draft nobody funded is an intention; a funded one that never paid
+        out is an argument."""
+        from .models import CollabDeal
+        self._friends(self.mate)
+        for st in (CollabDeal.STATUS_DRAFT, CollabDeal.STATUS_FUNDED, CollabDeal.STATUS_REFUNDED):
+            for _ in range(self.G.PARTNER_COLLABS):
+                CollabDeal.objects.create(
+                    initiator=self.me, status=st, title="x",
+                    participants=[{"username": self.me.username},
+                                  {"username": self.mate.username}])
+        self.assertEqual(self.partners(), [])
+
+    def test_somebody_elses_deals_do_not_count(self):
+        """Two other people finishing three collabs must not make either of
+        them YOUR partner."""
+        from .models import CollabDeal
+        a, b = member("aaa"), member("bbb")
+        self._friends(a)
+        for _ in range(self.G.PARTNER_COLLABS):
+            CollabDeal.objects.create(initiator=a, status=CollabDeal.STATUS_RELEASED, title="x",
+                                      participants=[{"username": "aaa"}, {"username": "bbb"}])
+        self.assertEqual(self.partners(), [])
+
+    def test_it_counts_deals_you_did_not_start(self):
+        """Being brought onto somebody else's deal is still finishing work
+        together."""
+        from .models import CollabDeal
+        self._friends(self.mate)
+        for _ in range(self.G.PARTNER_COLLABS):
+            CollabDeal.objects.create(
+                initiator=self.mate, status=CollabDeal.STATUS_RELEASED, title="x",
+                participants=[{"username": self.mate.username}, {"username": self.me.username}])
+        self.assertEqual(self.partners(), ["mate"])
+
+    def test_you_cannot_add_a_partner_and_it_says_how_far_off_you_are(self):
+        """A refusal that also answers "then how?" — the number is the point."""
+        self._friends(self.mate)
+        self._collabs(self.mate, 1)
+        r = self.c.post("/api/groupz/partners/add/", {"username": "mate"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("earned, not added", r.data["detail"])
+        self.assertIn("finished 1 collab", r.data["detail"])
+        self.assertIn(str(self.G.PARTNER_COLLABS), r.data["detail"])
+
+    def test_the_note_states_the_rule(self):
+        note = next(g for g in self.c.get("/api/groupz/").data
+                    if g["kind"] == "partners")["note"]
+        self.assertIn(str(self.G.PARTNER_COLLABS), note)
+        self.assertIn("Earned, not added", note)
+
+    def test_the_board_does_not_grow_a_query_per_collab(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        from .models import CollabDeal
+
+        def count_for(n):
+            CollabDeal.objects.all().delete()
+            for i in range(n):
+                CollabDeal.objects.create(
+                    initiator=self.me, status=CollabDeal.STATUS_RELEASED, title=f"d{i}",
+                    participants=[{"username": self.me.username},
+                                  {"username": self.mate.username}])
+            with CaptureQueriesContext(connection) as ctx:
+                self.c.get("/api/groupz/")
+            return len(ctx.captured_queries)
+
+        self._friends(self.mate)
+        few, many = count_for(3), count_for(30)
+        self.assertEqual(few, many, f"{few} queries for 3 deals but {many} for 30")

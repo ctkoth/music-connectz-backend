@@ -5540,9 +5540,12 @@ class Group(models.Model):
     Blocked one would be the dangerous kind, where a member reads "blocked" on
     this tab and the blocked person can still DM them.
     """
+    # Only Custom is curated now. PartnerZ was a stored list for one commit
+    # and is derived from finished collabs instead — see `groupz.partners_of`.
+    # The constant stays so the migration that converts old rows can name it.
     KIND_PARTNERS = "partners"
     KIND_CUSTOM = "custom"
-    KINDS = [(KIND_PARTNERS, "Partners"), (KIND_CUSTOM, "Custom")]
+    KINDS = [(KIND_CUSTOM, "Custom")]
 
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
                               related_name="groupz")

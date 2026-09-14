@@ -45,13 +45,27 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Block, Follow, Group, GroupMember, blocked_user_ids
+from .models import Block, CollabDeal, Follow, Group, GroupMember, blocked_user_ids
 
 User = get_user_model()
 
-# The three kinds that are answered elsewhere. They always exist — there is
+# The four kinds that are answered elsewhere. They always exist — there is
 # nothing to create, because the thing they read from is always there.
-DERIVED = ("friends", "fans", "blocked")
+DERIVED = ("friends", "fans", "partners", "blocked")
+
+# PartnerZ: a FriendZ you have actually finished work with, this many times.
+#
+# Corey's rule, and it is the strongest one on this tab. "Intend to work with
+# frequently" was a checkbox — you could type anybody in, so the list said what
+# you hoped rather than what you did. Three RELEASED collabs is a thing neither
+# of you can fake alone: the other person had to agree three times, and escrow
+# had to pay out three times. That is the substance rule applied to a
+# friendship — could a member get a good one without getting good? Not here.
+#
+# FriendZ is the gate because Corey named it: partners come from friends. It
+# also means the two of you follow each other, so a partnership is never a
+# surprise to one side.
+PARTNER_COLLABS = 3
 
 
 def _names(ids):
@@ -72,6 +86,55 @@ def _friends_and_fans(user):
     return following & followers, followers - following
 
 
+def collab_counts(user):
+    """{username: finished collabs with this member}, in one query.
+
+    RELEASED only. A draft nobody funded is an intention and a funded one that
+    never paid out is an argument; a released deal is escrow that actually
+    settled, which is the only point at which two people demonstrably finished
+    something together.
+
+    Counted in Python rather than with `participants__contains`, which is
+    Postgres-only while the suite runs on SQLite — the same gap
+    `lilith_taskz._in_released_deal` documents. Bounded to deals touched since
+    this member joined, because a deal released before they existed cannot
+    name them.
+    """
+    me = user.username
+    counts = {}
+    rows = (CollabDeal.objects
+            .filter(status=CollabDeal.STATUS_RELEASED, updated_at__gte=user.date_joined)
+            .values("initiator__username", "participants")[:2000])
+    for row in rows:
+        names = {e.get("username") for e in (row["participants"] or [])
+                 if isinstance(e, dict) and e.get("username")}
+        if row["initiator__username"]:
+            names.add(row["initiator__username"])
+        if me not in names:
+            continue
+        for other in names - {me}:
+            counts[other] = counts.get(other, 0) + 1
+    return counts
+
+
+def partners_of(user, friends_ids=None):
+    """FriendZ who have finished `PARTNER_COLLABS` collabs with this member.
+
+    Derived rather than curated, so the list says what the two of you DID
+    rather than what one of you hoped for.
+    """
+    if friends_ids is None:
+        friends_ids, _ = _friends_and_fans(user)
+    if not friends_ids:
+        return set()
+    counts = collab_counts(user)
+    earned = {n for n, c in counts.items() if c >= PARTNER_COLLABS}
+    if not earned:
+        return set()
+    return set(User.objects.filter(id__in=friends_ids, username__in=earned)
+               .values_list("id", flat=True))
+
+
 def board(user):
     """Every group this member has, in the order the tab renders them."""
     friends, fans = _friends_and_fans(user)
@@ -80,6 +143,7 @@ def board(user):
     # meant to edit — you cannot unblock somebody who blocked you.
     blocked = set(Block.objects.filter(blocker=user).values_list("blocked_id", flat=True))
 
+    partners = partners_of(user, friends)
     rows = [
         {"id": "friends", "kind": "friends", "title": "", "derived": True,
          "members": _names(friends),
@@ -87,6 +151,12 @@ def board(user):
         {"id": "fans", "kind": "fans", "title": "", "derived": True,
          "members": _names(fans),
          "note": "People who follow you and you don't follow back. Theirs to decide, not yours."},
+        {"id": "partners", "kind": "partners", "title": "", "derived": True,
+         "members": _names(partners),
+         # The rule, on the list, because a list you cannot edit has to say
+         # what puts somebody on it or it reads as broken.
+         "note": f"FriendZ you've finished {PARTNER_COLLABS} collabs with. "
+                 f"Earned, not added — it says what you did, not who you meant to work with."},
     ]
 
     owned = list(Group.objects.filter(owner=user).prefetch_related("memberships__member"))
@@ -126,6 +196,17 @@ def change(user, gid, action, username):
     if other.pk == user.pk:
         return {"detail": "You can't put yourself in your own group."}, status.HTTP_400_BAD_REQUEST
     adding = action == "add"
+
+    if gid == "partners":
+        # Neither half of this is yours to type: the other person has to be a
+        # FriendZ (they follow you back) and escrow has to have settled between
+        # you three times. Saying how it is earned beats a refusal.
+        got = collab_counts(user).get(other.username, 0)
+        return ({"detail": f"PartnerZ is earned, not added. You and @{other.username} have "
+                           f"finished {got} collab{'' if got == 1 else 's'} — "
+                           f"{PARTNER_COLLABS} released collabs between FriendZ and they land "
+                           f"here on their own."},
+                status.HTTP_400_BAD_REQUEST)
 
     if gid == "fans":
         # The one refusal. A member who can type their own fan list has a
