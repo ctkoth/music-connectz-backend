@@ -50,8 +50,14 @@ _BOWED = {"intonation": "Intonation 🎯", "tone": "Tone 🌈", "bowing": "Bowin
           "timing": "Timing ⏱️", "vibrato": "Vibrato 〰️"}
 
 # What a single take genuinely cannot show, said out loud rather than scored.
+#
+# It used to end there, which made it an honest refusal with nothing behind it:
+# no score was kept, so the history it deferred to did not exist. `TakeScore`
+# and `takescorez` are that history now, and the three deferred dimensions are
+# served from it at `/api/<key>/progress/` — so the caveat says where they went
+# rather than only that they are not here.
 _HISTORY_CAVEAT = ("Consistency, health and goal match come from your history, "
-                   "not a single clip.")
+                   "not a single clip — they're on your progress screen.")
 
 INSTRUMENTS = {
     "singz": {

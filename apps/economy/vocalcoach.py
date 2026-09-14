@@ -661,6 +661,28 @@ class SingZCoachView(APIView):
         # A post already says what it is. Its genre seeds the coach when the
         # handoff didn't carry one, so a Drill track isn't scored as "unspecified".
         genre = data.get("genre") or (post.genre if post else "")
+
+        from . import takescorez
+        # Recovery-first. The blueprint makes this a safety rule rather than a
+        # feature — "AI or automation features must not override recovery,
+        # health, or safety warnings" — so it is checked BEFORE the model call
+        # and no tier lifts it. It never refuses the take, only the hard
+        # setting: somebody told they may not sing today sings anyway,
+        # somewhere that is not counting.
+        blocked = takescorez.recovery_block(request.user, self.app_key,
+                                            data.get("difficulty"))
+        if blocked:
+            return Response({"detail": blocked["why"], "recovery": blocked},
+                            status=status.HTTP_409_CONFLICT)
+
+        # Scored against the goal they set, when the request didn't name one.
+        # That is the whole point of confirming a goal once: every take
+        # afterwards is measured against it without anybody re-picking it from
+        # a dropdown, which is the Auto-Goal Bridge's basis.
+        target = data.get("range")
+        if not target:
+            _decl = takescorez.profile_row(request.user, self.app_key)
+            target = (_decl.goal_range or _decl.confirmed_range) if _decl else None
         try:
             if stored is not None:
                 # Opened here rather than in the lookup, so a take refused on
@@ -669,7 +691,7 @@ class SingZCoachView(APIView):
                 f.open("rb")
             payload, err = score_take(
                 self.app_key, f, content_type,
-                genre=genre, target=data.get("range"),
+                genre=genre, target=target,
                 difficulty=data.get("difficulty"), style=data.get("style"),
                 # Only the voice the prose comes back in. The rubric is the
                 # same one the logged-out trial is scored on.
@@ -727,6 +749,21 @@ class SingZCoachView(APIView):
         if stored is not None:
             note += f" — {stored['kind']} #{stored['id']}"
         charged = _bill(request.user, note=note, count_daily=True)
+        # Keep it. Until this line every score this app has ever produced was
+        # handed to the browser and dropped, which is why the blueprint's
+        # whole intelligence layer — goal bridge, difficulty adjustment, range
+        # mapping, the heatmap, every weekly plan — had no material to work
+        # with. Best-effort inside `record`: a bookkeeping failure must never
+        # turn a take the member paid for into an error.
+        takescorez.record(
+            request.user, self.app_key, payload,
+            difficulty=data.get("difficulty"), genre=genre, target=target,
+            style=data.get("style"), upload=getattr(f, "instance", None),
+            source=("post" if post is not None else
+                    "journal" if stored is not None else "upload"),
+            ref=(f"post:{post.id}" if post is not None else
+                 str((stored or {}).get("id") or "")),
+        )
         out = {**payload, "cost_cents": charged}
         if stored is not None and post is None:
             # A scored take is never a dead end either: the score offers the way

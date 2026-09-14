@@ -5342,3 +5342,125 @@ class LilithSponsorship(models.Model):
     class Meta:
         unique_together = ("helper", "newcomer")
         ordering = ("-created_at",)
+
+
+# ------------------------------------------------- the coach's own memory
+#
+# Every score the coach has ever produced was returned to the browser and
+# dropped. Nothing stored one — `TakeAnalysis` holds the librosa read of one
+# upload, `TrainingProfile` holds XP and a streak, and `PracticeSession` holds
+# a metronome's duration. So the blueprint's whole intelligence layer had no
+# material: Auto-Goal Bridge, Auto-Adjust Difficulty, range mapping, the
+# progress heatmap, style-match analytics and every weekly plan are one table
+# short, and it is this one.
+#
+# It is also why `instruments._HISTORY_CAVEAT` had to say Consistency, Voice
+# Health and Goal Match "come from your history, not a single clip" and then
+# not serve them. That was the honest refusal. This is the fix.
+class TakeScore(models.Model):
+    """One coached take, kept.
+
+    The scores are a JSON map rather than five columns because the dimensions
+    differ per instrument — a drummer is scored on groove and fills, a singer
+    on pitch and breath — and five columns would either be the vocal five
+    wearing other names or five nullable ones nobody could trust. The two
+    things every app shares, `overall` and `weakest`, ARE columns, so trends
+    and "what to drill" are a query rather than a deserialization of the
+    member's whole history.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="take_scores")
+    app_key = models.CharField(max_length=32, db_index=True)
+
+    # {dimension_key: 1-10}, the coach's own scale (`vocalcoach._clamp`).
+    # Whitelisted by the instrument's own profile on the way in, so a field
+    # the model invents never reaches a column.
+    scores = models.JSONField(default=dict, blank=True)
+    # The mean of the above, rounded. Null when the take produced no scored
+    # dimension at all — NOT zero, for the same reason
+    # `TakeAnalysis.overall_pitch_accuracy` is nullable: nobody scoring zero
+    # and nothing being measurable need opposite responses.
+    overall = models.PositiveIntegerField(null=True, blank=True)
+    # The lowest-scoring dimension on this take, which is what a drill
+    # recommendation is made of. Stored rather than derived so "what has been
+    # weakest lately" is a group-by instead of a scan.
+    weakest = models.CharField(max_length=24, blank=True, default="", db_index=True)
+
+    # What the take was scored AGAINST, so a score is comparable to another.
+    # An Elite take at 6 and a Rookie take at 6 are not the same take.
+    difficulty = models.CharField(max_length=16, blank=True, default="")
+    genre = models.CharField(max_length=60, blank=True, default="")
+    # The range or register the member asked to be judged against.
+    target = models.CharField(max_length=60, blank=True, default="")
+    style = models.CharField(max_length=60, blank=True, default="")
+
+    # The range the coach HEARD, parsed out of its own prose. Blank whenever
+    # the prose did not clearly say — a range invented from four bars is, in
+    # the prompt's own words, a lie somebody will build a warm-up around, and
+    # that applies twice over to one parsed out of a sentence afterwards.
+    range_class = models.CharField(max_length=24, blank=True, default="")
+    low_note = models.CharField(max_length=8, blank=True, default="")
+    high_note = models.CharField(max_length=8, blank=True, default="")
+
+    # Where the take came from, so a score leads back to it.
+    upload = models.ForeignKey("Upload", null=True, blank=True, on_delete=models.SET_NULL,
+                               related_name="take_scores")
+    source = models.CharField(max_length=16, blank=True, default="")
+    ref = models.CharField(max_length=64, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["user", "app_key", "-created_at"])]
+
+    def __str__(self):
+        return f"{self.user} · {self.app_key} · {self.overall}"
+
+
+class InstrumentProfile(models.Model):
+    """What the member has DECLARED about their own training, per instrument.
+
+    Deliberately small, and deliberately only declarations. Everything that
+    can be measured is measured — `takescorez` derives the detected range, the
+    trend, the weakest dimension and the strain level from `TakeScore` rather
+    than keeping a counter here, because a counter is a number that can be
+    wrong and a history is one that can be audited. That is the same call
+    `LilithPayout` made about daily caps.
+    
+    What cannot be derived is what somebody WANTS and how their own body
+    reacts, and that is what these columns are. The blueprint asks for it
+    explicitly: "Ask user to confirm or change the target range. Ask for
+    fatigue sensitivity."
+    """
+    SENSITIVITY = (("low", "Takes a lot before I feel it"),
+                   ("normal", "Normal"),
+                   ("high", "I feel it quickly"))
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="instrument_profiles")
+    app_key = models.CharField(max_length=32, db_index=True)
+
+    # The member's own answer to "what are you now" — a declaration, and
+    # therefore allowed to disagree with what the coach heard. The coach's
+    # reading is `takescorez.detected()`, and the two are shown side by side
+    # rather than one overwriting the other.
+    confirmed_range = models.CharField(max_length=24, blank=True, default="")
+    # Where they are going. Once this is set, a take with no range on the
+    # request is scored against it, which is the Auto-Goal Bridge's whole
+    # basis: drills between here and there.
+    goal_range = models.CharField(max_length=24, blank=True, default="")
+    # How hard to push before easing off. It tunes the strain threshold and
+    # nothing else — it may never move a score, because how quickly somebody
+    # tires is not how good they are.
+    fatigue_sensitivity = models.CharField(max_length=8, choices=SENSITIVITY,
+                                           blank=True, default="")
+    # RapZ's onboarding: "Test BPM comfort range."
+    bpm_low = models.PositiveIntegerField(null=True, blank=True)
+    bpm_high = models.PositiveIntegerField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "app_key")
+
+    def __str__(self):
+        return f"{self.user} · {self.app_key}"
