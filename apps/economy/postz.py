@@ -860,8 +860,24 @@ class PostProgressionView(APIView):
         if not can_view_post(p, request.user):
             return Response({"detail": "you can't view this post"}, status=status.HTTP_403_FORBIDDEN)
 
-        rating_count = p.ratings.count()
-        rating_avg = item_rating_median(p) or 0.0
+        # THREE bugs lived in these two lines, and the tab they broke is the
+        # one every member lands on after signing in.
+        #
+        # `p.ratings` is not a relation — a Post has no reverse accessor by
+        # that name, because a rating is an `ItemRating` keyed by the opaque
+        # "post:<id>" the whole social layer uses. It raised AttributeError,
+        # so this endpoint answered 500 for every post card on the feed.
+        #
+        # `item_rating_median(p)` was handed the POST where every other caller
+        # in the codebase passes that same item key string. Filtering
+        # `item_id=<Post object>` matches nothing, so it returned None and the
+        # `or 0.0` turned it into a number — which means the CollabZ progress
+        # on this endpoint has been a hard zero for its whole life, and would
+        # have stayed zero and looked deliberate if the line above it had not
+        # been loud enough to 500.
+        item = f"post:{p.id}"
+        rating_count = ItemRating.objects.filter(item_id=item).count()
+        rating_avg = item_rating_median(item) or 0.0
 
         battle_needed = BATTLE_RATING_THRESHOLD
         collab_needed = post_collab_threshold(p)

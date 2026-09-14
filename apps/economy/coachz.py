@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
+    profile_for,
     CoachProfile, StudentRelationship, TakeRating, Post, Transaction
 )
 
@@ -46,7 +47,18 @@ class CoachStudioView(APIView):
         return Response({
             "coach": {
                 "user_id": request.user.id,
-                "name": request.user.profile.display_name or request.user.username,
+                # `request.user.profile` is the ACCOUNTS Profile (its
+                # related_name is "profile"), which holds a phone and an
+                # avatar_url and has no display_name at all — so this was
+                # wrong twice: RelatedObjectDoesNotExist for anybody without
+                # one, and AttributeError for anybody with one. The whole tab
+                # answered 500 either way.
+                #
+                # The display name lives on the ECONOMY Profile
+                # (related_name "mcz_profile"), and `profile_for` is the
+                # helper that returns it, creating the row if this member has
+                # never had one.
+                "name": profile_for(request.user).display_name or request.user.username,
                 "bio": coach_profile.bio,
                 "students_count": coach_profile.students_count,
                 "takes_rated": coach_profile.takes_rated,
