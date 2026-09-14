@@ -1126,3 +1126,75 @@ So:
 storage sizes, and prices. The frontend reads them from
 `/api/economy/limits/`. Never hardcode a tier number in UI copy — that is how
 the "20 free prompts" figure drifted into nine places.
+
+---
+
+## RapZ judges five dimensions of the take, plus the register it detects
+
+A rap take is scored on **Flow 🌊, Timing ⏱️, Breath 🫁, Clarity 🔍 and Delivery 🔥** — dimensions about how the verse sits rather than what it says. That is deliberate. The model hears the performance; scoring on what makes a rap *good* is a conversation between the member and their listeners.
+
+But the blueprint listed "Writing Score 📝 — rhyme density, structure, originality, punchlines, storytelling depending on style" as a core dimension alongside the five, and it was never built. It still isn't, because **lyricism depends on genre** — an old-school rapper cares about wordplay while a mumble-rap artist is after texture, and the same words score 2/10 in one style and 9/10 in another. A score derived from FORM rather than HEARD CONTENT would trip the substance rule — "could a member get a good one without getting good?" — and the answer would be yes, every time a member fills the Storytelling box without saying anything.
+
+So `lyrics: True` opts the member IN. The model watches the bars roll and reads them, same as it does for SingZ. A member working on flow has the choice: send it to be judged on the performance and ignore the words, or opt in and ask for both. A take that scores high on lyricism but low on flow learns the member's writing is stronger than their delivery, which is real information.
+
+The five dimensions are served at `/api/rapz/coach/` the same way SingZ serves its five — the model scores each, and nothing cascades.
+
+### Register is always there; it is just finally visible
+
+A rapper's register has been detected in the lab since before this app shipped — the screenshot of a rap take reads "your range reads Bass, D2 to B4". But RapZ had no `ranges` field and no `range_label`, so a take that arrived with a detected register had nowhere to go. The screen could not say what it heard.
+
+It is visible now, under the label "Your register" and the same eight vocal range classes SingZ uses. A member who took both SingZ and RapZ gets told the same range by the same model — because pitch is pitch — and can learn whether their singing register and their rapping register match. **No choice to hide it, no tier gate to mute it.** The information was always there; now it goes somewhere.
+
+### Rap styles: one list, never two that disagree
+
+A rapper picks a style — Boom Bap, Trap, Drill, Cloud Rap, Lyrical, Storytelling, Freestyle, Melodic, Double-Time, Old School, Conscious, Mumble — and the coach scores how close the take comes to the form the member is aiming at. It is served from `apps/economy/instruments.py` so the style the member picked and the style the coach knows about are one list, not two that drift.
+
+The model answers as a number and prose: "your delivery is methodical, which is closer to old-school than Trap" travels with a 0-100 score. Neither the number nor the prose alone is complete; a number with no reason is decoration, and prose with no number cannot trend or recommend. Both together answer what the take does RIGHT now rather than inventing a fixed rating.
+
+### Every dimension serves its own purpose
+
+- **Flow 🌊** — the pattern and rhythm of the verses. Is the cadence locked?
+- **Timing ⏱️** — does the take align with the beat?
+- **Breath 🫁** — is breath control visible in the performance?
+- **Clarity 🔍** — can the words be understood?
+- **Delivery 🔥** — does the take connect? Is it energized?
+
+Each one is something a TAKE can show — which is why "Consistency, Health and Goal Match" live on the progress screen instead. A single verse shows whether a rapper's timing is improving; a week of verses shows whether they are developing as a performer.
+
+### Style Match — now every instrument has this
+
+The blueprint listed Style Match among RapZ's core scores and it was served only as prose (`style_fit`) — the number nobody could trend, nobody could recommend from, and the history never reported on. A rapper who was getting better at their chosen style had no way to know it was working.
+
+Style Match is **added for every instrument** now, not only RapZ, because every take carries a genre. The substance rule says a score derived from FORM is not a score. Style Match is derived from HEARING — does this drum take SOUND like the drill record it is aiming at? — and it is the same question whether the instrument is drums or rap. The prose stays (an explanation is not decoration). The number is new and it is there to move.
+
+Style Match is sent from the same call that scores the five dimensions; it is not a sixth dimension but rather what the model already hears when it listens for those five.
+
+---
+
+## Every scoring dimension must have a description served nearby
+
+A member sends a take to the coach and gets back a score. The number means nothing without knowing what it measures. **Every dimension — Flow, Timing, Clarity, Consistency, Intonation, Groove, anything the coach scores — must have a short, honest description that lives in the endpoint alongside the score.**
+
+`apps/economy/instruments.py` holds all of them: `_VOCAL`, `_RAP`, `_FRETTED`, `_KEYS`, `_DRUMS`, `_BOWED` and `STYLE_SCORE` are dictionaries mapping score keys to their labels. A member looking at "Flow 🌊 — 7/10" without knowing what flow IS has a number with no meaning, and a number a member cannot check or understand teaches them nothing about their performance.
+
+**Three rules about these descriptions:**
+
+1. **They live in ONE place.** If a dimension is scored, it is defined in `instruments.py`. If `prompt_for()` in `vocalcoach.py` names a dimension the endpoint does not declare, or vice versa, that is a test failure — `test_instrument_routes` pins both directions. A client that knows a dimension the server does not is the change that makes a screen show a blank score.
+
+2. **They must be SHORT.** "Flow 🌊" is complete; "Flow 🌊 — the rhythmic pattern and cadence of your delivery including how you sit on the beat" is what a hover tooltip says, not what a label is. The label reaches the screen; keep it to one or two words plus the emoji. The expanded explanation lives in the coach's own caveat (the text that says what one take CAN show) or on a help screen that is ONE click away from the score.
+
+3. **They are HONEST about what a single take shows.** The caveat says it: "Flow, timing, breath, clarity and delivery are what one take can show. Consistency, health and goal match come from your history, not a single clip — they're on your progress screen." A member who sees "Consistency — 4/10" without that sentence believes they are inconsistent after one take, which is false. `_HISTORY_CAVEAT` is that sentence, and it is the same for every instrument, because the rule is the same: a single clip is a snapshot, a week is a trend.
+
+A take endpoint that adds a dimension without updating `instruments.py` ships silently — the frontend has no label for it, so it renders blank. A coach that drops a dimension does the opposite. Both are invisible failures because a score with no description is just a number, and a member staring at a missing score has nothing to report — they assume their take was not scored. `test_instrument_routes` guards this: every key in `INSTRUMENTS[key]["scores"]` + `STYLE_SCORE` is the exact set the coach is asked to produce, in the exact order, with no additions and no removals.
+
+### This is also why the coach response stays structured
+
+`_score_dict()` in `vocalcoach.py` returns a dictionary with one key per dimension. The response is NOT a free-form text description ("Your flow is good, your timing is tight, your breath control...") because a free-form response cannot be *scored* — nothing in it can be trended, compared, recommended on, or added to a history. A dimension must be:
+
+- A **number** so it can trend
+- A **key in the dictionary** so the frontend can find its label
+- A **field in EVERY response**, always, never optional — a missing dimension reads as a zero or a failure
+
+The prose explanation stays (Style Match includes it), but it rides ALONGSIDE the score, never instead of it. Both are necessary: the number moves, the text explains what moved.
+
+---
