@@ -19,6 +19,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import karmaz
 from .models import (
     AD_REWARD_DAILY_CAP_PER_USER,
     LINK_CLICK_REWARD_ENERGY,
@@ -106,6 +107,32 @@ class EarnView(APIView):
             _way("referral", "Refer someone", REFERRAL_REWARD_REFERRER_SPINAZ, "spinaz",
                  tab="profilez", target="referral-code",
                  note=f"They start with {REFERRAL_REWARD_JOINEE_SPINAZ} too."),
+            # The three that arrived with karmaz and were missing from the one
+            # list whose entire job is answering "how do I get more ⚡". A
+            # member on zero was being shown five ways and not the three
+            # newest, which is this file's own founding complaint.
+            #
+            # Read from `karmaz` rather than retyped: two places stating what a
+            # vote pays is the "20 free prompts in nine places" failure with a
+            # currency attached.
+            _way("vote", "Vote a comment up or down", karmaz.VOTE_ENERGY, "energy",
+                 tab="postz", target="social-feed",
+                 cap=f"{karmaz.VOTE_DAILY_CAP} a day",
+                 note="Up and down pay the same — otherwise the app is buying "
+                      "its own praise."),
+            _way("comment_karma", "Write a comment people vote up",
+                 karmaz.KARMA_ENERGY_PER_NET, "energy",
+                 tab="postz", target="social-feed",
+                 cap=f"up to {karmaz.KARMA_ENERGY_MAX} per comment",
+                 note=f"Paid per net upvote, {karmaz.KARMA_SETTLE_HOURS}h after you "
+                      f"post it, on somebody else's post. Needs "
+                      f"{karmaz.KARMA_MIN_NET}+ net."),
+            _way("cold_reply", "Reply to somebody who has never messaged you",
+                 karmaz.COLD_REPLY_ENERGY, "energy",
+                 tab="messagez", target="messagez-compose",
+                 cap=f"{karmaz.COLD_DAILY_CAP} a day, once per person",
+                 note=f"They get {karmaz.COLD_SENT_ENERGY} too, for being answered. "
+                      "Sending pays nothing on its own."),
             _way("share", "Share another member's post", SHARE_REWARD_ENERGY, "energy",
                  tab="social", target="social-feed",
                  note="Once per post, after you've actually watched it."),

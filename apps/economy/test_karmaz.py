@@ -282,6 +282,40 @@ class RewardsTableTests(TestCase):
         self.assertEqual(by["rate"]["energy"], RATING_REWARD_ENERGY)
 
 
+class OneListTests(TestCase):
+    """`earn.py` is the one answer to "how do I get more of this", and every
+    earner has to be in it.
+
+    That file exists because the app once said four things that were not true
+    at once — including "rating pays +1 ⚡" while no rating view awarded
+    anything. Adding three ⚡ earners and leaving them out of it would recreate
+    the exact gap it was written to close, so this pins that they are there and
+    that the numbers match rather than being retyped.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(member("earner"))
+
+    def test_the_three_new_earners_are_in_the_one_list(self):
+        keys = {w["key"] for w in self.client.get("/api/economy/earn/").data["available"]}
+        for k in ("vote", "comment_karma", "cold_reply"):
+            self.assertIn(k, keys, f"{k} pays ⚡ but the earn list doesn't know")
+
+    def test_the_earn_list_states_the_same_numbers_karmaz_pays(self):
+        by = {w["key"]: w for w in self.client.get("/api/economy/earn/").data["available"]}
+        self.assertEqual(by["vote"]["gain"], K.VOTE_ENERGY)
+        self.assertEqual(by["cold_reply"]["gain"], K.COLD_REPLY_ENERGY)
+        self.assertEqual(by["comment_karma"]["gain"], K.KARMA_ENERGY_PER_NET)
+
+    def test_each_one_says_where_to_go_do_it(self):
+        """A switched-on earner with nowhere to go is the dead end that file
+        exists to prevent."""
+        by = {w["key"]: w for w in self.client.get("/api/economy/earn/").data["available"]}
+        for k in ("vote", "comment_karma", "cold_reply"):
+            self.assertTrue(by[k]["tab"], f"{k} has no tab to send anybody to")
+
+
 class ApiTests(TestCase):
     def setUp(self):
         self.me = member("apiuser")
