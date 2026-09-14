@@ -875,3 +875,74 @@ class GoalsAndCurrentQualitiesTests(TestCase):
         self.assertEqual(out["goal"], "🎯 aim here")
         self.assertEqual(out["range_profile"], "🧔 Bass, D2–B4")
         self.assertEqual(out["style_fit"], "⚔️ drill wants menace")
+
+
+class ScaleIsAnchoredTests(TestCase):
+    """The rubric has a defined reference point, and it is not a released record.
+
+    Corey got a 2/10 on a real take. The prompt asked for "1-10" and defined
+    nothing, so the model scored against the only anchor its training gives it
+    for free — commercial releases — and a developing artist's phone recording
+    measured against those is a 2 every single time. That is not a harsh
+    coach, it is an undefined scale, and it was telling every member on the
+    platform to give up.
+
+    This is a CALIBRATION fix and not an inflation one: the number still has to
+    move because the performance moved, and a take with nothing on it still
+    scores 1-2. What changed is the reference point, which was never stated.
+    """
+
+    def test_the_scale_says_what_each_band_means(self):
+        from apps.economy.instruments import prompt_for
+        for app_key in ("singz", "rapz", "drumz", "guitarz"):
+            p = prompt_for(app_key, "Trap", "tenor", "builder")
+            self.assertIn("THE SCALE", p, app_key)
+            for band in ("1-2", "3-4", "5-6", "7-8", "9-10"):
+                self.assertIn(band, p, f"{app_key} has no anchor for {band}")
+
+    def test_it_says_five_is_normal(self):
+        """The whole failure in one line: without it, "average" reads as 2."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("5 is normal", p)
+        self.assertIn("Most takes belong here", p)
+
+    def test_the_reference_is_a_developing_artist_not_a_record(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("DEVELOPING ARTIST", p)
+        self.assertIn("NOT scoring it against a released record", p)
+
+    def test_the_scale_is_pitched_at_the_difficulty_they_chose(self):
+        """A Starter take judged on Stage Boss standards is not a strict coach,
+        it is the wrong measurement."""
+        from apps.economy.instruments import prompt_for
+        for level in ("starter", "builder", "performer", "stageboss"):
+            p = prompt_for("singz", "R&B", "tenor", level)
+            self.assertIn(f'What the numbers mean, at "{level}"', p)
+
+    def test_the_recording_is_not_the_performance(self):
+        """A phone mic in a bedroom is not their singing, and marking tone down
+        for room noise measures the room."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("guitarz", "Rock", None, "builder")
+        self.assertIn("Score the PERFORMANCE, not the recording", p)
+        self.assertIn("none of it may pull a score down", p)
+
+    def test_every_take_gets_at_least_one_real_strength(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn("AT LEAST ONE", p)
+        self.assertIn("empty strengths list", p)
+
+    def test_it_did_not_become_a_licence_to_flatter(self):
+        """The calibration must not have undone the honesty rules — a number
+        higher than the take deserves is the failure this whole file guards."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("no flattery", p)
+        self.assertIn("never soften", p)
+        self.assertIn("Never invent detail you cannot hear", p)
+        # And the bottom of the scale still exists.
+        self.assertIn("there is essentially no performance to score", p)
+        self.assertIn("Harshness is not honesty", p)
