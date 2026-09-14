@@ -577,7 +577,12 @@ class SingZCoachView(APIView):
             # was actually asked to score.
             "app_key": self.app_key,
             "label": profile["label"],
-            "scores": profile["scores"],
+            # `scores_for`, not `profile["scores"]`: every take is scored
+            # against the style or genre it was aimed at, so Style Match is
+            # always in the set. Publishing the profile's five while the
+            # response carries six is how a chip row ends up one short of
+            # the answer.
+            "scores": scores_for(self.app_key),
             "range_label": profile["range_label"],
             "ranges": [{"key": k, "label": l} for k, l in profile["ranges"]],
             # RapZ picks a style the way SingZ picks a range. Served from the

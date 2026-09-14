@@ -294,8 +294,17 @@ class InstrumentCoachTests(TestCase):
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
     def test_singz_still_scores_exactly_what_it_did(self, _k):
-        scores = self.client.get(URL).data["scores"]
-        self.assertEqual(set(scores), {"pitch", "tone", "breath", "range", "agility"})
+        """SingZ keeps its OWN five, which is what this guard is for — it was
+        written so a change to one coach could not quietly flatten the profiles
+        into one. Style Match joined every instrument deliberately (see
+        StyleMatchScoreTests); a rap dimension appearing here would still be
+        the failure this test exists to catch."""
+        scores = set(self.client.get(URL).data["scores"])
+        self.assertTrue({"pitch", "tone", "breath", "range", "agility"} <= scores)
+        self.assertEqual(scores - {"style_match"},
+                         {"pitch", "tone", "breath", "range", "agility"})
+        for rap_only in ("flow", "clarity", "delivery"):
+            self.assertNotIn(rap_only, scores)
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
     def test_the_caveat_names_this_instruments_dimensions(self, _k):
@@ -313,7 +322,11 @@ class InstrumentCoachTests(TestCase):
         self.assertIn("rap coach", sent)
         self.assertIn('"flow"', sent)
         self.assertNotIn('"range"', sent)
-        self.assertEqual(set(resp.data["scores"]), {"flow", "timing", "breath", "clarity", "delivery"})
+        # Style Match rides on every take now — see StyleMatchScoreTests. The
+        # instrument's OWN five are still what makes a rap coach a rap coach,
+        # which is what the assertions above and below actually pin.
+        self.assertEqual(set(resp.data["scores"]),
+                         {"flow", "timing", "breath", "clarity", "delivery", "style_match"})
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
     @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
@@ -966,24 +979,28 @@ class LyricRatingTests(TestCase):
         for k in ("guitarz", "bassz", "keyz", "drumz", "violinz"):
             self.assertFalse(rates_lyrics(k), f"{k} has no lyrics to rate")
 
-    def test_the_dimension_appears_only_when_asked_for(self):
-        from apps.economy.instruments import scores_for
-        self.assertNotIn("writing", scores_for("rapz"))
-        self.assertIn("writing", scores_for("rapz", lyrics=True))
+    def test_the_dimensions_appear_only_when_asked_for(self):
+        from apps.economy.instruments import LYRIC_SCORE, scores_for
+        plain, asked = scores_for("rapz"), scores_for("rapz", lyrics=True)
+        for k in LYRIC_SCORE:
+            self.assertNotIn(k, plain, k)
+            self.assertIn(k, asked, k)
 
     def test_asking_a_drum_kit_for_a_writing_score_is_ignored(self):
         """A toggle a screen cannot honour is the switch that changes nothing."""
-        from apps.economy.instruments import scores_for
-        self.assertNotIn("writing", scores_for("drumz", lyrics=True))
+        from apps.economy.instruments import LYRIC_SCORE, scores_for
+        for k in LYRIC_SCORE:
+            self.assertNotIn(k, scores_for("drumz", lyrics=True), k)
 
     def test_the_prompt_only_asks_when_the_toggle_is_on(self):
         from apps.economy.instruments import prompt_for
         on = prompt_for("rapz", "Trap", None, "builder", lyrics=True)
         off = prompt_for("rapz", "Trap", None, "builder")
         self.assertIn("lyrics_note", on)
-        self.assertIn('"writing"', on)
+        self.assertIn('"punchlines"', on)
+        self.assertIn('"rhyme"', on)
         self.assertNotIn("lyrics_note", off)
-        self.assertNotIn('"writing"', off)
+        self.assertNotIn('"punchlines"', off)
 
     def test_it_refuses_to_review_words_it_could_not_hear(self):
         """The same rule as the range profile: a review of lyrics nobody caught
@@ -991,7 +1008,7 @@ class LyricRatingTests(TestCase):
         from apps.economy.instruments import prompt_for
         p = prompt_for("singz", "R&B", "tenor", "builder", lyrics=True)
         self.assertIn("SAY SO", p)
-        self.assertIn("reviewing lyrics you could not hear", p)
+        self.assertIn("do not review words you did not hear", p)
 
     def test_it_judges_craft_and_is_not_a_censor(self):
         """The easiest place in this app to start marking somebody's opinions,
@@ -1004,8 +1021,34 @@ class LyricRatingTests(TestCase):
 
     def test_the_capability_is_published_so_a_screen_can_ask(self):
         from apps.economy.instruments import LYRIC_SCORE, rates_lyrics
-        self.assertEqual(list(LYRIC_SCORE), ["writing"])
+        self.assertEqual(set(LYRIC_SCORE),
+                         {"rhyme", "punchlines", "story", "imagery", "freshness"})
         self.assertTrue(rates_lyrics("rapz"))
+
+    def test_the_style_decides_which_of_them_matter(self):
+        """The blueprint's own words: writing means different things in
+        different styles. A ballad with no punchlines is not a ballad with a
+        writing problem — it scores null, not a 3."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder", style="Boom Bap", lyrics=True)
+        self.assertIn("WEIGHT THESE BY THE STYLE", p)
+        self.assertIn("score null for one the style", p)
+        self.assertIn("a 3 is an accusation", p)
+
+    def test_it_judges_cliche_rather_than_claiming_originality(self):
+        """Nobody can judge novelty without knowing everything ever written,
+        and a model asked for it invents an opinion. Clichés are hearable."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder", lyrics=True)
+        self.assertIn("CLICHÉ DENSITY", p)
+        self.assertIn("never claim something is unprecedented", p)
+
+    def test_writing_is_not_scored_twice_as_flow(self):
+        """How the words SIT is delivery; what the words ARE is writing. One
+        weakness must not sink two numbers."""
+        from apps.economy.instruments import LYRIC_SCORE
+        for perf in ("flow", "delivery", "timing", "clarity"):
+            self.assertNotIn(perf, LYRIC_SCORE)
 
     def test_the_history_keeps_the_writing_score(self):
         """Whitelisting a take against the profile's five would drop it: the
@@ -1017,10 +1060,10 @@ class LyricRatingTests(TestCase):
         row = takescorez.record(u, "rapz", {
             "rated_lyrics": True,
             "scores": {"flow": 7, "timing": 6, "breath": 6, "clarity": 7,
-                       "delivery": 8, "writing": 9},
+                       "delivery": 8, "rhyme": 9, "punchlines": 8},
         })
-        self.assertIn("writing", row.scores)
-        self.assertEqual(row.scores["writing"], 9)
+        self.assertEqual(row.scores["rhyme"], 9)
+        self.assertEqual(row.scores["punchlines"], 8)
 
     def test_a_take_scored_without_lyrics_stores_no_writing(self):
         from django.contrib.auth import get_user_model
@@ -1028,6 +1071,89 @@ class LyricRatingTests(TestCase):
         u = get_user_model().objects.create_user("plain", "p@mcz.test", "pw12345!")
         row = takescorez.record(u, "rapz", {
             "scores": {"flow": 7, "timing": 6, "breath": 6, "clarity": 7,
-                       "delivery": 8, "writing": 9},
+                       "delivery": 8, "rhyme": 9, "punchlines": 8},
         })
-        self.assertNotIn("writing", row.scores)
+        self.assertNotIn("rhyme", row.scores)
+        self.assertNotIn("punchlines", row.scores)
+
+
+class StyleMatchScoreTests(TestCase):
+    """Style Match 🎭 — a blueprint CORE score that only ever existed as prose.
+
+    `style_fit` has always come back as a sentence, so nothing could trend it,
+    no drill could be recommended off it, and the history could not say whether
+    a member was getting closer to the style they picked. The sentence stays;
+    it now has a number beside it.
+    """
+
+    def test_every_instrument_scores_it(self):
+        from apps.economy.instruments import scores_for
+        for k in ("singz", "rapz", "guitarz", "bassz", "keyz", "drumz", "violinz"):
+            self.assertIn("style_match", scores_for(k),
+                          f"{k} takes carry a genre and should be scored against it")
+
+    def test_it_measures_closeness_and_not_quality(self):
+        """The easiest score in the set to turn into a quality judgement by
+        accident. A superb take of the wrong style is a LOW style match and a
+        high everything else — flattening that into "bad" would tell somebody
+        to stop doing the thing they are good at."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder", style="Drill")
+        self.assertIn("ONLY how close", p)
+        self.assertIn("not how good it is", p)
+        self.assertIn("that is the correct answer", p)
+
+    def test_the_prose_did_not_go_away(self):
+        """A number with no explanation is what this whole module refuses to
+        ship — the score says how close, the sentence says in what way."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn('"style_fit"', p)
+        self.assertIn('"style_match"', p)
+
+    def test_it_falls_back_to_the_genre_when_no_style_was_picked(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("drumz", "Boom Bap", None, "builder")
+        self.assertIn("Boom Bap", p)
+        self.assertIn("style_match", p)
+
+
+class PromptShapeTests(TestCase):
+    """The JSON the model is asked for has to be JSON.
+
+    The shape ended with a hardcoded `"weak_notes": []` AND added another
+    `weak_notes` above it on any pitched instrument — the same key twice in one
+    object. Whichever the model honoured, a parser keeps the last, and the last
+    was the empty one. So every weak note that drives a TunerZ drill link was
+    being asked for and thrown away, on the exact instruments the feature was
+    built for.
+    """
+
+    def _shape(self, app_key):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for(app_key, "R&B", "tenor", "builder", lyrics=True)
+        import json, re
+        m = re.search(r"\{\n  \"score\".*\n\}", p, re.S)
+        self.assertIsNotNone(m, f"{app_key}: no JSON shape found in the prompt")
+        return m.group(0)
+
+    def test_no_key_is_asked_for_twice(self):
+        for app_key in ("singz", "rapz", "guitarz", "drumz", "violinz"):
+            shape = self._shape(app_key)
+            import re
+            keys = re.findall(r'^\s*"([a-z_]+)":', shape, re.M)
+            dupes = {k for k in keys if keys.count(k) > 1}
+            self.assertFalse(dupes, f"{app_key} asks for {dupes} more than once")
+
+    def test_the_shape_parses_as_json_once_the_placeholders_are_filled(self):
+        """A template that cannot become valid JSON is one the model has to
+        guess its way out of."""
+        import json, re
+        for app_key in ("singz", "drumz"):
+            shape = self._shape(app_key)
+            filled = re.sub(r"<[^>]*>", "1", shape)
+            filled = filled.replace('"1"', '"x"').replace(", ...", "")
+            try:
+                json.loads(filled)
+            except ValueError as e:
+                self.fail(f"{app_key} shape is not valid JSON: {e}\n{filled}")

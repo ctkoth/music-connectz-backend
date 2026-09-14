@@ -128,7 +128,46 @@ DEFAULT = {
 # only when asked for, because the five in a profile are the promise the app
 # makes about what one take shows — a member who opened SingZ to work on breath
 # should not find their writing marked.
-LYRIC_SCORE = {"writing": "Writing 📝"}
+# The blueprint's Writing score, broken into the things it actually names:
+# "rhyme density, structure, originality, punchlines, or storytelling —
+# DEPENDING ON STYLE". One number called "Writing" would have averaged five
+# different judgements into something nobody can act on; "your writing is a 6"
+# tells a member nothing about what to go and practise.
+#
+# Every one of these is answerable from the words themselves, which is the test
+# that kept the list to five. What was left out and why:
+#
+#   * "Originality" as such — nobody can judge it without knowing everything
+#     ever written, and a model asked for it will confidently invent an
+#     opinion. `freshness` asks the answerable half instead: how much of this
+#     is stock phrasing you have heard a hundred times. Clichés are
+#     recognisable; novelty is not.
+#   * "Flow" and "cadence" — already scored, as performance. How the words SIT
+#     is delivery; what the words ARE is writing, and scoring the same thing
+#     twice would let one weakness sink two numbers.
+#   * Subject matter, opinions, swearing. Not craft. See the prompt.
+LYRIC_SCORE = {
+    "rhyme": "Rhyme Scheme 🔗",
+    "punchlines": "Punchlines 🥊",
+    "story": "Story & Structure 📖",
+    "imagery": "Imagery 🖼️",
+    "freshness": "Freshness 💡",
+}
+
+# Style Match 🎭 — the blueprint lists it among RapZ's CORE scores and it has
+# only ever been served as prose (`style_fit`), so nothing could trend it, no
+# drill could be recommended from it, and the history could not say whether
+# somebody was getting closer to the style they picked.
+#
+# It is added for EVERY instrument rather than just RapZ, because every take
+# carries a genre even when the app has no style picker: "does this drum take
+# sound like the drill record it is aiming at" is the same question as "does
+# this verse sound like drill", and it is one a take can honestly answer.
+#
+# The prose stays. The number says how close; the sentence says in what way,
+# and a number with no explanation is the thing this file keeps refusing to
+# ship.
+STYLE_SCORE = {"style_match": "Style Match 🎭"}
 
 
 def profile_for_app(app_key):
@@ -150,7 +189,8 @@ def scores_for(app_key, *, lyrics=False):
     the whitelist that filters the model's answer, and the row that stores it
     can never disagree about how many there are."""
     p = profile_for_app(app_key)
-    return {**p["scores"], **(LYRIC_SCORE if (lyrics and rates_lyrics(app_key)) else {})}
+    return {**p["scores"], **STYLE_SCORE,
+            **(LYRIC_SCORE if (lyrics and rates_lyrics(app_key)) else {})}
 
 
 def prompt_for(app_key, genre, target, difficulty, style=None, lyrics=False):
@@ -172,6 +212,17 @@ Judge it against THAT style, not against rap in general."""
                  if p.get("style_label") and style else f"""
 - "style_fit": how this take sits against {genre} specifically — what that \
 genre asks for, and whether this take delivers it.""")
+    # The number behind that sentence. Said explicitly because "style match" is
+    # the easiest score in the set to turn into a quality judgement by
+    # accident: a brilliant take of the WRONG style is a low style match and a
+    # high everything else, and flattening that into "bad" would tell somebody
+    # to stop doing the thing they are good at.
+    style_scale = f"""
+"style_match" scores ONLY how close this take is to {('the ' + str(style)) if style else genre} \
+— not how good it is. A superb take of a different style is a LOW style match \
+and high everything else, and that is the correct answer: it tells them they \
+nailed something, just not the thing they picked. If they did not pick a \
+style, score it against {genre}."""
     range_ask = (f"""
 - "range_profile": what their range actually reads as from this take — the \
 lowest and highest usable notes you can hear, roughly how wide that is, and \
@@ -196,11 +247,31 @@ will build a warm-up around."""
     lyric_ask = ("""
 - "lyrics_read": the words you could actually make out, and how much of the \
 take that was. If the delivery is too buried or unclear to catch the writing, \
-SAY SO and score "writing" as null rather than guessing — reviewing lyrics you \
-could not hear is the worst thing you can do on this screen.
-- "lyrics_note": what the WRITING does — rhyme scheme and density, structure, \
-imagery, story, punchlines, how the hook lands, whether the words fit the \
-pocket. Quote the actual line you mean.
+SAY SO, score every lyric dimension null, and do not review words you did not \
+hear — that is the worst thing you can do on this screen.
+- "lyrics_note": what the WRITING does, quoting the actual line you mean.
+
+Scoring the writing, dimension by dimension:
+- "rhyme": the scheme itself — density, where the rhymes land, internal \
+rhymes, multis, whether it stays interesting or settles into the same slot \
+every bar.
+- "punchlines": wordplay, double meanings, the line somebody would rewind. \
+Quote the best one and say why it works.
+- "story": does the verse GO somewhere and is it built — setup, turn, \
+payoff, or a clear through-line.
+- "imagery": concrete and specific against vague and general. "The kitchen \
+light still on at 4am" over "things were hard".
+- "freshness": how much of this is stock phrasing anybody could have written. \
+You are judging CLICHÉ DENSITY, which you can hear, not originality, which \
+you cannot — never claim something is unprecedented.
+
+**WEIGHT THESE BY THE STYLE THEY PICKED, and score null for one the style \
+genuinely does not ask for.** The blueprint is explicit that good writing means \
+different things in different styles: Boom Bap lives on punchlines and internal \
+rhymes, Conscious on story and message, Cloud Rap on imagery and space, Drill on \
+tension. A ballad with no punchlines is not a ballad with a writing problem — \
+score "punchlines" null and say in the note that the style is not asking for \
+them. A null is an honest "not what this is for"; a 3 is an accusation.
 
 Judging the writing means the CRAFT and nothing else. Not what they are \
 talking about, not their opinions, not whether you would say it, not swearing \
@@ -218,8 +289,16 @@ If pitch accuracy below 70%, name 1-3 most problematic notes with what you heard
 Note is the letter + octave if hearable (E, F#, A3, etc). Frequency in Hz. \
 Cents_off: negative = flat, positive = sharp. If pitch is 70+, return []."""
                           if has_pitch else "")
+    # A JSON object with the SAME KEY TWICE is what this used to ask for: the
+    # template ended with a hardcoded `"weak_notes": []` and this field added
+    # another one above it. Whichever the model honoured, the other was
+    # ignored — and on a pitched instrument the empty one came last, which is
+    # the one a parser keeps. So the weak notes that drive the TunerZ drill
+    # links were being asked for and thrown away.
+    #
+    # It is the last key now, exactly once, and it carries its own comma.
     weak_notes_field = (
-        '\n  "weak_notes": [{"note": "...", "frequency": 330, "cents_off": 0}, ...],'
+        ',\n  "weak_notes": [{"note": "...", "frequency": 330, "cents_off": 0}, ...]'
         if has_pitch else "")
 
     return f"""You are the Music ConnectZ {p['coach']}. You are listening to one \
@@ -291,7 +370,7 @@ number and not coaching:
 - "now": what this take actually IS right now — their current qualities, in \
 {p['label']}'s own terms, the honest read a stranger would give it.
 - "goal": what they are aiming at from here, pitched at "{difficulty}" and at \
-{aim}. Concrete enough to know when they have hit it.{range_ask}{style_ask}{lyric_ask}{weak_notes_section}
+{aim}. Concrete enough to know when they have hit it.{range_ask}{style_ask}{style_scale}{lyric_ask}{weak_notes_section}
 
 Return ONLY valid JSON, no markdown fence, in exactly this shape:
 {{
@@ -303,6 +382,5 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "verdict": "<one sentence in that voice, what this take actually is>",
   "strengths": ["<what genuinely worked, named specifically - AT LEAST ONE, always>", "..."],
   "fixes": ["<the moment it goes wrong, and the fix — the two that matter most, worst first>", "..."],
-  "next_drill": "<one drill to run before the next take: what to do, how many reps>",{weak_notes_field}
-  "weak_notes": []
+  "next_drill": "<one drill to run before the next take: what to do, how many reps>"{weak_notes_field}
 }}"""
