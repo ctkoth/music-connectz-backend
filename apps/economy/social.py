@@ -627,6 +627,23 @@ def _profile_full(p, request, recheck=False):
     return card
 
 
+def _post_author_id(item):
+    """Whose post this item is, or None when it is not a post.
+
+    Needed because a comment on your OWN post earns nothing — the blueprint
+    says "on another user's post" and means it, and paying somebody to talk to
+    themselves is the faucet with no disguise. Read once per request rather
+    than once per comment.
+    """
+    if not str(item or "").startswith("post:"):
+        return None
+    try:
+        return (Post.objects.filter(pk=int(str(item).split(":", 1)[1]))
+                .values_list("author_id", flat=True).first())
+    except (ValueError, IndexError):
+        return None
+
+
 class SocialView(APIView):
     """Cross-user reactions + comments for any item.
 
@@ -641,10 +658,34 @@ class SocialView(APIView):
         ups = Reaction.objects.filter(item_id=item, value=1).count()
         downs = Reaction.objects.filter(item_id=item, value=-1).count()
         mine = Reaction.objects.filter(item_id=item, user=request.user).first()
+        from . import karmaz
+        rows = list(SocialComment.objects.filter(item_id=item).select_related("user")[:100])
+        ids = [c.id for c in rows]
+        # An hour after a comment lands, the votes on it decide what it paid
+        # its author. Settled here, lazily, on the same read that shows it —
+        # the shape `collab.maybe_auto_release` uses, and for the same reason:
+        # a member must never be left waiting on a cron nobody is watching.
+        # `manage.py settle_comment_karma` is the sweep for comments nobody
+        # happens to open.
+        karmaz.settle_visible(rows, post_author_id=_post_author_id(item))
+        # Two queries for the whole list rather than two per comment. A
+        # hundred comments must not be two hundred lookups on a feed read,
+        # which is the rule the feed's own query-count test already holds.
+        karma = karmaz.karma_map(ids)
+        my_votes = karmaz.my_votes(request.user, ids)
         comments = [
             {"id": c.id, "user": c.user.username, "body": c.body, "at": c.created_at.isoformat(),
-             "edited_at": c.edited_at.isoformat() if c.edited_at else None, "edit_history": c.edit_history or []}
-            for c in SocialComment.objects.filter(item_id=item).select_related("user")[:100]
+             "edited_at": c.edited_at.isoformat() if c.edited_at else None,
+             "edit_history": c.edit_history or [],
+             # Up and down on a comment, and this member's own vote. The same
+             # Reaction table a post's votes live in, keyed "comment:<id>" —
+             # not a second vote model.
+             **karma.get(c.id, {"up": 0, "down": 0, "net": 0}),
+             "my_vote": my_votes.get(c.id, 0),
+             # What it earned, once settled. Zero after settling is a real
+             # answer ("nobody voted it up"); null means not settled yet.
+             "karma_energy": c.karma_energy if c.karma_settled_at else None}
+            for c in rows
         ]
         my_r = ItemRating.objects.filter(user=request.user, item_id=item).first()
         heard = ListenProgress.objects.filter(user=request.user, item_id=item).first()
@@ -714,6 +755,18 @@ class SocialView(APIView):
             except (TypeError, ValueError):
                 value = 0
             value = max(-1, min(1, value))
+            # Voting on a COMMENT rather than the item. Same table, same
+            # up/down, and the one that pays — a comment's karma is what
+            # decides what its author earns an hour later, so it needed a
+            # signal and had none.
+            comment_id = (request.data or {}).get("comment_id")
+            if comment_id is not None:
+                from . import karmaz
+                c = SocialComment.objects.filter(pk=comment_id, item_id=item).select_related("user").first()
+                if not c:
+                    return Response({"detail": "comment not found"}, status=status.HTTP_404_NOT_FOUND)
+                out = karmaz.vote_on_comment(request.user, c, value)
+                return Response({**self._payload(item, request), "voted": out})
             if value == 0:
                 Reaction.objects.filter(user=request.user, item_id=item).delete()
             else:

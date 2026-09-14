@@ -189,6 +189,13 @@ class MessagesView(APIView):
         spoken_to = (Message.objects.filter(sender=me)
                      .values_list("recipient_id", flat=True).distinct().count())
 
+        # Answering somebody who messaged you first, when you never have.
+        # Read BEFORE the row exists, like `first_to_them` above and for the
+        # same reason: afterwards we have always spoken to them and the shape
+        # that pays is unrecognisable.
+        from . import karmaz
+        cold = karmaz.cold_reply(me, other) if first_to_them else None
+
         m = Message.objects.create(sender=me, recipient=other, body=body, media_url=media_url, media_type=media_type)
         if first_to_them:
             from .signbonus import try_award
@@ -198,4 +205,10 @@ class MessagesView(APIView):
         # otherwise suppress its own email.
         _email_new_message(other, me, body)
         notify(other, "message", f"@{me.username} messaged you 💬", actor=me, item_id=f"dm:{me.username}")
-        return Response(_msg(m, me), status=status.HTTP_201_CREATED)
+        # What it actually paid, on the reply that earned it. The gain half of
+        # the cost/gain rule: a reward the member never sees is a coincidence,
+        # and a coincidence changes nobody's behaviour.
+        body_out = _msg(m, me)
+        if cold and (cold.get("reply") or cold.get("capped")):
+            body_out["earned"] = cold
+        return Response(body_out, status=status.HTTP_201_CREATED)

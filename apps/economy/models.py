@@ -2564,6 +2564,13 @@ def item_rating_median(item_id):
 class SocialComment(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="social_comments")
     item_id = models.CharField(max_length=160, db_index=True)
+    # When the karma on this comment was settled, and what it paid. Kept on the
+    # comment rather than derived, because "has this been settled" has to be
+    # answerable without walking the payout table for every comment in a feed.
+    # Null means not yet due or not yet looked at — never "settled at zero",
+    # which `karma_energy` records as a settle with 0 ⚡.
+    karma_settled_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    karma_energy = models.PositiveIntegerField(default=0)
     # TextField for the same reason as Profile.bio — comments are covered by
     # the tier char limit, which Premium takes to 1,500 and StatZ removes.
     body = models.TextField()
@@ -5464,3 +5471,42 @@ class InstrumentProfile(models.Model):
 
     def __str__(self):
         return f"{self.user} · {self.app_key}"
+
+
+# ------------------------------------------- what engagement actually pays
+class EngagementPayout(models.Model):
+    """Every ⚡ paid for rating, voting, commenting or answering a stranger.
+
+    One table for the four, rather than a counter per feature, for the reason
+    `LilithPayout` gives: a counter is a number that can drift out of step with
+    what happened and a ledger is one that can be argued with. It is also what
+    LogZ would need to answer "why did I get this".
+
+    **`unique_together` is the once-per-thing guard, at the database.** Every
+    rule here is of the form "once per comment", "once per pair", "once per
+    comment you voted on" — and each is expressed as a `ref`, so the constraint
+    enforces it rather than a code path that can be reached another way. The
+    vote case is the one that matters most: without it, flipping a vote up and
+    down would pay every time.
+    """
+    KIND_VOTE = "vote_cast"            # you voted on somebody's comment
+    KIND_COMMENT_KARMA = "comment_karma"   # your comment earned its keep
+    KIND_COLD_REPLY = "cold_reply"     # you answered somebody new
+    KIND_COLD_SENT = "cold_sent"       # somebody new answered you
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="engagement_payouts")
+    kind = models.CharField(max_length=24, db_index=True)
+    energy = models.PositiveIntegerField(default=0)
+    spinaz = models.PositiveIntegerField(default=0)
+    # What earned it: "comment:12", "pair:3:9". The once-per rule in one field.
+    ref = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        unique_together = ("user", "kind", "ref")
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["user", "kind", "-created_at"])]
+
+    def __str__(self):
+        return f"{self.user} · {self.kind} · {self.energy}⚡"

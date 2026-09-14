@@ -20,6 +20,7 @@ from .lilith_taskz import (LilithBoardView, LilithRoutineDetailView,
                            LilithRoutineListView, LilithSponsorView,
                            LilithTaskCompleteView, LilithTaskDetailView,
                            LilithTaskListView)
+from .karmaz import KarmaRewardsView
 from .signbonus import SignBonusView
 from .voice import VoiceZView
 from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView, DupeZVerifyView,
@@ -378,6 +379,10 @@ urlpatterns = [
     # The questionnaire, open logged-out like the trial take.
     path("personalityz/test/", PersonalityTestView.as_view(), name="economy-personalityz-test"),
     path("signbonus/", SignBonusView.as_view(), name="economy-signbonus"),
+    # What rating, voting, commenting and answering a stranger pay — stated
+    # before the act, because none of them cost anything and a reward found
+    # out by accident is a coincidence.
+    path("karmaz/", KarmaRewardsView.as_view(), name="economy-karmaz"),
     # Lilith — the task manager. One GET builds the whole board because it
     # renders on every open, and the reward table rides with it so every
     # price is on screen before anything is pressed.
