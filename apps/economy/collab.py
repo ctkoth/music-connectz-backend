@@ -265,6 +265,17 @@ def release_deal(deal, note="collab release"):
     # later would mean somebody's share kept changing after they agreed to it.
     if deal.split_mode == CollabDeal.SPLIT_RATING:
         deal.participants, deal.split_snapshot = rating_split(deal)
+
+    # Lilith reads "still new" off released deals, so who was new has to be
+    # read HERE, before the status flips two dozen lines down — afterwards
+    # everybody in this deal has a released deal and nobody is new. The
+    # payout itself happens after the money moves.
+    from .lilith_taskz import beginners_among, settle_together
+    people = [u for u in (
+        [deal.initiator] + [User.objects.filter(username=e.get("username")).first()
+                            for e in deal.participants]) if u is not None]
+    was_beginner = beginners_among(people)
+
     paid_out = 0
     for entry in deal.participants:
         user = User.objects.filter(username=entry.get("username")).first()
@@ -295,6 +306,10 @@ def release_deal(deal, note="collab release"):
     deal.auto_release_at = None
     deal.save(update_fields=["held_cents", "held_spinaz", "held_stake_spinaz", "status",
                              "auto_release_at", "participants", "split_snapshot", "updated_at"])
+    # A finished collab is the graduation this platform actually wants, so it
+    # is where the helping gets paid. Swallowed inside settle_together — the
+    # escrow release must land whether or not a bonus does.
+    settle_together(people, was_beginner)
     return deal
 
 

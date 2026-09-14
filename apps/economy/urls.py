@@ -16,6 +16,10 @@ from .personalityz import PersonalityAxesView, PersonalityTestView
 from .trialdoorz import TrialDoorsView
 from .offerz_engine import (FunnelCatalogView, FunnelOfferRedeemView,
                             FunnelOffersView)
+from .lilith_taskz import (LilithBoardView, LilithRoutineDetailView,
+                           LilithRoutineListView, LilithSponsorView,
+                           LilithTaskCompleteView, LilithTaskDetailView,
+                           LilithTaskListView)
 from .signbonus import SignBonusView
 from .voice import VoiceZView
 from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView, DupeZVerifyView,
@@ -374,6 +378,20 @@ urlpatterns = [
     # The questionnaire, open logged-out like the trial take.
     path("personalityz/test/", PersonalityTestView.as_view(), name="economy-personalityz-test"),
     path("signbonus/", SignBonusView.as_view(), name="economy-signbonus"),
+    # Lilith — the task manager. One GET builds the whole board because it
+    # renders on every open, and the reward table rides with it so every
+    # price is on screen before anything is pressed.
+    path("lilith/", LilithBoardView.as_view(), name="economy-lilith"),
+    path("lilith/tasks/", LilithTaskListView.as_view(), name="economy-lilith-tasks"),
+    path("lilith/tasks/<int:task_id>/", LilithTaskDetailView.as_view(),
+         name="economy-lilith-task"),
+    path("lilith/tasks/<int:task_id>/complete/", LilithTaskCompleteView.as_view(),
+         name="economy-lilith-task-complete"),
+    path("lilith/routines/", LilithRoutineListView.as_view(),
+         name="economy-lilith-routines"),
+    path("lilith/routines/<int:routine_id>/", LilithRoutineDetailView.as_view(),
+         name="economy-lilith-routine"),
+    path("lilith/sponsor/", LilithSponsorView.as_view(), name="economy-lilith-sponsor"),
     path("offerz/funnel/", FunnelOffersView.as_view(), name="economy-funnel-offers"),
     path("offerz/funnel/redeem/", FunnelOfferRedeemView.as_view(),
          name="economy-funnel-offer-redeem"),

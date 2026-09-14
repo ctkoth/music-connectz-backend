@@ -254,6 +254,13 @@ class BattleEnterView(APIView):
         others_already = b.entries.exists()
         was_challenged = bool(b.mode == Battle.MODE_1V1 and b.opponent_id == request.user.id)
 
+        # Lilith, read BEFORE the entry exists for the same reason: entering a
+        # battle is itself a graduation, so afterwards this entrant is no
+        # longer new and the payout for helping them would be silently zero.
+        from .lilith_taskz import beginners_among, settle_together
+        _people = [request.user] + [e.user for e in b.entries.select_related("user")]
+        _was_beginner = beginners_among(_people)
+
         entry = BattleEntry.objects.create(
             battle=b, user=request.user, title=str(d.get("title", "") or "")[:160], **_media(d),
         )
@@ -274,6 +281,7 @@ class BattleEnterView(APIView):
             # Entry goes to the host. Stated on the button before it's pressed.
             award_spinaz(request.user, -b.entry_spinaz, f"BattleZ entry: {b.title}", app_key="battlez")
             award_spinaz(b.host, b.entry_spinaz, f"BattleZ entry from @{request.user.username}", app_key="battlez")
+        settle_together(_people, _was_beginner)
         notify(b.host, "join", f"@{request.user.username} entered '{b.title}' ⚔️",
                actor=request.user, item_id=b.item_key)
         return Response({"entry": entry_dict(entry, request),

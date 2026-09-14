@@ -5178,3 +5178,167 @@ class OfferDismissal(models.Model):
 
     def __str__(self):
         return f"{self.user} dismissed {self.offer_key}"
+
+
+# --------------------------------------------------------------- Lilith
+# From the blueprint, unchanged. `auto` and `statz` exist so a task's ORIGIN
+# is stored rather than guessed — it is what decides whether it may pay.
+KINDS = (
+    ("quick", "Quick Tap ⚡"),
+    ("standard", "Standard Task ✅"),
+    ("deep", "Deep Work 🧠"),
+    ("boss", "Boss Task 👑"),
+    ("auto", "Auto Task 🤖"),
+    ("statz", "StatZ Task 🌟"),
+)
+
+BUCKETS = (
+    ("inbox", "Inbox 📥"),
+    ("today", "Today ‼️"),
+    ("upcoming", "Upcoming ❗"),
+    ("anytime", "Anytime 👐🏼"),
+    ("someday", "Someday ❓"),
+    ("logbook", "Logbook 🧾"),
+)
+
+# WHERE a task came from, which is the whole basis of what it may pay.
+#
+#   self      — the member typed it. Nothing verified it happened.
+#   platform  — it points at a real action with its own economy.
+#   auto      — an automation rule made it. Pays no currency, ever: the
+#               blueprint's own rule is that automation must not create
+#               pay-to-win progression, and a rule that mints 🍥 while you
+#               sleep is exactly that.
+SOURCES = (("self", "Typed by the member"),
+           ("platform", "Points at a real action"),
+           ("auto", "Made by an automation rule"))
+
+#
+# The task manager's columns. The reward RULES — what pays what, and the
+# caps that stop it being a faucet — are in apps/economy/lilith_taskz.py.
+class LilithTask(models.Model):
+    """One thing to do.
+
+    `app_key`/`target` are the cross-pollination rule applied to a to-do list:
+    a task that says "record a Boss Take" carries WHERE that happens, so the
+    row is a door rather than a sentence. A task nobody can act on from the
+    list itself is the read-only surface CLAUDE.md calls unfinished.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="lilith_tasks")
+    title = models.CharField(max_length=140)
+    note = models.TextField(blank=True, default="")
+    kind = models.CharField(max_length=10, choices=KINDS, default="standard")
+    bucket = models.CharField(max_length=10, choices=BUCKETS, default="inbox", db_index=True)
+    source = models.CharField(max_length=10, choices=SOURCES, default="self")
+    # Where doing it actually happens. goToSpot(app_key, target) on the client.
+    app_key = models.CharField(max_length=32, blank=True, default="")
+    target = models.CharField(max_length=64, blank=True, default="")
+    due = models.DateTimeField(null=True, blank=True)
+    routine = models.ForeignKey("LilithRoutine", null=True, blank=True,
+                                on_delete=models.SET_NULL, related_name="tasks")
+    done_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("done_at", "due", "-created_at")
+        indexes = [models.Index(fields=["user", "bucket", "done_at"])]
+
+    def __str__(self):
+        return f"{self.title[:40]} ({self.bucket})"
+
+
+class LilithRoutine(models.Model):
+    """A habit, and the streak that is the only unfakeable thing in this app.
+
+    `last_done` and `streak` are kept rather than derived because deriving a
+    streak means walking every completion every time it renders, and this
+    renders on every open.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="lilith_routines")
+    title = models.CharField(max_length=140)
+    # Which real action closes it, when there is one. A routine pointing at a
+    # platform action is worth more than one pointing at nothing, for the
+    # same reason a task is.
+    app_key = models.CharField(max_length=32, blank=True, default="")
+    target = models.CharField(max_length=64, blank=True, default="")
+    streak = models.PositiveIntegerField(default=0)
+    longest = models.PositiveIntegerField(default=0)
+    last_done = models.DateField(null=True, blank=True)
+    # Which milestones have already paid. Once each, for life — a member who
+    # breaks a 30-day run and rebuilds it is not paid for 7 and 30 again.
+    paid_milestones = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-streak", "title")
+
+    def __str__(self):
+        return f"{self.title[:40]} · {self.streak}d"
+
+
+class LilithPayout(models.Model):
+    """Every coin Lilith has paid, and what for.
+
+    The daily caps are counted off this table rather than a counter column,
+    because a counter is a number that can be wrong and a ledger is a number
+    that can be audited. It is also what LogZ would need to answer "why did I
+    get this".
+    """
+    KIND_SELF = "self_task"
+    KIND_MILESTONE = "routine_milestone"
+    KIND_SPONSOR = "sponsor_graduation"
+    KIND_HELP = "help_graduated"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="lilith_payouts")
+    kind = models.CharField(max_length=24, db_index=True)
+    spinaz = models.PositiveIntegerField(default=0)
+    # ⚡ is recorded beside 🍥 rather than folded into it. They are different
+    # resources with different costs to us — one converts to model spend at
+    # 10:1 and the other cannot leave the platform — so a ledger that added
+    # them together could not answer the only question it exists for.
+    energy = models.PositiveIntegerField(default=0)
+    xp = models.PositiveIntegerField(default=0)
+    # What earned it, so a payout can be traced and a milestone cannot be
+    # claimed twice.
+    ref = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+
+class LilithSponsorship(models.Model):
+    """Somebody helping somebody who is still new.
+
+    The rule Corey asked for: pay MORE for helping an account that is still
+    new, where "new" ends when they complete a real collab or battle with
+    another member. The obvious version of that is farmable — make an alt,
+    "help" it, collab with it, collect — so the payout is arranged so that
+    doing it to yourself pays nothing:
+
+    * It pays on the NEWCOMER'S graduation, not on the helper's activity. No
+      graduation, no payout, however much helping was done.
+    * The graduating collab or battle must be with somebody OTHER than the
+      helper. A pair cannot be its own loop.
+    * DupeZ vetoes it. Any strong signal tying the two accounts together and
+      nothing is paid — that machinery already exists and already decides
+      what "one person" means.
+    * Once per newcomer, for life.
+    """
+    helper = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="lilith_sponsored")
+    newcomer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                 related_name="lilith_sponsors")
+    created_at = models.DateTimeField(auto_now_add=True)
+    graduated_at = models.DateTimeField(null=True, blank=True)
+    paid = models.BooleanField(default=False)
+    # Written down when it is refused, because a payout that silently does not
+    # happen is indistinguishable from a bug.
+    refused = models.CharField(max_length=64, blank=True, default="")
+
+    class Meta:
+        unique_together = ("helper", "newcomer")
+        ordering = ("-created_at",)
