@@ -62,12 +62,21 @@ _HISTORY_CAVEAT = ("Consistency, health and goal match come from your history, "
 INSTRUMENTS = {
     "singz": {
         "label": "SingZ", "performer": "vocalist", "coach": "vocal coach",
+        # There are words in a vocal take, so the writing CAN be judged — but
+        # only when the member asks. A singer working on range does not want
+        # their lyrics marked, and scoring somebody on something they did not
+        # submit for scoring is how a coach stops being trusted.
+        "lyrics": True,
         "scores": _VOCAL, "range_label": "Target range", "ranges": VOCAL_RANGES,
         "style_label": None, "styles": [],
         "caveat": "Pitch, tone, breath, range and agility are what one take can show. " + _HISTORY_CAVEAT,
     },
     "rapz": {
         "label": "RapZ", "performer": "rapper", "coach": "rap coach",
+        # The blueprint lists "Writing Score 📝 — rhyme density, structure,
+        # originality, punchlines, storytelling depending on style" as one of
+        # RapZ's core scores, and it was never implemented. This is it, opt-in.
+        "lyrics": True,
         "scores": _RAP,
         # A rapper has a register, and the lab has always detected it — the
         # screenshot of a rap take reads "your range reads Bass, D2 to B4".
@@ -115,14 +124,40 @@ DEFAULT = {
 }
 
 
+# The optional sixth dimension. Kept OUT of every profile's `scores` and added
+# only when asked for, because the five in a profile are the promise the app
+# makes about what one take shows — a member who opened SingZ to work on breath
+# should not find their writing marked.
+LYRIC_SCORE = {"writing": "Writing 📝"}
+
+
 def profile_for_app(app_key):
     return INSTRUMENTS.get((app_key or "").lower(), DEFAULT)
 
 
-def prompt_for(app_key, genre, target, difficulty, style=None):
+def rates_lyrics(app_key):
+    """Can this instrument's coach judge writing? Only where there are words.
+
+    A drum take has no lyrics, and a toggle offered on a screen that cannot
+    honour it is the switch-that-changes-nothing this codebase already has a
+    note about.
+    """
+    return bool(profile_for_app(app_key).get("lyrics"))
+
+
+def scores_for(app_key, *, lyrics=False):
+    """The dimensions this take will be scored on. One place, so the prompt,
+    the whitelist that filters the model's answer, and the row that stores it
+    can never disagree about how many there are."""
+    p = profile_for_app(app_key)
+    return {**p["scores"], **(LYRIC_SCORE if (lyrics and rates_lyrics(app_key)) else {})}
+
+
+def prompt_for(app_key, genre, target, difficulty, style=None, lyrics=False):
     """The coaching prompt, in this instrument's own terms."""
     p = profile_for_app(app_key)
-    keys = list(p["scores"])
+    lyrics = bool(lyrics) and rates_lyrics(app_key)
+    keys = list(scores_for(app_key, lyrics=lyrics))
     shape = ", ".join(f'"{k}": <1-10>' for k in keys)
     target_line = f"\n- {p['range_label']}: {target}" if p["range_label"] else ""
     style_line = (f"\n- {p['style_label']}: {style}"
@@ -152,6 +187,28 @@ will build a warm-up around."""
     range_field = (
         '\n  "range_profile": "<what their range reads as and what it suits - or say the take was too short to tell>",'
         if p["ranges"] else "")
+
+    # What the writing is judged on, and — just as importantly — what it is
+    # NOT. A lyric score is the easiest place in this app to start marking
+    # somebody's opinions, their subject matter or their swearing, none of
+    # which is craft. It is also the easiest place to invent: a model that
+    # cannot make the words out will happily review lyrics it imagined.
+    lyric_ask = ("""
+- "lyrics_read": the words you could actually make out, and how much of the \
+take that was. If the delivery is too buried or unclear to catch the writing, \
+SAY SO and score "writing" as null rather than guessing — reviewing lyrics you \
+could not hear is the worst thing you can do on this screen.
+- "lyrics_note": what the WRITING does — rhyme scheme and density, structure, \
+imagery, story, punchlines, how the hook lands, whether the words fit the \
+pocket. Quote the actual line you mean.
+
+Judging the writing means the CRAFT and nothing else. Not what they are \
+talking about, not their opinions, not whether you would say it, not swearing \
+or subject matter. A song about something you find unpleasant, written well, \
+is written well. You are a coach, not a censor.""" if lyrics else "")
+    lyric_fields = ('\n  "lyrics_read": "<the words you caught, and roughly how much of it - or say you could not make them out>",'
+                    '\n  "lyrics_note": "<what the writing does, quoting the line you mean>",'
+                    if lyrics else "")
 
     # For pitch-based instruments, ask for weak note extraction for practice tool linking
     has_pitch = "pitch" in p["scores"] or "intonation" in p["scores"]
@@ -234,7 +291,7 @@ number and not coaching:
 - "now": what this take actually IS right now — their current qualities, in \
 {p['label']}'s own terms, the honest read a stranger would give it.
 - "goal": what they are aiming at from here, pitched at "{difficulty}" and at \
-{aim}. Concrete enough to know when they have hit it.{range_ask}{style_ask}{weak_notes_section}
+{aim}. Concrete enough to know when they have hit it.{range_ask}{style_ask}{lyric_ask}{weak_notes_section}
 
 Return ONLY valid JSON, no markdown fence, in exactly this shape:
 {{
@@ -242,7 +299,7 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "scores": {{{shape}}},
   "now": "<their current qualities, in that voice>",
   "goal": "<what they're aiming at next, and how they'll know they got there>",{range_field}
-  "style_fit": "<how it sits against the style or genre they picked>",
+  "style_fit": "<how it sits against the style or genre they picked>",{lyric_fields}
   "verdict": "<one sentence in that voice, what this take actually is>",
   "strengths": ["<what genuinely worked, named specifically - AT LEAST ONE, always>", "..."],
   "fixes": ["<the moment it goes wrong, and the fix — the two that matter most, worst first>", "..."],

@@ -33,7 +33,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import ai_cost
-from .instruments import DIFFICULTIES, profile_for_app, prompt_for
+from .instruments import (DIFFICULTIES, LYRIC_SCORE, profile_for_app,
+                          prompt_for, rates_lyrics, scores_for)
 from .gemini import _bill, _key, generate_content
 from .models import (
     PROMPT_ALLOWANCE,
@@ -239,7 +240,7 @@ def _clamp(v, lo=1, hi=10):
 
 
 def score_take(app_key, f, content_type, *, genre, target, difficulty, style=None,
-               user=None):
+               user=None, lyrics=False):
     """Send one take to the model. Returns (payload, error) — exactly one is None.
 
     Shared by the member coach and the no-account trial, deliberately: a trial
@@ -258,12 +259,18 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         )
 
     difficulty = str(difficulty or "").lower()
+    # Opt-in, and only where there are words. `rates_lyrics` is checked here as
+    # well as in `prompt_for` because this value also decides what the whitelist
+    # below will accept: a drum take asked for a writing score must not end up
+    # with a column for one.
+    lyrics = bool(lyrics) and rates_lyrics(app_key)
     prompt = prompt_for(
         app_key,
         genre=str(genre or "unspecified")[:60],
         target=str(target or "unspecified")[:60],
         difficulty=difficulty if difficulty in DIFFICULTIES else "builder",
         style=str(style or "")[:60] or None,
+        lyrics=lyrics,
     )
     # The house voice for the PROSE inside the scored fields, from the member's
     # own row — the short form, not the full preamble. `prompt_for` states the
@@ -366,8 +373,11 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     listy = lambda v: [str(x)[:300] for x in v][:6] if isinstance(v, list) else []
     return {
         "score": _clamp(parsed.get("score")),
+        # One source for the dimension list, so the prompt cannot ask for six
+        # and the whitelist keep five.
         "scores": {k: _clamp((parsed.get("scores") or {}).get(k))
-                   for k in profile_for_app(app_key)["scores"]},
+                   for k in scores_for(app_key, lyrics=lyrics)},
+        "rated_lyrics": lyrics,
         "verdict": str(parsed.get("verdict", ""))[:400],
         # Where they are and where they're going. A score with no destination
         # is a number, not coaching — and these are whitelisted like everything
@@ -379,6 +389,10 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         # printing a heading over nothing.
         "range_profile": str(parsed.get("range_profile", ""))[:600],
         "style_fit": str(parsed.get("style_fit", ""))[:600],
+        # Only present when it was asked for. Whitelisted like everything else,
+        # so a model that volunteers a lyric review on a drum take is ignored.
+        **({"lyrics_read": str(parsed.get("lyrics_read", ""))[:1200],
+            "lyrics_note": str(parsed.get("lyrics_note", ""))[:800]} if lyrics else {}),
         "strengths": listy(parsed.get("strengths")),
         "fixes": listy(parsed.get("fixes")),
         "next_drill": str(parsed.get("next_drill", ""))[:300],
@@ -572,6 +586,13 @@ class SingZCoachView(APIView):
             "style_label": profile.get("style_label"),
             "styles": [{"key": k, "label": l} for k, l in profile.get("styles", [])],
             "difficulties": DIFFICULTIES,
+            # Whether this coach can judge writing at all. Served rather than
+            # guessed by the client, because a toggle offered on a drum take is
+            # the switch-that-changes-nothing this codebase already has a note
+            # about — and the extra dimension it adds comes from here too, so
+            # the chip the screen draws is the one the model was asked for.
+            "rates_lyrics": rates_lyrics(self.app_key),
+            "lyric_scores": LYRIC_SCORE if rates_lyrics(self.app_key) else {},
             "caveat": profile["caveat"],
         })
 
@@ -693,6 +714,7 @@ class SingZCoachView(APIView):
                 self.app_key, f, content_type,
                 genre=genre, target=target,
                 difficulty=data.get("difficulty"), style=data.get("style"),
+                lyrics=str(data.get("rate_lyrics", "")).lower() in ("1", "true", "yes", "on"),
                 # Only the voice the prose comes back in. The rubric is the
                 # same one the logged-out trial is scored on.
                 user=request.user,

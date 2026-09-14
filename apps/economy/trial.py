@@ -28,6 +28,7 @@ from rest_framework.views import APIView
 
 from .gemini import _key
 from .instruments import DIFFICULTIES, profile_for_app
+from .instruments import LYRIC_SCORE, rates_lyrics
 from .models import (
     TRIAL_CLAIM_DAYS,
     TRIAL_MAX_MB,
@@ -100,6 +101,11 @@ class TrialCoachView(APIView):
             "range_label": profile["range_label"],
             "ranges": [{"key": k, "label": l} for k, l in profile["ranges"]],
             "difficulties": DIFFICULTIES,
+            # Published here too, or the trial recorder cannot render the
+            # toggle and the door offers less than the product again — which
+            # is the gap the style picker comment above is about.
+            "rates_lyrics": rates_lyrics(self.app_key),
+            "lyric_scores": LYRIC_SCORE if rates_lyrics(self.app_key) else {},
             "caveat": profile["caveat"],
         })
 
@@ -142,6 +148,12 @@ class TrialCoachView(APIView):
             # a different input than the product is the same lie as one that
             # grades on an easier rubric, which is why score_take is shared.
             style=data.get("style"),
+            # And the same for the lyrics toggle, for the same reason the
+            # comment above gives: a trial graded on different inputs than the
+            # product is a lie about the product. It is the visitor's take —
+            # if they wrote words and want them read, that is the take they
+            # came to have scored.
+            lyrics=str(data.get("rate_lyrics", "")).lower() in ("1", "true", "yes", "on"),
         )
         if err:
             # A take the coach couldn't read doesn't burn the visitor's one

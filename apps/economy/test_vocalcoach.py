@@ -946,3 +946,88 @@ class ScaleIsAnchoredTests(TestCase):
         # And the bottom of the scale still exists.
         self.assertIn("there is essentially no performance to score", p)
         self.assertIn("Harshness is not honesty", p)
+
+
+class LyricRatingTests(TestCase):
+    """The optional writing score — RapZ's blueprint dimension, finally built.
+
+    "Writing Score 📝 — rhyme density, structure, originality, punchlines, or
+    storytelling depending on style" has been in the blueprint's core RapZ
+    scoring the whole time and was never implemented. It ships opt-in rather
+    than always-on, and the tests below are all about the two ways an opt-in
+    score can go wrong: appearing where it was not asked for, and being
+    reviewed when it could not be heard.
+    """
+
+    def test_only_apps_with_words_can_rate_lyrics(self):
+        from apps.economy.instruments import rates_lyrics
+        for k in ("singz", "rapz"):
+            self.assertTrue(rates_lyrics(k), k)
+        for k in ("guitarz", "bassz", "keyz", "drumz", "violinz"):
+            self.assertFalse(rates_lyrics(k), f"{k} has no lyrics to rate")
+
+    def test_the_dimension_appears_only_when_asked_for(self):
+        from apps.economy.instruments import scores_for
+        self.assertNotIn("writing", scores_for("rapz"))
+        self.assertIn("writing", scores_for("rapz", lyrics=True))
+
+    def test_asking_a_drum_kit_for_a_writing_score_is_ignored(self):
+        """A toggle a screen cannot honour is the switch that changes nothing."""
+        from apps.economy.instruments import scores_for
+        self.assertNotIn("writing", scores_for("drumz", lyrics=True))
+
+    def test_the_prompt_only_asks_when_the_toggle_is_on(self):
+        from apps.economy.instruments import prompt_for
+        on = prompt_for("rapz", "Trap", None, "builder", lyrics=True)
+        off = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn("lyrics_note", on)
+        self.assertIn('"writing"', on)
+        self.assertNotIn("lyrics_note", off)
+        self.assertNotIn('"writing"', off)
+
+    def test_it_refuses_to_review_words_it_could_not_hear(self):
+        """The same rule as the range profile: a review of lyrics nobody caught
+        is invented detail with an opinion attached."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder", lyrics=True)
+        self.assertIn("SAY SO", p)
+        self.assertIn("reviewing lyrics you could not hear", p)
+
+    def test_it_judges_craft_and_is_not_a_censor(self):
+        """The easiest place in this app to start marking somebody's opinions,
+        subject matter or swearing — none of which is craft."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder", lyrics=True)
+        self.assertIn("not a censor", p)
+        self.assertIn("not their opinions", p)
+        self.assertIn("written well, is written well", p.replace("\n", " "))
+
+    def test_the_capability_is_published_so_a_screen_can_ask(self):
+        from apps.economy.instruments import LYRIC_SCORE, rates_lyrics
+        self.assertEqual(list(LYRIC_SCORE), ["writing"])
+        self.assertTrue(rates_lyrics("rapz"))
+
+    def test_the_history_keeps_the_writing_score(self):
+        """Whitelisting a take against the profile's five would drop it: the
+        coach would show a Writing chip and the history would never have heard
+        of it."""
+        from django.contrib.auth import get_user_model
+        from apps.economy import takescorez
+        u = get_user_model().objects.create_user("lyricist", "l@mcz.test", "pw12345!")
+        row = takescorez.record(u, "rapz", {
+            "rated_lyrics": True,
+            "scores": {"flow": 7, "timing": 6, "breath": 6, "clarity": 7,
+                       "delivery": 8, "writing": 9},
+        })
+        self.assertIn("writing", row.scores)
+        self.assertEqual(row.scores["writing"], 9)
+
+    def test_a_take_scored_without_lyrics_stores_no_writing(self):
+        from django.contrib.auth import get_user_model
+        from apps.economy import takescorez
+        u = get_user_model().objects.create_user("plain", "p@mcz.test", "pw12345!")
+        row = takescorez.record(u, "rapz", {
+            "scores": {"flow": 7, "timing": 6, "breath": 6, "clarity": 7,
+                       "delivery": 8, "writing": 9},
+        })
+        self.assertNotIn("writing", row.scores)

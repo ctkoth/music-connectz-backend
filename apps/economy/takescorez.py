@@ -40,7 +40,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from .instruments import profile_for_app
+from .instruments import profile_for_app, scores_for
 from .models import InstrumentProfile, TakeScore
 
 # A dimension at or under this, out of the coach's 1-10, is a low. Not a
@@ -145,7 +145,11 @@ def record(user, app_key, payload, *, difficulty="", genre="", target="",
         return None
     try:
         prof = profile_for_app(app_key)
-        dims = prof["scores"]
+        # The take's OWN dimension set, including the optional writing score
+        # when the member asked for one. Whitelisting against the profile's
+        # five would drop it on the floor — the coach would show a Writing
+        # chip and the history would never have heard of it.
+        dims = scores_for(app_key, lyrics=bool(payload.get("rated_lyrics")))
         # Whitelisted against the instrument's own dimensions, so a key the
         # model invents cannot reach the column — the same guard the payload
         # itself already passes through in `score_take`.
@@ -277,7 +281,10 @@ def weakest(user, app_key):
         return {"key": "", "label": "", "average": None,
                 "why": f"{len(takes)} of {MIN_TAKES} takes. One take's worst "
                        "score is a bad day, not a weak spot."}
-    dims = profile_for_app(app_key)["scores"]
+    # Every dimension this member has actually been scored on, writing
+    # included — a weak spot the coach can name but the history cannot is a
+    # weak spot nobody can act on.
+    dims = scores_for(app_key, lyrics=True)
     sums = {}
     for t in takes:
         for k, v in (t.scores or {}).items():
@@ -298,7 +305,7 @@ def trend(user, app_key):
     a dimension that moved from one take to one take has not moved.
     """
     takes = sorted(_recent(user, app_key, days=RECENT_DAYS), key=lambda t: t.created_at)
-    dims = profile_for_app(app_key)["scores"]
+    dims = scores_for(app_key, lyrics=True)
     if len(takes) < MIN_TAKES * 2:
         return {"rows": [], "why": f"{len(takes)} of {MIN_TAKES * 2} takes. A trend "
                                    "drawn through fewer is a line through two dots."}
