@@ -95,6 +95,60 @@ def _read_pending(token):
         raise OAuthError("That sign-in could not be verified. Start again.")
 
 
+def disconnect_block(user, remaining):
+    """Why this member may not disconnect a sign-in, or "" if they may.
+
+    `remaining` is how many identities they would have LEFT. An OAuth signup
+    gets `set_unusable_password()`, so for those members the provider is not a
+    convenience on top of a password — it IS the password. Removing the last
+    one with nothing behind it locks them out of their own account, and unlike
+    a deleted post there is no support path back in: the account is still
+    there, and nobody can prove it is theirs.
+
+    So the rule is the one the delete rules already draw. A disconnect may cost
+    a convenience; it may never cost the way in. It is refused only in the case
+    that actually bites — no password AND nothing else linked — because a
+    refusal that fires when a password exists is a control that does not work
+    for the people who set one up properly.
+    """
+    if remaining > 0 or user.has_usable_password():
+        return ""
+    if user.email:
+        return (
+            "This is the only way you can sign in — your account has no "
+            "password. Set one with Forgot password, then disconnect."
+        )
+    # No password and no address to send a reset to. Naming it is the whole
+    # value: "set a password" is useless advice to somebody who cannot receive
+    # the link, and they would find that out by being locked out.
+    return (
+        "This is the only way you can sign in, and there's no email on the "
+        "account to send a password reset to. Add an email first."
+    )
+
+
+def connections_for(user):
+    """Every linked sign-in, each carrying whether it can be removed and why.
+
+    The reason rides on the ROW rather than being worked out by the client:
+    whether a disconnect is refused depends on the password and on how many
+    others are linked, and a screen recomputing that would be the second place
+    the rule lives — the one that disagrees after the next change here.
+    """
+    rows = list(user.oauth_identities.all().order_by("created_at"))
+    out = []
+    for row in rows:
+        why = disconnect_block(user, len(rows) - 1)
+        out.append({
+            "provider": row.provider,
+            "email": row.email,
+            "connected_at": row.created_at.isoformat(),
+            "can_disconnect": not why,
+            "blocked_reason": why,
+        })
+    return out
+
+
 def _user_from_oauth(info, with_created=False, create=True):
     """Find-or-create a user from a verified OAuth payload, return (user).
 
@@ -143,6 +197,24 @@ def _user_from_oauth(info, with_created=False, create=True):
         return (None, False) if with_created else None
 
     if not user:
+        # Opening an account on an address somebody else already holds. The
+        # provider did not verify it, so this is an arbitrary string that
+        # happens to name a real member — and an `OAuthIdentity` carrying it
+        # is a STRONG duplicate signal in `dupez`, which is what lets a member
+        # close "their other account" without an owner reviewing it.
+        #
+        # `accounts_user_email_ci_uniq` already refused this, so the hole was
+        # closed — but by an IntegrityError, which reaches the member as a 500
+        # and reaches the next reader as nothing at all. Refusing here on
+        # purpose is the same protection with a sentence attached, and the
+        # sentence is the useful half: the member who legitimately lands on
+        # this is one who forgot they had an account, and the answer they need
+        # is the other button, not an error page.
+        if info.get("email") and User.objects.filter(email__iexact=info["email"]).exists():
+            raise OAuthError(
+                "An account already uses that email address. Sign in to it and "
+                f"link {info['provider'].title()} from there."
+            )
         made = True
         base = info.get("name") or (info["email"].split("@")[0] if info.get("email") else info["provider"])
         user = User.objects.create_user(
@@ -580,6 +652,41 @@ class OAuthLinkView(APIView):
 
         except OAuthError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, provider):
+        """Disconnect a linked sign-in.
+
+        Linking existed from the start and unlinking never did, so a provider
+        attached to the wrong account could only be moved by someone with a
+        database shell. That is not an edge case: `_user_from_oauth` matches a
+        known `provider_uid` BEFORE anything else and signs you into whichever
+        account holds it, so a member whose SoundCloud landed on the wrong
+        account gets returned to it every single time, with no screen anywhere
+        offering a way out.
+
+        It takes the provider from the URL rather than a uid in the body: the
+        member is removing THEIR link to a provider, and a uid in a body is a
+        chance to name somebody else's.
+        """
+        identity = request.user.oauth_identities.filter(provider=provider).first()
+        if not identity:
+            return Response(
+                {"detail": f"No {provider.title()} sign-in is linked to your account."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        remaining = request.user.oauth_identities.exclude(pk=identity.pk).count()
+        blocked = disconnect_block(request.user, remaining)
+        if blocked:
+            return Response({"detail": blocked}, status=status.HTTP_400_BAD_REQUEST)
+
+        identity.delete()
+        return Response(
+            {
+                "detail": f"{provider.title()} disconnected. You can link it again any time.",
+                "user": PublicUserSerializer(request.user).data,
+            }
+        )
 
 
 class OAuthConfigView(APIView):

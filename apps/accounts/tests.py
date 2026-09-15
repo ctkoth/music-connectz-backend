@@ -87,7 +87,28 @@ class AuthFlowTests(TestCase):
         with CaptureQueriesContext(connection) as queries:
             resp = self.client.get("/api/auth/me/")
         self.assertEqual(resp.status_code, 200)
-        self.assertLessEqual(len(queries), 6, [q["sql"] for q in queries])
+        # 6 for the rows above, +1 for `connections` — one SELECT for the whole
+        # list, not one per link. The number is a ceiling on fan-out, so it may
+        # rise when a field genuinely adds a read and must never rise because a
+        # field started reading per row.
+        self.assertLessEqual(len(queries), 7, [q["sql"] for q in queries])
+
+    def test_connections_is_one_query_however_many_are_linked(self):
+        """The ceiling above only means something if it holds at three links as
+        well as one — a per-row read passes at one and fans out in production."""
+        from apps.accounts.models import OAuthIdentity
+
+        user = User.objects.create_user("many", "many@example.com", PASSWORD)
+        for n, provider in enumerate(("google", "spotify", "soundcloud")):
+            OAuthIdentity.objects.create(user=user, provider=provider,
+                                         provider_uid=f"uid-{n}", email="many@example.com")
+        self.client.force_authenticate(user)
+        self.client.get("/api/auth/me/")
+        with CaptureQueriesContext(connection) as queries:
+            resp = self.client.get("/api/auth/me/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.data["connections"]), 3)
+        self.assertLessEqual(len(queries), 7, [q["sql"] for q in queries])
 
 
 class OAuthLinkingTests(TestCase):
@@ -161,3 +182,66 @@ class OAuthVerifierShapeTests(TestCase):
             os.environ.pop("SPOTIFY_OAUTH_CLIENT_SECRET", None)
         self.assertIn("email_verified", info)
         self.assertIs(info["email_verified"], False)
+
+
+class DisconnectTests(TestCase):
+    """Linking shipped without an unlink, so a provider attached to the wrong
+    account could only be moved with a database shell — and `_user_from_oauth`
+    matches a known uid before anything else, so the member was returned to
+    that account on every sign-in with no way out on any screen."""
+
+    def setUp(self):
+        from apps.accounts.models import OAuthIdentity
+
+        self.client = APIClient()
+        self.user = User.objects.create_user("dis", "dis@example.com", PASSWORD)
+        OAuthIdentity.objects.create(user=self.user, provider="soundcloud",
+                                     provider_uid="sc-1", email="dis@example.com")
+        self.client.force_authenticate(self.user)
+
+    def test_disconnect_removes_the_link(self):
+        r = self.client.delete("/api/auth/oauth/soundcloud/link/")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(self.user.oauth_identities.count(), 0)
+
+    def test_disconnecting_what_is_not_linked_says_so(self):
+        r = self.client.delete("/api/auth/oauth/spotify/link/")
+        self.assertEqual(r.status_code, 404)
+
+    def test_it_never_removes_the_only_way_in(self):
+        """An OAuth signup gets set_unusable_password(), so for that member the
+        provider IS the password. Removing the last one locks them out of an
+        account nobody can then prove is theirs."""
+        self.user.set_unusable_password()
+        self.user.save()
+        r = self.client.delete("/api/auth/oauth/soundcloud/link/")
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertEqual(self.user.oauth_identities.count(), 1)
+
+    def test_a_second_link_makes_the_first_removable_again(self):
+        from apps.accounts.models import OAuthIdentity
+
+        self.user.set_unusable_password()
+        self.user.save()
+        OAuthIdentity.objects.create(user=self.user, provider="spotify",
+                                     provider_uid="sp-1", email="dis@example.com")
+        r = self.client.delete("/api/auth/oauth/soundcloud/link/")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(self.user.oauth_identities.count(), 1)
+
+    def test_it_only_ever_removes_your_own(self):
+        """The provider comes from the URL and the row from request.user, so
+        there is nowhere to name somebody else's link."""
+        from apps.accounts.models import OAuthIdentity
+
+        other = User.objects.create_user("other", "other@example.com", PASSWORD)
+        OAuthIdentity.objects.create(user=other, provider="spotify",
+                                     provider_uid="sp-other", email="other@example.com")
+        r = self.client.delete("/api/auth/oauth/spotify/link/")
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(other.oauth_identities.count(), 1)
+
+    def test_signed_out_cannot_disconnect(self):
+        self.client.force_authenticate(None)
+        r = self.client.delete("/api/auth/oauth/soundcloud/link/")
+        self.assertEqual(r.status_code, 401)

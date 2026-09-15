@@ -87,16 +87,40 @@ class TheQuestionIsOnlyAskedWhenWeCannotTell(TestCase):
         self.assertFalse(made)
         self.assertEqual(User.objects.count(), before)   # nothing was opened
 
-    def test_an_unverified_email_match_is_still_refused_not_asked(self):
-        """Refusing here protects the ACCOUNT, not just the count — a provider
-        that lets somebody claim an arbitrary address would otherwise be a way
-        in to anybody's."""
+    def test_an_unverified_email_match_is_asked_about_but_never_acted_on(self):
+        """An unverified address that names a real member is ASKED about, and
+        neither answer can reach that member's account.
+
+        This used to refuse outright, and the docstring's reason still stands —
+        a provider that lets somebody claim an arbitrary address would be a way
+        in to anybody's. What changed is that there is now a safe way to ask:
+        the member who really does own both has to sign in with the password
+        before anything links, so the question costs an attacker a password
+        they do not have.
+
+        Refusing at this point instead would take the question away from the
+        person it exists for. Both halves are pinned here, because dropping
+        either one is what turns asking back into a hole.
+        """
         from .oauth import OAuthError
+
+        # Asked, not decided: no user, and nothing written.
+        asked, made = _user_from_oauth(
+            info(provider="spotify", uid="s-1",
+                 email="member@example.com", verified=False),
+            with_created=True, create=False)
+        self.assertIsNone(asked)
+        self.assertFalse(made)
+
+        # And "I'm new" cannot open a shadow account on that address, which is
+        # what would hand the attacker a STRONG dupez signal against the member.
         with self.assertRaises(OAuthError):
             _user_from_oauth(
                 info(provider="spotify", uid="s-1",
                      email="member@example.com", verified=False),
-                with_created=True, create=False)
+                with_created=True, create=True)
+        self.assertEqual(
+            User.objects.filter(email__iexact="member@example.com").count(), 1)
 
 
 class AnsweringTheQuestion(TestCase):

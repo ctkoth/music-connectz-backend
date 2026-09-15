@@ -37,6 +37,10 @@ class PublicUserSerializer(serializers.ModelSerializer):
     # so the client can explain a disabled toggle instead of letting somebody
     # flip it and watch it silently flip back.
     voice = serializers.SerializerMethodField()
+    # Linked sign-ins, each carrying whether it can be disconnected and why
+    # not. Served here because this is what the account screen already reads,
+    # and a member cannot manage a link they cannot see they have.
+    connections = serializers.SerializerMethodField()
 
     # Nine of the fields below live on the economy profile/wallet/membership. Look
     # each row up ONCE per user and cache it on the serializer — resolving them
@@ -123,8 +127,13 @@ class PublicUserSerializer(serializers.ModelSerializer):
         fields = (
             "id", "username", "email", "phone", "avatar_url", "is_owner",
             "tier", "spinaz", "energy", "onboarded", "personas", "nationalities",
-            "birthday", "age", "zodiac", "zodiac_cn", "voice",
+            "birthday", "age", "zodiac", "zodiac_cn", "voice", "connections",
         )
+
+    def get_connections(self, obj):
+        from .views import connections_for
+
+        return connections_for(obj)
 
 
 class RegisterSerializer(serializers.Serializer):
