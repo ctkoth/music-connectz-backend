@@ -30,6 +30,7 @@ from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
 from .soundz import SoundZView
 from .soundcloud_engagement import SoundCloudEngagementView
+from .soundcloud_import import SoundCloudImportView
 from .coachz import CoachStudioView, RateStudentTakeView, AddStudentView
 from .distributez import TranscodeView, LyricsView
 from .adz import AdzView, AdDetailView, AdRewardView
@@ -231,6 +232,7 @@ urlpatterns = [
     path("share/p/<int:pk>", post_card, name="share-post"),
     path("soundz/", SoundZView.as_view(), name="economy-soundz"),
     path("soundcloud/engagement/", SoundCloudEngagementView.as_view(), name="economy-soundcloud-engagement"),
+    path("soundcloud/import/", SoundCloudImportView.as_view(), name="economy-soundcloud-import"),
     path("coachz/studio/", CoachStudioView.as_view(), name="economy-coachz-studio"),
     path("coachz/rate/", RateStudentTakeView.as_view(), name="economy-coachz-rate"),
     path("coachz/add-student/", AddStudentView.as_view(), name="economy-coachz-add-student"),

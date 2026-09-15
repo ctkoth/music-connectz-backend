@@ -267,9 +267,20 @@ def provider_status(value=None):
     return out
 
 
-def exchange_oauth2(provider: str, code: str, redirect_uri: str = "", code_verifier: str = ""):
-    """Swap an authorization `code` for an access token, then load + normalize
-    the member's profile. Used for every standard code-flow provider."""
+def access_token_for(provider: str, code: str, redirect_uri: str = "", code_verifier: str = ""):
+    """Swap an authorization `code` for the provider's raw access token.
+
+    Split out of `exchange_oauth2` so the two things that need a token share
+    one exchange. Sign-in wants the PROFILE behind the token and drops the
+    token; the SoundCloud importer wants the token itself, uses it once and
+    drops it. A second copy of this would be a second place the client secret,
+    the Basic-vs-body auth split and the PKCE verifier all have to stay right.
+
+    The token is RETURNED, never stored. Nothing in this codebase persists a
+    provider access token: holding a live credential that can post and delete
+    on somebody's SoundCloud turns a database breach into somebody else's music
+    being deleted, and no feature here is worth that.
+    """
     cfg = OAUTH2_PROVIDERS.get(provider)
     if not cfg:
         raise OAuthError(f"Unsupported provider '{provider}'.")
@@ -304,6 +315,19 @@ def exchange_oauth2(provider: str, code: str, redirect_uri: str = "", code_verif
         raise OAuthError(f"{provider.title()} returned an unexpected token response.")
     if not token:
         raise OAuthError(f"{provider.title()} did not return an access token.")
+    return token
+
+
+def exchange_oauth2(provider: str, code: str, redirect_uri: str = "", code_verifier: str = ""):
+    """Swap an authorization `code` for the member's normalized profile.
+
+    The token is used to read the profile and then goes out of scope here —
+    sign-in never needs it again.
+    """
+    cfg = OAUTH2_PROVIDERS.get(provider)
+    if not cfg:
+        raise OAuthError(f"Unsupported provider '{provider}'.")
+    token = access_token_for(provider, code, redirect_uri, code_verifier)
 
     try:
         profile = requests.get(

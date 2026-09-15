@@ -701,6 +701,18 @@ merge and push. The merge is still the deliberate act; the deliberation is the
 verification, not a question. Backend first whenever a screen needs a new
 endpoint.
 
+**Corey's second standing instruction: apply your recommendation, don't ask.**
+When you have weighed something and have a view, take it — the recommendation
+IS the decision, and a question that hands it back unanswered wastes the
+reasoning that produced it. Two things this does not license. It is not
+permission to skip the weighing, and a recommendation still has to say what it
+traded away, because the value of the judgement is checkable only if the cost
+is stated with it. And it does not cover a choice that is genuinely not the
+code's to make — a price, a name, whether a real credential gets stored — where
+the honest move is still to lay the options out. If in doubt: decide, ship, and
+say plainly what you decided and what it cost, so it can be reversed by
+somebody who disagrees.
+
 
 ## KeyConnectZ voice: the tier buys how many, never whether
 

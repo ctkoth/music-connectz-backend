@@ -75,6 +75,13 @@ UNLIMITED_CHARS = 10 ** 9
 # Nothing here is ever lowered without a migration plan for the members already
 # over the new number — a quota that retroactively shrinks turns somebody's
 # stored work into an error message they didn't cause.
+# `soundcloud_import` — tracks one SoundCloud import may bring in at once.
+#
+# Volume, not access: posting a SoundCloud link one at a time already works at
+# every tier, because WidgetZ reads the id out of the URL and frames the
+# provider's own player. Free is 5 rather than 0 — an importer that imports
+# nothing is a button that lies.
+
 # `custom_groups` — how many of a member's OWN curated groups they may keep.
 #
 # FriendZ, FanZ and PartnerZ are derived and therefore free and unlimited for
@@ -100,17 +107,17 @@ UNLIMITED_CHARS = 10 ** 9
 # which is exactly where paying for more is a real difference.
 TIER_LIMITS = {
     TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500, "embeds_per_post": 3,
-                "widgets_open": 4, "custom_groups": 1},
+                "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 5},
     TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 15,
-                   "widgets_open": 12, "custom_groups": 5},
+                   "widgets_open": 12, "custom_groups": 5, "soundcloud_import": 25},
     # StatZ writes without a character cap — the client already advertised this
     # ("StatZ char limit: Unlimited") while the server was still cutting at
     # 5000, so a StatZ member was told one thing and refused another.
     TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999,
-                 "widgets_open": 40, "custom_groups": 20},
+                 "widgets_open": 40, "custom_groups": 20, "soundcloud_import": 200},
     # Owner god-mode: effectively unlimited.
     TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760, "embeds_per_post": 999,
-                 "widgets_open": 999, "custom_groups": 999},
+                 "widgets_open": 999, "custom_groups": 999, "soundcloud_import": 200},
 }
 
 
