@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 
 from .models import (
     apply_post_rating,
+    public_name,
     AttractivenessRating,
     adult_only_reason,
     is_minor,
@@ -549,6 +550,7 @@ def _profile_card(p, request=None, badges=None):
     return {
         "username": p.user.username,
         "display_name": p.display_name or p.user.username,
+        "real_name": public_name(p),
         "avatar": _avatar_url(p, request) if request else None,
         "gender": p.gender,
         "sign": p.sign,

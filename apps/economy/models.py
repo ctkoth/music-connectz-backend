@@ -981,6 +981,12 @@ class Profile(models.Model):
     links = models.JSONField(default=list, blank=True)  # [{label, url}] public links
     # Location (opt-in) for in-person CollabZ / VenueZ distance filtering.
     share_location = models.BooleanField(default=False)
+    # Real name (User.first_name / User.last_name) shown to other members.
+    # Off by default and opt-in like share_location, because the name is
+    # PREFILLED from whatever the provider hands over at signup — Facebook via
+    # Spotify supplies a legal name — and defaulting that to public would
+    # publish it for somebody who never typed it and never saw a field.
+    name_public = models.BooleanField(default=False)
     lat = models.FloatField(null=True, blank=True)
     lng = models.FloatField(null=True, blank=True)
     # Declared external-account followers (sum across connected socials) — feeds
@@ -1004,6 +1010,24 @@ class Profile(models.Model):
 
 def profile_for(user):
     return Profile.objects.get_or_create(user=user)[0]
+
+
+def public_name(p):
+    """The member's real name if they chose to show it, else "".
+
+    One reader for every surface that renders somebody ELSE. The name is
+    prefilled from whatever the provider handed over at signup, so a screen
+    that reached for `user.first_name` directly would publish a legal name the
+    member never typed — and it would do it on whichever screen forgot, which
+    is the kind of leak nobody reports because nobody can see their own.
+
+    Returns "" rather than the username on purpose: the caller already has the
+    handle, and falling back to it here would make an opted-out member
+    indistinguishable from one whose name simply happens to be their handle.
+    """
+    if not p.name_public:
+        return ""
+    return " ".join(x for x in (p.user.first_name, p.user.last_name) if x).strip()
 
 
 def profile_age(p):

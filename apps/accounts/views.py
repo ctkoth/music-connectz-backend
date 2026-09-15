@@ -217,9 +217,20 @@ def _user_from_oauth(info, with_created=False, create=True):
             )
         made = True
         base = info.get("name") or (info["email"].split("@")[0] if info.get("email") else info["provider"])
+        # Split the provider's name into first/last as a PREFILL. Only here, in
+        # the branch that opens a new account — a returning member's own edit
+        # must never be overwritten by whatever their Facebook says this week,
+        # and this is the one path where there is nothing to overwrite.
+        #
+        # One split on the first space: "de la Cruz" belongs in a last name
+        # whole, and a cleverer parse would be a guess about somebody's name
+        # rather than a field they can correct.
+        first, _, last = (info.get("name") or "").strip().partition(" ")
         user = User.objects.create_user(
             username=_unique_username(base),
             email=info.get("email", ""),
+            first_name=first[:150],
+            last_name=last.strip()[:150],
         )
         user.set_unusable_password()
         user.save()
@@ -322,6 +333,26 @@ class MeView(APIView):
             request.user.username = new_username
             request.user.save(update_fields=["username"])
             changed.append("username")
+        # A real name, kept separate from the handle. `username` is the address
+        # other members type; these are what somebody is called, and a provider
+        # supplies them at signup (Facebook through Spotify hands over a legal
+        # name). Django's own columns, so no third place to look.
+        #
+        # They are stored and displayed and NEVER matched on. Matching an
+        # account by name would hand it to anyone who typed that name into a
+        # provider's display-name field, which nobody verifies — the email rule
+        # above, minus the part that makes it safe.
+        # Tracked apart from `changed`, which is the Profile's update_fields —
+        # putting a User column in there makes Profile.save() raise for a field
+        # it has never heard of.
+        named = [f for f in ("first_name", "last_name") if f in data]
+        for field in named:
+            setattr(request.user, field, str(data.get(field) or "").strip()[:150])
+        if named:
+            request.user.save(update_fields=named)
+        if "name_public" in data:
+            p.name_public = bool(data["name_public"])
+            changed.append("name_public")
         if isinstance(data.get("personas"), list):
             # A persona is {"key", "name", "skills": [{"name", "start"}]} once
             # the member has used the skill picker, or a bare key string from

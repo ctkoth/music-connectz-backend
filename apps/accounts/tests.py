@@ -245,3 +245,93 @@ class DisconnectTests(TestCase):
         self.client.force_authenticate(None)
         r = self.client.delete("/api/auth/oauth/soundcloud/link/")
         self.assertEqual(r.status_code, 401)
+
+
+class RealNameTests(TestCase):
+    """A real name is stored and shown. It is never matched on: a provider's
+    display name is typed by its owner and verified by nobody, so linking an
+    account on one would hand it to whoever typed it."""
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def _info(self, **over):
+        info = {"provider": "spotify", "uid": "sp-1", "email": "new@example.com",
+                "email_verified": False, "name": "Corey Knap", "avatar_url": ""}
+        info.update(over)
+        return info
+
+    def test_a_new_account_is_prefilled_from_the_provider(self):
+        from apps.accounts.views import _user_from_oauth
+        user = _user_from_oauth(self._info())
+        self.assertEqual(user.first_name, "Corey")
+        self.assertEqual(user.last_name, "Knap")
+
+    def test_a_multi_word_surname_stays_whole(self):
+        from apps.accounts.views import _user_from_oauth
+        user = _user_from_oauth(self._info(name="Ana de la Cruz"))
+        self.assertEqual(user.first_name, "Ana")
+        self.assertEqual(user.last_name, "de la Cruz")
+
+    def test_one_word_name_leaves_the_surname_blank(self):
+        from apps.accounts.views import _user_from_oauth
+        user = _user_from_oauth(self._info(name="Prince"))
+        self.assertEqual(user.first_name, "Prince")
+        self.assertEqual(user.last_name, "")
+
+    def test_a_returning_member_keeps_the_name_they_typed(self):
+        """The prefill is on the create branch only. A provider that changes
+        somebody's display name must not rewrite what they corrected here."""
+        from apps.accounts.models import OAuthIdentity
+        from apps.accounts.views import _user_from_oauth
+
+        mine = User.objects.create_user("mine", "mine@example.com", PASSWORD)
+        mine.first_name, mine.last_name = "Kay", "Oth"
+        mine.save()
+        OAuthIdentity.objects.create(user=mine, provider="spotify", provider_uid="sp-1")
+
+        again = _user_from_oauth(self._info(name="Somebody Else"))
+        self.assertEqual(again.pk, mine.pk)
+        again.refresh_from_db()
+        self.assertEqual((again.first_name, again.last_name), ("Kay", "Oth"))
+
+    def test_a_shared_name_never_matches_an_account(self):
+        """The whole reason this is display-only. Two members called the same
+        thing stay two members."""
+        from apps.accounts.views import _user_from_oauth
+
+        first = User.objects.create_user("real", "real@example.com", PASSWORD)
+        first.first_name, first.last_name = "Corey", "Knap"
+        first.save()
+
+        impostor = _user_from_oauth(self._info(uid="sp-2", email="other@example.com"))
+        self.assertNotEqual(impostor.pk, first.pk)
+
+    def test_the_name_is_private_until_the_member_says_otherwise(self):
+        from apps.economy.models import profile_for, public_name
+
+        user = User.objects.create_user("priv", "priv@example.com", PASSWORD)
+        user.first_name, user.last_name = "Corey", "Knap"
+        user.save()
+        p = profile_for(user)
+        self.assertFalse(p.name_public)
+        self.assertEqual(public_name(p), "")
+
+        p.name_public = True
+        p.save()
+        self.assertEqual(public_name(p), "Corey Knap")
+
+    def test_the_member_can_set_and_publish_their_name(self):
+        from apps.economy.models import profile_for
+
+        user = User.objects.create_user("edit", "edit@example.com", PASSWORD)
+        self.client.force_authenticate(user)
+        r = self.client.patch("/api/auth/me/",
+                              {"first_name": "Corey", "last_name": "Knap",
+                               "name_public": True}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        user.refresh_from_db()
+        self.assertEqual((user.first_name, user.last_name), ("Corey", "Knap"))
+        self.assertTrue(profile_for(user).name_public)
+        self.assertEqual(r.data["first_name"], "Corey")
+        self.assertTrue(r.data["name_public"])

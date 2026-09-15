@@ -41,6 +41,11 @@ class PublicUserSerializer(serializers.ModelSerializer):
     # not. Served here because this is what the account screen already reads,
     # and a member cannot manage a link they cannot see they have.
     connections = serializers.SerializerMethodField()
+    # Real name, separate from the handle. This serializer answers /api/auth/me/
+    # — the member's own view — so both halves are always returned here and
+    # `name_public` says whether anyone ELSE may see them. The surfaces that
+    # render another member read `public_name()` instead of these.
+    name_public = serializers.SerializerMethodField()
 
     # Nine of the fields below live on the economy profile/wallet/membership. Look
     # each row up ONCE per user and cache it on the serializer — resolving them
@@ -128,12 +133,16 @@ class PublicUserSerializer(serializers.ModelSerializer):
             "id", "username", "email", "phone", "avatar_url", "is_owner",
             "tier", "spinaz", "energy", "onboarded", "personas", "nationalities",
             "birthday", "age", "zodiac", "zodiac_cn", "voice", "connections",
+            "first_name", "last_name", "name_public",
         )
 
     def get_connections(self, obj):
         from .views import connections_for
 
         return connections_for(obj)
+
+    def get_name_public(self, obj):
+        return self._economy(obj, "profile").name_public
 
 
 class RegisterSerializer(serializers.Serializer):

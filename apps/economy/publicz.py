@@ -29,6 +29,7 @@ from .models import (
     Post,
     Profile,
     badges_for,
+    public_name,
     can_view_post,
     item_rating_median,
 )
@@ -96,6 +97,9 @@ def public_profile_dict(p):
     return {
         "username": p.user.username,
         "display_name": p.display_name or p.user.username,
+        # "" unless the member opted in — see public_name()'s note on why this
+        # never falls back to the handle.
+        "real_name": public_name(p),
         "bio": p.bio or "",
         "personas": personas,
         # BadgeZ travels with the card. A shared profile is somebody's proof
