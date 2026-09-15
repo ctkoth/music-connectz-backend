@@ -95,18 +95,6 @@ def _read_pending(token):
         raise OAuthError("That sign-in could not be verified. Start again.")
 
 
-def _is_pending_token(token):
-    """Check if a token is a pending OAuth token (signed by us) vs a real OAuth code.
-    Pending tokens are Django signed strings and include a period and colon pattern.
-    Real OAuth codes are typically much shorter alphanumeric strings without these markers.
-    """
-    if not token:
-        return False
-    # Django's signing.dumps produces strings with periods and colons
-    # Real OAuth codes don't follow this pattern
-    return "." in token and ":" in token
-
-
 def _user_from_oauth(info, with_created=False, create=True):
     """Find-or-create a user from a verified OAuth payload, return (user).
 
@@ -521,10 +509,13 @@ class OAuthLinkView(APIView):
     def post(self, request, provider):
         data = request.data or {}
         try:
-            # Check if this is a pending token flow (login then link)
-            if data.get("code") and _is_pending_token(data.get("code")):
-                # This is a pending token from an earlier OAuth exchange
-                info = _read_pending(data["code"])
+            # Linking after a login: the member answered "I already have one",
+            # signed in, and is now spending the signed result of the exchange
+            # that already happened. Same key as the register path above — the
+            # authorization code was spent on that first exchange and cannot be
+            # replayed, so a pending token is the only thing left to present.
+            if data.get("pending"):
+                info = _read_pending(data["pending"])
                 if info.get("provider") != provider:
                     raise OAuthError("That sign-in was for a different provider.")
             else:
