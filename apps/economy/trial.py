@@ -28,7 +28,8 @@ from rest_framework.views import APIView
 
 from .gemini import _key
 from .instruments import DIFFICULTIES, profile_for_app
-from .instruments import LYRIC_SCORE, rates_lyrics, scores_for
+from .instruments import (LYRIC_SCORE, MIX_SCORE, rates_lyrics, rates_mix,
+                          scores_for)
 from .models import (
     TRIAL_CLAIM_DAYS,
     TRIAL_MAX_MB,
@@ -125,6 +126,10 @@ class TrialCoachView(APIView):
             # is the gap the style picker comment above is about.
             "rates_lyrics": rates_lyrics(self.app_key),
             "lyric_scores": LYRIC_SCORE if rates_lyrics(self.app_key) else {},
+            # The mix toggle, published the same way and for the same reason:
+            # the screen must not keep its own copy of which dimensions exist.
+            "rates_mix": rates_mix(self.app_key),
+            "mix_scores": MIX_SCORE if rates_mix(self.app_key) else {},
             "caveat": profile["caveat"],
         })
 
@@ -173,6 +178,9 @@ class TrialCoachView(APIView):
             # if they wrote words and want them read, that is the take they
             # came to have scored.
             lyrics=str(data.get("rate_lyrics", "")).lower() in ("1", "true", "yes", "on"),
+            # Same reason as lyrics above: the trial is the product, so a
+            # visitor who wants the mix read gets the mix read.
+            mix=str(data.get("rate_mix", "")).lower() in ("1", "true", "yes", "on"),
         )
         if err:
             # A take the coach couldn't read doesn't burn the visitor's one

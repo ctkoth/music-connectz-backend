@@ -169,6 +169,38 @@ LYRIC_SCORE = {
 # ship.
 STYLE_SCORE = {"style_match": "Style Match 🎭"}
 
+# Mix 🎚️ — opt-in, like lyricism, and for the same reason: it is a DIFFERENT
+# SKILL from the one the five dimensions measure, and scoring somebody on a
+# craft they did not submit is the complaint that produced the lyrics toggle.
+#
+# The default has to be off. Most takes here are a phone in a bedroom, and a
+# performance coach that quietly marks those down for room tone is measuring
+# the room instead of the singer — the substance rule inverted, since a member
+# could raise that number by buying an interface rather than by getting better.
+# Somebody mixing on purpose wants to know; everybody else is being graded on
+# equipment.
+#
+# It is also why the performance dimensions must IGNORE production entirely:
+# with this off, a rough recording of a great take is a great take, and the
+# prompt says so in as many words.
+MIX_SCORE = {
+    "clarity_mix": "Balance 🎚️",
+    "low_end": "Low End 🔊",
+    "space": "Space & Depth 🌌",
+    "loudness": "Level 📶",
+}
+
+
+def rates_mix(app_key):
+    """Every instrument — any recording has a mix, including a drum take.
+
+    A function rather than a per-profile flag because there is nothing to vary:
+    unlike lyrics, which need words, there is no instrument whose recording
+    cannot be listened to as a recording. It exists so the caller reads the
+    same shape for both toggles.
+    """
+    return True
+
 
 def profile_for_app(app_key):
     return INSTRUMENTS.get((app_key or "").lower(), DEFAULT)
@@ -184,20 +216,22 @@ def rates_lyrics(app_key):
     return bool(profile_for_app(app_key).get("lyrics"))
 
 
-def scores_for(app_key, *, lyrics=False):
+def scores_for(app_key, *, lyrics=False, mix=False):
     """The dimensions this take will be scored on. One place, so the prompt,
     the whitelist that filters the model's answer, and the row that stores it
     can never disagree about how many there are."""
     p = profile_for_app(app_key)
     return {**p["scores"], **STYLE_SCORE,
-            **(LYRIC_SCORE if (lyrics and rates_lyrics(app_key)) else {})}
+            **(LYRIC_SCORE if (lyrics and rates_lyrics(app_key)) else {}),
+            **(MIX_SCORE if (mix and rates_mix(app_key)) else {})}
 
 
-def prompt_for(app_key, genre, target, difficulty, style=None, lyrics=False):
+def prompt_for(app_key, genre, target, difficulty, style=None, lyrics=False, mix=False):
     """The coaching prompt, in this instrument's own terms."""
     p = profile_for_app(app_key)
     lyrics = bool(lyrics) and rates_lyrics(app_key)
-    keys = list(scores_for(app_key, lyrics=lyrics))
+    mix = bool(mix) and rates_mix(app_key)
+    keys = list(scores_for(app_key, lyrics=lyrics, mix=mix))
     shape = ", ".join(f'"{k}": <1-10>' for k in keys)
     target_line = f"\n- {p['range_label']}: {target}" if p["range_label"] else ""
     style_line = (f"\n- {p['style_label']}: {style}"
@@ -281,6 +315,35 @@ is written well. You are a coach, not a censor.""" if lyrics else "")
                     '\n  "lyrics_note": "<what the writing does, quoting the line you mean>",'
                     if lyrics else "")
 
+    # Production, only when they asked for it. Deliberately the LAST section so
+    # it cannot colour the performance judgement above it.
+    mix_ask = ("""
+
+**THE MIX — they asked for this, so judge the RECORDING as a recording.**
+- "clarity_mix": is everything audible in its own space, or are parts masking \
+each other? Can you hear the vocal against the instrumental?
+- "low_end": is the bottom controlled — present without booming, tight without \
+being thin? Say what you hear, not what gear you think they used.
+- "space": reverb, width and depth. Is it placed in a room on purpose, or dry \
+and flat, or drowned?
+- "loudness": is the level consistent and appropriate, without clipping or \
+pumping? Judge the LEVEL, never the loudness war.
+
+Judge what is ON the recording, never the equipment behind it. "Get a better \
+mic" is not coaching — it is a shopping list, and most people sending this are \
+on a phone. Say what to change in the mix they have.""" if mix else "")
+    mix_fields = ('\n  "mix_note": "<what the mix does, and the one change that would help most>",'
+                  if mix else "")
+    # Sits right under "score the PERFORMANCE, not the recording", because
+    # turning the mix scores on is the one thing that could be read as
+    # cancelling that rule. It doesn't: the mix block is the ONLY place
+    # production counts, and a rough recording of a great take is still great.
+    mix_caveat = ("""
+
+That holds even though they asked for a mix rating. The mix scores below are \
+the ONLY place production may count — a rough recording of a great performance \
+is still a great performance and must score as one.""" if mix else "")
+
     # For pitch-based instruments, ask for weak note extraction for practice tool linking
     has_pitch = "pitch" in p["scores"] or "intonation" in p["scores"]
     weak_notes_section = ("""
@@ -321,10 +384,21 @@ released record, a session professional, or a studio mix. Those are the wrong \
 reference and using them makes every honest take a 2, which tells the member \
 nothing except to stop.
 
+FIRST, IS THERE A PERFORMANCE AT ALL? Silence, a few seconds of room noise, \
+talking, a TV in the background, a voice memo of an idea, or plainly the wrong \
+file — where there is essentially no performance to score, that is not a weak \
+take, it is not a take. Set "unscorable" to a short plain sentence saying what \
+you actually heard and what to send instead, set "score" and every entry in \
+"scores" to null, and stop. Do NOT score it low instead: a 2 tells somebody \
+their performance was bad when the truth is you never heard one, and those two \
+need opposite answers — one is what to fix, the other is what to send. If you \
+can hear them performing at all, however roughly, this is not that: leave \
+"unscorable" null and score it properly below.
+
 What the numbers mean, at "{difficulty}":
-- 1-2: there is essentially no performance to score — silence, a few seconds of \
-noise, or the wrong thing recorded. If you can hear them performing at all, \
-this is not the band.
+- 1-2: they are performing, but it barely holds together — the take is mostly \
+getting away from them. This is the floor for a REAL attempt, not the bin for \
+a clip with nothing in it; that one is "unscorable" above.
 - 3-4: real attempt, but the fundamentals come apart often enough that it is \
 the first thing to fix.
 - 5-6: a solid, ordinary take from somebody at this level. Things to fix, \
@@ -336,7 +410,7 @@ Score the PERFORMANCE, not the recording. Room noise, phone microphones, no \
 mixing, a backing track that is too loud — none of that is their singing, \
 playing or writing, and none of it may pull a score down. If the recording \
 genuinely gets in the way of hearing something, say so in the fixes and don't \
-score that dimension harshly for it.
+score that dimension harshly for it.{mix_caveat}
 
 Harshness is not honesty. A number lower than the take deserves is just as \
 wrong as one higher, and it is the one that makes somebody quit.
@@ -370,15 +444,16 @@ number and not coaching:
 - "now": what this take actually IS right now — their current qualities, in \
 {p['label']}'s own terms, the honest read a stranger would give it.
 - "goal": what they are aiming at from here, pitched at "{difficulty}" and at \
-{aim}. Concrete enough to know when they have hit it.{range_ask}{style_ask}{style_scale}{lyric_ask}{weak_notes_section}
+{aim}. Concrete enough to know when they have hit it.{range_ask}{style_ask}{style_scale}{lyric_ask}{mix_ask}{weak_notes_section}
 
 Return ONLY valid JSON, no markdown fence, in exactly this shape:
 {{
-  "score": <overall 1-10 integer>,
+  "unscorable": <null, or a short sentence: what you heard, and what to send instead>,
+  "score": <overall 1-10 integer, or null if unscorable>,
   "scores": {{{shape}}},
   "now": "<their current qualities, in that voice>",
   "goal": "<what they're aiming at next, and how they'll know they got there>",{range_field}
-  "style_fit": "<how it sits against the style or genre they picked>",{lyric_fields}
+  "style_fit": "<how it sits against the style or genre they picked>",{lyric_fields}{mix_fields}
   "verdict": "<one sentence in that voice, what this take actually is>",
   "strengths": ["<what genuinely worked, named specifically - AT LEAST ONE, always>", "..."],
   "fixes": ["<the moment it goes wrong, and the fix — the two that matter most, worst first>", "..."],

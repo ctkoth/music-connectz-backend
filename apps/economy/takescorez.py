@@ -149,7 +149,8 @@ def record(user, app_key, payload, *, difficulty="", genre="", target="",
         # when the member asked for one. Whitelisting against the profile's
         # five would drop it on the floor — the coach would show a Writing
         # chip and the history would never have heard of it.
-        dims = scores_for(app_key, lyrics=bool(payload.get("rated_lyrics")))
+        dims = scores_for(app_key, lyrics=bool(payload.get("rated_lyrics")),
+                          mix=bool(payload.get("rated_mix")))
         # Whitelisted against the instrument's own dimensions, so a key the
         # model invents cannot reach the column — the same guard the payload
         # itself already passes through in `score_take`.

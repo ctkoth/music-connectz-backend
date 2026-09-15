@@ -1133,7 +1133,11 @@ class PromptShapeTests(TestCase):
         from apps.economy.instruments import prompt_for
         p = prompt_for(app_key, "R&B", "tenor", "builder", lyrics=True)
         import json, re
-        m = re.search(r"\{\n  \"score\".*\n\}", p, re.S)
+        # Anchored on the block, not on which key happens to come first.
+        # "unscorable" is now asked for ahead of "score" on purpose — a model
+        # writes the JSON in order, so the field that decides whether there is
+        # anything to score has to be committed before the number is.
+        m = re.search(r"\{\n  \"[a-z_]+\":.*\n\}", p, re.S)
         self.assertIsNotNone(m, f"{app_key}: no JSON shape found in the prompt")
         return m.group(0)
 
@@ -1157,3 +1161,119 @@ class PromptShapeTests(TestCase):
                 json.loads(filled)
             except ValueError as e:
                 self.fail(f"{app_key} shape is not valid JSON: {e}\n{filled}")
+
+
+class MixRatingTests(TestCase):
+    """Opt-in, like lyricism, and for the same reason: the mix is a DIFFERENT
+    SKILL from the one the five dimensions measure. Most takes here are a phone
+    in a bedroom, and a performance coach that quietly marks those down is
+    measuring the room — a number a member could raise by buying an interface
+    rather than by getting better."""
+
+    def test_off_by_default(self):
+        from apps.economy.instruments import scores_for
+        self.assertNotIn("low_end", scores_for("singz"))
+
+    def test_on_when_asked_for(self):
+        from apps.economy.instruments import MIX_SCORE, scores_for
+        keys = scores_for("singz", mix=True)
+        for k in MIX_SCORE:
+            self.assertIn(k, keys)
+
+    def test_every_instrument_can_be_asked(self):
+        """Unlike lyrics, which need words, there is no instrument whose
+        recording cannot be listened to as a recording."""
+        from apps.economy.instruments import scores_for
+        for app_key in ("singz", "rapz", "drumz", "guitarz", "violinz", "keyz"):
+            self.assertIn("low_end", scores_for(app_key, mix=True), app_key)
+
+    def test_it_stacks_with_lyrics_without_either_losing_a_key(self):
+        from apps.economy.instruments import LYRIC_SCORE, MIX_SCORE, scores_for
+        keys = scores_for("rapz", lyrics=True, mix=True)
+        for k in list(LYRIC_SCORE) + list(MIX_SCORE):
+            self.assertIn(k, keys)
+
+    def test_the_prompt_keeps_performance_and_production_apart(self):
+        """Turning the mix on is the one thing that could read as cancelling
+        "score the PERFORMANCE, not the recording". It must not."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder", mix=True)
+        self.assertIn("Score the PERFORMANCE, not the recording", p)
+        self.assertIn("ONLY place production may count", p)
+        # And it never turns into a shopping list.
+        self.assertIn("is not coaching", p)
+
+    def test_no_mix_section_when_it_was_not_asked_for(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertNotIn("THE MIX", p)
+        self.assertNotIn("mix_note", p)
+
+
+class UnscorableTests(TestCase):
+    """"There was no performance in this clip" is an ANSWER, not a bad score.
+    A 2 says their playing was bad when the truth is nothing was heard, and the
+    two need opposite responses — one is what to fix, the other what to send."""
+
+    def test_the_prompt_asks_for_it_before_it_asks_for_a_number(self):
+        """A model writes JSON in order, so the field deciding whether there is
+        anything to score has to be committed before the number is."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("IS THERE A PERFORMANCE AT ALL", p)
+        self.assertLess(p.index('"unscorable"'), p.index('"score": <overall'))
+
+    def test_the_bottom_band_is_still_anchored_and_means_a_real_take(self):
+        """Removing 1-2 entirely would leave the model no floor for a genuine
+        but barely-holding performance, which is a different thing again."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("1-2", p)
+        self.assertIn("This is the floor for a REAL attempt", p)
+
+    def _run(self, payload):
+        """Same shape the other coach tests use: stub the HTTP call, not the
+        helper above it, so the real parse path runs."""
+        import json as _json
+        from unittest.mock import patch as _patch
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from apps.economy.vocalcoach import score_take
+
+        fake = type("R", (), {"status_code": 200,
+                              "json": lambda self: {"candidates": [{"content": {"parts": [
+                                  {"text": _json.dumps(payload)}]}}]}})()
+        with _patch("apps.economy.vocalcoach._key", return_value="k"), \
+             _patch("apps.economy.gemini.requests.post", return_value=fake):
+            return score_take("singz", SimpleUploadedFile("t.mp3", b"x"),
+                              "audio/mpeg", genre="R&B", target="tenor",
+                              difficulty="builder")
+
+    def test_an_unscorable_reply_comes_back_as_an_answer_not_an_error(self):
+        out, err = self._run({
+            "unscorable": "That's a TV in the background, not a take. Send 8 bars over a beat.",
+            "score": None, "scores": {}})
+        self.assertIsNone(err)
+        self.assertIn("not a take", out["unscorable"])
+        # No invented number, and no half-filled dimension set behind it.
+        self.assertIsNone(out["score"])
+        self.assertEqual(out["scores"], {})
+
+    def test_a_normal_reply_still_scores_and_says_it_is_scorable(self):
+        """The key is present either way, so the client reads one field rather
+        than inferring the state from a missing score."""
+        out, err = self._run({
+            "unscorable": None, "score": 6,
+            "scores": {"pitch": 6, "tone": 5, "breath": 6, "range": 5,
+                       "agility": 6, "style_match": 7},
+            "verdict": "solid", "strengths": ["pocket"], "fixes": ["bar 3"],
+            "next_drill": "d"})
+        self.assertIsNone(err)
+        self.assertEqual(out["unscorable"], "")
+        self.assertEqual(out["score"], 6)
+
+    def test_a_null_score_with_no_reason_is_still_an_error(self):
+        """Unscorable is a STATED answer. A reply that just omits the number is
+        an unparseable reply, and must not be dressed up as a verdict."""
+        out, err = self._run({"unscorable": None, "score": None, "scores": {}})
+        self.assertIsNone(out)
+        self.assertIsNotNone(err)

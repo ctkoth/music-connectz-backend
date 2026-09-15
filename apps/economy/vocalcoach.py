@@ -33,8 +33,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import ai_cost
-from .instruments import (DIFFICULTIES, LYRIC_SCORE, profile_for_app,
-                          prompt_for, rates_lyrics, scores_for)
+from .instruments import (DIFFICULTIES, LYRIC_SCORE, MIX_SCORE, profile_for_app,
+                          prompt_for, rates_lyrics, rates_mix, scores_for)
 from .gemini import _bill, _key, generate_content
 from .models import (
     PROMPT_ALLOWANCE,
@@ -240,7 +240,7 @@ def _clamp(v, lo=1, hi=10):
 
 
 def score_take(app_key, f, content_type, *, genre, target, difficulty, style=None,
-               user=None, lyrics=False):
+               user=None, lyrics=False, mix=False):
     """Send one take to the model. Returns (payload, error) — exactly one is None.
 
     Shared by the member coach and the no-account trial, deliberately: a trial
@@ -264,6 +264,13 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     # below will accept: a drum take asked for a writing score must not end up
     # with a column for one.
     lyrics = bool(lyrics) and rates_lyrics(app_key)
+    # Same shape as lyrics, and opt-in for the same reason: the mix is a
+    # different skill from the one the five dimensions measure, and most takes
+    # here are a phone in a bedroom. Scoring production by default would mark
+    # somebody down for their room — a number they could raise by buying an
+    # interface rather than by getting better, which is the substance rule
+    # inverted.
+    mix = bool(mix) and rates_mix(app_key)
     prompt = prompt_for(
         app_key,
         genre=str(genre or "unspecified")[:60],
@@ -271,6 +278,7 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         difficulty=difficulty if difficulty in DIFFICULTIES else "builder",
         style=str(style or "")[:60] or None,
         lyrics=lyrics,
+        mix=mix,
     )
     # The house voice for the PROSE inside the scored fields, from the member's
     # own row — the short form, not the full preamble. `prompt_for` states the
@@ -365,6 +373,24 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         return None, unreadable
 
     parsed = _parse(text)
+    # "There was no performance in this clip" is an ANSWER, not a failure, and
+    # not a low score either. A 2 tells somebody their playing was bad when the
+    # truth is the model never heard any playing — and the two need opposite
+    # responses: one is "here is what to fix", the other is "here is what to
+    # send". Inventing a number at the exact moment a stranger is deciding
+    # whether any of this is real is the substance rule's worst case.
+    #
+    # It comes back BEFORE the parse check below, because an unscorable take
+    # legitimately carries a null score and would otherwise read as unparseable.
+    if parsed and str(parsed.get("unscorable") or "").strip():
+        return {
+            "unscorable": str(parsed["unscorable"]).strip()[:400],
+            "score": None,
+            "scores": {},
+            "rated_lyrics": lyrics,
+            "rated_mix": mix,
+        }, None
+
     if not parsed or _clamp(parsed.get("score")) is None:
         logger.error("SingZ coach: unparseable reply — %s", text[:300])
         return None, ({"detail": "The coach's reply didn't come back readable. Try again."},
@@ -376,8 +402,12 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         # One source for the dimension list, so the prompt cannot ask for six
         # and the whitelist keep five.
         "scores": {k: _clamp((parsed.get("scores") or {}).get(k))
-                   for k in scores_for(app_key, lyrics=lyrics)},
+                   for k in scores_for(app_key, lyrics=lyrics, mix=mix)},
         "rated_lyrics": lyrics,
+        "rated_mix": mix,
+        # A scored take is explicitly NOT unscorable, so the client reads one
+        # key either way rather than inferring it from a missing score.
+        "unscorable": "",
         "verdict": str(parsed.get("verdict", ""))[:400],
         # Where they are and where they're going. A score with no destination
         # is a number, not coaching — and these are whitelisted like everything
@@ -393,6 +423,7 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         # so a model that volunteers a lyric review on a drum take is ignored.
         **({"lyrics_read": str(parsed.get("lyrics_read", ""))[:1200],
             "lyrics_note": str(parsed.get("lyrics_note", ""))[:800]} if lyrics else {}),
+        **({"mix_note": str(parsed.get("mix_note", ""))[:800]} if mix else {}),
         "strengths": listy(parsed.get("strengths")),
         "fixes": listy(parsed.get("fixes")),
         "next_drill": str(parsed.get("next_drill", ""))[:300],
@@ -598,6 +629,10 @@ class SingZCoachView(APIView):
             # the chip the screen draws is the one the model was asked for.
             "rates_lyrics": rates_lyrics(self.app_key),
             "lyric_scores": LYRIC_SCORE if rates_lyrics(self.app_key) else {},
+            # The mix toggle, published the same way and for the same reason:
+            # the screen must not keep its own copy of which dimensions exist.
+            "rates_mix": rates_mix(self.app_key),
+            "mix_scores": MIX_SCORE if rates_mix(self.app_key) else {},
             "caveat": profile["caveat"],
         })
 
@@ -720,6 +755,7 @@ class SingZCoachView(APIView):
                 genre=genre, target=target,
                 difficulty=data.get("difficulty"), style=data.get("style"),
                 lyrics=str(data.get("rate_lyrics", "")).lower() in ("1", "true", "yes", "on"),
+                mix=str(data.get("rate_mix", "")).lower() in ("1", "true", "yes", "on"),
                 # Only the voice the prose comes back in. The rubric is the
                 # same one the logged-out trial is scored on.
                 user=request.user,
