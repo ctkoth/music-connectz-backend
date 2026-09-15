@@ -14,7 +14,7 @@ from .widgetz import WidgetOpenView, WidgetZView
 from .rulez import RulezView
 from .personalityz import PersonalityAxesView, PersonalityTestView
 from .trialdoorz import TrialDoorsView
-from .trial import TrialPublicStatsView
+from .trial import TrialPublicStatsView, PublicTiersView
 from .offerz_engine import (FunnelCatalogView, FunnelOfferRedeemView,
                             FunnelOffersView)
 from .lilith_taskz import (LilithBoardView, LilithRoutineDetailView,
@@ -376,6 +376,7 @@ urlpatterns = [
     path("trialdoorz/", TrialDoorsView.as_view(), name="economy-trial-doors"),
     # Public funnel headline stats for non-authenticated trial visitors.
     path("trial/public/stats/", TrialPublicStatsView.as_view(), name="economy-trial-public-stats"),
+    path("tiers/", PublicTiersView.as_view(), name="economy-public-tiers"),
     # PersonalitieZ axes — one list, read by the profile toggles, every
     # member search filter, and VybeZ.
     path("personalityz/", PersonalityAxesView.as_view(), name="economy-personalityz"),

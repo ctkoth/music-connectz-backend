@@ -284,3 +284,33 @@ class TrialPublicStatsView(APIView):
                 }
             ]
         })
+
+
+class PublicTiersView(APIView):
+    """GET /api/economy/tiers/ — public membership tier options for trial door.
+
+    Non-authenticated endpoint showing all public tiers (Free, Premium, StatZ)
+    with their key features so visitors see membership options before creating
+    an account.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from .catalog import tier_ladder, TIER_FREE, TIER_PREMIUM, TIER_STATZ
+
+        ladder = tier_ladder()
+        tiers = []
+        for tier_key in [TIER_FREE, TIER_PREMIUM, TIER_STATZ]:
+            limits = ladder[tier_key]
+            price = limits.pop("month_cents", 0)
+            tiers.append({
+                "key": tier_key,
+                "label": {"free": "Free", "premium": "Premium", "statz": "StatZ"}.get(tier_key, tier_key),
+                "price_cents": price,
+                "upload_mb": limits["upload_mb"],
+                "storage_mb": limits["storage_mb"],
+                "char_limit": limits["char_limit"],
+                "embeds_per_post": limits["embeds_per_post"],
+            })
+        return Response({"tiers": tiers})
