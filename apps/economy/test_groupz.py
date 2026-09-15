@@ -597,3 +597,72 @@ class RebuildPartnershipsTests(TestCase):
         self.assertFalse(Partnership.objects.exists())
         call_command("rebuild_partnerships", "--write")
         self.assertEqual(Partnership.objects.get().collabs, 2)
+
+
+class AlmostPartnersTests(TestCase):
+    """The `works` counter has been on Partnership since the tally replaced the
+    scan, and every reader filtered `works__gte=PARTNER_WORKS` — so somebody one
+    deal from a real benefit looked identical to somebody who had never worked
+    with anyone. The number existed and nothing served it."""
+
+    def setUp(self):
+        from . import groupz as G
+        self.G = G
+        self.me = member("almost_me")
+        self.c = APIClient()
+        self.c.force_authenticate(self.me)
+
+    def test_two_of_three_is_reported_with_what_is_left(self):
+        mate = member("almost_mate")
+        self.G.note_work([self.me.pk, mate.pk], collabs=2)
+        rows = self.G.almost_partners(self.me)
+        self.assertEqual(rows, [{"username": "almost_mate", "works": 2, "needs": 1}])
+
+    def test_someone_already_partnered_is_not_in_it(self):
+        """They have the benefit — the list is who hasn't got it yet."""
+        mate = member("done_mate")
+        self.G.note_work([self.me.pk, mate.pk], collabs=self.G.PARTNER_WORKS)
+        self.assertEqual(self.G.almost_partners(self.me), [])
+
+    def test_a_stranger_is_not_in_it(self):
+        """Zero works is not progress — it would list everybody on the platform
+        as almost a partner, which says nothing about anybody."""
+        member("stranger")
+        self.assertEqual(self.G.almost_partners(self.me), [])
+
+    def test_closest_first(self):
+        near, far = member("near_one"), member("far_one")
+        self.G.note_work([self.me.pk, near.pk], collabs=2)
+        self.G.note_work([self.me.pk, far.pk], collabs=1)
+        self.assertEqual([r["username"] for r in self.G.almost_partners(self.me)],
+                         ["near_one", "far_one"])
+
+    def test_battles_count_toward_it_the_same_as_collabs(self):
+        mate = member("battle_mate")
+        self.G.note_work([self.me.pk, mate.pk], battles=2)
+        self.assertEqual(self.G.almost_partners(self.me)[0]["needs"], 1)
+
+    def test_it_rides_on_the_partners_row_beside_members(self):
+        """Added beside `members`, never folded into it — the client is in the
+        other repo and an endpoint may grow a key but never lose one."""
+        mate = member("tab_mate")
+        self.G.note_work([self.me.pk, mate.pk], collabs=2)
+        row = next(r for r in self.c.get("/api/groupz/").data
+                   if r["id"] == "partners")
+        self.assertIn("members", row)
+        self.assertEqual(row["almost"], [{"username": "tab_mate", "works": 2, "needs": 1}])
+
+    def test_it_does_not_grow_a_query_per_person(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        from .models import Partnership
+
+        def count_for(n):
+            Partnership.objects.all().delete()
+            for i in range(n):
+                self.G.note_work([self.me.pk, member(f"near{n}_{i}").pk], collabs=2)
+            with CaptureQueriesContext(connection) as ctx:
+                self.c.get("/api/groupz/")
+            return len(ctx.captured_queries)
+
+        self.assertLessEqual(count_for(20), count_for(2) + 2)

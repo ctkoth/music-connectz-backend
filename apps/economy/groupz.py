@@ -180,6 +180,41 @@ def partner_ids(user):
     return {b if a == user.pk else a for a, b in rows}
 
 
+def almost_partners(user):
+    """Who this member has started work with but not yet finished three of.
+
+    The counter has been on `Partnership` since the tally replaced the scan,
+    and every reader of it filters `works__gte=PARTNER_WORKS` — so a member one
+    deal away from a real benefit was indistinguishable from one who had never
+    worked with anybody. The number existed; nothing served it.
+
+    That is the gain half of the cost/gain rule going missing. A status you
+    only hear about once you already hold it cannot change what anybody does,
+    which is the whole job of having one — the same reason the ZodiacZ panel
+    publishes all twenty-four bonuses instead of only the one you earned.
+
+    Deliberately NOT gated on FriendZ, matching `partner_ids`: the escrow
+    benefit does not ask whether you follow each other, so neither does the
+    sentence telling you how close you are to it. Sorted by who is closest,
+    because the useful row is the one that needs one more.
+    """
+    # Annotated as `tally`, not `works`: `works` is a property on the model, and
+    # an annotation of that name blows up with "property has no setter" the
+    # moment the queryset builds an instance. `partner_ids` only gets away with
+    # it because `.values_list` never instantiates one.
+    rows = (Partnership.objects
+            .filter(Q(a=user) | Q(b=user))
+            .annotate(tally=F("collabs") + F("battles"))
+            .filter(tally__gt=0, tally__lt=PARTNER_WORKS)
+            .select_related("a", "b"))
+    out = [{
+        "username": (r.b if r.a_id == user.pk else r.a).username,
+        "works": r.collabs + r.battles,
+        "needs": PARTNER_WORKS - (r.collabs + r.battles),
+    } for r in rows]
+    return sorted(out, key=lambda x: (x["needs"], x["username"]))
+
+
 def partners_of(user, friends_ids=None):
     """FriendZ who have finished PARTNER_WORKS works with this member.
 
@@ -228,6 +263,11 @@ def board(user):
          "note": "People who follow you and you don't follow back. Theirs to decide, not yours."},
         {"id": "partners", "kind": "partners", "title": "", "derived": True,
          "members": _names(partners),
+         # Added BESIDE `members`, never folded into it: the client reading
+         # this is in the other repo and the two deploy independently, so an
+         # endpoint may grow a key ahead of its client and may never lose one.
+         # An older build renders the list it always did and ignores this.
+         "almost": almost_partners(user),
          # The rule, on the list, because a list you cannot edit has to say
          # what puts somebody on it or it reads as broken.
          # The rule, plus what it is worth, because a list you cannot edit has
