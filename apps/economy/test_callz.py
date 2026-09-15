@@ -105,10 +105,13 @@ class ThePriceIsVisibleBeforeItConnects(Base):
 
 
 class TheGate(Base):
-    def test_placing_a_call_is_the_statz_perk(self):
+    def test_a_free_member_can_place_a_call(self):
+        """This asserted a 403 — placing a call was StatZ-only. That is the
+        ladder rule broken at its plainest, and what it refused was the member
+        spending their OWN cash at a rate the callee published, so it protected
+        nothing. The tier buys minutes now."""
         tier(self.caller, TIER_FREE)
-        r = self.ring()
-        self.assertEqual(r.status_code, 403)
+        self.assertEqual(self.ring().status_code, 201)
 
     def test_receiving_one_is_free_at_every_tier(self):
         # Gating both sides would mean nobody can ever call anybody, and the
@@ -248,3 +251,68 @@ class TheHandshake(Base):
         d = self.c.get(f"/api/economy/callz/{pk}/").data
         self.assertGreaterEqual(d["elapsed_seconds"], 120)
         self.assertEqual(d["cost_cents"], 200)
+
+
+class EveryTierCanCallTests(TestCase):
+    """Placing a call was `tier == TIER_STATZ` — the ladder rule broken at its
+    plainest. A member who cannot call anybody does not upgrade to find out
+    what calling is like; they conclude the tab is broken.
+
+    What was being refused was the member spending THEIR OWN cash at somebody
+    else's published rate, so the refusal protected nothing."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        self.c = APIClient()
+        self.me = User.objects.create_user("caller", "caller@example.com", "hunter2hunter2")
+        self.them = User.objects.create_user("callee", "callee@example.com", "hunter2hunter2")
+        self.c.force_authenticate(self.me)
+
+    def test_a_free_member_may_place_a_call(self):
+        from apps.economy.callz import daily_minutes
+        from apps.economy.models import TIER_FREE
+        self.assertGreater(daily_minutes(TIER_FREE), 0)
+        r = self.c.get(f"/api/economy/callz/rate/{self.them.username}/")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.data["can_call"])
+
+    def test_the_ceiling_is_published_before_the_button(self):
+        """The cost of ringing somebody is the rate AND how long you have."""
+        r = self.c.get(f"/api/economy/callz/rate/{self.them.username}/")
+        self.assertIn("daily_minutes", r.data)
+        self.assertIn("minutes_left", r.data)
+        self.assertIn("rate_cents_per_min", r.data)
+
+    def test_the_tier_buys_how_long_not_whether(self):
+        from apps.economy.callz import daily_minutes
+        from apps.economy.models import TIER_FREE, TIER_PREMIUM, TIER_STATZ
+        free, prem, statz = (daily_minutes(t) for t in (TIER_FREE, TIER_PREMIUM, TIER_STATZ))
+        self.assertLess(free, prem)
+        self.assertLess(prem, statz)
+        # and the bottom of the ladder is a real conversation, not a taste
+        self.assertGreaterEqual(free, 15)
+
+    def test_used_minutes_come_from_what_was_billed(self):
+        """A call that rang and died holds timestamps and bills nothing.
+        Counting it would charge somebody for a call they never had."""
+        from apps.economy.callz import minutes_used_today
+        from apps.economy.models import Call
+        Call.objects.create(caller=self.me, callee=self.them,
+                            status=Call.STATUS_MISSED, billed_seconds=0)
+        self.assertEqual(minutes_used_today(self.me), 0)
+        Call.objects.create(caller=self.me, callee=self.them,
+                            status=Call.STATUS_ENDED, billed_seconds=600)
+        self.assertEqual(minutes_used_today(self.me), 10)
+
+    def test_spending_the_day_is_a_ceiling_that_names_itself(self):
+        from apps.economy.models import Call
+        from apps.economy.callz import daily_minutes
+        from apps.economy.models import membership_for
+        mins = daily_minutes(membership_for(self.me).tier)
+        Call.objects.create(caller=self.me, callee=self.them,
+                            status=Call.STATUS_ENDED, billed_seconds=mins * 60)
+        r = self.c.post("/api/economy/callz/", {"username": self.them.username}, format="json")
+        self.assertEqual(r.status_code, 429, r.content)
+        self.assertEqual(r.data["minutes_left"], 0)
+        self.assertEqual(r.data["daily_minutes"], mins)
+        self.assertIn(str(mins), r.data["detail"])

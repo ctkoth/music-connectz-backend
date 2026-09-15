@@ -116,12 +116,31 @@ def tier_limits(tier):
     return {
         "active_tasks": {"free": 50, "premium": 250}.get(t, 1000),
         "routines": {"free": 3, "premium": 12}.get(t, 50),
-        # StatZ only, from the blueprint's gated list.
-        "auto_schedule": t == "statz",
-        "persona_automation": t == "statz",
-        "ai_breakdown": t == "statz",
-        "recurring_quests": t == "statz",
-        "smart_priority": t == "statz",
+
+        # These five were `t == "statz"` — five booleans directly under a
+        # docstring promising a ladder of how many and how clever, "never
+        # whether". They are numbers now, and every tier gets a working one.
+        #
+        # It mattered more than an unbuilt feature usually would, because the
+        # tab RENDERS this: a free member was told "StatZ adds auto-schedule,
+        # persona automation and AI breakdowns" on every visit. A capability
+        # named and withheld is how somebody decides an app is not for them,
+        # and they decide it before the feature they were refused even exists.
+        "auto_schedule_days": {"free": 1, "premium": 7}.get(t, 30),
+        "automation_rules": {"free": 2, "premium": 10}.get(t, 50),
+        "recurring_quests": {"free": 1, "premium": 5}.get(t, 25),
+        # Priced per run out of the member's daily AI allowance, like every
+        # other model call — so the ladder here is the allowance, not a flag.
+        "ai_breakdown": True,
+
+        # A SORT, not a score. It was "smart_priority", which would have been a
+        # single blended number computed from deadline, money impact and
+        # "growth value" — fields the member typed, presented back as
+        # judgement. Members learn to pad the fields rather than do the work,
+        # which is `directz_ai_rating` wearing a to-do list. Ordering by a
+        # named axis is honest; scoring by a secret blend of them is not.
+        "priority_sort": True,
+
         # Premium and up.
         "reward_customization": t in ("premium", "statz"),
     }

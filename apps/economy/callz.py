@@ -42,8 +42,9 @@ from rest_framework.views import APIView
 
 from django.contrib.auth import get_user_model
 
-from .models import (Call, TIER_STATZ, blocked_user_ids, membership_for,
-                     pay_between, profile_for, wallet_for)
+from .models import (Call, TIER_DEBUG, TIER_FREE, TIER_PREMIUM, TIER_STATZ,
+                     blocked_user_ids, membership_for, pay_between,
+                     profile_for, wallet_for)
 from .social import profile_skill_rate
 
 User = get_user_model()
@@ -57,6 +58,48 @@ CALL_STALE_SECONDS = 90
 # the call rolls on and re-holds — it is a bound on how much of a member's
 # balance a single answer can lock up.
 MAX_ESCROW_MINUTES = 60
+
+# How LONG a call can run per day, by tier. This replaced a flat
+# `tier == TIER_STATZ` gate on placing a call at all.
+#
+# The gate was the ladder rule broken at its plainest — "a tier limit says how
+# MUCH, how OFTEN or how FAST; it may never say whether". A member who cannot
+# call anybody does not upgrade to find out what calling is like; they conclude
+# the tab is broken and stop opening it. And the thing being refused was the
+# member spending THEIR OWN cash on somebody else's published rate, so the
+# refusal protected nothing — the platform's only exposure is the escrow it
+# holds mid-call, which is what this actually caps.
+#
+# Free is deliberately a real conversation rather than a taste: a ceiling low
+# enough to be useless is the same door shut with a smaller sign on it.
+DAILY_CALL_MINUTES = {TIER_FREE: 30, TIER_PREMIUM: 120, TIER_STATZ: 600,
+                      TIER_DEBUG: 10 ** 6}
+
+
+def daily_minutes(tier):
+    return DAILY_CALL_MINUTES.get((tier or TIER_FREE).lower(), DAILY_CALL_MINUTES[TIER_FREE])
+
+
+def minutes_used_today(user):
+    """Minutes this member has already spent PLACING calls today.
+
+    Off `billed_seconds`, which is what was actually charged for, rather than
+    the gap between started_at and ended_at — a call that rang and died holds
+    timestamps and bills nothing, and counting it against the day's allowance
+    would charge somebody for a call they never had.
+    """
+    from django.db.models import Sum
+    from django.utils import timezone
+    start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    total = (Call.objects.filter(caller=user, created_at__gte=start)
+             .aggregate(s=Sum("billed_seconds"))["s"] or 0)
+    return int(total // 60)
+
+
+def minutes_left(user, tier=None):
+    from .models import membership_for
+    tier = tier or membership_for(user).tier
+    return max(0, daily_minutes(tier) - minutes_used_today(user))
 
 # What a member charges when they have priced no skills. Zero, and zero means
 # free: a call with a member who has never named a price should connect, not
@@ -216,9 +259,14 @@ class CallRateView(APIView):
             # None means "as long as you like" — they have not priced a skill.
             "affordable_minutes": affordable_minutes,
             "max_escrow_minutes": MAX_ESCROW_MINUTES,
-            "can_call": tier == TIER_STATZ,
+            # Every tier can place a call. What the tier buys is how long, and
+            # both halves are published BEFORE the button so the cost of
+            # ringing somebody is readable up front — the rate, the balance,
+            # the minutes it affords, and the minutes the day has left.
+            "can_call": minutes_left(request.user, tier) > 0,
+            "daily_minutes": daily_minutes(tier),
+            "minutes_left": minutes_left(request.user, tier),
             "tier": tier,
-            "tier_required": TIER_STATZ,
             # Receiving is never gated; only placing is. Said here so the tab
             # can explain the asymmetry rather than implying both sides pay.
             "receiving_is_free_at_every_tier": True,
@@ -251,11 +299,20 @@ class CallsView(APIView):
         })
 
     def post(self, request):
-        if membership_for(request.user).tier != TIER_STATZ:
+        tier = membership_for(request.user).tier
+        left = minutes_left(request.user, tier)
+        if left <= 0:
+            # A ceiling, not a door: it names the number, says when it comes
+            # back, and says what a tier up buys — all three, because "you
+            # can't" with no figure beside it is the refusal a member reads as
+            # the feature being broken.
             return Response(
-                {"detail": "Placing a call is a StatZ perk. Receiving one is free at every tier.",
-                 "tier_required": TIER_STATZ},
-                status=status.HTTP_403_FORBIDDEN)
+                {"detail": f"You've used today's {daily_minutes(tier)} call minutes. "
+                           "They reset at midnight, and a tier up raises the ceiling.",
+                 "daily_minutes": daily_minutes(tier),
+                 "minutes_left": 0,
+                 "tier": tier},
+                status=status.HTTP_429_TOO_MANY_REQUESTS)
         d = request.data or {}
         other = User.objects.filter(username__iexact=str(d.get("username", ""))).first()
         if not other or other.id == request.user.id:

@@ -303,10 +303,27 @@ class TierTests(TestCase):
         self.assertGreater(free["routines"], 0)
 
     def test_automation_is_what_a_tier_buys(self):
-        self.assertFalse(L.tier_limits("free")["auto_schedule"])
-        self.assertTrue(L.tier_limits("statz")["auto_schedule"])
-        self.assertGreater(L.tier_limits("statz")["active_tasks"],
-                           L.tier_limits("free")["active_tasks"])
+        """It buys HOW MUCH. These were five booleans sitting under a docstring
+        promising "never whether" — and the tab rendered the refusal, so a free
+        member was told each visit that auto-schedule was not for them."""
+        free, statz = L.tier_limits("free"), L.tier_limits("statz")
+        for key in ("auto_schedule_days", "automation_rules", "recurring_quests",
+                    "active_tasks", "routines"):
+            self.assertGreater(free[key], 0, f"free gets no {key}")
+            self.assertGreater(statz[key], free[key], f"{key} does not ladder")
+
+    def test_nothing_here_is_refused_outright(self):
+        for t in ("free", "premium", "statz"):
+            lim = L.tier_limits(t)
+            self.assertTrue(lim["ai_breakdown"], t)
+            self.assertTrue(lim["priority_sort"], t)
+
+    def test_priority_is_a_sort_and_never_a_score(self):
+        """A single blended number from deadline, money impact and "growth
+        value" is computed off fields the member typed and handed back as
+        judgement — which teaches padding, not work."""
+        self.assertNotIn("smart_priority", L.tier_limits("statz"))
+        self.assertTrue(L.tier_limits("free")["priority_sort"])
 
 
 class ApiTests(TestCase):
