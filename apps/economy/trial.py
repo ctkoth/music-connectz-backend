@@ -46,14 +46,28 @@ def client_ip(request):
     return (request.META.get("REMOTE_ADDR") or "")[:64]
 
 
+def _trial_ip_exempted(ip):
+    """Check if this IP is exempt from per-IP trial rate limits."""
+    import os
+    exempted = os.environ.get("TRIAL_EXEMPT_IPS", "").strip()
+    if not exempted or not ip:
+        return False
+    exempt_list = [i.strip() for i in exempted.split(",") if i.strip()]
+    return ip in exempt_list
+
+
 def trial_state(ip):
     """(taken_today_globally, this_address_already_had_one)."""
     from datetime import timedelta
     now = timezone.now()
     today = TrialTake.objects.filter(created_at__gte=now - timedelta(hours=24)).count()
-    mine = bool(ip) and TrialTake.objects.filter(
-        ip=ip, created_at__gte=now - timedelta(hours=TRIAL_PER_IP_HOURS)
-    ).exists()
+    # Exempt testing IPs from per-IP rate limit
+    if _trial_ip_exempted(ip):
+        mine = False
+    else:
+        mine = bool(ip) and TrialTake.objects.filter(
+            ip=ip, created_at__gte=now - timedelta(hours=TRIAL_PER_IP_HOURS)
+        ).exists()
     return today, mine
 
 
@@ -202,4 +216,71 @@ class TrialTakeDetailView(APIView):
             "claimed": bool(take.claimed_by_id),
             "open_in": f"{take.app_key}:coach",
             "created_at": take.created_at.isoformat(),
+        })
+
+
+class TrialPublicStatsView(APIView):
+    """GET /api/trial/public/stats/ — public funnel headline for trial door.
+
+    Non-authenticated endpoint showing headline funnel rates (landing → trial →
+    scored → account) so visitors can see engagement metrics before signing up.
+    Shows counts so a visitor can check sample size; does NOT expose per-channel
+    or per-device breakdowns, per the substance rule.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from datetime import timedelta
+        from .models import FunnelEvent
+
+        now = timezone.now()
+        days = int(request.query_params.get("days", "30"))
+        start = now - timedelta(days=days)
+
+        # Get headline rates: landing → trial, trial → scored, scored → account
+        landing = FunnelEvent.objects.filter(
+            kind="landing_view", created_at__gte=start
+        ).values("visitor_id").distinct().count()
+
+        trial = FunnelEvent.objects.filter(
+            kind="try_view", created_at__gte=start
+        ).values("visitor_id").distinct().count()
+
+        scored = FunnelEvent.objects.filter(
+            kind="try_scored", created_at__gte=start
+        ).values("visitor_id").distinct().count()
+
+        registered = FunnelEvent.objects.filter(
+            kind="register_success", created_at__gte=start
+        ).values("visitor_id").distinct().count()
+
+        return Response({
+            "days": days,
+            "headline": [
+                {
+                    "key": "landing_to_trial",
+                    "label": "Landed → Tried",
+                    "from": landing,
+                    "to": trial,
+                    "pct": int((trial / landing * 100) if landing > 0 else 0),
+                    "note": "of visitors who landed"
+                },
+                {
+                    "key": "trial_to_scored",
+                    "label": "Tried → Scored",
+                    "from": trial,
+                    "to": scored,
+                    "pct": int((scored / trial * 100) if trial > 0 else 0),
+                    "note": "of visitors who opened the trial"
+                },
+                {
+                    "key": "scored_to_registered",
+                    "label": "Scored → Registered",
+                    "from": scored,
+                    "to": registered,
+                    "pct": int((registered / scored * 100) if scored > 0 else 0),
+                    "note": "of visitors who got a score"
+                }
+            ]
         })
