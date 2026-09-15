@@ -25,6 +25,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .badgez import public_badge_chip
+from .visibility import redact
 from .models import (
     Post,
     Profile,
@@ -94,7 +95,10 @@ def public_profile_dict(p):
             "name": persona.get("name", ""),
             "skills": skills,
         })
-    return {
+    # Redacted for the anonymous audience: a member who moved bio or links to
+    # "member" must be honoured on the one page a stranger can open, which is
+    # the page this control exists for.
+    return redact({
         "username": p.user.username,
         "display_name": p.display_name or p.user.username,
         # "" unless the member opted in — see public_name()'s note on why this
@@ -110,7 +114,7 @@ def public_profile_dict(p):
         "badges": [public_badge_chip(b) for b in badges_for(p.user, only_visible=True)],
         "links": links_of(p),
         "public": True,
-    }
+    }, p, None)
 
 
 class PublicPostView(APIView):

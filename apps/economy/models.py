@@ -981,12 +981,16 @@ class Profile(models.Model):
     links = models.JSONField(default=list, blank=True)  # [{label, url}] public links
     # Location (opt-in) for in-person CollabZ / VenueZ distance filtering.
     share_location = models.BooleanField(default=False)
-    # Real name (User.first_name / User.last_name) shown to other members.
-    # Off by default and opt-in like share_location, because the name is
-    # PREFILLED from whatever the provider hands over at signup — Facebook via
-    # Spotify supplies a legal name — and defaulting that to public would
-    # publish it for somebody who never typed it and never saw a field.
-    name_public = models.BooleanField(default=False)
+    # Per-field visibility: {field: "private"|"member"|"public"}, holding ONLY
+    # the fields this member has actually changed. An unset field follows
+    # `visibility.DEFAULTS`, which is that field's current behaviour — so
+    # nobody's exposure moved when this shipped, and a default can be corrected
+    # later without rewriting every row.
+    #
+    # This replaced `name_public`, the boolean version of the same question for
+    # one field. Two mechanisms answering "may this person see this" is the
+    # two-writers failure with somebody's legal name behind it.
+    visibility = models.JSONField(default=dict, blank=True)
     lat = models.FloatField(null=True, blank=True)
     lng = models.FloatField(null=True, blank=True)
     # Declared external-account followers (sum across connected socials) — feeds
@@ -1012,22 +1016,26 @@ def profile_for(user):
     return Profile.objects.get_or_create(user=user)[0]
 
 
-def public_name(p):
-    """The member's real name if they chose to show it, else "".
+def public_name(p, viewer=None):
+    """The member's real name if this viewer may see it, else "".
 
     One reader for every surface that renders somebody ELSE. The name is
     prefilled from whatever the provider handed over at signup, so a screen
-    that reached for `user.first_name` directly would publish a legal name the
+    reaching for `user.first_name` directly would publish a legal name the
     member never typed — and it would do it on whichever screen forgot, which
     is the kind of leak nobody reports because nobody can see their own.
 
+    `viewer=None` means the logged-out audience, which is the safe default for
+    a caller that forgets to pass one.
+
     Returns "" rather than the username on purpose: the caller already has the
-    handle, and falling back to it here would make an opted-out member
-    indistinguishable from one whose name simply happens to be their handle.
+    handle, and falling back to it would make a member who hid their name
+    indistinguishable from one whose name happens to be their handle.
     """
-    if not p.name_public:
-        return ""
-    return " ".join(x for x in (p.user.first_name, p.user.last_name) if x).strip()
+    from .visibility import can_see
+    parts = [p.user.first_name if can_see(p, "first_name", viewer) else "",
+             p.user.last_name if can_see(p, "last_name", viewer) else ""]
+    return " ".join(x for x in parts if x).strip()
 
 
 def profile_age(p):

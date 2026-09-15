@@ -314,10 +314,9 @@ class RealNameTests(TestCase):
         user.first_name, user.last_name = "Corey", "Knap"
         user.save()
         p = profile_for(user)
-        self.assertFalse(p.name_public)
         self.assertEqual(public_name(p), "")
 
-        p.name_public = True
+        p.visibility = {"first_name": "public", "last_name": "public"}
         p.save()
         self.assertEqual(public_name(p), "Corey Knap")
 
@@ -326,12 +325,14 @@ class RealNameTests(TestCase):
 
         user = User.objects.create_user("edit", "edit@example.com", PASSWORD)
         self.client.force_authenticate(user)
-        r = self.client.patch("/api/auth/me/",
-                              {"first_name": "Corey", "last_name": "Knap",
-                               "name_public": True}, format="json")
+        r = self.client.patch(
+            "/api/auth/me/",
+            {"first_name": "Corey", "last_name": "Knap",
+             "visibility": {"first_name": "public"}}, format="json")
         self.assertEqual(r.status_code, 200, r.content)
         user.refresh_from_db()
         self.assertEqual((user.first_name, user.last_name), ("Corey", "Knap"))
-        self.assertTrue(profile_for(user).name_public)
+        self.assertEqual(profile_for(user).visibility["first_name"], "public")
         self.assertEqual(r.data["first_name"], "Corey")
-        self.assertTrue(r.data["name_public"])
+        levels = {row["field"]: row["level"] for row in r.data["visibility"]}
+        self.assertEqual(levels["first_name"], "public")

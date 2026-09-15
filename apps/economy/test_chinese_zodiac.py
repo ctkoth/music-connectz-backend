@@ -85,7 +85,13 @@ class OnTheProfileCard(TestCase):
         p.birthday = birthday
         p.save()
         from .social import _profile_card
-        return _profile_card(profile_for(u))
+        # The member card is a SIGNED-IN surface and both real callers pass a
+        # request, so give it one: the zodiac defaults to member-visible, and
+        # `_profile_card` with no request is deliberately treated as the
+        # anonymous audience (fail-safe, not fail-open).
+        viewer = User.objects.create_user(
+            f"viewer_{u.username}", f"viewer_{u.username}@example.com", "hunter2hunter2")
+        return _profile_card(profile_for(u), type("R", (), {"user": viewer})())
 
     def test_it_rides_along_with_the_western_sign(self):
         card = self._card("1990-06-01")

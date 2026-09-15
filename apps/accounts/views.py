@@ -298,6 +298,7 @@ class MeView(APIView):
         Premium members can also update their username/handle via the `username`
         field. Free members cannot."""
         from apps.economy.catalog import over_char_limit
+        from apps.economy.visibility import clean_visibility
         from apps.economy.models import (EXPLICIT_MIN_AGE, may_be_explicit,
                                          membership_for, profile_for, zodiac_for)
         p = profile_for(request.user)
@@ -350,9 +351,15 @@ class MeView(APIView):
             setattr(request.user, field, str(data.get(field) or "").strip()[:150])
         if named:
             request.user.save(update_fields=named)
-        if "name_public" in data:
-            p.name_public = bool(data["name_public"])
-            changed.append("name_public")
+        if "visibility" in data:
+            # Merged, not replaced: the screen sends the fields it changed, and
+            # a whole-map write would silently reset every control the client
+            # happens not to know about — which is exactly what happens while
+            # the two repos deploy independently and one of them is a version
+            # behind.
+            p.visibility = {**(p.visibility if isinstance(p.visibility, dict) else {}),
+                            **clean_visibility(data["visibility"])}
+            changed.append("visibility")
         if isinstance(data.get("personas"), list):
             # A persona is {"key", "name", "skills": [{"name", "start"}]} once
             # the member has used the skill picker, or a bare key string from

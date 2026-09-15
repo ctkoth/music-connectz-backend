@@ -12,6 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .visibility import redact
 from .models import (
     apply_post_rating,
     public_name,
@@ -547,10 +548,14 @@ def _profile_card(p, request=None, badges=None):
     alone, the card fetches its own.
     """
     m = getattr(p.user, "membership", None)
-    return {
+    # Built whole, then redacted in one pass — see `visibility.redact`. Doing it
+    # per key here would mean a field added below is exposed until somebody
+    # remembers to guard it, which is how a privacy control rots.
+    viewer = getattr(request, "user", None) if request else None
+    return redact({
         "username": p.user.username,
         "display_name": p.display_name or p.user.username,
-        "real_name": public_name(p),
+        "real_name": public_name(p, viewer),
         "avatar": _avatar_url(p, request) if request else None,
         "gender": p.gender,
         "sign": p.sign,
@@ -585,7 +590,7 @@ def _profile_card(p, request=None, badges=None):
         "badge_title": p.badge_title,
         "badges": worn_badges(p.user, badges),
         **follow_counts(p.user),
-    }
+    }, p, viewer)
 
 
 def _profile_full(p, request, recheck=False):

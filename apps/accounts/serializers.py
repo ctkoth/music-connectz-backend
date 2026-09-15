@@ -42,10 +42,14 @@ class PublicUserSerializer(serializers.ModelSerializer):
     # and a member cannot manage a link they cannot see they have.
     connections = serializers.SerializerMethodField()
     # Real name, separate from the handle. This serializer answers /api/auth/me/
-    # — the member's own view — so both halves are always returned here and
-    # `name_public` says whether anyone ELSE may see them. The surfaces that
-    # render another member read `public_name()` instead of these.
-    name_public = serializers.SerializerMethodField()
+    # — the member's OWN view — so both halves are always returned here, and
+    # `visibility` says who else may see them. The surfaces that render another
+    # member read `public_name()` instead of these.
+    #
+    # Every field is listed, including the ones left at their default: a member
+    # can only check what they are exposing by seeing the whole list, which is
+    # the same reason the ZodiacZ panel publishes all twenty-four bonuses.
+    visibility = serializers.SerializerMethodField()
 
     # Nine of the fields below live on the economy profile/wallet/membership. Look
     # each row up ONCE per user and cache it on the serializer — resolving them
@@ -133,7 +137,7 @@ class PublicUserSerializer(serializers.ModelSerializer):
             "id", "username", "email", "phone", "avatar_url", "is_owner",
             "tier", "spinaz", "energy", "onboarded", "personas", "nationalities",
             "birthday", "age", "zodiac", "zodiac_cn", "voice", "connections",
-            "first_name", "last_name", "name_public",
+            "first_name", "last_name", "visibility",
         )
 
     def get_connections(self, obj):
@@ -141,8 +145,10 @@ class PublicUserSerializer(serializers.ModelSerializer):
 
         return connections_for(obj)
 
-    def get_name_public(self, obj):
-        return self._economy(obj, "profile").name_public
+    def get_visibility(self, obj):
+        from apps.economy.visibility import settings_for
+
+        return settings_for(self._economy(obj, "profile"))
 
 
 class RegisterSerializer(serializers.Serializer):
