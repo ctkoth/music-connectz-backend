@@ -291,20 +291,23 @@ class PublicTiersView(APIView):
 
     Non-authenticated endpoint showing all public tiers (Free, Premium, StatZ)
     with their key features so visitors see membership options before creating
-    an account.
+    an account. Includes founding StatZ pricing and seat availability.
     """
 
     permission_classes = [AllowAny]
 
     def get(self, request):
         from .catalog import tier_ladder, TIER_FREE, TIER_PREMIUM, TIER_STATZ
+        from .models import founding_status
 
         ladder = tier_ladder()
+        founding = founding_status()
+
         tiers = []
         for tier_key in [TIER_FREE, TIER_PREMIUM, TIER_STATZ]:
             limits = ladder[tier_key]
             price = limits.pop("month_cents", 0)
-            tiers.append({
+            tier_data = {
                 "key": tier_key,
                 "label": {"free": "Free", "premium": "Premium", "statz": "StatZ"}.get(tier_key, tier_key),
                 "price_cents": price,
@@ -312,5 +315,18 @@ class PublicTiersView(APIView):
                 "storage_mb": limits["storage_mb"],
                 "char_limit": limits["char_limit"],
                 "embeds_per_post": limits["embeds_per_post"],
-            })
+            }
+
+            # Add founding info for StatZ
+            if tier_key == TIER_STATZ:
+                tier_data["founding"] = {
+                    "lifetime_cents": founding["price_cents"],
+                    "year_cents": founding["year_cents"],
+                    "month_cents": founding["month_cents"],
+                    "remaining": founding["remaining"],
+                    "sold_out": founding["sold_out"],
+                }
+
+            tiers.append(tier_data)
+
         return Response({"tiers": tiers})
