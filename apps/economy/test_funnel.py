@@ -462,3 +462,59 @@ class MicRefusalReasonTests(TestCase):
     def test_an_invented_reason_is_dropped(self):
         self.fire("NotReadableError: could not start video source")
         self.assertNotIn("why", FunnelEvent.objects.get().meta)
+
+
+class TheShutDoorIsAStepTests(TestCase):
+    """18 opened the trial and 1 started the recorder, and nothing could say
+    whether the other 17 were uninterested or were told no.
+
+    `available: false` hides EVERY control on the trial — upload, mic and
+    camera all vanish — so a refused visitor and a bored one produced the
+    same two rows: a try_view and nothing after it. They need opposite fixes,
+    one a product problem and one a cap set wrong."""
+
+    def setUp(self):
+        self.c = APIClient()
+
+    def send(self, why=None):
+        meta = {"app_key": "singz"}
+        if why is not None:
+            meta["why"] = why
+        return self.c.post("/api/auth/funnel/",
+                           {"kind": "try_blocked", "anon_id": "vis-1", "meta": meta},
+                           format="json")
+
+    def test_the_kind_is_accepted(self):
+        from .models import FunnelEvent
+        self.assertEqual(self.send("cap_reached").status_code, 204)
+        self.assertEqual(FunnelEvent.objects.filter(kind="try_blocked").count(), 1)
+
+    def test_each_no_is_kept_apart(self):
+        """already_used is the per-IP window, cap_reached is the platform's
+        daily ceiling, not_configured is a missing key. One row saying
+        'blocked' sends somebody to fix whichever they guessed."""
+        from .models import FunnelEvent
+        for why in ("already_used", "cap_reached", "not_configured"):
+            self.send(why)
+        got = {e.meta.get("why") for e in FunnelEvent.objects.filter(kind="try_blocked")}
+        self.assertEqual(got, {"already_used", "cap_reached", "not_configured"})
+
+    def test_a_reason_outside_the_list_is_dropped_not_stored(self):
+        """A closed list, like try_failed's — free text is how a table holding
+        no PII starts holding some."""
+        from .models import FunnelEvent
+        self.send("because i said so")
+        e = FunnelEvent.objects.get(kind="try_blocked")
+        self.assertNotIn("why", e.meta)
+
+    def test_it_appears_in_the_owner_summary(self):
+        from django.contrib.auth import get_user_model
+        self.send("cap_reached")
+        owner = get_user_model().objects.create_superuser(
+            "fowner", "fowner@mcz.test", "hunter2hunter2")
+        c = APIClient()
+        c.force_authenticate(owner)
+        r = c.get("/api/auth/funnel/summary/")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertIn("try_blocked", r.data["steps"])
+        self.assertEqual(r.data["steps"]["try_blocked"]["unique"], 1)

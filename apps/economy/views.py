@@ -442,9 +442,23 @@ class FunnelEventView(APIView):
     _MIC = lambda v: v if v in ("denied", "notfound", "inuse", "constrained",
                                 "insecure", "other") else None
 
+    # Why the trial door was shut, from a closed list — the three states
+    # `TrialCoachView` already distinguishes, kept apart here because they
+    # point at three different fixes: `already_used` is the per-IP window,
+    # `cap_reached` is the platform's daily ceiling, `not_configured` is a
+    # missing GEMINI_API_KEY. One row saying "blocked" would send somebody to
+    # fix whichever they guessed.
+    _BLOCKED = lambda v: v if v in ("already_used", "cap_reached",
+                                    "not_configured") else None
+
     META_SHAPE = {
         "landing_view": {},
         "try_view": {"app_key": _APP},
+        # Which "no" it was. Three completely different situations —
+        # the visitor spent today's take, the platform spent the day's, or
+        # nobody set the key — and a row that cannot tell them apart sends
+        # somebody to fix the wrong one.
+        "try_blocked": {"app_key": _APP, "why": _BLOCKED},
         "try_record": {"app_key": _APP,
                        # Camera or mic. The camera path asks for a second
                        # permission and produces a file an order of magnitude

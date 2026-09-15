@@ -4786,6 +4786,18 @@ FUNNEL_KINDS = (
     # never sent, or sent and were failed by the coach — three problems with
     # three different fixes, indistinguishable from the only two rows that
     # existed. Each of these is one thing that can go wrong, named.
+    # The door was SHUT before they could touch anything. `available: false`
+    # hides every control on the trial — upload, mic and camera all vanish —
+    # so a visitor who was refused and a visitor who looked and left produce
+    # exactly the same two rows: a try_view and nothing after it.
+    #
+    # That is the same gap the five kinds below were added to close, one step
+    # earlier and worse, because it sits on the step the whole funnel hangs
+    # on. 18 opened the trial and 1 started the recorder, and nothing here can
+    # say whether the other 17 were uninterested or were told no — and those
+    # need opposite fixes, one a product problem and one a cap that is set
+    # wrong.
+    ("try_blocked", "Trial door was shut"),
     ("try_record", "Trial recorder started"),
     ("try_mic_denied", "Trial mic refused"),
     ("try_attach", "Trial file attached"),
