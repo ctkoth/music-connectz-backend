@@ -239,3 +239,42 @@ class EndpointTests(TestCase):
         anon = APIClient()
         self.assertIn(anon.get("/api/economy/widgetz/").status_code, (401, 403))
         self.assertIn(anon.post("/api/economy/widgetz/open/", {}, format="json").status_code, (401, 403))
+
+
+class WidgetCountLadderTests(TestCase):
+    """How MANY, which is the half of WidgetZ that carries no risk.
+
+    `page` is StatZ because of what framing a member-written URL can be used
+    for. The COUNT is a different question: a player widget is built from an id
+    this codebase extracts, so ten are exactly as safe as one, and rationing
+    them is about screen space and browser memory."""
+
+    def test_every_tier_gets_a_real_board(self):
+        from apps.economy.catalog import limits_for
+        from apps.economy.models import TIER_FREE, TIER_PREMIUM, TIER_STATZ
+        free = limits_for(TIER_FREE)["widgets_open"]
+        # `useScreenShape` caps the grid at 4 lanes, so a ceiling under 4 would
+        # be a limit nobody on a phone could even reach — a taste, not a board.
+        self.assertGreaterEqual(free, 4)
+        self.assertLess(free, limits_for(TIER_PREMIUM)["widgets_open"])
+        self.assertLess(limits_for(TIER_PREMIUM)["widgets_open"],
+                        limits_for(TIER_STATZ)["widgets_open"])
+
+    def test_the_ceiling_is_published_before_it_is_hit(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+        u = get_user_model().objects.create_user("wl", "wl@example.com", "hunter2hunter2")
+        c = APIClient()
+        c.force_authenticate(u)
+        r = c.get("/api/economy/widgetz/")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertIn("widgets_open", r.data)
+        self.assertGreaterEqual(r.data["widgets_open"], 4)
+
+    def test_the_count_is_not_the_page_gate(self):
+        """Raising the count must never hand a lower tier a page frame."""
+        from apps.economy.widgetz import can_frame_pages
+        from apps.economy.models import TIER_FREE, TIER_PREMIUM, TIER_STATZ
+        self.assertFalse(can_frame_pages(TIER_FREE))
+        self.assertFalse(can_frame_pages(TIER_PREMIUM))
+        self.assertTrue(can_frame_pages(TIER_STATZ))

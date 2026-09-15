@@ -75,15 +75,31 @@ UNLIMITED_CHARS = 10 ** 9
 # Nothing here is ever lowered without a migration plan for the members already
 # over the new number — a quota that retroactively shrinks turns somebody's
 # stored work into an error message they didn't cause.
+# `widgets_open` — how many link widgets may be tiled at once.
+#
+# The safe half of the WidgetZ ladder. `page` (framing an arbitrary URL a
+# member wrote) is StatZ because of what it can be used for; the COUNT carries
+# none of that risk — a player widget is built from an id this codebase
+# extracts, so ten of them are exactly as safe as one. Rationing them is about
+# screen space and browser memory, not about trust.
+#
+# Free is 4, which is a board rather than a taste: `useScreenShape` caps at 4
+# lanes, so on a phone or a narrow window the SCREEN is the binding constraint
+# and this never bites. It starts to bite on a desktop with room for more,
+# which is exactly where paying for more is a real difference.
 TIER_LIMITS = {
-    TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500, "embeds_per_post": 3},
-    TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 15},
+    TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500, "embeds_per_post": 3,
+                "widgets_open": 4},
+    TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 15,
+                   "widgets_open": 12},
     # StatZ writes without a character cap — the client already advertised this
     # ("StatZ char limit: Unlimited") while the server was still cutting at
     # 5000, so a StatZ member was told one thing and refused another.
-    TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999},
+    TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999,
+                 "widgets_open": 40},
     # Owner god-mode: effectively unlimited.
-    TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760, "embeds_per_post": 999},
+    TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760, "embeds_per_post": 999,
+                 "widgets_open": 999},
 }
 
 

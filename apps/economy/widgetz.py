@@ -398,9 +398,16 @@ class WidgetZView(APIView):
 
     def get(self, request):
         m = membership_for(request.user)
+        from .catalog import limits_for
         return Response({
             "tier": m.tier,
             "players": PLAYER_LABELS,
+            # How many may be tiled at once. The safe half of this ladder: a
+            # player widget is built from an id this file extracts, so ten are
+            # exactly as safe as one, and the count is about screen space
+            # rather than trust. Published here so the board reads the number
+            # instead of keeping a second copy of it.
+            "widgets_open": limits_for(m.tier)["widgets_open"],
             "page_widgets": {
                 "allowed": can_frame_pages(m.tier),
                 "needs_tier": TIER_STATZ,
