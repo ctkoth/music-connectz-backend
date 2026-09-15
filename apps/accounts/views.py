@@ -95,6 +95,18 @@ def _read_pending(token):
         raise OAuthError("That sign-in could not be verified. Start again.")
 
 
+def _is_pending_token(token):
+    """Check if a token is a pending OAuth token (signed by us) vs a real OAuth code.
+    Pending tokens are Django signed strings and include a period and colon pattern.
+    Real OAuth codes are typically much shorter alphanumeric strings without these markers.
+    """
+    if not token:
+        return False
+    # Django's signing.dumps produces strings with periods and colons
+    # Real OAuth codes don't follow this pattern
+    return "." in token and ":" in token
+
+
 def _user_from_oauth(info, with_created=False, create=True):
     """Find-or-create a user from a verified OAuth payload, return (user).
 
@@ -127,17 +139,12 @@ def _user_from_oauth(info, with_created=False, create=True):
 
     made = False
     user = None
-    if info.get("email"):
+    # Only auto-link if the provider VERIFIED the email. For unverified emails,
+    # the provider didn't assert ownership, so we ask the member instead of
+    # risking a duplicate account. If they say "yes I have one", they authenticate
+    # and link it via OAuthLinkView.
+    if info.get("email") and info.get("email_verified"):
         match = User.objects.filter(email__iexact=info["email"]).first()
-        if match and not info.get("email_verified"):
-            # Refuse rather than silently opening a second account on the same
-            # address — duplicate emails would also make password login
-            # ambiguous, since it resolves an identifier to a single user.
-            raise OAuthError(
-                f"An account already uses {info['email']}. "
-                f"{info['provider'].title()} didn't confirm you own that address, "
-                "so sign in with your original method and link it from there."
-            )
         user = match
 
     if not user and not create:
@@ -502,6 +509,11 @@ class OAuthLinkView(APIView):
     """POST /api/auth/oauth/<provider>/link/ — link an OAuth provider to the
     current user's account. For authenticated users only. Requires the user to
     already have an account before linking.
+
+    Supports two flows:
+    1. Fresh OAuth verification: provide code/credential (same as direct linking)
+    2. Pending token: provide a pending token from an earlier OAuth attempt
+       (used when user logs in first, then links OAuth after authentication)
     """
 
     permission_classes = [IsAuthenticated]
@@ -509,27 +521,34 @@ class OAuthLinkView(APIView):
     def post(self, request, provider):
         data = request.data or {}
         try:
-            # Verify the OAuth credential (same as login)
-            if provider == "google":
-                info = verify_google(data.get("credential") or data.get("id_token"))
-            elif provider == "github":
-                info = exchange_github(
-                    data.get("code"), data.get("redirect_uri", "")
-                )
-            elif provider == "apple":
-                info = verify_apple(data.get("id_token") or data.get("credential"))
-            elif provider in OAUTH2_PROVIDERS:
-                info = exchange_oauth2(
-                    provider,
-                    data.get("code"),
-                    data.get("redirect_uri", ""),
-                    data.get("code_verifier", ""),
-                )
+            # Check if this is a pending token flow (login then link)
+            if data.get("code") and _is_pending_token(data.get("code")):
+                # This is a pending token from an earlier OAuth exchange
+                info = _read_pending(data["code"])
+                if info.get("provider") != provider:
+                    raise OAuthError("That sign-in was for a different provider.")
             else:
-                return Response(
-                    {"detail": f"Unsupported provider '{provider}'."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+                # Fresh OAuth verification (traditional flow)
+                if provider == "google":
+                    info = verify_google(data.get("credential") or data.get("id_token"))
+                elif provider == "github":
+                    info = exchange_github(
+                        data.get("code"), data.get("redirect_uri", "")
+                    )
+                elif provider == "apple":
+                    info = verify_apple(data.get("id_token") or data.get("credential"))
+                elif provider in OAUTH2_PROVIDERS:
+                    info = exchange_oauth2(
+                        provider,
+                        data.get("code"),
+                        data.get("redirect_uri", ""),
+                        data.get("code_verifier", ""),
+                    )
+                else:
+                    return Response(
+                        {"detail": f"Unsupported provider '{provider}'."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
             # Check if this OAuth identity is already linked to another account
             existing_identity = OAuthIdentity.objects.filter(
