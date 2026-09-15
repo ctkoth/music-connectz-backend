@@ -883,6 +883,16 @@ class LimitsView(APIView):
         lim["avatar_max_mb"] = AVATAR_MAX_MB
         lim["tiers"] = tier_ladder()
         lim["storage_used_mb"] = round(storage_used_bytes(request.user) / MB, 2)
+        # GroupZ. `custom_groups` rides in from limits_for above; these two are
+        # the parts it cannot know — how many are already made, and whether
+        # this tier may put an icon on one. Answered here so the screen states
+        # the ceiling BEFORE the Create button rather than on submit, and so
+        # the emoji rule is not re-derived from a tier over there.
+        from .groupz import can_set_emoji
+        from .models import Group
+        lim["custom_groups_used"] = Group.objects.filter(
+            owner=request.user, kind=Group.KIND_CUSTOM).count()
+        lim["can_set_emoji"] = can_set_emoji(m.tier)
         # Whether a third-party ad frame may be rendered for this member.
         #
         # Answered here rather than by the client, because the client would have

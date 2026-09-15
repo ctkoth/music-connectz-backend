@@ -171,6 +171,13 @@ class OwnedGroupTests(TestCase):
         self.assertEqual(Group.objects.filter(owner=self.me, kind="partners").count(), 0)
 
     def test_custom_groups_need_a_name_and_there_can_be_many(self):
+        """Many, up to the tier's ceiling — which is 1 on Free, so this takes
+        a tier that keeps more. The cap is `custom_groups` in catalog.py."""
+        from .models import TIER_PREMIUM, membership_for
+        m = membership_for(self.me)
+        m.tier = TIER_PREMIUM
+        m.save(update_fields=["tier", "updated_at"])
+
         self.assertEqual(self.c.post("/api/groupz/", {"kind": "custom"}, format="json").status_code, 400)
         for t in ("Tour band", "Mix notes"):
             self.c.post("/api/groupz/", {"kind": "custom", "title": t}, format="json")
@@ -666,3 +673,85 @@ class AlmostPartnersTests(TestCase):
             return len(ctx.captured_queries)
 
         self.assertLessEqual(count_for(20), count_for(2) + 2)
+
+
+class CustomGroupLadderTests(TestCase):
+    """How many custom groups a tier keeps, and who may put an icon on one.
+
+    FriendZ, FanZ and PartnerZ are untouched by both: they are derived from
+    Follow and from finished work, so capping them would be capping a fact
+    rather than a feature."""
+
+    def setUp(self):
+        from . import groupz as G
+        self.G = G
+        self.me = member("cg")
+        self.c = APIClient()
+        self.c.force_authenticate(self.me)
+
+    def _tier(self, t):
+        from .models import membership_for
+        m = membership_for(self.me)
+        m.tier = t
+        m.save(update_fields=["tier", "updated_at"])
+
+    def _make(self, title, emoji=None):
+        body = {"kind": "custom", "title": title}
+        if emoji is not None:
+            body["emoji"] = emoji
+        return self.c.post("/api/groupz/", body, format="json")
+
+    def test_free_gets_one_which_is_a_ladder_not_a_wall(self):
+        from .catalog import limits_for
+        from .models import TIER_FREE
+        self.assertEqual(limits_for(TIER_FREE)["custom_groups"], 1)
+        self.assertEqual(self._make("mine").status_code, 201)
+
+    def test_the_ceiling_names_itself_and_says_what_lifts_it(self):
+        self._make("one")
+        r = self._make("two")
+        self.assertEqual(r.status_code, 403, r.content)
+        self.assertEqual(r.data["custom_groups"], 1)
+        self.assertIn("tier up", r.data["detail"])
+        # and it says the derived lists are not eating the allowance
+        self.assertIn("PartnerZ", r.data["detail"])
+
+    def test_it_ladders(self):
+        from .catalog import limits_for
+        from .models import TIER_FREE, TIER_PREMIUM, TIER_STATZ
+        self.assertEqual(
+            [limits_for(t)["custom_groups"] for t in (TIER_FREE, TIER_PREMIUM, TIER_STATZ)],
+            [1, 5, 20])
+
+    def test_premium_may_set_an_icon(self):
+        from .models import TIER_PREMIUM, Group
+        self._tier(TIER_PREMIUM)
+        self.assertEqual(self._make("iconed", "🎧").status_code, 201)
+        self.assertEqual(Group.objects.get(owner=self.me, title="iconed").emoji, "🎧")
+
+    def test_free_still_gets_the_group_just_without_the_icon(self):
+        """Decoration is dropped, never a refusal — failing the whole create
+        over an icon would fail the thing they actually asked for."""
+        from .models import Group
+        self.assertEqual(self._make("plain", "🎧").status_code, 201)
+        self.assertEqual(Group.objects.get(owner=self.me, title="plain").emoji, "")
+
+    def test_the_derived_lists_do_not_count_toward_the_ceiling(self):
+        self._make("one")                      # free ceiling now reached
+        for kind in ("friends", "fans", "partners", "blocked"):
+            r = self.c.post("/api/groupz/", {"kind": kind}, format="json")
+            self.assertEqual(r.status_code, 200, f"{kind}: {r.content}")
+
+    def test_the_board_carries_the_icon(self):
+        from .models import TIER_PREMIUM
+        self._tier(TIER_PREMIUM)
+        self._make("shown", "🔥")
+        row = next(g for g in self.c.get("/api/groupz/").data if g["title"] == "shown")
+        self.assertEqual(row["emoji"], "🔥")
+
+    def test_limits_publishes_the_ceiling_before_the_button(self):
+        r = self.c.get("/api/economy/limits/")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.data["custom_groups"], 1)
+        self.assertEqual(r.data["custom_groups_used"], 0)
+        self.assertFalse(r.data["can_set_emoji"])

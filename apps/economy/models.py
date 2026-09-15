@@ -5583,6 +5583,13 @@ class Group(models.Model):
                               related_name="groupz")
     kind = models.CharField(max_length=16, choices=KINDS, default=KIND_CUSTOM)
     title = models.CharField(max_length=120, blank=True, default="")
+    # A group's own icon. One or two emoji, not a URL and not an upload: a
+    # group is private to its owner, so this is never rendered to anybody else
+    # and an upload path would be storage, moderation and a scan for a glyph
+    # only one person ever sees. Premium and up — decoration, which is the
+    # same line KeyConnectZ already draws for its wallpaper: nobody loses a
+    # capability without it, and every tier's groups work identically.
+    emoji = models.CharField(max_length=16, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

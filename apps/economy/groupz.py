@@ -47,8 +47,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .catalog import limits_for
 from .models import (Block, Follow, Group, GroupMember, Partnership,
-                     blocked_user_ids)
+                     TIER_PREMIUM, TIER_STATZ, TIER_DEBUG,
+                     blocked_user_ids, membership_for)
 
 User = get_user_model()
 
@@ -104,6 +106,34 @@ PARTNER_WORKS = 3
 # the two stack down to ESCROW_MIN_RELEASE_DAYS rather than one making the
 # other pointless.
 PARTNER_ESCROW_DAYS_OFF = 4
+
+
+# Who may put an icon on a group. Decoration, so this is the one place a
+# "whether" is allowed — the same line KeyConnectZ draws for its wallpaper:
+# nobody loses a capability, and a group works identically without one.
+EMOJI_TIERS = (TIER_PREMIUM, TIER_STATZ, TIER_DEBUG)
+
+
+def can_set_emoji(tier):
+    return tier in EMOJI_TIERS
+
+
+def _clean_emoji(data, user):
+    """The emoji for a group, or "" if this tier cannot set one.
+
+    Silently dropped rather than refused: a member on Free who sends one — an
+    older client, or a tier that lapsed — gets their group, without an icon.
+    Refusing the whole create over a decoration would fail the thing they
+    actually asked for.
+
+    Length is the only validation. Deciding what counts as "an emoji" means a
+    unicode table that is wrong every September, and the field is private to
+    its owner, so the worst case is somebody's own group named with the wrong
+    character.
+    """
+    if not can_set_emoji(membership_for(user).tier):
+        return ""
+    return str((data or {}).get("emoji") or "").strip()[:16]
 
 
 def _names(ids):
@@ -281,6 +311,7 @@ def board(user):
     for g in owned:
         rows.append({
             "id": str(g.pk), "kind": g.kind, "title": g.title, "derived": False,
+            "emoji": g.emoji,
             "members": sorted(m.member.username for m in g.memberships.all()),
             "note": "",
         })
@@ -398,13 +429,31 @@ class GroupsView(APIView):
         if kind == Group.KIND_CUSTOM and not title:
             return Response({"detail": "A custom group needs a name."},
                             status=status.HTTP_400_BAD_REQUEST)
+
+        # How many custom groups this tier keeps. A ceiling, and it names
+        # itself: "you can't" with no figure beside it is the refusal a member
+        # reads as the feature being broken. FriendZ, FanZ and PartnerZ are
+        # untouched — they are derived, so capping them would cap a fact.
+        if kind == Group.KIND_CUSTOM:
+            cap = limits_for(membership_for(request.user).tier)["custom_groups"]
+            have = Group.objects.filter(owner=request.user,
+                                        kind=Group.KIND_CUSTOM).count()
+            if have >= cap:
+                return Response(
+                    {"detail": f"{cap} custom group{'' if cap == 1 else 's'} is this "
+                               "tier's ceiling. Rename or delete one, or a tier up "
+                               "keeps more. FriendZ, FanZ and PartnerZ don't count "
+                               "toward it.",
+                     "custom_groups": cap, "have": have},
+                    status=status.HTTP_403_FORBIDDEN)
         # One Partners group, many Custom ones. Partners is a role rather than
         # a folder — "people I intend to work with frequently" is one list.
         if kind == Group.KIND_PARTNERS:
             Group.objects.get_or_create(owner=request.user, kind=kind,
                                         defaults={"title": title})
         else:
-            Group.objects.create(owner=request.user, kind=kind, title=title)
+            Group.objects.create(owner=request.user, kind=kind, title=title,
+                                 emoji=_clean_emoji(request.data, request.user))
         return Response(board(request.user), status=status.HTTP_201_CREATED)
 
 
