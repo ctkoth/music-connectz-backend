@@ -39,6 +39,13 @@ class WhatItClaimsIsBuiltTests(TestCase):
         a = apps_by_name()["LanguageZ"]
         self.assertTrue(a["built"])
 
+    def test_soundcloud_import_and_engagement_are_both_built(self):
+        # Both were fully live and absent from this screen entirely — not
+        # even mislabeled `built: False`, just never rowed at all.
+        a = apps_by_name()
+        self.assertTrue(a["SoundCloud Import"]["built"])
+        self.assertTrue(a["SoundCloud Engagement"]["built"])
+
     def test_both_extra_battle_kinds_are_built(self):
         """BattleEnterView accepts 1v1, freestyle and cypher, BattleZ offers
         all three in its picker, and each has a drawn icon."""
@@ -97,7 +104,8 @@ class ABuiltAppNamesItsDoorTests(TestCase):
 
     def test_the_built_apps_that_have_a_home_name_it(self):
         a = apps_by_name()
-        for name in ("VybeZ", "PersonalitieZ", "ReligionZ", "LanguageZ", "Freestyle", "Battle Cypher"):
+        for name in ("VybeZ", "PersonalitieZ", "ReligionZ", "LanguageZ", "Freestyle", "Battle Cypher",
+                    "SoundCloud Import", "SoundCloud Engagement"):
             self.assertTrue(a[name]["tab"], f"{name} is built and links nowhere")
 
     def test_an_unbuilt_app_never_claims_a_door(self):
@@ -110,7 +118,7 @@ class ABuiltAppNamesItsDoorTests(TestCase):
         keys = {t["key"] for t in LOGICZ_TABS}
         # The tabs LogicZ itself describes, plus the ones a row may point at
         # that live under another group's key.
-        extra = {"vybez", "profilez"}
+        extra = {"vybez", "profilez", "soundcloudengagementz"}
         for app in apps_by_name().values():
             if app["tab"]:
                 self.assertIn(app["tab"], keys | extra,

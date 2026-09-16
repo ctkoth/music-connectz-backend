@@ -74,9 +74,29 @@ class TheyLandAsDraftsTests(Base):
         self.run_import(1)
         p = Post.objects.get(author=self.me)
         self.assertEqual(p.embeds[0]["type"], "soundcloud")
-        self.assertIn("soundcloud.com", p.embeds[0]["url"])
+        # The actual widget address, not the bare permalink — a stored
+        # permalink would frame soundcloud.com's own site, which is not
+        # built to be framed that way, instead of the provider's dedicated
+        # w.soundcloud.com/player embed the manual "add a track" flow has
+        # always used. Same assertion shape as test_widgetz.py's.
+        self.assertTrue(p.embeds[0]["url"].startswith("https://w.soundcloud.com/player/?url="))
+        self.assertIn("height", p.embeds[0])
         # SoundCloud stays the host; nothing is re-uploaded here.
         self.assertEqual(p.media_url, "")
+
+    def test_a_track_whose_permalink_cannot_be_resolved_is_skipped_not_broken(self):
+        """A shortlink or a garbage URL from the API must not become a post
+        whose embed cannot play — better to import one fewer than a dead
+        player nobody notices until they open it."""
+        with patch("apps.economy.soundcloud_import.access_token_for", return_value="tok"), \
+             patch("apps.economy.soundcloud_import._tracks", return_value=[
+                 track(0),
+                 {"permalink_url": "https://on.soundcloud.com/xyz", "title": "Shortlink"},
+             ]):
+            r = self.c.post("/api/economy/soundcloud/import/",
+                            {"code": "c", "redirect_uri": "r"}, format="json")
+        self.assertEqual(r.data["imported"], 1)
+        self.assertEqual(Post.objects.filter(author=self.me).count(), 1)
 
     def test_importing_costs_nothing(self):
         """An imported draft has been shown to nobody. The cost of a post
@@ -99,6 +119,20 @@ class RunningItTwiceTests(Base):
         r = self.run_import(3)
         self.assertEqual(r.data["imported"], 1)
         self.assertEqual(Post.objects.filter(author=self.me).count(), 3)
+
+    def test_a_track_added_by_hand_first_is_recognised_as_already_here(self):
+        """The import path and the one-at-a-time `PostEmbedsView` path store
+        the identical widget shape now, so a track posted by hand and then
+        imported in bulk is caught as a duplicate rather than doubled."""
+        from .views import _parse_embed_url
+        parsed = _parse_embed_url(track(0)["permalink_url"])
+        Post.objects.create(author=self.me, title="By hand",
+                            embeds=[{"type": "soundcloud", "url": parsed["url"],
+                                    "title": "By hand"}],
+                            visibility="public")
+        r = self.run_import(1)
+        self.assertEqual(r.data["imported"], 0)
+        self.assertEqual(r.data["already_here"], 1)
 
 
 class NoStoredCredentialTests(Base):

@@ -42,6 +42,7 @@ from apps.accounts.oauth import OAuthError, access_token_for
 
 from .catalog import limits_for
 from .models import Post, membership_for
+from .widgetz import _player_for
 
 # SoundCloud's own listing endpoint for the authorised member.
 ME_TRACKS = "https://api.soundcloud.com/me/tracks"
@@ -84,17 +85,20 @@ def _tracks(token, limit):
     return body.get("collection", body) if isinstance(body, dict) else body
 
 
-def _already_here(user, urls):
-    """Permalinks this member has already imported, so a second run is a no-op.
+def _already_here(user, widget_urls):
+    """Which of these WIDGET urls this member has already imported, so a
+    second run is a no-op.
 
-    Matched on the URL inside `embeds` rather than on a title: two different
-    mixes of one song share a name, and re-importing must not silently drop
-    the second. One query for the whole batch.
+    Matched on the widget `src` inside `embeds` — the same value both this
+    import and the one-at-a-time "add a track" flow in `views.PostEmbedsView`
+    now store — rather than on a title: two different mixes of one song
+    share a name, and re-importing must not silently drop the second. One
+    query for the whole batch.
     """
     seen = set()
     for post in Post.objects.filter(author=user).exclude(embeds=[]).only("embeds"):
         for e in (post.embeds or []):
-            if isinstance(e, dict) and e.get("url") in urls:
+            if isinstance(e, dict) and e.get("url") in widget_urls:
                 seen.add(e["url"])
     return seen
 
@@ -141,24 +145,36 @@ class SoundCloudImportView(APIView):
         for t in tracks if isinstance(tracks, list) else []:
             if not isinstance(t, dict):
                 continue
-            url = (t.get("permalink_url") or "").strip()
+            permalink = (t.get("permalink_url") or "").strip()
             title = (t.get("title") or "").strip()[:160]
-            if url and title:
-                wanted.append((url, title))
+            if not (permalink and title):
+                continue
+            # Resolved through the SAME widget builder `views._parse_embed_url`
+            # and the manual "add a track" flow use, so an imported post and a
+            # hand-added one store the identical embed shape. Storing the raw
+            # `permalink_url` here once meant an imported post framed
+            # soundcloud.com itself instead of `w.soundcloud.com/player` — the
+            # provider's real site, not built to be framed that way, where a
+            # hand-added link was always routed through the actual widget.
+            spec = _player_for(permalink)
+            if not spec:
+                continue
+            wanted.append((spec["src"], title, spec.get("aspect", ""), spec.get("height", 0)))
             if len(wanted) >= cap:
                 break
 
-        skipped = _already_here(request.user, {u for u, _ in wanted})
+        skipped = _already_here(request.user, {u for u, _, _, _ in wanted})
         made = [
             Post.objects.create(
                 author=request.user,
                 title=title,
                 # The player, not a copy of the audio. SoundCloud stays the
                 # host; this is a post that frames their track.
-                embeds=[{"type": "soundcloud", "url": url, "title": title}],
+                embeds=[{"type": "soundcloud", "url": url, "title": title,
+                        "aspect": aspect, "height": height}],
                 visibility="private",
             )
-            for url, title in wanted if url not in skipped
+            for url, title, aspect, height in wanted if url not in skipped
         ]
 
         return Response({

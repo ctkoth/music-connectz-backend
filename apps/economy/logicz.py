@@ -46,6 +46,14 @@ LOGICZ_TABS = [
      "apps": [
          _app("Visibility", "👁️", "Public, members only, or just you.", True),
          _app("Mood", "🫥", "How you felt posting it.", False),
+         # A member self-reports engagement their own SoundCloud track got and
+         # earns Energy/SpinaZ for it — a different thing from the import
+         # below, which brings the tracks THEMSELVES in. Neither had a row
+         # here before this, so neither was discoverable from the one screen
+         # whose job is saying what this app has.
+         _app("SoundCloud Engagement", "📈",
+              "Report a like, repost or comment your own track got, capped "
+              "daily per kind.", True, tab="soundcloudengagementz"),
      ]},
     {"key": "collabz", "name": "CollabZ", "emoji": "🤝", "icon": "collabz.png",
      "desc": "PostZ is for show. This is where it becomes work — escrowed, so a "
@@ -142,6 +150,9 @@ LOGICZ_TABS = [
          _app("PersonaZ", "🎭", "Your creative personas and the skills they carry.", True),
          _app("SocialZ", "🌐", "Linked accounts, verified — the reach that pays Energy.", True),
          _app("BadgeZ", "🏅", "A title you wear and an effect you feel.", True),
+         _app("SoundCloud Import", "🎧",
+              "Bring your catalogue in as private drafts — free, and nothing "
+              "is shown until you publish each one.", True, tab="profilez"),
      ]},
     {"key": "specz", "name": "SpecZ", "emoji": "📋", "icon": "specz.png",
      "desc": "What your device can take, and what the app will ask of it.", "apps": []},

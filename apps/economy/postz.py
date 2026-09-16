@@ -618,6 +618,39 @@ class PostsView(APIView):
             p.save(update_fields=["allow_in_playlists"])
             if len(d) <= 2:            # edit_id + the flag: nothing else to do
                 return Response(_post_dict(p, request))
+        if "visibility" in d:
+            # Also a SETTING, not content, and held to no edit window for the
+            # same reason `allow_in_playlists` isn't — a private import sitting
+            # for two years must still be publishable. Junk is ignored rather
+            # than defaulting to "public" the way creation does: a typo here
+            # should never be the thing that publishes a draft.
+            new_vis = str(d.get("visibility") or "").strip().lower()
+            if new_vis in dict(Post.VIS_CHOICES):
+                was_private = p.visibility == "private"
+                p.visibility = new_vis
+                vfields = ["visibility"]
+                # Going private -> anything else is the moment a post can
+                # first reach anybody. soundcloud_import.py's own promise is
+                # that "the normal cost of a post applies when they publish
+                # one" — imports are created with skill_cost_cents=0 because
+                # nothing was charged at import, so this charges the
+                # SHORTFALL between what the post's current skills_used would
+                # cost today and what has already been charged. A normal
+                # private post (charged in full at creation) has no shortfall
+                # and is never charged twice for the same skills.
+                if was_private and new_vis != "private":
+                    cost, _lines = post_cost_cents(request.user, p.skills_used)
+                    owed = max(0, cost - p.skill_cost_cents)
+                    if owed:
+                        w = wallet_for(request.user)
+                        charged = min(owed, max(0, w.energy))
+                        w.energy -= charged
+                        w.save(update_fields=["energy", "updated_at"])
+                        p.skill_cost_cents += charged
+                        vfields.append("skill_cost_cents")
+                p.save(update_fields=vfields)
+            if len(d) <= 2:            # edit_id + visibility: nothing else to do
+                return Response(_post_dict(p, request))
         if not owner:
             window = edit_window_for(membership_for(request.user).tier)
             if timezone.now() > p.created_at + timedelta(seconds=window):
