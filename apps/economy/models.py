@@ -880,6 +880,27 @@ def attractiveness_median(user):
     return _median(scores)
 
 
+def attractiveness_medians(user_ids):
+    """{user_id: median} for many members, in TWO queries rather than 2N.
+
+    Two because the number combines direct RateZ ratings with every rating a
+    member's FaceZ faces received, and those are different tables — the
+    combination is what makes it a median rather than two numbers, so it has
+    to happen after both come back.
+    """
+    ids = list(user_ids)
+    if not ids:
+        return {}
+    scores = {}
+    for uid, score in (AttractivenessRating.objects.filter(target_id__in=ids)
+                       .values_list("target_id", "score")):
+        scores.setdefault(uid, []).append(score)
+    for uid, score in (FaceRating.objects.filter(face__owner_id__in=ids)
+                       .values_list("face__owner_id", "score")):
+        scores.setdefault(uid, []).append(score)
+    return {k: _median(v) for k, v in scores.items()}
+
+
 class OverallRating(models.Model):
     """Overall (holistic) rating of a member's profile, 1-10, one per rater."""
     rater = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="overall_given")
@@ -895,6 +916,24 @@ class OverallRating(models.Model):
 def overall_median(user):
     """A member's overall profile rating median (1-10). None if unrated."""
     return _median(OverallRating.objects.filter(target=user).values_list("score", flat=True))
+
+
+def overall_medians(user_ids):
+    """{user_id: median} for many members, in ONE query.
+
+    Batched for the same reason the feed's ratings were: `MembersView` called
+    the per-user version once per card and walks up to 500 profiles. Measured
+    at 8.3 queries per member before this, and VybeZ fires that search from
+    three text inputs.
+    """
+    ids = list(user_ids)
+    if not ids:
+        return {}
+    scores = {}
+    for uid, score in (OverallRating.objects.filter(target_id__in=ids)
+                       .values_list("target_id", "score")):
+        scores.setdefault(uid, []).append(score)
+    return {k: _median(v) for k, v in scores.items()}
 
 
 # ---- Cross-user Profile ----
@@ -2196,7 +2235,7 @@ class Follow(models.Model):
         unique_together = ("follower", "following")
 
 
-def social_sources(user):
+def social_sources(user, follower_ids=None):
     """Every follower source that counts toward reach: the Music ConnectZ
     follower count (always verified — it's our own number) plus each connected
     external account from Profile.links that has been VERIFIED (real count +
@@ -2205,9 +2244,15 @@ def social_sources(user):
     games reach by typing a stranger's big follower number).
 
     Each source: {label, followers, verified}."""
-    mcz_followers = len(set(
-        Follow.objects.filter(following=user).values_list("follower_id", flat=True)
-    ))
+    # `follower_ids` is the set a caller already fetched. `follow_counts` has
+    # it in hand and was calling this anyway, so every card paid for the same
+    # followers query twice — once for its own count and once, here, to build
+    # the "Music ConnectZ" reach source out of it.
+    if follower_ids is not None:
+        mcz_followers = len(set(follower_ids))
+    else:
+        mcz_followers = len(set(
+            Follow.objects.filter(following=user).values_list("follower_id", flat=True)))
     sources = [{"label": "Music ConnectZ", "followers": mcz_followers, "verified": True}]
     p = getattr(user, "mcz_profile", None)
     for link in (getattr(p, "links", None) or []):
@@ -2232,23 +2277,65 @@ def social_sources(user):
     return sources
 
 
-def reach_median(user):
-    """Median follower count across all VERIFIED sources. Median (not sum) so a
-    single huge account can't dominate — it's the typical reach across the
-    creator's proven presence. Unverified links are excluded."""
-    counts = [s["followers"] for s in social_sources(user) if s.get("verified")]
+def _reach_from(sources):
+    """The reach median out of an already-built source list.
+
+    Split out so `follow_counts` — which has the list — stops rebuilding it.
+    One definition of the number, two ways in, exactly like the batched
+    medians above.
+    """
+    counts = [s["followers"] for s in sources if s.get("verified")]
     m = _median(counts)
     return int(m) if m is not None else 0
 
 
-def follow_counts(user):
+def reach_median(user):
+    """Median follower count across all VERIFIED sources. Median (not sum) so a
+    single huge account can't dominate — it's the typical reach across the
+    creator's proven presence. Unverified links are excluded."""
+    return _reach_from(social_sources(user))
+
+
+def follow_edges_for(user_ids):
+    """{user_id: (follower_ids, following_ids)} for many members, in TWO
+    queries rather than 2N.
+
+    `follow_counts` is two queries per member and `_profile_card` calls it on
+    every card, so a 40-member search spent 80 of its 322 queries here. The
+    sets themselves are returned rather than counts, because friends (mutual)
+    and fans (one-way) are set operations on them — handing back four numbers
+    would mean doing the arithmetic in two places.
+    """
+    ids = set(user_ids)
+    if not ids:
+        return {}
+    edges = {uid: (set(), set()) for uid in ids}
+    for follower_id, following_id in (
+            Follow.objects.filter(following_id__in=ids)
+            .values_list("follower_id", "following_id")):
+        edges[following_id][0].add(follower_id)
+    for follower_id, following_id in (
+            Follow.objects.filter(follower_id__in=ids)
+            .values_list("follower_id", "following_id")):
+        edges[follower_id][1].add(following_id)
+    return edges
+
+
+def follow_counts(user, edges=None):
     """followers / following / friends(mutual) / fans(one-way) for a user, plus
-    verified external social sources and the median reach across them."""
-    following_ids = set(Follow.objects.filter(follower=user).values_list("following_id", flat=True))
-    follower_ids = set(Follow.objects.filter(following=user).values_list("follower_id", flat=True))
+    verified external social sources and the median reach across them.
+
+    `edges` is the (followers, following) pair from `follow_edges_for` when a
+    caller has already fetched them for a whole page.
+    """
+    if edges is not None:
+        follower_ids, following_ids = edges
+    else:
+        following_ids = set(Follow.objects.filter(follower=user).values_list("following_id", flat=True))
+        follower_ids = set(Follow.objects.filter(following=user).values_list("follower_id", flat=True))
     friends = following_ids & follower_ids           # mutual
     fans = follower_ids - following_ids              # follow you, you don't follow back
-    sources = social_sources(user)
+    sources = social_sources(user, follower_ids=follower_ids)
     verified_external = sum(
         s["followers"] for s in sources
         if s.get("verified") and s["label"] != "Music ConnectZ"
@@ -2259,7 +2346,13 @@ def follow_counts(user):
         "friends": len(friends),
         "fans": len(fans),
         "sources": sources,
-        "reach_median": reach_median(user),
+        # Computed from the `sources` already in hand, not by calling
+        # `reach_median(user)` — which rebuilds the identical list from
+        # scratch, followers query and all. That was the LAST per-member query
+        # in the member search: every card fetched its own followers three
+        # times over, once for the count, once to build the reach source, and
+        # once again here.
+        "reach_median": _reach_from(sources),
         # Back-compat: external_followers = sum of verified externals.
         "external_followers": verified_external,
         "total_followers": len(follower_ids) + verified_external,
@@ -2591,6 +2684,29 @@ class ItemRating(models.Model):
 
 def item_rating_median(item_id):
     return _median(ItemRating.objects.filter(item_id=item_id).values_list("score", flat=True))
+
+
+def item_rating_medians(item_ids):
+    """{item_id: median} for many items, in ONE query.
+
+    `item_rating_median` is per item, and the feed called it once per card —
+    so a 50-post feed spent 50 queries printing 50 ratings, on a screen that
+    re-polls every 30 seconds. The same shape `_reactions_for` and the collab
+    deal count were already batched into, missed on this one and on
+    `shares`/`joins` beside it.
+
+    A median cannot be done in SQL portably (SQLite in tests, Postgres in
+    production), so the scores come back in one pass and the medians are taken
+    in Python. One query and a little arithmetic beats N queries every time.
+    """
+    ids = list(item_ids)
+    if not ids:
+        return {}
+    scores = {}
+    for item_id, score in (ItemRating.objects.filter(item_id__in=ids)
+                           .values_list("item_id", "score")):
+        scores.setdefault(item_id, []).append(score)
+    return {k: _median(v) for k, v in scores.items()}
 
 
 class SocialComment(models.Model):

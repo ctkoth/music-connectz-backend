@@ -34,6 +34,7 @@ from .models import (
     can_view_post,
     owns_post,
     item_rating_median,
+    item_rating_medians,
     notify,
     record_submission,
     submission_cap_for,
@@ -109,7 +110,7 @@ _UNSET = object()
 
 
 def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_UNSET,
-               cap=None):
+               cap=None, shares=None, joins=None, rating=_UNSET):
     vibe = up - down
     media = media_slots(p)
     if take_state is _UNSET:
@@ -189,10 +190,20 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
                                          take_bytes=take_bytes, cap=cap,
                                          take_missing=take_missing),
         "skill_cost_cents": p.skill_cost_cents,
-        "joins": p.joins.count() if p.visibility == "restricted" else 0,
-        "shares": p.shares.count(),
+        # Three more per-card counts, batched by the caller for the same
+        # reason `collabs` and `take_state` above already were: the feed
+        # serves up to 300 posts and re-polls every 30 seconds, so each of
+        # these was one query per card per poll. `joins` hid behind a
+        # `restricted` check, which is why a feed of public posts measured two
+        # N+1s and a real one had three.
+        #
+        # None/_UNSET keeps the single-post callers (create, edit, detail)
+        # working unchanged — one extra query on one post is not worth a
+        # batching call site.
+        "joins": (p.joins.count() if p.visibility == "restricted" else 0) if joins is None else joins,
+        "shares": p.shares.count() if shares is None else shares,
         "up": up, "down": down, "vibe": vibe, "flagged": flagged,
-        "rating": item_rating_median(f"post:{p.id}"),
+        "rating": item_rating_median(f"post:{p.id}") if rating is _UNSET else rating,
         "created_at": p.created_at.isoformat(),
         "edited_at": p.edited_at.isoformat() if p.edited_at else None,
         "edit_history": p.edit_history or [],
@@ -527,9 +538,22 @@ class PostsView(APIView):
         # it the coach door is offered on a track the coach cannot read, and the
         # member finds out by pressing the button — see take_state_for.
         sizes = take_state_for([(p, media_slots(p)) for p in visible])
+        ids = [p.id for p in visible]
+        # The last three per-card counts. Each was one query per post on a
+        # feed that re-polls every 30 seconds: measured at 2 queries per post
+        # and 108 queries for 50 posts before this, which is ~3.6 queries a
+        # second of idle load from a single open tab.
+        shares = dict(PostShare.objects.filter(post_id__in=ids)
+                      .values_list("post_id").annotate(n=Count("id")))
+        joins = dict(PostJoin.objects.filter(post_id__in=ids)
+                     .values_list("post_id").annotate(n=Count("id")))
+        ratings = item_rating_medians([f"post:{i}" for i in ids])
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
                             collabs=deals.get(p.id, 0), price=price, cap=cap,
-                            take_state=sizes.get(p.id))
+                            take_state=sizes.get(p.id),
+                            shares=shares.get(p.id, 0),
+                            joins=joins.get(p.id, 0) if p.visibility == "restricted" else 0,
+                            rating=ratings.get(f"post:{p.id}"))
                  for p in visible]
 
         now = timezone.now()

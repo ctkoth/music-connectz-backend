@@ -72,7 +72,13 @@ OCC_TABS = [
     {"key": "habitz", "open_in": "habitz", "icon": "habitz.png", "name": "HabitZ", "emoji": "🎂", "needs": TIER_FREE,
      "desc": "Something you repeat, noticed and kept.", "builds": "habitz"},
     {"key": "characterz", "icon": "characterz.png", "name": "CharacterZ", "emoji": "🤔", "needs": TIER_PREMIUM,
-     "desc": "MBTI characters attached to a FaceZ face, with a story and a voice.",
+     # Not "MBTI characters". This dict is served to members by `tabs_for`,
+     # so it was the second place on the platform publishing somebody else's
+     # trademark — while `personalityz.py`'s own docstring says in as many
+     # words that we deliberately do not call it that. The four axes are ours
+     # to describe; the name is not ours to use.
+     "desc": "Characters built on the four PersonalitieZ axes, attached to a "
+             "FaceZ face, with a story and a voice.",
      "builds": "characterz"},
     {"key": "settings", "open_in": "occ", "icon": "preferencez.png", "name": "Settings", "emoji": "⚙️", "needs": TIER_FREE,
      "desc": "AutomationZ and SuggestionZ live here.", "builds": "settings"},

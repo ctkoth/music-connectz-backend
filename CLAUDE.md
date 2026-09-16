@@ -1019,6 +1019,80 @@ came back, and a storage backend that cannot answer is never treated as a file
 that is gone — marking on an unreachable bucket would tell every member on the
 platform their music was lost, which is worse than the bug it exists for.
 
+## Two screens that re-poll, and every row on them cost a query
+
+The feed re-polls every 30 seconds from every open tab, and VybeZ fires the
+member search from three TEXT INPUTS. Neither is a page-load cost — they are
+standing load that every idle member contributes to forever — so their query
+counts are the ones to watch.
+
+Both measured, both linear, both now flat:
+
+    feed     108 queries for 50 posts    ->  11, at any length
+    members  322 queries for 39 members  ->  15, at any count
+
+**The feed**, three per-card counts: `shares`, `joins` and `rating`.
+`_reactions_for`, the CollabDeal count and `take_state_for` beside them had
+already been collapsed into one query each; these three were missed.
+
+`joins` is the one worth remembering: it sits behind
+`if p.visibility == "restricted"`, so **a feed of public posts measures two
+N+1s and a real feed has three.** A benchmark built from convenient data hides
+the case that costs.
+
+**The member search**, six: two rating medians, a FaceZ rating join, a
+membership read (no `select_related`), and the followers query **three
+separate times** —
+
+1. `follow_counts` counts them,
+2. `social_sources` fetches the same rows again to build the "Music ConnectZ"
+   reach source out of them,
+3. `reach_median` rebuilds that entire source list from scratch, followers
+   query and all, to take a median of a list its caller was already holding.
+
+Three reads of one table, in one function, on every card. Each was locally
+reasonable — `reach_median(user)` reads as a tidy one-liner — and the cost
+only exists in the composition.
+
+`worn_badges_by_user` and `Audience` directly above them were already batched,
+which is the tell: somebody did this work and stopped at the two that were
+obviously expensive.
+
+### Two tests had the N+1 written into their expected value
+
+`test_postz_collab` and `test_crosspost` each measure the feed's cost as a
+DIFFERENCE between a short feed and a long one — the right shape, and why they
+survived this at all. But both asserted **two extra queries per card**, and
+each says why in its own words: *"the feed already does two per-card queries
+(shares, rating median) that predate this change and aren't mine to fix
+here."*
+
+So the N+1 was found, documented, and pinned as expected cost. Both assert
+**zero** now, which is also the only version that cannot rot: `== 2 per card`
+goes green again the moment somebody reintroduces an N+1 of exactly the right
+size, and `== 0` cannot.
+
+A per-row cost noted in a docstring as somebody else's problem is a per-row
+cost that never gets fixed. If a test has to describe a known inefficiency to
+explain its own number, that number is the bug.
+
+### What the batched versions must not quietly change
+
+A batch that changes an answer is worse than the N+1 it replaced, so each has
+a test beside the count test:
+
+- **A missing key is None, not 0.** `.get()` on a batch dict returns None and
+  the per-user helper returned None — which is luck rather than design until
+  it is pinned. A fake rating ends the question; an empty one invites a real
+  one.
+- **`follow_edges_for` returns the SETS, not four numbers.** friends is the
+  mutual set and fans is one-way, so handing back counts would mean doing that
+  arithmetic in two places.
+- **The single-card callers keep working with nothing batched.** A public
+  profile and a member modal render one card, and one card's six queries is
+  not worth a batching call site — so `batched=None` falls through to the old
+  path, and there is a test that it still does.
+
 ## Nothing stores a storage URL — `/api/economy/media/<id>/<name>` does
 
 The app **writes the URL it hands out into the database**: `uploadWork.js`

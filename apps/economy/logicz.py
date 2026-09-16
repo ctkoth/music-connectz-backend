@@ -59,16 +59,34 @@ LOGICZ_TABS = [
              "everybody else bets SpinaZ.",
      "apps": [
          _app("1v1", "1️⃣", "One artist against one artist, whoever else helped.", True),
-         _app("Freestyle", "🆓", "Live, sporadic battles.", False),
-         _app("Battle Cypher", "🧑‍🤝‍🧑", "More than one against more than one.", False),
+         # Both built: `BattleEnterView` accepts kind in (1v1, freestyle,
+         # cypher) and BattleZ offers all three in its picker. They each have
+         # their own drawn icon. The flag was the only thing saying otherwise.
+         _app("Freestyle", "🆓", "Live, sporadic battles.", True, tab="battlez"),
+         _app("Battle Cypher", "🧑‍🤝‍🧑", "More than one against more than one.",
+              True, tab="battlez"),
      ]},
     {"key": "social", "name": "Social ConnectZ", "emoji": "💓", "icon": "social_connectz.png",
      "desc": "The room itself — who's here, who's rated, who's looking.",
      "apps": [
-         _app("VibeZ", "♥️", "Dating and collab, with what you're after stated plainly.", False),
+         # Spelled VybeZ, which is what the tab is called and what the member
+         # will be looking for. It was "VibeZ" here and `built=False`, on a
+         # screen whose entire job is telling somebody what this app has —
+         # while VybeZ has been a mounted tab with its own icon. A live
+         # feature labelled "not built yet" is worse than one nobody
+         # mentioned: it tells people not to go looking.
+         _app("VybeZ", "♥️", "Dating and collab, with what you're after stated plainly.",
+              True, tab="vybez"),
          _app("Inferno", "❤️‍🔥", "The fast version of the same thing.", False),
          _app("BoardZ", "🪧", "Message boards.", False),
-         _app("PersonalitieZ", "😶", "MBTI tests, simple and complex.", False),
+         # NOT "MBTI tests". Myers-Briggs is somebody's trademark and this
+         # module is member-facing copy, so it was the one place on the
+         # platform publishing it — while `personalityz.py`'s own docstring
+         # says in as many words that we deliberately do not call it that. It
+         # is four declared axes, it is built, and it lives in ProfileZ.
+         _app("PersonalitieZ", "😶",
+              "Four axes you declare yourself. Neither side is better, and it "
+              "never moves a rating.", True, tab="profilez"),
      ]},
     {"key": "messagez", "name": "MessageZ", "emoji": "📨", "icon": "messagez.png",
      "desc": "Direct messages. In and out.",
