@@ -27,6 +27,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .clientip import client_ip
 from .gemini import _key
 from .instruments import DIFFICULTIES, profile_for_app
 from .instruments import (LYRIC_SCORE, MIX_SCORE, rates_lyrics, rates_mix,
@@ -41,34 +42,6 @@ from .models import (
     trial_daily_cap,
 )
 from .vocalcoach import score_take
-
-
-# How many proxies of OURS sit in front of this app. Render is one; put a CDN
-# in front and it is two.
-TRUSTED_PROXY_HOPS = max(1, int(os.environ.get("TRUSTED_PROXY_HOPS", "1")))
-
-
-def client_ip(request):
-    """The caller's address, taken from the end of X-Forwarded-For we control.
-
-    This read `[0]` and that is the one entry an attacker owns. Each proxy
-    APPENDS the address it saw, so a request arriving with its own
-    `X-Forwarded-For: 1.2.3.4` comes out of our proxy as `1.2.3.4, <real>` —
-    and `[0]` is the value the client invented. Anything keyed on it (the
-    trial's per-address ceiling, for one) was bypassable with a header, while
-    still being perfectly binding on honest visitors who send no such header.
-
-    So count from the RIGHT, skipping our own hops. Set TRUSTED_PROXY_HOPS if
-    a CDN is added in front; too small over-trusts, too large reads one of our
-    own proxies and collapses every visitor onto one address, which is why the
-    per-IP ceiling is a loose backstop rather than the thing that decides.
-    """
-    fwd = request.META.get("HTTP_X_FORWARDED_FOR", "")
-    if fwd:
-        chain = [p.strip() for p in fwd.split(",") if p.strip()]
-        if chain:
-            return chain[-min(TRUSTED_PROXY_HOPS, len(chain))][:64]
-    return (request.META.get("REMOTE_ADDR") or "")[:64]
 
 
 def client_anon_id(request):
@@ -381,7 +354,10 @@ class PublicTiersView(APIView):
 
     def get(self, request):
         from .catalog import tier_ladder, TIER_FREE, TIER_PREMIUM, TIER_STATZ
-        from .models import founding_status
+        from .models import (ENERGY_FLOOR_PER_HOUR, PROMPT_ALLOWANCE,
+                             REFERRAL_REWARD_JOINEE_SPINAZ,
+                             REFERRAL_REWARD_REFERRER_SPINAZ,
+                             SIGNUP_WELCOME_SPINAZ, founding_status)
 
         ladder = tier_ladder()
         founding = founding_status()
@@ -398,6 +374,20 @@ class PublicTiersView(APIView):
                 "storage_mb": limits["storage_mb"],
                 "char_limit": limits["char_limit"],
                 "embeds_per_post": limits["embeds_per_post"],
+                # The number every join screen sells on, and the one this
+                # endpoint did NOT serve — which is exactly why Register.jsx
+                # had "3 scored takes/day" and "5 scored takes/day" typed into
+                # it, becoming the tenth place a tier number lived. It is the
+                # AI allowance, so it covers the coach, OCC, DirectZ and every
+                # Gemini surface together, not takes alone.
+                "daily_prompts": PROMPT_ALLOWANCE.get(tier_key, 0),
+                # Energy per hour at the FLOOR, which is the rate that applies
+                # to somebody reading a signup page: the reach-derived rate is
+                # reach ÷ divisor, and reach is 0 until an external account is
+                # verified. Register.jsx claimed Premium was "2x faster"; the
+                # floors are 2 and 6, so for its own audience it is 3x, and
+                # the copy was understating the thing it was selling.
+                "energy_per_hour": ENERGY_FLOOR_PER_HOUR.get(tier_key, 0),
             }
 
             # Add founding info for StatZ
@@ -412,4 +402,15 @@ class PublicTiersView(APIView):
 
             tiers.append(tier_data)
 
-        return Response({"tiers": tiers})
+        return Response({
+            "tiers": tiers,
+            # What joining itself pays, so the signup form can state the gain
+            # before the button rather than after it. The welcome bonus was
+            # paid on every registration and named on no screen — the cost/gain
+            # rule's other half, and the half that gets forgotten.
+            "join": {
+                "welcome_spinaz": SIGNUP_WELCOME_SPINAZ,
+                "referrer_spinaz": REFERRAL_REWARD_REFERRER_SPINAZ,
+                "joinee_spinaz": REFERRAL_REWARD_JOINEE_SPINAZ,
+            },
+        })

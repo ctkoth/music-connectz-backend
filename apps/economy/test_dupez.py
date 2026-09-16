@@ -595,7 +595,7 @@ class AddressTests(TestCase):
         # the owner would stop reading the queue, and the real entries would go
         # unread with them.
         for i in range(dupez.ADDRESS_CROWD):
-            self.signup(f"m{i}", f"m{i}@x.com")
+            self.signup(f"crowd{i}", f"m{i}@x.com")
         DupeFlag.objects.all().delete()
         self.signup("late", "late@x.com")
         self.assertEqual(DupeFlag.objects.count(), 0)
@@ -640,10 +640,10 @@ class AddressTests(TestCase):
     def test_only_signup_addresses_count_as_a_signal(self):
         # A sighting is where somebody happened to be. Two members who once
         # used the same café are not a duplicate.
-        a = self.signup("a", "a@x.com", ip="1.1.1.1")
-        b = self.signup("b", "b@x.com", ip="2.2.2.2")
-        self._post("/api/auth/login/", {"username": "a", "password": PW}, ip="3.3.3.3")
-        self._post("/api/auth/login/", {"username": "b", "password": PW}, ip="3.3.3.3")
+        a = self.signup("member_a", "a@x.com", ip="1.1.1.1")
+        b = self.signup("member_b", "b@x.com", ip="2.2.2.2")
+        self._post("/api/auth/login/", {"username": "member_a", "password": PW}, ip="3.3.3.3")
+        self._post("/api/auth/login/", {"username": "member_b", "password": PW}, ip="3.3.3.3")
         self.assertEqual(dupez.signals_between(a, b), [])
 
 

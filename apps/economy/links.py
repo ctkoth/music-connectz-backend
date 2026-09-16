@@ -93,11 +93,10 @@ def scan_available():
     return bool(scanner())
 
 
-def _client_ip(request):
-    fwd = request.META.get("HTTP_X_FORWARDED_FOR", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR")
+# One reader, in clientip.py. This was a local copy that took
+# X-Forwarded-For[0] — the entry the CALLER writes — so the cap it feeds was
+# keyed on a value the person being capped chooses.
+from .clientip import client_ip as _client_ip
 
 
 NETWORK_ERRORS = (urllib.error.URLError, ValueError, TimeoutError, OSError)

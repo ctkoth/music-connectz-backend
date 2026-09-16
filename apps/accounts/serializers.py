@@ -164,9 +164,30 @@ class RegisterSerializer(serializers.Serializer):
     trial_token = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
 
     def validate_username(self, value):
+        # `username_problem` is the same rule `check-username/` answers with.
+        # It was the checker's alone until now, and the checker cannot create
+        # an account — so a handle the availability endpoint would have
+        # refused was registered anyway, and there was nothing to notice.
+        from .usernames import username_problem
         value = value.strip()
-        if User.objects.filter(username__iexact=value).exists():
-            raise serializers.ValidationError("That username is taken.")
+        problem = username_problem(value)
+        if problem:
+            raise serializers.ValidationError(problem)
+        return value
+
+    def validate_password(self, value):
+        """Django's own validators — the ones `AUTH_PASSWORD_VALIDATORS` has
+        been configured with since the project was started.
+
+        `passwords.py` runs them on a RESET and this never ran them on a
+        REGISTER, so the rule was enforced at the weaker moment and not the
+        stronger one: you could sign up with the literal string "password",
+        and then be refused that same password if you ever tried to change to
+        it. Held forever, and the only way to find out it was not allowed was
+        to try to stop using it.
+        """
+        from django.contrib.auth import password_validation
+        password_validation.validate_password(value)
         return value
 
     def validate_email(self, value):

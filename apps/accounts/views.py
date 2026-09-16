@@ -32,12 +32,41 @@ logger = logging.getLogger(__name__)
 
 
 def _unique_username(base):
-    base = re.sub(r"[^a-zA-Z0-9_.-]", "", (base or "user")).strip(".-_") or "user"
-    candidate = base[:140]
-    i = 1
-    while User.objects.filter(username__iexact=candidate).exists():
-        candidate = f"{base[:140]}{i}"
+    """A free handle built from whatever a provider called somebody.
+
+    This is the SECOND writer of usernames — `RegisterSerializer` is the other
+    — and it used to allow `.` and `-` and run to 140 characters, so the two
+    disagreed about what a handle is: a SoundCloud display name of
+    "bob.obrien" or "admin" registered here and would be refused on the form.
+    It answers to `usernames.USERNAME_RE` and `RESERVED` now, same as the form.
+
+    It SANITIZES and never refuses. An OAuth sign-in must not fail because
+    somebody's display name has an apostrophe in it — that is a wall in front
+    of the easiest door we have. Anything unusable becomes "user" plus a
+    number, which is ugly and works, and the member can be told to pick a
+    better one later.
+    """
+    from .usernames import RESERVED, USERNAME_RE
+
+    cleaned = re.sub(r"[^a-zA-Z0-9_]", "", (base or "")).strip("_")
+    # Room for the numeric suffix the loop may need, inside the 20-char rule.
+    stem = cleaned[:16] or "user"
+    if len(stem) < 3:
+        stem = f"{stem}user"[:16]
+
+    candidate = stem
+    i = 0
+    while (User.objects.filter(username__iexact=candidate).exists()
+           or candidate.lower() in RESERVED
+           or not USERNAME_RE.match(candidate)):
         i += 1
+        suffix = str(i)
+        candidate = f"{stem[:20 - len(suffix)]}{suffix}"
+        # Belt and braces: a stem that cannot be made to fit falls back rather
+        # than looping forever on an account nobody can finish creating.
+        if i > 9999:
+            candidate = f"user{User.objects.count() + 1}"[:20]
+            break
     return candidate
 
 
@@ -317,14 +346,23 @@ class MeView(APIView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
-            # Validate format: alphanumeric + underscore, 3-20 chars
-            if not re.match(r"^[a-zA-Z0-9_]{3,20}$", new_username):
-                return Response(
-                    {"detail": "Handle must be 3-20 characters: letters, numbers, and underscores only."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+            # THE THIRD copy of this rule, and the third behaviour. It was the
+            # same regex typed out again — with no reserved list, so a Premium
+            # member could rename themselves `admin`, `support` or `official`:
+            # impersonation, behind a paywall. `username_problem` is the one
+            # rule now, shared with the register serializer and the
+            # availability endpoint.
+            #
+            # `taken=False` because the uniqueness question here is different:
+            # a rename must not report the member's own current handle as
+            # taken, so the exclude-self query below answers it instead.
+            from .usernames import username_problem
 
-            # Check availability (case-insensitive)
+            problem = username_problem(new_username, taken=False)
+            if problem:
+                return Response({"detail": problem},
+                                status=status.HTTP_400_BAD_REQUEST)
+
             if User.objects.filter(username__iexact=new_username).exclude(id=request.user.id).exists():
                 return Response(
                     {"detail": f"The handle '{new_username}' is taken. Try another."},
@@ -333,7 +371,17 @@ class MeView(APIView):
 
             request.user.username = new_username
             request.user.save(update_fields=["username"])
-            changed.append("username")
+            # NOT `changed`. That list is `Profile.save(update_fields=...)`,
+            # and `username` lives on User — so this raised
+            # "fields do not exist in this model" and 500'd, AFTER the handle
+            # had already been saved on the line above. The rename worked and
+            # reported failure, which is the inverse of the worst bug class in
+            # this app and just as bad: the member sees an error, tries again,
+            # and is told the handle is taken by themselves.
+            #
+            # `first_name`/`last_name` hit this same trap and were given their
+            # own `named` list; this one was missed. Anything on User goes in
+            # its own save, never in `changed`.
         # A real name, kept separate from the handle. `username` is the address
         # other members type; these are what somebody is called, and a provider
         # supplies them at signup (Facebook through Spotify hands over a legal
@@ -451,35 +499,31 @@ class UsernameAvailabilityView(APIView):
     """GET /api/auth/check-username/?username=<handle> — check if a username is
     available. Returns {available: bool, reason: str | null}."""
 
-    permission_classes = [IsAuthenticated]
+    # Open logged-out, for the reason `rulez` and `trialdoorz` are: the one
+    # screen that needs this is the signup form, and nobody is signed in on
+    # it. Behind IsAuthenticated it could only ever answer the question for
+    # people who had already stopped asking it — which is why nothing called
+    # it, and why a whole form got filled in before "that username is taken".
+    permission_classes = [AllowAny]
 
     def get(self, request):
+        from .usernames import USERNAME_RULE, username_problem
+
         username = request.query_params.get("username", "").strip()
+        me = getattr(request.user, "username", "") if request.user.is_authenticated else ""
 
-        # Validate format first
-        if not re.match(r"^[a-zA-Z0-9_]{3,20}$", username):
-            return Response({
-                "available": False,
-                "reason": "Must be 3-20 characters: letters, numbers, and underscores only.",
-            })
+        # Asked about their own handle, which is neither free nor taken.
+        if me and username.lower() == me.lower():
+            return Response({"available": False, "rule": USERNAME_RULE,
+                             "reason": "This is already your handle."})
 
-        # Check if current user's own username
-        if username.lower() == request.user.username.lower():
-            return Response({
-                "available": False,
-                "reason": "This is already your handle.",
-            })
-
-        # Check availability
-        if User.objects.filter(username__iexact=username).exists():
-            return Response({
-                "available": False,
-                "reason": "This handle is taken.",
-            })
-
+        problem = username_problem(username)
         return Response({
-            "available": True,
-            "reason": None,
+            "available": problem is None,
+            # Travels either way so the form can state the rule BEFORE somebody
+            # picks a handle that breaks it, rather than only after.
+            "rule": USERNAME_RULE,
+            "reason": problem,
         })
 
 

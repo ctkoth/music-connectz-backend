@@ -12,7 +12,8 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from .models import TRIAL_PER_IP, TrialTake, trial_daily_cap
-from .trial import client_ip, trial_state
+from .clientip import client_ip
+from .trial import trial_state
 
 
 class TheAddressIsNotThePersonTests(TestCase):

@@ -360,8 +360,12 @@ def client_ip(request):
     unexpected costs us a hint and must not cost somebody their registration.
     """
     try:
-        fwd = (request.META.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
-        return (fwd or request.META.get("REMOTE_ADDR") or "")[:64]
+        # One reader, in clientip.py. This took X-Forwarded-For[0], which the
+        # CALLER writes — spoofable in both directions on a duplicate signal:
+        # hide your own second account, or put somebody else's address on your
+        # signup and raise a flag against them.
+        from .clientip import client_ip
+        return client_ip(request)
     except (AttributeError, TypeError):
         return ""
 

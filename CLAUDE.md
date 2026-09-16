@@ -1188,6 +1188,121 @@ stayed at 5, which is a thin gap. Making the founding discount LIFETIME-ONLY
 would unpin the monthly ladder. That is a pricing decision, so the code
 records it here rather than making it.
 
+## A username had THREE writers and one rule, applied by none of them
+
+The same audit, run on the signup flow. `check-username/` carried a real
+handle rule — `^[a-zA-Z0-9_]{3,20}$` — and was the only thing that had one. It
+sat behind `IsAuthenticated`, so the single screen that needs it (the signup
+form, where by definition nobody is signed in) could not call it, and nothing
+did. Meanwhile:
+
+- **`RegisterSerializer` had no rule at all.** It is a plain `Serializer`
+  rather than a `ModelSerializer`, so Django's own `UnicodeUsernameValidator`
+  never ran, and `create_user()` does not call `full_clean()`. The field was
+  `CharField(max_length=150)` and nothing else.
+- **`MeView.patch` had the regex typed out a second time**, with no reserved
+  list — so a Premium member could rename themselves `admin`, `support` or
+  `official`. Impersonation, behind a paywall.
+- **`_unique_username` (the OAuth path) allowed `.` and `-` and 140
+  characters**, so a provider display name of "bob.obrien" made an account the
+  form would refuse.
+
+Every one of these registered, and each was a real account:
+
+    "a/b"                 public profile 404s — no screen could address them
+    "who?"  "hash#tag"    their own ?ref= invite truncates at the ? or #
+    "<script>x</script>"  goes wherever a handle goes
+    "@everyone"  "."      reads as a mention; is a path segment
+
+`apps/accounts/usernames.py` is the one rule now and all three import it.
+`_unique_username` SANITIZES rather than refusing, because an OAuth sign-in
+must not fail over an apostrophe in somebody's display name — that is a wall
+in front of the easiest door we have.
+
+`manage.py audit_usernames` names whoever is already over the line, because
+"never lower a live limit without a plan for the members already over it"
+applies to a handle too. It has **no `--write`**: a username is the address
+other members type and the invite link they share, so renaming somebody
+without asking breaks every link anybody ever made to them.
+
+### The password rule was enforced on the weaker end
+
+`AUTH_PASSWORD_VALIDATORS` has been configured since the project was started.
+`passwords.py` runs them on a RESET. **Registration ran `min_length=8` and
+nothing else** — so you could sign up with the literal string `password`, and
+then be refused that same password if you ever tried to change to it. Held
+forever, and the only way to find out it was not allowed was to try to stop
+using it.
+
+### And the Premium handle change had never once worked
+
+`changed.append("username")` fed `Profile.save(update_fields=...)`, and
+`username` is a **User** column — so it raised "fields do not exist in this
+model" and 500'd, one line AFTER the handle had already been saved. The rename
+worked and reported failure: the member sees an error, tries again, and is
+told the handle is taken by themselves. `first_name`/`last_name` hit this
+exact trap and were given their own `named` list; this one was missed.
+Anything on User gets its own save and never goes in `changed`.
+
+## Five modules each had their own copy of "whose request is this"
+
+`trial.py`, `postz.py`, `links.py`, `adz.py` and `dupez.py` each carried the
+same four lines, and all five were wrong the same way:
+
+    fwd.split(",")[0].strip()      # the entry the CALLER writes
+
+Each proxy APPENDS the address it saw, so a request arriving with its own
+`X-Forwarded-For: 1.2.3.4` leaves our proxy as `1.2.3.4, <real>`. `[0]` is
+whatever the sender invented — and every one of the five is a control that
+reads it:
+
+- **`postz`** mints 🍥 per "distinct authenticated user + IP", and its own
+  comment says the cap exists "so rotating IPs / accounts can't farm it".
+  Rotating IPs was one header.
+- **`links`** pays +5 ⚡ per genuine visit, capped per address per day.
+- **`adz`** pays per ad view, capped per address per day.
+- **`dupez`** records the address an account SIGNED UP from, and two accounts
+  sharing one is a duplicate signal — spoofable in both directions: hide your
+  own second account, or put somebody else's address on your signup and raise
+  a flag against them.
+- **`trial`** gated the one free no-account take.
+
+`apps/economy/clientip.py` is the one reader and counts hops from the RIGHT
+(`TRUSTED_PROXY_HOPS`, 1 for Render alone, 2 with a CDN in front).
+`test_clientip` walks the tree and fails if any module reads the header
+itself, because a sixth copy is how this comes back.
+
+**Nothing keyed on an address should be a hard "one per address" rule.** Too
+few trusted hops over-trusts the caller; too many reads one of our own proxies
+and collapses every visitor onto a single address. It is a ceiling or a
+signal, never the only control — which is the same conclusion the trial door
+reached from the other direction.
+
+## The signup screen was the tenth place a tier number lived
+
+`Register.jsx` had "3 scored takes/day", "5 scored takes/day", "2x faster
+Energy" and both referral amounts typed into its copy, because
+`PublicTiersView` served upload/storage/char limits and **not the allowance
+every join screen actually sells on**. It serves `daily_prompts` and
+`energy_per_hour` now, plus a `join` block with the welcome and referral 🍥.
+
+Two things that came out of writing it down:
+
+- **The "2x faster Energy" claim was wrong for its own audience.** The
+  reach-derived rate is `reach ÷ divisor` (10 free, 5 premium — 2x), but reach
+  is 0 until an external account is VERIFIED, so anybody reading a signup page
+  is on the FLOOR: 2 and 6 ⚡/hour, which is 3x. The copy understated the thing
+  it was selling.
+- **`SIGNUP_WELCOME_SPINAZ` is paid on every registration and was named on no
+  screen.** The gain half of the cost/gain rule, and the half that gets
+  forgotten — a reward found out by accident is a coincidence, and a
+  coincidence changes nobody's behaviour.
+
+"Advanced analytics" and "Priority support" were also on the Premium card and
+**neither exists anywhere in this codebase**. A signup page selling two
+features that were never built is the substance rule with a price attached.
+Both gone.
+
 ## A profile field has two writers, and only one of them used to clean
 
 `POST /api/economy/profile/` wrote every name in `social.PROFILE_FIELDS`
