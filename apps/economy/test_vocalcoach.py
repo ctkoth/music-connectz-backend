@@ -961,6 +961,44 @@ class ScaleIsAnchoredTests(TestCase):
         self.assertIn("Harshness is not honesty", p)
 
 
+class OverallIsNotTheWeakestFacetTests(TestCase):
+    """A take with real bones and one rough facet is not a weak take.
+
+    Corey watched an AI coach mark a verse a 5/10 on tongue-stumbles on the
+    fast lines while the same song scored 9.7 with human listeners on
+    RepostExchange. The prompt asked for an overall "1-10 integer" and said
+    nothing about how it relates to the dimensions underneath it, so the model
+    had no reason not to let one weak facet set the ceiling for the whole
+    take — the same undefined-anchor failure `ScaleIsAnchoredTests` above
+    fixed for the bands themselves, one level up.
+
+    A real listener does not average facets and does not get capped by the
+    weakest one; they remember what landed. So the prompt says so, explicitly,
+    the same way it explicitly anchors "5 is normal" rather than trusting the
+    model to infer it.
+    """
+
+    def test_the_overall_is_not_an_average_or_the_weakest_facet(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn("THE OVERALL is not an average", p)
+        self.assertIn("never the weakest one", p)
+
+    def test_a_carrying_strength_may_outweigh_one_rough_facet(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("does not cap the whole take at that facet's level", p)
+        self.assertIn("Let what's working carry the overall", p)
+
+    def test_a_take_shaky_throughout_still_scores_low(self):
+        """The fix is calibration, not inflation — pervasive weakness still
+        pulls the overall down, same as `ScaleIsAnchoredTests` guards above."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("guitarz", "Rock", None, "builder")
+        self.assertIn("shaky throughout", p)
+        self.assertIn("never for a strong one with a single fixable habit", p)
+
+
 class LyricRatingTests(TestCase):
     """The optional writing score — RapZ's blueprint dimension, finally built.
 

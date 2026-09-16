@@ -406,6 +406,16 @@ nothing broken. **Most takes belong here** — 5 is normal, not a failure.
 - 7-8: clearly good for this level; the fixes are refinements.
 - 9-10: exceptional at this level. Rare, and worth saying so when it happens.
 
+THE OVERALL is not an average of the dimensions below it, and it is never the \
+weakest one. A real listener does not grade each facet and divide — they \
+remember what landed. If the hook is real, the emotion reads, or the energy \
+connects, one rough facet (diction smearing on the fast bars, a pitchy note, a \
+rushed line) does not cap the whole take at that facet's level. Let what's \
+working carry the overall the way an actual audience would, and put the weak \
+facet in "fixes" rather than in the number. Only let the overall sit low when \
+the weaknesses run through the whole take — score it down for a take that is \
+shaky throughout, never for a strong one with a single fixable habit.
+
 Score the PERFORMANCE, not the recording. Room noise, phone microphones, no \
 mixing, a backing track that is too loud — none of that is their singing, \
 playing or writing, and none of it may pull a score down. If the recording \
