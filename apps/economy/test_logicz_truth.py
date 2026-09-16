@@ -7,6 +7,7 @@ with a label on it.
 """
 from django.test import TestCase
 
+from .instruments import INSTRUMENTS
 from .logicz import LOGICZ_TABS
 
 
@@ -38,6 +39,19 @@ class WhatItClaimsIsBuiltTests(TestCase):
     def test_languagez_is_built(self):
         a = apps_by_name()["LanguageZ"]
         self.assertTrue(a["built"])
+
+    def test_every_scored_instrument_has_its_own_top_level_tab_here(self):
+        """SingZ and RapZ each got a LOGICZ_TABS row of their own; the other
+        five (guitarz, bassz, keyz, drumz, violinz) had a real, mounted,
+        tested coach and no row anywhere in this file — invisible from the
+        one screen whose job is saying what this app has, on top of the
+        separate bug (fixed alongside this) that the member Dock had no
+        route to four of them at all."""
+        keys = {t["key"] for t in LOGICZ_TABS}
+        for app_key in INSTRUMENTS:
+            self.assertIn(app_key, keys, app_key)
+            tab = next(t for t in LOGICZ_TABS if t["key"] == app_key)
+            self.assertTrue(any(a["built"] for a in tab["apps"]), app_key)
 
     def test_soundcloud_import_and_engagement_are_both_built(self):
         # Both were fully live and absent from this screen entirely — not

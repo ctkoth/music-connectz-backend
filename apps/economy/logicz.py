@@ -132,6 +132,27 @@ LOGICZ_TABS = [
     {"key": "rapz", "name": "RapZ", "emoji": "👨🏼‍🎤", "icon": "rapz.png",
      "desc": "Breath control, flow, sixteen style tracks and a combo meter.",
      "apps": [_app("Coach", "🤖", "What to practise next, and why.", True)]},
+    # Five more coaches with the identical shape as SingZ/RapZ right above —
+    # mounted, scored, tested — that had no row here at all, on top of the
+    # separate bug (fixed alongside this) that the member Dock had no route
+    # to four of them and "DrumZ" pointed at an unrelated tool.
+    {"key": "guitarz", "name": "GuitarZ", "emoji": "🎸", "icon": "guitarz.png",
+     "desc": "Timing, tone, technique, dynamics and cleanliness, scored.",
+     "apps": [_app("Coach", "🤖", "What to practise next, and why.", True)]},
+    {"key": "bassz", "name": "BassZ", "emoji": "🎸", "icon": "bassz.png",
+     "desc": "Timing, tone, technique, dynamics and note length, scored.",
+     "apps": [_app("Coach", "🤖", "What to practise next, and why.", True)]},
+    {"key": "keyz", "name": "KeyZ", "emoji": "🎹", "icon": "keyz.png",
+     "desc": "Timing, tone, technique, dynamics and voicing, scored.",
+     "apps": [_app("Coach", "🤖", "What to practise next, and why.", True)]},
+    {"key": "violinz", "name": "ViolinZ", "emoji": "🎻", "icon": "violinz.png",
+     "desc": "Intonation, tone, bowing, timing and vibrato, scored.",
+     "apps": [_app("Coach", "🤖", "What to practise next, and why.", True)]},
+    {"key": "drumz", "name": "DrumZ", "emoji": "🥁", "icon": "drumz.png",
+     "desc": "Timing, groove, dynamics, consistency and fills, scored — plus a "
+             "beat-sequencer practice pad.",
+     "apps": [_app("Coach", "🤖", "What to practise next, and why.", True),
+              _app("Practice Pad", "🎛️", "A beat sequencer to warm up on.", True)]},
     {"key": "labelz", "name": "LabelZ", "emoji": "🏷️", "icon": "labelz.png",
      "desc": "Public groups — a label anyone can find and ask to join.", "apps": []},
     {"key": "groupz", "name": "GroupZ", "emoji": "👥", "icon": "groupz.png",
