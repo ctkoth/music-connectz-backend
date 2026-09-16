@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 
 from apps.economy.personaz import clean_persona
 from apps.economy.personalityz import clean_code as clean_personality
+from apps.economy.religionz import clean_religion
 
 from .models import OAuthIdentity, Profile
 from .oauth import (
@@ -444,6 +445,9 @@ class MeView(APIView):
             # in economy/social.py about what happens when it gets two.
             p.personality = clean_personality(data["personality"])
             changed.append("personality")
+        if "religion" in data:
+            p.religion = clean_religion(data["religion"])
+            changed.append("religion")
         if isinstance(data.get("nationalities"), list):
             p.nationalities = [str(x)[:60] for x in data["nationalities"]][:30]
             changed.append("nationalities")

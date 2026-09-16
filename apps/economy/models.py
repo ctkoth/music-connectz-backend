@@ -971,6 +971,11 @@ class Profile(models.Model):
     # One CharField rather than four booleans because it is one answer a
     # member gives once, and because the filter reads it as a whole.
     personality = models.CharField(max_length=4, blank=True, default="", db_index=True)
+    # ReligionZ — a declared tradition from the closed list in religionz.py,
+    # or "" for "hasn't said". Same shape as personality and sign: a
+    # DECLARATION filterable in MembersView, never a measurement — see
+    # religionz.py for why that distinction is what makes it allowed.
+    religion = models.CharField(max_length=32, blank=True, default="", db_index=True)
     # {"clarity": {axis: 0-100}, "depth": "basic"|"advanced"} from the
     # questionnaire, or {} for a member who set their letters by hand.
     #

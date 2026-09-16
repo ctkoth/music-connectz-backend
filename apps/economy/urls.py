@@ -13,6 +13,7 @@ from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
 from .rulez import RulezView
 from .personalityz import PersonalityAxesView, PersonalityTestView
+from .religionz import ReligionsView
 from .trialdoorz import TrialDoorsView
 from .trial import TrialPublicStatsView, PublicTiersView
 from .offerz_engine import (FunnelCatalogView, FunnelOfferRedeemView,
@@ -384,6 +385,9 @@ urlpatterns = [
     path("personalityz/", PersonalityAxesView.as_view(), name="economy-personalityz"),
     # The questionnaire, open logged-out like the trial take.
     path("personalityz/test/", PersonalityTestView.as_view(), name="economy-personalityz-test"),
+    # ReligionZ — the closed list of 50, read by the profile picker and every
+    # member search filter. Same shape as personalityz above.
+    path("religionz/", ReligionsView.as_view(), name="economy-religionz"),
     path("signbonus/", SignBonusView.as_view(), name="economy-signbonus"),
     # What rating, voting, commenting and answering a stranger pay — stated
     # before the act, because none of them cost anything and a reward found

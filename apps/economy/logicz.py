@@ -87,6 +87,13 @@ LOGICZ_TABS = [
          _app("PersonalitieZ", "😶",
               "Four axes you declare yourself. Neither side is better, and it "
               "never moves a rating.", True, tab="profilez"),
+         # Same shape as PersonalitieZ right above it, so it does not become
+         # the next entry on the "told members it didn't exist" list: a
+         # declared, filterable field, built, and it lives in ProfileZ.
+         _app("ReligionZ", "🕊️",
+              "One declared tradition out of fifty, grouped into families. "
+              "No tradition outranks another, and it never moves a rating.",
+              True, tab="profilez"),
      ]},
     {"key": "messagez", "name": "MessageZ", "emoji": "📨", "icon": "messagez.png",
      "desc": "Direct messages. In and out.",
