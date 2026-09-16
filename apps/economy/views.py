@@ -428,7 +428,12 @@ class FunnelEventView(APIView):
     # the message the member saw: the reason is the thing that decides what to
     # fix, and free text here would be the one place a visitor's own words
     # could land in this table.
-    _WHY = lambda v: v if v in ("too_big", "refused", "network", "empty", "server") else None
+    # `timeout` is new and is the one the 853-second spinner would have been,
+    # had anything been able to report it: the request was never answered. A
+    # dropped connection and a request nobody answered need opposite fixes —
+    # one is the member's link, the other is ours — so they are counted apart.
+    _WHY = lambda v: v if v in ("too_big", "refused", "network", "empty",
+                                "server", "timeout") else None
     # What KIND OF SCREEN this happened on, in three buckets.
     #
     # Measured by the client from width and `pointer: coarse`, never read off

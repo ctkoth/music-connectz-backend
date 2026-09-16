@@ -298,9 +298,31 @@ class LoginView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        # This door took 25 wrong passwords in a row and answered 400 to every
+        # one of them, and would have taken 25 million: there was no rate
+        # limiting anywhere in this project. Only FAILURES count, so a member
+        # who signs in successfully never spends any of it — see ratelimit.py
+        # for why it is keyed on the account AND the address rather than
+        # either alone.
+        from .ratelimit import (login_block_reason, note_login_failure,
+                                note_login_success)
+
+        identifier = (request.data or {}).get("identifier", "")
+        blocked = login_block_reason(request, identifier)
+        if blocked:
+            return Response({"detail": blocked},
+                            status=status.HTTP_429_TOO_MANY_REQUESTS)
+
         serializer = LoginSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            # Counted BEFORE the error is raised, because a wrong password and
+            # a missing field arrive the same way and a guesser can send
+            # either.
+            note_login_failure(request, identifier)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
         user = serializer.validated_data["user"]
+        note_login_success(request, identifier)
         _note_seen(user, request)
         tokens = issue_tokens(user)
         return Response({"user": PublicUserSerializer(user).data, **tokens})

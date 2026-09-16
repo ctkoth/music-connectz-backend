@@ -28,6 +28,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .clientip import client_ip
+from .deadline import COACH_BUDGET_SECONDS
 from .gemini import _key
 from .instruments import DIFFICULTIES, profile_for_app
 from .instruments import (LYRIC_SCORE, MIX_SCORE, rates_lyrics, rates_mix,
@@ -144,6 +145,11 @@ class TrialCoachView(APIView):
             "per_address": (f"one free take per browser every {TRIAL_PER_IP_HOURS} hours "
                             f"({TRIAL_PER_IP} per network address)"),
             "max_mb": TRIAL_MAX_MB,
+            # The longest a take may now run before the server gives up and
+            # says so. On screen BEFORE the button, because a wait with a
+            # stated end is one somebody sits through and an open-ended one
+            # is one they abandon — which is what 853 seconds of spinner was.
+            "coach_budget_seconds": COACH_BUDGET_SECONDS,
             "claim_days": TRIAL_CLAIM_DAYS,
             # `scores_for`, not `profile["scores"]`: every take is scored
             # against the style or genre it was aimed at, so Style Match is

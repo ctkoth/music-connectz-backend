@@ -1088,6 +1088,88 @@ overhead.
   it reads the membership row, and the feed's query-count test catches a
   per-card read.
 
+## 853 seconds on a spinner: the failure where nothing failed
+
+A member sent a 3:05 take and watched **"Scoring your take… 853s"**. No error,
+no 500, no dropped connection, nothing in any log. **Every single component was
+doing exactly what it was configured to do.** That is what makes this worth
+writing down at length — it is the failure mode that no amount of error
+handling catches, because nothing errored.
+
+### The arithmetic
+
+    Files upload            timeout=300
+    wait_active poll        40 tries x (20s GET timeout + 1.5s sleep)  = 860
+    generateContent         timeout=300  PER MODEL, and the chain has four
+    ------------------------------------------------------------------------
+    one request could legally run for              2360s = 39 minutes
+
+**853 is `wait_active` one tick from the end of its own worst case.** The
+member was sitting in that loop, and the loop was bounded by a TRY COUNT while
+each try carried a 20-second timeout on a request that fetches a one-line
+status document.
+
+Every one of those numbers is defensible alone. 300s for an upload is right —
+a big take over a slow link is still a take. 40 polls is right — video is
+transcoded after upload and takes a while. The bug is that **nothing added
+them up**, and the sum is what the member experiences.
+
+### The thing that was supposed to stop it, and why it didn't
+
+`render.yaml` says `--timeout 120`. That reads as a request timeout. It is not.
+
+`--threads 4` selects gunicorn's **gthread** worker, and its main loop is:
+
+    while self.alive:
+        self.notify()                      # "I am alive" to the arbiter
+        self.wait_for_and_dispatch_events(timeout=1.0)
+
+It calls `notify()` **every second regardless of whether a request thread is
+blocked**. `--timeout` is the arbiter's check for a stale heartbeat, so with
+gthread it bounds an *idle or wedged worker*, never a slow request. A thread
+can block on `requests.get` for as long as its own timeouts allow and the
+arbiter never notices.
+
+So the config that looks like it bounds a request bounds nothing, and it looks
+correct in review. That is the part to remember: **`--timeout` means different
+things to different gunicorn workers, and the one we run is the one where it
+does not mean what it says.**
+
+### And the client had no timeout at all
+
+`api.js` had no `AbortController` and no `signal`. `fetch` with no signal waits
+as long as the other end is willing to. So even if everything above had been
+fine, a hung proxy would have produced the same spinner.
+
+### What now stops it
+
+- **`apps/economy/deadline.py`** — ONE budget for the whole run
+  (`COACH_BUDGET_SECONDS`, 100s), made at the view and passed down. Every leg
+  asks `remaining()` and can never get more than is left. Per-call timeouts
+  answer "how long may this ONE call hang"; nobody was answering **"how long
+  may this member WAIT"**, which is the only number a person experiences.
+- **Running out is an ANSWER**, a 504 with a sentence and a next move, and
+  nothing is billed. `Expired` carries the member-facing text because the
+  catch site is usually not the one that knows what they were doing.
+- **The poll is bounded by the clock, not the count**, and its status GET has
+  a 5s timeout instead of 20 — it reads one line of JSON, it is not a
+  transfer.
+- **The client has a bound too**, deliberately LONGER than the server's, so a
+  server that answers in time is always the one that decides and the client
+  only fires when nothing answered at all.
+
+### The general rule this leaves behind
+
+**A timeout on a call is not a budget for a request.** If a request makes N
+calls, its worst case is the SUM, and nobody reviewing any single line will
+see it. Anything a member waits on gets one deadline, made where the request
+starts, passed down — and every timeout below it is a cap on that, never an
+addition to it.
+
+The corollary is the one that bit here: **a number that only goes up is not
+progress.** It cannot distinguish "working" from "hung", which is the single
+thing the person watching needs to know.
+
 ## The coach's live path has one check, and it isn't a test
 
 `gemini_files.py` (the Files API upload) and `gemini.MODEL_CHAINS` (the model
@@ -1187,6 +1269,61 @@ widen much past 5/day before the model cost eats the subscription (5/day at
 stayed at 5, which is a thin gap. Making the founding discount LIFETIME-ONLY
 would unpin the monthly ladder. That is a pricing decision, so the code
 records it here rather than making it.
+
+## Nothing in this project was rate limited, including the login door
+
+Not configured in settings, not applied to a single view. `/api/auth/login/`
+took **25 wrong passwords in a row** and answered 400 to every one, and would
+have taken 25 million. Registration had accepted the literal string
+`password` until the same audit fixed it, so every account that signed up with
+a top-100 password was one script away.
+
+`apps/accounts/ratelimit.py`. Two decisions shape it and both are lessons from
+elsewhere in this codebase:
+
+- **It counts FAILURES, not requests.** DRF's own throttles count every call,
+  which means a member who signs in successfully all day slowly runs
+  themselves out of budget, and a suite that logs in a hundred times starts
+  failing for a reason unrelated to what it tests. A good password clears the
+  bucket. The limit is invisible to everybody who is not guessing.
+- **It is keyed BOTH ways, and neither alone.** The trial door's lesson,
+  applied before it could bite again: an address is not a person. Keyed only
+  on IP it punishes everybody behind a carrier's CGNAT for one stranger's
+  typos; keyed only on the account it does nothing about somebody walking a
+  list. So the ACCOUNT limit is tight (8) and the ADDRESS limit is loose (40),
+  and only failures ever count.
+
+A successful login clears the account's bucket and **not** the address's — the
+account has proven who it is, the connection has proven nothing, and one real
+login among a run of guesses is exactly what a successful guess looks like.
+
+The address comes from `economy.clientip`, for the reason that module exists:
+**DRF's own `get_ident` uses the WHOLE `X-Forwarded-For` string when
+`NUM_PROXIES` is unset**, so an attacker varying that header gets a fresh
+bucket per request and the limit stops nobody. There is a test that spoofs a
+different prefix on every attempt and asserts it still gets a 429.
+
+Counts live in Django's default LocMemCache and gunicorn runs two workers, so
+they are PER WORKER — the real limit is about double what is written. Fine for
+what this is (a scripted guesser hits it either way), and the reason the
+numbers are not tuned finer.
+
+### What the login and OAuth audit found working
+
+Worth recording, so the next person does not re-derive it. Login resolves by
+username OR email, case-insensitively on both. The OAuth link flow refuses a
+tampered pending token, a token minted for a different provider, an identity
+another member already holds, and a replay of a spent token — each with the
+right sentence. `oauth-config` reports per-provider readiness rather than
+enabling a button the exchange cannot finish.
+
+One thing deliberately NOT changed: login says "No account matches that login"
+and "Incorrect password" as separate messages, which is username enumeration.
+Usernames here are already public (every profile is), so the enumeration it
+allows on a handle is free anyway, and the specific message is what tells an
+honest member they typed the wrong email rather than the wrong password. A
+generic "those don't match" would cost real signups to protect something the
+public profile route already gives away.
 
 ## A username had THREE writers and one rule, applied by none of them
 

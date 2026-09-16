@@ -33,6 +33,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import ai_cost
+from .deadline import COACH_BUDGET_SECONDS, Deadline, Expired
 from .instruments import (DIFFICULTIES, LYRIC_SCORE, MIX_SCORE, profile_for_app,
                           prompt_for, rates_lyrics, rates_mix, scores_for)
 from .gemini import _bill, _key, generate_content
@@ -192,7 +193,7 @@ def _size_of(f):
         return int(getattr(f, "size", 0) or 0)
 
 
-def _media_part(f, mime, size):
+def _media_part(f, mime, size, deadline=None):
     """The generateContent part carrying the take, and a cleanup callback.
 
     Small takes go INLINE, base64 in the request body: one round trip, nothing
@@ -208,10 +209,11 @@ def _media_part(f, mime, size):
                 None, None)
 
     from . import gemini_files
-    up, why = gemini_files.upload(f, mime, size, display_name="boss-take")
+    up, why = gemini_files.upload(f, mime, size, display_name="boss-take",
+                                  deadline=deadline)
     if why:
         return None, None, why
-    ready, why = gemini_files.wait_active(up)
+    ready, why = gemini_files.wait_active(up, deadline=deadline)
     if not ready:
         gemini_files.delete(up)
         return None, None, why
@@ -240,7 +242,7 @@ def _clamp(v, lo=1, hi=10):
 
 
 def score_take(app_key, f, content_type, *, genre, target, difficulty, style=None,
-               user=None, lyrics=False, mix=False):
+               user=None, lyrics=False, mix=False, deadline=None):
     """Send one take to the model. Returns (payload, error) — exactly one is None.
 
     Shared by the member coach and the no-account trial, deliberately: a trial
@@ -301,11 +303,19 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
 
     unreadable = ({"detail": "The coach couldn't process that take."}, status.HTTP_502_BAD_GATEWAY)
 
+    # One budget for the whole run, made HERE when a caller didn't bring one,
+    # so a coach path can never again be unbounded by forgetting to pass it.
+    # Per-call timeouts answer "how long may this one call hang"; this is the
+    # only thing that answers "how long may the member wait", which is the
+    # number they actually experience.
+    if deadline is None:
+        deadline = Deadline(COACH_BUDGET_SECONDS)
+
     # How the take travels: inline for small ones, uploaded-and-referenced for
     # anything the inline request can't carry. Deciding it HERE means the trial
     # door gets the same lift for free, and there is still exactly one rubric.
     size = _size_of(f)
-    part, cleanup, why = _media_part(f, mime, size)
+    part, cleanup, why = _media_part(f, mime, size, deadline=deadline)
     if why:
         return None, ({"detail": f"The coach couldn't take that one — {why}.",
                        "size_mb": round(size / (1024 * 1024), 1)},
@@ -315,15 +325,40 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     # which is also why the upload above happens once rather than per model.
     body = {"contents": [{"parts": [{"text": prompt}, part]}]}
     try:
+        # Don't START the expensive leg with nothing left. Without this, a run
+        # that had already spent its whole budget uploading would go on to ask
+        # for a 90-second generate anyway — which is precisely the "each part
+        # was doing what it was configured to do" shape that produced 853
+        # seconds. `remaining()` has a floor, so it can never be talked into a
+        # 0.2s timeout that is guaranteed to fail after a round trip.
+        deadline.check("the take was still uploading when the time ran out")
         resp, tried = generate_content(
             "text", body, key=key,
             # A referenced file is read by the model rather than sent with the
             # request, and a long one takes longer to listen to than a short
             # one — so the wait scales with the take instead of cutting a good
             # one off at ninety seconds.
-            timeout=90 if cleanup is None else 300,
+            # Was 90 inline / 300 referenced, and those were added to
+            # everything above rather than shared with it — which is how one
+            # request could legally run for 39 minutes. It takes what the
+            # member's budget has left now, capped at the old numbers.
+            timeout=(deadline.remaining(cap=90 if cleanup is None else 300)
+                     if deadline else (90 if cleanup is None else 300)),
             env_vars=("GEMINI_AUDIO_MODEL",),
             label=f"{app_key} coach")
+    except Expired as e:
+        # The budget ran out. This is the case that used to be a spinner: the
+        # member waited, nothing answered, and nothing anywhere knew. It is a
+        # 504 with a sentence and a next move now — and nothing is billed,
+        # because a take that produced no score was not a take.
+        logger.warning("%s coach: over budget after %.0fs — %s",
+                       app_key, deadline.spent(), e.message)
+        return None, ({"detail": f"The coach is taking longer than it should — {e.message}. "
+                                 "Nothing was charged. Try a shorter section, or the same "
+                                 "take again in a minute.",
+                       "timed_out": True,
+                       "waited_seconds": int(deadline.spent())},
+                      status.HTTP_504_GATEWAY_TIMEOUT)
     except requests.RequestException:
         logger.exception("SingZ coach: could not reach Gemini")
         return None, ({"detail": "Couldn't reach the coach. Try that take again."},
@@ -593,7 +628,7 @@ class SingZCoachView(APIView):
             # their tier's own upload limit, whichever binds them first. This
             # flag was a hardcoded False, which was safe only while the coach's
             # number was the smaller one for everybody. At 200MB it isn't.
-            "max_mb": cap_mb,
+            "coach_budget_seconds": COACH_BUDGET_SECONDS, "max_mb": cap_mb,
             "max_mb_why": cap_why(cap_mb, cap_is_tier),
             "max_mb_is_tier_limit": cap_is_tier,
             # What the coach itself would take regardless of tier, so a member
@@ -700,7 +735,7 @@ class SingZCoachView(APIView):
         if stored is None and f.size > cap_mb * 1024 * 1024:
             return Response({"detail": f"That take is {f.size / (1024 * 1024):.0f}MB. "
                                        + cap_why(cap_mb, cap_is_tier),
-                             "max_mb": cap_mb, "max_mb_is_tier_limit": cap_is_tier},
+                             "coach_budget_seconds": COACH_BUDGET_SECONDS, "max_mb": cap_mb, "max_mb_is_tier_limit": cap_is_tier},
                             status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
 
         key = _key()
@@ -908,7 +943,7 @@ class SingZCoachView(APIView):
                            + cap_why(cap_mb, cap_is_tier)
                            + " The post keeps the full track — record or attach the "
                              "section you want scored.",
-                 "max_mb": cap_mb, "max_mb_is_tier_limit": cap_is_tier, "post_id": post.id},
+                 "coach_budget_seconds": COACH_BUDGET_SECONDS, "max_mb": cap_mb, "max_mb_is_tier_limit": cap_is_tier, "post_id": post.id},
                 status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
         # The Upload's own recorded type, falling back to the slot the post
         # keeps it in — an upload saved with no content type is still audio if
@@ -962,7 +997,7 @@ class SingZCoachView(APIView):
                            + cap_why(cap_mb, cap_is_tier)
                            + " The entry keeps the whole recording — attach just the "
                              "section you want scored.",
-                 "max_mb": cap_mb, "max_mb_is_tier_limit": cap_is_tier,
+                 "coach_budget_seconds": COACH_BUDGET_SECONDS, "max_mb": cap_mb, "max_mb_is_tier_limit": cap_is_tier,
                  "journal_id": e.id},
                 status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
         content_type = (upload.content_type or "").lower() or f"{kind}/webm"
