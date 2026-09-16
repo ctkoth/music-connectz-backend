@@ -452,8 +452,15 @@ class FunnelEventView(APIView):
     # `cap_reached` is the platform's daily ceiling, `not_configured` is a
     # missing GEMINI_API_KEY. One row saying "blocked" would send somebody to
     # fix whichever they guessed.
+    #
+    # `address_busy` is the fourth, and for most of this app's life it was
+    # wearing `already_used`'s clothes: the per-address ceiling was ONE, so a
+    # mobile carrier's shared CGNAT address meant a stranger spent the take
+    # and the next visitor was told they had used theirs. Counted apart
+    # because the fix for one is an account and the fix for the other is our
+    # own ceiling.
     _BLOCKED = lambda v: v if v in ("already_used", "cap_reached",
-                                    "not_configured") else None
+                                    "not_configured", "address_busy") else None
 
     # Which sign-in it was, from `provider_requirements()` — the ONE list of
     # provider names this platform has. Typing the eight in here would be the

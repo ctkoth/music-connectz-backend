@@ -3081,8 +3081,33 @@ SIGNIFICANT_AT = 3
 # size only decides how big one already-rate-limited take may be. Env-tunable
 # so it can be dialled down in a hurry without a deploy.
 TRIAL_MAX_MB = int(os.environ.get("TRIAL_MAX_MB", "100"))
-TRIAL_PER_IP_HOURS = 24          # one free scored take per address per day
+TRIAL_PER_IP_HOURS = 24          # the window both ceilings below are measured over
 TRIAL_CLAIM_DAYS = 30            # a token stays claimable this long
+
+# An IP address is not a person, and keying "one free take" on one was wrong in
+# BOTH directions at once.
+#
+# Against an honest visitor it was far too tight. Mobile carriers run CGNAT: a
+# single IPv4 address fronts thousands of subscribers, so the first person on
+# that carrier to try the door spent the free take for everybody behind it —
+# and the rest were told "You've had your free take for today" about a take
+# they never had. The trial is the one screen a stranger ever sees, and most
+# strangers arrive on a phone.
+#
+# Against an abuser it did nothing at all. `client_ip` reads X-Forwarded-For,
+# which a client can simply set, so one header bypassed the whole thing. A
+# control that stops the people it is not aimed at and not the ones it is, is
+# not a control.
+#
+# So the count is keyed per BROWSER now (`anon_id`, the same localStorage UUID
+# the funnel uses), and the IP keeps a much looser ceiling as a backstop. The
+# thing that actually caps the money has always been `trial_daily_cap()`, which
+# refuses rather than overspends — the per-IP rule was never what stood between
+# us and a bill, it just read like it.
+TRIAL_PER_BROWSER = int(os.environ.get("TRIAL_PER_BROWSER", "1"))
+# Sized for a shared carrier address, not for one machine. Well under the
+# global daily cap on purpose: one address may never spend the whole day.
+TRIAL_PER_IP = int(os.environ.get("TRIAL_PER_IP", "25"))
 
 
 def trial_daily_cap():
@@ -3099,6 +3124,26 @@ class TrialTake(models.Model):
     token = models.CharField(max_length=64, unique=True, db_index=True)
     app_key = models.CharField(max_length=32, default="singz")
     ip = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    # The browser that took it — the same localStorage UUID the funnel keys on,
+    # and the honest unit for "one free take each". Blank for takes written
+    # before this column existed, and blank whenever storage is unreadable
+    # (private mode), which is why the IP ceiling stays as a backstop rather
+    # than being replaced by this.
+    anon_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    # Did the coach actually return a number?
+    #
+    # A take can come back "unscorable" — the model listened and there was no
+    # performance in the file (silence, room noise, the wrong upload). That
+    # cost us a model call, so it counts against the address and the global
+    # ceiling, but it must NOT count as the visitor's free take: they spent a
+    # performance and got no score, and `trial.py` already says the rule one
+    # function away — "a take the coach couldn't read doesn't burn the
+    # visitor's one free run". An unscorable take is one the coach couldn't
+    # read; it just fails a layer later, which is invisible from the outside.
+    #
+    # Defaults True so every row written before this column existed keeps
+    # counting, because every one of them was scored.
+    scored = models.BooleanField(default=True, db_index=True)
     result = models.JSONField(default=dict, blank=True)
     claimed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE,

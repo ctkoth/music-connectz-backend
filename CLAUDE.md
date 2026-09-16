@@ -637,6 +637,78 @@ ACCOUNTS (a `Profile` is created lazily, so counting those would drop members
 who never went near a screen that makes one), `unset` is a row rather than a
 rounding error, and an age is a band and never a date.
 
+## The trial door's rate limit was wrong in both directions at once
+
+An audit of the whole logged-out path, asking "what stops a stranger getting a
+score", found the per-address ceiling doing the opposite of its job.
+
+`TRIAL_PER_IP_HOURS = 24` meant **one free take per IP address per day**, and
+an IP address is not a person:
+
+- **Against an honest visitor it was far too tight.** Mobile carriers run
+  CGNAT — a single IPv4 address fronts thousands of subscribers — so the first
+  person on that carrier to try the door spent the free take for everybody
+  behind it. The rest were told *"You've had your free take for today"* about a
+  take they never had, on the one screen a stranger ever sees, and most
+  strangers arrive on a phone. It is also unanswerable: there is nothing they
+  can do about somebody else's handset.
+- **Against an abuser it did nothing at all.** `client_ip` read
+  `X-Forwarded-For[0]`, and each proxy APPENDS, so entry `[0]` is whatever the
+  CALLER wrote. One header bypassed the entire limit. A control that stops the
+  people it is not aimed at and not the ones it is, is not a control — and the
+  module docstring cited it as the thing standing between us and a bill.
+
+What actually caps the money is `trial_daily_cap()`, which refuses rather than
+overspends. It always was; the per-IP rule just read like it.
+
+So the count is keyed per **browser** (`TrialTake.anon_id`, the same
+localStorage UUID the funnel uses), `TRIAL_PER_IP` is a loose backstop sized
+for a shared carrier address and kept well under the global cap, and
+`client_ip` counts hops from the RIGHT (`TRUSTED_PROXY_HOPS`, 1 for Render —
+raise it if a CDN goes in front).
+
+Four things not to undo:
+
+- **A blank `anon_id` never matches anybody.** Private-mode browsers throw on
+  localStorage and send `""`. Treating every one of those as the same visitor
+  would shut the door on all of them at once. It is "unknown", not a match —
+  which is also why the IP backstop stays rather than being replaced.
+- **`address_busy` is its own refusal, with its own sentence.** The fix for
+  one is an account and the fix for the other is us raising a ceiling, and the
+  copy never phrases it as something the visitor did. It is also its own
+  `try_blocked` slug, so the funnel can finally tell the two apart.
+- **An unscorable take does not use up the free take.** The coach listened and
+  there was no performance in the file — silence, room noise, the wrong upload
+  — so the visitor spent a performance and got no number, and trying again
+  with a real take used to answer "you've had yours". `TrialTake.scored` is
+  what browser_done counts. The row is still written and still counts against
+  the address and the global cap, because we paid for that model call either
+  way and a call that left no row would be money spent off the books.
+- **The per-IP ceiling must stay below `trial_daily_cap()`.** One address may
+  never be able to spend the whole day's budget. There is a test.
+
+### And the public stats endpoint had never once answered
+
+`TrialPublicStatsView` queried `visitor_id` in four places. The field is
+`anon_id`, so every request was a `FieldError` — a 500, from the day it
+shipped. The client made it moot by asking for `/api/trial/public/stats/`,
+which is not where it is mounted, so the call 404'd before it could reach the
+500. Both ends broken, and silent, because the caller swallows the failure.
+
+What it served was the bigger problem. It published the **join funnel's own
+conversion rates to the people standing in the funnel** — rendered on the
+trial door, under the heading "What members do", which at the numbers that
+produced it reads *"Tried → Scored 5%"* and *"Scored → Registered 0%"*. That
+is a measurement of how well OUR door works, not of whether the coach is any
+good, and handing it to somebody deciding whether to try argues against
+trying. The three rates belong in FunnelZ, where the owner reads them, and
+FunnelZ already has them.
+
+It serves counts now — takes scored, and how many instruments have a door.
+Both true, neither a percentage anybody can be on the wrong side of, and both
+go UP as the platform works. And it stays silent below `MIN_TO_SHOW`: "3 takes
+scored" is worse than no panel, which is the same rule `pct: None` follows.
+
 ## A route is not the same as a door
 
 `test_instrument_routes` pins that a scored profile in `instruments.py`
