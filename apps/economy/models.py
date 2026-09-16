@@ -976,6 +976,13 @@ class Profile(models.Model):
     # DECLARATION filterable in MembersView, never a measurement — see
     # religionz.py for why that distinction is what makes it allowed.
     religion = models.CharField(max_length=32, blank=True, default="", db_index=True)
+    # LanguageZ — declared languages spoken AND how well, from the closed
+    # list in languagez.py: {lang_key: "beginner"|"intermediate"|"fluent"}.
+    # Same shape SubstanceZ already uses for "what, and how often" — a bare
+    # list of keys cannot say fluency any more than a bare list of
+    # substances could say frequency. Declared, never a measurement, and
+    # filterable in MembersView on presence of the language, not the level.
+    languages = models.JSONField(default=dict, blank=True)
     # {"clarity": {axis: 0-100}, "depth": "basic"|"advanced"} from the
     # questionnaire, or {} for a member who set their letters by hand.
     #

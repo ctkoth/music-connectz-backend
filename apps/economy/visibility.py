@@ -55,6 +55,7 @@ DEFAULTS = {
     "sober": MEMBER,
     "personality": MEMBER,
     "religion": MEMBER,
+    "languages": MEMBER,
     "attracted_to": MEMBER,
     "age": MEMBER,
 

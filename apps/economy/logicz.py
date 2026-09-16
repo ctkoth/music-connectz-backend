@@ -94,6 +94,11 @@ LOGICZ_TABS = [
               "One declared tradition out of fifty, grouped into families. "
               "No tradition outranks another, and it never moves a rating.",
               True, tab="profilez"),
+         # Same shape again — multi-select this time, because a member
+         # commonly speaks several, but the same declared-never-scored rule.
+         _app("LanguageZ", "🗣️",
+              "The languages you speak, so people who can actually talk to "
+              "you can find you. Never moves a rating.", True, tab="profilez"),
      ]},
     {"key": "messagez", "name": "MessageZ", "emoji": "📨", "icon": "messagez.png",
      "desc": "Direct messages. In and out.",

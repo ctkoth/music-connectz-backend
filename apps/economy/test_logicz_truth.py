@@ -35,6 +35,10 @@ class WhatItClaimsIsBuiltTests(TestCase):
         a = apps_by_name()["ReligionZ"]
         self.assertTrue(a["built"])
 
+    def test_languagez_is_built(self):
+        a = apps_by_name()["LanguageZ"]
+        self.assertTrue(a["built"])
+
     def test_both_extra_battle_kinds_are_built(self):
         """BattleEnterView accepts 1v1, freestyle and cypher, BattleZ offers
         all three in its picker, and each has a drawn icon."""
@@ -93,7 +97,7 @@ class ABuiltAppNamesItsDoorTests(TestCase):
 
     def test_the_built_apps_that_have_a_home_name_it(self):
         a = apps_by_name()
-        for name in ("VybeZ", "PersonalitieZ", "ReligionZ", "Freestyle", "Battle Cypher"):
+        for name in ("VybeZ", "PersonalitieZ", "ReligionZ", "LanguageZ", "Freestyle", "Battle Cypher"):
             self.assertTrue(a[name]["tab"], f"{name} is built and links nowhere")
 
     def test_an_unbuilt_app_never_claims_a_door(self):

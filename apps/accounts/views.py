@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 from apps.economy.personaz import clean_persona
 from apps.economy.personalityz import clean_code as clean_personality
 from apps.economy.religionz import clean_religion
+from apps.economy.languagez import clean_languages
 
 from .models import OAuthIdentity, Profile
 from .oauth import (
@@ -448,6 +449,9 @@ class MeView(APIView):
         if "religion" in data:
             p.religion = clean_religion(data["religion"])
             changed.append("religion")
+        if "languages" in data:
+            p.languages = clean_languages(data["languages"])
+            changed.append("languages")
         if isinstance(data.get("nationalities"), list):
             p.nationalities = [str(x)[:60] for x in data["nationalities"]][:30]
             changed.append("nationalities")

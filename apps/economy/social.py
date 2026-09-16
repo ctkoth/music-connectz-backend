@@ -70,6 +70,7 @@ from .personalityz import (AXES as PERSONALITY_AXES, as_dict as personality_dict
                            clean_code as clean_personality, filter_reason,
                            matches as personality_matches, wanted_from)
 from .religionz import clean_religion
+from .languagez import clean_languages
 
 User = get_user_model()
 VALID_TYPES = {"party", "openmic", "theater", "show", "custom"}
@@ -362,7 +363,7 @@ ADULT_ONLY_PROFILE_FIELDS = ("attracted_to", "asexual")
 PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign",
                   "nationalities", "regions", "substances", "sober",
                   "attracted_to", "asexual", "traits", "personas", "links",
-                  "external_followers", "personality", "religion")
+                  "external_followers", "personality", "religion", "languages")
 
 
 # Everything in PROFILE_FIELDS used to be written STRAIGHT off the request
@@ -411,6 +412,10 @@ def clean_profile_field(field, value):
         # Same rule: an unrecognised key becomes "hasn't said" rather than
         # 400ing a profile edit. See religionz.py.
         return clean_religion(value)
+    if field == "languages":
+        # A list rather than one value — a member commonly speaks several.
+        # Unrecognised entries drop rather than refusing the whole save.
+        return clean_languages(value)
     if field == "asexual":
         return bool(value)
     if field == "external_followers":
@@ -594,6 +599,7 @@ def _profile_card(p, request=None, badges=None, audience=None, batched=None):
         "personality": p.personality,
         "personality_axes": personality_dict(p.personality),
         "religion": p.religion,
+        "languages": p.languages,
         "attracted_to": p.attracted_to,
         # ONE call, two keys. These are the same number under two names —
         # older clients read `median`, newer ones `attractiveness` — and
@@ -1159,6 +1165,12 @@ class MembersView(APIView):
         # ReligionZ: ?religions=catholic,sunni — same shape as signs/genders,
         # a declared single value matched against a closed list.
         religions = multi("religions")
+        # LanguageZ: ?languages=en,es — a member passes if they declared ANY
+        # of the selected languages, same OR-within-a-metric rule `regions`
+        # already follows just below. The FILTER matches on presence, not
+        # level — "can we talk at all" is the search question; the level
+        # itself is for the card to show, not for this to gate on.
+        languages = multi("languages")
         # SubstanceZ multi-select: substance keys the searcher wants sober-friendly.
         # A member passes if, on every selected substance, they are NOT active
         # ("use"/"sometimes"). Undeclared counts as sober-friendly.
@@ -1227,6 +1239,8 @@ class MembersView(APIView):
             if signs and p.sign not in signs:
                 continue
             if religions and p.religion not in religions:
+                continue
+            if languages and not (set(languages) & set((p.languages or {}).keys())):
                 continue
             if signs_cn:
                 cn = chinese_zodiac_for(p.birthday)
