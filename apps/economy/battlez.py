@@ -17,6 +17,7 @@ from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.db import models, transaction
+from django.db.models import Count
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -33,8 +34,10 @@ from .models import (
     BattleWager,
     MoneyBattleVote,
     award_spinaz,
+    spend_spinaz,
     blocked_user_ids,
     item_rating_median,
+    item_rating_medians,
     membership_for,
     notify,
     profile_for,
@@ -72,7 +75,7 @@ def entry_dict(e, request=None):
     }
 
 
-def battle_dict(b, request=None, with_entries=True):
+def battle_dict(b, request=None, with_entries=True, batched=None):
     user = getattr(request, "user", None)
     me = bool(user and getattr(user, "is_authenticated", False))
     out = {
@@ -90,8 +93,16 @@ def battle_dict(b, request=None, with_entries=True):
         "entry_spinaz": b.entry_spinaz,
         "status": b.status,
         "item_key": b.item_key,
-        "rating": item_rating_median(b.item_key),
-        "entry_count": b.entries.count(),
+        # `batched` is the whole list's numbers, fetched once by BattlesView.
+        # Without it each card was three queries of its own — the rating
+        # median, the entry count, and the "have I entered" exists() below —
+        # so a 40-battle list cost 123 queries. None falls through to the
+        # per-battle reads, which is right for the detail view: one card's
+        # three queries is not worth a batching call site.
+        "rating": ((batched or {}).get("ratings", {}).get(b.item_key)
+                   if batched else item_rating_median(b.item_key)),
+        "entry_count": ((batched or {}).get("entries", {}).get(b.id, 0)
+                        if batched else b.entries.count()),
         "mode": b.mode,
         "kind": b.kind,
         "opponent": b.opponent.username if b.opponent else "",
@@ -113,7 +124,8 @@ def battle_dict(b, request=None, with_entries=True):
                                 "paid_out": mine.paid_out} if mine else None)
             out["i_am_contestant"] = bool(out["my_side"])
     if me:
-        out["entered"] = b.entries.filter(user=user).exists()
+        out["entered"] = (b.id in batched["mine"] if batched
+                          else b.entries.filter(user=user).exists())
     if with_entries:
         entries = list(b.entries.select_related("user"))
         # Best-judged first — a battle with no leaderboard is just a thread.
@@ -131,7 +143,21 @@ class BattlesView(APIView):
         qs = (Battle.objects.select_related("host", "opponent")
               .exclude(host_id__in=blocked_user_ids(request.user))[:200])
         qs = [maybe_auto_settle(b) for b in qs]
-        return Response({"battles": [battle_dict(b, request, with_entries=False) for b in qs]})
+        # The three per-card reads, in three queries for the whole list rather
+        # than three per battle. Measured at 123 queries for 40 battles before
+        # this; the same shape the feed and the member search had.
+        ids = [b.id for b in qs]
+        batched = {
+            "ratings": item_rating_medians([b.item_key for b in qs]),
+            "entries": dict(BattleEntry.objects.filter(battle_id__in=ids)
+                            .values_list("battle_id").annotate(n=Count("id"))),
+            # A set rather than a per-card exists(): "have I entered" is one
+            # question about this member, asked once.
+            "mine": set(BattleEntry.objects.filter(battle_id__in=ids, user=request.user)
+                        .values_list("battle_id", flat=True)),
+        }
+        return Response({"battles": [battle_dict(b, request, with_entries=False,
+                                                 batched=batched) for b in qs]})
 
     def post(self, request):
         d = request.data or {}
@@ -279,7 +305,14 @@ class BattleEnterView(APIView):
             try_award(request.user, "battle_joins_others", stretch=was_challenged)
         if b.entry_spinaz:
             # Entry goes to the host. Stated on the button before it's pressed.
-            award_spinaz(request.user, -b.entry_spinaz, f"BattleZ entry: {b.title}", app_key="battlez")
+            # Same reason as the wager below: one statement, so the entry fee
+            # cannot be paid twice out of a balance that only covers it once.
+            if spend_spinaz(request.user, b.entry_spinaz,
+                            f"BattleZ entry: {b.title}", app_key="battlez") is None:
+                return Response(
+                    {"detail": f"That's {b.entry_spinaz} SpinaZ and you don't have it any more.",
+                     "spinaz": (wallet_for(request.user).spinaz or 0)},
+                    status=status.HTTP_402_PAYMENT_REQUIRED)
             award_spinaz(b.host, b.entry_spinaz, f"BattleZ entry from @{request.user.username}", app_key="battlez")
         settle_together(_people, _was_beginner)
         notify(b.host, "join", f"@{request.user.username} entered '{b.title}' ⚔️",
@@ -576,7 +609,17 @@ class BattleWagerView(APIView):
         with transaction.atomic():
             # Held by the battle, not spent — a battle that never settles has to
             # be able to give every stake back.
-            award_spinaz(request.user, -amount, f"BattleZ wager: {b.title}", app_key="battlez")
+            # Conditional: the balance check above is a separate statement, and
+            # a member is not obliged to wait between the two. `spend_spinaz`
+            # does the check and the move in one, so a second wager racing the
+            # first is REFUSED rather than overdrawing — `award_spinaz(-n)` had
+            # no floor at all, and spending 500 from a balance of 10 left -490.
+            if spend_spinaz(request.user, amount,
+                            f"BattleZ wager: {b.title}", app_key="battlez") is None:
+                return Response(
+                    {"detail": f"That's {amount} SpinaZ and you don't have it any more.",
+                     "spinaz": (wallet_for(request.user).spinaz or 0)},
+                    status=status.HTTP_402_PAYMENT_REQUIRED)
             BattleWager.objects.create(battle=b, user=request.user, side=side, amount=amount)
             Battle.objects.filter(pk=b.pk).update(
                 held_wager_spinaz=models.F("held_wager_spinaz") + amount)

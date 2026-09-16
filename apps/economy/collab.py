@@ -16,6 +16,7 @@ from django.conf import settings
 from .gates import clean_gates, describe, failing_gate, member_metrics, refusal
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -423,15 +424,25 @@ class CollabDealsView(APIView):
 
     def get(self, request):
         me = request.user
-        deals = CollabDeal.objects.filter(initiator=me)[:100]
-        # Also include deals where I'm a participant (JSON scan, bounded).
-        seen = {d.id for d in deals}
-        extra = [
-            d for d in CollabDeal.objects.exclude(id__in=seen).order_by("-created_at")[:300]
-            if any(p.get("username") == me.username for p in d.participants)
-        ][:100]
+        # ONE indexed query for both halves — the deals I started and the deals
+        # somebody put me in.
+        #
+        # This used to fetch the 300 most recent deals PLATFORM-WIDE and filter
+        # them in Python, so a deal you were a participant in **silently
+        # vanished from your screen** once 300 newer deals existed anywhere on
+        # the platform. The row stayed in the database. On an escrow surface
+        # that is somebody's funded deal disappearing with their money still
+        # held by it, and it gets worse the better the platform does.
+        #
+        # `CollabParticipant` is the index that makes this answerable — see its
+        # docstring for why a `participants__contains` lookup was not the fix.
+        deals = (CollabDeal.objects
+                 .filter(Q(initiator=me) | Q(participant_rows__user=me))
+                 .select_related("initiator")
+                 .distinct()
+                 .order_by("-created_at")[:200])
         days = {}   # one badge read per payer across the whole list, not per card
-        out = [deal_dict(maybe_auto_release(d), me, days) for d in list(deals) + extra]
+        out = [deal_dict(maybe_auto_release(d), me, days) for d in deals]
         return Response({"deals": out})
 
     # Atomic because the ⚡ charge locks the wallet, and select_for_update

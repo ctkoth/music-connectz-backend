@@ -1019,6 +1019,97 @@ came back, and a storage backend that cannot answer is never treated as a file
 that is gone — marking on an unreachable bucket would tell every member on the
 platform their music was lost, which is worse than the bug it exists for.
 
+## The wallet primitives were a read-modify-write, in Python, with no floor
+
+Every reward on this platform goes through three helpers, and all three looked
+like this:
+
+    w = wallet_for(user)
+    w.spinaz = (w.spinaz or 0) + int(amount)
+    w.save(update_fields=["spinaz", "updated_at"])
+
+No lock, no floor, and the arithmetic done in the PROCESS rather than the
+database. Two proven failures, neither theorised:
+
+- **A lost update.** Two requests read the same row, each computes its own
+  total, and the later write wins. Spending 50 twice from a balance of 100
+  left **50** — one of the two spends simply vanished. Gunicorn runs two
+  workers of four threads, so eight request threads can be inside this at
+  once, and everything is in here: rating rewards, referrals, AdZ, OfferZ, the
+  twenty-four zodiac bonuses, battle entries and wagers, collab escrow.
+- **No floor.** `award_spinaz(user, -500)` on a balance of 10 left **-490**.
+
+`_bump_wallet` does it with `F()` now, so the database does the arithmetic and
+concurrent moves add up instead of overwriting each other. `select_for_update`
+would also work and is what `collab.py` and `payouts.py` already use for the
+paths somebody thought about — an F-expression is cheaper and needs no
+surrounding transaction to mean anything, which matters because several
+callers here are not in one.
+
+### A spend is a different operation from a credit, and now says so
+
+`spend_spinaz` is a CONDITIONAL atomic decrement:
+`filter(spinaz__gte=amount).update(spinaz=F("spinaz") - amount)`. One statement
+the database serialises, so a second spend racing the first loses and is told
+so, and the balance cannot go under.
+
+Both battle paths needed it. Each read the wallet, compared it to the stake,
+and then spent in a SEPARATE statement — and a member is not obliged to wait
+between the two. They answer 402 now rather than overdrawing.
+
+Two properties worth keeping:
+
+- **A refused spend writes no ledger row.** LogZ exists so a balance change
+  has a reason behind it; a spend that did not happen must not appear as one.
+- **A spend of zero or a negative is not a spend.** It returns None rather
+  than quietly becoming a credit.
+
+## A deal you were a participant in disappeared once the platform grew
+
+`CollabDealsView.get` found them by fetching the **300 most recent deals
+platform-wide** and filtering in Python. So a deal somebody else put you in
+silently vanished from your screen once 300 newer deals existed anywhere —
+the row stayed in the database, with whatever the escrow was holding still
+held by it. It gets worse the better the platform does, which is the worst
+property a bug can have.
+
+`CollabParticipant` is the fix, and it is the same fix `PostContributor`
+already is for a post — that docstring says it in four words: **JSON for
+display, a table for lookups.** Deals never got one.
+
+A `participants__contains` lookup would have been the obvious answer and is
+not available: the suite runs on SQLite, production is Postgres, and that
+lookup is Postgres-only. `offerz_engine._json_contains_works` already
+documents this and answers it by skipping the query where the backend cannot
+do it — right for an offer (a skipped offer shows nothing) and wrong here,
+because it would mean a deal list that works in production and is untestable.
+A table works identically on both.
+
+Three things hold it:
+
+- **It is DERIVED, not maintained.** A `post_save` signal reconciles the table
+  from the JSON, so no call site can forget it — every writer already edits
+  the JSON.
+- **The signal is guarded on `update_fields`.** The release paths save with
+  "participants" in their list and `maybe_auto_release` runs on every deal in
+  the list view, so an unguarded signal would put two queries on every card of
+  a READ.
+- **It is swallowed, so it can drift, so there is a rebuild.**
+  `manage.py rebuild_collab_participants [--write]`, dry by default and
+  REPLACING rather than adding — same shape and same reasoning as
+  `rebuild_partnerships`. Migration 0126 seeds it, because shipping the table
+  without a backfill would have emptied the deal list for every participant:
+  the exact failure the table exists to fix, caused by the fix.
+
+### And both list screens were paying per row
+
+    deals    42 queries for 40 deals     ->  1, at any length
+    battles  123 queries for 40 battles  ->  6, at any length
+
+BattleZ had three per card — the rating median, the entry count, and a
+per-battle `exists()` asking whether I had entered. That last one is one
+question about one member, and it was asked once per row.
+
 ## Two screens that re-poll, and every row on them cost a query
 
 The feed re-polls every 30 seconds from every open tab, and VybeZ fires the

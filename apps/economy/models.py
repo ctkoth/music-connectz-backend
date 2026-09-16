@@ -5,12 +5,16 @@ transaction) is enforced here, server-side, so the client can't bypass it.
 
 Rates match the frontend: Free 10% · Premium 5% · StatZ 2%.
 """
+import logging
 import os
 from datetime import timedelta
 
 from django.conf import settings
 from django.db import models
+from django.dispatch import receiver
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 TIER_FREE = "free"
 TIER_PREMIUM = "premium"
@@ -626,12 +630,11 @@ def award_promptz(user, amount, note="PromptZ", *, app_key="", target=""):
     watching the number. Same bug LogZ exists to fix, left open on one
     resource because this helper predates it and nothing re-checked.
     """
-    w = wallet_for(user)
-    w.promptz = (w.promptz or 0) + int(amount)
-    w.save(update_fields=["promptz", "updated_at"])
+    wallet_for(user)
+    new = _bump_wallet(user, "promptz", amount)
     log_resource(user, Transaction.RES_PROMPTZ, int(amount), note or "PromptZ",
                  app_key=app_key, target=target)
-    return w.promptz
+    return new
 
 
 # Free daily prompt allowance by tier. Resets each day — it does NOT stack.
@@ -1647,6 +1650,66 @@ class LinkClick(models.Model):
         unique_together = ("counter", "clicker", "day")
 
 
+def _bump_wallet(user, field, amount):
+    """Move one wallet balance by `amount`, atomically, and return the new value.
+
+    The three award_* helpers below each did this instead:
+
+        w = wallet_for(user)
+        w.spinaz = (w.spinaz or 0) + int(amount)
+        w.save(update_fields=["spinaz", "updated_at"])
+
+    A read-modify-write, in PYTHON, with no lock — so two requests that read
+    the same row both compute their own total and the later write wins. Proven
+    rather than theorised: spending 50 twice from a balance of 100 leaves 50,
+    because one of the two spends simply vanished. Gunicorn runs two workers
+    of four threads, so eight request threads can be inside this at once, and
+    every reward on the platform goes through it — rating, referrals, AdZ,
+    OfferZ, the zodiac bonuses, battle entries and wagers, collab escrow.
+
+    `F()` makes the database do the arithmetic, so concurrent moves add up
+    instead of overwriting each other. `select_for_update` would also work and
+    is what `collab.py` and `payouts.py` already use for the paths somebody
+    thought about; an F-expression is cheaper and needs no surrounding
+    transaction to mean anything — which matters because several callers here
+    are not in one.
+    """
+    from django.db.models import F
+
+    Wallet.objects.filter(user=user).update(
+        **{field: F(field) + int(amount)}, updated_at=timezone.now())
+    return Wallet.objects.values_list(field, flat=True).filter(user=user).first()
+
+
+def spend_spinaz(user, amount, note="", *, app_key="", target=""):
+    """Take `amount` 🍥 off a member, or refuse. Returns the new balance, or
+    None if they could not afford it.
+
+    A CONDITIONAL atomic decrement, because a balance check followed by a
+    deduction is two statements and a member is not obliged to wait between
+    them. Both battle paths read the wallet, compared it to the stake, and
+    then spent in a separate step — so a balance could pass the check twice
+    and be spent twice. `award_spinaz(user, -n)` had no floor either: spending
+    500 from a balance of 10 left **-490**.
+
+    `filter(spinaz__gte=amount).update(...)` does the check and the move in one
+    statement the database serialises, so the second one loses and is told so.
+    """
+    from django.db.models import F
+
+    amount = int(amount)
+    if amount <= 0:
+        return None
+    wallet_for(user)                       # make sure the row exists
+    moved = Wallet.objects.filter(user=user, spinaz__gte=amount).update(
+        spinaz=F("spinaz") - amount, updated_at=timezone.now())
+    if not moved:
+        return None
+    log_resource(user, Transaction.RES_SPINAZ, -amount, note or "SpinaZ",
+                 app_key=app_key, target=target)
+    return Wallet.objects.values_list("spinaz", flat=True).filter(user=user).first()
+
+
 def award_spinaz(user, amount, note="", *, app_key="", target=""):
     """Credit SpinAZ to a user's wallet and record it.
 
@@ -1654,22 +1717,20 @@ def award_spinaz(user, amount, note="", *, app_key="", target=""):
     away, so a member could watch their balance change and never learn what
     moved it or when.
     """
-    w = wallet_for(user)
-    w.spinaz = (w.spinaz or 0) + int(amount)
-    w.save(update_fields=["spinaz", "updated_at"])
+    wallet_for(user)                       # make sure the row exists
+    new = _bump_wallet(user, "spinaz", amount)
     log_resource(user, Transaction.RES_SPINAZ, int(amount), note or "SpinaZ",
                  app_key=app_key, target=target)
-    return w.spinaz
+    return new
 
 
 def award_energy(user, amount, note="", *, app_key="", target="", visibility=""):
     """Credit Energy to a user's wallet, and record it."""
-    w = wallet_for(user)
-    w.energy = (w.energy or 0) + int(amount)
-    w.save(update_fields=["energy", "updated_at"])
+    wallet_for(user)
+    new = _bump_wallet(user, "energy", amount)
     log_resource(user, Transaction.RES_ENERGY, int(amount), note or "Energy",
                  app_key=app_key, target=target, visibility=visibility)
-    return w.energy
+    return new
 
 
 def log_resource(user, resource, amount, note="", *, app_key="", target="", visibility=""):
@@ -4339,6 +4400,96 @@ class PostContributor(models.Model):
     class Meta:
         unique_together = ("post", "user")
         indexes = [models.Index(fields=["user"])]
+
+
+class CollabParticipant(models.Model):
+    """A real row per person on a deal.
+
+    `CollabDeal.participants` is the JSON the client renders; this is the same
+    fact as an indexed foreign key so it can be QUERIED. Exactly what
+    `PostContributor` is for a post, and its docstring says why in four words:
+    **JSON for display, a table for lookups.**
+
+    Deals never got one, and the deal list paid for it in the worst possible
+    way. `CollabDealsView.get` found the deals you are a participant in by
+    fetching the 300 most recent deals PLATFORM-WIDE and filtering them in
+    Python — so once 300 newer deals existed anywhere on the platform, a deal
+    somebody else had put you in **silently disappeared from your screen**.
+    The row stayed in the database. On an escrow surface that is somebody's
+    funded deal vanishing, with their money still held by it.
+
+    A JSON lookup would have been the obvious fix and is not available: this
+    suite runs on SQLite, production is Postgres, and `participants__contains`
+    is Postgres-only — `offerz_engine._json_contains_works` already documents
+    that and answers it by skipping the query where the backend cannot do it.
+    Right for an offer (a skipped offer shows nothing) and wrong here, because
+    it would mean a deal list that works in production and is untestable. A
+    table works identically on both.
+
+    Kept in sync by `sync_participants`, which reconciles from the JSON rather
+    than being appended to at each call site — the JSON is still the thing
+    every writer edits, so a table that is *derived* on save cannot drift the
+    way one that is *maintained* alongside would.
+    """
+    deal = models.ForeignKey("CollabDeal", on_delete=models.CASCADE,
+                             related_name="participant_rows")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="collab_participations")
+
+    class Meta:
+        unique_together = ("deal", "user")
+        indexes = [models.Index(fields=["user"])]
+
+    def __str__(self):
+        return f"{self.user_id} on deal {self.deal_id}"
+
+
+def sync_participants(deal):
+    """Make CollabParticipant match `deal.participants`. Idempotent.
+
+    Derived rather than maintained: every writer already edits the JSON, so
+    reconciling from it on save means there is no call site that can forget.
+    A username that matches no account is skipped rather than raising — a
+    lookup table must never be the reason a deal cannot be saved.
+    """
+    from django.contrib.auth import get_user_model
+
+    names = {str(p.get("username") or "").strip()
+             for p in (deal.participants or []) if isinstance(p, dict)}
+    names.discard("")
+    want = dict(get_user_model().objects.filter(username__in=names)
+                .values_list("username", "id"))
+    have = dict(CollabParticipant.objects.filter(deal=deal)
+                .values_list("user__username", "id"))
+
+    for name, uid in want.items():
+        if name not in have:
+            CollabParticipant.objects.get_or_create(deal=deal, user_id=uid)
+    gone = [rid for name, rid in have.items() if name not in want]
+    if gone:
+        CollabParticipant.objects.filter(id__in=gone).delete()
+
+
+@receiver(models.signals.post_save, sender=CollabDeal)
+def _sync_collab_participants(sender, instance, created, update_fields=None, **kwargs):
+    """Keep the lookup table derived, so no call site can forget it.
+
+    Guarded on `update_fields`: the release paths save a deal with
+    "participants" in their update list (the split is re-cut on release), and
+    `maybe_auto_release` is called on every deal in the list view — so an
+    unguarded signal would put two queries on every card of a read. A save
+    that does not name `participants` cannot have changed who is on the deal.
+
+    Swallowed for the same reason `try_award` and the Partnership tally are:
+    an index must never be the reason money fails to move. It can drift, and
+    `manage.py rebuild_collab_participants` is what un-drifts it.
+    """
+    if not created and update_fields is not None and "participants" not in update_fields:
+        return
+    try:
+        sync_participants(instance)
+    except Exception:                                    # noqa: BLE001
+        logger.exception("collab: could not sync participants for deal %s", instance.pk)
 
 
 class SkillRating(models.Model):
