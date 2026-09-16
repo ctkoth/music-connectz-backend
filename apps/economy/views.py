@@ -50,6 +50,10 @@ from .serializers_metz import (
     TakeAnalysisSerializer,
 )
 from .models import PracticeSession, DrumPattern, ToolPreference, PatternShare, DrillTake, TakeAnalysis
+from .models import Habit
+# The one list of provider names, so the funnel cannot come to disagree
+# with the sign-in buttons about which providers exist.
+from apps.accounts.oauth import provider_requirements
 
 User = get_user_model()
 VALID_TIERS = {t[0] for t in TIER_CHOICES}
@@ -451,6 +455,18 @@ class FunnelEventView(APIView):
     _BLOCKED = lambda v: v if v in ("already_used", "cap_reached",
                                     "not_configured") else None
 
+    # Which sign-in it was, from `provider_requirements()` — the ONE list of
+    # provider names this platform has. Typing the eight in here would be the
+    # second place they live, and it was already wrong on the first draft: the
+    # list said "apple" and that provider is commented out over there, so the
+    # funnel would have accepted a kind no button can fire. Free text is out
+    # for the usual reason — it is how a table that holds no PII starts
+    # holding some.
+    _PROVIDER = lambda v: v if v in provider_requirements() else None
+
+    # Habit cadence, off `Habit.FREQUENCY_CHOICES`, same rule.
+    _FREQ = lambda v: v if v in dict(Habit.FREQUENCY_CHOICES) else None
+
     META_SHAPE = {
         "landing_view": {},
         "try_view": {"app_key": _APP},
@@ -470,6 +486,21 @@ class FunnelEventView(APIView):
         "try_send": {"app_key": _APP},
         "try_failed": {"app_key": _APP, "why": _WHY},
         "try_scored": {"app_key": _APP},
+        # Which instrument's onboarding, because a modal that gets skipped on
+        # DrumZ and finished on SingZ is one number hiding two.
+        "onboard_habit": {"app_key": _APP, "frequency": _FREQ},
+        "onboard_skip": {"app_key": _APP},
+        # Only the notification switch. Language and sound are settings rather
+        # than steps, and a funnel row that carries every preference a screen
+        # collects stops being a funnel; this one is here because a habit with
+        # its reminders off is a habit nobody is coming back to.
+        "onboard_prefs": {
+            "notifications_enabled": lambda v: bool(v)},
+        # The provider, from the same closed list the sign-in buttons use — a
+        # free-text provider name is how a table that holds no PII starts
+        # holding some.
+        "oauth_linked": {"provider": _PROVIDER},
+        "oauth_link_fail": {"provider": _PROVIDER},
         "quiz_view": {"depth": lambda x: x if x in ("basic", "advanced") else None},
         "quiz_done": {"depth": lambda x: x if x in ("basic", "advanced") else None,
                       # How many of the four axes came out said. A visitor who

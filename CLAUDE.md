@@ -561,6 +561,47 @@ left `track` unimported — so the Record button threw before `getUserMedia`
 and the trial recorded nothing at all. A closed set is right; a closed set is
 also why a client typo measures zero instead of measuring wrong.)*
 
+### It happened again, eleven times, and the omission is the half a closed set cannot catch
+
+An audit of every kind the client fires against every kind this endpoint
+accepts found **eleven** being POSTed and answered 400. Same silence as the
+recorder events, for the same reason: `track()` swallows its own failure so a
+measurement can never take a feature down, which also means a rejected kind
+and a recorded one look identical from the client.
+
+Five were wanted and are declared now — `onboard_habit`, `onboard_skip`,
+`onboard_prefs`, `oauth_linked`, `oauth_link_fail`. They are the first kinds
+here that describe what happens AFTER the account, which the funnel has never
+been able to see: it ended at `register_success`, and an account that never
+finishes onboarding is a row rather than a member. The other six were
+engagement telemetry from signed-in members — notifications read, sound
+preferences changed — and were deleted at the call site instead. This table's
+promise is that a row is a browser with no account and is never joined against
+Users; a member's settings panel has no business writing to it.
+
+Three things hold it now:
+
+- **Both closed lists are read, never retyped.** `_PROVIDER` is
+  `provider_requirements()` — the one list of provider names — after the first
+  draft typed the eight in and got it wrong immediately, listing `apple`,
+  which that function has commented out. `_FREQ` is `Habit.FREQUENCY_CHOICES`.
+  A funnel that accepts a provider no button can fire, or a cadence no habit
+  can have, is measuring something that does not exist.
+- **`oauth_link_fail` keeps the provider and drops the error text.** The client
+  sends `linkErr.message`, which is whatever the server or the network said —
+  free text, on the table that holds none, exactly as `try_failed`'s `why` is a
+  slug rather than the sentence the visitor read.
+- **The client mirrors this list in `src/funnelkinds.test.mjs`** and fails if it
+  fires a kind the mirror does not hold. The two repos deploy independently and
+  this endpoint decides; the mirror is what makes an omission visible from the
+  side that would otherwise never see it.
+
+`kind` is `varchar(20)`, and four of the five arrived longer than that
+(`onboarding_preferences_confirmed` is 32). Django's system check refuses the
+model, so the build fails rather than the column silently truncating — the one
+loud failure in this whole story — and the names are terse now to match the
+rest of the list rather than widening a column to fit one of them.
+
 ### Ambient keys, because a per-kind allowlist grows holes
 
 `src` and `dev` are true of the VISIT, not of the step, so they ride every

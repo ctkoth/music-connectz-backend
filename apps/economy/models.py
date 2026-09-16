@@ -4817,6 +4817,30 @@ FUNNEL_KINDS = (
     ("register_view", "Register screen opened"),
     ("register_success", "Account created"),
     ("login_success", "Logged in"),
+    # WHAT HAPPENS NEXT, which this funnel has never been able to see. It ends
+    # at "account created" — but an account that never finishes onboarding is
+    # not a member, it is a row, and the difference is invisible from here.
+    #
+    # These three were already being fired by the client and REJECTED as
+    # unknown kinds, so they have been costing a 400 per press and measuring
+    # nothing. That is the same failure the recorder kinds were added to fix,
+    # and it is worth noticing that a closed set catches the typo and cannot
+    # catch the omission — the client looks identical either way.
+    #
+    # Short names on purpose. `kind` is varchar(20) and these arrived from the
+    # client as onboarding_preferences_confirmed, which is 32 — Django's own
+    # system check refuses the model, so it would have failed the build rather
+    # than shipped, but the rest of this list is terse (try_send, quiz_done)
+    # and matching it is better than widening a column to fit one name.
+    ("onboard_habit", "Onboarding habit created"),
+    ("onboard_skip", "Onboarding habit skipped"),
+    ("onboard_prefs", "Onboarding preferences confirmed"),
+    # The "I already have one" OAuth link, which shipped silently broken and
+    # was fixed this session. The client swallows a link failure so the member
+    # is not blocked by it, which is right — and means the only way anybody
+    # would ever learn it had broken again is this number.
+    ("oauth_linked", "OAuth linked after login"),
+    ("oauth_link_fail", "OAuth link failed after login"),
 )
 
 

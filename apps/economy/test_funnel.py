@@ -518,3 +518,91 @@ class TheShutDoorIsAStepTests(TestCase):
         self.assertEqual(r.status_code, 200, r.content)
         self.assertIn("try_blocked", r.data["steps"])
         self.assertEqual(r.data["steps"]["try_blocked"]["unique"], 1)
+
+
+class WhatHappensAfterTheAccountTests(TestCase):
+    """Ten kinds were being fired by live screens and refused as unknown.
+
+    `track()` is fire-and-forget with a swallowed `.catch`, so every one of
+    them was a 400 nobody could see — the same failure the recorder kinds were
+    added to fix, four months later and eleven times over. A closed set catches
+    a typo and cannot catch an omission: the client looks identical either way.
+
+    Five are kept because they measure something this funnel could not see —
+    it ended at "account created", and an account that never finishes
+    onboarding is a row rather than a member. The other six were engagement
+    telemetry on a table whose whole promise is that it is never joined to a
+    User, and they were deleted at the call site instead."""
+
+    def setUp(self):
+        self.c = APIClient()
+
+    def send(self, kind, meta=None):
+        return self.c.post("/api/auth/funnel/",
+                           {"kind": kind, "anon_id": "vis-1", "meta": meta or {}},
+                           format="json")
+
+    def test_the_onboarding_steps_are_accepted(self):
+        for kind in ("onboard_habit", "onboard_skip",
+                     "onboard_prefs"):
+            self.assertEqual(self.send(kind).status_code, 204, kind)
+
+    def test_the_link_steps_are_accepted(self):
+        for kind in ("oauth_linked", "oauth_link_fail"):
+            self.assertEqual(self.send(kind).status_code, 204, kind)
+
+    def test_a_habit_keeps_its_instrument_and_cadence(self):
+        self.send("onboard_habit",
+                  {"app_key": "rapz", "frequency": "weekly"})
+        e = FunnelEvent.objects.get(kind="onboard_habit")
+        self.assertEqual(e.meta.get("app_key"), "rapz")
+        self.assertEqual(e.meta.get("frequency"), "weekly")
+
+    def test_a_cadence_outside_the_model_is_dropped(self):
+        """`Habit.FREQUENCY_CHOICES` is the one list. A funnel that accepted
+        "hourly" would be storing a cadence no habit can have."""
+        self.send("onboard_habit",
+                  {"app_key": "rapz", "frequency": "hourly"})
+        self.assertNotIn("frequency",
+                         FunnelEvent.objects.get(kind="onboard_habit").meta)
+
+    def test_only_the_notification_switch_survives_the_preferences_step(self):
+        """Language and sound are settings rather than steps. A funnel row that
+        carries every preference a screen collects stops being a funnel."""
+        self.send("onboard_prefs",
+                  {"notifications_enabled": True, "language": "es",
+                   "sound_enabled": False})
+        e = FunnelEvent.objects.get(kind="onboard_prefs")
+        self.assertEqual(e.meta.get("notifications_enabled"), True)
+        self.assertNotIn("language", e.meta)
+        self.assertNotIn("sound_enabled", e.meta)
+
+    def test_a_provider_comes_from_the_one_provider_list(self):
+        """Not a tuple typed into the view. The first draft of this typed the
+        eight names in and got it wrong immediately — it listed "apple", which
+        `provider_requirements()` has commented out, so the funnel would have
+        accepted a step no button on the platform can fire."""
+        from apps.accounts.oauth import provider_requirements
+        known = sorted(provider_requirements())
+        self.assertTrue(known)
+        for name in known:
+            self.send("oauth_linked", {"provider": name})
+        stored = {e.meta.get("provider")
+                  for e in FunnelEvent.objects.filter(kind="oauth_linked")}
+        self.assertEqual(stored, set(known))
+        self.assertNotIn("apple", known)
+
+    def test_a_link_failure_never_stores_the_error_text(self):
+        """The client sends `error: linkErr.message`, which is whatever the
+        server or the network said — free text, on a table that holds no PII."""
+        self.send("oauth_link_fail",
+                  {"provider": "spotify", "error": "That email belongs to bob@x.com"})
+        e = FunnelEvent.objects.get(kind="oauth_link_fail")
+        self.assertEqual(e.meta.get("provider"), "spotify")
+        self.assertNotIn("error", e.meta)
+
+    def test_every_new_kind_still_fits_the_column(self):
+        from .models import FUNNEL_KINDS, FunnelEvent as FE
+        width = FE._meta.get_field("kind").max_length
+        for key, _label in FUNNEL_KINDS:
+            self.assertLessEqual(len(key), width, key)
