@@ -904,9 +904,25 @@ class LimitsView(APIView):
         # the emoji rule is not re-derived from a tier over there.
         from .groupz import can_set_emoji
         from .models import Group
-        lim["custom_groups_used"] = Group.objects.filter(
-            owner=request.user, kind=Group.KIND_CUSTOM).count()
+        own_groups = list(Group.objects.filter(
+            owner=request.user, kind=Group.KIND_CUSTOM).values("id", "title", "emoji"))
+        lim["custom_groups_used"] = len(own_groups)
         lim["can_set_emoji"] = can_set_emoji(m.tier)
+        # The audiences a profile field may name. Served from here so the
+        # visibility control offers the member's REAL groups rather than a
+        # client-side idea of what a group is — and so "who can see this" and
+        # "who is in my circle" read from one place, which is the whole reason
+        # GroupZ is the source rather than a second grouping concept.
+        lim["audiences"] = (
+            [{"token": "public", "label": "Public"},
+             {"token": "member", "label": "Members"},
+             {"token": "friends", "label": "FriendZ"},
+             {"token": "fans", "label": "FanZ"},
+             {"token": "partnerz", "label": "PartnerZ"},
+             {"token": "private", "label": "Private"}]
+            + [{"token": f"group:{g['id']}",
+                "label": f"{g['emoji']} {g['title']}".strip()} for g in own_groups]
+        )
         # Whether a third-party ad frame may be rendered for this member.
         #
         # Answered here rather than by the client, because the client would have

@@ -1016,7 +1016,7 @@ def profile_for(user):
     return Profile.objects.get_or_create(user=user)[0]
 
 
-def public_name(p, viewer=None):
+def public_name(p, viewer=None, audience=None):
     """The member's real name if this viewer may see it, else "".
 
     One reader for every surface that renders somebody ELSE. The name is
@@ -1033,8 +1033,8 @@ def public_name(p, viewer=None):
     indistinguishable from one whose name happens to be their handle.
     """
     from .visibility import can_see
-    parts = [p.user.first_name if can_see(p, "first_name", viewer) else "",
-             p.user.last_name if can_see(p, "last_name", viewer) else ""]
+    parts = [p.user.first_name if can_see(p, "first_name", viewer, audience) else "",
+             p.user.last_name if can_see(p, "last_name", viewer, audience) else ""]
     return " ".join(x for x in parts if x).strip()
 
 

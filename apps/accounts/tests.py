@@ -332,7 +332,7 @@ class RealNameTests(TestCase):
         self.assertEqual(r.status_code, 200, r.content)
         user.refresh_from_db()
         self.assertEqual((user.first_name, user.last_name), ("Corey", "Knap"))
-        self.assertEqual(profile_for(user).visibility["first_name"], "public")
+        self.assertEqual(profile_for(user).visibility["first_name"], ["public"])
         self.assertEqual(r.data["first_name"], "Corey")
         levels = {row["field"]: row["level"] for row in r.data["visibility"]}
-        self.assertEqual(levels["first_name"], "public")
+        self.assertEqual(levels["first_name"], ["public"])

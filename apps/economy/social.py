@@ -12,6 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .audience import Audience
 from .visibility import redact
 from .models import (
     apply_post_rating,
@@ -541,7 +542,7 @@ def profile_max_experience(p):
     return best
 
 
-def _profile_card(p, request=None, badges=None):
+def _profile_card(p, request=None, badges=None, audience=None):
     """Compact card for search results.
 
     `badges` lets a listing pass in rows it has already loaded in bulk; left
@@ -552,10 +553,11 @@ def _profile_card(p, request=None, badges=None):
     # per key here would mean a field added below is exposed until somebody
     # remembers to guard it, which is how a privacy control rots.
     viewer = getattr(request, "user", None) if request else None
+    _attractiveness = attractiveness_median(p.user)
     return redact({
         "username": p.user.username,
         "display_name": p.display_name or p.user.username,
-        "real_name": public_name(p, viewer),
+        "real_name": public_name(p, viewer, audience),
         "avatar": _avatar_url(p, request) if request else None,
         "gender": p.gender,
         "sign": p.sign,
@@ -574,8 +576,12 @@ def _profile_card(p, request=None, badges=None):
         "personality": p.personality,
         "personality_axes": personality_dict(p.personality),
         "attracted_to": p.attracted_to,
-        "median": attractiveness_median(p.user),
-        "attractiveness": attractiveness_median(p.user),
+        # ONE call, two keys. These are the same number under two names —
+        # older clients read `median`, newer ones `attractiveness` — and
+        # computing it twice was a second query per card on a screen that
+        # renders up to five hundred of them.
+        "median": _attractiveness,
+        "attractiveness": _attractiveness,
         "overall": overall_median(p.user),
         "age": profile_age(p),
         "shares_location": bool(p.share_location and p.lat is not None and p.lng is not None),
@@ -590,7 +596,7 @@ def _profile_card(p, request=None, badges=None):
         "badge_title": p.badge_title,
         "badges": worn_badges(p.user, badges),
         **follow_counts(p.user),
-    }, p, viewer)
+    }, p, viewer, audience)
 
 
 def _profile_full(p, request, recheck=False):
@@ -1174,6 +1180,12 @@ class MembersView(APIView):
         # Every card wears its badges, so load them for the whole page in one
         # query. Per-card would be five hundred of them behind one search.
         worn = worn_badges_by_user(p.user_id for p in qs)
+        # What this viewer is to every member on the page — friend, fan,
+        # PartnerZ, in one of their groups — resolved ONCE for the whole set.
+        # Asked per card it is four questions five hundred times, on a screen
+        # that is otherwise a handful of queries. Same reason the badges above
+        # are loaded in one go.
+        aud = Audience(request.user, [p.user_id for p in qs])
         for p in qs:
             if regions and not (set(regions) & set(p.regions or [])):
                 continue
@@ -1211,7 +1223,8 @@ class MembersView(APIView):
             # The distance GATE lives in the spec above; this is the number
             # shown on the card. Computed once in member_metrics either way.
             dist = metrics.get("km")
-            card = _profile_card(p, request, badges=worn.get(p.user_id, []))
+            card = _profile_card(p, request, badges=worn.get(p.user_id, []),
+                                 audience=aud)
             card["distance_km"] = dist
             results.append(card)
         # Nearest first when a distance origin exists. Distance WINS over the

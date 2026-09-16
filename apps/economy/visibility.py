@@ -69,6 +69,21 @@ DEFAULTS = {
 }
 
 
+def as_list(level):
+    """A field's audiences, whatever shape the row holds.
+
+    Stored values were single strings before a field could carry several, and
+    there is no migration for it: a string reads as a one-item list, which is
+    exactly what it meant. Rewriting every row to say the same thing in a new
+    shape would be a migration whose only effect is risk.
+    """
+    if isinstance(level, str):
+        return [level]
+    if isinstance(level, (list, tuple)):
+        return [x for x in level if isinstance(x, str)]
+    return []
+
+
 def clean_visibility(raw):
     """Normalise what a client sent into storable overrides.
 
@@ -88,33 +103,81 @@ def clean_visibility(raw):
         field = str(field)
         if field not in DEFAULTS:
             continue
-        level = str(level or "").strip().lower()
-        if level not in LEVELS or level == DEFAULTS[field]:
+        wanted = [str(x or "").strip().lower() for x in as_list(level)]
+        keep = [x for x in wanted if x in LEVELS or _is_audience(x)]
+        if not keep:
             continue
-        out[field] = level
+        # `public` and `member` swallow everything narrower, so a field set to
+        # "public and my friends" is just public. Storing both would be a row
+        # that reads as a restriction it does not apply.
+        if PUBLIC in keep:
+            keep = [PUBLIC]
+        elif MEMBER in keep:
+            keep = [MEMBER]
+        elif PRIVATE in keep and len(keep) > 1:
+            # Private beside an audience is a contradiction — "only me, and
+            # also my friends". The audience is the specific thing they chose,
+            # so private is the half that goes.
+            keep = [x for x in keep if x != PRIVATE]
+        # Order-insensitive and duplicate-free, so two clients sending the same
+        # choice in a different order do not look like different rows.
+        keep = sorted(set(keep))
+        if keep == [DEFAULTS[field]]:
+            continue
+        out[field] = keep
     return out
 
 
+def _is_audience(token):
+    from .audience import RELATIONS, is_group
+    return token in RELATIONS or is_group(token)
+
+
 def level_for(p, field):
-    """This member's setting for one field, or the default if they never said."""
+    """This member's audiences for one field, as a LIST.
+
+    Always a list, even for one audience: a caller that had to handle both a
+    string and a list would get it right in the place it was written and wrong
+    in the next place somebody copies it to.
+    """
     stored = p.visibility if isinstance(getattr(p, "visibility", None), dict) else {}
-    level = stored.get(field)
-    return level if level in LEVELS else DEFAULTS.get(field, PRIVATE)
+    got = [x for x in as_list(stored.get(field)) if x in LEVELS or _is_audience(x)]
+    return got or [DEFAULTS.get(field, PRIVATE)]
 
 
-def can_see(p, field, viewer):
+def can_see(p, field, viewer, audience=None):
     """May `viewer` see `field` on profile `p`?
 
-    Anonymous viewers are the PUBLIC audience, so they see fields set to
-    public — the level name is about the field's reach, not the viewer's rank,
-    and conflating the two is the mistake that would hide public fields from
-    the logged-out page this exists to serve.
+    A field carries as many audiences as its owner wants, and ANY of them
+    letting the viewer in is enough — "my PartnerZ and my friends" is the
+    obvious real request, and forcing one choice makes people pick the looser
+    option, which is the opposite of what a privacy control is for.
+
+    `audience` is a prebuilt `Audience` when a caller is rendering many members
+    at once; without one, a relationship audience resolves on the spot. That
+    fallback is correct but costs queries, so anything rendering a list passes
+    one in — see `audience.Audience`'s note on the fifty-card search.
     """
     if viewer is not None and getattr(viewer, "is_authenticated", False):
         if viewer.pk == p.user_id:
             return True
-        return _RANK[level_for(p, field)] >= _RANK[MEMBER]
-    return _RANK[level_for(p, field)] >= _RANK[PUBLIC]
+    for token in level_for(p, field):
+        if token == PUBLIC:
+            return True
+        if token == PRIVATE:
+            continue
+        if token == MEMBER:
+            if viewer is not None and getattr(viewer, "is_authenticated", False):
+                return True
+            continue
+        # A relationship audience. Anonymous viewers are in none of them.
+        if viewer is None or not getattr(viewer, "is_authenticated", False):
+            continue
+        from .audience import for_one
+        res = audience or for_one(viewer, p.user_id)
+        if res.allows(p.user_id, token):
+            return True
+    return False
 
 
 def settings_for(p):
@@ -124,7 +187,7 @@ def settings_for(p):
     only check what they are exposing by seeing the whole list, which is the
     same reason the ZodiacZ panel publishes all twenty-four bonuses.
     """
-    return [{"field": f, "level": level_for(p, f), "default": DEFAULTS[f]}
+    return [{"field": f, "level": level_for(p, f), "default": [DEFAULTS[f]]}
             for f in sorted(DEFAULTS)]
 
 
@@ -160,7 +223,7 @@ def _blank_like(value):
     return None
 
 
-def redact(card, p, viewer):
+def redact(card, p, viewer, audience=None):
     """Blank every field on this card that `viewer` may not see.
 
     One pass over the finished dict rather than a check at each key, so a field
@@ -170,6 +233,6 @@ def redact(card, p, viewer):
     """
     for key in list(card):
         field = _DERIVED.get(key, key)
-        if field in DEFAULTS and not can_see(p, field, viewer):
+        if field in DEFAULTS and not can_see(p, field, viewer, audience):
             card[key] = _blank_like(card[key])
     return card
