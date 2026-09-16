@@ -45,6 +45,21 @@ RESERVED = {
 }
 
 
+def normalize_handle(value):
+    """Strip a username down to just its letters and digits, lowercased.
+
+    Two usernames that normalize to the same string are almost certainly the
+    same person typed two ways — "K-Oth" and "KOTH" are one handle with an
+    underscore and a capitalisation between them. This is what lets
+    `OAuthLoginView` offer a weak "is this you?" hint when a provider hands
+    back a display name and no email to match against — it is never used to
+    DECIDE anything on its own, the same rule `dupez.signals_between` already
+    holds: this reports a fact for a human to read, and nothing here merges
+    or auto-links an account off it.
+    """
+    return re.sub(r"[^a-z0-9]", "", (value or "").lower())
+
+
 def username_problem(value, *, taken=True):
     """Why this username can't be used, or None if it can.
 

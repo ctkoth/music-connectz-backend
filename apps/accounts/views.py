@@ -102,6 +102,35 @@ def _note_seen(user, request):
         logger.exception("dupez: could not record address for %s", getattr(user, "id", "?"))
 
 
+def _possible_match(name):
+    """A weak "is this you?" hint for the needs_choice screen.
+
+    A provider that hands over no email — SoundCloud's "KOTH" — matches
+    nothing, so the member is asked to guess between two buttons blind. Most
+    of the time they are not guessing: the handle they signed up with on the
+    provider and the handle they picked here are the same one, typed with
+    different case or a separator ("KOTH" / "K-Oth"). `normalize_handle`
+    strips both to the same string.
+
+    This is a hint, never a decision — the same line `dupez.signals_between`
+    draws for every signal it reports: nothing here merges an account or
+    signs anybody in, it only saves a member from picking the wrong button.
+    Best-effort and read-only, so a failure here must never take sign-in down
+    with it, same guarantee as `_note_signup`/`_note_seen` above.
+    """
+    from .usernames import normalize_handle
+    target = normalize_handle(name)
+    if not target:
+        return None
+    try:
+        for username, in User.objects.values_list("username").iterator():
+            if normalize_handle(username) == target:
+                return username
+    except Exception:  # noqa: BLE001 — a hint must never break a sign-in
+        logger.exception("oauth: could not compute a possible-match hint")
+    return None
+
+
 # A provider hand-off we have verified but not yet acted on.
 #
 # An OAuth authorization code is single-use: the moment we exchange it, it is
@@ -665,6 +694,9 @@ class OAuthLoginView(APIView):
                     info.get("name")
                     or (info["email"].split("@")[0] if info.get("email") else provider)
                 ),
+                # A hint, not a match: the provider's own display name against
+                # an existing username, normalized. See `_possible_match`.
+                "possible_match": _possible_match(info.get("name")),
                 "pending": _pending_token(info),
                 "detail": "Do you already have a Music ConnectZ account?",
             })

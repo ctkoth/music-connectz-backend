@@ -12,12 +12,14 @@ Twitter is why the second exists. Its API returns no email at all, so before
 this every Twitter sign-in by an existing member opened a second account —
 not occasionally, every single time.
 """
+from unittest import mock
+
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from .models import OAuthIdentity
-from .views import _user_from_oauth, _pending_token
+from .views import _user_from_oauth, _pending_token, _possible_match
 
 User = get_user_model()
 
@@ -171,3 +173,63 @@ class AnsweringTheQuestion(TestCase):
         self.client.post("/api/auth/oauth/twitter/", {"pending": tok}, "application/json")
         self.client.post("/api/auth/oauth/twitter/", {"pending": tok}, "application/json")
         self.assertEqual(User.objects.count(), 1)
+
+
+class PossibleMatchIsAHintNeverADecision(TestCase):
+    """`_possible_match` is what lets the needs_choice screen say "is this
+    you?" instead of leaving a member to guess between two buttons blind —
+    the SoundCloud case: a handle of "KOTH" and an existing account "K-Oth"
+    are the same person typed two ways, and normalize_handle is what sees it.
+
+    It reports a username, never a User — dupez's own rule about a signal:
+    something for a human to read, nothing that acts on its own.
+    """
+
+    def test_a_differently_cased_and_punctuated_handle_still_matches(self):
+        User.objects.create_user(username="K-Oth", email="")
+        self.assertEqual(_possible_match("KOTH"), "K-Oth")
+
+    def test_an_exact_match_is_found_too(self):
+        User.objects.create_user(username="corey", email="")
+        self.assertEqual(_possible_match("corey"), "corey")
+
+    def test_no_name_offers_no_hint(self):
+        self.assertIsNone(_possible_match(""))
+        self.assertIsNone(_possible_match(None))
+
+    def test_a_name_nobody_has_offers_no_hint(self):
+        User.objects.create_user(username="someone", email="")
+        self.assertIsNone(_possible_match("NobodyByThisHandle"))
+
+    def test_a_lookup_failure_is_swallowed_not_raised(self):
+        """A hint must never be able to take a sign-in down with it — the same
+        guarantee `_note_signup`/`_note_seen` already give the dupez flags."""
+        with mock.patch("apps.accounts.views.User") as bad_user_model:
+            bad_user_model.objects.values_list.side_effect = Exception("boom")
+            self.assertIsNone(_possible_match("whatever"))
+
+
+class NeedsChoiceCarriesThePossibleMatchHint(TestCase):
+    """The end-to-end wiring: a provider identity that cannot be tied to
+    anybody by email or provider_uid still gets asked "is this you?" when the
+    handle lines up."""
+
+    def test_the_hint_reaches_the_needs_choice_response(self):
+        User.objects.create_user(username="K-Oth", email="")
+        with mock.patch("apps.accounts.views.exchange_github",
+                         return_value=info(provider="github", uid="gh-1", name="KOTH")):
+            r = self.client.post(
+                "/api/auth/oauth/github/", {"code": "x"}, "application/json")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertTrue(body["needs_choice"])
+        self.assertEqual(body["possible_match"], "K-Oth")
+
+    def test_no_match_is_none_not_a_missing_key(self):
+        with mock.patch("apps.accounts.views.exchange_github",
+                         return_value=info(provider="github", uid="gh-2", name="NobodyHere")):
+            r = self.client.post(
+                "/api/auth/oauth/github/", {"code": "x"}, "application/json")
+        body = r.json()
+        self.assertIn("possible_match", body)
+        self.assertIsNone(body["possible_match"])
