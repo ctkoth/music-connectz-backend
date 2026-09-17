@@ -401,10 +401,10 @@ getting away from them. This is the floor for a REAL attempt, not the bin for \
 a clip with nothing in it; that one is "unscorable" above.
 - 3-4: real attempt, but the fundamentals come apart often enough that it is \
 the first thing to fix.
-- 5-6: a solid, ordinary take from somebody at this level. Things to fix, \
-nothing broken. **Most takes belong here** — 5 is normal, not a failure.
-- 7-8: clearly good for this level; the fixes are refinements.
-- 9-10: exceptional at this level. Rare, and worth saying so when it happens.
+- 5-7: a solid, ordinary take from somebody at this level. Things to fix, \
+nothing broken. **Most takes belong here** — 6 is normal, not a failure.
+- 8-9: clearly good for this level; the fixes are refinements.
+- 10: exceptional at this level. Rare, and worth saying so when it happens.
 
 THE OVERALL is not an average of the dimensions below it, and it is never the \
 weakest one. A real listener does not grade each facet and divide — they \

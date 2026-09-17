@@ -1752,3 +1752,15 @@ That is not how an actual audience hears a song. A listener does not average fiv
 RepostExchange's 9.7 is not the target to hit, and the fix does not chase it: that number comes from an exchange platform where reciprocal rating is the norm, which is exactly the kind of number the substance rule warns about — a score a member can get without the song being good. What the fix corrects is real and independent of that comparison: an AI coach that could not tell "ordinary" from "strong take, one habit to fix" was measuring the wrong thing regardless of what any other platform said about the same song.
 
 ---
+
+## Two more calibration bugs, found the way the last one was: Corey scoring his own takes
+
+Same complaint as the section above, sharpened: the trial door was costing signups on two separate axes, and the fix for neither is a floor.
+
+**1. Medium was still landing low.** `ScaleIsAnchoredTests` had already moved the reference point off a released record — 5-6 was "solid, ordinary, nothing broken," and the docstring is correct that this fixed the undefined-anchor failure. But "5 is normal" is still a low number to see after a real attempt, and a visitor deciding whether to make an account reads a 5 as "below average" whatever the caveat beside it says — nobody's mental model of 1-10 puts the midpoint at "good." **The bottom of the scale did not move.** 1-2 and 3-4 are exactly what they were: a real attempt that is mostly getting away from someone still scores there, and there is still no floor under it. What moved is where ORDINARY lands — 5-6 became 5-7, and the anchor line now reads "6 is normal" instead of "5 is normal." A developing artist's solid, unremarkable take reads as a 6 or 7 now, not a 5, and a rough one is exactly as rough as it was.
+
+**2. Nothing set the model's temperature.** Every scoring call ran at Gemini's default sampling temperature — tuned for creative variety, because that is what the API is FOR most of the time. A coaching score is the opposite kind of task: it is a judgement, and two calls against the same take should land close to the same number, or the coach reads as inconsistent rather than calibrated. `vocalcoach.COACH_TEMPERATURE` (0.3, env-overridable the same way `MAX_MB` is) pins it down. Low enough that the same performance gets the same read twice; not near-zero, which tends to make the prose repetitive rather than making the JUDGEMENT any more consistent — degenerate output is not the same thing as a stable one.
+
+Both bugs shared one root: nothing in the original prompt or request body told the model HOW to be consistent, on the number or on the scale it lived on, so it filled the gap with its own defaults — a released-record reference for one, a creative-writing temperature for the other. `ScaleIsAnchoredTests` and the new `TheScoreIsAJudgementNotACreativeTaskTests` pin both so neither drifts back.
+
+---

@@ -79,6 +79,15 @@ INLINE_MAX_MB = 14
 # judgement may want moving without a deploy.
 MAX_MB = int(os.environ.get("COACH_MAX_MB", "200"))
 
+# Gemini's default sampling temperature (roughly 1.0) is tuned for creative
+# variety, and a coaching score is a judgement, not a creative task — two
+# calls against the same take should land close to the same number. Low
+# enough to stop the number wandering between runs; not near-zero, which
+# tends to make the prose repetitive rather than actually more consistent.
+# Env-overridable for the same reason MAX_MB is: a calibration judgement,
+# not a transport limit, and one Corey may want to tune without a deploy.
+COACH_TEMPERATURE = float(os.environ.get("COACH_TEMPERATURE", "0.3"))
+
 # What Gemini will actually accept as inline media. Anything outside these two
 # sets is refused by the API, not by us — and the refusal arrives as a plain
 # non-200 that we used to surface as "The coach couldn't process that take",
@@ -323,7 +332,16 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     # Built ONCE, before the chain walks. Several models may be tried, and a
     # file object read a second time hands the next attempt an empty take —
     # which is also why the upload above happens once rather than per model.
-    body = {"contents": [{"parts": [{"text": prompt}, part]}]}
+    #
+    # No generationConfig at all used to mean Gemini's default sampling
+    # temperature — around 1.0 — on a call whose whole job is a JUDGMENT, not
+    # creative writing. Two runs against the same take could land materially
+    # different scores for no reason a member could see, which reads as an
+    # inconsistent coach rather than a calibrated one. COACH_TEMPERATURE is
+    # low enough that the same performance gets the same read run to run,
+    # without going so low the prose turns robotic or repetitive.
+    body = {"contents": [{"parts": [{"text": prompt}, part]}],
+            "generationConfig": {"temperature": COACH_TEMPERATURE}}
     try:
         # Don't START the expensive leg with nothing left. Without this, a run
         # that had already spent its whole budget uploading would go on to ask

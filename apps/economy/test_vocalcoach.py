@@ -910,15 +910,27 @@ class ScaleIsAnchoredTests(TestCase):
         for app_key in ("singz", "rapz", "drumz", "guitarz"):
             p = prompt_for(app_key, "Trap", "tenor", "builder")
             self.assertIn("THE SCALE", p, app_key)
-            for band in ("1-2", "3-4", "5-6", "7-8", "9-10"):
+            for band in ("1-2", "3-4", "5-7", "8-9", "10"):
                 self.assertIn(band, p, f"{app_key} has no anchor for {band}")
 
-    def test_it_says_five_is_normal(self):
-        """The whole failure in one line: without it, "average" reads as 2."""
+    def test_it_says_six_is_normal(self):
+        """The whole failure in one line: without it, "average" reads as 2.
+
+        Was "5 is normal" — Corey's read (both in his own scores and members
+        who never came back) was that even the calibrated scale still landed
+        low for an ordinary take, so the ordinary band moved up a point,
+        5-6 to 5-7, without touching the bottom of the scale at all: a take
+        that genuinely barely holds together still scores 1-2, exactly as
+        before. Nothing here is a floor — a real attempt with nothing behind
+        it can still land wherever it actually lands.
+        """
         from apps.economy.instruments import prompt_for
         p = prompt_for("singz", "R&B", "tenor", "builder")
-        self.assertIn("5 is normal", p)
+        self.assertIn("6 is normal", p)
         self.assertIn("Most takes belong here", p)
+        # The bottom of the scale is untouched — this is a shift of where
+        # "ordinary" lands, never a guaranteed minimum.
+        self.assertIn("1-2: they are performing, but it barely holds together", p)
 
     def test_the_reference_is_a_developing_artist_not_a_record(self):
         from apps.economy.instruments import prompt_for
@@ -959,6 +971,33 @@ class ScaleIsAnchoredTests(TestCase):
         # And the bottom of the scale still exists.
         self.assertIn("there is essentially no performance to score", p)
         self.assertIn("Harshness is not honesty", p)
+
+
+class TheScoreIsAJudgementNotACreativeTaskTests(TestCase):
+    """A score is only useful if the same take gets the same read twice.
+
+    Nothing set Gemini's sampling temperature, so a scoring call ran at the
+    model's default — tuned for varied, creative output, not a stable
+    judgement. Two members sending near-identical takes (or the same member
+    resubmitting) could get meaningfully different numbers for no reason
+    visible on screen, which reads as an inconsistent coach rather than a
+    calibrated one. `COACH_TEMPERATURE` pins it low.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("temp1", "temp1@e.com", "pw12345678")
+        self.client.force_authenticate(self.user)
+        m = membership_for(self.user); m.tier = TIER_STATZ; m.save()
+        w = wallet_for(self.user); w.money_cents = 100000; w.save()
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
+    def test_the_coach_call_sets_a_low_temperature(self, post, _k):
+        self.client.post(URL, {"take": take(), "genre": "R&B", "range": "tenor",
+                               "difficulty": "builder"}, format="multipart")
+        cfg = post.call_args.kwargs["json"]["generationConfig"]
+        self.assertLess(cfg["temperature"], 0.5)
 
 
 class OverallIsNotTheWeakestFacetTests(TestCase):
