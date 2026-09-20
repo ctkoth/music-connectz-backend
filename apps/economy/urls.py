@@ -156,6 +156,10 @@ from .views import (
     InstrumentLeaderboardView,
 )
 from .habits import HabitCreateView, HabitCompleteView
+from .bodiez import (
+    BodieZExercisesView, BodieZRoutinesView, BodieZRoutineDetailView,
+    BodieZSessionsView, BodieZSessionDetailView, BodieZSetsView, BodieZProgressView,
+)
 
 urlpatterns = [
     path("wallet/", WalletView.as_view(), name="economy-wallet"),
@@ -410,6 +414,18 @@ urlpatterns = [
     path("lilith/routines/<int:routine_id>/", LilithRoutineDetailView.as_view(),
          name="economy-lilith-routine"),
     path("lilith/sponsor/", LilithSponsorView.as_view(), name="economy-lilith-sponsor"),
+    # BodieZ — strength training and workout planning. v1: library, routines,
+    # session log, and a progress read built from logged sets, not a formula.
+    path("bodiez/exercises/", BodieZExercisesView.as_view(), name="economy-bodiez-exercises"),
+    path("bodiez/routines/", BodieZRoutinesView.as_view(), name="economy-bodiez-routines"),
+    path("bodiez/routines/<int:routine_id>/", BodieZRoutineDetailView.as_view(),
+         name="economy-bodiez-routine"),
+    path("bodiez/sessions/", BodieZSessionsView.as_view(), name="economy-bodiez-sessions"),
+    path("bodiez/sessions/<int:session_id>/", BodieZSessionDetailView.as_view(),
+         name="economy-bodiez-session"),
+    path("bodiez/sessions/<int:session_id>/sets/", BodieZSetsView.as_view(),
+         name="economy-bodiez-sets"),
+    path("bodiez/progress/", BodieZProgressView.as_view(), name="economy-bodiez-progress"),
     path("offerz/funnel/", FunnelOffersView.as_view(), name="economy-funnel-offers"),
     path("offerz/funnel/redeem/", FunnelOfferRedeemView.as_view(),
          name="economy-funnel-offer-redeem"),
