@@ -1,4 +1,5 @@
 from django.contrib.auth import authenticate, get_user_model
+from django.db import transaction
 from django.db.models import Q
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -203,48 +204,59 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def create(self, validated):
-        user = User.objects.create_user(
-            username=validated["username"],
-            email=validated["email"],
-            password=validated["password"],
-        )
-        Profile.objects.update_or_create(
-            user=user, defaults={"phone": validated.get("phone", "")}
-        )
-        # Welcome bonus for signing up — kickstart their balance
-        from apps.economy.models import award_spinaz, SIGNUP_WELCOME_SPINAZ
-        award_spinaz(user, SIGNUP_WELCOME_SPINAZ, "signup welcome bonus",
-                     app_key="profilez", target="signup")
-        # Platform owner bonus for each new join — incentivizes growth focus
-        from apps.economy.views import platform_owner
-        owner = platform_owner()
-        if owner and owner.id != user.id:
-            award_spinaz(owner, SIGNUP_WELCOME_SPINAZ, f"new member join ({user.username})",
+        # Everything below used to run un-transacted: `create_user` committed
+        # immediately, and every step after it (the welcome bonus, the owner's
+        # bonus, the zodiac write, the referral, the trial claim) could still
+        # raise. When one did, the member got a 500 and NOT an account — but
+        # the username and email were already taken, permanently, by a user row
+        # with no way back to it. Retrying "register" then failed with "that
+        # username/email is taken", by themselves, forever. That is a dead end
+        # this screen exists to prevent, not cause. One atomic block: either
+        # the whole join happens or none of it does, and a bug in the welcome
+        # bonus can never brick a signup.
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=validated["username"],
+                email=validated["email"],
+                password=validated["password"],
+            )
+            Profile.objects.update_or_create(
+                user=user, defaults={"phone": validated.get("phone", "")}
+            )
+            # Welcome bonus for signing up — kickstart their balance
+            from apps.economy.models import award_spinaz, SIGNUP_WELCOME_SPINAZ
+            award_spinaz(user, SIGNUP_WELCOME_SPINAZ, "signup welcome bonus",
                          app_key="profilez", target="signup")
-        # Store the birthday on the searchable economy profile if provided.
-        birthday = (validated.get("birthday") or "").strip()
-        if birthday:
-            # Derive the sign here too, exactly as PATCH /api/auth/me/ does —
-            # otherwise a member who gave their birthday at signup had a blank
-            # ZodiacZ sign until they edited their profile again.
-            from apps.economy.models import profile_for, zodiac_for
-            ep = profile_for(user)
-            ep.birthday = birthday[:10]
-            ep.sign = zodiac_for(ep.birthday)
-            ep.save(update_fields=["birthday", "sign", "updated_at"])
-        # Two-sided referral: credit the inviter + welcome the joinee (once).
-        code = (validated.get("ref") or "").strip()
-        if code and code.lower() != user.username.lower():
-            from apps.economy.models import record_referral
-            referrer = User.objects.filter(username__iexact=code).first()
-            if referrer:
-                record_referral(referrer, user)
-        # Claim the trial take, if they came in through one. Best-effort by
-        # design — a stale token must never cost somebody their registration.
-        token = (validated.get("trial_token") or "").strip()
-        if token:
-            from apps.economy.models import claim_trial_take
-            claim_trial_take(user, token)
+            # Platform owner bonus for each new join — incentivizes growth focus
+            from apps.economy.views import platform_owner
+            owner = platform_owner()
+            if owner and owner.id != user.id:
+                award_spinaz(owner, SIGNUP_WELCOME_SPINAZ, f"new member join ({user.username})",
+                             app_key="profilez", target="signup")
+            # Store the birthday on the searchable economy profile if provided.
+            birthday = (validated.get("birthday") or "").strip()
+            if birthday:
+                # Derive the sign here too, exactly as PATCH /api/auth/me/ does —
+                # otherwise a member who gave their birthday at signup had a blank
+                # ZodiacZ sign until they edited their profile again.
+                from apps.economy.models import profile_for, zodiac_for
+                ep = profile_for(user)
+                ep.birthday = birthday[:10]
+                ep.sign = zodiac_for(ep.birthday)
+                ep.save(update_fields=["birthday", "sign", "updated_at"])
+            # Two-sided referral: credit the inviter + welcome the joinee (once).
+            code = (validated.get("ref") or "").strip()
+            if code and code.lower() != user.username.lower():
+                from apps.economy.models import record_referral
+                referrer = User.objects.filter(username__iexact=code).first()
+                if referrer:
+                    record_referral(referrer, user)
+            # Claim the trial take, if they came in through one. Best-effort by
+            # design — a stale token must never cost somebody their registration.
+            token = (validated.get("trial_token") or "").strip()
+            if token:
+                from apps.economy.models import claim_trial_take
+                claim_trial_take(user, token)
         return user
 
 
