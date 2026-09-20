@@ -1038,6 +1038,55 @@ class OverallIsNotTheWeakestFacetTests(TestCase):
         self.assertIn("never for a strong one with a single fixable habit", p)
 
 
+class TheTopBandsAreNotGatedBehindRarityTests(TestCase):
+    """A take real listeners loved should not need a second coach's blessing.
+
+    Corey sent in a take human listeners had rated a genuine 10, and the
+    coach still landed it in the middle of the scale on a Builder-tier take —
+    the same undefined-anchor shape `ScaleIsAnchoredTests` and
+    `OverallIsNotTheWeakestFacetTests` already fixed once, showing up a third
+    time at the TOP of the scale rather than the middle or the overall/facet
+    relationship. "10: exceptional... Rare" told the model a 10 was an
+    unusual thing to reach for, which is the same kind of unstated anchor
+    that made "average" read as a 2 before "6 is normal" existed — a model
+    that reads "rare" defaults to caution, and caution at the top of the
+    scale is the same failure as caution at the anchor point, just harder to
+    notice because it looks like a strict coach rather than a wrong one.
+
+    The fix says two things explicitly: a strong reaction from real listeners
+    is evidence to use, not a temptation to correct downward over a
+    technicality; and a 10 needs to be TRUE, not rare — undershooting one
+    that is earned is exactly as wrong as overshooting one that isn't.
+    """
+
+    def test_listener_reaction_counts_as_evidence(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("real evidence of where this take sits", p)
+
+    def test_a_ten_does_not_have_to_be_rare_to_be_true(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn("does not have to be rare to be true", p)
+        self.assertNotIn("Rare, and worth saying so", p)
+
+    def test_undershooting_is_pinned_as_wrong_as_overshooting(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("guitarz", "Rock", None, "builder")
+        self.assertIn("Undershooting a take that plainly deserves this band", p)
+        self.assertIn("exactly as wrong as", p)
+
+    def test_it_did_not_become_a_licence_to_flatter(self):
+        """Same guard the other calibration fixes carry — a stated evidence
+        rule for the top bands must not loosen the honesty rules everywhere
+        else in the prompt."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("no flattery", p)
+        self.assertIn("Harshness is not honesty", p)
+        self.assertIn("there is essentially no performance to score", p)
+
+
 class LyricRatingTests(TestCase):
     """The optional writing score — RapZ's blueprint dimension, finally built.
 

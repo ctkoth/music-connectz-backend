@@ -403,8 +403,15 @@ a clip with nothing in it; that one is "unscorable" above.
 the first thing to fix.
 - 5-7: a solid, ordinary take from somebody at this level. Things to fix, \
 nothing broken. **Most takes belong here** — 6 is normal, not a failure.
-- 8-9: clearly good for this level; the fixes are refinements.
-- 10: exceptional at this level. Rare, and worth saying so when it happens.
+- 8-9: clearly good for this level — the kind of take that actually lands \
+with real listeners, not just technically clean. If people who heard it \
+responded strongly, that reaction is real evidence of where this take sits, \
+not something to talk yourself out of over a technicality nobody but \
+another musician would even notice.
+- 10: exceptional at this level, and it does not have to be rare to be \
+true — say 10 whenever the take earns it. Undershooting a take that plainly \
+deserves this band is not caution, it is a wrong number, exactly as wrong as \
+overshooting one that does not.
 
 THE OVERALL is not an average of the dimensions below it, and it is never the \
 weakest one. A real listener does not grade each facet and divide — they \
