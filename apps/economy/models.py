@@ -5396,6 +5396,95 @@ class UserPreferences(models.Model):
         return f"{self.user} — {self.language}, notifications={'on' if self.notifications_enabled else 'off'}"
 
 
+class BodieZExercise(models.Model):
+    """The movement library. Seeded once by a data migration, not per-user —
+    a member picks from this list rather than typing a free-text name, so a
+    routine's exercises can be grouped and charted by muscle group later
+    without parsing prose.
+    """
+    name = models.CharField(max_length=80, unique=True)
+    MUSCLE_CHOICES = [
+        ("chest", "Chest"), ("back", "Back"), ("shoulders", "Shoulders"),
+        ("arms", "Arms"), ("legs", "Legs"), ("core", "Core"),
+        ("cardio", "Cardio"), ("full_body", "Full Body"),
+    ]
+    muscle_group = models.CharField(max_length=12, choices=MUSCLE_CHOICES)
+    EQUIPMENT_CHOICES = [
+        ("bodyweight", "Bodyweight"), ("dumbbell", "Dumbbell"),
+        ("barbell", "Barbell"), ("machine", "Machine"), ("band", "Band"),
+    ]
+    equipment = models.CharField(max_length=12, choices=EQUIPMENT_CHOICES)
+
+    class Meta:
+        ordering = ("muscle_group", "name")
+
+    def __str__(self):
+        return self.name
+
+
+class BodieZRoutine(models.Model):
+    """A saved training plan. `exercises` is JSON for display — the same
+    shape `PostContributor` and `CollabParticipant` warn against reading back
+    with Python for anything at scale, but a routine has at most a few dozen
+    rows and is only ever read by its owner, so there is nothing here a
+    lookup table would earn its keep on.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="bodiez_routines")
+    title = models.CharField(max_length=80)
+    # [{exercise_id, sets, reps, order}, ...]
+    exercises = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+
+    def __str__(self):
+        return f"{self.user} — {self.title}"
+
+
+class BodieZSession(models.Model):
+    """One workout, live or finished. `ended_at` null means in progress —
+    the same null-means-open shape `TakeAnalysis.analyzed_at` uses, so a
+    session list can tell "still training" from "finished at 6:03pm" without
+    a separate status column that could disagree with the timestamps.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="bodiez_sessions")
+    routine = models.ForeignKey(BodieZRoutine, on_delete=models.SET_NULL,
+                                 null=True, blank=True, related_name="sessions")
+    started_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ("-started_at",)
+
+    def __str__(self):
+        return f"{self.user} — {self.started_at:%Y-%m-%d}"
+
+
+class BodieZSet(models.Model):
+    """One logged set inside a session. `weight_kg` null means bodyweight —
+    not zero, for the same reason a coach score is null rather than 0 when
+    nothing was measurable: a 0kg squat and a bodyweight squat are different
+    facts and collapsing them would make the volume total lie.
+    """
+    session = models.ForeignKey(BodieZSession, on_delete=models.CASCADE, related_name="sets")
+    exercise = models.ForeignKey(BodieZExercise, on_delete=models.CASCADE, related_name="+")
+    set_number = models.PositiveSmallIntegerField()
+    reps = models.PositiveSmallIntegerField()
+    weight_kg = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("session_id", "set_number")
+
+    def __str__(self):
+        return f"{self.session_id} — {self.exercise.name} x{self.reps}"
+
+
 class TakeAnalysis(models.Model):
     upload = models.OneToOneField(Upload, on_delete=models.CASCADE, related_name="analysis")
     detected_notes = models.JSONField(default=list, help_text="[{note, freq, cents_off, timestamp}]")
