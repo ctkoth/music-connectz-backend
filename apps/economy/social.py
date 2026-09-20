@@ -591,6 +591,12 @@ def _profile_card(p, request=None, badges=None, audience=None, batched=None):
         "sign_cn": chinese_zodiac_for(p.birthday),
         "regions": p.regions,
         "nationalities": p.nationalities,
+        # Social ConnectZ shows this as the member's own claimed identity —
+        # "Producer", "Mix Engineer" — the same PersonaZ classes ProfileZ
+        # renders, read through the one repair-on-read helper rather than
+        # `profile.personas` directly (see personaz.py: a mangled row must
+        # not reach a search result any more than it reaches its owner).
+        "personas": personas_of(p),
         "sober": p.sober,
         # The code AND the per-axis form, because the profile screen renders
         # four toggles and the card renders one string. Neither should have to
