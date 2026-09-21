@@ -1032,6 +1032,11 @@ class Profile(models.Model):
     # point of "customize" rather than "choose": a member who likes the house
     # set but wants a louder coin should not have to change all of it.
     sound_overrides = models.JSONField(default=dict, blank=True)
+    # CoachVoiceZ — which voice reads a Boss Take's feedback aloud. Same shape
+    # as `sound_pack`: the server stores the CHOICE, never a waveform, and an
+    # empty value means "the house voice" so a lapsed StatZ subscription
+    # degrades to the free default rather than an unplayable stored value.
+    coach_voice = models.CharField(max_length=24, blank=True, default="")
     links = models.JSONField(default=list, blank=True)  # [{label, url}] public links
     # Location (opt-in) for in-person CollabZ / VenueZ distance filtering.
     share_location = models.BooleanField(default=False)
@@ -3625,6 +3630,39 @@ def key_voice_state(user, kind):
     used = sum(rows.values_list("units", flat=True))
     limits = key_voice_limits(membership_for(user).tier)
     cap = limits["clips"] if kind == KeyVoiceUse.KIND_TRANSCRIBE else limits["chars"]
+    return used, cap, max(0, cap - used)
+
+
+class CoachVoiceUse(models.Model):
+    """One Boss Take read aloud — characters spoken, for the daily allowance.
+
+    Deliberately its own table rather than folded into KeyVoiceUse: choosing
+    WHICH voice reads it back is a dimension KeyConnectZ's single-voice
+    "speak" never had, and coupling the two features' budgets would mean
+    using one quietly ate into the other's allowance, with nothing on screen
+    explaining why.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="coach_voice_uses")
+    chars = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["user", "created_at"])]
+
+
+def coach_voice_state(user):
+    """(used, cap, remaining) for coach playback — a rolling 24 hours, same
+    shape as `key_voice_state`."""
+    from datetime import timedelta
+
+    from .catalog import COACH_SPEAK_DAILY_CHARS
+
+    rows = CoachVoiceUse.objects.filter(
+        user=user, created_at__gte=timezone.now() - timedelta(hours=24))
+    used = sum(rows.values_list("chars", flat=True))
+    cap = COACH_SPEAK_DAILY_CHARS.get(membership_for(user).tier, COACH_SPEAK_DAILY_CHARS[TIER_FREE])
     return used, cap, max(0, cap - used)
 
 
