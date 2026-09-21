@@ -160,7 +160,7 @@ from .views import (
 )
 from .habits import HabitCreateView, HabitCompleteView
 from .bodiez import (
-    BodieZExercisesView, BodieZRoutinesView, BodieZRoutineDetailView,
+    BodieZBoardView, BodieZExercisesView, BodieZRoutinesView, BodieZRoutineDetailView,
     BodieZSessionsView, BodieZSessionDetailView, BodieZSetsView, BodieZProgressView,
 )
 
@@ -433,6 +433,7 @@ urlpatterns = [
     path("bodiez/sessions/<int:session_id>/sets/", BodieZSetsView.as_view(),
          name="economy-bodiez-sets"),
     path("bodiez/progress/", BodieZProgressView.as_view(), name="economy-bodiez-progress"),
+    path("bodiez/board/", BodieZBoardView.as_view(), name="economy-bodiez-board"),
     path("offerz/funnel/", FunnelOffersView.as_view(), name="economy-funnel-offers"),
     path("offerz/funnel/redeem/", FunnelOfferRedeemView.as_view(),
          name="economy-funnel-offer-redeem"),
