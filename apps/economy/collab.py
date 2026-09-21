@@ -218,7 +218,22 @@ def _partner_lookup(payers, payees):
 def maybe_auto_release(deal):
     """Lazily release a fully-funded deal whose auto-release window has passed
     and which isn't disputed — so recipients are never stuck waiting on an
-    unresponsive payer. Safe to call on any read."""
+    unresponsive payer. Safe to call on any read.
+
+    Escrow is a trust, in the literal sense the word carries in two
+    traditions this platform's members actually come from. Islamic law calls
+    it amanah — a thing held for another that must be returned exactly as
+    entrusted, on time, without the holder treating it as their own
+    (Qur'an 4:58, Saheeh International translation; al-Qaradawi, 1999, on
+    amanah as the basis of commercial trust). The window this function
+    enforces is that promise made mechanical: the platform holds the money,
+    not owns it, and `auto_release_at` is the date the trust is discharged
+    whether or not anyone presses a button. The same idea runs through the
+    parable of the talents — a steward is trusted with what belongs to
+    someone else and is answerable for what he does with it (Matthew 25:14-30,
+    ESV) — which is the same argument `EscrowWindow` makes to the payer on
+    screen: the days aren't a delay, they're what "held in trust" means.
+    """
     if deal.status not in (CollabDeal.STATUS_FUNDED, CollabDeal.STATUS_DELIVERED):
         return deal
     if not deal.auto_release_at or timezone.now() < deal.auto_release_at:
