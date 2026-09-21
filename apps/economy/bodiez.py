@@ -75,7 +75,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (BODIEZ_BUCKETS, BODIEZ_GOAL_KINDS, BodieZExercise, BodieZGoal,
-                     BodieZRoutine, BodieZSession, BodieZSet, BodieZWeightLog)
+                     BodieZRecoveryLog, BodieZRoutine, BodieZSession, BodieZSet,
+                     BodieZWeightLog)
 
 _BUCKET_KEYS = {k for k, _ in BODIEZ_BUCKETS}
 
@@ -770,3 +771,77 @@ class BodieZWeightLogView(APIView):
         log = BodieZWeightLog.objects.create(user=request.user, weight_kg=weight_kg)
         return Response({"id": log.id, "weight_kg": float(log.weight_kg),
                          "logged_at": log.logged_at.isoformat()}, status=status.HTTP_201_CREATED)
+
+
+def _recovery_dict(log):
+    return {"id": log.id, "soreness": log.soreness, "sleep_quality": log.sleep_quality,
+            "fatigue": log.fatigue, "notes": log.notes, "logged_at": log.logged_at.isoformat()}
+
+
+# The number this endpoint refuses to invent: a single "readiness score"
+# blending self-report and training load would be exactly the composite
+# `directz_ai_rating` was — a number that FEELS like a measurement while
+# actually being an average of things that don't average cleanly. What it
+# returns instead is a real count (days trained in the window, the same
+# BodyMap already computes) sitting next to the member's own numbers,
+# unmixed, so whoever reads it does the one piece of judgment a formula
+# can't: deciding what soreness + four training days this week actually
+# means for THEM today.
+REST_WINDOW_DAYS = 7
+REST_SUGGESTED_TRAINING_DAYS = 5  # BodyMap's own "overworked" threshold + 1
+REST_SUGGESTED_SORENESS = 4       # of 5 — a member's own word for it
+
+
+class BodieZRecoveryView(APIView):
+    """GET the recent check-ins plus a rest signal; POST today's check-in.
+
+    `rest_suggested` is a bool, never a score, and it is true for one of two
+    REAL reasons the response names separately — trained
+    `REST_SUGGESTED_TRAINING_DAYS`+ days this window, or the member's own
+    most recent soreness/fatigue reading hit `REST_SUGGESTED_SORENESS`+.
+    Either reason alone is enough; neither is blended into the other.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        now = timezone.now()
+        since = now - timedelta(days=REST_WINDOW_DAYS)
+        days_trained = len(set(
+            BodieZSession.objects
+            .filter(user=request.user, ended_at__isnull=False, started_at__gte=since)
+            .values_list("started_at__date", flat=True)
+        ))
+        latest = BodieZRecoveryLog.objects.filter(user=request.user).first()
+        self_reported_high = bool(
+            latest and (latest.soreness >= REST_SUGGESTED_SORENESS
+                        or latest.fatigue >= REST_SUGGESTED_SORENESS)
+        )
+        overtrained = days_trained >= REST_SUGGESTED_TRAINING_DAYS
+        logs = BodieZRecoveryLog.objects.filter(user=request.user)[:14]
+        return Response({
+            "logs": [_recovery_dict(l) for l in logs],
+            "days_trained_last_7d": days_trained,
+            "rest_suggested": overtrained or self_reported_high,
+            "rest_suggested_because": (
+                ["trained_often"] * overtrained + ["self_reported"] * self_reported_high
+            ),
+            "window_days": REST_WINDOW_DAYS,
+        })
+
+    def post(self, request):
+        d = request.data
+        try:
+            soreness = int(d.get("soreness"))
+            sleep_quality = int(d.get("sleep_quality"))
+            fatigue = int(d.get("fatigue"))
+        except (TypeError, ValueError):
+            return Response({"detail": "soreness, sleep_quality and fatigue must be numbers 1-5."},
+                             status=status.HTTP_400_BAD_REQUEST)
+        if not all(1 <= v <= 5 for v in (soreness, sleep_quality, fatigue)):
+            return Response({"detail": "soreness, sleep_quality and fatigue must each be 1-5."},
+                             status=status.HTTP_400_BAD_REQUEST)
+        log = BodieZRecoveryLog.objects.create(
+            user=request.user, soreness=soreness, sleep_quality=sleep_quality,
+            fatigue=fatigue, notes=str(d.get("notes") or "")[:280],
+        )
+        return Response(_recovery_dict(log), status=status.HTTP_201_CREATED)
