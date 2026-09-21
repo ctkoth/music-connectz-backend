@@ -1087,6 +1087,69 @@ class TheTopBandsAreNotGatedBehindRarityTests(TestCase):
         self.assertIn("there is essentially no performance to score", p)
 
 
+class SeveralDevelopingFacetsAreNotTheSameAsBrokenTests(TestCase):
+    """A real take: Flow 4, Timing 4, Breath 5, Clarity 4, Delivery 5, and an
+    overall of 5 — for a take a human audience rated a 10, with a real hook
+    and a complete, landing story praised in the same response's own "What
+    worked" section.
+
+    `OverallIsNotTheWeakestFacetTests` above licensed the overall to rise
+    above ONE rough facet when something is carrying the take. This take has
+    no single outlier to carry past — it has FIVE moderate, developing
+    dimensions, none of them individually broken, sitting next to a genuine
+    hook and a story real listeners responded to. The old wording never told
+    the model that case exists, so it fell back to something close to
+    averaging the facets anyway, which is the exact failure
+    `OverallIsNotTheWeakestFacetTests` already named and only partly fixed.
+
+    The distinction that matters is not "how many facets need work" — it is
+    whether anything is actually BROKEN (falling apart, losing the beat
+    entirely, unintelligible throughout) versus merely developing. Several
+    developing facets next to a real payoff is not the shaky-throughout case
+    the floor still has to catch.
+    """
+
+    def test_several_developing_facets_may_still_be_carried(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn("not limited to ONE facet", p)
+        self.assertIn("still be carried above their average", p)
+
+    def test_developing_is_distinguished_from_broken(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("Developing is not broken", p)
+        self.assertIn("not how many facets need work", p)
+
+    def test_it_did_not_become_a_licence_to_flatter(self):
+        """The floor for a take that is genuinely shaky throughout — the one
+        `OverallIsNotTheWeakestFacetTests` guards — is still standing."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("guitarz", "Rock", None, "builder")
+        self.assertIn("shaky throughout", p)
+        self.assertIn("no flattery", p)
+        self.assertIn("Harshness is not honesty", p)
+
+
+class PerformanceCraftIsNotSongQualityTests(TestCase):
+    """The caveat used to say what a single take can show (flow, timing,
+    breath...) and nothing about what it does NOT claim to measure. A member
+    reading a moderate performance-craft score for a song real listeners
+    loved had no way to know those are different questions — the number read
+    as a verdict on the song, which RapZ's five dimensions were never scoring
+    (writing/lyrics are opt-in, via "Rate my lyrics too", and separate).
+    """
+
+    def test_every_instrument_states_the_distinction(self):
+        from apps.economy.instruments import INSTRUMENTS, DEFAULT
+        for key, profile in {**INSTRUMENTS, "_default": DEFAULT}.items():
+            self.assertIn("not whether the song itself is good", profile["caveat"], key)
+
+    def test_it_names_both_things_can_be_true_at_once(self):
+        from apps.economy.instruments import INSTRUMENTS
+        self.assertIn("both can be true at once", INSTRUMENTS["rapz"]["caveat"])
+
+
 class LyricRatingTests(TestCase):
     """The optional writing score — RapZ's blueprint dimension, finally built.
 

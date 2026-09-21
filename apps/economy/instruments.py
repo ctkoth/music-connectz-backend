@@ -59,6 +59,18 @@ _BOWED = {"intonation": "Intonation 🎯", "tone": "Tone 🌈", "bowing": "Bowin
 _HISTORY_CAVEAT = ("Consistency, health and goal match come from your history, "
                    "not a single clip — they're on your progress screen.")
 
+# The other half of what a member needs to hear before a number surprises
+# them: this scores the PERFORMANCE, not the song. A take can have a real
+# hook and land with every listener who hears it while the flow underneath
+# is still rushing the beat — those are different questions, and a member
+# who only sees one number for both reads a moderate performance score as a
+# verdict on the song itself, which it was never measuring. Opting into
+# "Rate my lyrics too" adds the writing half; without it, craft is all this
+# number ever claims to be.
+_CRAFT_NOT_SONG = ("This scores your PERFORMANCE — not whether the song itself is good. "
+                   "A take can connect with real listeners and still have a flow or "
+                   "timing habit worth fixing underneath; both can be true at once.")
+
 INSTRUMENTS = {
     "singz": {
         "label": "SingZ", "performer": "vocalist", "coach": "vocal coach",
@@ -69,7 +81,7 @@ INSTRUMENTS = {
         "lyrics": True,
         "scores": _VOCAL, "range_label": "Target range", "ranges": VOCAL_RANGES,
         "style_label": None, "styles": [],
-        "caveat": "Pitch, tone, breath, range and agility are what one take can show. " + _HISTORY_CAVEAT,
+        "caveat": "Pitch, tone, breath, range and agility are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
     },
     "rapz": {
         "label": "RapZ", "performer": "rapper", "coach": "rap coach",
@@ -84,32 +96,32 @@ INSTRUMENTS = {
         # was the one surface that couldn't say what it heard.
         "range_label": "Your register", "ranges": VOCAL_RANGES,
         "style_label": "Rap style", "styles": RAP_STYLES,
-        "caveat": "Flow, timing, breath, clarity and delivery are what one take can show. " + _HISTORY_CAVEAT,
+        "caveat": "Flow, timing, breath, clarity and delivery are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
     },
     "guitarz": {
         "label": "GuitarZ", "performer": "guitarist", "coach": "guitar coach",
         "scores": _FRETTED, "range_label": None, "ranges": [], "style_label": None, "styles": [],
-        "caveat": "Timing, tone, technique, dynamics and cleanliness are what one take can show. " + _HISTORY_CAVEAT,
+        "caveat": "Timing, tone, technique, dynamics and cleanliness are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
     },
     "bassz": {
         "label": "BassZ", "performer": "bassist", "coach": "bass coach",
         "scores": {**_FRETTED, "cleanliness": "Note Length 📏"}, "range_label": None, "ranges": [], "style_label": None, "styles": [],
-        "caveat": "Timing, tone, technique, dynamics and note length are what one take can show. " + _HISTORY_CAVEAT,
+        "caveat": "Timing, tone, technique, dynamics and note length are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
     },
     "keyz": {
         "label": "KeyZ", "performer": "keyboardist", "coach": "keys coach",
         "scores": _KEYS, "range_label": None, "ranges": [], "style_label": None, "styles": [],
-        "caveat": "Timing, tone, technique, dynamics and voicing are what one take can show. " + _HISTORY_CAVEAT,
+        "caveat": "Timing, tone, technique, dynamics and voicing are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
     },
     "drumz": {
         "label": "DrumZ", "performer": "drummer", "coach": "drum coach",
         "scores": _DRUMS, "range_label": None, "ranges": [], "style_label": None, "styles": [],
-        "caveat": "Timing, groove, dynamics, consistency and fills are what one take can show. " + _HISTORY_CAVEAT,
+        "caveat": "Timing, groove, dynamics, consistency and fills are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
     },
     "violinz": {
         "label": "ViolinZ", "performer": "violinist", "coach": "strings coach",
         "scores": _BOWED, "range_label": None, "ranges": [], "style_label": None, "styles": [],
-        "caveat": "Intonation, tone, bowing, timing and vibrato are what one take can show. " + _HISTORY_CAVEAT,
+        "caveat": "Intonation, tone, bowing, timing and vibrato are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
     },
 }
 
@@ -120,7 +132,7 @@ DEFAULT = {
     "scores": {"timing": "Timing ⏱️", "tone": "Tone 🌈", "technique": "Technique 🎯",
                "dynamics": "Dynamics 📊", "cleanliness": "Cleanliness ✨"},
     "range_label": None, "ranges": [], "style_label": None, "styles": [],
-    "caveat": "Timing, tone, technique, dynamics and cleanliness are what one take can show. " + _HISTORY_CAVEAT,
+    "caveat": "Timing, tone, technique, dynamics and cleanliness are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
 }
 
 
@@ -422,6 +434,17 @@ working carry the overall the way an actual audience would, and put the weak \
 facet in "fixes" rather than in the number. Only let the overall sit low when \
 the weaknesses run through the whole take — score it down for a take that is \
 shaky throughout, never for a strong one with a single fixable habit.
+
+This is not limited to ONE facet. A take can have several dimensions sitting \
+in the developing range at once — flow, timing and breath all needing real \
+work — and still be carried above their average by a genuine hook, a story \
+that lands, or a performance that connects with a real listener, exactly the \
+way that one rough facet is carried above. "Several things to work on" and \
+"strong take" are not opposites; a complete, connecting performance with \
+multiple fixable habits still earns credit for being complete and connecting. \
+The line that matters is not how many facets need work, it is whether \
+anything is actually BROKEN — falling apart, losing the beat entirely, \
+unintelligible throughout. Developing is not broken.
 
 Score the PERFORMANCE, not the recording. Room noise, phone microphones, no \
 mixing, a backing track that is too loud — none of that is their singing, \
