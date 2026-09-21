@@ -83,7 +83,62 @@ _BUCKET_KEYS = {k for k, _ in BODIEZ_BUCKETS}
 
 def _exercise_dict(ex):
     return {"id": ex.id, "name": ex.name, "muscle_group": ex.muscle_group,
-            "equipment": ex.equipment}
+            "equipment": ex.equipment, "demo_url": ex.demo_url}
+
+
+# Real, published rep/set/rest prescriptions, one per training goal — never a
+# model's guess and never typed twice. A "Build a routine" button that picked
+# exercises without saying how many sets or reps would be the substance
+# rule's failure case with a barbell in it: a routine a member could follow
+# blindly and get nothing from, because the actual training stimulus (volume,
+# intensity, rest) never got specified. Each scheme cites the source it comes
+# from, in the member's own words, so "why 8-12 reps" has an answer beyond
+# "the app said so" — the same standard `_HISTORY_CAVEAT` already holds Coach
+# to for what a single take can and can't show.
+#
+# Three goals, not the many an exercise-science textbook would name, because
+# three is what a member choosing a routine actually decides between —
+# strength itself is deliberately excluded here since BodieZGoal already has
+# a "strength" kind driven by logged 1RM progress; a fourth goal here would
+# be the second place that word means something on this screen.
+GOALS = {
+    "muscle_gain": {
+        "label": "Muscle gain",
+        "sets": 4, "reps_low": 8, "reps_high": 12, "rest_seconds": 75,
+        "why": ("Moderate load, moderate reps, short-to-moderate rest — the range "
+                "most consistently associated with hypertrophy across training "
+                "studies, because it maximizes total volume load without the "
+                "fatigue cost of near-maximal singles."),
+        "citation": ("American College of Sports Medicine. (2009). Progression "
+                     "models in resistance training for healthy adults. Medicine "
+                     "& Science in Sports & Exercise, 41(3), 687-708; Schoenfeld, "
+                     "B. J. (2010). The mechanisms of muscle hypertrophy and their "
+                     "application to resistance training. Journal of Strength and "
+                     "Conditioning Research, 24(10), 2857-2872."),
+    },
+    "toning": {
+        "label": "Toning (muscular endurance)",
+        "sets": 3, "reps_low": 15, "reps_high": 20, "rest_seconds": 45,
+        "why": ("Lighter load for more reps, shorter rest — builds the muscular "
+                "endurance and definition most people mean by \"toning\" without "
+                "the heavier loading hypertrophy training calls for."),
+        "citation": ("American College of Sports Medicine. (2009). Progression "
+                     "models in resistance training for healthy adults. Medicine "
+                     "& Science in Sports & Exercise, 41(3), 687-708."),
+    },
+    "fat_loss": {
+        "label": "Slimming (fat loss)",
+        "sets": 3, "reps_low": 12, "reps_high": 15, "rest_seconds": 30,
+        "why": ("Short rest between sets keeps heart rate elevated through the "
+                "whole session — closer to circuit training than traditional "
+                "lifting — which raises total energy expenditure per session. "
+                "Real fat loss still runs on a sustained calorie deficit; this "
+                "changes how the session trains, not that."),
+        "citation": ("Kraemer, W. J., & Ratamess, N. A. (2004). Fundamentals of "
+                     "resistance training: Progression and exercise prescription. "
+                     "Medicine & Science in Sports & Exercise, 36(4), 674-688."),
+    },
+}
 
 
 def _routine_dict(r):
@@ -580,6 +635,7 @@ class BodieZCoachView(APIView):
             "exercises": rows,
             "labels": REC_LABELS,
             "stale_after_days": self.STALE_DAYS,
+            "goals": GOALS,
         })
 
 
