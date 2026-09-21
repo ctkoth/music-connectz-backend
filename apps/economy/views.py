@@ -389,7 +389,13 @@ def _member_shape():
 
 def _door_keys():
     from apps.economy.trialdoorz import door_keys
-    return door_keys()
+    # BodieZ is a trial door too, but not a scored instrument — nothing in
+    # `instruments.py` covers a workout, so it is not one of
+    # `INSTRUMENT_APP_KEYS` and `trialdoorz.door_keys()` does not carry it.
+    # Added here, once, rather than teaching that module about a door shaped
+    # nothing like the ones it reads off the URL conf.
+    from apps.economy.bodiez_trial import APP_KEY as BODIEZ_APP_KEY
+    return door_keys() + (BODIEZ_APP_KEY,)
 
 
 class FunnelEventView(APIView):
@@ -650,9 +656,9 @@ class FunnelSummaryView(APIView):
         # a funnel that can only say "people leave".
         all_rows = list(rows.values("kind", "anon_id", "meta"))
 
-        def split_by(key, label):
+        def split_by(key, label, rows_subset=None):
             buckets = {}
-            for row in all_rows:
+            for row in (rows_subset if rows_subset is not None else all_rows):
                 value = (row["meta"] or {}).get(key)
                 if not value:
                     continue
@@ -672,6 +678,31 @@ class FunnelSummaryView(APIView):
         # one number hides whichever of the two is the actual problem.
         devices = split_by("dev", "dev")
 
+        # Per DOOR now, not just totalled across every one of them. SingZ and
+        # RapZ (and now BodieZ) each have their own visitors, and "sources"
+        # above answers "which channel works for the platform" while this
+        # answers "which channel works for THIS door" — a source that's
+        # strong for SingZ and dead for RapZ is invisible in the combined
+        # total, which just reads as a mediocre channel for both.
+        #
+        # Scoped to rows carrying that door's `app_key` — `try_view` and
+        # every recorder step already carry it, so a door's own funnel is
+        # exactly the subset of `all_rows` this filters to. No new query:
+        # same `all_rows` this endpoint already pulled once.
+        by_door = []
+        for key in _door_keys():
+            door_rows = [r for r in all_rows if (r["meta"] or {}).get("app_key") == key]
+            step_counts = {
+                kind: len({r["anon_id"] for r in door_rows if r["kind"] == kind})
+                for kind, _ in FUNNEL_KINDS
+            }
+            by_door.append({
+                "app_key": key,
+                "steps": step_counts,
+                "sources": split_by("src", "src", door_rows),
+                "devices": split_by("dev", "dev", door_rows),
+            })
+
         return Response({
             "days": days,
             "since": since,
@@ -684,6 +715,14 @@ class FunnelSummaryView(APIView):
                              "coarse — never from the user agent, which lies by design. "
                              "Visits from before this shipped carry no shape and are "
                              "counted in the steps above but not here."),
+            "by_door": by_door,
+            "by_door_note": ("Source and device, scoped to each trial door's own visitors — "
+                             "the same split as `sources`/`devices` above, run once per door "
+                             "instead of once for the whole funnel. No demographics here: a "
+                             "FunnelEvent is a browser with no account, so there is no age or "
+                             "gender to attach without joining an anonymous row back to a "
+                             "person — the promise `members` below depends on. Demographics "
+                             "stay platform-wide, for members, never per-door."),
             "members": _member_shape(),
             # Said out loud so an empty list reads as "nothing tagged" rather
             # than "no traffic" — two very different problems.
