@@ -17,6 +17,7 @@ from .religionz import ReligionsView
 from .languagez import LanguagesView
 from .trialdoorz import TrialDoorsView
 from .trial import TrialPublicStatsView, PublicTiersView
+from .bodiez_trial import BodieZTrialView
 from .offerz_engine import (FunnelCatalogView, FunnelOfferRedeemView,
                             FunnelOffersView)
 from .lilith_taskz import (LilithBoardView, LilithRoutineDetailView,
@@ -444,6 +445,7 @@ urlpatterns = [
     path("bodiez/goals/<int:goal_id>/", BodieZGoalDetailView.as_view(), name="economy-bodiez-goal"),
     path("bodiez/weightlog/", BodieZWeightLogView.as_view(), name="economy-bodiez-weightlog"),
     path("bodiez/recovery/", BodieZRecoveryView.as_view(), name="economy-bodiez-recovery"),
+    path("bodiez/trial/", BodieZTrialView.as_view(), name="economy-bodiez-trial"),
     path("offerz/funnel/", FunnelOffersView.as_view(), name="economy-funnel-offers"),
     path("offerz/funnel/redeem/", FunnelOfferRedeemView.as_view(),
          name="economy-funnel-offer-redeem"),

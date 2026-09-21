@@ -3381,7 +3381,35 @@ def claim_trial_take(user, token):
     take.claimed_by = user
     take.claimed_at = timezone.now()
     take.save(update_fields=["claimed_by", "claimed_at"])
+    if take.app_key == "bodiez":
+        _claim_bodiez_trial(user, take)
     return take
+
+
+def _claim_bodiez_trial(user, take):
+    """The exercise a BodieZ trial visitor picked becomes a real routine on
+    their new account, in Inbox where every hand-built routine starts.
+
+    SingZ and RapZ's claim already carries the take's SCORE into the new
+    account via `claimed_by` — a member's coach history reads it back. BodieZ
+    has no equivalent history row for one arithmetic set, so the thing worth
+    keeping is what they were BUILDING: the exercise, reps and weight they
+    picked stop being a page that vanishes with the tab and become the first
+    row of a real routine, editable in the Scheduler's own designer like any
+    other. Best-effort and silent on a malformed `result` — a trial claim
+    must never be the reason a registration fails.
+    """
+    result = take.result or {}
+    exercise_id = (result.get("exercise") or {}).get("id")
+    if not exercise_id:
+        return
+    BodieZRoutine.objects.create(
+        user=user, title="From your BodieZ trial", bucket="inbox",
+        exercises=[{
+            "exercise_id": exercise_id, "order": 0, "sets": 3,
+            "reps": result.get("reps"), "weight_kg": result.get("weight_kg"),
+        }],
+    )
 
 
 # ---- PlaylistZ ----
