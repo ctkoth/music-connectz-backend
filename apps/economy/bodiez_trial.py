@@ -37,7 +37,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .bodiez import REC_LABELS, _exercise_dict
+from .bodiez import GOALS, REC_LABELS, _exercise_dict
 from .clientip import client_ip
 from .models import BodieZExercise, TRIAL_CLAIM_DAYS, TRIAL_PER_IP_HOURS, TrialTake, trial_daily_cap
 from .trial import client_anon_id, trial_state
@@ -123,6 +123,12 @@ class BodieZTrialView(APIView):
             # product, same reason RapZ's trial door forwards the real style
             # list rather than a shorter one.
             "exercises": [_exercise_dict(e) for e in BodieZExercise.objects.all()],
+            # Coach's real, cited rep/set/rest schemes — the same table
+            # `BodieZCoachView` serves members, not a trial-only summary of
+            # it. A visitor picking "muscle gain" here sees the identical
+            # numbers a member sees, which is the whole point of a trial: the
+            # product, not a demo of it.
+            "goals": GOALS,
             "upgrade": _statz_upgrade(),
         })
 

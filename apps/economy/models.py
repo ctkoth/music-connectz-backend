@@ -5476,6 +5476,26 @@ class BodieZExercise(models.Model):
     a member picks from this list rather than typing a free-text name, so a
     routine's exercises can be grouped and charted by muscle group later
     without parsing prose.
+
+    EQUIPMENT_CHOICES grew from five to eight — ez_bar, kettlebell and cable
+    split off what "machine" and "dumbbell" were quietly standing in for.
+    Two mislabeled rows (`Tricep Pushdown` as "machine" when it's a cable
+    stack, `Kettlebell Swing` as "dumbbell" because kettlebell didn't exist
+    yet) are corrected in the migration that adds these — a wrong equipment
+    tag is the same failure the filter this drives exists to prevent: a
+    member who owns a cable machine and nothing else filtering to "machine"
+    would miss the tricep exercise built for exactly their setup.
+
+    Deliberately NOT expanded: no separate `incline_bench` / `decline_bench`
+    equipment value. A bench angle changes which exercise you're doing, not
+    which tool you own — "Incline Barbell Bench Press" and "Flat Barbell
+    Bench Press" are both `equipment="barbell"`, and the angle lives in the
+    NAME, the way ExRx.net's own exercise database and every commercial gym
+    log (Strong, Jefit itself) already draw this line. Equipment answers "can
+    I even attempt this" (do I own a barbell); modeling angle as equipment
+    would answer a question nobody asks a filter — "which bench" — while
+    making the real one ("do I have a barbell") one dropdown option out of
+    eleven instead of one out of eight.
     """
     name = models.CharField(max_length=80, unique=True)
     MUSCLE_CHOICES = [
@@ -5486,9 +5506,22 @@ class BodieZExercise(models.Model):
     muscle_group = models.CharField(max_length=12, choices=MUSCLE_CHOICES)
     EQUIPMENT_CHOICES = [
         ("bodyweight", "Bodyweight"), ("dumbbell", "Dumbbell"),
-        ("barbell", "Barbell"), ("machine", "Machine"), ("band", "Band"),
+        ("barbell", "Barbell"), ("ez_bar", "EZ Bar"),
+        ("kettlebell", "Kettlebell"), ("machine", "Machine"),
+        ("cable", "Cable / Pulley"), ("band", "Band"),
     ]
     equipment = models.CharField(max_length=12, choices=EQUIPMENT_CHOICES)
+    # A link to a real demonstration — never hosted here, never fabricated.
+    # Blank for every seeded exercise: this codebase has no media pipeline for
+    # exercise photography and no rights to any third party's GIFs, and
+    # inventing a URL to fill this field would be exactly the kind of
+    # decoration the substance rule exists to keep out — a member clicking a
+    # dead or wrong link is worse than a row with nothing to click. It reads
+    # through the SAME "outside link, new tab, never framed" rule
+    # `widgetz.py` already applies to a member's own posted links: nothing
+    # here has been through `links.scanner()`, so it is never a candidate for
+    # StatZ's framed-page treatment, whatever the tier.
+    demo_url = models.CharField(max_length=300, blank=True, default="")
 
     class Meta:
         ordering = ("muscle_group", "name")

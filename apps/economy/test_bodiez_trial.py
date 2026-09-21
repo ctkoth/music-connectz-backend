@@ -153,3 +153,18 @@ class BodieZFunnelDoorTests(TestCase):
         from apps.economy.models import FunnelEvent
         ev = FunnelEvent.objects.get(anon_id="a1")
         self.assertNotIn("app_key", ev.meta)
+
+
+class BodieZTrialGoalsTests(TestCase):
+    """The trial gets the SAME goal schemes members get — never a summary
+    or a trial-only teaser copy of Coach's real numbers."""
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_trial_get_serves_the_same_goals_coach_does(self):
+        from apps.economy.bodiez import GOALS
+        r = self.client.get(TRIAL)
+        self.assertEqual(set(r.data["goals"].keys()), set(GOALS.keys()))
+        self.assertEqual(r.data["goals"]["muscle_gain"]["citation"],
+                          GOALS["muscle_gain"]["citation"])

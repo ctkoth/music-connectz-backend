@@ -901,3 +901,70 @@ class BodieZExerciseHistoryTests(TestCase):
         client = APIClient()
         r = client.get(f"/api/economy/bodiez/exercises/{self.bench.id}/history/")
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class BodieZEquipmentExpansionTests(TestCase):
+    """ez_bar, kettlebell and cable each need a real exercise using them, or
+    the filter is a dropdown entry pointing at an empty room — see the
+    migration's own docstring."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="equip", password="pw")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_every_new_equipment_value_has_at_least_one_exercise(self):
+        for equipment in ("ez_bar", "kettlebell", "cable"):
+            self.assertTrue(
+                BodieZExercise.objects.filter(equipment=equipment).exists(),
+                f"no exercise uses {equipment}")
+
+    def test_relabeled_exercises_carry_their_corrected_equipment(self):
+        self.assertEqual(
+            BodieZExercise.objects.get(name="Tricep Pushdown").equipment, "cable")
+        self.assertEqual(
+            BodieZExercise.objects.get(name="Kettlebell Swing").equipment, "kettlebell")
+
+    def test_bench_angle_is_not_a_separate_equipment_value(self):
+        # Incline/decline live in the exercise NAME; the equipment stays
+        # whatever tool the movement actually uses.
+        incline = BodieZExercise.objects.get(name="Incline Barbell Bench Press")
+        self.assertEqual(incline.equipment, "barbell")
+        choices = {k for k, _ in BodieZExercise.EQUIPMENT_CHOICES}
+        self.assertNotIn("incline_bench", choices)
+        self.assertNotIn("decline_bench", choices)
+
+    def test_exercise_dict_carries_demo_url_even_when_blank(self):
+        r = self.client.get("/api/economy/bodiez/exercises/")
+        row = r.data["exercises"][0]
+        self.assertIn("demo_url", row)
+
+
+class BodieZCoachGoalsTests(TestCase):
+    """Real, cited rep/set/rest schemes — never a model's guess. See
+    bodiez.py's GOALS docstring."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="goals", password="pw")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_coach_serves_all_three_goals(self):
+        from .bodiez import GOALS
+        r = self.client.get("/api/economy/bodiez/coach/")
+        self.assertEqual(set(r.data["goals"].keys()), set(GOALS.keys()))
+
+    def test_every_goal_carries_a_real_citation_and_a_reachable_scheme(self):
+        from .bodiez import GOALS
+        for key, scheme in GOALS.items():
+            self.assertTrue(scheme["citation"], f"{key} has no citation")
+            self.assertLess(scheme["reps_low"], scheme["reps_high"])
+            self.assertGreater(scheme["sets"], 0)
+            self.assertGreater(scheme["rest_seconds"], 0)
+
+    def test_strength_is_not_a_fourth_goal_here(self):
+        # BodieZGoal already owns "strength" as a kind driven by logged 1RM
+        # progress — a second "strength" here would be the same word meaning
+        # two different things on one screen.
+        from .bodiez import GOALS
+        self.assertNotIn("strength", GOALS)
