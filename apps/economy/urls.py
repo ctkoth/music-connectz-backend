@@ -32,6 +32,7 @@ from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
 from .soundz import SoundZView
 from .coachvoice import CoachVoiceView, CoachSpeakView
+from .dawz import DawZView
 from .attractivenessz_view import AttractivenessZView
 from .soundcloud_engagement import SoundCloudEngagementView
 from .soundcloud_import import SoundCloudImportView
@@ -241,6 +242,7 @@ urlpatterns = [
     path("soundz/", SoundZView.as_view(), name="economy-soundz"),
     path("coachvoice/", CoachVoiceView.as_view(), name="economy-coachvoice"),
     path("coachvoice/speak/", CoachSpeakView.as_view(), name="economy-coachvoice-speak"),
+    path("dawz/", DawZView.as_view(), name="economy-dawz"),
     path("attractivenessz/", AttractivenessZView.as_view(), name="economy-attractivenessz"),
     path("soundcloud/engagement/", SoundCloudEngagementView.as_view(), name="economy-soundcloud-engagement"),
     path("soundcloud/import/", SoundCloudImportView.as_view(), name="economy-soundcloud-import"),
