@@ -216,6 +216,20 @@ KEY_VOICE_CLIP_MAX_SECONDS = 60
 KEY_VOICE_CLIP_MAX_MB = 8
 
 
+# CoachVoiceZ — reading a Boss Take's feedback aloud. The house voice is free
+# at every tier (the substance of KeyConnectZ's "being understood is not a
+# luxury" applies to coaching too), and the allowance is what ladders —
+# frequency, never whether. Deliberately smaller than KEY_SPEAK_DAILY_CHARS:
+# one Boss Take's feedback is a few hundred characters, not a translated
+# sentence read on demand, so a much lower daily ceiling still covers real use.
+COACH_SPEAK_DAILY_CHARS = {
+    TIER_FREE: 1_000,
+    TIER_PREMIUM: 10_000,
+    TIER_STATZ: 50_000,
+    TIER_DEBUG: 10 ** 8,
+}
+
+
 def key_voice_limits(tier):
     """{clips, chars} — this tier's daily voice allowance."""
     return {
