@@ -860,3 +860,44 @@ class BodieZRecoveryTests(TestCase):
         client = APIClient()
         r = client.get("/api/economy/bodiez/recovery/")
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class BodieZExerciseHistoryTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="u1", password="pw")
+        self.client.force_authenticate(user=self.user)
+        self.bench = BodieZExercise.objects.create(name="Test Bench", muscle_group="chest", equipment="barbell")
+
+    def test_no_history_returns_null(self):
+        r = self.client.get(f"/api/economy/bodiez/exercises/{self.bench.id}/history/")
+        self.assertIsNone(r.data["last_session"])
+
+    def test_returns_the_most_recent_finished_sessions_sets(self):
+        older = _finished_session(self.user, days_ago=5)
+        BodieZSet.objects.create(session=older, exercise=self.bench, set_number=1, reps=5, weight_kg=50)
+        newer = _finished_session(self.user, days_ago=0)
+        BodieZSet.objects.create(session=newer, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        BodieZSet.objects.create(session=newer, exercise=self.bench, set_number=2, reps=7, weight_kg=60)
+        r = self.client.get(f"/api/economy/bodiez/exercises/{self.bench.id}/history/")
+        sets = r.data["last_session"]["sets"]
+        self.assertEqual(len(sets), 2)
+        self.assertEqual(sets[0]["weight_kg"], 60.0)
+
+    def test_an_in_progress_session_is_not_history_yet(self):
+        sess = BodieZSession.objects.create(user=self.user)  # ended_at null
+        BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get(f"/api/economy/bodiez/exercises/{self.bench.id}/history/")
+        self.assertIsNone(r.data["last_session"])
+
+    def test_only_my_own_history_is_returned(self):
+        other = User.objects.create_user(username="u2", password="pw")
+        sess = _finished_session(other, days_ago=0)
+        BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get(f"/api/economy/bodiez/exercises/{self.bench.id}/history/")
+        self.assertIsNone(r.data["last_session"])
+
+    def test_requires_auth(self):
+        client = APIClient()
+        r = client.get(f"/api/economy/bodiez/exercises/{self.bench.id}/history/")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)

@@ -160,7 +160,7 @@ from .views import (
 )
 from .habits import HabitCreateView, HabitCompleteView
 from .bodiez import (
-    BodieZBoardView, BodieZBodyMapView, BodieZCoachView, BodieZExercisesView,
+    BodieZBoardView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
     BodieZGoalDetailView, BodieZGoalsView, BodieZRecoveryView, BodieZRoutinesView,
     BodieZRoutineDetailView, BodieZSessionsView, BodieZSessionDetailView, BodieZSetsView,
     BodieZProgressView, BodieZWeightLogView,
@@ -426,6 +426,8 @@ urlpatterns = [
     # BodieZ — strength training and workout planning. v1: library, routines,
     # session log, and a progress read built from logged sets, not a formula.
     path("bodiez/exercises/", BodieZExercisesView.as_view(), name="economy-bodiez-exercises"),
+    path("bodiez/exercises/<int:exercise_id>/history/", BodieZExerciseHistoryView.as_view(),
+         name="economy-bodiez-exercise-history"),
     path("bodiez/routines/", BodieZRoutinesView.as_view(), name="economy-bodiez-routines"),
     path("bodiez/routines/<int:routine_id>/", BodieZRoutineDetailView.as_view(),
          name="economy-bodiez-routine"),
