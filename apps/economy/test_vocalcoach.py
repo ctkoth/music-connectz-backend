@@ -873,7 +873,9 @@ class GoalsAndCurrentQualitiesTests(TestCase):
                    ("flow", "timing", "breath", "clarity", "delivery")},
                    "verdict": "🎧 solid", "now": "🎤 you're here",
                    "goal": "🎯 aim here", "range_profile": "🧔 Bass, D2–B4",
-                   "style_fit": "⚔️ drill wants menace", "strengths": ["a"],
+                   "style_fit": "⚔️ drill wants menace",
+                   "song_score": 8, "song_why": "🎶 the hook actually lands",
+                   "strengths": ["a"],
                    "fixes": ["b"], "next_drill": "c"}
         fake = type("R", (), {"status_code": 200,
                               "json": lambda self: {"candidates": [{"content": {"parts": [
@@ -888,6 +890,74 @@ class GoalsAndCurrentQualitiesTests(TestCase):
         self.assertEqual(out["goal"], "🎯 aim here")
         self.assertEqual(out["range_profile"], "🧔 Bass, D2–B4")
         self.assertEqual(out["style_fit"], "⚔️ drill wants menace")
+        self.assertEqual(out["song_score"], 8)
+        self.assertEqual(out["song_why"], "🎶 the hook actually lands")
+
+
+class SongScoreIsSeparateFromPerformanceTests(TestCase):
+    """Song 🎶 answers "does this land with a real listener", as its own
+    number — never folded into the five performance dimensions, never
+    allowed to move them or be moved by them.
+
+    Built directly from a real take: Flow 4, Timing 4, Breath 5, Clarity 4,
+    Delivery 5 for a song a human audience rated a 10. The performance
+    numbers were honest — real, timestamped issues backed every one of them.
+    What was missing was a place for "and the SONG genuinely works" to be a
+    number of its own rather than something only mentioned in prose that the
+    overall then had no clean way to reflect.
+    """
+
+    def test_the_prompt_asks_for_it_as_its_own_field(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn('"song_score"', p)
+        self.assertIn('"song_why"', p)
+
+    def test_it_is_scored_as_a_listener_not_a_technician(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("Score it as a listener would, not as a technician", p)
+
+    def test_neither_number_may_move_the_other(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("guitarz", "Rock", None, "builder")
+        self.assertIn("Neither number may pull on the other", p)
+
+    def test_no_song_to_judge_is_null_not_invented(self):
+        """A warm-up or an exercise is not a song — the substance rule's own
+        test applies here too: could a member get a number without there
+        being anything to rate?"""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("drumz", "Trap", None, "builder")
+        self.assertIn("set \"song_score\" to null rather than inventing one", p)
+
+    def test_song_score_is_not_merged_into_the_performance_dimensions(self):
+        """The whole point is a separate card, not a sixth chip in the grid —
+        so song_score must never appear inside scores_for()'s dimension set."""
+        from apps.economy.instruments import scores_for
+        for key in ("singz", "rapz", "guitarz", "drumz"):
+            self.assertNotIn("song_score", scores_for(key, lyrics=True, mix=True))
+
+    def test_it_is_clamped_and_survives_as_none_when_absent(self):
+        from apps.economy.vocalcoach import score_take
+        import json as _json
+        from unittest.mock import patch as _patch
+        payload = {"score": 6, "scores": {k: 6 for k in
+                   ("flow", "timing", "breath", "clarity", "delivery")},
+                   "verdict": "🎧 fine", "now": "🎤 here", "goal": "🎯 there",
+                   "style_fit": "solid", "strengths": ["a"], "fixes": ["b"],
+                   "next_drill": "c"}  # no song_score/song_why — an exercise
+        fake = type("R", (), {"status_code": 200,
+                              "json": lambda self: {"candidates": [{"content": {"parts": [
+                                  {"text": _json.dumps(payload)}]}}]}})()
+        with _patch("apps.economy.vocalcoach._key", return_value="k"), \
+             _patch("apps.economy.gemini.requests.post", return_value=fake):
+            out, err = score_take("rapz", SimpleUploadedFile("t.mp3", b"x"),
+                                  "audio/mpeg", genre="Trap", target=None,
+                                  difficulty="builder")
+        self.assertIsNone(err)
+        self.assertIsNone(out["song_score"])
+        self.assertEqual(out["song_why"], "")
 
 
 class ScaleIsAnchoredTests(TestCase):
@@ -1136,14 +1206,16 @@ class PerformanceCraftIsNotSongQualityTests(TestCase):
     breath...) and nothing about what it does NOT claim to measure. A member
     reading a moderate performance-craft score for a song real listeners
     loved had no way to know those are different questions — the number read
-    as a verdict on the song, which RapZ's five dimensions were never scoring
-    (writing/lyrics are opt-in, via "Rate my lyrics too", and separate).
+    as a verdict on the song. It answered that gap twice: first by saying
+    the five dimensions don't measure the song, and then — once Song 🎶
+    shipped as its own field — by saying the two numbers are separate and
+    neither may move the other.
     """
 
     def test_every_instrument_states_the_distinction(self):
         from apps.economy.instruments import INSTRUMENTS, DEFAULT
         for key, profile in {**INSTRUMENTS, "_default": DEFAULT}.items():
-            self.assertIn("not whether the song itself is good", profile["caveat"], key)
+            self.assertIn("Song 🎶 scores the SONG", profile["caveat"], key)
 
     def test_it_names_both_things_can_be_true_at_once(self):
         from apps.economy.instruments import INSTRUMENTS
