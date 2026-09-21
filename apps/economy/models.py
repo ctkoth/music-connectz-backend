@@ -5549,6 +5549,71 @@ class BodieZSet(models.Model):
         return f"{self.session_id} — {self.exercise.name} x{self.reps}"
 
 
+# Four kinds — every one is a target `bodiez.goal_progress` can compute from
+# rows this app already logs, deliberately never a fifth "custom" kind with a
+# member-typed target and no way to check it: the substance rule's test
+# ("could a member get a good number without doing the work?") has an easy
+# yes for a goal nothing measures.
+BODIEZ_GOAL_KINDS = (
+    ("strength", "Strength"),      # an exercise + a target weight (+ optional reps)
+    ("frequency", "Frequency"),    # sessions per week
+    ("count", "Total workouts"),   # lifetime finished-session count
+    ("bodyweight", "Body weight"), # a target on BodieZWeightLog
+)
+
+
+class BodieZGoal(models.Model):
+    """A body, strength, habit or performance target — the blueprint's own
+    examples ("benching 225", "training 4 days a week", "completing 100
+    workouts", "losing 15 pounds") map onto the four kinds above one for one.
+
+    `starting_value` is snapshotted at CREATION for `bodyweight` goals only —
+    the direction (losing vs gaining) has to be read against where the member
+    started, and a starting point that could drift after the fact would let
+    the goal rewrite its own difficulty. Strength/frequency/count all read
+    live off logged data instead, so they need no baseline of their own.
+
+    Achievement is never persisted — `bodiez.goal_progress` computes it fresh
+    on every read from the member's actual rows. A goal that could go stale
+    between "achieved" and the data that made it true is worse than
+    recomputing a cheap comparison every time.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="bodiez_goals")
+    kind = models.CharField(max_length=12, choices=BODIEZ_GOAL_KINDS)
+    title = models.CharField(max_length=80)
+    exercise = models.ForeignKey(BodieZExercise, null=True, blank=True,
+                                 on_delete=models.SET_NULL, related_name="+")
+    target_value = models.DecimalField(max_digits=8, decimal_places=2)
+    target_reps = models.PositiveSmallIntegerField(null=True, blank=True)
+    starting_value = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    target_date = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.user} — {self.title}"
+
+
+class BodieZWeightLog(models.Model):
+    """One body-weight check-in. Its only consumer is a `bodyweight` goal's
+    progress read — this is not the start of a Nutrition or body-composition
+    feature, which stays explicitly out of scope, the same line the module
+    docstring already draws."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="bodiez_weight_logs")
+    weight_kg = models.DecimalField(max_digits=6, decimal_places=2)
+    logged_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-logged_at",)
+
+    def __str__(self):
+        return f"{self.user} — {self.weight_kg}kg"
+
+
 class TakeAnalysis(models.Model):
     upload = models.OneToOneField(Upload, on_delete=models.CASCADE, related_name="analysis")
     detected_notes = models.JSONField(default=list, help_text="[{note, freq, cents_off, timestamp}]")
