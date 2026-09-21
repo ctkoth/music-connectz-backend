@@ -216,3 +216,97 @@ class BodieZProgressViewTests(TestCase):
         response = self.client.get("/api/economy/bodiez/progress/")
         self.assertEqual(response.data["sessions_completed"], 0)
         self.assertEqual(response.data["total_volume_kg"], 0)
+
+
+class BodieZSchedulerTests(TestCase):
+    """The Jefit-on-a-Lilith-scheduler piece: routines organized into
+    Inbox/Today/Upcoming/Anytime/Someday/Trash, same bucket shape Lilith
+    already gives a task."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="u1", password="pw")
+        self.client.force_authenticate(user=self.user)
+
+    def test_a_new_routine_lands_in_inbox_by_default(self):
+        r = self.client.post("/api/economy/bodiez/routines/", {"title": "Push Day"}, format="json")
+        self.assertEqual(r.data["bucket"], "inbox")
+
+    def test_a_routine_can_be_created_straight_into_a_bucket(self):
+        r = self.client.post("/api/economy/bodiez/routines/",
+                              {"title": "Push Day", "bucket": "today"}, format="json")
+        self.assertEqual(r.data["bucket"], "today")
+
+    def test_an_unknown_bucket_on_create_falls_back_to_inbox(self):
+        r = self.client.post("/api/economy/bodiez/routines/",
+                              {"title": "Push Day", "bucket": "not-a-real-bucket"}, format="json")
+        self.assertEqual(r.data["bucket"], "inbox")
+
+    def test_moving_a_routine_between_buckets(self):
+        routine = BodieZRoutine.objects.create(user=self.user, title="Push Day")
+        r = self.client.patch(f"/api/economy/bodiez/routines/{routine.id}/",
+                               {"bucket": "upcoming"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data["bucket"], "upcoming")
+        routine.refresh_from_db()
+        self.assertEqual(routine.bucket, "upcoming")
+
+    def test_an_unknown_bucket_on_move_is_refused(self):
+        routine = BodieZRoutine.objects.create(user=self.user, title="Push Day")
+        r = self.client.patch(f"/api/economy/bodiez/routines/{routine.id}/",
+                               {"bucket": "not-a-real-bucket"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_scheduling_a_routine_for_a_date(self):
+        routine = BodieZRoutine.objects.create(user=self.user, title="Push Day")
+        r = self.client.patch(f"/api/economy/bodiez/routines/{routine.id}/",
+                               {"scheduled_for": "2026-10-01"}, format="json")
+        self.assertEqual(r.data["scheduled_for"], "2026-10-01")
+
+    def test_clearing_a_scheduled_date(self):
+        routine = BodieZRoutine.objects.create(user=self.user, title="Push Day",
+                                                scheduled_for="2026-10-01")
+        r = self.client.patch(f"/api/economy/bodiez/routines/{routine.id}/",
+                               {"scheduled_for": ""}, format="json")
+        self.assertIsNone(r.data["scheduled_for"])
+
+    def test_an_unparseable_date_is_refused(self):
+        routine = BodieZRoutine.objects.create(user=self.user, title="Push Day")
+        r = self.client.patch(f"/api/economy/bodiez/routines/{routine.id}/",
+                               {"scheduled_for": "not-a-date"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_moving_to_trash_does_not_delete_the_row(self):
+        routine = BodieZRoutine.objects.create(user=self.user, title="Push Day")
+        self.client.patch(f"/api/economy/bodiez/routines/{routine.id}/",
+                           {"bucket": "trash"}, format="json")
+        self.assertTrue(BodieZRoutine.objects.filter(id=routine.id).exists())
+
+    def test_the_board_groups_every_routine_by_bucket_in_one_request(self):
+        BodieZRoutine.objects.create(user=self.user, title="A", bucket="inbox")
+        BodieZRoutine.objects.create(user=self.user, title="B", bucket="today")
+        BodieZRoutine.objects.create(user=self.user, title="C", bucket="today")
+        BodieZRoutine.objects.create(user=self.user, title="D", bucket="someday")
+        r = self.client.get("/api/economy/bodiez/board/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        b = r.data["buckets"]
+        self.assertEqual(set(b), {"inbox", "today", "upcoming", "anytime", "someday", "trash"})
+        self.assertEqual(len(b["inbox"]), 1)
+        self.assertEqual(len(b["today"]), 2)
+        self.assertEqual(len(b["upcoming"]), 0)
+
+    def test_the_board_only_shows_my_own_routines(self):
+        other = User.objects.create_user(username="u2", password="pw")
+        BodieZRoutine.objects.create(user=other, title="Not mine", bucket="today")
+        r = self.client.get("/api/economy/bodiez/board/")
+        self.assertEqual(r.data["buckets"]["today"], [])
+
+    def test_the_board_serves_bucket_labels_so_the_client_never_retypes_them(self):
+        r = self.client.get("/api/economy/bodiez/board/")
+        keys = {row["key"] for row in r.data["bucket_labels"]}
+        self.assertEqual(keys, {"inbox", "today", "upcoming", "anytime", "someday", "trash"})
+
+    def test_board_requires_auth(self):
+        client = APIClient()
+        r = client.get("/api/economy/bodiez/board/")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)

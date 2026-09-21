@@ -5460,18 +5460,44 @@ class BodieZExercise(models.Model):
         return self.name
 
 
+# The blueprint gives BodieZ the same five-bucket scheduler Lilith already
+# has — Inbox/Today/Upcoming/Anytime/Someday — plus Trash, because a deleted
+# routine landing straight in the database with no undo is a harsher edit
+# than anything else in this bucket system allows. Kept as BodieZ's OWN tuple
+# rather than reusing Lilith's `BUCKETS`: the labels and emoji the blueprint
+# gives each app disagree (Lilith's Today is "‼️", BodieZ's is "💪"), and a
+# shared tuple would mean one of the two apps rendering the wrong glyph.
+BODIEZ_BUCKETS = (
+    ("inbox", "Inbox 📥"),
+    ("today", "Today 💪"),
+    ("upcoming", "Upcoming 📅"),
+    ("anytime", "Anytime 🏋️"),
+    ("someday", "Someday 🧠"),
+    ("trash", "Trash 🚮"),
+)
+
+
 class BodieZRoutine(models.Model):
     """A saved training plan. `exercises` is JSON for display — the same
     shape `PostContributor` and `CollabParticipant` warn against reading back
     with Python for anything at scale, but a routine has at most a few dozen
     rows and is only ever read by its owner, so there is nothing here a
     lookup table would earn its keep on.
+
+    `bucket` + `scheduled_for` are the Jefit-style scheduler the blueprint
+    asks BodieZ to have — a routine dreamed up gets typed into Inbox, moved to
+    Today when it's the one you're doing now, or given a date and it shows up
+    in Upcoming. `scheduled_for` is a DATE, not a datetime: a training day is
+    a day, and a time-of-day field here would be a second place BodieZ's own
+    calendar semantics live once one gets built.
     """
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
                               related_name="bodiez_routines")
     title = models.CharField(max_length=80)
     # [{exercise_id, sets, reps, order}, ...]
     exercises = models.JSONField(default=list)
+    bucket = models.CharField(max_length=10, choices=BODIEZ_BUCKETS, default="inbox", db_index=True)
+    scheduled_for = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
