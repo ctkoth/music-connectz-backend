@@ -60,16 +60,16 @@ _HISTORY_CAVEAT = ("Consistency, health and goal match come from your history, "
                    "not a single clip — they're on your progress screen.")
 
 # The other half of what a member needs to hear before a number surprises
-# them: this scores the PERFORMANCE, not the song. A take can have a real
-# hook and land with every listener who hears it while the flow underneath
-# is still rushing the beat — those are different questions, and a member
-# who only sees one number for both reads a moderate performance score as a
-# verdict on the song itself, which it was never measuring. Opting into
-# "Rate my lyrics too" adds the writing half; without it, craft is all this
-# number ever claims to be.
-_CRAFT_NOT_SONG = ("This scores your PERFORMANCE — not whether the song itself is good. "
-                   "A take can connect with real listeners and still have a flow or "
-                   "timing habit worth fixing underneath; both can be true at once.")
+# them: the five dimensions above score the PERFORMANCE, not the song. A take
+# can have a real hook and land with every listener who hears it while the
+# flow underneath is still rushing the beat — those are different questions,
+# and a member who only saw one number for both used to read a moderate
+# performance score as a verdict on the song itself, which it was never
+# measuring. "song_score" answers the other question, as its own number.
+_CRAFT_NOT_SONG = ("The dimensions above score your PERFORMANCE. Song 🎶 scores the SONG "
+                   "itself — the hook, whether it connects — as its own separate number. "
+                   "A take can score high on one and moderate on the other; both can be "
+                   "true at once, and neither is allowed to move the other.")
 
 INSTRUMENTS = {
     "singz": {
@@ -180,6 +180,27 @@ LYRIC_SCORE = {
 # and a number with no explanation is the thing this file keeps refusing to
 # ship.
 STYLE_SCORE = {"style_match": "Style Match 🎭"}
+
+# Song 🎶 — a real listener's answer to "does this land", scored as its own
+# number rather than folded into the five performance dimensions above it.
+#
+# Deliberately NOT merged into `scores_for()` the way Style Match is. Style
+# Match answers a question ABOUT the performance (how close is this to the
+# style aimed at); Song answers a DIFFERENT question — is the song itself any
+# good — and a member reading one flat grid of dimension chips has no way to
+# tell those apart, which is exactly the confusion that produced this field:
+# a take scored moderate on flow/timing/breath for a song real listeners
+# loved read as "your song is mediocre" when the coach was only ever judging
+# the performance underneath it. Kept structurally separate (its own top-
+# level score, like `score` itself) so the client can render it in its own
+# card rather than a sixth chip in a grid that would bury the distinction it
+# exists to make.
+#
+# Can legitimately be null: a warm-up, a scale run, an exercise with no
+# distinct structure is not a song, and inventing a number for one would be
+# exactly the substance rule's failure case — a rating for something that was
+# never there to rate.
+SONG_SCORE = {"song_score": "Song 🎶"}
 
 # Mix 🎚️ — opt-in, like lyricism, and for the same reason: it is a DIFFERENT
 # SKILL from the one the five dimensions measure, and scoring somebody on a
@@ -452,6 +473,20 @@ playing or writing, and none of it may pull a score down. If the recording \
 genuinely gets in the way of hearing something, say so in the fixes and don't \
 score that dimension harshly for it.{mix_caveat}
 
+SONG vs PERFORMANCE — two different questions, and "song_score" is where the \
+second one lives. Everything above judges the PERFORMANCE: how the take sits, \
+bar to bar, note to note. "song_score" judges the SONG itself, the way a real \
+listener reacts to it — is there a hook, does the structure pull you through \
+it, does it land emotionally, would this actually stick after one listen. \
+Score it as a listener would, not as a technician: a technically shaky \
+performance of a genuinely great song can score HIGH on song_score and \
+moderate on the performance dimensions, and a flawless performance of a \
+forgettable song can score the opposite. Neither number may pull on the \
+other — a great song performed roughly is still a great song, and a mediocre \
+song performed perfectly is still a mediocre song. If there is no actual song \
+here to react to — a warm-up, a scale run, an isolated drum groove with no \
+structure to judge — set "song_score" to null rather than inventing one.
+
 Harshness is not honesty. A number lower than the take deserves is just as \
 wrong as one higher, and it is the one that makes somebody quit.
 
@@ -493,7 +528,9 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "scores": {{{shape}}},
   "now": "<their current qualities, in that voice>",
   "goal": "<what they're aiming at next, and how they'll know they got there>",{range_field}
-  "style_fit": "<how it sits against the style or genre they picked>",{lyric_fields}{mix_fields}
+  "style_fit": "<how it sits against the style or genre they picked>",
+  "song_score": <1-10, or null if there's no actual song here to judge>,
+  "song_why": "<one sentence, as a listener: what makes it land or not>",{lyric_fields}{mix_fields}
   "verdict": "<one sentence in that voice, what this take actually is>",
   "strengths": ["<what genuinely worked, named specifically - AT LEAST ONE, always>", "..."],
   "fixes": ["<the moment it goes wrong, and the fix — the two that matter most, worst first>", "..."],
