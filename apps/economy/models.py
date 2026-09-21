@@ -2641,6 +2641,15 @@ def directz_display_rating(work):
     couldn't watch it" is a real answer and it used to be reported as a number.
     `source` is "users", "ai", or None — and when it is None, `rating` is None
     too. Callers must render the absence rather than reaching for a zero.
+
+    `directz_ai_rating` — the thing this replaced — is the specific failure
+    the second noble truth names: craving a number that isn't there, and
+    manufacturing one to make the craving stop (tanha, the Buddha's second of
+    the Four Noble Truths — Bodhi, 2005, pp. 75-78, on the Dhammacakkappavattana
+    Sutta). None here isn't a bug to patch with a formula; it's the honest
+    state of a work nobody has judged yet, and the fix for craving a rating is
+    never inventing one — it's waiting for a real one, same as the substance
+    rule already says three sections up.
     """
     scores = list(work.ratings.values_list("score", flat=True))
     user_median = _median(scores)

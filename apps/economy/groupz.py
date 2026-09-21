@@ -105,6 +105,15 @@ PARTNER_WORKS = 3
 # Four days rather than the floor, so Patron (7) stays the stronger badge and
 # the two stack down to ESCROW_MIN_RELEASE_DAYS rather than one making the
 # other pointless.
+#
+# There's a name for the shape this benefit takes, and it's older than this
+# platform by about two thousand years: the Gita's Nishkama Karma — do the
+# duty, let go of the fruit of it (Bhagavad Gita, 2.47, Easwaran translation,
+# 2007). PartnerZ isn't paid for holding a status; the escrow speeds up only
+# when the WORK happens again, unattached to whether either side is chasing
+# the discount. A stipend rewards the wanting. This rewards the doing, and
+# only the doing moves it — which is the same test the paragraph above
+# already applies, cited here because the Gita named it first.
 PARTNER_ESCROW_DAYS_OFF = 4
 
 
