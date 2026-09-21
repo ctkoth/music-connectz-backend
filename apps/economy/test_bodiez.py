@@ -1,4 +1,6 @@
 """Tests for BodieZ — exercises, routines, sessions and progress."""
+from datetime import timedelta
+
 from django.test import TestCase
 from django.contrib.auth.models import User
 from rest_framework.test import APIClient
@@ -309,4 +311,186 @@ class BodieZSchedulerTests(TestCase):
     def test_board_requires_auth(self):
         client = APIClient()
         r = client.get("/api/economy/bodiez/board/")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+def _finished_session(user, days_ago=0):
+    from django.utils import timezone
+    sess = BodieZSession.objects.create(user=user)
+    sess.started_at = timezone.now() - timedelta(days=days_ago)
+    sess.ended_at = sess.started_at
+    sess.save(update_fields=["started_at", "ended_at"])
+    return sess
+
+
+class BodieZBodyMapTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="u1", password="pw")
+        self.client.force_authenticate(user=self.user)
+        self.bench = BodieZExercise.objects.create(name="Test Bench", muscle_group="chest", equipment="barbell")
+        self.squat = BodieZExercise.objects.create(name="Test Squat", muscle_group="legs", equipment="barbell")
+
+    def test_every_muscle_group_is_reported_even_with_no_data(self):
+        r = self.client.get("/api/economy/bodiez/bodymap/")
+        groups = {row["muscle_group"] for row in r.data["muscles"]}
+        self.assertEqual(groups, {k for k, _ in BodieZExercise.MUSCLE_CHOICES})
+
+    def test_an_untouched_muscle_group_is_untrained(self):
+        r = self.client.get("/api/economy/bodiez/bodymap/")
+        legs = next(row for row in r.data["muscles"] if row["muscle_group"] == "legs")
+        self.assertEqual(legs["status"], "untrained")
+        self.assertIsNone(legs["last_trained"])
+
+    def test_a_set_logged_today_reads_recent(self):
+        sess = _finished_session(self.user, days_ago=0)
+        BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/bodymap/")
+        chest = next(row for row in r.data["muscles"] if row["muscle_group"] == "chest")
+        self.assertEqual(chest["status"], "recent")
+
+    def test_a_set_logged_two_weeks_ago_reads_undertrained(self):
+        sess = _finished_session(self.user, days_ago=14)
+        BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/bodymap/")
+        chest = next(row for row in r.data["muscles"] if row["muscle_group"] == "chest")
+        self.assertEqual(chest["status"], "undertrained")
+
+    def test_four_separate_days_in_the_window_reads_overworked(self):
+        for d in (0, 1, 2, 3):
+            sess = _finished_session(self.user, days_ago=d)
+            BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/bodymap/")
+        chest = next(row for row in r.data["muscles"] if row["muscle_group"] == "chest")
+        self.assertEqual(chest["status"], "overworked")
+
+    def test_overworked_counts_days_not_sets(self):
+        # Five sets in ONE session must not read the same as five sessions.
+        sess = _finished_session(self.user, days_ago=0)
+        for i in range(5):
+            BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=i + 1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/bodymap/")
+        chest = next(row for row in r.data["muscles"] if row["muscle_group"] == "chest")
+        self.assertNotEqual(chest["status"], "overworked")
+
+    def test_an_in_progress_session_does_not_count(self):
+        sess = BodieZSession.objects.create(user=self.user)  # ended_at null
+        BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/bodymap/")
+        chest = next(row for row in r.data["muscles"] if row["muscle_group"] == "chest")
+        self.assertEqual(chest["status"], "untrained")
+
+    def test_only_my_own_sets_count(self):
+        other = User.objects.create_user(username="u2", password="pw")
+        sess = _finished_session(other, days_ago=0)
+        BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/bodymap/")
+        chest = next(row for row in r.data["muscles"] if row["muscle_group"] == "chest")
+        self.assertEqual(chest["status"], "untrained")
+
+    def test_requires_auth(self):
+        client = APIClient()
+        r = client.get("/api/economy/bodiez/bodymap/")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class BodieZCoachTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="u1", password="pw")
+        self.client.force_authenticate(user=self.user)
+        self.bench = BodieZExercise.objects.create(name="Test Bench", muscle_group="chest", equipment="barbell")
+        self.pushup = BodieZExercise.objects.create(name="Test Push-Up", muscle_group="chest", equipment="bodyweight")
+
+    def test_one_session_is_not_enough_data(self):
+        sess = _finished_session(self.user, days_ago=1)
+        BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/coach/")
+        row = next(x for x in r.data["exercises"] if x["exercise_id"] == self.bench.id)
+        self.assertEqual(row["recommendation"], "not_enough_data")
+
+    def test_same_weight_more_reps_recommends_increase_weight(self):
+        s1 = _finished_session(self.user, days_ago=7)
+        BodieZSet.objects.create(session=s1, exercise=self.bench, set_number=1, reps=7, weight_kg=60)
+        s2 = _finished_session(self.user, days_ago=0)
+        BodieZSet.objects.create(session=s2, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/coach/")
+        row = next(x for x in r.data["exercises"] if x["exercise_id"] == self.bench.id)
+        self.assertEqual(row["recommendation"], "increase_weight")
+        self.assertIn("60", row["why"])
+
+    def test_same_weight_fewer_reps_holds_steady(self):
+        s1 = _finished_session(self.user, days_ago=7)
+        BodieZSet.objects.create(session=s1, exercise=self.bench, set_number=1, reps=10, weight_kg=60)
+        s2 = _finished_session(self.user, days_ago=0)
+        BodieZSet.objects.create(session=s2, exercise=self.bench, set_number=1, reps=6, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/coach/")
+        row = next(x for x in r.data["exercises"] if x["exercise_id"] == self.bench.id)
+        self.assertEqual(row["recommendation"], "hold_steady")
+
+    def test_a_weight_increase_already_taken_holds_steady(self):
+        s1 = _finished_session(self.user, days_ago=7)
+        BodieZSet.objects.create(session=s1, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        s2 = _finished_session(self.user, days_ago=0)
+        BodieZSet.objects.create(session=s2, exercise=self.bench, set_number=1, reps=8, weight_kg=65)
+        r = self.client.get("/api/economy/bodiez/coach/")
+        row = next(x for x in r.data["exercises"] if x["exercise_id"] == self.bench.id)
+        self.assertEqual(row["recommendation"], "hold_steady")
+
+    def test_a_weight_drop_is_logged_as_a_deload(self):
+        s1 = _finished_session(self.user, days_ago=7)
+        BodieZSet.objects.create(session=s1, exercise=self.bench, set_number=1, reps=8, weight_kg=70)
+        s2 = _finished_session(self.user, days_ago=0)
+        BodieZSet.objects.create(session=s2, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/coach/")
+        row = next(x for x in r.data["exercises"] if x["exercise_id"] == self.bench.id)
+        self.assertEqual(row["recommendation"], "deload_taken")
+
+    def test_bodyweight_exercise_compares_total_reps(self):
+        s1 = _finished_session(self.user, days_ago=7)
+        BodieZSet.objects.create(session=s1, exercise=self.pushup, set_number=1, reps=15, weight_kg=None)
+        s2 = _finished_session(self.user, days_ago=0)
+        BodieZSet.objects.create(session=s2, exercise=self.pushup, set_number=1, reps=20, weight_kg=None)
+        r = self.client.get("/api/economy/bodiez/coach/")
+        row = next(x for x in r.data["exercises"] if x["exercise_id"] == self.pushup.id)
+        self.assertEqual(row["recommendation"], "increase_difficulty")
+
+    def test_a_stale_exercise_says_reintroduce(self):
+        for d in (60, 45, 30):
+            sess = _finished_session(self.user, days_ago=d)
+            BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/coach/")
+        row = next(x for x in r.data["exercises"] if x["exercise_id"] == self.bench.id)
+        self.assertEqual(row["recommendation"], "reintroduce")
+
+    def test_every_recommendation_carries_why(self):
+        s1 = _finished_session(self.user, days_ago=7)
+        BodieZSet.objects.create(session=s1, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        s2 = _finished_session(self.user, days_ago=0)
+        BodieZSet.objects.create(session=s2, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/coach/")
+        for row in r.data["exercises"]:
+            self.assertTrue(row["why"])
+
+    def test_labels_are_served_for_every_recommendation_key(self):
+        from apps.economy.bodiez import REC_LABELS
+        s1 = _finished_session(self.user, days_ago=7)
+        BodieZSet.objects.create(session=s1, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/coach/")
+        self.assertEqual(set(r.data["labels"]), set(REC_LABELS))
+        for row in r.data["exercises"]:
+            self.assertIn(row["recommendation"], r.data["labels"])
+
+    def test_only_my_own_sessions_are_considered(self):
+        other = User.objects.create_user(username="u2", password="pw")
+        s1 = _finished_session(other, days_ago=7)
+        BodieZSet.objects.create(session=s1, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        s2 = _finished_session(other, days_ago=0)
+        BodieZSet.objects.create(session=s2, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/coach/")
+        self.assertEqual(r.data["exercises"], [])
+
+    def test_requires_auth(self):
+        client = APIClient()
+        r = client.get("/api/economy/bodiez/coach/")
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
