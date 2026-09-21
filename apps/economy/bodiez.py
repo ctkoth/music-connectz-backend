@@ -35,7 +35,28 @@ arithmetic over `BodieZSet` rows, not a call to Gemini —
   a black box wearing a coach's name, and that is the thing this whole rule
   exists to keep out of the app.
 
-Deliberately still NOT built here: Nutrition, Community, Goals, Recovery, and
+This also adds Goals (`BodieZGoalsView`), and it holds the same line: four
+kinds, `BODIEZ_GOAL_KINDS`, and every one reads its progress off data this app
+already logs rather than trusting the member's own report of how they're
+doing —
+
+- **strength** — an exercise + a target weight. Progress is the best
+  matching set ever logged, same "read the real rows" the Coach uses.
+- **frequency** — sessions per week, read off the trailing 7 days.
+- **count** — a lifetime finished-session target ("complete 100 workouts").
+- **bodyweight** — the one kind that needs a number nothing else in this app
+  logs, so `BodieZWeightLog` is a bare check-in (weight + timestamp, nothing
+  else) — not the start of Nutrition or body composition, which stays
+  explicitly out of scope. Progress reads the STARTING value snapshotted at
+  goal creation against the latest log, so "losing 15 pounds" and "gaining
+  15 pounds" both compute correctly from the same two numbers.
+
+There is deliberately no fifth "custom" kind with a member-typed target and
+nothing to check it against — that would be a goal the substance rule's own
+test answers yes to ("could a member get a good number without doing the
+work?"), so `achieved` is never a checkbox a member ticks themselves.
+
+Deliberately still NOT built here: Nutrition, Community, Recovery, and
 XP/streak rewards. The last one is worth explaining rather than just omitting
 — XP here would need its own wallet column (nothing in this codebase has a
 general per-user XP total; LilithPayout.xp is Lilith-specific) and a decision
@@ -53,7 +74,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import BODIEZ_BUCKETS, BodieZExercise, BodieZRoutine, BodieZSession, BodieZSet
+from .models import (BODIEZ_BUCKETS, BODIEZ_GOAL_KINDS, BodieZExercise, BodieZGoal,
+                     BodieZRoutine, BodieZSession, BodieZSet, BodieZWeightLog)
 
 _BUCKET_KEYS = {k for k, _ in BODIEZ_BUCKETS}
 
@@ -525,3 +547,226 @@ class BodieZCoachView(APIView):
             "labels": REC_LABELS,
             "stale_after_days": self.STALE_DAYS,
         })
+
+
+_GOAL_KIND_KEYS = {k for k, _ in BODIEZ_GOAL_KINDS}
+FREQUENCY_WINDOW_DAYS = 7
+
+
+def _best_set(user, exercise, min_reps=None):
+    """The heaviest logged, weighted set ever against this exercise — the
+    same "read the real rows" the Coach uses for its own comparisons."""
+    qs = BodieZSet.objects.filter(session__user=user, session__ended_at__isnull=False,
+                                  exercise=exercise, weight_kg__isnull=False)
+    if min_reps:
+        qs = qs.filter(reps__gte=min_reps)
+    return qs.order_by("-weight_kg").first()
+
+
+def goal_progress(goal, user):
+    """(current_value, target_value, pct 0-100 or None, achieved: bool).
+
+    `pct` is None only when there's nothing to divide by yet (a strength goal
+    with no matching set logged) — never a fabricated 0, because 0% reads as
+    "you've made no progress" and "we have no data" is a different fact.
+    """
+    if goal.kind == "strength":
+        best = _best_set(user, goal.exercise, goal.target_reps)
+        target = float(goal.target_value)
+        if not best:
+            return None, target, None, False
+        current = float(best.weight_kg)
+        pct = min(100.0, round(current / target * 100, 1)) if target else None
+        return current, target, pct, current >= target
+
+    if goal.kind == "frequency":
+        since = timezone.now() - timedelta(days=FREQUENCY_WINDOW_DAYS)
+        days = (BodieZSession.objects
+                .filter(user=user, ended_at__isnull=False, started_at__gte=since)
+                .values_list("started_at__date", flat=True))
+        current = len(set(days))
+        target = float(goal.target_value)
+        pct = min(100.0, round(current / target * 100, 1)) if target else None
+        return current, target, pct, current >= target
+
+    if goal.kind == "count":
+        current = BodieZSession.objects.filter(user=user, ended_at__isnull=False).count()
+        target = float(goal.target_value)
+        pct = min(100.0, round(current / target * 100, 1)) if target else None
+        return current, target, pct, current >= target
+
+    if goal.kind == "bodyweight":
+        latest = BodieZWeightLog.objects.filter(user=user).first()
+        if not latest or goal.starting_value is None:
+            return None, float(goal.target_value), None, False
+        current = float(latest.weight_kg)
+        target = float(goal.target_value)
+        start = float(goal.starting_value)
+        span = target - start
+        if span == 0:
+            pct = 100.0 if current == target else 0.0
+        else:
+            pct = max(0.0, min(100.0, round((current - start) / span * 100, 1)))
+        # Losing weight and gaining weight cross the target from opposite
+        # sides, so "achieved" has to check the direction the goal set out
+        # in, not just >=.
+        achieved = current <= target if span < 0 else current >= target
+        return current, target, pct, achieved
+
+    return None, float(goal.target_value), None, False
+
+
+def _goal_dict(goal, user):
+    current, target, pct, achieved = goal_progress(goal, user)
+    return {
+        "id": goal.id, "kind": goal.kind, "title": goal.title,
+        "exercise_id": goal.exercise_id,
+        "exercise_name": goal.exercise.name if goal.exercise_id else None,
+        "target_value": target, "target_reps": goal.target_reps,
+        "starting_value": float(goal.starting_value) if goal.starting_value is not None else None,
+        "target_date": goal.target_date.isoformat() if goal.target_date else None,
+        "current_value": current, "pct": pct, "achieved": achieved,
+        "created_at": goal.created_at.isoformat(),
+    }
+
+
+class BodieZGoalsView(APIView):
+    """GET/POST /api/economy/bodiez/goals/ — list mine with live progress
+    attached, or set a new one.
+
+    POST body: kind (required, one of BODIEZ_GOAL_KINDS), title (required),
+    target_value (required), exercise_id (required for `strength`),
+    target_reps (optional, `strength` only), target_date (optional).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        goals = BodieZGoal.objects.filter(user=request.user)
+        return Response({
+            "goals": [_goal_dict(g, request.user) for g in goals],
+            "kinds": [{"key": k, "label": v} for k, v in BODIEZ_GOAL_KINDS],
+        })
+
+    def post(self, request):
+        d = request.data
+        kind = d.get("kind")
+        if kind not in _GOAL_KIND_KEYS:
+            return Response({"detail": f"kind must be one of {sorted(_GOAL_KIND_KEYS)}."},
+                             status=status.HTTP_400_BAD_REQUEST)
+        title = (d.get("title") or "").strip()
+        if not title:
+            return Response({"detail": "Goal needs a title."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            target_value = Decimal(str(d.get("target_value")))
+        except Exception:
+            return Response({"detail": "target_value must be a number."}, status=status.HTTP_400_BAD_REQUEST)
+        if target_value <= 0:
+            return Response({"detail": "target_value must be positive."}, status=status.HTTP_400_BAD_REQUEST)
+
+        exercise = None
+        if kind == "strength":
+            try:
+                exercise = BodieZExercise.objects.get(id=d.get("exercise_id"))
+            except (BodieZExercise.DoesNotExist, ValueError, TypeError):
+                return Response({"detail": "A strength goal needs a real exercise_id."},
+                                 status=status.HTTP_400_BAD_REQUEST)
+
+        target_reps = None
+        if d.get("target_reps") not in (None, ""):
+            try:
+                target_reps = max(1, int(d["target_reps"]))
+            except (TypeError, ValueError):
+                return Response({"detail": "target_reps must be a whole number."},
+                                 status=status.HTTP_400_BAD_REQUEST)
+
+        target_date = None
+        if d.get("target_date"):
+            try:
+                target_date = date.fromisoformat(str(d["target_date"])[:10])
+            except ValueError:
+                return Response({"detail": "target_date must be YYYY-MM-DD."},
+                                 status=status.HTTP_400_BAD_REQUEST)
+
+        starting_value = None
+        if kind == "bodyweight":
+            # Snapshotted now, because a starting point that could drift
+            # after the fact would let the goal rewrite its own difficulty.
+            latest = BodieZWeightLog.objects.filter(user=request.user).first()
+            starting_value = latest.weight_kg if latest else target_value
+
+        goal = BodieZGoal.objects.create(
+            user=request.user, kind=kind, title=title[:80], exercise=exercise,
+            target_value=target_value, target_reps=target_reps,
+            starting_value=starting_value, target_date=target_date,
+        )
+        return Response(_goal_dict(goal, request.user), status=status.HTTP_201_CREATED)
+
+
+class BodieZGoalDetailView(APIView):
+    """PATCH/DELETE /api/economy/bodiez/goals/{id}/ — only title and
+    target_date are editable. The target itself is not, on purpose: changing
+    what "achieved" means after the fact is how a goal stops meaning
+    anything — delete it and start a new one instead."""
+    permission_classes = [IsAuthenticated]
+
+    def _get(self, request, goal_id):
+        return BodieZGoal.objects.filter(id=goal_id, user=request.user).first()
+
+    def patch(self, request, goal_id):
+        goal = self._get(request, goal_id)
+        if not goal:
+            return Response({"detail": "Goal not found."}, status=status.HTTP_404_NOT_FOUND)
+        d = request.data
+        fields = []
+        if "title" in d:
+            title = str(d["title"]).strip()
+            if not title:
+                return Response({"detail": "Goal needs a title."}, status=status.HTTP_400_BAD_REQUEST)
+            goal.title = title[:80]
+            fields.append("title")
+        if "target_date" in d:
+            raw = d.get("target_date")
+            if not raw:
+                goal.target_date = None
+            else:
+                try:
+                    goal.target_date = date.fromisoformat(str(raw)[:10])
+                except ValueError:
+                    return Response({"detail": "target_date must be YYYY-MM-DD."},
+                                     status=status.HTTP_400_BAD_REQUEST)
+            fields.append("target_date")
+        if fields:
+            goal.save(update_fields=fields)
+        return Response(_goal_dict(goal, request.user))
+
+    def delete(self, request, goal_id):
+        goal = self._get(request, goal_id)
+        if not goal:
+            return Response({"detail": "Goal not found."}, status=status.HTTP_404_NOT_FOUND)
+        goal.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class BodieZWeightLogView(APIView):
+    """GET/POST /api/economy/bodiez/weightlog/ — the only reader of this is a
+    `bodyweight` goal's progress; this is a check-in, not a Nutrition
+    feature."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        logs = BodieZWeightLog.objects.filter(user=request.user)[:60]
+        return Response({"logs": [
+            {"id": l.id, "weight_kg": float(l.weight_kg), "logged_at": l.logged_at.isoformat()}
+            for l in logs
+        ]})
+
+    def post(self, request):
+        try:
+            weight_kg = Decimal(str(request.data.get("weight_kg")))
+        except Exception:
+            return Response({"detail": "weight_kg must be a number."}, status=status.HTTP_400_BAD_REQUEST)
+        if weight_kg <= 0:
+            return Response({"detail": "weight_kg must be positive."}, status=status.HTTP_400_BAD_REQUEST)
+        log = BodieZWeightLog.objects.create(user=request.user, weight_kg=weight_kg)
+        return Response({"id": log.id, "weight_kg": float(log.weight_kg),
+                         "logged_at": log.logged_at.isoformat()}, status=status.HTTP_201_CREATED)

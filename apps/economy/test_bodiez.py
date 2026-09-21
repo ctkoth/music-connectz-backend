@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from django.test import TestCase
 from django.contrib.auth.models import User
+from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework import status
 
@@ -493,4 +494,287 @@ class BodieZCoachTests(TestCase):
     def test_requires_auth(self):
         client = APIClient()
         r = client.get("/api/economy/bodiez/coach/")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class BodieZGoalsStrengthTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="u1", password="pw")
+        self.client.force_authenticate(user=self.user)
+        self.bench = BodieZExercise.objects.create(name="Test Bench", muscle_group="chest", equipment="barbell")
+
+    def test_create_a_strength_goal(self):
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "strength", "title": "Bench 100kg", "target_value": 100,
+            "exercise_id": self.bench.id,
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(r.data["kind"], "strength")
+        self.assertIsNone(r.data["current_value"])
+        self.assertIsNone(r.data["pct"])
+        self.assertFalse(r.data["achieved"])
+
+    def test_a_strength_goal_needs_a_real_exercise(self):
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "strength", "title": "Bench 100kg", "target_value": 100,
+            "exercise_id": 999999,
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_progress_reads_the_heaviest_logged_set(self):
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "strength", "title": "Bench 100kg", "target_value": 100,
+            "exercise_id": self.bench.id,
+        }, format="json")
+        goal_id = r.data["id"]
+        sess = BodieZSession.objects.create(user=self.user, ended_at=timezone.now())
+        BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=5, weight_kg=80)
+        r = self.client.get("/api/economy/bodiez/goals/")
+        row = next(g for g in r.data["goals"] if g["id"] == goal_id)
+        self.assertEqual(row["current_value"], 80.0)
+        self.assertEqual(row["pct"], 80.0)
+        self.assertFalse(row["achieved"])
+
+    def test_a_matching_set_marks_the_goal_achieved(self):
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "strength", "title": "Bench 100kg", "target_value": 100,
+            "exercise_id": self.bench.id,
+        }, format="json")
+        goal_id = r.data["id"]
+        sess = BodieZSession.objects.create(user=self.user, ended_at=timezone.now())
+        BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=5, weight_kg=100)
+        r = self.client.get("/api/economy/bodiez/goals/")
+        row = next(g for g in r.data["goals"] if g["id"] == goal_id)
+        self.assertTrue(row["achieved"])
+
+    def test_target_reps_filters_out_sets_that_dont_meet_it(self):
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "strength", "title": "Bench 100kg x5", "target_value": 100,
+            "exercise_id": self.bench.id, "target_reps": 5,
+        }, format="json")
+        goal_id = r.data["id"]
+        sess = BodieZSession.objects.create(user=self.user, ended_at=timezone.now())
+        # 100kg but only 2 reps — doesn't meet the rep target.
+        BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=2, weight_kg=100)
+        r = self.client.get("/api/economy/bodiez/goals/")
+        row = next(g for g in r.data["goals"] if g["id"] == goal_id)
+        self.assertIsNone(row["current_value"])
+
+    def test_an_in_progress_session_does_not_count_toward_a_goal(self):
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "strength", "title": "Bench 100kg", "target_value": 100,
+            "exercise_id": self.bench.id,
+        }, format="json")
+        goal_id = r.data["id"]
+        sess = BodieZSession.objects.create(user=self.user)  # ended_at null
+        BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=5, weight_kg=100)
+        r = self.client.get("/api/economy/bodiez/goals/")
+        row = next(g for g in r.data["goals"] if g["id"] == goal_id)
+        self.assertIsNone(row["current_value"])
+
+
+class BodieZGoalsFrequencyAndCountTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="u1", password="pw")
+        self.client.force_authenticate(user=self.user)
+
+    def test_frequency_goal_counts_distinct_days_in_the_trailing_week(self):
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "frequency", "title": "Train 3x/week", "target_value": 3,
+        }, format="json")
+        goal_id = r.data["id"]
+        for d in (0, 1, 2):
+            _finished_session(self.user, days_ago=d)
+        r = self.client.get("/api/economy/bodiez/goals/")
+        row = next(g for g in r.data["goals"] if g["id"] == goal_id)
+        self.assertEqual(row["current_value"], 3)
+        self.assertTrue(row["achieved"])
+
+    def test_frequency_goal_ignores_sessions_outside_the_window(self):
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "frequency", "title": "Train 3x/week", "target_value": 3,
+        }, format="json")
+        goal_id = r.data["id"]
+        _finished_session(self.user, days_ago=30)
+        r = self.client.get("/api/economy/bodiez/goals/")
+        row = next(g for g in r.data["goals"] if g["id"] == goal_id)
+        self.assertEqual(row["current_value"], 0)
+
+    def test_count_goal_reads_lifetime_finished_sessions(self):
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "count", "title": "100 workouts", "target_value": 100,
+        }, format="json")
+        goal_id = r.data["id"]
+        for d in range(5):
+            _finished_session(self.user, days_ago=d)
+        r = self.client.get("/api/economy/bodiez/goals/")
+        row = next(g for g in r.data["goals"] if g["id"] == goal_id)
+        self.assertEqual(row["current_value"], 5)
+        self.assertEqual(row["pct"], 5.0)
+        self.assertFalse(row["achieved"])
+
+    def test_a_goal_only_sees_my_own_sessions(self):
+        other = User.objects.create_user(username="u2", password="pw")
+        _finished_session(other, days_ago=0)
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "count", "title": "100 workouts", "target_value": 100,
+        }, format="json")
+        goal_id = r.data["id"]
+        r = self.client.get("/api/economy/bodiez/goals/")
+        row = next(g for g in r.data["goals"] if g["id"] == goal_id)
+        self.assertEqual(row["current_value"], 0)
+
+
+class BodieZGoalsBodyweightTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="u1", password="pw")
+        self.client.force_authenticate(user=self.user)
+
+    def test_weight_log_round_trip(self):
+        r = self.client.post("/api/economy/bodiez/weightlog/", {"weight_kg": 80}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        r = self.client.get("/api/economy/bodiez/weightlog/")
+        self.assertEqual(len(r.data["logs"]), 1)
+        self.assertEqual(r.data["logs"][0]["weight_kg"], 80.0)
+
+    def test_bodyweight_goal_snapshots_starting_value_at_creation(self):
+        self.client.post("/api/economy/bodiez/weightlog/", {"weight_kg": 90}, format="json")
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "bodyweight", "title": "Lose to 75kg", "target_value": 75,
+        }, format="json")
+        self.assertEqual(r.data["starting_value"], 90.0)
+
+    def test_losing_weight_progress_and_achievement(self):
+        self.client.post("/api/economy/bodiez/weightlog/", {"weight_kg": 90}, format="json")
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "bodyweight", "title": "Lose to 75kg", "target_value": 75,
+        }, format="json")
+        goal_id = r.data["id"]
+        self.client.post("/api/economy/bodiez/weightlog/", {"weight_kg": 82.5}, format="json")
+        r = self.client.get("/api/economy/bodiez/goals/")
+        row = next(g for g in r.data["goals"] if g["id"] == goal_id)
+        self.assertEqual(row["current_value"], 82.5)
+        self.assertEqual(row["pct"], 50.0)
+        self.assertFalse(row["achieved"])
+
+    def test_reaching_or_passing_the_losing_target_is_achieved(self):
+        self.client.post("/api/economy/bodiez/weightlog/", {"weight_kg": 90}, format="json")
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "bodyweight", "title": "Lose to 75kg", "target_value": 75,
+        }, format="json")
+        goal_id = r.data["id"]
+        self.client.post("/api/economy/bodiez/weightlog/", {"weight_kg": 70}, format="json")
+        r = self.client.get("/api/economy/bodiez/goals/")
+        row = next(g for g in r.data["goals"] if g["id"] == goal_id)
+        self.assertTrue(row["achieved"])
+
+    def test_gaining_weight_progress_and_achievement(self):
+        self.client.post("/api/economy/bodiez/weightlog/", {"weight_kg": 60}, format="json")
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "bodyweight", "title": "Bulk to 70kg", "target_value": 70,
+        }, format="json")
+        goal_id = r.data["id"]
+        self.client.post("/api/economy/bodiez/weightlog/", {"weight_kg": 65}, format="json")
+        r = self.client.get("/api/economy/bodiez/goals/")
+        row = next(g for g in r.data["goals"] if g["id"] == goal_id)
+        self.assertEqual(row["pct"], 50.0)
+        self.assertFalse(row["achieved"])
+
+    def test_a_bodyweight_goal_with_no_log_at_all_has_no_current_value(self):
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "bodyweight", "title": "Lose to 75kg", "target_value": 75,
+        }, format="json")
+        self.assertIsNone(r.data["current_value"])
+        self.assertIsNone(r.data["pct"])
+        self.assertFalse(r.data["achieved"])
+
+
+class BodieZGoalsGeneralTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="u1", password="pw")
+        self.client.force_authenticate(user=self.user)
+
+    def test_an_unknown_kind_is_refused(self):
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "not_a_real_kind", "title": "x", "target_value": 1,
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_there_is_no_custom_kind(self):
+        # The whole point: every kind must read off real logged data.
+        from apps.economy.models import BODIEZ_GOAL_KINDS
+        self.assertNotIn("custom", {k for k, _ in BODIEZ_GOAL_KINDS})
+
+    def test_a_zero_target_is_refused(self):
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "count", "title": "x", "target_value": 0,
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_a_blank_title_is_refused(self):
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "count", "title": "", "target_value": 5,
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_patch_title_and_date(self):
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "count", "title": "100 workouts", "target_value": 100,
+        }, format="json")
+        goal_id = r.data["id"]
+        r = self.client.patch(f"/api/economy/bodiez/goals/{goal_id}/",
+                              {"title": "150 workouts", "target_date": "2026-12-31"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data["title"], "150 workouts")
+        self.assertEqual(r.data["target_date"], "2026-12-31")
+
+    def test_target_value_is_not_editable_via_patch(self):
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "count", "title": "100 workouts", "target_value": 100,
+        }, format="json")
+        goal_id = r.data["id"]
+        self.client.patch(f"/api/economy/bodiez/goals/{goal_id}/",
+                          {"target_value": 5}, format="json")
+        r = self.client.get("/api/economy/bodiez/goals/")
+        row = next(g for g in r.data["goals"] if g["id"] == goal_id)
+        self.assertEqual(row["target_value"], 100.0)
+
+    def test_delete_goal(self):
+        r = self.client.post("/api/economy/bodiez/goals/", {
+            "kind": "count", "title": "100 workouts", "target_value": 100,
+        }, format="json")
+        goal_id = r.data["id"]
+        r = self.client.delete(f"/api/economy/bodiez/goals/{goal_id}/")
+        self.assertEqual(r.status_code, status.HTTP_204_NO_CONTENT)
+        r = self.client.get("/api/economy/bodiez/goals/")
+        self.assertEqual(r.data["goals"], [])
+
+    def test_patch_other_users_goal_404s(self):
+        other = User.objects.create_user(username="u2", password="pw")
+        other_client = APIClient()
+        other_client.force_authenticate(other)
+        r = other_client.post("/api/economy/bodiez/goals/", {
+            "kind": "count", "title": "not yours", "target_value": 100,
+        }, format="json")
+        goal_id = r.data["id"]
+        r = self.client.patch(f"/api/economy/bodiez/goals/{goal_id}/", {"title": "mine now"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_kinds_are_served_for_the_client_to_render(self):
+        from apps.economy.models import BODIEZ_GOAL_KINDS
+        r = self.client.get("/api/economy/bodiez/goals/")
+        self.assertEqual({k["key"] for k in r.data["kinds"]}, {k for k, _ in BODIEZ_GOAL_KINDS})
+
+    def test_goals_require_auth(self):
+        client = APIClient()
+        r = client.get("/api/economy/bodiez/goals/")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_weightlog_requires_auth(self):
+        client = APIClient()
+        r = client.get("/api/economy/bodiez/weightlog/")
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
