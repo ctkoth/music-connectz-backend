@@ -778,3 +778,85 @@ class BodieZGoalsGeneralTests(TestCase):
         client = APIClient()
         r = client.get("/api/economy/bodiez/weightlog/")
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class BodieZRecoveryTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="u1", password="pw")
+        self.client.force_authenticate(user=self.user)
+        self.bench = BodieZExercise.objects.create(name="Test Bench", muscle_group="chest", equipment="barbell")
+
+    def test_a_checkin_round_trips(self):
+        r = self.client.post("/api/economy/bodiez/recovery/",
+                              {"soreness": 3, "sleep_quality": 4, "fatigue": 2, "notes": "shoulders tight"},
+                              format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(r.data["soreness"], 3)
+        r = self.client.get("/api/economy/bodiez/recovery/")
+        self.assertEqual(len(r.data["logs"]), 1)
+        self.assertEqual(r.data["logs"][0]["notes"], "shoulders tight")
+
+    def test_out_of_range_values_are_refused(self):
+        r = self.client.post("/api/economy/bodiez/recovery/",
+                              {"soreness": 6, "sleep_quality": 3, "fatigue": 2}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_non_numeric_values_are_refused(self):
+        r = self.client.post("/api/economy/bodiez/recovery/",
+                              {"soreness": "sore", "sleep_quality": 3, "fatigue": 2}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_no_rest_signal_with_no_data_at_all(self):
+        r = self.client.get("/api/economy/bodiez/recovery/")
+        self.assertFalse(r.data["rest_suggested"])
+        self.assertEqual(r.data["days_trained_last_7d"], 0)
+
+    def test_high_soreness_alone_suggests_rest(self):
+        self.client.post("/api/economy/bodiez/recovery/",
+                          {"soreness": 5, "sleep_quality": 3, "fatigue": 2}, format="json")
+        r = self.client.get("/api/economy/bodiez/recovery/")
+        self.assertTrue(r.data["rest_suggested"])
+        self.assertIn("self_reported", r.data["rest_suggested_because"])
+        self.assertNotIn("trained_often", r.data["rest_suggested_because"])
+
+    def test_training_five_separate_days_alone_suggests_rest(self):
+        for d in (0, 1, 2, 3, 4):
+            sess = _finished_session(self.user, days_ago=d)
+            BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/recovery/")
+        self.assertTrue(r.data["rest_suggested"])
+        self.assertIn("trained_often", r.data["rest_suggested_because"])
+        self.assertNotIn("self_reported", r.data["rest_suggested_because"])
+        self.assertEqual(r.data["days_trained_last_7d"], 5)
+
+    def test_low_soreness_and_light_training_never_suggests_rest(self):
+        self.client.post("/api/economy/bodiez/recovery/",
+                          {"soreness": 1, "sleep_quality": 5, "fatigue": 1}, format="json")
+        sess = _finished_session(self.user, days_ago=0)
+        BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/recovery/")
+        self.assertFalse(r.data["rest_suggested"])
+
+    def test_only_the_most_recent_checkin_drives_the_self_reported_signal(self):
+        self.client.post("/api/economy/bodiez/recovery/",
+                          {"soreness": 5, "sleep_quality": 1, "fatigue": 5}, format="json")
+        self.client.post("/api/economy/bodiez/recovery/",
+                          {"soreness": 1, "sleep_quality": 5, "fatigue": 1}, format="json")
+        r = self.client.get("/api/economy/bodiez/recovery/")
+        self.assertFalse(r.data["rest_suggested"])
+
+    def test_only_my_own_data_is_considered(self):
+        other = User.objects.create_user(username="u2", password="pw")
+        other_client = APIClient()
+        other_client.force_authenticate(other)
+        other_client.post("/api/economy/bodiez/recovery/",
+                          {"soreness": 5, "sleep_quality": 1, "fatigue": 5}, format="json")
+        r = self.client.get("/api/economy/bodiez/recovery/")
+        self.assertFalse(r.data["rest_suggested"])
+        self.assertEqual(r.data["logs"], [])
+
+    def test_requires_auth(self):
+        client = APIClient()
+        r = client.get("/api/economy/bodiez/recovery/")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)

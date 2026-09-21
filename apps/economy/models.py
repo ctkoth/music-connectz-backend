@@ -5614,6 +5614,60 @@ class BodieZWeightLog(models.Model):
         return f"{self.user} — {self.weight_kg}kg"
 
 
+# BodieZ's Recovery piece was the one line in the blueprint that had no code
+# behind it yet: "soreness, sleep quality, fatigue, rest days... readiness
+# before training." Every earlier BodieZ screen already answers "what did
+# you do" — Recovery is the first one that has to answer "should you," and
+# that question has a much older paper trail than this codebase does.
+#
+# Three traditions land on the identical structural claim — rest is not a
+# lifestyle preference an athlete opts into, it is COMMANDED, on a schedule,
+# to the same degree the work itself is:
+#
+#   Exodus 23:12 (New International Version): "Six days do your work, but on
+#   the seventh day do not work... so that your ox and your donkey may rest."
+#   The command names the LABORING BODY specifically, not just the task left
+#   undone — rest is owed to the animal that did the work, which is closer to
+#   "your legs get today off" than to a wellness suggestion.
+#
+#   Qur'an 78:9 (Saheeh International): "And made your sleep for rest." Rest
+#   is listed as a designed FUNCTION of the body, not a gap between the
+#   functions that matter — the same reframing `days_trained_last_7d` forces
+#   on BodyMap's "overworked" status: training every day isn't discipline
+#   past a point, it's the absence of the thing the body was built to do.
+#
+#   Mark 6:31 (English Standard Version): "Come away by yourselves to a
+#   desolate place and rest a while." Said to people who had just done
+#   real, good work and were about to keep doing it without stopping — the
+#   text does not wait for them to break down first.
+#
+# None of that licenses a fabricated "readiness score" — the substance rule
+# draws that line regardless of what inspired the feature, so `readiness()`
+# below returns SELF-REPORTED numbers and a real training-day count, never a
+# single number pretending to average them.
+class BodieZRecoveryLog(models.Model):
+    """One daily check-in: soreness, sleep quality, fatigue, each 1-5, a
+    member's own words about their own body. Never inferred, never derived
+    from training data — a soreness number this app computed FOR somebody
+    would be a claim about their body they never made, which is a different
+    failure than a fake rating but the same shape: a number invented in place
+    of one that had to come from the person it's about.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="bodiez_recovery_logs")
+    soreness = models.PositiveSmallIntegerField()
+    sleep_quality = models.PositiveSmallIntegerField()
+    fatigue = models.PositiveSmallIntegerField()
+    notes = models.CharField(max_length=280, blank=True, default="")
+    logged_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-logged_at",)
+
+    def __str__(self):
+        return f"{self.user} — soreness {self.soreness}, fatigue {self.fatigue}"
+
+
 class TakeAnalysis(models.Model):
     upload = models.OneToOneField(Upload, on_delete=models.CASCADE, related_name="analysis")
     detected_notes = models.JSONField(default=list, help_text="[{note, freq, cents_off, timestamp}]")
