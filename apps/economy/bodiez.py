@@ -125,6 +125,39 @@ class BodieZExercisesView(APIView):
         return Response({"exercises": [_exercise_dict(e) for e in rows]})
 
 
+class BodieZExerciseHistoryView(APIView):
+    """GET /api/economy/bodiez/exercises/<id>/history/ — this member's own
+    most recent logged sets against this exercise, from a FINISHED session.
+
+    This is the Jefit signature feature: showing "last time: 3x8 @ 60kg"
+    beside the input while logging today's set. It has to be a real number
+    off a real row, never a suggested target — a logger that pre-fills last
+    time's numbers as a DEFAULT is fine (the member can change them); a
+    logger that invents a number because nothing was logged yet is the
+    substance rule's failure case wearing a progress tracker's clothes.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, exercise_id):
+        last_set = (BodieZSet.objects
+                    .filter(session__user=request.user, session__ended_at__isnull=False,
+                            exercise_id=exercise_id)
+                    .order_by("-session__started_at", "-set_number")
+                    .select_related("session")
+                    .first())
+        if not last_set:
+            return Response({"last_session": None})
+        sets = (BodieZSet.objects
+                .filter(session=last_set.session_id, exercise_id=exercise_id)
+                .order_by("set_number"))
+        return Response({
+            "last_session": {
+                "started_at": last_set.session.started_at.isoformat(),
+                "sets": [_set_dict(s) for s in sets],
+            },
+        })
+
+
 class BodieZRoutinesView(APIView):
     """GET/POST /api/economy/bodiez/routines/"""
     permission_classes = [IsAuthenticated]
