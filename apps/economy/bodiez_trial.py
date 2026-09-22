@@ -37,7 +37,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .bodiez import GOALS, REC_LABELS, _exercise_dict
+from .bodiez import GOALS, REC_LABELS, SPLITS, _exercise_dict
 from .clientip import client_ip
 from .models import BodieZExercise, TRIAL_CLAIM_DAYS, TRIAL_PER_IP_HOURS, TrialTake, trial_daily_cap
 from .trial import client_anon_id, trial_state
@@ -129,6 +129,7 @@ class BodieZTrialView(APIView):
             # numbers a member sees, which is the whole point of a trial: the
             # product, not a demo of it.
             "goals": GOALS,
+            "splits": SPLITS,
             "upgrade": _statz_upgrade(),
         })
 
