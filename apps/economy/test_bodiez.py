@@ -1091,3 +1091,29 @@ class BodieZChestAndReverseCurlDemoTests(TestCase):
         reverse_curl = BodieZExercise.objects.get(name="Reverse Barbell Curl")
         self.assertNotEqual(barbell_curl.id, reverse_curl.id)
         self.assertTrue(reverse_curl.demo_url)
+
+
+class BodieZLegsDemoVideoTests(TestCase):
+    """Fifth batch, the first to touch legs. See migration 0142's docstring."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="demovids5", password="pw")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_this_batchs_exercises_carry_a_real_demo_url(self):
+        names = {"Squat", "Deadlift", "Leg Press", "Dumbbell Squat", "Dumbbell Deadlift"}
+        with_demo = set(BodieZExercise.objects.exclude(demo_url="").values_list("name", flat=True))
+        self.assertTrue(names.issubset(with_demo))
+
+    def test_dumbbell_variants_are_not_relabeled_barbell_or_kettlebell_rows(self):
+        squat = BodieZExercise.objects.get(name="Squat")
+        dumbbell_squat = BodieZExercise.objects.get(name="Dumbbell Squat")
+        goblet_squat = BodieZExercise.objects.get(name="Kettlebell Goblet Squat")
+        deadlift = BodieZExercise.objects.get(name="Deadlift")
+        dumbbell_deadlift = BodieZExercise.objects.get(name="Dumbbell Deadlift")
+        self.assertNotEqual(squat.id, dumbbell_squat.id)
+        self.assertNotEqual(goblet_squat.id, dumbbell_squat.id)
+        self.assertNotEqual(deadlift.id, dumbbell_deadlift.id)
+        self.assertTrue(dumbbell_squat.demo_url)
+        self.assertTrue(dumbbell_deadlift.demo_url)
