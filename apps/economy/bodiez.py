@@ -160,54 +160,54 @@ GOALS = {
 # Each split is a real, named convention — full body, upper/lower,
 # push/pull/legs, a body-part split — not an invented one; see Baechle &
 # Earle (2008) for the same set discussed as standard programming choices.
-# What IS this module's own judgement call, and is stated here rather than
-# left implicit: **"arms" rides on both Push and Pull days.** The library's
-# muscle_group column has no biceps/triceps split (see BodieZExercise's own
-# docstring on why bench angle stays out of `equipment` for the matching
-# reason — a schema axis only earns its place when something downstream
-# actually reads it), so a real push/pull separation of arm work is not
-# data this app has. Putting the whole "arms" bucket on both days is the
-# honest call: false coverage (silently dropping arms from Pull) is worse
-# than a rep of the same bucket appearing on both — the same choice
-# `_claim_bodiez_trial` already made about which OTHER things get
-# duplicated rather than dropped.
+#
+# The "arms rides on both Push and Pull days" compromise that used to sit
+# here is GONE, not just reworded: migration 0145 split the library's old
+# "arms" bucket into biceps, triceps and forearms, so Push and Pull can each
+# get the muscle that actually belongs to them (triceps on Push, biceps and
+# forearms on Pull) instead of a duplicated blanket bucket standing in for
+# data this app didn't have. Same for "legs" -> upper_legs/lower_legs and
+# "core" -> abs. Body-part split's own "Arms" day still groups biceps,
+# triceps and forearms together — that one's a day-count constraint (five
+# days/week means five routines, not eight), not a data gap.
 SPLITS = {
     1: {"label": "1 day/week — Full Body",
-        "days": [{"label": "Full Body", "muscles": ["chest", "back", "shoulders", "arms", "legs", "core"]}]},
+        "days": [{"label": "Full Body", "muscles": ["chest", "back", "shoulders", "biceps", "triceps",
+                                                       "forearms", "upper_legs", "lower_legs", "abs", "glutes"]}]},
     2: {"label": "2 days/week — Upper / Lower",
         "days": [
-            {"label": "Upper", "muscles": ["chest", "back", "shoulders", "arms"]},
-            {"label": "Lower", "muscles": ["legs", "core"]},
+            {"label": "Upper", "muscles": ["chest", "back", "shoulders", "biceps", "triceps", "forearms"]},
+            {"label": "Lower", "muscles": ["upper_legs", "lower_legs", "abs", "glutes"]},
         ]},
     3: {"label": "3 days/week — Push / Pull / Legs",
         "days": [
-            {"label": "Push", "muscles": ["chest", "shoulders", "arms"]},
-            {"label": "Pull", "muscles": ["back", "arms"]},
-            {"label": "Legs", "muscles": ["legs", "core"]},
+            {"label": "Push", "muscles": ["chest", "shoulders", "triceps"]},
+            {"label": "Pull", "muscles": ["back", "biceps", "forearms"]},
+            {"label": "Legs", "muscles": ["upper_legs", "lower_legs", "abs", "glutes"]},
         ]},
     4: {"label": "4 days/week — Upper / Lower x2",
         "days": [
-            {"label": "Upper A", "muscles": ["chest", "back", "shoulders", "arms"]},
-            {"label": "Lower A", "muscles": ["legs", "core"]},
-            {"label": "Upper B", "muscles": ["chest", "back", "shoulders", "arms"]},
-            {"label": "Lower B", "muscles": ["legs", "core"]},
+            {"label": "Upper A", "muscles": ["chest", "back", "shoulders", "biceps", "triceps", "forearms"]},
+            {"label": "Lower A", "muscles": ["upper_legs", "lower_legs", "abs", "glutes"]},
+            {"label": "Upper B", "muscles": ["chest", "back", "shoulders", "biceps", "triceps", "forearms"]},
+            {"label": "Lower B", "muscles": ["upper_legs", "lower_legs", "abs", "glutes"]},
         ]},
     5: {"label": "5 days/week — Body-part split",
         "days": [
             {"label": "Chest", "muscles": ["chest"]},
             {"label": "Back", "muscles": ["back"]},
             {"label": "Shoulders", "muscles": ["shoulders"]},
-            {"label": "Arms", "muscles": ["arms"]},
-            {"label": "Legs", "muscles": ["legs", "core"]},
+            {"label": "Arms", "muscles": ["biceps", "triceps", "forearms"]},
+            {"label": "Legs", "muscles": ["upper_legs", "lower_legs", "abs", "glutes"]},
         ]},
     6: {"label": "6 days/week — Push / Pull / Legs x2",
         "days": [
-            {"label": "Push A", "muscles": ["chest", "shoulders", "arms"]},
-            {"label": "Pull A", "muscles": ["back", "arms"]},
-            {"label": "Legs A", "muscles": ["legs", "core"]},
-            {"label": "Push B", "muscles": ["chest", "shoulders", "arms"]},
-            {"label": "Pull B", "muscles": ["back", "arms"]},
-            {"label": "Legs B", "muscles": ["legs", "core"]},
+            {"label": "Push A", "muscles": ["chest", "shoulders", "triceps"]},
+            {"label": "Pull A", "muscles": ["back", "biceps", "forearms"]},
+            {"label": "Legs A", "muscles": ["upper_legs", "lower_legs", "abs", "glutes"]},
+            {"label": "Push B", "muscles": ["chest", "shoulders", "triceps"]},
+            {"label": "Pull B", "muscles": ["back", "biceps", "forearms"]},
+            {"label": "Legs B", "muscles": ["upper_legs", "lower_legs", "abs", "glutes"]},
         ]},
 }
 

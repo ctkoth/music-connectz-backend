@@ -16,7 +16,7 @@ class BodieZExercisesViewTests(TestCase):
         self.user = User.objects.create_user(username="u1", password="pw")
         self.client.force_authenticate(user=self.user)
         self.bench = BodieZExercise.objects.create(name="Test Bench Press", muscle_group="chest", equipment="barbell")
-        self.squat = BodieZExercise.objects.create(name="Test Squat", muscle_group="legs", equipment="barbell")
+        self.squat = BodieZExercise.objects.create(name="Test Squat", muscle_group="upper_legs", equipment="barbell")
 
     def test_lists_all_exercises(self):
         response = self.client.get("/api/economy/bodiez/exercises/")
@@ -26,7 +26,7 @@ class BodieZExercisesViewTests(TestCase):
         self.assertIn("Test Squat", names)
 
     def test_filters_by_muscle_group(self):
-        response = self.client.get("/api/economy/bodiez/exercises/?muscle_group=legs")
+        response = self.client.get("/api/economy/bodiez/exercises/?muscle_group=upper_legs")
         names = {e["name"] for e in response.data["exercises"]}
         self.assertIn("Test Squat", names)
         self.assertNotIn("Test Bench Press", names)
@@ -401,7 +401,7 @@ class BodieZBodyMapTests(TestCase):
         self.user = User.objects.create_user(username="u1", password="pw")
         self.client.force_authenticate(user=self.user)
         self.bench = BodieZExercise.objects.create(name="Test Bench", muscle_group="chest", equipment="barbell")
-        self.squat = BodieZExercise.objects.create(name="Test Squat", muscle_group="legs", equipment="barbell")
+        self.squat = BodieZExercise.objects.create(name="Test Squat", muscle_group="upper_legs", equipment="barbell")
 
     def test_every_muscle_group_is_reported_even_with_no_data(self):
         r = self.client.get("/api/economy/bodiez/bodymap/")
@@ -410,7 +410,7 @@ class BodieZBodyMapTests(TestCase):
 
     def test_an_untouched_muscle_group_is_untrained(self):
         r = self.client.get("/api/economy/bodiez/bodymap/")
-        legs = next(row for row in r.data["muscles"] if row["muscle_group"] == "legs")
+        legs = next(row for row in r.data["muscles"] if row["muscle_group"] == "upper_legs")
         self.assertEqual(legs["status"], "untrained")
         self.assertIsNone(legs["last_trained"])
 
@@ -1130,7 +1130,8 @@ class BodieZSplitsTests(TestCase):
         from .bodiez import SPLITS
         # cardio and full_body are deliberately not muscle groups a split
         # assigns to a day — they're not what "leg day" or "push day" means.
-        real_groups = {"chest", "back", "shoulders", "arms", "legs", "core"}
+        real_groups = {"chest", "back", "shoulders", "biceps", "triceps", "forearms",
+                       "upper_legs", "lower_legs", "abs", "glutes"}
         for day_count, split in SPLITS.items():
             covered = set()
             for day in split["days"]:
@@ -1190,6 +1191,65 @@ class BodieZLegsDemoVideoTests(TestCase):
         self.assertTrue(dumbbell_deadlift.demo_url)
 
 
+class BodieZJefitMuscleGroupsTests(TestCase):
+    """The library's 8 muscle groups became Jefit's 11 plus Full Body. See
+    migration 0145's docstring for the reasoning and the full REASSIGN map."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="jefitgroups", password="pw")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_old_coarse_groups_are_gone_from_the_choices(self):
+        keys = {k for k, _ in BodieZExercise.MUSCLE_CHOICES}
+        self.assertNotIn("arms", keys)
+        self.assertNotIn("legs", keys)
+        self.assertNotIn("core", keys)
+
+    def test_new_groups_match_jefits_eleven_plus_full_body(self):
+        keys = {k for k, _ in BodieZExercise.MUSCLE_CHOICES}
+        self.assertEqual(keys, {"abs", "back", "biceps", "cardio", "chest", "forearms",
+                                 "glutes", "shoulders", "triceps", "upper_legs",
+                                 "lower_legs", "full_body"})
+
+    def test_biceps_and_triceps_are_reachable_separately(self):
+        # The entire point: a member filtering to Biceps must not see
+        # Tricep Pushdown, and vice versa — the old "arms" bucket answered
+        # both with the same list.
+        curl = BodieZExercise.objects.get(name="Barbell Curl")
+        pushdown = BodieZExercise.objects.get(name="Tricep Pushdown")
+        self.assertEqual(curl.muscle_group, "biceps")
+        self.assertEqual(pushdown.muscle_group, "triceps")
+        self.assertNotEqual(curl.muscle_group, pushdown.muscle_group)
+
+    def test_forearm_focused_curls_moved_off_biceps(self):
+        self.assertEqual(BodieZExercise.objects.get(name="Reverse Barbell Curl").muscle_group, "forearms")
+        self.assertEqual(BodieZExercise.objects.get(name="Zottman Curl").muscle_group, "forearms")
+
+    def test_legs_split_into_upper_and_lower(self):
+        self.assertEqual(BodieZExercise.objects.get(name="Squat").muscle_group, "upper_legs")
+        self.assertEqual(BodieZExercise.objects.get(name="Calf Raise").muscle_group, "lower_legs")
+
+    def test_core_exercises_are_now_labeled_abs(self):
+        for name in ("Cable Crunch", "Plank", "Russian Twist"):
+            self.assertEqual(BodieZExercise.objects.get(name=name).muscle_group, "abs")
+
+    def test_full_body_lifts_kept_their_category_rather_than_being_forced_into_one_muscle(self):
+        for name in ("Burpee", "Clean and Press", "Kettlebell Swing", "Turkish Get-Up"):
+            self.assertEqual(BodieZExercise.objects.get(name=name).muscle_group, "full_body")
+
+    def test_chest_back_shoulders_cardio_were_untouched(self):
+        self.assertEqual(BodieZExercise.objects.get(name="Bench Press").muscle_group, "chest")
+        self.assertEqual(BodieZExercise.objects.get(name="Deadlift").muscle_group, "back")
+        self.assertEqual(BodieZExercise.objects.get(name="Overhead Press").muscle_group, "shoulders")
+        self.assertEqual(BodieZExercise.objects.get(name="Running").muscle_group, "cardio")
+
+    def test_bodymap_reports_all_twelve_groups(self):
+        r = self.client.get("/api/economy/bodiez/bodymap/")
+        groups = {row["muscle_group"] for row in r.data["muscles"]}
+        self.assertEqual(groups, {k for k, _ in BodieZExercise.MUSCLE_CHOICES})
+
+
 class BodieZCableDemoVideoTests(TestCase):
     """Sixth batch, the first done on a cable stack — no new rows, five
     existing ones. See migration 0144's docstring."""
@@ -1244,7 +1304,7 @@ class CleanTrialSplitTests(TestCase):
     nothing it sends is trusted past this function. See its docstring."""
 
     def setUp(self):
-        self.ex = BodieZExercise.objects.create(name="Trial Split Test Squat", muscle_group="legs", equipment="barbell")
+        self.ex = BodieZExercise.objects.create(name="Trial Split Test Squat", muscle_group="upper_legs", equipment="barbell")
 
     def test_a_clean_day_survives(self):
         from apps.economy.bodiez import clean_trial_split

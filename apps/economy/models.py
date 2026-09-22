@@ -5498,10 +5498,22 @@ class BodieZExercise(models.Model):
     eleven instead of one out of eight.
     """
     name = models.CharField(max_length=80, unique=True)
+    # Jefit's own eleven groups (Abs, Back, Biceps, Cardio, Chest, Forearms,
+    # Glutes, Shoulders, Triceps, Upper Legs, Lower Legs), plus one Jefit
+    # doesn't have: this library's compound lifts (Burpee, Clean and Press,
+    # kettlebell work) genuinely train more than one region, and forcing each
+    # into a single dominant muscle would misdescribe what it trains — see
+    # migration 0145's docstring for the decision. "Arms" and "Legs" are
+    # GONE, not aliased: a member filtering to "Biceps" who got "Arms"
+    # results back (Barbell Curl AND Barbell Tricep Extension) would have a
+    # filter that doesn't filter, the same failure PersonalitieZ's undeclared
+    # state exists to prevent on a different field.
     MUSCLE_CHOICES = [
-        ("chest", "Chest"), ("back", "Back"), ("shoulders", "Shoulders"),
-        ("arms", "Arms"), ("legs", "Legs"), ("core", "Core"),
-        ("cardio", "Cardio"), ("full_body", "Full Body"),
+        ("abs", "Abs"), ("back", "Back"), ("biceps", "Biceps"),
+        ("cardio", "Cardio"), ("chest", "Chest"), ("forearms", "Forearms"),
+        ("glutes", "Glutes"), ("shoulders", "Shoulders"), ("triceps", "Triceps"),
+        ("upper_legs", "Upper Legs"), ("lower_legs", "Lower Legs"),
+        ("full_body", "Full Body"),
     ]
     muscle_group = models.CharField(max_length=12, choices=MUSCLE_CHOICES)
     EQUIPMENT_CHOICES = [
