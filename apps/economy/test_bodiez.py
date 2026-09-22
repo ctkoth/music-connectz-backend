@@ -1032,3 +1032,41 @@ class BodieZShoulderDemoVideoTests(TestCase):
     def test_lateral_raise_kept_its_id_and_gained_a_demo_url(self):
         lateral = BodieZExercise.objects.get(name="Lateral Raise")
         self.assertEqual(lateral.demo_url, "/exercise-demos/dumbbell-lateral-raise.mp4")
+
+
+class BodieZSplitsTests(TestCase):
+    """1-6 days/week splits — real, named conventions covering every
+    muscle group across the week. See SPLITS' own docstring for why arms
+    rides on both Push and Pull days rather than being dropped from one."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="splitz", password="pw")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_coach_serves_all_six_day_counts(self):
+        from .bodiez import SPLITS
+        r = self.client.get("/api/economy/bodiez/coach/")
+        self.assertEqual(set(r.data["splits"].keys()), {1, 2, 3, 4, 5, 6})
+        self.assertEqual(set(r.data["splits"].keys()), set(SPLITS.keys()))
+
+    def test_every_split_has_exactly_that_many_days(self):
+        from .bodiez import SPLITS
+        for day_count, split in SPLITS.items():
+            self.assertEqual(len(split["days"]), day_count, split["label"])
+
+    def test_every_split_covers_every_real_muscle_group(self):
+        from .bodiez import SPLITS
+        # cardio and full_body are deliberately not muscle groups a split
+        # assigns to a day — they're not what "leg day" or "push day" means.
+        real_groups = {"chest", "back", "shoulders", "arms", "legs", "core"}
+        for day_count, split in SPLITS.items():
+            covered = set()
+            for day in split["days"]:
+                covered.update(day["muscles"])
+            self.assertEqual(covered, real_groups, split["label"])
+
+    def test_trial_serves_the_identical_splits_table(self):
+        from .bodiez import SPLITS
+        r = self.client.get("/api/economy/bodiez/trial/")
+        self.assertEqual(r.data["splits"], SPLITS)

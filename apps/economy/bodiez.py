@@ -141,6 +141,67 @@ GOALS = {
 }
 
 
+# One split per training-day count, 1 through 6 — what "Build a Routine"
+# had NEVER offered: a member could only ever get one routine, one exercise
+# per muscle group, whatever they clicked. Asked outright "does this cover
+# every muscle across a real week", the honest answer used to be no, and
+# this is that gap closed rather than talked around.
+#
+# Each split is a real, named convention — full body, upper/lower,
+# push/pull/legs, a body-part split — not an invented one; see Baechle &
+# Earle (2008) for the same set discussed as standard programming choices.
+# What IS this module's own judgement call, and is stated here rather than
+# left implicit: **"arms" rides on both Push and Pull days.** The library's
+# muscle_group column has no biceps/triceps split (see BodieZExercise's own
+# docstring on why bench angle stays out of `equipment` for the matching
+# reason — a schema axis only earns its place when something downstream
+# actually reads it), so a real push/pull separation of arm work is not
+# data this app has. Putting the whole "arms" bucket on both days is the
+# honest call: false coverage (silently dropping arms from Pull) is worse
+# than a rep of the same bucket appearing on both — the same choice
+# `_claim_bodiez_trial` already made about which OTHER things get
+# duplicated rather than dropped.
+SPLITS = {
+    1: {"label": "1 day/week — Full Body",
+        "days": [{"label": "Full Body", "muscles": ["chest", "back", "shoulders", "arms", "legs", "core"]}]},
+    2: {"label": "2 days/week — Upper / Lower",
+        "days": [
+            {"label": "Upper", "muscles": ["chest", "back", "shoulders", "arms"]},
+            {"label": "Lower", "muscles": ["legs", "core"]},
+        ]},
+    3: {"label": "3 days/week — Push / Pull / Legs",
+        "days": [
+            {"label": "Push", "muscles": ["chest", "shoulders", "arms"]},
+            {"label": "Pull", "muscles": ["back", "arms"]},
+            {"label": "Legs", "muscles": ["legs", "core"]},
+        ]},
+    4: {"label": "4 days/week — Upper / Lower x2",
+        "days": [
+            {"label": "Upper A", "muscles": ["chest", "back", "shoulders", "arms"]},
+            {"label": "Lower A", "muscles": ["legs", "core"]},
+            {"label": "Upper B", "muscles": ["chest", "back", "shoulders", "arms"]},
+            {"label": "Lower B", "muscles": ["legs", "core"]},
+        ]},
+    5: {"label": "5 days/week — Body-part split",
+        "days": [
+            {"label": "Chest", "muscles": ["chest"]},
+            {"label": "Back", "muscles": ["back"]},
+            {"label": "Shoulders", "muscles": ["shoulders"]},
+            {"label": "Arms", "muscles": ["arms"]},
+            {"label": "Legs", "muscles": ["legs", "core"]},
+        ]},
+    6: {"label": "6 days/week — Push / Pull / Legs x2",
+        "days": [
+            {"label": "Push A", "muscles": ["chest", "shoulders", "arms"]},
+            {"label": "Pull A", "muscles": ["back", "arms"]},
+            {"label": "Legs A", "muscles": ["legs", "core"]},
+            {"label": "Push B", "muscles": ["chest", "shoulders", "arms"]},
+            {"label": "Pull B", "muscles": ["back", "arms"]},
+            {"label": "Legs B", "muscles": ["legs", "core"]},
+        ]},
+}
+
+
 def _routine_dict(r):
     return {"id": r.id, "title": r.title, "exercises": r.exercises,
             "bucket": r.bucket,
@@ -636,6 +697,7 @@ class BodieZCoachView(APIView):
             "labels": REC_LABELS,
             "stale_after_days": self.STALE_DAYS,
             "goals": GOALS,
+            "splits": SPLITS,
         })
 
 
