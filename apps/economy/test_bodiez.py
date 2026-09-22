@@ -968,3 +968,33 @@ class BodieZCoachGoalsTests(TestCase):
         # two different things on one screen.
         from .bodiez import GOALS
         self.assertNotIn("strength", GOALS)
+
+
+class BodieZDemoVideoTests(TestCase):
+    """The first real demo_url values — self-recorded, rights cleared. See
+    migration 0138's own docstring."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="demovids", password="pw")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_five_exercises_carry_a_real_demo_url(self):
+        with_demo = BodieZExercise.objects.exclude(demo_url="")
+        self.assertEqual(with_demo.count(), 5)
+
+    def test_demo_urls_are_root_relative_not_a_frozen_host(self):
+        for ex in BodieZExercise.objects.exclude(demo_url=""):
+            self.assertTrue(ex.demo_url.startswith("/exercise-demos/"), ex.demo_url)
+
+    def test_barbell_curl_is_a_new_row_not_a_relabeled_bicep_curl(self):
+        # Bicep Curl stays dumbbell; Barbell Curl is its own exercise.
+        self.assertEqual(BodieZExercise.objects.get(name="Bicep Curl").equipment, "dumbbell")
+        barbell_curl = BodieZExercise.objects.get(name="Barbell Curl")
+        self.assertEqual(barbell_curl.equipment, "barbell")
+        self.assertTrue(barbell_curl.demo_url)
+
+    def test_exercise_dict_serves_the_real_url(self):
+        r = self.client.get("/api/economy/bodiez/exercises/")
+        row = next(e for e in r.data["exercises"] if e["name"] == "Barbell Curl")
+        self.assertEqual(row["demo_url"], "/exercise-demos/barbell-curl.mp4")
