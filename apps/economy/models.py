@@ -5547,6 +5547,12 @@ BODIEZ_BUCKETS = (
 )
 
 
+BODIEZ_DAY_TAGS = (
+    ("mon", "Mon"), ("tue", "Tue"), ("wed", "Wed"), ("thu", "Thu"),
+    ("fri", "Fri"), ("sat", "Sat"), ("sun", "Sun"), ("any", "Any"),
+)
+
+
 class BodieZRoutine(models.Model):
     """A saved training plan. `exercises` is JSON for display — the same
     shape `PostContributor` and `CollabParticipant` warn against reading back
@@ -5560,13 +5566,41 @@ class BodieZRoutine(models.Model):
     in Upcoming. `scheduled_for` is a DATE, not a datetime: a training day is
     a day, and a time-of-day field here would be a second place BodieZ's own
     calendar semantics live once one gets built.
+
+    `day_tag` is a DIFFERENT axis from either of those, and was missing
+    outright until a member's real Jefit export showed the gap: `bucket` is
+    a WORKFLOW state (where a routine sits before/after it's run) and
+    `scheduled_for` is one SPECIFIC calendar date, but neither can say "this
+    is a Monday routine" as a recurring fact independent of any particular
+    week. Worse, `bucket`+`scheduled_for` both assume ONE routine occupies a
+    slot — the export had three different named Monday sessions ("chest 1",
+    "Band arm1", "New chest") a member picks between week to week, which a
+    single-slot model can't represent at all. `day_tag` is many-to-one on
+    purpose: any number of routines can carry "mon", and the member decides
+    which one to run on a given Monday, same as Jefit's own day-tag chips.
+    `"any"` is the day-agnostic bucket the export also used for accessory
+    work (ab/leg finishers) that isn't tied to a specific day — kept apart
+    from a blank tag so "untagged, never assigned" and "deliberately every
+    day" read differently on a routine list.
+
+    It is deliberately just a label, not a schedule: it does not create
+    calendar entries, does not conflict-check against `scheduled_for`, and
+    does not drive any reminder. A member can day_tag a routine AND give it
+    a scheduled_for date; the two answer different questions ("what kind of
+    day is this for" vs "when, specifically, am I doing it").
     """
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
                               related_name="bodiez_routines")
     title = models.CharField(max_length=80)
+    # A short note on the WHOLE plan — "recovery in chair", "deload week" —
+    # distinct from the title the same way Jefit's own routine name and
+    # routine description are two separate fields. Optional: most routines
+    # need no context beyond their name, and a blank field costs nothing.
+    description = models.CharField(max_length=200, blank=True, default="")
     # [{exercise_id, sets, reps, order}, ...]
     exercises = models.JSONField(default=list)
     bucket = models.CharField(max_length=10, choices=BODIEZ_BUCKETS, default="inbox", db_index=True)
+    day_tag = models.CharField(max_length=3, choices=BODIEZ_DAY_TAGS, blank=True, default="")
     scheduled_for = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

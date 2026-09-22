@@ -74,11 +74,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import (BODIEZ_BUCKETS, BODIEZ_GOAL_KINDS, BodieZExercise, BodieZGoal,
-                     BodieZRecoveryLog, BodieZRoutine, BodieZSession, BodieZSet,
+from .models import (BODIEZ_BUCKETS, BODIEZ_DAY_TAGS, BODIEZ_GOAL_KINDS, BodieZExercise,
+                     BodieZGoal, BodieZRecoveryLog, BodieZRoutine, BodieZSession, BodieZSet,
                      BodieZWeightLog)
 
 _BUCKET_KEYS = {k for k, _ in BODIEZ_BUCKETS}
+_DAY_TAG_KEYS = {k for k, _ in BODIEZ_DAY_TAGS}
 
 
 def _exercise_dict(ex):
@@ -203,8 +204,8 @@ SPLITS = {
 
 
 def _routine_dict(r):
-    return {"id": r.id, "title": r.title, "exercises": r.exercises,
-            "bucket": r.bucket,
+    return {"id": r.id, "title": r.title, "description": r.description,
+            "exercises": r.exercises, "bucket": r.bucket, "day_tag": r.day_tag,
             "scheduled_for": r.scheduled_for.isoformat() if r.scheduled_for else None,
             "updated_at": r.updated_at.isoformat()}
 
@@ -299,8 +300,11 @@ class BodieZRoutinesView(APIView):
             return Response({"detail": f"Unknown exercise id(s): {bad}"}, status=status.HTTP_400_BAD_REQUEST)
         bucket = request.data.get("bucket")
         bucket = bucket if bucket in _BUCKET_KEYS else "inbox"
+        day_tag = request.data.get("day_tag")
+        day_tag = day_tag if day_tag in _DAY_TAG_KEYS else ""
+        description = str(request.data.get("description") or "").strip()[:200]
         routine = BodieZRoutine.objects.create(user=request.user, title=title, exercises=exercises,
-                                                bucket=bucket)
+                                                bucket=bucket, day_tag=day_tag, description=description)
         return Response(_routine_dict(routine), status=status.HTTP_201_CREATED)
 
 
@@ -409,6 +413,14 @@ class BodieZRoutineDetailView(APIView):
                 return Response({"detail": f"bucket must be one of {sorted(_BUCKET_KEYS)}."},
                                  status=status.HTTP_400_BAD_REQUEST)
             routine.bucket = bucket
+        if "day_tag" in request.data:
+            day_tag = request.data.get("day_tag") or ""
+            if day_tag not in _DAY_TAG_KEYS and day_tag != "":
+                return Response({"detail": f"day_tag must be one of {sorted(_DAY_TAG_KEYS)}, or blank."},
+                                 status=status.HTTP_400_BAD_REQUEST)
+            routine.day_tag = day_tag
+        if "description" in request.data:
+            routine.description = str(request.data.get("description") or "").strip()[:200]
         if "scheduled_for" in request.data:
             raw = request.data.get("scheduled_for")
             if not raw:
@@ -451,6 +463,10 @@ class BodieZBoardView(APIView):
             # place the emoji and wording live, and the two drift within a
             # year the way every retyped tier number in this app has.
             "bucket_labels": [{"key": k, "label": v} for k, v in BODIEZ_BUCKETS],
+            # Same reasoning as bucket_labels — a client that split
+            # BODIEZ_DAY_TAGS itself would be the second place the order and
+            # wording live.
+            "day_tag_labels": [{"key": k, "label": v} for k, v in BODIEZ_DAY_TAGS],
         })
 
 
