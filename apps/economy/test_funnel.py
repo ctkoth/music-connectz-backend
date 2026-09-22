@@ -61,12 +61,22 @@ class FunnelEventTests(TestCase):
         self.assertEqual(row.kind, "try_shared")
         self.assertEqual(row.meta, {"app_key": "rapz"})
 
-    def test_a_kind_with_no_declared_shape_stores_no_meta(self):
+    def test_a_kind_with_no_declared_shape_stores_no_non_ambient_meta(self):
         r = self.client.post(EVENT, {
-            "kind": "landing_view", "anon_id": "abc123", "meta": {"app_key": "singz"},
+            "kind": "landing_view", "anon_id": "abc123", "meta": {"why": "too_big"},
         }, format="json")
         self.assertEqual(r.status_code, 204)
         self.assertEqual(FunnelEvent.objects.get().meta, {})
+
+    def test_app_key_is_ambient_now_and_rides_register_view(self):
+        # The gap this closed: register_view/register_success carried no
+        # app_key, so by_door could show a door's own view->scored chain but
+        # never whether those visitors went on to register.
+        r = self.client.post(EVENT, {
+            "kind": "register_view", "anon_id": "abc123", "meta": {"app_key": "bodiez"},
+        }, format="json")
+        self.assertEqual(r.status_code, 204)
+        self.assertEqual(FunnelEvent.objects.get().meta, {"app_key": "bodiez"})
 
 
 class FunnelSummaryTests(TestCase):
@@ -320,6 +330,62 @@ class RegisterAttributionTests(TestCase):
     def test_a_login_keeps_its_channel_too(self):
         self.fire("login_success", "r2", "flyer")
         self.assertEqual(FunnelEvent.objects.get().meta, {"src": "flyer"})
+
+
+class ByDoorIncludesBodiezTests(TestCase):
+    """`by_door` was already scoping the whole funnel per trial door,
+    BodieZ included — see `_door_keys()` — but it carried no label and no
+    way to tell a recorder door from one that has none, and `register_view`
+    / `register_success` never carried `app_key` at all, so a door's own
+    scored→registered chain was structurally unanswerable. This pins the fix:
+    app_key is AMBIENT now (rides register_view/register_success too), and
+    each by_door row names itself and says whether it has a recorder.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_superuser("boss5", "b5@e.com", PW)
+
+    def fire(self, kind, anon, app_key=None):
+        meta = {"app_key": app_key} if app_key else {}
+        return self.client.post(EVENT, {"kind": kind, "anon_id": anon, "meta": meta}, format="json")
+
+    def owner_client(self):
+        c = APIClient()
+        c.force_authenticate(self.owner)
+        return c
+
+    def test_bodiez_is_one_of_the_doors(self):
+        r = self.owner_client().get(SUMMARY)
+        keys = {d["app_key"] for d in r.data["by_door"]}
+        self.assertIn("bodiez", keys)
+
+    def test_bodiez_carries_a_real_label_and_no_recorder(self):
+        r = self.owner_client().get(SUMMARY)
+        bodiez = next(d for d in r.data["by_door"] if d["app_key"] == "bodiez")
+        self.assertEqual(bodiez["label"], "BodieZ")
+        self.assertFalse(bodiez["has_recorder"])
+
+    def test_an_instrument_door_has_a_recorder(self):
+        r = self.owner_client().get(SUMMARY)
+        singz = next(d for d in r.data["by_door"] if d["app_key"] == "singz")
+        self.assertTrue(singz["has_recorder"])
+
+    def test_a_bodiez_visitor_who_registers_shows_up_in_bodiezs_own_chain(self):
+        # This is the gap that made "scored -> registered" per door
+        # unanswerable before app_key went ambient: register_view had no
+        # slot in its own META_SHAPE for it, so even a client that SENT one
+        # had it dropped. It's the server's acceptance being pinned here;
+        # track.js remembering and resending the last door is the client
+        # half, covered live rather than here (no browser in this suite).
+        self.fire("try_view", "bz1", app_key="bodiez")
+        self.fire("try_scored", "bz1", app_key="bodiez")
+        self.fire("register_view", "bz1", app_key="bodiez")
+        self.fire("register_success", "bz1", app_key="bodiez")
+        r = self.owner_client().get(SUMMARY)
+        bodiez = next(d for d in r.data["by_door"] if d["app_key"] == "bodiez")
+        self.assertEqual(bodiez["steps"]["register_view"], 1)
+        self.assertEqual(bodiez["steps"]["register_success"], 1)
 
 
 class DeviceShapeTests(TestCase):
