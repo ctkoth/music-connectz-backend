@@ -94,6 +94,72 @@ class BodieZRoutinesViewTests(TestCase):
         self.assertFalse(BodieZRoutine.objects.filter(id=routine.id).exists())
 
 
+class BodieZRoutineDayTagTests(TestCase):
+    """`day_tag` and `description` — a member's real Jefit export showed the
+    gap: `bucket` is a workflow state and `scheduled_for` is one date, but
+    neither can say "this is a Monday routine" as a recurring fact, and
+    neither supports MULTIPLE routines sharing a day. See BodieZRoutine's
+    own docstring."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="daytag1", password="pw")
+        self.client.force_authenticate(user=self.user)
+
+    def test_a_routine_can_be_created_with_a_day_tag_and_description(self):
+        r = self.client.post("/api/economy/bodiez/routines/", {
+            "title": "chest 1", "exercises": [], "day_tag": "mon",
+            "description": "recovery in chair",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(r.data["day_tag"], "mon")
+        self.assertEqual(r.data["description"], "recovery in chair")
+
+    def test_multiple_routines_can_share_the_same_day_tag(self):
+        # This is the actual gap: a single-slot model (one routine per
+        # weekday) cannot represent three named Monday sessions a member
+        # picks between. day_tag is many-to-one on purpose.
+        for title in ["chest 1", "Band arm1", "New chest"]:
+            r = self.client.post("/api/economy/bodiez/routines/",
+                                  {"title": title, "exercises": [], "day_tag": "mon"}, format="json")
+            self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        mon_titles = set(BodieZRoutine.objects.filter(user=self.user, day_tag="mon")
+                          .values_list("title", flat=True))
+        self.assertEqual(mon_titles, {"chest 1", "Band arm1", "New chest"})
+
+    def test_an_unrecognised_day_tag_is_dropped_not_rejected(self):
+        r = self.client.post("/api/economy/bodiez/routines/",
+                              {"title": "Junk day", "exercises": [], "day_tag": "whenever"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(r.data["day_tag"], "")
+
+    def test_any_is_a_real_day_tag_distinct_from_blank(self):
+        r = self.client.post("/api/economy/bodiez/routines/",
+                              {"title": "leg ab", "exercises": [], "day_tag": "any"}, format="json")
+        self.assertEqual(r.data["day_tag"], "any")
+
+    def test_patch_can_set_and_clear_the_day_tag(self):
+        routine = BodieZRoutine.objects.create(user=self.user, title="chest 1", exercises=[])
+        r = self.client.patch(f"/api/economy/bodiez/routines/{routine.id}/",
+                               {"day_tag": "mon"}, format="json")
+        self.assertEqual(r.data["day_tag"], "mon")
+        r = self.client.patch(f"/api/economy/bodiez/routines/{routine.id}/",
+                               {"day_tag": ""}, format="json")
+        self.assertEqual(r.data["day_tag"], "")
+
+    def test_patch_rejects_a_bad_day_tag(self):
+        routine = BodieZRoutine.objects.create(user=self.user, title="chest 1", exercises=[])
+        r = self.client.patch(f"/api/economy/bodiez/routines/{routine.id}/",
+                               {"day_tag": "someday"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_patch_can_set_the_description(self):
+        routine = BodieZRoutine.objects.create(user=self.user, title="Grimesto home", exercises=[])
+        r = self.client.patch(f"/api/economy/bodiez/routines/{routine.id}/",
+                               {"description": "recovery in chair"}, format="json")
+        self.assertEqual(r.data["description"], "recovery in chair")
+
+
 class BodieZSessionsViewTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -308,6 +374,11 @@ class BodieZSchedulerTests(TestCase):
         r = self.client.get("/api/economy/bodiez/board/")
         keys = {row["key"] for row in r.data["bucket_labels"]}
         self.assertEqual(keys, {"inbox", "today", "upcoming", "anytime", "someday", "trash"})
+
+    def test_the_board_serves_day_tag_labels_so_the_client_never_retypes_them(self):
+        r = self.client.get("/api/economy/bodiez/board/")
+        keys = {row["key"] for row in r.data["day_tag_labels"]}
+        self.assertEqual(keys, {"mon", "tue", "wed", "thu", "fri", "sat", "sun", "any"})
 
     def test_board_requires_auth(self):
         client = APIClient()
