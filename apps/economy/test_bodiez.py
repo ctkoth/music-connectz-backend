@@ -980,8 +980,14 @@ class BodieZDemoVideoTests(TestCase):
         self.client.force_authenticate(self.user)
 
     def test_five_exercises_carry_a_real_demo_url(self):
-        with_demo = BodieZExercise.objects.exclude(demo_url="")
-        self.assertEqual(with_demo.count(), 5)
+        # Not a total count — later migrations add more real videos, and a
+        # count pinned here would break every time one does, the same trap
+        # the funnel's own eleven-kinds story warns against. Check that
+        # THESE five specifically got one.
+        names = {"Tricep Kickback", "Dumbbell Tricep Extension", "Barbell Tricep Extension",
+                 "Barbell Curl", "EZ Bar Skullcrusher"}
+        with_demo = set(BodieZExercise.objects.exclude(demo_url="").values_list("name", flat=True))
+        self.assertTrue(names.issubset(with_demo))
 
     def test_demo_urls_are_root_relative_not_a_frozen_host(self):
         for ex in BodieZExercise.objects.exclude(demo_url=""):
@@ -998,3 +1004,31 @@ class BodieZDemoVideoTests(TestCase):
         r = self.client.get("/api/economy/bodiez/exercises/")
         row = next(e for e in r.data["exercises"] if e["name"] == "Barbell Curl")
         self.assertEqual(row["demo_url"], "/exercise-demos/barbell-curl.mp4")
+
+
+class BodieZShoulderDemoVideoTests(TestCase):
+    """Second batch of real demo_url values. See migration 0139's docstring."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="demovids2", password="pw")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_this_batchs_three_exercises_carry_a_real_demo_url(self):
+        # Not a total — see 0138's test for why a pinned count is the wrong
+        # check here.
+        names = {"Dumbbell Front Raise", "Dumbbell Shoulder Press", "Lateral Raise"}
+        with_demo = set(BodieZExercise.objects.exclude(demo_url="").values_list("name", flat=True))
+        self.assertTrue(names.issubset(with_demo))
+
+    def test_dumbbell_shoulder_press_is_not_the_barbell_overhead_press(self):
+        overhead = BodieZExercise.objects.get(name="Overhead Press")
+        self.assertEqual(overhead.equipment, "barbell")
+        self.assertFalse(overhead.demo_url)
+        dumbbell_press = BodieZExercise.objects.get(name="Dumbbell Shoulder Press")
+        self.assertEqual(dumbbell_press.equipment, "dumbbell")
+        self.assertTrue(dumbbell_press.demo_url)
+
+    def test_lateral_raise_kept_its_id_and_gained_a_demo_url(self):
+        lateral = BodieZExercise.objects.get(name="Lateral Raise")
+        self.assertEqual(lateral.demo_url, "/exercise-demos/dumbbell-lateral-raise.mp4")
