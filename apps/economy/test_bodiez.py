@@ -1070,3 +1070,24 @@ class BodieZSplitsTests(TestCase):
         from .bodiez import SPLITS
         r = self.client.get("/api/economy/bodiez/trial/")
         self.assertEqual(r.data["splits"], SPLITS)
+
+
+class BodieZChestAndReverseCurlDemoTests(TestCase):
+    """Fourth batch. See migration 0141's docstring."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="demovids4", password="pw")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_this_batchs_exercises_carry_a_real_demo_url(self):
+        names = {"Reverse Barbell Curl", "Bench Press",
+                 "Incline Barbell Bench Press", "Decline Barbell Bench Press"}
+        with_demo = set(BodieZExercise.objects.exclude(demo_url="").values_list("name", flat=True))
+        self.assertTrue(names.issubset(with_demo))
+
+    def test_reverse_curl_is_not_a_relabeled_barbell_curl(self):
+        barbell_curl = BodieZExercise.objects.get(name="Barbell Curl")
+        reverse_curl = BodieZExercise.objects.get(name="Reverse Barbell Curl")
+        self.assertNotEqual(barbell_curl.id, reverse_curl.id)
+        self.assertTrue(reverse_curl.demo_url)
