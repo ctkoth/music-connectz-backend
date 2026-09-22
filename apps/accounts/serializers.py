@@ -163,6 +163,12 @@ class RegisterSerializer(serializers.Serializer):
     # Token from a no-account trial Boss Take. Signing up with it attaches that
     # take to the new account, so the thing they made at the door isn't lost.
     trial_token = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
+    # A full week's routine built client-side on the BodieZ trial door — free,
+    # unlimited, no AI, no account, so nothing about building it touches the
+    # shared trial-take budget. It only becomes real BodieZRoutine rows if
+    # this registration actually completes, which is the "only keep it if you
+    # upgrade" the CTA on that screen promises.
+    trial_split = serializers.JSONField(required=False, default=list)
 
     def validate_username(self, value):
         # `username_problem` is the same rule `check-username/` answers with.
@@ -202,6 +208,14 @@ class RegisterSerializer(serializers.Serializer):
         if value and Profile.objects.filter(phone=value).exists():
             raise serializers.ValidationError("An account already uses that phone number.")
         return value
+
+    def validate_trial_split(self, value):
+        # Cleaned here, never trusted raw — this is the one field on this
+        # serializer that arrives from someone who was never authenticated.
+        # Malformed input becomes an empty list rather than a 400: a broken
+        # trial split must never be the reason a registration fails.
+        from apps.economy.bodiez import clean_trial_split
+        return clean_trial_split(value)
 
     def create(self, validated):
         # Everything below used to run un-transacted: `create_user` committed
@@ -257,6 +271,12 @@ class RegisterSerializer(serializers.Serializer):
             if token:
                 from apps.economy.models import claim_trial_take
                 claim_trial_take(user, token)
+            # The week they built on the BodieZ trial door, if any — already
+            # cleaned by validate_trial_split, so this is trusted here.
+            trial_split = validated.get("trial_split") or []
+            if trial_split:
+                from apps.economy.bodiez import create_trial_split_routines
+                create_trial_split_routines(user, trial_split)
         return user
 
 

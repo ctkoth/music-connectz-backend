@@ -1117,3 +1117,59 @@ class BodieZLegsDemoVideoTests(TestCase):
         self.assertNotEqual(deadlift.id, dumbbell_deadlift.id)
         self.assertTrue(dumbbell_squat.demo_url)
         self.assertTrue(dumbbell_deadlift.demo_url)
+
+
+class CleanTrialSplitTests(TestCase):
+    """`clean_trial_split` is the untrusted-input side of the trial's "Build
+    a week" flow — the client that calls it was never authenticated, so
+    nothing it sends is trusted past this function. See its docstring."""
+
+    def setUp(self):
+        self.ex = BodieZExercise.objects.create(name="Trial Split Test Squat", muscle_group="legs", equipment="barbell")
+
+    def test_a_clean_day_survives(self):
+        from apps.economy.bodiez import clean_trial_split
+        out = clean_trial_split([{"title": "Day 1", "exercises": [
+            {"exercise_id": self.ex.id, "order": 0, "sets": 4, "reps": 8, "weight_kg": 100}]}])
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["exercises"][0]["exercise_id"], self.ex.id)
+
+    def test_not_a_list_returns_empty(self):
+        from apps.economy.bodiez import clean_trial_split
+        self.assertEqual(clean_trial_split("nonsense"), [])
+        self.assertEqual(clean_trial_split(None), [])
+        self.assertEqual(clean_trial_split({}), [])
+
+    def test_unknown_exercise_id_is_dropped(self):
+        from apps.economy.bodiez import clean_trial_split
+        out = clean_trial_split([{"title": "Day 1", "exercises": [
+            {"exercise_id": 999999, "order": 0, "sets": 3, "reps": 10}]}])
+        self.assertEqual(out, [])
+
+    def test_a_day_with_no_title_is_dropped(self):
+        from apps.economy.bodiez import clean_trial_split
+        out = clean_trial_split([{"title": "  ", "exercises": [
+            {"exercise_id": self.ex.id, "order": 0, "sets": 3, "reps": 10}]}])
+        self.assertEqual(out, [])
+
+    def test_more_than_six_days_is_truncated(self):
+        from apps.economy.bodiez import clean_trial_split
+        raw = [{"title": f"Day {i}", "exercises": [
+            {"exercise_id": self.ex.id, "order": 0, "sets": 3, "reps": 10}]} for i in range(9)]
+        out = clean_trial_split(raw)
+        self.assertLessEqual(len(out), 6)
+
+    def test_junk_sets_falls_back_to_defaults_for_the_whole_exercise(self):
+        from apps.economy.bodiez import clean_trial_split
+        out = clean_trial_split([{"title": "Day 1", "exercises": [
+            {"exercise_id": self.ex.id, "order": 0, "sets": "not a number", "reps": 8}]}])
+        self.assertEqual(len(out), 1)
+        ex = out[0]["exercises"][0]
+        self.assertEqual(ex["sets"], 3)
+        self.assertEqual(ex["reps"], 10)
+
+    def test_an_out_of_range_rep_count_is_clamped_not_replaced(self):
+        from apps.economy.bodiez import clean_trial_split
+        out = clean_trial_split([{"title": "Day 1", "exercises": [
+            {"exercise_id": self.ex.id, "order": 0, "sets": 3, "reps": -50}]}])
+        self.assertEqual(out[0]["exercises"][0]["reps"], 1)

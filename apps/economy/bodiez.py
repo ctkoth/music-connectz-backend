@@ -304,6 +304,75 @@ class BodieZRoutinesView(APIView):
         return Response(_routine_dict(routine), status=status.HTTP_201_CREATED)
 
 
+# The trial's "Build a week" flow computes the split client-side — the same
+# pure `pickForDay` lookup the real app's SplitBuilder already runs, no AI,
+# no server round trip, so a stranger can preview all 1-6 days for free
+# before an account exists to save anything to. What they built has nowhere
+# to live until they register, so `RegisterSerializer.create` calls this with
+# whatever the client sent in `trial_split` — untrusted input from someone
+# who was never authenticated, so it is cleaned here rather than trusted,
+# following the same shape `BodieZRoutinesView.post` already validates a
+# single routine with. Best-effort and silent on anything malformed: a bad
+# trial split must never be the reason a registration fails, same rule
+# `claim_trial_take` already holds itself to for a stale token.
+MAX_TRIAL_SPLIT_DAYS = 6
+MAX_TRIAL_SPLIT_EXERCISES_PER_DAY = 12
+
+
+def clean_trial_split(raw):
+    """Untrusted client JSON -> a validated list of day dicts, or []."""
+    if not isinstance(raw, list) or not raw:
+        return []
+    days = raw[:MAX_TRIAL_SPLIT_DAYS]
+
+    all_ids = set()
+    for day in days:
+        if not isinstance(day, dict):
+            continue
+        for e in (day.get("exercises") or [])[:MAX_TRIAL_SPLIT_EXERCISES_PER_DAY]:
+            if isinstance(e, dict) and e.get("exercise_id"):
+                all_ids.add(e["exercise_id"])
+    valid_ids = set(BodieZExercise.objects.filter(id__in=all_ids).values_list("id", flat=True))
+
+    cleaned = []
+    for day in days:
+        if not isinstance(day, dict):
+            continue
+        title = str(day.get("title") or "").strip()[:120]
+        if not title:
+            continue
+        exercises = []
+        for i, e in enumerate((day.get("exercises") or [])[:MAX_TRIAL_SPLIT_EXERCISES_PER_DAY]):
+            if not isinstance(e, dict) or e.get("exercise_id") not in valid_ids:
+                continue
+            try:
+                sets = max(1, min(10, int(e.get("sets") or 3)))
+                reps = max(1, min(100, int(e.get("reps") or 10)))
+            except (TypeError, ValueError):
+                sets, reps = 3, 10
+            weight_kg = e.get("weight_kg")
+            try:
+                weight_kg = float(weight_kg) if weight_kg not in (None, "") else None
+            except (TypeError, ValueError):
+                weight_kg = None
+            exercises.append({"exercise_id": e["exercise_id"], "order": i,
+                               "sets": sets, "reps": reps, "weight_kg": weight_kg})
+        if exercises:
+            cleaned.append({"title": title, "exercises": exercises})
+    return cleaned
+
+
+def create_trial_split_routines(user, days):
+    """One real BodieZRoutine per day, in Inbox — `days` already cleaned by
+    `clean_trial_split`. Mirrors `BodieZRoutinesView.post` one call at a time
+    rather than a bulk-insert, because the per-routine defaults (bucket,
+    ordering) live there and a second copy of that logic is how the two
+    quietly disagree within a year."""
+    for day in days:
+        BodieZRoutine.objects.create(user=user, title=day["title"],
+                                      exercises=day["exercises"], bucket="inbox")
+
+
 class BodieZRoutineDetailView(APIView):
     """PATCH/DELETE /api/economy/bodiez/routines/{id}/"""
     permission_classes = [IsAuthenticated]
