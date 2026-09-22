@@ -202,7 +202,7 @@ class TrialSplitOnRegisterTests(TestCase):
 
     def setUp(self):
         from apps.economy.models import BodieZExercise
-        self.squat = BodieZExercise.objects.create(name="Register Split Test Squat", muscle_group="legs", equipment="barbell")
+        self.squat = BodieZExercise.objects.create(name="Register Split Test Squat", muscle_group="upper_legs", equipment="barbell")
         self.bench = BodieZExercise.objects.create(name="Register Split Test Bench", muscle_group="chest", equipment="barbell")
 
     def _split(self, days=2):
