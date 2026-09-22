@@ -1190,6 +1190,54 @@ class BodieZLegsDemoVideoTests(TestCase):
         self.assertTrue(dumbbell_deadlift.demo_url)
 
 
+class BodieZCableDemoVideoTests(TestCase):
+    """Sixth batch, the first done on a cable stack — no new rows, five
+    existing ones. See migration 0144's docstring."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="demovids6", password="pw")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_this_batchs_exercises_carry_a_real_demo_url(self):
+        names = {"Tricep Pushdown", "Cable Row", "Cable Fly", "Cable Face Pull", "Cable Crunch"}
+        with_demo = set(BodieZExercise.objects.exclude(demo_url="").values_list("name", flat=True))
+        self.assertTrue(names.issubset(with_demo))
+
+    def test_no_new_rows_were_created_only_existing_ones_updated(self):
+        # Every name in this batch predates 0130's seed — a row created here
+        # would mean this migration typo'd a name past the exact match
+        # `filter(name=...)` requires and silently made a duplicate instead.
+        for name in ("Tricep Pushdown", "Cable Row", "Cable Fly", "Cable Face Pull", "Cable Crunch"):
+            self.assertEqual(BodieZExercise.objects.filter(name=name).count(), 1, name)
+
+    def test_exercise_dict_serves_the_real_url(self):
+        r = self.client.get("/api/economy/bodiez/exercises/")
+        row = next(e for e in r.data["exercises"] if e["name"] == "Cable Row")
+        self.assertEqual(row["demo_url"], "/exercise-demos/cable-row.mp4")
+
+
+class BodieZDemoCreditTests(TestCase):
+    """The IFPA citation travels on the library response once, not per
+    video — see bodiez.py's DEMO_CREDIT comment for why."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="democredit", password="pw")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_credit_is_served_when_a_video_exists(self):
+        r = self.client.get("/api/economy/bodiez/exercises/")
+        self.assertIn("demo_credit", r.data)
+        self.assertTrue(r.data["demo_credit"])
+        self.assertIn("IFPA", r.data["demo_credit"])
+
+    def test_credit_is_blank_when_no_exercise_has_a_video(self):
+        BodieZExercise.objects.update(demo_url="")
+        r = self.client.get("/api/economy/bodiez/exercises/")
+        self.assertEqual(r.data["demo_credit"], "")
+
+
 class CleanTrialSplitTests(TestCase):
     """`clean_trial_split` is the untrusted-input side of the trial's "Build
     a week" flow — the client that calls it was never authenticated, so

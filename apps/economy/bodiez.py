@@ -87,6 +87,15 @@ def _exercise_dict(ex):
             "equipment": ex.equipment, "demo_url": ex.demo_url}
 
 
+# Corey's real credential, stated once here rather than on every video — a
+# citation repeated 30 times is 30 places it can drift the moment it needs a
+# correction, the same reasoning `catalog.py`'s tier numbers already follow.
+# It travels on the LIBRARY response (every demo video comes from this same
+# list) rather than per-exercise, because the claim is about who recorded the
+# set, not about any one clip.
+DEMO_CREDIT = "Demonstrated by an IFPA-certified trainer."
+
+
 # Real, published rep/set/rest prescriptions, one per training goal — never a
 # model's guess and never typed twice. A "Build a routine" button that picked
 # exercises without saying how many sets or reps would be the substance
@@ -239,7 +248,12 @@ class BodieZExercisesView(APIView):
         muscle = request.query_params.get("muscle_group")
         if muscle:
             rows = rows.filter(muscle_group=muscle)
-        return Response({"exercises": [_exercise_dict(e) for e in rows]})
+        # demo_credit only when at least one row in the library actually has
+        # a video — an unearned credential line on a library with no clips to
+        # its name would be exactly the kind of claim the substance rule
+        # exists to keep off screen.
+        credit = DEMO_CREDIT if BodieZExercise.objects.exclude(demo_url="").exists() else ""
+        return Response({"exercises": [_exercise_dict(e) for e in rows], "demo_credit": credit})
 
 
 class BodieZExerciseHistoryView(APIView):
