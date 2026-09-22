@@ -487,27 +487,27 @@ class FunnelEventView(APIView):
 
     META_SHAPE = {
         "landing_view": {},
-        "try_view": {"app_key": _APP},
+        "try_view": {},
         # Which "no" it was. Three completely different situations —
         # the visitor spent today's take, the platform spent the day's, or
         # nobody set the key — and a row that cannot tell them apart sends
         # somebody to fix the wrong one.
-        "try_blocked": {"app_key": _APP, "why": _BLOCKED},
-        "try_record": {"app_key": _APP,
+        "try_blocked": {"why": _BLOCKED},
+        "try_record": {
                        # Camera or mic. The camera path asks for a second
                        # permission and produces a file an order of magnitude
                        # bigger, so a cliff on one of them is not a cliff on
                        # the other and they must not be totalled together.
                        "video": lambda v: bool(v)},
-        "try_mic_denied": {"app_key": _APP, "video": lambda v: bool(v), "why": _MIC},
-        "try_attach": {"app_key": _APP},
-        "try_send": {"app_key": _APP},
-        "try_failed": {"app_key": _APP, "why": _WHY},
-        "try_scored": {"app_key": _APP},
+        "try_mic_denied": {"video": lambda v: bool(v), "why": _MIC},
+        "try_attach": {},
+        "try_send": {},
+        "try_failed": {"why": _WHY},
+        "try_scored": {},
         # Which instrument's onboarding, because a modal that gets skipped on
         # DrumZ and finished on SingZ is one number hiding two.
-        "onboard_habit": {"app_key": _APP, "frequency": _FREQ},
-        "onboard_skip": {"app_key": _APP},
+        "onboard_habit": {"frequency": _FREQ},
+        "onboard_skip": {},
         # Only the notification switch. Language and sound are settings rather
         # than steps, and a funnel row that carries every preference a screen
         # collects stops being a funnel; this one is here because a habit with
@@ -525,7 +525,7 @@ class FunnelEventView(APIView):
                       # finishes with two letters answered the middle on two
                       # axes, which is a different thing from abandoning.
                       "axes": lambda v: v if isinstance(v, int) and 0 <= v <= 4 else None},
-        "try_shared": {"app_key": _APP},
+        "try_shared": {},
         "register_view": {
             "has_ref": lambda v: bool(v),
             "has_trial": lambda v: bool(v),
@@ -541,7 +541,19 @@ class FunnelEventView(APIView):
     # the channel that produced it, and the one column a marketing spend is
     # judged on was structurally always zero. Listing them per kind would fix
     # those two and leave the next kind somebody adds with the same hole.
-    AMBIENT = {"src": _SRC, "dev": _DEV}
+    #
+    # `app_key` joined this list rather than staying a per-kind entry for the
+    # identical reason. It was declared on every trial-door step but never on
+    # `register_view` / `register_success` / `login_success` — so `by_door`
+    # (FunnelSummaryView) could show a door's own view→scored chain but could
+    # never show whether THOSE visitors went on to register, because the
+    # event that would answer that structurally carried no door. A per-kind
+    # allowlist is right for a field that means something different per step
+    # (`why`, `video`); it is the wrong shape for a fact about the whole
+    # visit, and app_key is exactly that: which door, if any, this browser
+    # was using when it did whatever it's doing now. `track.js` remembers the
+    # last one it saw and rides it on every call after, the same as `src`.
+    AMBIENT = {"src": _SRC, "dev": _DEV, "app_key": _APP}
 
     def post(self, request):
         kind = str(request.data.get("kind") or "")
@@ -689,6 +701,14 @@ class FunnelSummaryView(APIView):
         # every recorder step already carry it, so a door's own funnel is
         # exactly the subset of `all_rows` this filters to. No new query:
         # same `all_rows` this endpoint already pulled once.
+        from apps.economy.bodiez_trial import APP_KEY as BODIEZ_APP_KEY
+        from apps.economy.trialdoorz import doors as trial_doors
+        # Read, not retyped — the same label the front door and the trial
+        # screen itself already show, so this screen can never call a door
+        # something a visitor never saw.
+        door_labels = {d["app_key"]: d["label"] for d in trial_doors()}
+        door_labels[BODIEZ_APP_KEY] = "BodieZ"
+
         by_door = []
         for key in _door_keys():
             door_rows = [r for r in all_rows if (r["meta"] or {}).get("app_key") == key]
@@ -698,6 +718,15 @@ class FunnelSummaryView(APIView):
             }
             by_door.append({
                 "app_key": key,
+                "label": door_labels.get(key, key),
+                # BodieZ has no recorder — no mic, no file, no model call, so
+                # "scored" there is real arithmetic on a logged set or a
+                # built week, never a send-to-coach step. A client rendering
+                # every door the same way would show BodieZ a permanent wall
+                # of zeros for steps that were never going to fire, which
+                # reads as five broken features instead of one door that
+                # works differently. `has_recorder` lets the screen ask.
+                "has_recorder": key != BODIEZ_APP_KEY,
                 "steps": step_counts,
                 "sources": split_by("src", "src", door_rows),
                 "devices": split_by("dev", "dev", door_rows),
