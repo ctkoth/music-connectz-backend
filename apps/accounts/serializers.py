@@ -233,9 +233,10 @@ class RegisterSerializer(serializers.Serializer):
         # the whole join happens or none of it does, and a bug in the welcome
         # bonus can never brick a signup.
         with transaction.atomic():
-            # Username is required by Django's User model, so use email or phone as
+            # Username is required by Django's User model, so use email as
             # fallback when registering without an explicit username.
-            username = validated["username"] or validated["email"] or validated["phone"]
+            # Phone is not used as username since it's PII and shouldn't be public.
+            username = validated["username"] or validated["email"]
             user = User.objects.create_user(
                 username=username,
                 email=validated["email"],
