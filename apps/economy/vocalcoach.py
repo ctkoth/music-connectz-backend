@@ -483,97 +483,118 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     }, None
 
 
-def record_coaching_observations(user, payload, song_key=None, song_bpm=None):
-    """Cross-pollination: low scores suggest practice tools with drill context.
+def record_coaching_observations(user, payload, app_key="singz", song_key=None, song_bpm=None):
+    """Cross-pollination: scores link to practice or teaching based on performance.
 
-    When pitch is weak, extract specific notes the member struggled with and
-    link to TunerZ with context (the exact note, frequency, how far off).
+    Low scores (<65%): link to practice tools specific to each dimension.
+    High scores (>85%+): link to teaching/coaching opportunities.
 
-    Best-effort: observations never fail the coach. Silent no-op if consent
-    isn't given (see record_observation).
+    Reads dimension definitions from instruments.py to work across all instruments.
+    Best-effort: observations never fail the coach. Silent no-op if consent isn't given.
     """
     if not user or not getattr(user, "is_authenticated", True):
         return
 
     try:
+        from apps.economy.instruments import INSTRUMENTS
+
+        instrument = INSTRUMENTS.get(app_key)
+        if not instrument:
+            return
+
         scores = payload.get("scores", {})
         weak_notes = payload.get("weak_notes", [])
+        instrument_scores = instrument.get("scores", {})
 
-        # Pitch accuracy low: suggest TunerZ with weak note details if available
-        pitch = scores.get("pitch_accuracy")
-        if pitch is not None and pitch < 65:
-            # If model extracted weak notes, link to each one
-            if weak_notes:
-                for note_data in weak_notes[:3]:  # Max 3 to avoid spam
-                    try:
-                        note_name = str(note_data.get("note", "")).strip()
-                        frequency = note_data.get("frequency")
-                        cents_off = note_data.get("cents_off", 0)
+        # Process each dimension the instrument declares
+        for dimension_key, dimension_label in instrument_scores.items():
+            score = scores.get(dimension_key)
+            if score is None:
+                continue
 
-                        if not note_name or not frequency:
-                            continue
+            # LOW SCORES: suggest practice tools
+            if score < 65:
+                # Pitch/intonation dimension: suggest TunerZ for pitched instruments
+                if dimension_key in ("pitch", "intonation"):
+                    if weak_notes:
+                        # Link specific weak notes to TunerZ with context
+                        for note_data in weak_notes[:3]:  # Max 3 to avoid spam
+                            try:
+                                note_name = str(note_data.get("note", "")).strip()
+                                frequency = note_data.get("frequency")
+                                cents_off = note_data.get("cents_off", 0)
 
-                        # Key context for observation label
-                        key_str = f" in {song_key}" if song_key else ""
-                        cents_desc = "flat" if cents_off < 0 else "sharp"
-                        label = f"Develop {note_name}{key_str} ({abs(cents_off)}¢ {cents_desc})"
+                                if not note_name or not frequency:
+                                    continue
 
-                        # Build target with drill context as query params
-                        # Frontend will parse these and pre-tune TunerZ
-                        params = f"note={note_name}&freq={frequency}&cents={cents_off}"
-                        if song_key:
-                            params += f"&key={song_key.replace(' ', '+')}"
-                        if song_bpm:
-                            params += f"&bpm={song_bpm}"
-                        target = f"tunerz:drill?{params}"
+                                key_str = f" in {song_key}" if song_key else ""
+                                cents_desc = "flat" if cents_off < 0 else "sharp"
+                                label = f"Develop {note_name}{key_str} ({abs(cents_off)}¢ {cents_desc})"
 
+                                params = f"note={note_name}&freq={frequency}&cents={cents_off}"
+                                if song_key:
+                                    params += f"&key={song_key.replace(' ', '+')}"
+                                if song_bpm:
+                                    params += f"&bpm={song_bpm}"
+                                target = f"tunerz:drill?{params}"
+
+                                record_observation(
+                                    user,
+                                    kind=OBS_COACH,
+                                    key=f"pitch-{note_name.lower().replace('#', 's').replace('b', 'f')}",
+                                    label=label,
+                                    app_key="tunerz",
+                                    target=target,
+                                )
+                            except (TypeError, ValueError):
+                                continue
+                    else:
+                        # Generic pitch/intonation suggestion
                         record_observation(
                             user,
                             kind=OBS_COACH,
-                            key=f"pitch-{note_name.lower().replace('#', 's').replace('b', 'f')}",
-                            label=label,
+                            key=f"{dimension_key}-low",
+                            label=f"Strengthen {dimension_label.split()[0].lower()} (currently {score}%)",
                             app_key="tunerz",
-                            target=target,
+                            target="tunerz:pitch-tuner",
                         )
-                    except (TypeError, ValueError):
-                        continue
-            else:
-                # No specific notes extracted, generic pitch suggestion
+
+                # Timing dimension: suggest MetZ for rhythm practice
+                elif dimension_key == "timing":
+                    target = "metz:metronome"
+                    if song_bpm:
+                        target += f"?bpm={song_bpm}"
+                    record_observation(
+                        user,
+                        kind=OBS_COACH,
+                        key=f"{dimension_key}-low",
+                        label=f"Strengthen rhythm and timing (currently {score}%)",
+                        app_key="metz",
+                        target=target,
+                    )
+
+                # Other dimensions: suggest coaching in this instrument
+                else:
+                    record_observation(
+                        user,
+                        kind=OBS_COACH,
+                        key=f"{dimension_key}-low",
+                        label=f"Develop {dimension_label.split()[0].lower()} (currently {score}%)",
+                        app_key=app_key,
+                        target=f"{app_key}:coach",
+                    )
+
+            # HIGH SCORES: suggest teaching/coaching opportunities
+            elif score >= 85:
                 record_observation(
                     user,
                     kind=OBS_COACH,
-                    key="pitch-low",
-                    label=f"Strengthen pitch accuracy (currently {pitch}%)",
-                    app_key="tunerz",
-                    target="tunerz:pitch-tuner",
+                    key=f"{dimension_key}-high",
+                    label=f"Strong {dimension_label.split()[0].lower()} — ready to teach (currently {score}%)",
+                    app_key=app_key,
+                    target=f"{app_key}:coach",
                 )
 
-        # Timing accuracy low: suggest MetZ
-        timing = scores.get("timing_accuracy")
-        if timing is not None and timing < 65:
-            target = "metz:metronome"
-            if song_bpm:
-                target += f"?bpm={song_bpm}"
-            record_observation(
-                user,
-                kind=OBS_COACH,
-                key="timing-low",
-                label=f"Strengthen rhythm and timing (currently {timing}%)",
-                app_key="metz",
-                target=target,
-            )
-
-        # Tone quality low: suggest another round of coaching
-        tone = scores.get("tone_quality")
-        if tone is not None and tone < 65:
-            record_observation(
-                user,
-                kind=OBS_COACH,
-                key="tone-low",
-                label=f"Develop vocal control (currently {tone}%)",
-                app_key="singz",
-                target="singz:coach",
-            )
     except Exception:
         # Observations are best-effort. Never let them fail the coach.
         logger.exception("Failed to record coaching observations")
@@ -909,7 +930,7 @@ class SingZCoachView(APIView):
         song_bpm = None
         if post and hasattr(post, 'bpm'):
             song_bpm = post.bpm
-        record_coaching_observations(request.user, payload, song_key=song_key, song_bpm=song_bpm)
+        record_coaching_observations(request.user, payload, app_key=self.app_key, song_key=song_key, song_bpm=song_bpm)
 
         return Response(out)
 
