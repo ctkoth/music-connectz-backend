@@ -153,8 +153,8 @@ class PublicUserSerializer(serializers.ModelSerializer):
 
 
 class RegisterSerializer(serializers.Serializer):
-    username = serializers.CharField(max_length=150)
-    email = serializers.EmailField()
+    username = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
+    email = serializers.EmailField(required=False, allow_blank=True, default="")
     phone = serializers.CharField(max_length=32, required=False, allow_blank=True, default="")
     password = serializers.CharField(write_only=True, min_length=8)
     birthday = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
@@ -164,11 +164,29 @@ class RegisterSerializer(serializers.Serializer):
     # take to the new account, so the thing they made at the door isn't lost.
     trial_token = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
 
+    def validate(self, attrs):
+        username = (attrs.get("username") or "").strip()
+        email = (attrs.get("email") or "").strip()
+        phone = (attrs.get("phone") or "").strip()
+
+        if not username and not email and not phone:
+            raise serializers.ValidationError(
+                "Please provide a username, email address, or phone number."
+            )
+
+        attrs["username"] = username
+        attrs["email"] = email
+        attrs["phone"] = phone
+        return attrs
+
     def validate_username(self, value):
         # `username_problem` is the same rule `check-username/` answers with.
         # It was the checker's alone until now, and the checker cannot create
         # an account — so a handle the availability endpoint would have
         # refused was registered anyway, and there was nothing to notice.
+        # Empty username is allowed when email is provided.
+        if not value or not value.strip():
+            return ""
         from .usernames import username_problem
         value = value.strip()
         problem = username_problem(value)
@@ -192,8 +210,8 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def validate_email(self, value):
-        value = value.strip().lower()
-        if User.objects.filter(email__iexact=value).exists():
+        value = (value or "").strip().lower()
+        if value and User.objects.filter(email__iexact=value).exists():
             raise serializers.ValidationError("An account already uses that email.")
         return value
 
@@ -215,8 +233,11 @@ class RegisterSerializer(serializers.Serializer):
         # the whole join happens or none of it does, and a bug in the welcome
         # bonus can never brick a signup.
         with transaction.atomic():
+            # Username is required by Django's User model, so use email or phone as
+            # fallback when registering without an explicit username.
+            username = validated["username"] or validated["email"] or validated["phone"]
             user = User.objects.create_user(
-                username=validated["username"],
+                username=username,
                 email=validated["email"],
                 password=validated["password"],
             )
