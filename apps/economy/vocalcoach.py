@@ -901,6 +901,20 @@ class SingZCoachView(APIView):
             ref=(f"post:{post.id}" if post is not None else
                  str((stored or {}).get("id") or "")),
         )
+        # Record engagement event when take is scored well
+        if payload and payload.get("score"):
+            score = payload.get("score")
+            if score > 60:  # Only record event for above-average scores
+                from . import engagement
+                # Determine the take owner (who receives the notification)
+                take_owner = post.author if post else request.user
+                engagement.record_activity_event(
+                    actor=request.user,
+                    subject=take_owner,
+                    kind="take_score",
+                    app_key=self.app_key,
+                    target=f"{self.app_key}:coach?id={(stored or {}).get('id') or 'upload'}"
+                )
         out = {**payload, "cost_cents": charged}
         if stored is not None and post is None:
             # A scored take is never a dead end either: the score offers the way

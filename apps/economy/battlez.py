@@ -317,6 +317,17 @@ class BattleEnterView(APIView):
         settle_together(_people, _was_beginner)
         notify(b.host, "join", f"@{request.user.username} entered '{b.title}' ⚔️",
                actor=request.user, item_id=b.item_key)
+
+        # Record battle_enter event
+        from . import engagement
+        engagement.record_activity_event(
+            actor=request.user,
+            subject=b.host,
+            kind="battle_enter",
+            app_key="battlez",
+            target=f"battlez:battle?id={b.id}"
+        )
+
         return Response({"entry": entry_dict(entry, request),
                          "battle": battle_dict(b, request), **energy},
                         status=status.HTTP_201_CREATED)
@@ -528,6 +539,17 @@ class BattleChallengeView(APIView):
         notify(opponent, "system",
                f"@{request.user.username} challenged you to '{b.title}' ⚔️",
                actor=request.user, item_id=b.item_key)
+
+        # Record battle_invite event
+        from . import engagement
+        engagement.record_activity_event(
+            actor=request.user,
+            subject=opponent,
+            kind="battle_invite",
+            app_key="battlez",
+            target=f"battlez:battle?id={b.id}"
+        )
+
         return Response(battle_dict(b, request), status=status.HTTP_201_CREATED)
 
 
@@ -661,7 +683,26 @@ class BattleSettleView(APIView):
                  "minutes_left": left, "ends_at": b.ends_at.isoformat()},
                 status=status.HTTP_409_CONFLICT,
             )
-        return Response(battle_dict(settle_battle(b), request))
+        b = settle_battle(b)
+
+        # Record battle_win event for the winner
+        if b.winner:
+            from . import engagement
+            opponents = []
+            if b.host and b.host.id != b.winner.id:
+                opponents.append(b.host)
+            if b.opponent and b.opponent.id != b.winner.id:
+                opponents.append(b.opponent)
+            for opponent in opponents:
+                engagement.record_activity_event(
+                    actor=b.winner,
+                    subject=opponent,
+                    kind="battle_win",
+                    app_key="battlez",
+                    target=f"battlez:battle?id={b.id}"
+                )
+
+        return Response(battle_dict(b, request))
 
 
 class MoneyBattleVoteView(APIView):

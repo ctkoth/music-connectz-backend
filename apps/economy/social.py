@@ -812,6 +812,20 @@ class SocialView(APIView):
                 Reaction.objects.update_or_create(user=request.user, item_id=item, defaults={"value": value})
                 if value == 1:
                     self._notify_target(item, "like", f"@{request.user.username} liked your post 👍", request.user)
+                    if item.startswith("post:"):
+                        try:
+                            post_id = int(item.split(":")[1])
+                            post = Post.objects.get(id=post_id)
+                            from . import engagement
+                            engagement.record_activity_event(
+                                actor=request.user,
+                                subject=post.author,
+                                kind="like",
+                                app_key="postz",
+                                target=f"postz:post?id={post.id}"
+                            )
+                        except (ValueError, IndexError, Post.DoesNotExist):
+                            pass
         elif action == "comment":
             # Was hardcoded [:500], which silently cut a Premium member's 1,500
             # characters and refused a StatZ member the unlimited they paid for.
@@ -893,6 +907,20 @@ class SocialView(APIView):
                     # Post author gets Battle Starter, Collab Architect, Multi-Craft
                     if post_author:
                         recheck_badges(post_author)
+                    # Record engagement event for rating
+                    if item.startswith("post:") and post_author:
+                        try:
+                            from . import engagement
+                            post_id = int(item.split(":")[1])
+                            engagement.record_activity_event(
+                                actor=request.user,
+                                subject=post_author,
+                                kind="rate",
+                                app_key="postz",
+                                target=f"postz:post?id={post_id}"
+                            )
+                        except (ValueError, IndexError):
+                            pass
                 else:
                     # Changing your rating is an edit — only within the tier's window.
                     from datetime import timedelta
@@ -1098,6 +1126,14 @@ class FollowView(APIView):
                 notify(target, "follow",
                        f"@{request.user.username} {'is now your friend 🤝' if mutual else 'followed you'}",
                        actor=request.user, item_id=f"profile:{request.user.username}")
+                from . import engagement
+                engagement.record_activity_event(
+                    actor=request.user,
+                    subject=target,
+                    kind="follow",
+                    app_key="social",
+                    target=f"social:profile?username={target.username}"
+                )
         return Response({"username": target.username, **follow_counts(target), "relationship": relationship(request.user, target)})
 
 
@@ -1139,6 +1175,18 @@ class MemberProfileView(APIView):
         if not user:
             return Response({"detail": "profile not found"}, status=status.HTTP_404_NOT_FOUND)
         p = profile_for(user)
+
+        # Record engagement event when profile is viewed (optional — can be noisy)
+        if user.id != request.user.id:
+            from . import engagement
+            engagement.record_activity_event(
+                actor=request.user,
+                subject=user,
+                kind="profile_view",
+                app_key="social",
+                target=f"social:profile?username={user.username}"
+            )
+
         # recheck only bites on your own profile; _profile_full enforces that.
         return Response(_profile_full(p, request, recheck=True))
 

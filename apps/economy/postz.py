@@ -429,6 +429,19 @@ def create_post(user, d):
     if is_submission:
         record_submission(user)
 
+    # Record post_publish event to followers
+    if vis == "public":
+        from . import engagement
+        from .models import Follow
+        for follower_id in Follow.objects.filter(following=user).values_list('follower_id', flat=True):
+            engagement.record_activity_event(
+                actor=user,
+                subject_id=follower_id,
+                kind="post_publish",
+                app_key="postz",
+                target=f"postz:post?id={p.id}"
+            )
+
     # ZodiacZ. Four signs are nudged at something a post can be, so they are
     # decided here where the post's shape is already known rather than by four
     # callers each re-deriving it. `try_award` no-ops for every other sign.

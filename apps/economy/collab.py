@@ -559,6 +559,21 @@ class CollabDealsView(APIView):
             notify(source_post.author, "system",
                    f"@{request.user.username} started a CollabZ deal on '{source_post.title}' 🤝",
                    actor=request.user, item_id=f"post:{source_post.id}")
+
+        # Record collab_invite event for each participant except self
+        from . import engagement
+        for entry in deal.participants:
+            if entry.get("username") != request.user.username:
+                participant = User.objects.filter(username=entry.get("username")).first()
+                if participant:
+                    engagement.record_activity_event(
+                        actor=request.user,
+                        subject=participant,
+                        kind="collab_invite",
+                        app_key="collab",
+                        target=f"collab:deal?id={deal.id}"
+                    )
+
         return Response({**deal_dict(deal, request.user), **energy},
                         status=status.HTTP_201_CREATED)
 
@@ -647,6 +662,27 @@ class CollabDeliverView(APIView):
         deal.delivered_at = timezone.now()
         deal.save(update_fields=["status", "delivered_at", "updated_at"])
 
+        # Record engagement event when work is delivered/accepted
+        from . import engagement
+        from .models import CollabParticipant
+        for participant in deal.participants:
+            if isinstance(participant, dict):
+                participant_id = participant.get("id")
+            else:
+                participant_id = participant
+            if participant_id and participant_id != request.user.id:
+                try:
+                    subject = User.objects.get(id=participant_id)
+                    engagement.record_activity_event(
+                        actor=request.user,
+                        subject=subject,
+                        kind="collab_accept",
+                        app_key="collab",
+                        target=f"collab:deal?id={deal.id}"
+                    )
+                except User.DoesNotExist:
+                    pass
+
         # ZodiacZ — the Ox finishes. The stretch is delivering on a deal you
         # did not start, which is the same work with none of the glory.
         from .signbonus import try_award
@@ -672,6 +708,20 @@ class CollabReleaseView(APIView):
         if deal.status not in (CollabDeal.STATUS_FUNDED, CollabDeal.STATUS_DELIVERED):
             return Response({"detail": f"can't release a {deal.status} deal"}, status=status.HTTP_409_CONFLICT)
         deal = release_deal(deal)
+
+        # Record collab_complete event for each participant
+        from . import engagement
+        for entry in deal.participants:
+            participant = User.objects.filter(username=entry.get("username")).first()
+            if participant:
+                engagement.record_activity_event(
+                    actor=request.user,
+                    subject=participant,
+                    kind="collab_complete",
+                    app_key="collab",
+                    target=f"collab:deal?id={deal.id}"
+                )
+
         return Response(deal_dict(deal, request.user))
 
 
