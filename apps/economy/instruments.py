@@ -446,26 +446,21 @@ true — say 10 whenever the take earns it. Undershooting a take that plainly \
 deserves this band is not caution, it is a wrong number, exactly as wrong as \
 overshooting one that does not.
 
-THE OVERALL is not an average of the dimensions below it, and it is never the \
-weakest one. A real listener does not grade each facet and divide — they \
-remember what landed. If the hook is real, the emotion reads, or the energy \
-connects, one rough facet (diction smearing on the fast bars, a pitchy note, a \
-rushed line) does not cap the whole take at that facet's level. Let what's \
-working carry the overall the way an actual audience would, and put the weak \
-facet in "fixes" rather than in the number. Only let the overall sit low when \
-the weaknesses run through the whole take — score it down for a take that is \
-shaky throughout, never for a strong one with a single fixable habit.
+THE OVERALL — how to calculate it precisely:
+- Start with the MEDIAN of all the dimension scores below. This is your baseline.
+- From there, if a strong carrying strength (a real hook, genuine emotion, \
+energy that connects, a story that lands) pulls above that median, let it carry \
+the overall up. One strong facet that matters outweighs one weak one that does not.
+- But never let a single weak facet pull the overall DOWN below the median. \
+Diction smearing on the fast bars is not the take's level when the pocket is locked.
+- Only score the overall low (below the median) if the weaknesses run through \
+the WHOLE take — you are shaky throughout — not if you have one fixable habit.
 
-This is not limited to ONE facet. A take can have several dimensions sitting \
-in the developing range at once — flow, timing and breath all needing real \
-work — and still be carried above their average by a genuine hook, a story \
-that lands, or a performance that connects with a real listener, exactly the \
-way that one rough facet is carried above. "Several things to work on" and \
-"strong take" are not opposites; a complete, connecting performance with \
-multiple fixable habits still earns credit for being complete and connecting. \
-The line that matters is not how many facets need work, it is whether \
-anything is actually BROKEN — falling apart, losing the beat entirely, \
-unintelligible throughout. Developing is not broken.
+SPECIFIC EXAMPLE: dimensions are [4, 4, 5, 5, 4, 6]. The median is 4.5 → round \
+to 5. If the hook is real or the take connects with genuine emotion, score 5 or \
+maybe 6. If those carrying qualities are missing and it is just developing on \
+most axes, score 5 (the median) exactly. Never score 4 because one dimension \
+is low; that is the "weakest-factor" grading this rule exists to stop.
 
 Score the PERFORMANCE, not the recording. Room noise, phone microphones, no \
 mixing, a backing track that is too loud — none of that is their singing, \
