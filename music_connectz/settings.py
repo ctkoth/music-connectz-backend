@@ -286,6 +286,13 @@ ACRCLOUD_HOST = os.environ.get("ACRCLOUD_HOST", "identify-eu-west-1.acrcloud.com
 WEB_RISK_API_KEY = os.environ.get("WEB_RISK_API_KEY", "").strip()
 SAFE_BROWSING_API_KEY = os.environ.get("SAFE_BROWSING_API_KEY", "").strip()
 
+# Parcel Primate — bulk email (SendGrid v3 Mail Send). Read once, here, never
+# hardcoded and never logged. See apps/economy/parcelprimate.py for the gate:
+# with this unset, list/campaign building still works and Send is refused
+# with a stated reason, same shape as WEB_RISK_API_KEY above.
+SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "").strip()
+PARCEL_FROM_EMAIL = os.environ.get("PARCEL_FROM_EMAIL", "").strip()
+
 # Modal — the sandbox OCC runs code in. This is the one thing OCC could never
 # do: execute a member's code. It needs a container per run, which is real
 # infrastructure with a real bill, so it stays off until BOTH tokens are set.

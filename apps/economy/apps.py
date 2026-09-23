@@ -31,6 +31,28 @@ def uploads_are_durable(app_configs, **kwargs):
     )]
 
 
+@register()
+def parcelprimate_key_configured(app_configs, **kwargs):
+    """Warn in the deploy log when Parcel Primate can't actually send.
+
+    Same shape as `uploads_are_durable` above and as `test_link_scan`'s
+    settings check: list-building and drafting work with no key at all, but
+    an unset SENDGRID_API_KEY means the Send button is refused for every
+    member, and that should be visible to whoever is watching a deploy go
+    out, not discovered by whoever presses Send first.
+    """
+    from django.conf import settings
+    if getattr(settings, "SENDGRID_API_KEY", "") or "":
+        return []
+    return [CheckWarning(
+        "Parcel Primate has no SENDGRID_API_KEY — members can build lists and "
+        "draft campaigns, but Send is refused for everyone until it's set.",
+        hint="Set SENDGRID_API_KEY (and optionally PARCEL_FROM_EMAIL) in the "
+             "environment. tools/parcelprimate_live_check.sh verifies it once set.",
+        id="economy.W002",
+    )]
+
+
 class EconomyConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "apps.economy"

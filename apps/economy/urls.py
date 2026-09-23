@@ -16,6 +16,11 @@ from .personalityz import PersonalityAxesView, PersonalityTestView
 from .religionz import ReligionsView
 from .languagez import LanguagesView
 from .trialdoorz import TrialDoorsView
+from .parcelprimate import (
+    MailCampaignQuoteView, MailCampaignSendView, MailCampaignsView,
+    MailContactDetailView, MailContactsView, MailListDetailView,
+    MailListsView, ParcelPrimateStatusView, ParcelUnsubscribeView,
+)
 from .trial import TrialPublicStatsView, PublicTiersView
 from .offerz_engine import (FunnelCatalogView, FunnelOfferRedeemView,
                             FunnelOffersView)
@@ -385,6 +390,19 @@ urlpatterns = [
     path("rulez/", RulezView.as_view(), name="economy-rulez"),
     # Logged-out: which coaches a stranger can reach without an account.
     path("trialdoorz/", TrialDoorsView.as_view(), name="economy-trial-doors"),
+    # Parcel Primate — the mailchimp-knockoff bulk-email tool. Status first
+    # (tells the screen whether Send is possible before anything is built),
+    # then lists/contacts/campaigns, then the quote (price before Send) and
+    # send itself. Unsubscribe is unauthenticated on purpose — see module doc.
+    path("parcelprimate/status/", ParcelPrimateStatusView.as_view(), name="economy-parcelprimate-status"),
+    path("parcelprimate/lists/", MailListsView.as_view(), name="economy-parcelprimate-lists"),
+    path("parcelprimate/lists/<int:list_id>/", MailListDetailView.as_view(), name="economy-parcelprimate-list"),
+    path("parcelprimate/lists/<int:list_id>/contacts/", MailContactsView.as_view(), name="economy-parcelprimate-contacts"),
+    path("parcelprimate/lists/<int:list_id>/contacts/<int:contact_id>/", MailContactDetailView.as_view(), name="economy-parcelprimate-contact"),
+    path("parcelprimate/campaigns/", MailCampaignsView.as_view(), name="economy-parcelprimate-campaigns"),
+    path("parcelprimate/campaigns/<int:campaign_id>/quote/", MailCampaignQuoteView.as_view(), name="economy-parcelprimate-quote"),
+    path("parcelprimate/campaigns/<int:campaign_id>/send/", MailCampaignSendView.as_view(), name="economy-parcelprimate-send"),
+    path("parcelprimate/unsubscribe/<int:contact_id>/<str:token>/", ParcelUnsubscribeView.as_view(), name="economy-parcelprimate-unsubscribe"),
     # Public funnel headline stats for non-authenticated trial visitors.
     path("trial/public/stats/", TrialPublicStatsView.as_view(), name="economy-trial-public-stats"),
     path("tiers/", PublicTiersView.as_view(), name="economy-public-tiers"),
