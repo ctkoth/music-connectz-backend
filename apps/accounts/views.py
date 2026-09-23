@@ -921,3 +921,96 @@ class UsersView(APIView):
         # Delete the user
         target.delete()
         return Response({"deleted": username}, status=status.HTTP_200_OK)
+
+
+class OTPSendView(APIView):
+    """POST /api/auth/otp/send/ — Send OTP to email or phone."""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        from .otp import send_otp
+        from .models import OTPVerification
+        
+        identifier = request.data.get("identifier", "").strip()
+        channel = request.data.get("channel", "").lower()
+        
+        if not identifier:
+            return Response(
+                {"detail": "identifier (email or phone) is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        if channel not in ["email", "phone"]:
+            return Response(
+                {"detail": "channel must be 'email' or 'phone'"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        # Check if identifier is already used
+        User = get_user_model()
+        if channel == "email" and User.objects.filter(email__iexact=identifier).exists():
+            return Response(
+                {"detail": "An account already uses that email."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if channel == "phone" and Profile.objects.filter(phone=identifier).exists():
+            return Response(
+                {"detail": "An account already uses that phone number."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        try:
+            otp_obj = send_otp(identifier, channel)
+            return Response(
+                {
+                    "identifier": identifier,
+                    "channel": channel,
+                    "expires_in_minutes": 10,
+                    # In development, you might want to return the code for testing:
+                    # "code": otp_obj.code,  # REMOVE IN PRODUCTION
+                },
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            logging.error(f"Failed to send OTP to {channel} {identifier}: {str(e)}")
+            return Response(
+                {"detail": f"Failed to send verification code to {channel}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class OTPVerifyView(APIView):
+    """POST /api/auth/otp/verify/ — Verify OTP code."""
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        from .otp import verify_otp
+        
+        identifier = request.data.get("identifier", "").strip()
+        channel = request.data.get("channel", "").lower()
+        code = request.data.get("code", "").strip()
+        
+        if not all([identifier, channel, code]):
+            return Response(
+                {"detail": "identifier, channel, and code are required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        if channel not in ["email", "phone"]:
+            return Response(
+                {"detail": "channel must be 'email' or 'phone'"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        success, message = verify_otp(identifier, channel, code)
+        
+        if success:
+            return Response(
+                {"verified": True, "message": message},
+                status=status.HTTP_200_OK,
+            )
+        else:
+            return Response(
+                {"verified": False, "message": message},
+                status=status.HTTP_400_BAD_REQUEST,
+            )

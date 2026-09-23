@@ -44,3 +44,30 @@ class OAuthIdentity(models.Model):
 
     def __str__(self):
         return f"{self.provider}:{self.provider_uid}"
+
+
+class OTPVerification(models.Model):
+    """Temporary OTP codes for email/phone verification during registration."""
+
+    CHANNEL_EMAIL = "email"
+    CHANNEL_PHONE = "phone"
+    CHANNEL_CHOICES = [
+        (CHANNEL_EMAIL, "Email"),
+        (CHANNEL_PHONE, "Phone"),
+    ]
+
+    identifier = models.CharField(max_length=255)  # email or phone number
+    channel = models.CharField(max_length=10, choices=CHANNEL_CHOICES)
+    code = models.CharField(max_length=6)
+    verified = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        unique_together = ("identifier", "channel")
+        indexes = [
+            models.Index(fields=["identifier", "channel", "expires_at"]),
+        ]
+
+    def __str__(self):
+        return f"OTP {self.channel} {self.identifier} ({'verified' if self.verified else 'pending'})"

@@ -165,6 +165,8 @@ class RegisterSerializer(serializers.Serializer):
     trial_token = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
 
     def validate(self, attrs):
+        from .otp import is_verified, cleanup_verified
+
         username = (attrs.get("username") or "").strip()
         email = (attrs.get("email") or "").strip()
         phone = (attrs.get("phone") or "").strip()
@@ -172,6 +174,17 @@ class RegisterSerializer(serializers.Serializer):
         if not username and not email and not phone:
             raise serializers.ValidationError(
                 "Please provide a username, email address, or phone number."
+            )
+
+        # Check OTP verification if email or phone provided
+        if email and not is_verified(email, "email"):
+            raise serializers.ValidationError(
+                {"email": "Email must be verified with OTP before registration."}
+            )
+
+        if phone and not is_verified(phone, "phone"):
+            raise serializers.ValidationError(
+                {"phone": "Phone must be verified with OTP before registration."}
             )
 
         attrs["username"] = username
@@ -279,6 +292,12 @@ class RegisterSerializer(serializers.Serializer):
             if token:
                 from apps.economy.models import claim_trial_take
                 claim_trial_take(user, token)
+            # Clean up OTP records after successful registration
+            from .otp import cleanup_verified
+            if validated.get("email"):
+                cleanup_verified(validated["email"], "email")
+            if validated.get("phone"):
+                cleanup_verified(validated["phone"], "phone")
         return user
 
 
