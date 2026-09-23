@@ -79,6 +79,29 @@ class Membership(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     # Presence: touched on every stats poll; powers the header "online now" count.
     last_seen = models.DateTimeField(null=True, blank=True, db_index=True)
+    # Online status: online/idle/away/offline for presence indicator
+    online_status = models.CharField(
+        max_length=16,
+        choices=[("online", "Online"), ("idle", "Idle"), ("away", "Away"), ("offline", "Offline")],
+        default="offline",
+        db_index=True,
+    )
+    # Current activity: what the user is doing (listening, composing, recording, battling, collaborating)
+    current_activity = models.CharField(
+        max_length=20,
+        choices=[
+            ("", "None"),
+            ("listening", "Listening"),
+            ("composing", "Composing"),
+            ("recording", "Recording"),
+            ("battling", "In Battle"),
+            ("collaborating", "Collaborating"),
+        ],
+        default="",
+        blank=True,
+    )
+    # Last activity timestamp for computing idle status
+    last_activity_at = models.DateTimeField(null=True, blank=True, db_index=True)
     # Founding lifetime membership: tier never expires and never re-bills.
     lifetime = models.BooleanField(default=False, db_index=True)
     # Founding member: claimed StatZ in the Founding 50 (any plan). Powers the badge.
@@ -2250,12 +2273,55 @@ class Message(models.Model):
     media_url = models.CharField(max_length=500, blank=True, default="")
     media_type = models.CharField(max_length=60, blank=True, default="")  # MIME, e.g. audio/webm
     read = models.BooleanField(default=False, db_index=True)
+    read_at = models.DateTimeField(null=True, blank=True)  # When message was read
+    delivered_at = models.DateTimeField(null=True, blank=True)  # When message reached recipient
     created_at = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(null=True, blank=True)
     edit_history = models.JSONField(default=list, blank=True)  # [{body, at}] prior versions
 
     class Meta:
         ordering = ("created_at",)
+
+
+class ActivityEvent(models.Model):
+    """Activity timeline: social events (follow, like, rate, collab, battle, etc.).
+
+    Powers the user's activity feed and enables notifications for social interactions.
+    One event per significant action; cross-pollination to relevant apps via app_key/target.
+    """
+    KINDS = [
+        ("follow", "Started following"),
+        ("like", "Liked post"),
+        ("rate", "Rated take"),
+        ("collab_invite", "Invited to collaborate"),
+        ("collab_accept", "Accepted collaboration"),
+        ("collab_complete", "Completed collaboration"),
+        ("battle_invite", "Invited to battle"),
+        ("battle_enter", "Entered battle"),
+        ("battle_win", "Won battle"),
+        ("post_publish", "Published post"),
+        ("take_score", "Got coached"),
+        ("profile_view", "Viewed your profile"),
+    ]
+
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="activity_events_created")
+    subject = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="activity_events_received")
+    kind = models.CharField(max_length=20, choices=KINDS, db_index=True)
+    # Cross-pollination: app_key (which app initiated this) and target (link back to action)
+    app_key = models.CharField(max_length=20, blank=True, default="")  # e.g., "singz", "battlez", "collab"
+    target = models.CharField(max_length=200, blank=True, default="")  # e.g., "singz:post?id=123", "battlez:battle?id=456"
+    # Timeline tracking
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    read = models.BooleanField(default=False, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["subject", "read", "-created_at"], name="economy_act_subject_read_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.actor.username} {self.get_kind_display()} {self.subject.username}"
 
 
 # ---- Moderation: report content + block users ----
