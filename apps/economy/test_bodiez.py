@@ -1307,6 +1307,42 @@ class BodieZJefitMuscleGroupsTests(TestCase):
         self.assertEqual(groups, {k for k, _ in BodieZExercise.MUSCLE_CHOICES})
 
 
+class BodieZMachineBenchAndMoreDemoVideoTests(TestCase):
+    """Seventh batch. See migration 0146's docstring — Machine Bench Press
+    is a new row, Cable Woodchopper and Barbell Row are existing rows
+    getting a demo_url, and Cable Crunch is deliberately untouched."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="demovids7", password="pw")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_machine_bench_press_is_a_new_row_not_a_relabeled_barbell_one(self):
+        machine = BodieZExercise.objects.get(name="Machine Bench Press")
+        barbell = BodieZExercise.objects.get(name="Bench Press")
+        self.assertNotEqual(machine.id, barbell.id)
+        self.assertEqual(machine.equipment, "machine")
+        self.assertEqual(machine.muscle_group, "chest")
+        self.assertTrue(machine.demo_url)
+
+    def test_this_batchs_existing_rows_carry_a_real_demo_url(self):
+        for name in ("Cable Woodchopper", "Barbell Row"):
+            self.assertTrue(BodieZExercise.objects.get(name=name).demo_url, name)
+
+    def test_no_new_row_was_created_for_cable_woodchopper_or_barbell_row(self):
+        self.assertEqual(BodieZExercise.objects.filter(name="Cable Woodchopper").count(), 1)
+        self.assertEqual(BodieZExercise.objects.filter(name="Barbell Row").count(), 1)
+
+    def test_cable_crunch_keeps_its_0144_video_untouched(self):
+        self.assertEqual(BodieZExercise.objects.get(name="Cable Crunch").demo_url,
+                          "/exercise-demos/cable-crunch.mp4")
+
+    def test_exercise_dict_serves_the_real_url(self):
+        r = self.client.get("/api/economy/bodiez/exercises/")
+        row = next(e for e in r.data["exercises"] if e["name"] == "Machine Bench Press")
+        self.assertEqual(row["demo_url"], "/exercise-demos/machine-bench-press.mp4")
+
+
 class BodieZCableDemoVideoTests(TestCase):
     """Sixth batch, the first done on a cable stack — no new rows, five
     existing ones. See migration 0144's docstring."""
