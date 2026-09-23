@@ -465,6 +465,51 @@ class BodieZBodyMapTests(TestCase):
         r = client.get("/api/economy/bodiez/bodymap/")
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
 
+    def test_an_untouched_muscle_scores_zero(self):
+        r = self.client.get("/api/economy/bodiez/bodymap/")
+        legs = next(row for row in r.data["muscles"] if row["muscle_group"] == "upper_legs")
+        self.assertEqual(legs["volume_score"], 0)
+
+    def test_hitting_the_target_scores_a_full_ten(self):
+        # TARGET_WEEKLY_SETS is the FLOOR of the evidence-based range, so
+        # meeting it reads as a full 10 rather than needing the ceiling.
+        for i in range(10):
+            sess = _finished_session(self.user, days_ago=0)
+            BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/bodymap/")
+        chest = next(row for row in r.data["muscles"] if row["muscle_group"] == "chest")
+        self.assertEqual(chest["volume_score"], 10)
+
+    def test_half_the_target_scores_a_five(self):
+        for i in range(5):
+            sess = _finished_session(self.user, days_ago=0)
+            BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/bodymap/")
+        chest = next(row for row in r.data["muscles"] if row["muscle_group"] == "chest")
+        self.assertEqual(chest["volume_score"], 5)
+
+    def test_the_score_never_exceeds_ten_however_much_volume_is_logged(self):
+        for i in range(25):
+            sess = _finished_session(self.user, days_ago=0)
+            BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/bodymap/")
+        chest = next(row for row in r.data["muscles"] if row["muscle_group"] == "chest")
+        self.assertEqual(chest["volume_score"], 10)
+
+    def test_the_target_and_citation_are_served_so_the_score_is_checkable(self):
+        r = self.client.get("/api/economy/bodiez/bodymap/")
+        self.assertEqual(r.data["target_weekly_sets"], 10)
+        self.assertIn("Schoenfeld", r.data["volume_citation"])
+
+    def test_the_score_can_be_verified_from_sets_last_7d_and_the_target(self):
+        for i in range(3):
+            sess = _finished_session(self.user, days_ago=0)
+            BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=60)
+        r = self.client.get("/api/economy/bodiez/bodymap/")
+        chest = next(row for row in r.data["muscles"] if row["muscle_group"] == "chest")
+        expected = min(10, round(10 * chest["sets_last_7d"] / r.data["target_weekly_sets"]))
+        self.assertEqual(chest["volume_score"], expected)
+
 
 class BodieZCoachTests(TestCase):
     def setUp(self):
@@ -1033,12 +1078,24 @@ class BodieZCoachGoalsTests(TestCase):
             self.assertGreater(scheme["sets"], 0)
             self.assertGreater(scheme["rest_seconds"], 0)
 
-    def test_strength_is_not_a_fourth_goal_here(self):
-        # BodieZGoal already owns "strength" as a kind driven by logged 1RM
-        # progress — a second "strength" here would be the same word meaning
-        # two different things on one screen.
+    def test_the_key_is_strength_training_never_strength(self):
+        # BodieZGoal already owns "strength" as a KIND driven by logged 1RM
+        # progress — a second dict entry keyed "strength" here would be the
+        # same word meaning two different things on one screen. The LABEL is
+        # allowed to say "Strength" (that's what a member is choosing); the
+        # key is what a second writer would collide on, so that's what stays
+        # distinct.
         from .bodiez import GOALS
         self.assertNotIn("strength", GOALS)
+        self.assertIn("strength_training", GOALS)
+        self.assertEqual(GOALS["strength_training"]["label"], "Strength")
+
+    def test_strength_training_is_heavier_and_longer_rest_than_muscle_gain(self):
+        from .bodiez import GOALS
+        strength = GOALS["strength_training"]
+        gain = GOALS["muscle_gain"]
+        self.assertLess(strength["reps_high"], gain["reps_low"])
+        self.assertGreater(strength["rest_seconds"], gain["rest_seconds"])
 
 
 class BodieZDemoVideoTests(TestCase):

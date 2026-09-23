@@ -106,11 +106,18 @@ DEMO_CREDIT = "Demonstrated by an IFPA-certified trainer."
 # "the app said so" — the same standard `_HISTORY_CAVEAT` already holds Coach
 # to for what a single take can and can't show.
 #
-# Three goals, not the many an exercise-science textbook would name, because
-# three is what a member choosing a routine actually decides between —
-# strength itself is deliberately excluded here since BodieZGoal already has
-# a "strength" kind driven by logged 1RM progress; a fourth goal here would
-# be the second place that word means something on this screen.
+# Four goals now, not the many an exercise-science textbook would name,
+# because four is what a member choosing a routine actually decides between:
+# strength, muscle gain, toning, slimming.
+#
+# Strength is keyed "strength_training", never "strength" — BodieZGoal
+# already has a "strength" KIND driven by logged 1RM progress (a personal
+# target: "bench 225"), and this dict is a training PROTOCOL (a rep/set/rest
+# prescription a routine follows). Both showing as "Strength" on the same
+# screen would read as one feature, and they answer different questions —
+# "what am I aiming for" versus "how should today's session be loaded". The
+# label stays "Strength" because that's what a member is choosing; the KEY
+# is what stays distinct, since that's what a second writer would collide on.
 GOALS = {
     "muscle_gain": {
         "label": "Muscle gain",
@@ -147,6 +154,20 @@ GOALS = {
         "citation": ("Kraemer, W. J., & Ratamess, N. A. (2004). Fundamentals of "
                      "resistance training: Progression and exercise prescription. "
                      "Medicine & Science in Sports & Exercise, 36(4), 674-688."),
+    },
+    "strength_training": {
+        "label": "Strength",
+        "sets": 5, "reps_low": 3, "reps_high": 5, "rest_seconds": 180,
+        "why": ("Heavy load, low reps, long rest between sets — the range that "
+                "builds maximal force output rather than size. Reps this low "
+                "can't be trained to failure safely without a spotter or a "
+                "power rack, so the rest is long enough for near-full recovery "
+                "between sets rather than the shorter rest hypertrophy work uses."),
+        "citation": ("National Academy of Sports Medicine. (2022). NASM Essentials "
+                     "of Personal Fitness Training (7th ed.) — OPT Model, Phase 4: "
+                     "Maximal Strength; American College of Sports Medicine. (2009). "
+                     "Progression models in resistance training for healthy adults. "
+                     "Medicine & Science in Sports & Exercise, 41(3), 687-708."),
     },
 }
 
@@ -618,6 +639,18 @@ class BodieZBodyMapView(APIView):
       doesn't read the same as five separate sessions.
     - `recent` — trained within `RECENT_DAYS`.
     - `balanced` — trained inside the window, but neither of the above.
+
+    `volume_score` (0-10) is the one number on this screen that looks like a
+    score, and it earns the exception the docstring above just warned
+    against by staying CHECKABLE: it's `sets_last_7d` divided by
+    `TARGET_WEEKLY_SETS`, capped at 10 — a ratio a member can verify with the
+    two numbers sitting right beside it, never a black box. `TARGET_WEEKLY_SETS`
+    is the floor of the evidence-based weekly-volume range for muscle growth
+    (Schoenfeld's own review, already cited in GOALS["muscle_gain"] above),
+    so hitting the recommended MINIMUM reads as a full 10 rather than
+    requiring the top of the range — the same "developing artist" calibration
+    lesson `vocalcoach.py`'s `ScaleIsAnchoredTests` already learned: an anchor
+    set at the ceiling tells everyone below it they're failing.
     """
     permission_classes = [IsAuthenticated]
 
@@ -625,6 +658,12 @@ class BodieZBodyMapView(APIView):
     STALE_DAYS = 10
     WINDOW_DAYS = 7
     OVERWORKED_SESSION_DAYS = 4
+    TARGET_WEEKLY_SETS = 10
+    VOLUME_CITATION = ("Schoenfeld, B. J., Ogborn, D., & Krieger, J. W. (2017). "
+                        "Dose-response relationship between weekly resistance "
+                        "training volume and increases in muscle mass: A "
+                        "systematic review and meta-analysis. Journal of Sports "
+                        "Sciences, 35(11), 1073-1082.")
 
     def get(self, request):
         now = timezone.now()
@@ -643,7 +682,8 @@ class BodieZBodyMapView(APIView):
             if not group_sets:
                 rows.append({"muscle_group": muscle, "label": label,
                              "last_trained": None, "sets_last_7d": 0,
-                             "days_trained_last_7d": 0, "status": "untrained"})
+                             "days_trained_last_7d": 0, "status": "untrained",
+                             "volume_score": 0})
                 continue
 
             last_trained = max(s.session.started_at for s in group_sets)
@@ -666,6 +706,7 @@ class BodieZBodyMapView(APIView):
                 "sets_last_7d": len(recent),
                 "days_trained_last_7d": days_trained,
                 "status": status_,
+                "volume_score": min(10, round(10 * len(recent) / self.TARGET_WEEKLY_SETS)),
             })
 
         return Response({
@@ -673,6 +714,8 @@ class BodieZBodyMapView(APIView):
             "window_days": self.WINDOW_DAYS,
             "recent_days": self.RECENT_DAYS,
             "stale_after_days": self.STALE_DAYS,
+            "target_weekly_sets": self.TARGET_WEEKLY_SETS,
+            "volume_citation": self.VOLUME_CITATION,
         })
 
 
