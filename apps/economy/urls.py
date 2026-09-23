@@ -1,7 +1,9 @@
 from django.urls import path, re_path
+from rest_framework.routers import DefaultRouter
 
 from .directz_app import (DirectZCopyrightView, DirectZWorksView,
                           DirectZRateView)
+from .engagementz import PresenceViewSet, ActivityFeedViewSet, MessageReceiptsViewSet
 from .media import MediaFileView
 from .questz import QuestBoardView, QuestClaimView
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
@@ -157,7 +159,12 @@ from .views import (
 )
 from .habits import HabitCreateView, HabitCompleteView
 
-urlpatterns = [
+router = DefaultRouter()
+router.register(r'presence', PresenceViewSet, basename='presence')
+router.register(r'activity-feed', ActivityFeedViewSet, basename='activity-feed')
+router.register(r'messages', MessageReceiptsViewSet, basename='messages')
+
+urlpatterns = router.urls + [
     path("wallet/", WalletView.as_view(), name="economy-wallet"),
     path("earn/", EarnView.as_view(), name="economy-earn"),
     # OpportunitieZ — what other members are seeking, for collaborators to find.

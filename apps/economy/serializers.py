@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Transaction, Wallet
+from .models import Transaction, Wallet, ActivityEvent
 
 
 class WalletSerializer(serializers.ModelSerializer):
@@ -20,3 +20,18 @@ class TransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Transaction
         fields = ["id", "kind", "amount_cents", "dev_tax_cents", "note", "created_at"]
+
+
+class ActivityEventSerializer(serializers.ModelSerializer):
+    actor = serializers.SerializerMethodField()
+    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+
+    class Meta:
+        model = ActivityEvent
+        fields = ["id", "actor", "kind", "kind_display", "app_key", "target", "created_at", "read"]
+
+    def get_actor(self, obj):
+        return {
+            "id": obj.actor.id,
+            "username": obj.actor.username,
+        }
