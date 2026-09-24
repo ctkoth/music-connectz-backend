@@ -264,13 +264,15 @@ class BodieZExercisesView(APIView):
     """GET /api/economy/bodiez/exercises/ — the movement library, everyone's,
     read-only. Nothing here is per-user, so there is no write endpoint.
 
-    Supports accessibility filtering: when a member declares wheelchair or
-    mobility disability and enables seated-only mode, this endpoint filters
-    to seated/lying/mixed exercises, skipping standing.
+    Supports accessibility filtering for wheelchair users, amputees, and those with
+    limb-specific disabilities:
+    - Seated-only mode: excludes standing exercises for wheelchair users
+    - Arm-only mode: shows exercises that don't require legs (for leg amputees)
+    - Leg-only mode: shows exercises that don't require arms (for arm amputees)
 
     Query params:
     - muscle_group: filter by muscle (e.g., "chest", "legs")
-    - accessibility_mode: "seated_only" respects user's setting or forces it
+    - accessibility_mode: "seated_only", "arm_only", "leg_only"
     """
     permission_classes = [IsAuthenticated]
 
@@ -280,35 +282,56 @@ class BodieZExercisesView(APIView):
         if muscle:
             rows = rows.filter(muscle_group=muscle)
 
-        # Accessibility filtering: seated-only mode for wheelchair/mobility users
-        seated_only = False
+        # Accessibility filtering based on disabilities
         accessibility_info = {}
 
         # Check user's accessibility preferences
         from .models import profile_for
         profile = profile_for(request.user)
         prefs = profile.accessibility_preferences or {}
-        if prefs.get("seated_only_mode", {}).get("enabled"):
-            seated_only = True
-            accessibility_info["auto_enabled_reason"] = (
-                f"Seated-only mode is enabled because you have a disability "
-                f"that benefits from accessible exercises. You can customize this "
-                f"in your Accessibility Settings."
-            )
 
-        # Query param can override
-        if request.query_params.get("accessibility_mode") == "seated_only":
-            seated_only = True
+        # Determine which modes are enabled
+        seated_only = prefs.get("seated_only_mode", {}).get("enabled", False)
+        arm_only = prefs.get("arm_only_mode", {}).get("enabled", False)
+        leg_only = prefs.get("leg_only_mode", {}).get("enabled", False)
 
-        # Filter: exclude standing-only exercises
+        # Query params can override
+        mode = request.query_params.get("accessibility_mode")
+        if mode == "seated_only":
+            seated_only = True
+        elif mode == "arm_only":
+            arm_only = True
+        elif mode == "leg_only":
+            leg_only = True
+
+        # Apply filters based on accessibility modes
+        from django.db.models import Q
+
         if seated_only:
-            from django.db.models import Q
             rows = rows.exclude(position="standing")
             accessibility_info["seated_only_mode_active"] = True
-            accessibility_info["explanation"] = (
-                "This view shows only seated, lying, and adaptable exercises. "
-                "Standing-only exercises are hidden because they cannot be done from a wheelchair. "
-                "You can disable seated-only mode in Accessibility Settings to see all exercises."
+            accessibility_info["explanations"] = accessibility_info.get("explanations", [])
+            accessibility_info["explanations"].append(
+                "Seated-only mode active: showing only seated, lying, and adaptable exercises. "
+                "Standing exercises are hidden for wheelchair accessibility."
+            )
+
+        if arm_only:
+            rows = rows.filter(requires_legs=False)
+            accessibility_info["arm_only_mode_active"] = True
+            accessibility_info["explanations"] = accessibility_info.get("explanations", [])
+            accessibility_info["explanations"].append(
+                "Arm-only mode active: showing exercises that don't require legs. "
+                "This helps you find movements suited for leg amputation or limited leg function."
+            )
+
+        if leg_only:
+            rows = rows.filter(requires_arms=False)
+            accessibility_info["leg_only_mode_active"] = True
+            accessibility_info["explanations"] = accessibility_info.get("explanations", [])
+            accessibility_info["explanations"].append(
+                "Leg-only mode active: showing exercises that don't require arms. "
+                "This helps you find movements suited for arm amputation or limited arm function."
             )
 
         # demo_credit only when at least one row in the library actually has

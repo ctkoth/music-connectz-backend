@@ -31,6 +31,10 @@ DISABILITIES = {
     "chronic_pain": ("Chronic pain", "Movement and mobility"),
     "arthritis": ("Arthritis", "Movement and mobility"),
     "paralysis": ("Paralysis", "Movement and mobility"),
+    "arm_amputation": ("Arm amputation or loss", "Limb differences"),
+    "leg_amputation": ("Leg amputation or loss", "Limb differences"),
+    "hand_function": ("Limited hand or grip function", "Limb differences"),
+    "foot_function": ("Limited foot or leg function", "Limb differences"),
 
     # Sensory
     "deaf": ("Deaf", "Hearing and communication"),
@@ -141,6 +145,38 @@ ACCESSIBILITY_TRIGGERS = {
         "sensory_friendly": {
             "label": "Sensory-friendly mode",
             "why": "Softens colors, reduces flashing, minimizes sudden changes.",
+            "default": False,
+        }
+    },
+    "arm_amputation": {
+        "leg_only_mode": {
+            "label": "Leg-only exercise mode",
+            "why": "Filter BodieZ exercises to those that work legs, core, or require " +
+                   "no arm involvement. Standing exercises become more accessible.",
+            "default": True,
+        }
+    },
+    "leg_amputation": {
+        "arm_only_mode": {
+            "label": "Arm-only exercise mode",
+            "why": "Filter BodieZ exercises to those that work arms, upper body, or require " +
+                   "no leg involvement. Seated and standing exercises stay accessible.",
+            "default": True,
+        }
+    },
+    "hand_function": {
+        "arm_only_mode": {
+            "label": "Arm-only exercise mode",
+            "why": "Filter BodieZ exercises to those with grip-alternative equipment or " +
+                   "bodyweight movements that don't require fine hand control.",
+            "default": False,
+        }
+    },
+    "foot_function": {
+        "leg_only_mode": {
+            "label": "Leg-only exercise mode",
+            "why": "Filter BodieZ exercises to those that don't require foot control or " +
+                   "balance, focusing on strength and movement.",
             "default": False,
         }
     },

@@ -5621,6 +5621,18 @@ class BodieZExercise(models.Model):
     position = models.CharField(
         max_length=10, choices=POSITION_CHOICES, default="standing"
     )
+    # Limb involvement for amputees and users with arm/leg disabilities.
+    # requires_arms=True means the exercise uses arms (default most exercises).
+    # requires_legs=True means the exercise uses legs (default most exercises).
+    # This enables filtering for: arm-only, leg-only, or upper/lower body focus.
+    requires_arms = models.BooleanField(
+        default=True,
+        help_text="Exercise requires or uses arms"
+    )
+    requires_legs = models.BooleanField(
+        default=True,
+        help_text="Exercise requires or uses legs"
+    )
     # A link to a real demonstration — never hosted here, never fabricated.
     # Blank for every seeded exercise: this codebase has no media pipeline for
     # exercise photography and no rights to any third party's GIFs, and
