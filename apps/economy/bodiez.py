@@ -85,7 +85,8 @@ _DAY_TAG_KEYS = {k for k, _ in BODIEZ_DAY_TAGS}
 def _exercise_dict(ex):
     return {"id": ex.id, "name": ex.name, "muscle_group": ex.muscle_group,
             "equipment": ex.equipment, "position": ex.position,
-            "demo_url": ex.demo_url}
+            "demo_url": ex.demo_url, "requires_arms": ex.requires_arms,
+            "requires_legs": ex.requires_legs}
 
 
 # Corey's real credential, stated once here rather than on every video — a
