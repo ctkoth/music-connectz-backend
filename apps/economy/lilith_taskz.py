@@ -60,11 +60,58 @@ XP_FOR = {"quick": 5, "standard": 10, "deep": 25, "boss": 40, "auto": 0, "statz"
 # Keeping a routine is the one thing here that cannot be faked by typing —
 # you cannot backdate consistency. So it is the biggest payer, and it pays at
 # milestones rather than per tick so it is a habit rather than a wage.
+# Deliberately spaced: 7/30/100 are the only milestones, so routine rewards
+# are relatively RARE compared to task variety, which is the point.
 ROUTINE_MILESTONES = {7: 20, 30: 50, 100: 150}
 # ⚡ beside the coin at each milestone. Cheap for us, and it hands back the
 # capacity to keep doing the thing that earned it — which is the point of a
 # streak reward rather than a trophy.
 ROUTINE_MILESTONE_ENERGY = {7: 10, 30: 25, 100: 50}
+
+# Site activity suggestions — things to do that aren't tied to a specific app.
+# These show up as "Something to do" recommendations and are worth less 🍥 than
+# self-made tasks because they are suggested, not self-motivated. But they earn
+# the same XP because effort is effort, regardless of origin. All are the
+# "platform" source so they carry no reward unless the member actually does
+# the action that the frontend links to — Lilith suggests the route but does
+# not coin the destination until it is reached.
+SITE_ACTIVITY_SUGGESTIONS = [
+    {
+        "key": "explore_profile",
+        "title": "Visit a featured member's profile",
+        "note": "Find new people to follow and collaborate with",
+        "kind": "quick",
+        "xp": XP_FOR["quick"],
+    },
+    {
+        "key": "read_trending",
+        "title": "Check out what's trending",
+        "note": "See what other members are working on",
+        "kind": "quick",
+        "xp": XP_FOR["quick"],
+    },
+    {
+        "key": "join_room",
+        "title": "Sit in on a live jam or performance",
+        "note": "Watch someone perform in real time",
+        "kind": "quick",
+        "xp": XP_FOR["quick"],
+    },
+    {
+        "key": "rate_something",
+        "title": "Rate a post or take you enjoyed",
+        "note": "Help the community find quality work",
+        "kind": "quick",
+        "xp": XP_FOR["quick"],
+    },
+    {
+        "key": "message_new",
+        "title": "Start a conversation with someone",
+        "note": "Reach out to a member you found interesting",
+        "kind": "standard",
+        "xp": XP_FOR["standard"],
+    },
+]
 
 # Three in a day, and every Today task cleared. XP only: both are counts of
 # things already rewarded once, and paying coin again would be paying twice
@@ -271,6 +318,63 @@ def _combo_and_sweep(user):
         _award_xp(user, CLEAN_SWEEP_XP)
         out["sweep"] = {"xp": CLEAN_SWEEP_XP, "said": VOICE["sweep"]}
     return out
+
+
+def suggested_activities(user):
+    """Generate a list of suggested site activities for the member.
+
+    These are platform activities — not tied to a specific MCZ app — that
+    Lilith suggests to keep engagement varied. They are shown in the board's
+    "Something to do" section and earn XP when completed, but no 🍥 (those
+    come from self-made tasks and real actions). Suggestions rotate based on
+    what the member has already done and their tier.
+    """
+    from .models import FunnelEvent, Transaction
+    from django.db.models import Count, Q
+
+    tier = "free"
+    try:
+        from .models import membership_for
+        tier = membership_for(user).tier or "free"
+    except Exception:
+        pass
+
+    # Premium members get more variety in suggestions (up to 3, free gets 2)
+    max_suggestions = 3 if tier in ("premium", "statz") else 2
+
+    # Find which activities the member has already engaged with recently
+    # to rotate suggestions and not repeat the same ones constantly
+    since = timezone.now() - timedelta(days=7)
+    recently_done = set()
+
+    # Check ratings (rate_something)
+    if Transaction.objects.filter(user=user, kind="rating_paid", created_at__gte=since).exists():
+        recently_done.add("rate_something")
+
+    # Check messages (message_new) — crude proxy: any message activity
+    try:
+        from apps.messagez.models import MessageThread
+        if MessageThread.objects.filter(Q(user_a=user) | Q(user_b=user),
+                                       updated_at__gte=since).exists():
+            recently_done.add("message_new")
+    except Exception:
+        pass
+
+    # Check room visits / performances (join_room)
+    try:
+        from apps.venuez.models import VenueVisit
+        if VenueVisit.objects.filter(visitor=user, visited_at__gte=since).exists():
+            recently_done.add("join_room")
+    except Exception:
+        pass
+
+    # Filter out recently-done activities and pick the top suggestions
+    available = [s for s in SITE_ACTIVITY_SUGGESTIONS
+                if s["key"] not in recently_done]
+
+    # Return up to max_suggestions, shuffled so same one doesn't always appear first
+    import random
+    return random.sample(available, min(max_suggestions, len(available)))
 
 
 def keep_routine(routine):
@@ -531,6 +635,9 @@ def rewards_table():
          "spinaz": SELF_TASK_SPINAZ, "energy": SELF_TASK_ENERGY,
          "xp": XP_FOR["standard"], "cap": f"{SELF_TASK_DAILY_CAP} a day",
          "why": "Nobody verified it happened, so the coin is a token and the XP is the reward."},
+        {"key": "site_activity", "what": "Complete a suggested site activity",
+         "spinaz": 0, "energy": 0, "xp": XP_FOR["quick"], "cap": "",
+         "why": "Lilith suggests these to keep engagement varied. XP only — they are suggestions, not verified actions."},
         {"key": "platform_task", "what": "Tick a task that points at a real action",
          "spinaz": 0, "energy": 0, "xp": XP_FOR["standard"], "cap": "",
          "why": "The action itself already pays. Lilith routes you to it, it does not pay twice."},
@@ -545,7 +652,7 @@ def rewards_table():
         {"key": f"routine_{d}", "what": f"Keep a routine {d} days running",
          "spinaz": ROUTINE_MILESTONES[d], "energy": ROUTINE_MILESTONE_ENERGY[d],
          "xp": 0, "cap": "once, for life",
-         "why": "Consistency is the one thing here nobody can fake by typing."}
+         "why": "Consistency is the one thing here nobody can fake by typing. Deliberately rare — only three milestones (7/30/100 days)."}
         for d in sorted(ROUTINE_MILESTONES)
     ] + [
         {"key": "collab_beginner",
@@ -621,6 +728,13 @@ def board(user):
 
     routines = list(LilithRoutine.objects.filter(user=user))
     since = timezone.now() - timedelta(hours=24)
+
+    # Generate suggestions for site activities. Empty list if member already
+    # has plenty to do (open tasks + routines >= some threshold).
+    suggestions = []
+    if len(open_tasks) + len(routines) < 8:
+        suggestions = suggested_activities(user)
+
     return {
         "said": _greeting() if open_tasks else VOICE["empty"],
         "tier": tier,
@@ -629,6 +743,7 @@ def board(user):
         "kinds": [{"key": k, "label": v, "xp": XP_FOR.get(k, 10)} for k, v in KINDS],
         "bucket_labels": [{"key": k, "label": v} for k, v in BUCKETS],
         "routines": [_routine_dict(r) for r in routines],
+        "suggestions": suggestions,
         "rewards": rewards_table(),
         # The caps, as counters rather than rules, so a member can see how
         # much of today's allowance is left before they spend the effort.
