@@ -41,11 +41,11 @@ from .models import (BUCKETS, KINDS, LilithPayout, LilithRoutine,  # noqa: E402
 
 # ------------------------------------------------------------- the economy
 
-# A self-made task. One coin, three a day — the same daily ceiling ZodiacZ
-# uses, for the same reason: it stops somebody clearing the board in one
-# afternoon. 3/day is ~90 a month, under a third of one referral.
+# A self-made task. Token coin, one a day — the same daily ceiling as other
+# self-made rewards. 1/day is 30 a month, way under a single routine milestone.
+# Self-made tasks are supplementary, not primary — routines are the dominant earner.
 SELF_TASK_SPINAZ = 1
-SELF_TASK_DAILY_CAP = 3
+SELF_TASK_DAILY_CAP = 1
 # NO ⚡ on a self-made task, deliberately. Paying a token coin for a typed
 # checkbox is already one faucet more than this file recommends; adding a
 # second currency to the same unverified action doubles it for nothing. The
@@ -60,13 +60,13 @@ XP_FOR = {"quick": 5, "standard": 10, "deep": 25, "boss": 40, "auto": 0, "statz"
 # Keeping a routine is the one thing here that cannot be faked by typing —
 # you cannot backdate consistency. So it is the biggest payer, and it pays at
 # milestones rather than per tick so it is a habit rather than a wage.
-# Deliberately spaced: 7/30/100 are the only milestones, so routine rewards
-# are relatively RARE compared to task variety, which is the point.
-ROUTINE_MILESTONES = {7: 20, 30: 50, 100: 150}
+# Routines are deliberately the DOMINANT reward source — consistency is what
+# separates real members from drive-by users, and it is worth the most here.
+ROUTINE_MILESTONES = {7: 50, 14: 75, 30: 150, 60: 250, 100: 400}
 # ⚡ beside the coin at each milestone. Cheap for us, and it hands back the
 # capacity to keep doing the thing that earned it — which is the point of a
 # streak reward rather than a trophy.
-ROUTINE_MILESTONE_ENERGY = {7: 10, 30: 25, 100: 50}
+ROUTINE_MILESTONE_ENERGY = {7: 25, 14: 35, 30: 50, 60: 75, 100: 100}
 
 # Site activity suggestions — things to do that aren't tied to a specific app.
 # These show up as "Something to do" recommendations and are worth less 🍥 than
@@ -652,7 +652,7 @@ def rewards_table():
         {"key": f"routine_{d}", "what": f"Keep a routine {d} days running",
          "spinaz": ROUTINE_MILESTONES[d], "energy": ROUTINE_MILESTONE_ENERGY[d],
          "xp": 0, "cap": "once, for life",
-         "why": "Consistency is the one thing here nobody can fake by typing. Deliberately rare — only three milestones (7/30/100 days)."}
+         "why": "Consistency is the one thing here nobody can fake by typing. Routines are the dominant earner — real members are built on habits."}
         for d in sorted(ROUTINE_MILESTONES)
     ] + [
         {"key": "collab_beginner",
