@@ -23,7 +23,8 @@ from .offerz_engine import (FunnelCatalogView, FunnelOfferRedeemView,
 from .lilith_taskz import (LilithBoardView, LilithRoutineDetailView,
                            LilithRoutineListView, LilithSponsorView,
                            LilithTaskCompleteView, LilithTaskDetailView,
-                           LilithTaskListView)
+                           LilithTaskListView, LilithTagView, LilithTagListView,
+                           LilithReverseTagsView)
 from .karmaz import KarmaRewardsView
 from .signbonus import SignBonusView
 from .voice import VoiceZView
@@ -424,6 +425,10 @@ urlpatterns = [
     path("lilith/routines/<int:routine_id>/", LilithRoutineDetailView.as_view(),
          name="economy-lilith-routine"),
     path("lilith/sponsor/", LilithSponsorView.as_view(), name="economy-lilith-sponsor"),
+    path("lilith/tags/", LilithTagListView.as_view(), name="economy-lilith-tags"),
+    path("lilith/tag/", LilithTagView.as_view(), name="economy-lilith-tag-create"),
+    path("lilith/tag/<int:pk>/", LilithTagView.as_view(), name="economy-lilith-tag-delete"),
+    path("lilith/reverse-tags/", LilithReverseTagsView.as_view(), name="economy-lilith-reverse-tags"),
     # BodieZ — strength training and workout planning. v1: library, routines,
     # session log, and a progress read built from logged sets, not a formula.
     path("bodiez/exercises/", BodieZExercisesView.as_view(), name="economy-bodiez-exercises"),

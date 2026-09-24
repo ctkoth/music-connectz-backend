@@ -964,3 +964,152 @@ class LilithSponsorView(APIView):
             "spinaz": SPONSOR_GRADUATION_SPINAZ,
             "energy": SPONSOR_GRADUATION_ENERGY,
         }, status=status.HTTP_201_CREATED)
+
+
+# ----------------------------------------------------------------- tagging
+
+class LilithTagView(APIView):
+    """POST /api/lilith/tag/ — tag a task or routine to another piece of content.
+    DELETE /api/lilith/tag/{id}/ — remove a tag.
+
+    Tags link tasks and routines to Posts, Users, takes, battles, or anything
+    with an app_key/target pair. They are bidirectional: the tagged item shows
+    the tag, and the task/routine shows what it's linked to.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        """Create a tag from task/routine to some content."""
+        from .models import LilithTag
+        d = request.data
+        task_id = d.get("task_id")
+        routine_id = d.get("routine_id")
+        to_app_key = (d.get("to_app_key") or "").strip()
+        to_target = (d.get("to_target") or "").strip()
+
+        if not (task_id or routine_id):
+            return Response({"detail": "Specify task_id or routine_id."}, status=400)
+        if not (to_app_key and to_target):
+            return Response({"detail": "Specify to_app_key and to_target."}, status=400)
+
+        # Verify ownership
+        task = None
+        routine = None
+        if task_id:
+            task = LilithTask.objects.filter(id=task_id, user=request.user).first()
+            if not task:
+                return Response({"detail": "Task not found or not yours."}, status=404)
+        if routine_id:
+            routine = LilithRoutine.objects.filter(id=routine_id, user=request.user).first()
+            if not routine:
+                return Response({"detail": "Routine not found or not yours."}, status=404)
+
+        visibility = d.get("visibility", LilithTag.VISIBILITY_PRIVATE)
+        if visibility not in dict(LilithTag.VISIBILITY_CHOICES):
+            visibility = LilithTag.VISIBILITY_PRIVATE
+
+        # Create or update
+        tag, created = LilithTag.objects.get_or_create(
+            user=request.user,
+            task=task,
+            routine=routine,
+            to_app_key=to_app_key,
+            to_target=to_target,
+            defaults={"visibility": visibility}
+        )
+
+        if not created:
+            tag.visibility = visibility
+            tag.save(update_fields=["visibility"])
+
+        return Response({
+            "id": tag.id,
+            "task_id": tag.task_id,
+            "routine_id": tag.routine_id,
+            "to_app_key": tag.to_app_key,
+            "to_target": tag.to_target,
+            "visibility": tag.visibility,
+            "created_at": tag.created_at.isoformat(),
+        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    def delete(self, request, pk):
+        """Remove a tag."""
+        from .models import LilithTag
+        tag = LilithTag.objects.filter(id=pk, user=request.user).first()
+        if not tag:
+            return Response({"detail": "Tag not found or not yours."}, status=404)
+        tag.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class LilithTagListView(APIView):
+    """GET /api/lilith/tags/?task_id=X or ?routine_id=X — list tags on a task/routine.
+
+    Returns all tags created by the logged-in user on the specified task or
+    routine, regardless of visibility (they own them).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .models import LilithTag
+        task_id = request.query_params.get("task_id")
+        routine_id = request.query_params.get("routine_id")
+
+        if not (task_id or routine_id):
+            return Response({"detail": "Specify task_id or routine_id."}, status=400)
+
+        tags = LilithTag.objects.filter(user=request.user)
+        if task_id:
+            tags = tags.filter(task_id=task_id)
+        if routine_id:
+            tags = tags.filter(routine_id=routine_id)
+
+        return Response([{
+            "id": tag.id,
+            "task_id": tag.task_id,
+            "routine_id": tag.routine_id,
+            "to_app_key": tag.to_app_key,
+            "to_target": tag.to_target,
+            "visibility": tag.visibility,
+            "created_at": tag.created_at.isoformat(),
+        } for tag in tags])
+
+
+class LilithReverseTagsView(APIView):
+    """GET /api/lilith/reverse-tags/?app_key=X&target=Y — tags applied to this content.
+
+    Returns tags pointing AT the given app_key/target pair. Only shows tags
+    with visibility shared or public, or owned by the logged-in user.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .models import LilithTag
+        app_key = request.query_params.get("app_key")
+        target = request.query_params.get("target")
+
+        if not (app_key and target):
+            return Response({"detail": "Specify app_key and target."}, status=400)
+
+        tags = LilithTag.objects.filter(
+            to_app_key=app_key,
+            to_target=target
+        ).select_related("task", "routine", "user")
+
+        # Filter visibility: show if owned by user OR if shared/public
+        visible_tags = [
+            tag for tag in tags
+            if tag.user == request.user
+            or tag.visibility in [LilithTag.VISIBILITY_SHARED, LilithTag.VISIBILITY_PUBLIC]
+        ]
+
+        return Response([{
+            "id": tag.id,
+            "user": tag.user.username,
+            "task_id": tag.task_id,
+            "task_title": tag.task.title if tag.task else None,
+            "routine_id": tag.routine_id,
+            "routine_title": tag.routine.title if tag.routine else None,
+            "visibility": tag.visibility,
+            "created_at": tag.created_at.isoformat(),
+        } for tag in visible_tags])

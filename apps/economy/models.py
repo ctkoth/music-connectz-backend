@@ -6131,6 +6131,61 @@ class LilithSponsorship(models.Model):
         ordering = ("-created_at",)
 
 
+class LilithTag(models.Model):
+    """Cross-pollination tags: link tasks and routines to anything on the platform.
+
+    A member can tag a Task or Routine onto any piece of content (a Post, User,
+    SingZ take, BattleZ entry, etc) and see it bidirectionally — the content
+    shows the tags applied to it, and the task/routine shows what it's linked to.
+    This closes the dead-end surfaces rule: a member working on a routine can
+    tag related posts to it, then jump from the routine to those posts, or vice
+    versa, without needing a separate app or losing context.
+
+    Tags are keyed by app_key and target, the same shape used throughout the
+    platform for cross-pollination (see LilithTask above).
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="lilith_tags")
+
+    # The source: either a task or a routine (one must be non-null)
+    task = models.ForeignKey(LilithTask, null=True, blank=True,
+                             on_delete=models.CASCADE, related_name="tags")
+    routine = models.ForeignKey(LilithRoutine, null=True, blank=True,
+                                on_delete=models.CASCADE, related_name="tags")
+
+    # The target: app_key and target pair (e.g., "postz", "post:123")
+    # This allows tagging anything that has an app_key/target shape.
+    to_app_key = models.CharField(max_length=32, db_index=True)
+    to_target = models.CharField(max_length=128, db_index=True)
+
+    # Visibility: private (only creator), shared (with collaborators), public
+    VISIBILITY_PRIVATE = "private"
+    VISIBILITY_SHARED = "shared"
+    VISIBILITY_PUBLIC = "public"
+    VISIBILITY_CHOICES = [
+        (VISIBILITY_PRIVATE, "Private"),
+        (VISIBILITY_SHARED, "Shared"),
+        (VISIBILITY_PUBLIC, "Public"),
+    ]
+    visibility = models.CharField(max_length=10, choices=VISIBILITY_CHOICES,
+                                  default=VISIBILITY_PRIVATE)
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        unique_together = (("task", "to_app_key", "to_target"),
+                           ("routine", "to_app_key", "to_target"))
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["user", "created_at"]),
+            models.Index(fields=["to_app_key", "to_target"]),
+        ]
+
+    def __str__(self):
+        src = self.task.title if self.task else self.routine.title
+        return f"{src} → {self.to_app_key}:{self.to_target}"
+
+
 # ------------------------------------------------- the coach's own memory
 #
 # Every score the coach has ever produced was returned to the browser and
