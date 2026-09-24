@@ -1784,3 +1784,210 @@ class InstrumentLeaderboardView(APIView):
             "period": period,
             "leaders": leaderboardz.top_xp_earners_by_instrument(app_key, limit=limit, period_days=period_days),
         })
+
+
+class DisabilitieZView(APIView):
+    """GET/PATCH /api/economy/disabilitiez/ — disability declarations & accessibility.
+
+    DisabilitieZ lets members declare disabilities from medical sources
+    (CDC, WHO, ICD-11) so the platform can auto-suggest accessibility features
+    and filter for community. Not a diagnosis — a DECLARATION.
+
+    GET: Fetch this member's declared disabilities and auto-suggested
+         accessibility features.
+    PATCH: Update disability declarations and customize accessibility
+           preferences. Auto-applies features when new disabilities are added.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from . import disabilitiez
+        from .models import profile_for
+
+        profile = profile_for(request.user)
+        
+        return Response({
+            "disabilities": profile.disabilities or [],
+            "accessibility_preferences": profile.accessibility_preferences or {},
+            # Reference list of all available disabilities and what they enable
+            "available_disabilities": {
+                key: {
+                    "label": name,
+                    "category": category,
+                    "suggests_features": list(disabilitiez.ACCESSIBILITY_TRIGGERS.get(key, {}).keys()),
+                }
+                for key, (name, category) in disabilitiez.DISABILITIES.items()
+            },
+        })
+
+    def patch(self, request):
+        from . import disabilitiez
+        from .models import profile_for
+
+        profile = profile_for(request.user)
+        
+        # Update disabilities if provided
+        if "disabilities" in request.data:
+            new_disabilities = request.data["disabilities"]
+            if not isinstance(new_disabilities, list):
+                return Response(
+                    {"detail": "Disabilities must be a list"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Validate against known disabilities
+            valid_keys = set(disabilitiez.DISABILITIES.keys())
+            invalid = [d for d in new_disabilities if d not in valid_keys]
+            if invalid:
+                return Response(
+                    {"detail": f"Unknown disabilities: {invalid}"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            profile.disabilities = new_disabilities
+            
+            # Auto-apply accessibility features for newly declared disabilities
+            new_prefs = disabilitiez.apply_accessibility_features(profile, new_disabilities)
+            profile.accessibility_preferences = new_prefs
+
+        # Allow customization of accessibility preferences
+        if "accessibility_preferences" in request.data:
+            prefs = request.data["accessibility_preferences"]
+            if not isinstance(prefs, dict):
+                return Response(
+                    {"detail": "Preferences must be a dict"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            # Merge with existing, preserving auto-set features
+            profile.accessibility_preferences.update(prefs)
+
+        profile.save(update_fields=["disabilities", "accessibility_preferences", "updated_at"])
+
+        return Response({
+            "disabilities": profile.disabilities,
+            "accessibility_preferences": profile.accessibility_preferences,
+            "message": "Disabilities and accessibility preferences updated. " +
+                       "Some features auto-enabled based on your declarations.",
+        })
+
+
+class RelationshipStatusView(APIView):
+    """GET/PATCH /api/economy/relationships/status/ — relationship status & member tagging.
+
+    Lets members declare relationship status and tag other members (like Facebook).
+    Supports: single, in_a_relationship, married, complicated, open, divorced.
+
+    GET: Fetch this member's relationship status and tagged relationships.
+    PATCH: Update status or add/remove relationship tags.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .models import profile_for
+
+        profile = profile_for(request.user)
+        
+        # Fetch relationship names for display
+        relationships = []
+        for rel in (profile.relationships or []):
+            try:
+                related_user = User.objects.get(id=rel.get("user_id"))
+                relationships.append({
+                    "user_id": rel["user_id"],
+                    "username": related_user.username,
+                    "relationship_type": rel.get("type", "friend"),
+                })
+            except User.DoesNotExist:
+                pass  # Skip deleted users
+        
+        return Response({
+            "relationship_status": profile.relationship_status or "",
+            "relationships": relationships,
+            "status_choices": [
+                ("single", "Single"),
+                ("in_a_relationship", "In a relationship"),
+                ("married", "Married"),
+                ("complicated", "It's complicated"),
+                ("open", "Open relationship"),
+                ("divorced", "Divorced"),
+            ],
+            "relationship_types": [
+                "partner", "spouse", "family", "friend", "collaborator"
+            ],
+        })
+
+    def patch(self, request):
+        from .models import profile_for
+
+        profile = profile_for(request.user)
+        
+        # Update relationship status
+        if "relationship_status" in request.data:
+            status_val = request.data["relationship_status"]
+            valid_statuses = {
+                "", "single", "in_a_relationship", "married",
+                "complicated", "open", "divorced"
+            }
+            if status_val not in valid_statuses:
+                return Response(
+                    {"detail": f"Invalid status. Choose from: {', '.join(valid_statuses)}"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            profile.relationship_status = status_val
+
+        # Add a relationship tag
+        if "add_relationship" in request.data:
+            rel_data = request.data["add_relationship"]
+            user_id = rel_data.get("user_id")
+            rel_type = rel_data.get("type", "friend")
+            
+            if not user_id:
+                return Response(
+                    {"detail": "user_id required"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            if rel_type not in {"partner", "spouse", "family", "friend", "collaborator"}:
+                return Response(
+                    {"detail": "Invalid relationship type"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Prevent self-tagging
+            if user_id == request.user.id:
+                return Response(
+                    {"detail": "Cannot tag yourself"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Check user exists
+            if not User.objects.filter(id=user_id).exists():
+                return Response(
+                    {"detail": "User not found"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Add if not already there
+            existing_rels = profile.relationships or []
+            if not any(r.get("user_id") == user_id for r in existing_rels):
+                existing_rels.append({
+                    "user_id": user_id,
+                    "type": rel_type,
+                })
+                profile.relationships = existing_rels
+
+        # Remove a relationship tag
+        if "remove_relationship" in request.data:
+            user_id = request.data["remove_relationship"]
+            existing_rels = profile.relationships or []
+            profile.relationships = [r for r in existing_rels if r.get("user_id") != user_id]
+
+        profile.save(update_fields=["relationship_status", "relationships", "updated_at"])
+        
+        return Response({
+            "relationship_status": profile.relationship_status,
+            "relationships": profile.relationships or [],
+            "message": "Relationship info updated",
+        })

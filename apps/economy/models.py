@@ -1091,6 +1091,27 @@ class Profile(models.Model):
     # your current reach, and your rate. Format: {active, help_needed, status,
     # current_reach, rate} — all optional and displayed only if active is True.
     seeking = models.JSONField(default=dict, blank=True)
+    # DisabilitieZ — declared disabilities from a medical source (CDC, WHO).
+    # Format: ["wheelchair", "deaf", "blind", ...] for filtering and
+    # auto-suggesting accessibility features like seated-only exercise mode.
+    # Blank means "hasn't said". Same shape as substances: DECLARATION, never
+    # a measurement or diagnosis. See apps/economy/disabilitiez.py for the
+    # complete list sourced from medical authorities.
+    disabilities = models.JSONField(default=list, blank=True)
+    # Accessibility preferences triggered by disability declarations.
+    # Format: {seated_only_mode: bool, ...} — auto-populated when wheelchair
+    # or mobility disability is declared, with explanation of why; members may
+    # customize. An empty dict means defaults or not yet set.
+    accessibility_preferences = models.JSONField(default=dict, blank=True)
+    # Relationship status for social features. Choices: "", "single",
+    # "in_a_relationship", "married", "complicated", "open", "divorced".
+    # Blank means "hasn't said". searchable in MembersView for social filtering.
+    relationship_status = models.CharField(max_length=20, blank=True, default="", db_index=True)
+    # Member relationships/tags — array of (user_id, relationship_type) tuples
+    # like Facebook's relationship list. Format: [{user_id: int, type: str}, ...]
+    # Types: "partner", "spouse", "family", "friend", "collaborator".
+    # Bidirectional: adding a tag requests mutual confirmation (optional).
+    relationships = models.JSONField(default=list, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
 
@@ -5589,6 +5610,17 @@ class BodieZExercise(models.Model):
         ("cable", "Cable / Pulley"), ("band", "Band"),
     ]
     equipment = models.CharField(max_length=12, choices=EQUIPMENT_CHOICES)
+    # Exercise position for accessibility: standing (default), seated, lying,
+    # or mixed (can be done multiple ways). Wheelchair users and those with
+    # mobility issues can filter to seated/lying exercises only via an
+    # auto-suggested mode when DisabilitieZ flags wheelchair disability.
+    POSITION_CHOICES = [
+        ("standing", "Standing"), ("seated", "Seated"),
+        ("lying", "Lying"), ("mixed", "Can be modified"),
+    ]
+    position = models.CharField(
+        max_length=10, choices=POSITION_CHOICES, default="standing"
+    )
     # A link to a real demonstration — never hosted here, never fabricated.
     # Blank for every seeded exercise: this codebase has no media pipeline for
     # exercise photography and no rights to any third party's GIFs, and

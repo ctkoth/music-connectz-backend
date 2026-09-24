@@ -84,7 +84,8 @@ _DAY_TAG_KEYS = {k for k, _ in BODIEZ_DAY_TAGS}
 
 def _exercise_dict(ex):
     return {"id": ex.id, "name": ex.name, "muscle_group": ex.muscle_group,
-            "equipment": ex.equipment, "demo_url": ex.demo_url}
+            "equipment": ex.equipment, "position": ex.position,
+            "demo_url": ex.demo_url}
 
 
 # Corey's real credential, stated once here rather than on every video — a
@@ -261,7 +262,16 @@ def _session_dict(sess, sets=None):
 
 class BodieZExercisesView(APIView):
     """GET /api/economy/bodiez/exercises/ — the movement library, everyone's,
-    read-only. Nothing here is per-user, so there is no write endpoint."""
+    read-only. Nothing here is per-user, so there is no write endpoint.
+
+    Supports accessibility filtering: when a member declares wheelchair or
+    mobility disability and enables seated-only mode, this endpoint filters
+    to seated/lying/mixed exercises, skipping standing.
+
+    Query params:
+    - muscle_group: filter by muscle (e.g., "chest", "legs")
+    - accessibility_mode: "seated_only" respects user's setting or forces it
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -269,12 +279,48 @@ class BodieZExercisesView(APIView):
         muscle = request.query_params.get("muscle_group")
         if muscle:
             rows = rows.filter(muscle_group=muscle)
+
+        # Accessibility filtering: seated-only mode for wheelchair/mobility users
+        seated_only = False
+        accessibility_info = {}
+
+        # Check user's accessibility preferences
+        from .models import profile_for
+        profile = profile_for(request.user)
+        prefs = profile.accessibility_preferences or {}
+        if prefs.get("seated_only_mode", {}).get("enabled"):
+            seated_only = True
+            accessibility_info["auto_enabled_reason"] = (
+                f"Seated-only mode is enabled because you have a disability "
+                f"that benefits from accessible exercises. You can customize this "
+                f"in your Accessibility Settings."
+            )
+
+        # Query param can override
+        if request.query_params.get("accessibility_mode") == "seated_only":
+            seated_only = True
+
+        # Filter: exclude standing-only exercises
+        if seated_only:
+            from django.db.models import Q
+            rows = rows.exclude(position="standing")
+            accessibility_info["seated_only_mode_active"] = True
+            accessibility_info["explanation"] = (
+                "This view shows only seated, lying, and adaptable exercises. "
+                "Standing-only exercises are hidden because they cannot be done from a wheelchair. "
+                "You can disable seated-only mode in Accessibility Settings to see all exercises."
+            )
+
         # demo_credit only when at least one row in the library actually has
         # a video — an unearned credential line on a library with no clips to
         # its name would be exactly the kind of claim the substance rule
         # exists to keep off screen.
         credit = DEMO_CREDIT if BodieZExercise.objects.exclude(demo_url="").exists() else ""
-        return Response({"exercises": [_exercise_dict(e) for e in rows], "demo_credit": credit})
+        return Response({
+            "exercises": [_exercise_dict(e) for e in rows],
+            "demo_credit": credit,
+            "accessibility": accessibility_info,
+        })
 
 
 class BodieZExerciseHistoryView(APIView):

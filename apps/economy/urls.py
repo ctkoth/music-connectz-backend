@@ -160,6 +160,8 @@ from .views import (
     TakeAnalysisView,
     LeaderboardsView,
     InstrumentLeaderboardView,
+    DisabilitieZView,
+    RelationshipStatusView,
 )
 from .habits import HabitCreateView, HabitCompleteView
 from .bodiez import (
@@ -541,4 +543,8 @@ urlpatterns = router.urls + [
     # LeaderboardZ — competition drives conversions. All metrics are substance.
     path("leaderboardz/", LeaderboardsView.as_view(), name="economy-leaderboardz"),
     path("leaderboardz/xp/<str:app_key>/", InstrumentLeaderboardView.as_view(), name="economy-leaderboardz-xp"),
+    # DisabilitieZ — accessibility through disability declarations
+    path("disabilitiez/", DisabilitieZView.as_view(), name="economy-disabilitiez"),
+    # Relationships — status and member tagging (Facebook-style)
+    path("relationships/status/", RelationshipStatusView.as_view(), name="economy-relationships-status"),
 ]
