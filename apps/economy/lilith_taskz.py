@@ -127,15 +127,18 @@ CLEAN_SWEEP_XP = 30
 # model spend, so every coin has a cost to us. The rule that falls out:
 # **pay ⚡ generously, pay 🍥 carefully.**
 #
-# 50 ⚡ is Corey's number and it is the right one. Onboarding grants exactly
-# 50, so this says helping a newcomer is worth what arriving is worth; a free
-# member passively regenerates 48 a day (ENERGY_FLOOR_PER_HOUR), so it is
-# about a day of capacity; and a rating pays 1, so it ranks this at fifty
-# ratings — which is roughly the truth.
-COLLAB_WITH_BEGINNER_ENERGY = 50
-# Capped per day like every other faucet: many beginners must not become a
-# job, and the ceiling is what stops it.
-COLLAB_WITH_BEGINNER_DAILY_CAP = 3
+# Direct collaboration with a beginner is the single most valuable interaction
+# on the platform — it is what turns a newcomer into a member. It cannot be
+# faked (the other person has to agree) and it is exactly what the platform
+# exists for. Pay it heavily, and raise the cap so experienced members can do
+# this work without hitting a ceiling.
+COLLAB_WITH_BEGINNER_ENERGY = 100
+COLLAB_WITH_BEGINNER_SPINAZ = 25
+# Capped per day: the platform's scarcest good is a member's FIRST real
+# collaboration, and many beginners must not become a job. But the ceiling is
+# higher because direct work is the priority — this is the main interaction
+# that should be encouraged, unlike self-made tasks.
+COLLAB_WITH_BEGINNER_DAILY_CAP = 5
 
 # Helping somebody who is still new. The largest payout in this file, and the
 # only one that is not paid for effort at all — see `graduate` below.
@@ -523,7 +526,7 @@ def graduate(newcomer, partner=None, partners=()):
 
 
 def collabed_with_beginner(user, other, *, beginner=None):
-    """`user` completed a collab or battle with somebody still new. Pay ⚡.
+    """`user` completed a collab or battle with somebody still new. Pay ⚡ and 🍥.
 
     Separate from sponsorship and much smaller: this is the act itself rather
     than the outcome of helping somebody over months, and it happens far more
@@ -544,10 +547,10 @@ def collabed_with_beginner(user, other, *, beginner=None):
     if has_strong(signals_between(user, other)):
         return None
     if _paid_today(user, "collab_beginner") >= COLLAB_WITH_BEGINNER_DAILY_CAP:
-        return {"capped": True, "energy": 0, "said": VOICE["capped"]}
+        return {"capped": True, "energy": 0, "spinaz": 0, "said": VOICE["capped"]}
     _pay(user, "collab_beginner", energy=COLLAB_WITH_BEGINNER_ENERGY,
-         ref=f"beginner:{other.pk}")
-    return {"capped": False, "energy": COLLAB_WITH_BEGINNER_ENERGY}
+         spinaz=COLLAB_WITH_BEGINNER_SPINAZ, ref=f"beginner:{other.pk}")
+    return {"capped": False, "energy": COLLAB_WITH_BEGINNER_ENERGY, "spinaz": COLLAB_WITH_BEGINNER_SPINAZ}
 
 
 def helped_graduated(user, other, *, beginner=None):
@@ -657,9 +660,9 @@ def rewards_table():
     ] + [
         {"key": "collab_beginner",
          "what": "Finish a collab or battle with a member who is still new",
-         "spinaz": 0, "energy": COLLAB_WITH_BEGINNER_ENERGY, "xp": 0,
+         "spinaz": COLLAB_WITH_BEGINNER_SPINAZ, "energy": COLLAB_WITH_BEGINNER_ENERGY, "xp": 0,
          "cap": f"{COLLAB_WITH_BEGINNER_DAILY_CAP} a day",
-         "why": "⚡ is spent here and cannot be cashed out, so it can be generous."},
+         "why": "Direct collaboration with beginners is the platform's priority. ⚡ is spent here and cannot be cashed out; 🍥 is earned generously to encourage this work."},
         {"key": "sponsor_graduation",
          "what": "Somebody you helped completes their first collab or battle",
          "spinaz": SPONSOR_GRADUATION_SPINAZ, "energy": SPONSOR_GRADUATION_ENERGY,

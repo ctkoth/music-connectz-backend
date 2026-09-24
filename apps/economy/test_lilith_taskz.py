@@ -232,8 +232,9 @@ class WorkingTogetherTests(TestCase):
     def test_collabing_with_a_beginner_pays_energy_not_coin(self):
         got = L.collabed_with_beginner(self.a, self.b, beginner=True)
         self.assertEqual(got["energy"], L.COLLAB_WITH_BEGINNER_ENERGY)
+        self.assertEqual(got["spinaz"], L.COLLAB_WITH_BEGINNER_SPINAZ)
         self.assertEqual(wallet_for(self.a).energy, L.COLLAB_WITH_BEGINNER_ENERGY)
-        self.assertEqual(wallet_for(self.a).spinaz, 0)
+        self.assertEqual(wallet_for(self.a).spinaz, L.COLLAB_WITH_BEGINNER_SPINAZ)
 
     def test_it_caps_per_day(self):
         for _ in range(L.COLLAB_WITH_BEGINNER_DAILY_CAP):
