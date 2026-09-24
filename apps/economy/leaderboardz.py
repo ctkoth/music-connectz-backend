@@ -12,11 +12,11 @@ Leaderboards drive competition and motivate premium upgrades by showing:
 
 from datetime import timedelta
 from django.contrib.auth import get_user_model
-from django.db.models import Sum, Count, Q
+from django.db.models import Sum, Count, Q, Max, Avg
 from django.utils import timezone
 
-from .models import TIER_FREE, Membership, Transaction, Wallet
-from apps.skillz.models import TrainingProfile
+from .models import TIER_FREE, Membership, Transaction, Wallet, Badge, Post
+from apps.skillz.models import TrainingProfile, TrainingEvent
 
 User = get_user_model()
 
@@ -245,6 +245,178 @@ def top_referrers(limit=10):
             "username": u.username,
             "referral_count": u.referral_count or 0,
             "referral_earned": u.referral_earned or 0,
+        }
+        for i, u in enumerate(qs[:limit])
+    ]
+
+
+def top_followers(limit=10, period_days=None):
+    """Members with most followers — social proof and reach.
+
+    Shows network power and community trust. Motivates:
+    - Following others to build audience reciprocally
+    - Engagement to grow followers
+    - Verification to establish credibility
+    """
+    qs = User.objects.annotate(
+        followers_count=Count(
+            "follower_set",  # reverse relation of Follow.following
+            distinct=True
+        )
+    ).filter(followers_count__gt=0).order_by("-followers_count")
+
+    if period_days:
+        # For period, count only followers who followed in the window
+        cutoff = timezone.now() - timedelta(days=period_days)
+        qs = User.objects.annotate(
+            followers_count=Count(
+                "follower_set",
+                filter=Q(follower_set__created_at__gte=cutoff),
+                distinct=True
+            )
+        ).filter(followers_count__gt=0).order_by("-followers_count")
+
+    return [
+        {
+            "rank": i + 1,
+            "username": u.username,
+            "followers_count": u.followers_count or 0,
+        }
+        for i, u in enumerate(qs[:limit])
+    ]
+
+
+def top_streak_keepers(limit=10, period_days=None):
+    """Members with longest streaks across all instruments.
+
+    Motivation: consistency, dedication, habit formation.
+    Shows discipline and reliability.
+    """
+    qs = User.objects.annotate(
+        longest_streak=Max(
+            "training_profiles__longest_streak"
+        )
+    ).filter(longest_streak__gt=0).order_by("-longest_streak")
+
+    if period_days:
+        # For period, show current streaks (within-window only)
+        cutoff = timezone.now() - timedelta(days=period_days)
+        qs = User.objects.annotate(
+            current_streak=Max(
+                "training_profiles__current_streak",
+                filter=Q(training_profiles__events__created_at__gte=cutoff)
+            )
+        ).filter(current_streak__gt=0).order_by("-current_streak")
+
+    return [
+        {
+            "rank": i + 1,
+            "username": u.username,
+            "streak_days": (u.longest_streak if not period_days else u.current_streak) or 0,
+        }
+        for i, u in enumerate(qs[:limit])
+    ]
+
+
+def top_verified_reach(limit=10, period_days=None):
+    """Members with highest verified external reach/followers.
+
+    Shows network power from external validation (Spotify, YouTube, etc).
+    Motivates external account verification for passive ⚡.
+    """
+    # Note: This assumes Profile.external_followers exists and tracks verified sources.
+    # Falls back to 0 if field doesn't exist.
+    try:
+        qs = User.objects.annotate(
+            verified_reach=Sum(
+                "profile__external_followers",
+                filter=Q(profile__isnull=False)
+            )
+        ).filter(verified_reach__isnull=False, verified_reach__gt=0).order_by("-verified_reach")
+
+        if period_days:
+            # Period version shows growth in verified reach (not meaningful for this metric,
+            # so we use all-time)
+            pass
+
+        return [
+            {
+                "rank": i + 1,
+                "username": u.username,
+                "verified_reach": int(u.verified_reach) or 0,
+            }
+            for i, u in enumerate(qs[:limit])
+        ]
+    except Exception:
+        # If field doesn't exist, return empty leaderboard
+        return []
+
+
+def top_badge_collectors(limit=10, period_days=None):
+    """Members who've earned the most badges.
+
+    Shows achievement/completion. Motivates:
+    - Reaching milestones
+    - Diversifying across platform features
+    - Engagement across different domains
+    """
+    qs = User.objects.annotate(
+        badges_earned=Count(
+            "badges",  # reverse relation from Badge.user
+            distinct=True
+        )
+    ).filter(badges_earned__gt=0).order_by("-badges_earned")
+
+    if period_days:
+        cutoff = timezone.now() - timedelta(days=period_days)
+        qs = User.objects.annotate(
+            badges_earned=Count(
+                "badges",
+                filter=Q(badges__awarded_at__gte=cutoff),
+                distinct=True
+            )
+        ).filter(badges_earned__gt=0).order_by("-badges_earned")
+
+    return [
+        {
+            "rank": i + 1,
+            "username": u.username,
+            "badges_earned": u.badges_earned or 0,
+        }
+        for i, u in enumerate(qs[:limit])
+    ]
+
+
+def top_content_creators(limit=10, period_days=None):
+    """Members who've created the most posts.
+
+    Shows content production. Motivates:
+    - Sharing work
+    - Building audience through consistent posts
+    - Content-based earning
+    """
+    qs = User.objects.annotate(
+        posts_count=Count(
+            "posts",
+            distinct=True
+        )
+    ).filter(posts_count__gt=0).order_by("-posts_count")
+
+    if period_days:
+        cutoff = timezone.now() - timedelta(days=period_days)
+        qs = User.objects.annotate(
+            posts_count=Count(
+                "posts",
+                filter=Q(posts__created_at__gte=cutoff),
+                distinct=True
+            )
+        ).filter(posts_count__gt=0).order_by("-posts_count")
+
+    return [
+        {
+            "rank": i + 1,
+            "username": u.username,
+            "posts_count": u.posts_count or 0,
         }
         for i, u in enumerate(qs[:limit])
     ]

@@ -1680,10 +1680,20 @@ class LeaderboardsView(APIView):
         return Response({
             "period": period,
             "period_days": period_days,
+            # Economic metrics
             "spinaz_earners": leaderboardz.top_spinaz_earners(limit=limit, period_days=period_days),
             "energy_earners": leaderboardz.top_energy_earners(limit=limit, period_days=period_days),
+            # Participation metrics
             "raters": leaderboardz.top_raters(limit=limit, period_days=period_days),
             "referrers": leaderboardz.top_referrers(limit=limit),
+            # Social engagement
+            "followers": leaderboardz.top_followers(limit=limit, period_days=period_days),
+            "verified_reach": leaderboardz.top_verified_reach(limit=limit, period_days=period_days),
+            # Achievement & consistency
+            "streaks": leaderboardz.top_streak_keepers(limit=limit, period_days=period_days),
+            "badges": leaderboardz.top_badge_collectors(limit=limit, period_days=period_days),
+            # Content creation
+            "content_creators": leaderboardz.top_content_creators(limit=limit, period_days=period_days),
             # Instrument-specific boards (singz, rapz, etc) on separate endpoints
             "note": "Use /api/economy/leaderboards/xp/<app_key>/ for per-instrument SkillZ rankings",
         })
