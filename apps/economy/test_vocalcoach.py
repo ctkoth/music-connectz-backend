@@ -873,7 +873,9 @@ class GoalsAndCurrentQualitiesTests(TestCase):
                    ("flow", "timing", "breath", "clarity", "delivery")},
                    "verdict": "🎧 solid", "now": "🎤 you're here",
                    "goal": "🎯 aim here", "range_profile": "🧔 Bass, D2–B4",
-                   "style_fit": "⚔️ drill wants menace", "strengths": ["a"],
+                   "style_fit": "⚔️ drill wants menace",
+                   "song_score": 8, "song_why": "🎶 the hook actually lands",
+                   "strengths": ["a"],
                    "fixes": ["b"], "next_drill": "c"}
         fake = type("R", (), {"status_code": 200,
                               "json": lambda self: {"candidates": [{"content": {"parts": [
@@ -888,6 +890,74 @@ class GoalsAndCurrentQualitiesTests(TestCase):
         self.assertEqual(out["goal"], "🎯 aim here")
         self.assertEqual(out["range_profile"], "🧔 Bass, D2–B4")
         self.assertEqual(out["style_fit"], "⚔️ drill wants menace")
+        self.assertEqual(out["song_score"], 8)
+        self.assertEqual(out["song_why"], "🎶 the hook actually lands")
+
+
+class SongScoreIsSeparateFromPerformanceTests(TestCase):
+    """Song 🎶 answers "does this land with a real listener", as its own
+    number — never folded into the five performance dimensions, never
+    allowed to move them or be moved by them.
+
+    Built directly from a real take: Flow 4, Timing 4, Breath 5, Clarity 4,
+    Delivery 5 for a song a human audience rated a 10. The performance
+    numbers were honest — real, timestamped issues backed every one of them.
+    What was missing was a place for "and the SONG genuinely works" to be a
+    number of its own rather than something only mentioned in prose that the
+    overall then had no clean way to reflect.
+    """
+
+    def test_the_prompt_asks_for_it_as_its_own_field(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn('"song_score"', p)
+        self.assertIn('"song_why"', p)
+
+    def test_it_is_scored_as_a_listener_not_a_technician(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("Score it as a listener would, not as a technician", p)
+
+    def test_neither_number_may_move_the_other(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("guitarz", "Rock", None, "builder")
+        self.assertIn("Neither number may pull on the other", p)
+
+    def test_no_song_to_judge_is_null_not_invented(self):
+        """A warm-up or an exercise is not a song — the substance rule's own
+        test applies here too: could a member get a number without there
+        being anything to rate?"""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("drumz", "Trap", None, "builder")
+        self.assertIn("set \"song_score\" to null rather than inventing one", p)
+
+    def test_song_score_is_not_merged_into_the_performance_dimensions(self):
+        """The whole point is a separate card, not a sixth chip in the grid —
+        so song_score must never appear inside scores_for()'s dimension set."""
+        from apps.economy.instruments import scores_for
+        for key in ("singz", "rapz", "guitarz", "drumz"):
+            self.assertNotIn("song_score", scores_for(key, lyrics=True, mix=True))
+
+    def test_it_is_clamped_and_survives_as_none_when_absent(self):
+        from apps.economy.vocalcoach import score_take
+        import json as _json
+        from unittest.mock import patch as _patch
+        payload = {"score": 6, "scores": {k: 6 for k in
+                   ("flow", "timing", "breath", "clarity", "delivery")},
+                   "verdict": "🎧 fine", "now": "🎤 here", "goal": "🎯 there",
+                   "style_fit": "solid", "strengths": ["a"], "fixes": ["b"],
+                   "next_drill": "c"}  # no song_score/song_why — an exercise
+        fake = type("R", (), {"status_code": 200,
+                              "json": lambda self: {"candidates": [{"content": {"parts": [
+                                  {"text": _json.dumps(payload)}]}}]}})()
+        with _patch("apps.economy.vocalcoach._key", return_value="k"), \
+             _patch("apps.economy.gemini.requests.post", return_value=fake):
+            out, err = score_take("rapz", SimpleUploadedFile("t.mp3", b"x"),
+                                  "audio/mpeg", genre="Trap", target=None,
+                                  difficulty="builder")
+        self.assertIsNone(err)
+        self.assertIsNone(out["song_score"])
+        self.assertEqual(out["song_why"], "")
 
 
 class ScaleIsAnchoredTests(TestCase):
@@ -1036,6 +1106,120 @@ class OverallIsNotTheWeakestFacetTests(TestCase):
         p = prompt_for("guitarz", "Rock", None, "builder")
         self.assertIn("shaky throughout", p)
         self.assertIn("never for a strong one with a single fixable habit", p)
+
+
+class TheTopBandsAreNotGatedBehindRarityTests(TestCase):
+    """A take real listeners loved should not need a second coach's blessing.
+
+    Corey sent in a take human listeners had rated a genuine 10, and the
+    coach still landed it in the middle of the scale on a Builder-tier take —
+    the same undefined-anchor shape `ScaleIsAnchoredTests` and
+    `OverallIsNotTheWeakestFacetTests` already fixed once, showing up a third
+    time at the TOP of the scale rather than the middle or the overall/facet
+    relationship. "10: exceptional... Rare" told the model a 10 was an
+    unusual thing to reach for, which is the same kind of unstated anchor
+    that made "average" read as a 2 before "6 is normal" existed — a model
+    that reads "rare" defaults to caution, and caution at the top of the
+    scale is the same failure as caution at the anchor point, just harder to
+    notice because it looks like a strict coach rather than a wrong one.
+
+    The fix says two things explicitly: a strong reaction from real listeners
+    is evidence to use, not a temptation to correct downward over a
+    technicality; and a 10 needs to be TRUE, not rare — undershooting one
+    that is earned is exactly as wrong as overshooting one that isn't.
+    """
+
+    def test_listener_reaction_counts_as_evidence(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("real evidence of where this take sits", p)
+
+    def test_a_ten_does_not_have_to_be_rare_to_be_true(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn("does not have to be rare to be true", p)
+        self.assertNotIn("Rare, and worth saying so", p)
+
+    def test_undershooting_is_pinned_as_wrong_as_overshooting(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("guitarz", "Rock", None, "builder")
+        self.assertIn("Undershooting a take that plainly deserves this band", p)
+        self.assertIn("exactly as wrong as", p)
+
+    def test_it_did_not_become_a_licence_to_flatter(self):
+        """Same guard the other calibration fixes carry — a stated evidence
+        rule for the top bands must not loosen the honesty rules everywhere
+        else in the prompt."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("no flattery", p)
+        self.assertIn("Harshness is not honesty", p)
+        self.assertIn("there is essentially no performance to score", p)
+
+
+class SeveralDevelopingFacetsAreNotTheSameAsBrokenTests(TestCase):
+    """A real take: Flow 4, Timing 4, Breath 5, Clarity 4, Delivery 5, and an
+    overall of 5 — for a take a human audience rated a 10, with a real hook
+    and a complete, landing story praised in the same response's own "What
+    worked" section.
+
+    `OverallIsNotTheWeakestFacetTests` above licensed the overall to rise
+    above ONE rough facet when something is carrying the take. This take has
+    no single outlier to carry past — it has FIVE moderate, developing
+    dimensions, none of them individually broken, sitting next to a genuine
+    hook and a story real listeners responded to. The old wording never told
+    the model that case exists, so it fell back to something close to
+    averaging the facets anyway, which is the exact failure
+    `OverallIsNotTheWeakestFacetTests` already named and only partly fixed.
+
+    The distinction that matters is not "how many facets need work" — it is
+    whether anything is actually BROKEN (falling apart, losing the beat
+    entirely, unintelligible throughout) versus merely developing. Several
+    developing facets next to a real payoff is not the shaky-throughout case
+    the floor still has to catch.
+    """
+
+    def test_several_developing_facets_may_still_be_carried(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn("not limited to ONE facet", p)
+        self.assertIn("still be carried above their average", p)
+
+    def test_developing_is_distinguished_from_broken(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("Developing is not broken", p)
+        self.assertIn("not how many facets need work", p)
+
+    def test_it_did_not_become_a_licence_to_flatter(self):
+        """The floor for a take that is genuinely shaky throughout — the one
+        `OverallIsNotTheWeakestFacetTests` guards — is still standing."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("guitarz", "Rock", None, "builder")
+        self.assertIn("shaky throughout", p)
+        self.assertIn("no flattery", p)
+        self.assertIn("Harshness is not honesty", p)
+
+
+class PerformanceCraftIsNotSongQualityTests(TestCase):
+    """The caveat used to say what a single take can show (flow, timing,
+    breath...) and nothing about what it does NOT claim to measure. A member
+    reading a moderate performance-craft score for a song real listeners
+    loved had no way to know those are different questions — the number read
+    as a verdict on the song. It answered that gap twice: first by saying
+    the five dimensions don't measure the song, and then — once Song 🎶
+    shipped as its own field — by saying the two numbers are separate and
+    neither may move the other.
+    """
+
+    def test_every_instrument_states_the_distinction(self):
+        from apps.economy.instruments import INSTRUMENTS, DEFAULT
+        for key, profile in {**INSTRUMENTS, "_default": DEFAULT}.items():
+            self.assertIn("Song 🎶 scores the SONG", profile["caveat"], key)
+
+    def test_it_names_both_things_can_be_true_at_once(self):
+        from apps.economy.instruments import INSTRUMENTS
+        self.assertIn("both can be true at once", INSTRUMENTS["rapz"]["caveat"])
 
 
 class LyricRatingTests(TestCase):

@@ -1055,6 +1055,11 @@ class Profile(models.Model):
     # point of "customize" rather than "choose": a member who likes the house
     # set but wants a louder coin should not have to change all of it.
     sound_overrides = models.JSONField(default=dict, blank=True)
+    # CoachVoiceZ — which voice reads a Boss Take's feedback aloud. Same shape
+    # as `sound_pack`: the server stores the CHOICE, never a waveform, and an
+    # empty value means "the house voice" so a lapsed StatZ subscription
+    # degrades to the free default rather than an unplayable stored value.
+    coach_voice = models.CharField(max_length=24, blank=True, default="")
     links = models.JSONField(default=list, blank=True)  # [{label, url}] public links
     # Location (opt-in) for in-person CollabZ / VenueZ distance filtering.
     share_location = models.BooleanField(default=False)
@@ -2702,6 +2707,15 @@ def directz_display_rating(work):
     couldn't watch it" is a real answer and it used to be reported as a number.
     `source` is "users", "ai", or None — and when it is None, `rating` is None
     too. Callers must render the absence rather than reaching for a zero.
+
+    `directz_ai_rating` — the thing this replaced — is the specific failure
+    the second noble truth names: craving a number that isn't there, and
+    manufacturing one to make the craving stop (tanha, the Buddha's second of
+    the Four Noble Truths — Bodhi, 2005, pp. 75-78, on the Dhammacakkappavattana
+    Sutta). None here isn't a bug to patch with a formula; it's the honest
+    state of a work nobody has judged yet, and the fix for craving a rating is
+    never inventing one — it's waiting for a real one, same as the substance
+    rule already says three sections up.
     """
     scores = list(work.ratings.values_list("score", flat=True))
     user_median = _median(scores)
@@ -3433,7 +3447,35 @@ def claim_trial_take(user, token):
     take.claimed_by = user
     take.claimed_at = timezone.now()
     take.save(update_fields=["claimed_by", "claimed_at"])
+    if take.app_key == "bodiez":
+        _claim_bodiez_trial(user, take)
     return take
+
+
+def _claim_bodiez_trial(user, take):
+    """The exercise a BodieZ trial visitor picked becomes a real routine on
+    their new account, in Inbox where every hand-built routine starts.
+
+    SingZ and RapZ's claim already carries the take's SCORE into the new
+    account via `claimed_by` — a member's coach history reads it back. BodieZ
+    has no equivalent history row for one arithmetic set, so the thing worth
+    keeping is what they were BUILDING: the exercise, reps and weight they
+    picked stop being a page that vanishes with the tab and become the first
+    row of a real routine, editable in the Scheduler's own designer like any
+    other. Best-effort and silent on a malformed `result` — a trial claim
+    must never be the reason a registration fails.
+    """
+    result = take.result or {}
+    exercise_id = (result.get("exercise") or {}).get("id")
+    if not exercise_id:
+        return
+    BodieZRoutine.objects.create(
+        user=user, title="From your BodieZ trial", bucket="inbox",
+        exercises=[{
+            "exercise_id": exercise_id, "order": 0, "sets": 3,
+            "reps": result.get("reps"), "weight_kg": result.get("weight_kg"),
+        }],
+    )
 
 
 # ---- PlaylistZ ----
@@ -3691,6 +3733,39 @@ def key_voice_state(user, kind):
     used = sum(rows.values_list("units", flat=True))
     limits = key_voice_limits(membership_for(user).tier)
     cap = limits["clips"] if kind == KeyVoiceUse.KIND_TRANSCRIBE else limits["chars"]
+    return used, cap, max(0, cap - used)
+
+
+class CoachVoiceUse(models.Model):
+    """One Boss Take read aloud — characters spoken, for the daily allowance.
+
+    Deliberately its own table rather than folded into KeyVoiceUse: choosing
+    WHICH voice reads it back is a dimension KeyConnectZ's single-voice
+    "speak" never had, and coupling the two features' budgets would mean
+    using one quietly ate into the other's allowance, with nothing on screen
+    explaining why.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="coach_voice_uses")
+    chars = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["user", "created_at"])]
+
+
+def coach_voice_state(user):
+    """(used, cap, remaining) for coach playback — a rolling 24 hours, same
+    shape as `key_voice_state`."""
+    from datetime import timedelta
+
+    from .catalog import COACH_SPEAK_DAILY_CHARS
+
+    rows = CoachVoiceUse.objects.filter(
+        user=user, created_at__gte=timezone.now() - timedelta(hours=24))
+    used = sum(rows.values_list("chars", flat=True))
+    cap = COACH_SPEAK_DAILY_CHARS.get(membership_for(user).tier, COACH_SPEAK_DAILY_CHARS[TIER_FREE])
     return used, cap, max(0, cap - used)
 
 
@@ -5460,6 +5535,319 @@ class UserPreferences(models.Model):
 
     def __str__(self):
         return f"{self.user} — {self.language}, notifications={'on' if self.notifications_enabled else 'off'}"
+
+
+class BodieZExercise(models.Model):
+    """The movement library. Seeded once by a data migration, not per-user —
+    a member picks from this list rather than typing a free-text name, so a
+    routine's exercises can be grouped and charted by muscle group later
+    without parsing prose.
+
+    EQUIPMENT_CHOICES grew from five to eight — ez_bar, kettlebell and cable
+    split off what "machine" and "dumbbell" were quietly standing in for.
+    Two mislabeled rows (`Tricep Pushdown` as "machine" when it's a cable
+    stack, `Kettlebell Swing` as "dumbbell" because kettlebell didn't exist
+    yet) are corrected in the migration that adds these — a wrong equipment
+    tag is the same failure the filter this drives exists to prevent: a
+    member who owns a cable machine and nothing else filtering to "machine"
+    would miss the tricep exercise built for exactly their setup.
+
+    Deliberately NOT expanded: no separate `incline_bench` / `decline_bench`
+    equipment value. A bench angle changes which exercise you're doing, not
+    which tool you own — "Incline Barbell Bench Press" and "Flat Barbell
+    Bench Press" are both `equipment="barbell"`, and the angle lives in the
+    NAME, the way ExRx.net's own exercise database and every commercial gym
+    log (Strong, Jefit itself) already draw this line. Equipment answers "can
+    I even attempt this" (do I own a barbell); modeling angle as equipment
+    would answer a question nobody asks a filter — "which bench" — while
+    making the real one ("do I have a barbell") one dropdown option out of
+    eleven instead of one out of eight.
+    """
+    name = models.CharField(max_length=80, unique=True)
+    # Jefit's own eleven groups (Abs, Back, Biceps, Cardio, Chest, Forearms,
+    # Glutes, Shoulders, Triceps, Upper Legs, Lower Legs), plus one Jefit
+    # doesn't have: this library's compound lifts (Burpee, Clean and Press,
+    # kettlebell work) genuinely train more than one region, and forcing each
+    # into a single dominant muscle would misdescribe what it trains — see
+    # migration 0145's docstring for the decision. "Arms" and "Legs" are
+    # GONE, not aliased: a member filtering to "Biceps" who got "Arms"
+    # results back (Barbell Curl AND Barbell Tricep Extension) would have a
+    # filter that doesn't filter, the same failure PersonalitieZ's undeclared
+    # state exists to prevent on a different field.
+    MUSCLE_CHOICES = [
+        ("abs", "Abs"), ("back", "Back"), ("biceps", "Biceps"),
+        ("cardio", "Cardio"), ("chest", "Chest"), ("forearms", "Forearms"),
+        ("glutes", "Glutes"), ("shoulders", "Shoulders"), ("triceps", "Triceps"),
+        ("upper_legs", "Upper Legs"), ("lower_legs", "Lower Legs"),
+        ("full_body", "Full Body"),
+    ]
+    muscle_group = models.CharField(max_length=12, choices=MUSCLE_CHOICES)
+    EQUIPMENT_CHOICES = [
+        ("bodyweight", "Bodyweight"), ("dumbbell", "Dumbbell"),
+        ("barbell", "Barbell"), ("ez_bar", "EZ Bar"),
+        ("kettlebell", "Kettlebell"), ("machine", "Machine"),
+        ("cable", "Cable / Pulley"), ("band", "Band"),
+    ]
+    equipment = models.CharField(max_length=12, choices=EQUIPMENT_CHOICES)
+    # A link to a real demonstration — never hosted here, never fabricated.
+    # Blank for every seeded exercise: this codebase has no media pipeline for
+    # exercise photography and no rights to any third party's GIFs, and
+    # inventing a URL to fill this field would be exactly the kind of
+    # decoration the substance rule exists to keep out — a member clicking a
+    # dead or wrong link is worse than a row with nothing to click. It reads
+    # through the SAME "outside link, new tab, never framed" rule
+    # `widgetz.py` already applies to a member's own posted links: nothing
+    # here has been through `links.scanner()`, so it is never a candidate for
+    # StatZ's framed-page treatment, whatever the tier.
+    demo_url = models.CharField(max_length=300, blank=True, default="")
+
+    class Meta:
+        ordering = ("muscle_group", "name")
+
+    def __str__(self):
+        return self.name
+
+
+# The blueprint gives BodieZ the same five-bucket scheduler Lilith already
+# has — Inbox/Today/Upcoming/Anytime/Someday — plus Trash, because a deleted
+# routine landing straight in the database with no undo is a harsher edit
+# than anything else in this bucket system allows. Kept as BodieZ's OWN tuple
+# rather than reusing Lilith's `BUCKETS`: the labels and emoji the blueprint
+# gives each app disagree (Lilith's Today is "‼️", BodieZ's is "💪"), and a
+# shared tuple would mean one of the two apps rendering the wrong glyph.
+BODIEZ_BUCKETS = (
+    ("inbox", "Inbox 📥"),
+    ("today", "Today 💪"),
+    ("upcoming", "Upcoming 📅"),
+    ("anytime", "Anytime 🏋️"),
+    ("someday", "Someday 🧠"),
+    ("trash", "Trash 🚮"),
+)
+
+
+BODIEZ_DAY_TAGS = (
+    ("mon", "Mon"), ("tue", "Tue"), ("wed", "Wed"), ("thu", "Thu"),
+    ("fri", "Fri"), ("sat", "Sat"), ("sun", "Sun"), ("any", "Any"),
+)
+
+
+class BodieZRoutine(models.Model):
+    """A saved training plan. `exercises` is JSON for display — the same
+    shape `PostContributor` and `CollabParticipant` warn against reading back
+    with Python for anything at scale, but a routine has at most a few dozen
+    rows and is only ever read by its owner, so there is nothing here a
+    lookup table would earn its keep on.
+
+    `bucket` + `scheduled_for` are the Jefit-style scheduler the blueprint
+    asks BodieZ to have — a routine dreamed up gets typed into Inbox, moved to
+    Today when it's the one you're doing now, or given a date and it shows up
+    in Upcoming. `scheduled_for` is a DATE, not a datetime: a training day is
+    a day, and a time-of-day field here would be a second place BodieZ's own
+    calendar semantics live once one gets built.
+
+    `day_tag` is a DIFFERENT axis from either of those, and was missing
+    outright until a member's real Jefit export showed the gap: `bucket` is
+    a WORKFLOW state (where a routine sits before/after it's run) and
+    `scheduled_for` is one SPECIFIC calendar date, but neither can say "this
+    is a Monday routine" as a recurring fact independent of any particular
+    week. Worse, `bucket`+`scheduled_for` both assume ONE routine occupies a
+    slot — the export had three different named Monday sessions ("chest 1",
+    "Band arm1", "New chest") a member picks between week to week, which a
+    single-slot model can't represent at all. `day_tag` is many-to-one on
+    purpose: any number of routines can carry "mon", and the member decides
+    which one to run on a given Monday, same as Jefit's own day-tag chips.
+    `"any"` is the day-agnostic bucket the export also used for accessory
+    work (ab/leg finishers) that isn't tied to a specific day — kept apart
+    from a blank tag so "untagged, never assigned" and "deliberately every
+    day" read differently on a routine list.
+
+    It is deliberately just a label, not a schedule: it does not create
+    calendar entries, does not conflict-check against `scheduled_for`, and
+    does not drive any reminder. A member can day_tag a routine AND give it
+    a scheduled_for date; the two answer different questions ("what kind of
+    day is this for" vs "when, specifically, am I doing it").
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="bodiez_routines")
+    title = models.CharField(max_length=80)
+    # A short note on the WHOLE plan — "recovery in chair", "deload week" —
+    # distinct from the title the same way Jefit's own routine name and
+    # routine description are two separate fields. Optional: most routines
+    # need no context beyond their name, and a blank field costs nothing.
+    description = models.CharField(max_length=200, blank=True, default="")
+    # [{exercise_id, sets, reps, order}, ...]
+    exercises = models.JSONField(default=list)
+    bucket = models.CharField(max_length=10, choices=BODIEZ_BUCKETS, default="inbox", db_index=True)
+    day_tag = models.CharField(max_length=3, choices=BODIEZ_DAY_TAGS, blank=True, default="")
+    scheduled_for = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-updated_at",)
+
+    def __str__(self):
+        return f"{self.user} — {self.title}"
+
+
+class BodieZSession(models.Model):
+    """One workout, live or finished. `ended_at` null means in progress —
+    the same null-means-open shape `TakeAnalysis.analyzed_at` uses, so a
+    session list can tell "still training" from "finished at 6:03pm" without
+    a separate status column that could disagree with the timestamps.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="bodiez_sessions")
+    routine = models.ForeignKey(BodieZRoutine, on_delete=models.SET_NULL,
+                                 null=True, blank=True, related_name="sessions")
+    started_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ("-started_at",)
+
+    def __str__(self):
+        return f"{self.user} — {self.started_at:%Y-%m-%d}"
+
+
+class BodieZSet(models.Model):
+    """One logged set inside a session. `weight_kg` null means bodyweight —
+    not zero, for the same reason a coach score is null rather than 0 when
+    nothing was measurable: a 0kg squat and a bodyweight squat are different
+    facts and collapsing them would make the volume total lie.
+    """
+    session = models.ForeignKey(BodieZSession, on_delete=models.CASCADE, related_name="sets")
+    exercise = models.ForeignKey(BodieZExercise, on_delete=models.CASCADE, related_name="+")
+    set_number = models.PositiveSmallIntegerField()
+    reps = models.PositiveSmallIntegerField()
+    weight_kg = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("session_id", "set_number")
+
+    def __str__(self):
+        return f"{self.session_id} — {self.exercise.name} x{self.reps}"
+
+
+# Four kinds — every one is a target `bodiez.goal_progress` can compute from
+# rows this app already logs, deliberately never a fifth "custom" kind with a
+# member-typed target and no way to check it: the substance rule's test
+# ("could a member get a good number without doing the work?") has an easy
+# yes for a goal nothing measures.
+BODIEZ_GOAL_KINDS = (
+    ("strength", "Strength"),      # an exercise + a target weight (+ optional reps)
+    ("frequency", "Frequency"),    # sessions per week
+    ("count", "Total workouts"),   # lifetime finished-session count
+    ("bodyweight", "Body weight"), # a target on BodieZWeightLog
+)
+
+
+class BodieZGoal(models.Model):
+    """A body, strength, habit or performance target — the blueprint's own
+    examples ("benching 225", "training 4 days a week", "completing 100
+    workouts", "losing 15 pounds") map onto the four kinds above one for one.
+
+    `starting_value` is snapshotted at CREATION for `bodyweight` goals only —
+    the direction (losing vs gaining) has to be read against where the member
+    started, and a starting point that could drift after the fact would let
+    the goal rewrite its own difficulty. Strength/frequency/count all read
+    live off logged data instead, so they need no baseline of their own.
+
+    Achievement is never persisted — `bodiez.goal_progress` computes it fresh
+    on every read from the member's actual rows. A goal that could go stale
+    between "achieved" and the data that made it true is worse than
+    recomputing a cheap comparison every time.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="bodiez_goals")
+    kind = models.CharField(max_length=12, choices=BODIEZ_GOAL_KINDS)
+    title = models.CharField(max_length=80)
+    exercise = models.ForeignKey(BodieZExercise, null=True, blank=True,
+                                 on_delete=models.SET_NULL, related_name="+")
+    target_value = models.DecimalField(max_digits=8, decimal_places=2)
+    target_reps = models.PositiveSmallIntegerField(null=True, blank=True)
+    starting_value = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    target_date = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.user} — {self.title}"
+
+
+class BodieZWeightLog(models.Model):
+    """One body-weight check-in. Its only consumer is a `bodyweight` goal's
+    progress read — this is not the start of a Nutrition or body-composition
+    feature, which stays explicitly out of scope, the same line the module
+    docstring already draws."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="bodiez_weight_logs")
+    weight_kg = models.DecimalField(max_digits=6, decimal_places=2)
+    logged_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-logged_at",)
+
+    def __str__(self):
+        return f"{self.user} — {self.weight_kg}kg"
+
+
+# BodieZ's Recovery piece was the one line in the blueprint that had no code
+# behind it yet: "soreness, sleep quality, fatigue, rest days... readiness
+# before training." Every earlier BodieZ screen already answers "what did
+# you do" — Recovery is the first one that has to answer "should you," and
+# that question has a much older paper trail than this codebase does.
+#
+# Three traditions land on the identical structural claim — rest is not a
+# lifestyle preference an athlete opts into, it is COMMANDED, on a schedule,
+# to the same degree the work itself is:
+#
+#   Exodus 23:12 (New International Version): "Six days do your work, but on
+#   the seventh day do not work... so that your ox and your donkey may rest."
+#   The command names the LABORING BODY specifically, not just the task left
+#   undone — rest is owed to the animal that did the work, which is closer to
+#   "your legs get today off" than to a wellness suggestion.
+#
+#   Qur'an 78:9 (Saheeh International): "And made your sleep for rest." Rest
+#   is listed as a designed FUNCTION of the body, not a gap between the
+#   functions that matter — the same reframing `days_trained_last_7d` forces
+#   on BodyMap's "overworked" status: training every day isn't discipline
+#   past a point, it's the absence of the thing the body was built to do.
+#
+#   Mark 6:31 (English Standard Version): "Come away by yourselves to a
+#   desolate place and rest a while." Said to people who had just done
+#   real, good work and were about to keep doing it without stopping — the
+#   text does not wait for them to break down first.
+#
+# None of that licenses a fabricated "readiness score" — the substance rule
+# draws that line regardless of what inspired the feature, so `readiness()`
+# below returns SELF-REPORTED numbers and a real training-day count, never a
+# single number pretending to average them.
+class BodieZRecoveryLog(models.Model):
+    """One daily check-in: soreness, sleep quality, fatigue, each 1-5, a
+    member's own words about their own body. Never inferred, never derived
+    from training data — a soreness number this app computed FOR somebody
+    would be a claim about their body they never made, which is a different
+    failure than a fake rating but the same shape: a number invented in place
+    of one that had to come from the person it's about.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="bodiez_recovery_logs")
+    soreness = models.PositiveSmallIntegerField()
+    sleep_quality = models.PositiveSmallIntegerField()
+    fatigue = models.PositiveSmallIntegerField()
+    notes = models.CharField(max_length=280, blank=True, default="")
+    logged_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-logged_at",)
+
+    def __str__(self):
+        return f"{self.user} — soreness {self.soreness}, fatigue {self.fatigue}"
 
 
 class TakeAnalysis(models.Model):

@@ -35,6 +35,28 @@ import json
 from urllib.parse import urlparse
 
 
+# Bio/interests/pet peeves — bounded the same way `skills` already is
+# (`[:100]`, `[:80]` per name), so a persona row cannot be grown into a
+# payload by pasting a novel into one field.
+MAX_BIO_CHARS = 500
+MAX_TAGS = 20
+MAX_TAG_CHARS = 40
+
+
+def _clean_tag_list(value):
+    """A bounded list of short strings — interests or pet peeves. Junk
+    entries are dropped rather than failing the whole save, the same rule
+    `soundz.clean_overrides` follows for one bad key."""
+    if not isinstance(value, list):
+        return []
+    out = []
+    for item in value[:MAX_TAGS]:
+        tag = str(item or "").strip()[:MAX_TAG_CHARS]
+        if tag:
+            out.append(tag)
+    return out
+
+
 def _recover(text):
     """A dict back out of a string that is the printed form of one, else None.
 
@@ -117,7 +139,24 @@ def clean_persona(raw):
         skills.append(entry)
 
     key = str(raw.get("key") or raw.get("name") or "")[:60]
-    return {"key": key, "name": str(raw.get("name") or key)[:60], "skills": skills}
+    out = {"key": key, "name": str(raw.get("name") or key)[:60], "skills": skills}
+
+    # Bio, interests, pet peeves — flavor text a member types about THIS
+    # persona, never inferred and never scored. A DirectZ or MangaZ persona
+    # built off these carries what its owner actually said about it, not a
+    # guess dressed up as one — the same reason PersonalitieZ is declared
+    # rather than detected.
+    bio = str(raw.get("bio") or "").strip()[:MAX_BIO_CHARS]
+    if bio:
+        out["bio"] = bio
+    interests = _clean_tag_list(raw.get("interests"))
+    if interests:
+        out["interests"] = interests
+    pet_peeves = _clean_tag_list(raw.get("pet_peeves"))
+    if pet_peeves:
+        out["pet_peeves"] = pet_peeves
+
+    return out
 
 
 def personas_of(profile):

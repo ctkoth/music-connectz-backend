@@ -19,6 +19,7 @@ from .religionz import ReligionsView
 from .languagez import LanguagesView
 from .trialdoorz import TrialDoorsView
 from .trial import TrialPublicStatsView, PublicTiersView
+from .bodiez_trial import BodieZTrialView
 from .offerz_engine import (FunnelCatalogView, FunnelOfferRedeemView,
                             FunnelOffersView)
 from .lilith_taskz import (LilithBoardView, LilithRoutineDetailView,
@@ -33,6 +34,9 @@ from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView, DupeZVerify
 from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
 from .soundz import SoundZView
+from .coachvoice import CoachVoiceView, CoachSpeakView
+from .dawz import DawZView
+from .attractivenessz_view import AttractivenessZView
 from .soundcloud_engagement import SoundCloudEngagementView
 from .soundcloud_import import SoundCloudImportView
 from .coachz import CoachStudioView, RateStudentTakeView, AddStudentView
@@ -158,6 +162,12 @@ from .views import (
     InstrumentLeaderboardView,
 )
 from .habits import HabitCreateView, HabitCompleteView
+from .bodiez import (
+    BodieZBoardView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
+    BodieZGoalDetailView, BodieZGoalsView, BodieZRecoveryView, BodieZRoutinesView,
+    BodieZRoutineDetailView, BodieZSessionsView, BodieZSessionDetailView, BodieZSetsView,
+    BodieZProgressView, BodieZWeightLogView,
+)
 
 router = DefaultRouter()
 router.register(r'presence', PresenceViewSet, basename='presence')
@@ -240,6 +250,10 @@ urlpatterns = router.urls + [
     path("share/u/<str:username>", profile_card, name="share-profile"),
     path("share/p/<int:pk>", post_card, name="share-post"),
     path("soundz/", SoundZView.as_view(), name="economy-soundz"),
+    path("coachvoice/", CoachVoiceView.as_view(), name="economy-coachvoice"),
+    path("coachvoice/speak/", CoachSpeakView.as_view(), name="economy-coachvoice-speak"),
+    path("dawz/", DawZView.as_view(), name="economy-dawz"),
+    path("attractivenessz/", AttractivenessZView.as_view(), name="economy-attractivenessz"),
     path("soundcloud/engagement/", SoundCloudEngagementView.as_view(), name="economy-soundcloud-engagement"),
     path("soundcloud/import/", SoundCloudImportView.as_view(), name="economy-soundcloud-import"),
     path("coachz/studio/", CoachStudioView.as_view(), name="economy-coachz-studio"),
@@ -417,6 +431,28 @@ urlpatterns = router.urls + [
     path("lilith/routines/<int:routine_id>/", LilithRoutineDetailView.as_view(),
          name="economy-lilith-routine"),
     path("lilith/sponsor/", LilithSponsorView.as_view(), name="economy-lilith-sponsor"),
+    # BodieZ — strength training and workout planning. v1: library, routines,
+    # session log, and a progress read built from logged sets, not a formula.
+    path("bodiez/exercises/", BodieZExercisesView.as_view(), name="economy-bodiez-exercises"),
+    path("bodiez/exercises/<int:exercise_id>/history/", BodieZExerciseHistoryView.as_view(),
+         name="economy-bodiez-exercise-history"),
+    path("bodiez/routines/", BodieZRoutinesView.as_view(), name="economy-bodiez-routines"),
+    path("bodiez/routines/<int:routine_id>/", BodieZRoutineDetailView.as_view(),
+         name="economy-bodiez-routine"),
+    path("bodiez/sessions/", BodieZSessionsView.as_view(), name="economy-bodiez-sessions"),
+    path("bodiez/sessions/<int:session_id>/", BodieZSessionDetailView.as_view(),
+         name="economy-bodiez-session"),
+    path("bodiez/sessions/<int:session_id>/sets/", BodieZSetsView.as_view(),
+         name="economy-bodiez-sets"),
+    path("bodiez/progress/", BodieZProgressView.as_view(), name="economy-bodiez-progress"),
+    path("bodiez/board/", BodieZBoardView.as_view(), name="economy-bodiez-board"),
+    path("bodiez/bodymap/", BodieZBodyMapView.as_view(), name="economy-bodiez-bodymap"),
+    path("bodiez/coach/", BodieZCoachView.as_view(), name="economy-bodiez-coach"),
+    path("bodiez/goals/", BodieZGoalsView.as_view(), name="economy-bodiez-goals"),
+    path("bodiez/goals/<int:goal_id>/", BodieZGoalDetailView.as_view(), name="economy-bodiez-goal"),
+    path("bodiez/weightlog/", BodieZWeightLogView.as_view(), name="economy-bodiez-weightlog"),
+    path("bodiez/recovery/", BodieZRecoveryView.as_view(), name="economy-bodiez-recovery"),
+    path("bodiez/trial/", BodieZTrialView.as_view(), name="economy-bodiez-trial"),
     path("offerz/funnel/", FunnelOffersView.as_view(), name="economy-funnel-offers"),
     path("offerz/funnel/redeem/", FunnelOfferRedeemView.as_view(),
          name="economy-funnel-offer-redeem"),

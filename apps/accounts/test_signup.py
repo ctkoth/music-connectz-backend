@@ -194,6 +194,71 @@ class TheThingThatMadeThemSignUpTests(TestCase):
         self.assertEqual(r.status_code, 201)
 
 
+class TrialSplitOnRegisterTests(TestCase):
+    """The BodieZ trial's "Build a week" is built free, client-side, no
+    account and no AI — see bodiez.py's clean_trial_split docstring. What was
+    built only becomes real if registration actually completes, which is
+    what these pin."""
+
+    def setUp(self):
+        from apps.economy.models import BodieZExercise
+        self.squat = BodieZExercise.objects.create(name="Register Split Test Squat", muscle_group="upper_legs", equipment="barbell")
+        self.bench = BodieZExercise.objects.create(name="Register Split Test Bench", muscle_group="chest", equipment="barbell")
+
+    def _split(self, days=2):
+        base = [
+            {"title": "Day 1 — Legs", "exercises": [
+                {"exercise_id": self.squat.id, "order": 0, "sets": 4, "reps": 8, "weight_kg": 60}]},
+            {"title": "Day 2 — Chest", "exercises": [
+                {"exercise_id": self.bench.id, "order": 0, "sets": 3, "reps": 10, "weight_kg": None}]},
+        ]
+        return base[:days]
+
+    def test_registering_with_a_built_split_keeps_it_as_real_routines(self):
+        from apps.economy.models import BodieZRoutine
+        r = APIClient().post("/api/auth/register/", {
+            "username": "weekbuilder", "email": "wb@x.test",
+            "password": "hunter2hunter2", "trial_split": self._split()}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        user = User.objects.get(username="weekbuilder")
+        routines = list(BodieZRoutine.objects.filter(user=user).order_by("id"))
+        self.assertEqual(len(routines), 2)
+        self.assertEqual(routines[0].title, "Day 1 — Legs")
+        self.assertEqual(routines[0].exercises[0]["exercise_id"], self.squat.id)
+        self.assertEqual(routines[1].exercises[0]["exercise_id"], self.bench.id)
+        self.assertTrue(all(r.bucket == "inbox" for r in routines))
+
+    def test_an_unknown_exercise_id_is_dropped_not_rejected(self):
+        from apps.economy.models import BodieZRoutine
+        split = [{"title": "Day 1", "exercises": [
+            {"exercise_id": 999999, "order": 0, "sets": 3, "reps": 10}]}]
+        r = APIClient().post("/api/auth/register/", {
+            "username": "sneaky", "email": "sneaky@x.test",
+            "password": "hunter2hunter2", "trial_split": split}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        user = User.objects.get(username="sneaky")
+        # A day with no valid exercises left is dropped entirely rather than
+        # saved empty — a routine with nothing in it is not a routine.
+        self.assertEqual(BodieZRoutine.objects.filter(user=user).count(), 0)
+
+    def test_junk_trial_split_never_blocks_the_signup(self):
+        r = APIClient().post("/api/auth/register/", {
+            "username": "junkweek", "email": "junkweek@x.test",
+            "password": "hunter2hunter2", "trial_split": "not a list"}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+
+    def test_more_than_six_days_is_truncated_not_rejected(self):
+        from apps.economy.models import BodieZRoutine
+        split = [{"title": f"Day {i}", "exercises": [
+            {"exercise_id": self.squat.id, "order": 0, "sets": 3, "reps": 10}]} for i in range(9)]
+        r = APIClient().post("/api/auth/register/", {
+            "username": "sevendays", "email": "sevendays@x.test",
+            "password": "hunter2hunter2", "trial_split": split}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        user = User.objects.get(username="sevendays")
+        self.assertLessEqual(BodieZRoutine.objects.filter(user=user).count(), 6)
+
+
 class TheThirdUsernameWriterTests(TestCase):
     """`PATCH /api/auth/me/` lets a Premium member change their handle, and it
     carried its OWN copy of the regex — the third — with no reserved list. So

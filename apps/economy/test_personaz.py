@@ -75,6 +75,69 @@ class TheShapeItselfTests(TestCase):
         self.assertTrue(needs_repair([MANGLED]))
 
 
+class ThePersonaFlavorFieldsTests(TestCase):
+    """Bio, interests and pet peeves — typed by the member about one persona,
+    never inferred, never scored. Same discipline PersonalitieZ already
+    holds: this is a declaration, not a measurement, so there is no "good"
+    bio to fail the substance rule's test with.
+    """
+
+    def test_a_bio_is_kept(self):
+        out = clean_persona({"key": "k", "name": "N", "bio": "Session bassist, night owl."})
+        self.assertEqual(out["bio"], "Session bassist, night owl.")
+
+    def test_an_absent_bio_adds_no_key(self):
+        out = clean_persona({"key": "k", "name": "N"})
+        self.assertNotIn("bio", out)
+
+    def test_a_blank_bio_adds_no_key(self):
+        out = clean_persona({"key": "k", "name": "N", "bio": "   "})
+        self.assertNotIn("bio", out)
+
+    def test_a_bio_is_bounded(self):
+        from apps.economy.personaz import MAX_BIO_CHARS
+        out = clean_persona({"key": "k", "name": "N", "bio": "x" * (MAX_BIO_CHARS + 50)})
+        self.assertEqual(len(out["bio"]), MAX_BIO_CHARS)
+
+    def test_interests_and_pet_peeves_are_kept(self):
+        out = clean_persona({"key": "k", "name": "N",
+                             "interests": ["vinyl", "analog synths"],
+                             "pet_peeves": ["late gear", "off-tempo clicks"]})
+        self.assertEqual(out["interests"], ["vinyl", "analog synths"])
+        self.assertEqual(out["pet_peeves"], ["late gear", "off-tempo clicks"])
+
+    def test_empty_tag_lists_add_no_key(self):
+        out = clean_persona({"key": "k", "name": "N", "interests": [], "pet_peeves": []})
+        self.assertNotIn("interests", out)
+        self.assertNotIn("pet_peeves", out)
+
+    def test_junk_entries_are_dropped_not_fatal(self):
+        out = clean_persona({"key": "k", "name": "N", "interests": ["real", "", "  ", None, 123]})
+        self.assertEqual(out["interests"], ["real", "123"])
+
+    def test_tag_lists_are_bounded_in_count_and_length(self):
+        from apps.economy.personaz import MAX_TAG_CHARS, MAX_TAGS
+        out = clean_persona({"key": "k", "name": "N",
+                             "interests": [f"tag{i}" * 20 for i in range(MAX_TAGS + 10)]})
+        self.assertLessEqual(len(out["interests"]), MAX_TAGS)
+        self.assertTrue(all(len(t) <= MAX_TAG_CHARS for t in out["interests"]))
+
+    def test_a_non_list_value_is_ignored_rather_than_fatal(self):
+        out = clean_persona({"key": "k", "name": "N", "interests": "not a list"})
+        self.assertNotIn("interests", out)
+
+    def test_it_never_touches_a_measurement(self):
+        """The substance rule's own test: could a member get a good one
+        without getting good? There is no good bio, so nothing here may
+        become a score, a rating or a skill level."""
+        from apps.economy import personaz
+        src = open(personaz.__file__).read()
+        section = src.split("# Bio, interests, pet peeves")[-1].split("return out")[0]
+        for word in ("rating", "rank", "award_spinaz", "award_xp"):
+            self.assertNotIn(word, section.lower(),
+                             f"'{word}' leaked into the flavor-field section")
+
+
 class TheReadPathRepairsTests(TestCase):
     """Nobody stays broken until they happen to save their profile again."""
 

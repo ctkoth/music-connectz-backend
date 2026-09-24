@@ -59,6 +59,18 @@ _BOWED = {"intonation": "Intonation 🎯", "tone": "Tone 🌈", "bowing": "Bowin
 _HISTORY_CAVEAT = ("Consistency, health and goal match come from your history, "
                    "not a single clip — they're on your progress screen.")
 
+# The other half of what a member needs to hear before a number surprises
+# them: the five dimensions above score the PERFORMANCE, not the song. A take
+# can have a real hook and land with every listener who hears it while the
+# flow underneath is still rushing the beat — those are different questions,
+# and a member who only saw one number for both used to read a moderate
+# performance score as a verdict on the song itself, which it was never
+# measuring. "song_score" answers the other question, as its own number.
+_CRAFT_NOT_SONG = ("The dimensions above score your PERFORMANCE. Song 🎶 scores the SONG "
+                   "itself — the hook, whether it connects — as its own separate number. "
+                   "A take can score high on one and moderate on the other; both can be "
+                   "true at once, and neither is allowed to move the other.")
+
 INSTRUMENTS = {
     "singz": {
         "label": "SingZ", "performer": "vocalist", "coach": "vocal coach",
@@ -69,7 +81,7 @@ INSTRUMENTS = {
         "lyrics": True,
         "scores": _VOCAL, "range_label": "Target range", "ranges": VOCAL_RANGES,
         "style_label": None, "styles": [],
-        "caveat": "Pitch, tone, breath, range and agility are what one take can show. " + _HISTORY_CAVEAT,
+        "caveat": "Pitch, tone, breath, range and agility are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
     },
     "rapz": {
         "label": "RapZ", "performer": "rapper", "coach": "rap coach",
@@ -84,32 +96,32 @@ INSTRUMENTS = {
         # was the one surface that couldn't say what it heard.
         "range_label": "Your register", "ranges": VOCAL_RANGES,
         "style_label": "Rap style", "styles": RAP_STYLES,
-        "caveat": "Flow, timing, breath, clarity and delivery are what one take can show. " + _HISTORY_CAVEAT,
+        "caveat": "Flow, timing, breath, clarity and delivery are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
     },
     "guitarz": {
         "label": "GuitarZ", "performer": "guitarist", "coach": "guitar coach",
         "scores": _FRETTED, "range_label": None, "ranges": [], "style_label": None, "styles": [],
-        "caveat": "Timing, tone, technique, dynamics and cleanliness are what one take can show. " + _HISTORY_CAVEAT,
+        "caveat": "Timing, tone, technique, dynamics and cleanliness are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
     },
     "bassz": {
         "label": "BassZ", "performer": "bassist", "coach": "bass coach",
         "scores": {**_FRETTED, "cleanliness": "Note Length 📏"}, "range_label": None, "ranges": [], "style_label": None, "styles": [],
-        "caveat": "Timing, tone, technique, dynamics and note length are what one take can show. " + _HISTORY_CAVEAT,
+        "caveat": "Timing, tone, technique, dynamics and note length are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
     },
     "keyz": {
         "label": "KeyZ", "performer": "keyboardist", "coach": "keys coach",
         "scores": _KEYS, "range_label": None, "ranges": [], "style_label": None, "styles": [],
-        "caveat": "Timing, tone, technique, dynamics and voicing are what one take can show. " + _HISTORY_CAVEAT,
+        "caveat": "Timing, tone, technique, dynamics and voicing are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
     },
     "drumz": {
         "label": "DrumZ", "performer": "drummer", "coach": "drum coach",
         "scores": _DRUMS, "range_label": None, "ranges": [], "style_label": None, "styles": [],
-        "caveat": "Timing, groove, dynamics, consistency and fills are what one take can show. " + _HISTORY_CAVEAT,
+        "caveat": "Timing, groove, dynamics, consistency and fills are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
     },
     "violinz": {
         "label": "ViolinZ", "performer": "violinist", "coach": "strings coach",
         "scores": _BOWED, "range_label": None, "ranges": [], "style_label": None, "styles": [],
-        "caveat": "Intonation, tone, bowing, timing and vibrato are what one take can show. " + _HISTORY_CAVEAT,
+        "caveat": "Intonation, tone, bowing, timing and vibrato are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
     },
 }
 
@@ -120,7 +132,7 @@ DEFAULT = {
     "scores": {"timing": "Timing ⏱️", "tone": "Tone 🌈", "technique": "Technique 🎯",
                "dynamics": "Dynamics 📊", "cleanliness": "Cleanliness ✨"},
     "range_label": None, "ranges": [], "style_label": None, "styles": [],
-    "caveat": "Timing, tone, technique, dynamics and cleanliness are what one take can show. " + _HISTORY_CAVEAT,
+    "caveat": "Timing, tone, technique, dynamics and cleanliness are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
 }
 
 
@@ -168,6 +180,27 @@ LYRIC_SCORE = {
 # and a number with no explanation is the thing this file keeps refusing to
 # ship.
 STYLE_SCORE = {"style_match": "Style Match 🎭"}
+
+# Song 🎶 — a real listener's answer to "does this land", scored as its own
+# number rather than folded into the five performance dimensions above it.
+#
+# Deliberately NOT merged into `scores_for()` the way Style Match is. Style
+# Match answers a question ABOUT the performance (how close is this to the
+# style aimed at); Song answers a DIFFERENT question — is the song itself any
+# good — and a member reading one flat grid of dimension chips has no way to
+# tell those apart, which is exactly the confusion that produced this field:
+# a take scored moderate on flow/timing/breath for a song real listeners
+# loved read as "your song is mediocre" when the coach was only ever judging
+# the performance underneath it. Kept structurally separate (its own top-
+# level score, like `score` itself) so the client can render it in its own
+# card rather than a sixth chip in a grid that would bury the distinction it
+# exists to make.
+#
+# Can legitimately be null: a warm-up, a scale run, an exercise with no
+# distinct structure is not a song, and inventing a number for one would be
+# exactly the substance rule's failure case — a rating for something that was
+# never there to rate.
+SONG_SCORE = {"song_score": "Song 🎶"}
 
 # Mix 🎚️ — opt-in, like lyricism, and for the same reason: it is a DIFFERENT
 # SKILL from the one the five dimensions measure, and scoring somebody on a
@@ -402,11 +435,17 @@ a clip with nothing in it; that one is "unscorable" above.
 - 3-4: real attempt, but technical fundamentals break down — rhythm, intonation, \
 control, or muscle memory gaps make this the first thing to fix before building \
 on it. Solid building blocks are missing.
-- 5-7: a solid, ordinary take from somebody at this level. Fundamentals hold, \
-technical execution is together, things could be tighter or more polished but \
-nothing foundational is broken. **Most takes belong here** — 6 is normal, not a failure.
-- 8-9: clearly good for this level; the fixes are refinements.
-- 10: exceptional at this level. Rare, and worth saying so when it happens.
+- 5-7: a solid, ordinary take from somebody at this level. Things to fix, \
+nothing broken. **Most takes belong here** — 6 is normal, not a failure.
+- 8-9: clearly good for this level — the kind of take that actually lands \
+with real listeners, not just technically clean. If people who heard it \
+responded strongly, that reaction is real evidence of where this take sits, \
+not something to talk yourself out of over a technicality nobody but \
+another musician would even notice.
+- 10: exceptional at this level, and it does not have to be rare to be \
+true — say 10 whenever the take earns it. Undershooting a take that plainly \
+deserves this band is not caution, it is a wrong number, exactly as wrong as \
+overshooting one that does not.
 
 THE OVERALL is not an average of the dimensions below it, and it is never the \
 weakest one. A real listener does not grade each facet and divide — they \
@@ -418,11 +457,36 @@ facet in "fixes" rather than in the number. Only let the overall sit low when \
 the weaknesses run through the whole take — score it down for a take that is \
 shaky throughout, never for a strong one with a single fixable habit.
 
+This is not limited to ONE facet. A take can have several dimensions sitting \
+in the developing range at once — flow, timing and breath all needing real \
+work — and still be carried above their average by a genuine hook, a story \
+that lands, or a performance that connects with a real listener, exactly the \
+way that one rough facet is carried above. "Several things to work on" and \
+"strong take" are not opposites; a complete, connecting performance with \
+multiple fixable habits still earns credit for being complete and connecting. \
+The line that matters is not how many facets need work, it is whether \
+anything is actually BROKEN — falling apart, losing the beat entirely, \
+unintelligible throughout. Developing is not broken.
+
 Score the PERFORMANCE, not the recording. Room noise, phone microphones, no \
 mixing, a backing track that is too loud — none of that is their singing, \
 playing or writing, and none of it may pull a score down. If the recording \
 genuinely gets in the way of hearing something, say so in the fixes and don't \
 score that dimension harshly for it.{mix_caveat}
+
+SONG vs PERFORMANCE — two different questions, and "song_score" is where the \
+second one lives. Everything above judges the PERFORMANCE: how the take sits, \
+bar to bar, note to note. "song_score" judges the SONG itself, the way a real \
+listener reacts to it — is there a hook, does the structure pull you through \
+it, does it land emotionally, would this actually stick after one listen. \
+Score it as a listener would, not as a technician: a technically shaky \
+performance of a genuinely great song can score HIGH on song_score and \
+moderate on the performance dimensions, and a flawless performance of a \
+forgettable song can score the opposite. Neither number may pull on the \
+other — a great song performed roughly is still a great song, and a mediocre \
+song performed perfectly is still a mediocre song. If there is no actual song \
+here to react to — a warm-up, a scale run, an isolated drum groove with no \
+structure to judge — set "song_score" to null rather than inventing one.
 
 Harshness is not honesty. A number lower than the take deserves is just as \
 wrong as one higher, and it is the one that makes somebody quit.
@@ -465,7 +529,9 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "scores": {{{shape}}},
   "now": "<their current qualities, in that voice>",
   "goal": "<what they're aiming at next, and how they'll know they got there>",{range_field}
-  "style_fit": "<how it sits against the style or genre they picked>",{lyric_fields}{mix_fields}
+  "style_fit": "<how it sits against the style or genre they picked>",
+  "song_score": <1-10, or null if there's no actual song here to judge>,
+  "song_why": "<one sentence, as a listener: what makes it land or not>",{lyric_fields}{mix_fields}
   "verdict": "<one sentence in that voice, what this take actually is>",
   "strengths": ["<what genuinely worked, named specifically - AT LEAST ONE, always>", "..."],
   "fixes": ["<the moment it goes wrong, and the fix — the two that matter most, worst first>", "..."],
