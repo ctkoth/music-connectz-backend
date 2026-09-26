@@ -237,16 +237,10 @@ class RegisterSerializer(serializers.Serializer):
             Profile.objects.update_or_create(
                 user=user, defaults={"phone": validated.get("phone", "")}
             )
-            # Welcome bonus for signing up — kickstart their balance
-            from apps.economy.models import award_spinaz, SIGNUP_WELCOME_SPINAZ
-            award_spinaz(user, SIGNUP_WELCOME_SPINAZ, "signup welcome bonus",
-                         app_key="profilez", target="signup")
-            # Platform owner bonus for each new join — incentivizes growth focus
-            from apps.economy.views import platform_owner
-            owner = platform_owner()
-            if owner and owner.id != user.id:
-                award_spinaz(owner, SIGNUP_WELCOME_SPINAZ, f"new member join ({user.username})",
-                             app_key="profilez", target="signup")
+            # Welcome bonus + the platform owner's bonus — shared with the OAuth
+            # door (welcome.py), which used to get neither.
+            from .welcome import attach_signup_context, award_signup_bonuses
+            award_signup_bonuses(user)
             # Store the birthday on the searchable economy profile if provided.
             birthday = (validated.get("birthday") or "").strip()
             if birthday:
@@ -258,19 +252,10 @@ class RegisterSerializer(serializers.Serializer):
                 ep.birthday = birthday[:10]
                 ep.sign = zodiac_for(ep.birthday)
                 ep.save(update_fields=["birthday", "sign", "updated_at"])
-            # Two-sided referral: credit the inviter + welcome the joinee (once).
-            code = (validated.get("ref") or "").strip()
-            if code and code.lower() != user.username.lower():
-                from apps.economy.models import record_referral
-                referrer = User.objects.filter(username__iexact=code).first()
-                if referrer:
-                    record_referral(referrer, user)
-            # Claim the trial take, if they came in through one. Best-effort by
-            # design — a stale token must never cost somebody their registration.
-            token = (validated.get("trial_token") or "").strip()
-            if token:
-                from apps.economy.models import claim_trial_take
-                claim_trial_take(user, token)
+            # Two-sided referral, and the trial take if they came in through one.
+            # Best-effort by design — a stale token must never cost somebody
+            # their registration.
+            attach_signup_context(user, validated.get("ref"), validated.get("trial_token"))
             # The week they built on the BodieZ trial door, if any — already
             # cleaned by validate_trial_split, so this is trusted here.
             trial_split = validated.get("trial_split") or []

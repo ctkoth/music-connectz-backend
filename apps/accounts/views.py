@@ -22,6 +22,7 @@ from .oauth import (
     verify_apple,
     verify_google,
 )
+from .welcome import welcome_oauth_member
 from .serializers import (
     LoginSerializer,
     PublicUserSerializer,
@@ -648,6 +649,12 @@ class OAuthLoginView(APIView):
                     raise OAuthError("That sign-in was for a different provider.")
                 user, made = _user_from_oauth(info, with_created=True, create=True)
                 _note_signup(user, request) if made else _note_seen(user, request)
+                # A brand-new account is owed what a registered one gets: the
+                # welcome 🍥, its inviter's credit, and the take it scored at
+                # /try. Only when `made` — a returning member is never paid
+                # the welcome twice.
+                if made:
+                    welcome_oauth_member(user, data)
                 return Response({
                     "user": PublicUserSerializer(user).data,
                     **issue_tokens(user),
@@ -705,6 +712,8 @@ class OAuthLoginView(APIView):
         # platform get made, so an account created HERE is the one worth
         # noticing — the same call, gated on whether the account is new.
         _note_signup(user, request) if made else _note_seen(user, request)
+        if made:
+            welcome_oauth_member(user, data)
         tokens = issue_tokens(user)
         return Response({"user": PublicUserSerializer(user).data, **tokens})
 
