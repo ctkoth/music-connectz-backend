@@ -7,7 +7,7 @@ from .questz import QuestBoardView, QuestClaimView
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
 from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
-                    PostJoinView, PostShareView, SubmissionsView, PostProgressionView)
+                    PostJoinView, PostShareView, SubmissionsView, PostProgressionView, DiscoveryFeedView)
 from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
@@ -336,6 +336,8 @@ urlpatterns = [
     path("ratez/", RatezView.as_view(), name="economy-ratez"),
     path("ratez/kinds/", RatingKindsView.as_view(), name="economy-ratez-kinds"),
     path("postz/", PostsView.as_view(), name="economy-postz"),
+    # Personalized discovery feed based on taste affinity and listening behavior.
+    path("postz/discover/", DiscoveryFeedView.as_view(), name="economy-postz-discover"),
     # The price before the button, never after it.
     path("postz/cost/", PostCostView.as_view(), name="economy-postz-cost"),
     # No account needed — a public post by link, and the author behind it.

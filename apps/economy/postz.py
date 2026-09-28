@@ -958,3 +958,64 @@ class PostProgressionView(APIView):
                 "progress_percent": min(100, round((rating_avg / collab_needed) * 100)) if collab_needed > 0 else 0,
             },
         })
+
+
+class DiscoveryFeedView(APIView):
+    """GET personalized discovery feed based on listening behavior.
+
+    Returns posts tailored to the member's taste:
+    - Posts from members with similar listening patterns
+    - Ranked by creator affinity, post quality, and recency
+    - Excludes posts they've already heard
+
+    This solves: "How do I discover new music I'll actually like?"
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Get personalized discovery recommendations."""
+        from .discoveryengine import recommendations_for, genre_recommendations_for
+
+        genre = request.query_params.get("genre")
+        limit = min(100, int(request.query_params.get("limit", 30)))
+
+        # Get recommendations (either personalized or genre-based)
+        if genre:
+            recommendations = genre_recommendations_for(request.user, genre, limit)
+        else:
+            recommendations = recommendations_for(request.user, limit)
+
+        # Format the response like the main feed does
+        if not recommendations:
+            return Response({"posts": [], "kind": "discovery"})
+
+        reactions = _reactions_for([p.id for p in recommendations])
+        deals = dict(
+            CollabDeal.objects.filter(source_post_id__in=[p.id for p in recommendations])
+            .values_list("source_post_id")
+            .annotate(n=Count("id"))
+        )
+        price = coach_price(request.user)
+        cap = coach_cap(request.user)
+        sizes = take_state_for([(p, media_slots(p)) for p in recommendations])
+        ids = [p.id for p in recommendations]
+        shares = dict(PostShare.objects.filter(post_id__in=ids)
+                      .values_list("post_id").annotate(n=Count("id")))
+        joins = dict(PostJoin.objects.filter(post_id__in=ids)
+                     .values_list("post_id").annotate(n=Count("id")))
+        ratings = item_rating_medians([f"post:{i}" for i in ids])
+
+        posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
+                            collabs=deals.get(p.id, 0), price=price, cap=cap,
+                            take_state=sizes.get(p.id),
+                            shares=shares.get(p.id, 0),
+                            joins=joins.get(p.id, 0) if p.visibility == "restricted" else 0,
+                            rating=ratings.get(f"post:{p.id}"))
+                 for p in recommendations]
+
+        return Response({
+            "posts": posts,
+            "kind": "discovery",
+            "note": f"Recommended based on {genre or 'your taste'}"
+        })
