@@ -26,6 +26,7 @@ import re
 
 import requests
 from django.conf import settings
+from django.core.cache import cache
 from rest_framework import status
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
@@ -585,6 +586,25 @@ def record_coaching_observations(user, payload, song_key=None, song_bpm=None):
         logger.exception("Failed to record coaching observations")
 
 
+def coach_rate_limit_check(user):
+    """Check per-minute rate limit for coach abuse prevention.
+
+    Returns a Response if the user has exceeded the limit, None otherwise.
+    Allows 5 attempts per minute to prevent rapid-fire spam while permitting
+    normal usage. A member trying one take every 12 seconds is fine; a script
+    sending 10 per second is not.
+    """
+    cache_key = f"coach_rate:{user.id}"
+    attempts = cache.get(cache_key, 0)
+    if attempts >= 5:
+        return Response(
+            {"detail": "Too many coaching attempts. Wait a minute and try again."},
+            status=status.HTTP_429_TOO_MANY_REQUESTS
+        )
+    cache.set(cache_key, attempts + 1, 60)
+    return None
+
+
 class SingZCoachView(APIView):
     """The Boss Take coach for any InstrumentZ app.
 
@@ -696,6 +716,11 @@ class SingZCoachView(APIView):
         })
 
     def post(self, request):
+        # Rate limit check first: prevent rapid-fire abuse before doing any work.
+        rate_limit_response = coach_rate_limit_check(request.user)
+        if rate_limit_response:
+            return rate_limit_response
+
         # No tier gate. The blueprint filed the AI coach under StatZ Gated
         # Features and that was reconsidered on purpose: the trial door already
         # hands an anonymous visitor a full scored take, one per address per

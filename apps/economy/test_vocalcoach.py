@@ -1538,3 +1538,30 @@ class UnscorableTests(TestCase):
         out, err = self._run({"unscorable": None, "score": None, "scores": {}})
         self.assertIsNone(out)
         self.assertIsNotNone(err)
+
+
+class CoachRateLimitTests(TestCase):
+    """Rate limit prevents rapid-fire abuse while allowing normal usage."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("test", "test@t.com", "pw")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    @patch("apps.economy.vocalcoach.requests.post")
+    def test_rate_limit_blocks_rapid_attempts(self, mock_post):
+        """User is blocked after 5 attempts in one minute."""
+        mock_post.return_value = fake_gemini()
+        # Create a fake audio file
+        audio = SimpleUploadedFile("test.mp3", b"fake audio", content_type="audio/mpeg")
+        # First 5 attempts should succeed (or at least not be blocked by rate limit)
+        for i in range(5):
+            audio_copy = SimpleUploadedFile("test.mp3", b"fake audio", content_type="audio/mpeg")
+            resp = self.client.post(URL, {"take": audio_copy}, format="multipart")
+            # Should not be rate limited (may fail for other reasons like missing tier config)
+            self.assertNotEqual(resp.status_code, 429)
+        # 6th attempt should be rate limited
+        audio_copy = SimpleUploadedFile("test.mp3", b"fake audio", content_type="audio/mpeg")
+        resp = self.client.post(URL, {"take": audio_copy}, format="multipart")
+        self.assertEqual(resp.status_code, 429)
+        self.assertIn("Too many coaching attempts", resp.data["detail"])
