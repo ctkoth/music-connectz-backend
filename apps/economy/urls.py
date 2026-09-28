@@ -174,6 +174,10 @@ from .improvementz import (
     DrillPrescriptionDetailView, AccountabilityGroupListView,
     AccountabilityGroupDetailView,
 )
+from .beatz import (
+    BeatListView, BeatDetailView, BeatPurchaseView, BeatUsageReportView,
+    BeatEarningsView, ProducerBeatsView,
+)
 
 urlpatterns = [
     path("wallet/", WalletView.as_view(), name="economy-wallet"),
@@ -557,4 +561,11 @@ urlpatterns = [
     path("improvementz/drills/<int:drill_id>/complete/", DrillPrescriptionDetailView.as_view(), name="economy-improvementz-drill-complete"),
     path("improvementz/groups/", AccountabilityGroupListView.as_view(), name="economy-improvementz-groups"),
     path("improvementz/groups/<int:group_id>/", AccountabilityGroupDetailView.as_view(), name="economy-improvementz-group-detail"),
+    # BeatZ — Path 4 beat/stem licensing (producers sell, buyers license)
+    path("beatz/", BeatListView.as_view(), name="economy-beatz"),
+    path("beatz/<int:beat_id>/", BeatDetailView.as_view(), name="economy-beatz-detail"),
+    path("beatz/<int:beat_id>/purchase/", BeatPurchaseView.as_view(), name="economy-beatz-purchase"),
+    path("beatz/purchases/<int:purchase_id>/report-usage/", BeatUsageReportView.as_view(), name="economy-beatz-report-usage"),
+    path("beatz/earnings/", BeatEarningsView.as_view(), name="economy-beatz-earnings"),
+    path("beatz/my-beats/", ProducerBeatsView.as_view(), name="economy-beatz-my-beats"),
 ]

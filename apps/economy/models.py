@@ -6617,3 +6617,119 @@ class CoachReview(models.Model):
 
     def __str__(self):
         return f"{self.student} → {self.coach} · {self.rating}★"
+
+
+class BeatZ(models.Model):
+    """Beat or stem offered for licensing.
+
+    Path 4 of monetization — beat/stem licensing. Producers upload audio and
+    set licensing terms. Artists purchase licenses to use the beat/stem in their
+    own productions. Revenue is split per tier's developer tax.
+
+    A beat is immutable once uploaded (no edits to price/terms after first
+    purchase). The producer sets one price and licensing model (exclusive or
+    non-exclusive). Non-exclusive licenses expire; exclusive ones don't.
+    """
+
+    LICENSE_EXCLUSIVE = "exclusive"
+    LICENSE_NONEXCLUSIVE = "nonexclusive"
+    LICENSE_CHOICES = [
+        (LICENSE_EXCLUSIVE, "Exclusive"),
+        (LICENSE_NONEXCLUSIVE, "Non-exclusive"),
+    ]
+
+    producer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                 related_name="beats_produced")
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default="")
+    genre = models.CharField(max_length=50, blank=True, default="")
+    tempo_bpm = models.PositiveIntegerField(null=True, blank=True)  # beats per minute
+    audio_upload = models.ForeignKey(Upload, on_delete=models.SET_NULL, null=True,
+                                     related_name="beat_audio")
+
+    # Pricing and licensing
+    price_cents = models.PositiveIntegerField(default=500)  # $5 default
+    license_type = models.CharField(max_length=20, choices=LICENSE_CHOICES,
+                                    default=LICENSE_NONEXCLUSIVE)
+    quantity_available = models.PositiveIntegerField(default=1000)  # for exclusive: 1
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["producer", "-created_at"]),
+                   models.Index(fields=["genre"])]
+
+    def __str__(self):
+        return f"{self.title} by {self.producer.username}"
+
+
+class BeatPurchase(models.Model):
+    """Purchase record for a beat license.
+
+    One purchase = one license. Buyer owns the right to use the beat according
+    to the license type. Exclusive purchases are time-unlimited; non-exclusive
+    expire after one year (renewable).
+    """
+
+    buyer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="beat_purchases")
+    beat = models.ForeignKey(BeatZ, on_delete=models.CASCADE, related_name="purchases")
+    license_type = models.CharField(max_length=20, choices=BeatZ.LICENSE_CHOICES)
+
+    # Financial
+    price_cents = models.PositiveIntegerField()  # snapshot of beat price at purchase
+    developer_cut_cents = models.PositiveIntegerField(default=0)  # platform fee
+    producer_payout_cents = models.PositiveIntegerField(default=0)  # amount to producer
+
+    purchased_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)  # null for exclusive
+
+    class Meta:
+        ordering = ("-purchased_at",)
+        indexes = [models.Index(fields=["buyer", "-purchased_at"]),
+                   models.Index(fields=["beat", "-purchased_at"])]
+
+    def __str__(self):
+        return f"{self.buyer.username} bought {self.beat.title}"
+
+
+class BeatUsage(models.Model):
+    """Record of a purchased beat being used in a member's track.
+
+    Artist reports where they used a beat (YouTube, streaming, commercial) so
+    the producer can track where their beats end up. This feeds back into
+    discovery: beats with proven track records get featured.
+    """
+
+    purchase = models.ForeignKey(BeatPurchase, on_delete=models.CASCADE,
+                                 related_name="usages")
+    post = models.ForeignKey(Post, on_delete=models.SET_NULL, null=True, blank=True,
+                             related_name="beat_usages")
+    upload = models.ForeignKey(Upload, on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name="beat_usages")
+
+    # Usage context
+    USAGE_PERSONAL = "personal"
+    USAGE_YOUTUBE = "youtube"
+    USAGE_STREAMING = "streaming"
+    USAGE_COMMERCIAL = "commercial"
+    USAGE_CHOICES = [
+        (USAGE_PERSONAL, "Personal/Demo"),
+        (USAGE_YOUTUBE, "YouTube"),
+        (USAGE_STREAMING, "Streaming (Spotify, Apple Music, etc)"),
+        (USAGE_COMMERCIAL, "Commercial/Sync"),
+    ]
+    usage_kind = models.CharField(max_length=20, choices=USAGE_CHOICES)
+    details = models.TextField(blank=True, default="")  # URL, project name, etc
+
+    reported_at = models.DateTimeField(auto_now_add=True)
+    verified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-reported_at",)
+        indexes = [models.Index(fields=["purchase", "-reported_at"])]
+
+    def __str__(self):
+        return f"Beat usage: {self.purchase.beat.title} by {self.purchase.buyer.username}"
