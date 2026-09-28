@@ -169,6 +169,11 @@ from .bodiez import (
 from .lessonz import (
     CoachProfileView, CoachReviewsView, StudentReviewView, coaches_list_view,
 )
+from .improvementz import (
+    GoalListView, GoalDetailView, DrillPrescriptionListView,
+    DrillPrescriptionDetailView, AccountabilityGroupListView,
+    AccountabilityGroupDetailView,
+)
 
 urlpatterns = [
     path("wallet/", WalletView.as_view(), name="economy-wallet"),
@@ -545,4 +550,11 @@ urlpatterns = [
     path("lessonz/coach/<int:coach_id>/reviews/", CoachReviewsView.as_view(), name="economy-lessonz-coach-reviews"),
     path("lessonz/review/", StudentReviewView.as_view(), name="economy-lessonz-review"),
     path("lessonz/coaches/", coaches_list_view, name="economy-lessonz-coaches"),
+    # ImprovemenZ — Gap 3 improvement loop (goals, drill prescriptions, accountability)
+    path("improvementz/goals/", GoalListView.as_view(), name="economy-improvementz-goals"),
+    path("improvementz/goals/<int:goal_id>/", GoalDetailView.as_view(), name="economy-improvementz-goal-detail"),
+    path("improvementz/drills/", DrillPrescriptionListView.as_view(), name="economy-improvementz-drills"),
+    path("improvementz/drills/<int:drill_id>/complete/", DrillPrescriptionDetailView.as_view(), name="economy-improvementz-drill-complete"),
+    path("improvementz/groups/", AccountabilityGroupListView.as_view(), name="economy-improvementz-groups"),
+    path("improvementz/groups/<int:group_id>/", AccountabilityGroupDetailView.as_view(), name="economy-improvementz-group-detail"),
 ]

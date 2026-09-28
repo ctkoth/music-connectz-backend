@@ -6449,7 +6449,149 @@ class Partnership(models.Model):
         return f"Partnership<{self.a_id}+{self.b_id}> {self.collabs}c {self.battles}b"
 
 
-# ------------------------------------------------------------------ LessonZ
+# ------------------------------------------------------------------ Gap 3: Improvement Loop
+class Goal(models.Model):
+    """Member improvement goal: target for practice and accountability.
+
+    Gap 3 of the monetization loop — improvement drives discovery signals and
+    motivates investment in coaching. Goals are measurable (not feelings):
+    "hit high C in tune 10 times", "hold 8/8 beat for 5 minutes", not
+    "get better". A goal is complete when the member reaches the threshold or
+    closes it deliberately. Completion is not graded — reaching it is completion.
+
+    A goal carries an instrument and an app_key so discovery can surface
+    "members improving at singz" and coaches can prescribe drills specific to
+    an instrument.
+    """
+
+    STATUS_ACTIVE = "active"
+    STATUS_COMPLETED = "completed"
+    STATUS_ABANDONED = "abandoned"
+    STATUS_CHOICES = [
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_ABANDONED, "Abandoned"),
+    ]
+
+    member = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="goals")
+    app_key = models.CharField(max_length=20, default="singz")  # singz, rapz, etc
+    title = models.CharField(max_length=200)  # e.g., "Hit high C in tune"
+    description = models.TextField(blank=True, default="")
+    target_metric = models.CharField(max_length=100)  # e.g., "10 times", "5 minutes"
+    progress_so_far = models.IntegerField(default=0)  # count of times hit target
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    abandoned_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["member", "status"]),
+                   models.Index(fields=["app_key"])]
+
+    def __str__(self):
+        return f"{self.member} · {self.title}"
+
+
+class DrillPrescription(models.Model):
+    """Coach prescribes a drill after a lesson.
+
+    A prescription is a suggestion, not a mandate — the student can ignore it.
+    But prescriptions appear in their practice dashboard to create visibility
+    and accountability. A coach prescribes by drill type (weak notes, timing,
+    breath) and the member can run it multiple times. Prescriptions don't
+    expire; a stale one stays on the list until the member marks it complete.
+    """
+
+    coach = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="prescriptions_given")
+    student = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name="prescriptions_received")
+    call = models.OneToOneField(Call, on_delete=models.SET_NULL, null=True, blank=True,
+                                related_name="drill_prescription")
+    drill_type = models.CharField(max_length=50)  # e.g., "pitch_accuracy", "timing", "breath"
+    instructions = models.TextField(blank=True, default="")
+    is_completed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["student", "is_completed"])]
+
+    def __str__(self):
+        return f"{self.coach} prescribed {self.drill_type} to {self.student}"
+
+
+class GoalProgress(models.Model):
+    """Track a member's progress toward a goal via practice sessions.
+
+    Each drill take or practice session can count toward a goal if the member
+    is working on that goal. This row records the link, so a dashboard can
+    show "you've improved X toward your goal" without recomputing.
+
+    Only explicit links count — a session doesn't auto-link to a goal.
+    The member or coach must mark it as progress.
+    """
+
+    goal = models.ForeignKey(Goal, on_delete=models.CASCADE, related_name="progress_entries")
+    drill_take = models.ForeignKey(DrillTake, on_delete=models.SET_NULL, null=True, blank=True,
+                                   related_name="goal_progresses")
+    practice_session = models.ForeignKey(PracticeSession, on_delete=models.SET_NULL, null=True, blank=True,
+                                         related_name="goal_progresses")
+    improvement_amount = models.IntegerField(default=1)  # how much progress toward goal
+    recorded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-recorded_at",)
+        indexes = [models.Index(fields=["goal"])]
+
+    def __str__(self):
+        if self.drill_take:
+            return f"Progress on {self.goal} from drill take {self.drill_take.id}"
+        return f"Progress on {self.goal} from practice session"
+
+
+class AccountabilityGroup(models.Model):
+    """Peer group working toward improvement goals together.
+
+    Members join groups to share goals and hold each other accountable.
+    Groups can be public (discoverable) or private (invitation-only).
+    Weekly check-ins surface member progress and keep the group engaged.
+    """
+
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True, default="")
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="accountability_groups_owned")
+    app_key = models.CharField(max_length=20, default="singz")  # singz, rapz, etc
+    is_public = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["app_key", "is_public"])]
+
+    def __str__(self):
+        return f"{self.name} ({self.app_key})"
+
+
+class AccountabilityGroupMember(models.Model):
+    """Member of an accountability group."""
+
+    group = models.ForeignKey(AccountabilityGroup, on_delete=models.CASCADE,
+                              related_name="members")
+    member = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                               related_name="accountability_groups")
+    joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("group", "member")
+        ordering = ("joined_at",)
+
+    def __str__(self):
+        return f"{self.member} in {self.group.name}"
 class CoachReview(models.Model):
     """A student's review of a coach after a lesson is complete.
 
