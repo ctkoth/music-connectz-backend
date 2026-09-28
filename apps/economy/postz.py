@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from datetime import timedelta
 
+from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Sum, When
 from django.utils import timezone
 
@@ -30,13 +31,18 @@ from .models import (
     SHARE_REWARD_ENERGY,
     SHARE_MIN_ACTIVE_SECONDS,
     BATTLE_RATING_THRESHOLD,
+    DEV_TAX,
+    Transaction,
     award_spinaz,
     can_view_post,
     owns_post,
     item_rating_median,
     item_rating_medians,
+    log_resource,
+    membership_for,
     notify,
     record_submission,
+    split_cents,
     submission_cap_for,
     submissions_used_today,
     wallet_for,
@@ -45,6 +51,7 @@ from .models import (
     post_is_collab_eligible,
 )
 from .personaz import personas_of
+from .views import credit_owner
 
 # Reach engine: likes/dislikes rank the feed (they never touch price — that's
 # ratings' job). Heavy dislike ratio downranks + flags for moderation.
@@ -1019,3 +1026,112 @@ class DiscoveryFeedView(APIView):
             "kind": "discovery",
             "note": f"Recommended based on {genre or 'your taste'}"
         })
+
+
+class PostSaleView(APIView):
+    """Purchase a post to support the creator.
+
+    POST: Buy access to a paid post.
+    GET: Check if user has purchased a post.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        """Check if user has access to this post (either author, or purchased)."""
+        try:
+            post = Post.objects.get(pk=pk)
+        except Post.DoesNotExist:
+            return Response({"detail": "Post not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        user_has_access = (
+            post.author_id == request.user.id or
+            post.sales.filter(buyer_id=request.user.id).exists()
+        )
+        return Response({
+            "has_access": user_has_access,
+            "price_cents": post.price_cents,
+            "is_author": post.author_id == request.user.id,
+        })
+
+    def post(self, request, pk):
+        """Buy a post."""
+        try:
+            post = Post.objects.get(pk=pk)
+        except Post.DoesNotExist:
+            return Response({"detail": "Post not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Cannot buy your own post
+        if post.author_id == request.user.id:
+            return Response(
+                {"detail": "You can't buy your own post"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Post must be priced
+        if not post.price_cents:
+            return Response(
+                {"detail": "This post is free"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check if already purchased
+        if request.user.post_purchases.filter(post=post).exists():
+            return Response(
+                {"detail": "Already purchased"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check wallet balance
+        wallet = wallet_for(request.user)
+        if not wallet or (wallet.money_cents or 0) < post.price_cents:
+            return Response(
+                {"detail": f"Insufficient balance. Need ${post.price_cents/100:.2f}"},
+                status=status.HTTP_402_PAYMENT_REQUIRED
+            )
+
+        # Process the sale
+        from .models import PostSale
+        with transaction.atomic():
+            # Debit buyer
+            wallet.money_cents = (wallet.money_cents or 0) - post.price_cents
+            wallet.save(update_fields=["money_cents", "updated_at"])
+
+            # Create sale record
+            PostSale.objects.create(
+                post=post,
+                buyer=request.user,
+                price_cents=post.price_cents
+            )
+
+            # Credit creator (after dev tax)
+            dev_tax, creator_net = split_cents(
+                post.price_cents,
+                DEV_TAX[membership_for(post.author).tier]
+            )
+
+            creator_wallet = wallet_for(post.author)
+            creator_wallet.money_cents = (creator_wallet.money_cents or 0) + creator_net
+            creator_wallet.save(update_fields=["money_cents", "updated_at"])
+
+            # Log transactions
+            log_resource(
+                request.user,
+                Transaction.KIND_MONEY,
+                -post.price_cents,
+                note=f"Post purchase #{post.id}"
+            )
+            log_resource(
+                post.author,
+                Transaction.KIND_MONEY,
+                creator_net,
+                note=f"Post sale (post #{post.id})"
+            )
+            credit_owner(request.user, dev_tax, f"Post sale platform fee (post #{post.id})")
+
+        return Response({
+            "success": True,
+            "price_cents": post.price_cents,
+            "balance_after": wallet.money_cents,
+            "message": f"You've supported {post.author.username}!"
+        }, status=status.HTTP_201_CREATED)

@@ -1507,6 +1507,8 @@ class Post(models.Model):
     # Progression tracking: when did this post become eligible for next tier?
     battle_eligible_at = models.DateTimeField(null=True, blank=True)  # when rating count/avg hit threshold
     collab_eligible_at = models.DateTimeField(null=True, blank=True)  # when quality score hit threshold
+    # Price for fans to support this post (null = free post)
+    price_cents = models.PositiveIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     edited_at = models.DateTimeField(null=True, blank=True)
     edit_history = models.JSONField(default=list, blank=True)  # [{title, description, at}] prior versions
@@ -1545,6 +1547,17 @@ class PostShare(models.Model):
 
     class Meta:
         unique_together = ("post", "user")
+
+
+class PostSale(models.Model):
+    """A fan paying to support/access a post."""
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="sales")
+    buyer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="post_purchases")
+    price_cents = models.PositiveIntegerField()  # what they paid (same as post.price_cents at purchase time)
+    purchased_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("post", "buyer")  # one purchase per buyer per post
 
 
 class DailySubmission(models.Model):

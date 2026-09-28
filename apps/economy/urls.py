@@ -7,7 +7,7 @@ from .questz import QuestBoardView, QuestClaimView
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
 from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
-                    PostJoinView, PostShareView, SubmissionsView, PostProgressionView, DiscoveryFeedView)
+                    PostJoinView, PostShareView, SubmissionsView, PostProgressionView, DiscoveryFeedView, PostSaleView)
 from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
@@ -357,6 +357,7 @@ urlpatterns = [
     # Progress toward BattleZ/CollabZ eligibility: ratings needed and current progress.
     path("postz/<int:pk>/progression/", PostProgressionView.as_view(), name="economy-postz-progression"),
     path("postz/<int:pk>/share/", PostShareView.as_view(), name="economy-postz-share"),
+    path("postz/<int:pk>/sale/", PostSaleView.as_view(), name="economy-postz-sale"),
     path("postz/<int:pk>/delete/", PostDeleteView.as_view(), name="economy-postz-delete"),
     path("postz/embeds/", PostEmbedsView.as_view(), name="economy-postz-embeds"),
     path("submissions/", SubmissionsView.as_view(), name="economy-submissions"),
