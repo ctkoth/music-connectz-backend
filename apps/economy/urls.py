@@ -166,6 +166,9 @@ from .bodiez import (
     BodieZRoutineDetailView, BodieZSessionsView, BodieZSessionDetailView, BodieZSetsView,
     BodieZProgressView, BodieZWeightLogView,
 )
+from .lessonz import (
+    CoachProfileView, CoachReviewsView, StudentReviewView, coaches_list_view,
+)
 
 urlpatterns = [
     path("wallet/", WalletView.as_view(), name="economy-wallet"),
@@ -537,4 +540,9 @@ urlpatterns = [
     # LeaderboardZ — competition drives conversions. All metrics are substance.
     path("leaderboardz/", LeaderboardsView.as_view(), name="economy-leaderboardz"),
     path("leaderboardz/xp/<str:app_key>/", InstrumentLeaderboardView.as_view(), name="economy-leaderboardz-xp"),
+    # LessonZ — Lesson marketplace (Path 3 monetization)
+    path("lessonz/profile/", CoachProfileView.as_view(), name="economy-lessonz-profile"),
+    path("lessonz/coach/<int:coach_id>/reviews/", CoachReviewsView.as_view(), name="economy-lessonz-coach-reviews"),
+    path("lessonz/review/", StudentReviewView.as_view(), name="economy-lessonz-review"),
+    path("lessonz/coaches/", coaches_list_view, name="economy-lessonz-coaches"),
 ]

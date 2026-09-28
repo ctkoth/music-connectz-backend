@@ -5282,7 +5282,26 @@ class FunnelEvent(models.Model):
 
 
 class CoachProfile(models.Model):
-    """Coaching studio: track student relationships and portfolio."""
+    """Coaching studio: track student relationships, portfolio, and lesson marketplace.
+
+    Path 3 of monetization — lesson marketplace. A coach sets a per-minute rate
+    and students book lessons via Call. Ratings come from CoachReview rows after
+    the lesson is complete. Verification counts actual completed lessons, so a
+    coach with 0 lessons is featured nowhere until they have a real review.
+
+    Three things make this affordable:
+
+      * `average_rating` is computed on read from CoachReview rows (not cached),
+        so a review that is later disputed never orphans a cached number.
+      * `verified_lesson_count` is incremented ONCE per Call that reaches
+        STATUS_ENDED, not re-counted from CallZ rows on every read.
+      * `featured_until` is a nullable timestamp — a coach with no students
+        never touches the featured list, and a featured window that has passed
+        is instantly cleared on next read (no cron needed).
+
+    The Call model holds the actual call and escrow, carrying the
+    lesson_rate_cents_per_min snapshot from here at ring time.
+    """
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="coach_profile"
     )
@@ -5297,8 +5316,25 @@ class CoachProfile(models.Model):
     # Referral bonuses tracking
     referral_spinaz_earned = models.IntegerField(default=0)
 
+    # Path 3: Lesson Marketplace
+    lesson_rate_cents_per_min = models.PositiveIntegerField(default=100)  # $0.01/sec = $0.60/min
+    verified_lesson_count = models.PositiveIntegerField(default=0, db_index=True)
+    featured_until = models.DateTimeField(null=True, blank=True, db_index=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["-verified_lesson_count"]),
+                   models.Index(fields=["featured_until"])]
+
+    @property
+    def average_rating(self):
+        """Compute average rating from CoachReview rows. Returns None if no reviews."""
+        reviews = self.user.coach_reviews.all()
+        if not reviews.exists():
+            return None
+        return sum(r.rating for r in reviews) / reviews.count()
 
     def __str__(self):
         return f"Coach {self.user} ({self.students_count} students)"
@@ -6411,3 +6447,31 @@ class Partnership(models.Model):
 
     def __str__(self):
         return f"Partnership<{self.a_id}+{self.b_id}> {self.collabs}c {self.battles}b"
+
+
+# ------------------------------------------------------------------ LessonZ
+class CoachReview(models.Model):
+    """A student's review of a coach after a lesson is complete.
+
+    Path 3 of monetization — lesson marketplace. One review per (coach, student)
+    pair. A student can only rate a coach once; re-rating replaces the old one.
+    The review is written AFTER the lesson ends. CoachProfile.average_rating
+    computes from these rows on read, so no cached number can drift.
+    """
+
+    coach = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="coach_reviews")
+    student = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name="lesson_reviews")
+    rating = models.PositiveIntegerField(default=5)  # 1-5 stars
+    text = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("coach", "student")
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["coach", "-created_at"])]
+
+    def __str__(self):
+        return f"{self.student} → {self.coach} · {self.rating}★"
