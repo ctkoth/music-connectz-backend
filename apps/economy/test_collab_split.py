@@ -25,6 +25,7 @@ from apps.economy.models import (
     ItemRating,
     OverallRating,
     Post,
+    RoyaltyEntry,
     contributor_item_key,
     profile_for,
     wallet_for,
@@ -233,3 +234,30 @@ class RatingSplitTests(TestCase):
         self.assertEqual(data["rating_min_raters"], RATING_SPLIT_MIN_RATERS)
         self.assertEqual(data["rating_keys"]["alpha"],
                          contributor_item_key(self.deal.id, "alpha"))
+
+    def test_royalty_entries_are_created_on_money_deal_release(self):
+        """Money deals create RoyaltyEntry records when released."""
+        # Create a money deal (not spinaz)
+        deal = CollabDeal.objects.create(
+            initiator=self.a,
+            title="Paid Collab",
+            currency=CollabDeal.CURRENCY_MONEY,
+            status=CollabDeal.STATUS_FUNDED,
+            participants=[
+                {"username": "alpha", "receives_cents": 600, "funded": True},
+                {"username": "beta", "receives_cents": 400, "funded": True},
+            ],
+            held_cents=1000,
+        )
+        from apps.economy.collab import release_deal
+        release_deal(deal)
+        # Both participants should have royalty entries
+        alpha_royalties = list(RoyaltyEntry.objects.filter(
+            user=self.a, kind=RoyaltyEntry.KIND_ACCRUAL))
+        beta_royalties = list(RoyaltyEntry.objects.filter(
+            user=self.b, kind=RoyaltyEntry.KIND_ACCRUAL))
+        self.assertEqual(len(alpha_royalties), 1)
+        self.assertEqual(len(beta_royalties), 1)
+        self.assertEqual(alpha_royalties[0].amount_cents, 600)
+        self.assertEqual(beta_royalties[0].amount_cents, 400)
+        self.assertIn("Paid Collab", alpha_royalties[0].source)

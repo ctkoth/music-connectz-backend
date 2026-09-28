@@ -29,6 +29,7 @@ from .models import (
     CollabDeal,
     ItemRating,
     Post,
+    RoyaltyEntry,
     Transaction,
     Wallet,
     badge_effects,
@@ -367,6 +368,13 @@ def release_deal(deal, note="collab release"):
                 w.money_cents += recv
                 paid_out += recv
                 Transaction.objects.create(user=user, kind=Transaction.KIND_REWARD, amount_cents=recv, dev_tax_cents=0, note=f"CollabZ escrow: {deal.title}"[:200])
+                # Record royalty split accrual
+                RoyaltyEntry.objects.create(
+                    user=user,
+                    kind=RoyaltyEntry.KIND_ACCRUAL,
+                    amount_cents=recv,
+                    source=f"CollabZ: {deal.title}"[:200],
+                )
         else:
             if recv:
                 w.spinaz += recv
