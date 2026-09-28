@@ -327,6 +327,20 @@ def cashout_rate(plan, tier):
     return None
 
 
+# ---- Playlist royalties (passive income from plays) ----
+#
+# Posts on public playlists generate revenue based on plays. A "play" is
+# ListenProgress where seconds >= 10 (wall-clock clamped on the backend, so real
+# listening time). CPM = cents per 1000 plays. Creator keeps (100 - dev_tax)%,
+# platform keeps dev_tax% via the standard split_cents().
+#
+# Accrued daily by management command; no UI involvement. Transparent in
+# creator's Transaction ledger with source "playlist_streams".
+PLAYLIST_CPM_BASE = 100                 # 1 cent per 10 plays, ~$1 per 1000
+PLAYLIST_RECENCY_BOOST_DAYS = 7         # posts < 7 days old get bonus
+PLAYLIST_RECENCY_BOOST_MULTIPLIER = 1.5 # fresh content earns 50% more
+
+
 # AI model per-message cost in cents — the *minimum* to cover the model run
 # (pass-through, no markup). Corey GPT is priced a touch under the cheapest other
 # voice so it's always the value option; it's tuned on member input + the built-in

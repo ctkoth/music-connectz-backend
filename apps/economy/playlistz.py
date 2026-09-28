@@ -571,3 +571,168 @@ class MyAppearancesView(APIView):
                 "added_at": it.added_at.isoformat(),
             })
         return Response({"appearances": out})
+
+
+def accrue_playlist_royalties_for_date(target_date):
+    """Daily batch: accrue royalties from playlist plays.
+
+    For each listen to a post on a public playlist where listener != creator
+    and duration >= 10 seconds, accrue royalties. Royalty = CPM_BASE / 1000 × recency_boost.
+    Create RoyaltyEntry and Transaction per creator. Return summary.
+
+    Args:
+        target_date: datetime.date object (usually yesterday)
+
+    Returns:
+        dict: {"accruals": N, "creators": N, "total_cents": N}
+    """
+    from datetime import timedelta
+    from django.utils import timezone
+    from django.db.models import Q
+    from .models import ListenProgress, RoyaltyEntry, Transaction
+    from .catalog import (
+        PLAYLIST_CPM_BASE,
+        PLAYLIST_RECENCY_BOOST_DAYS,
+        PLAYLIST_RECENCY_BOOST_MULTIPLIER,
+    )
+
+    start_of_date = timezone.make_aware(
+        timezone.datetime.combine(target_date, timezone.datetime.min.time())
+    )
+    end_of_date = start_of_date + timedelta(days=1)
+
+    # Get all posts on public playlists (memoized for reuse)
+    public_playlist_posts = set(
+        PlaylistItem.objects.filter(
+            playlist__visibility="public",
+            kind=PlaylistItem.KIND_POST,
+            post__isnull=False,
+        ).values_list("post_id", flat=True)
+    )
+
+    if not public_playlist_posts:
+        return {"accruals": 0, "creators": 0, "total_cents": 0}
+
+    # Get all posts by id for quick lookup
+    posts_by_id = {
+        p.id: p for p in Post.objects.filter(id__in=public_playlist_posts)
+    }
+
+    # Find all ListenProgress for any post during the date with >= 10 seconds
+    listens = ListenProgress.objects.filter(
+        updated_at__gte=start_of_date,
+        updated_at__lt=end_of_date,
+        seconds__gte=10,  # At least 10 seconds listened
+    ).select_related("user")
+
+    # Group plays by creator
+    accruals_by_creator = {}
+    accrual_count = 0
+
+    for listen in listens:
+        # Parse item_id to extract post_id (format: "post:123", etc)
+        parts = listen.item_id.split(":")
+        if len(parts) < 2 or parts[0] != "post":
+            continue
+
+        try:
+            post_id = int(parts[1])
+        except (ValueError, IndexError):
+            continue
+
+        # Check if this post is on a public playlist
+        if post_id not in posts_by_id:
+            continue
+
+        post = posts_by_id[post_id]
+
+        # Skip if listener is the creator
+        if listen.user_id == post.author_id:
+            continue
+
+        # Calculate royalty: 1 play × CPM / 1000 × recency_boost
+        cpm_cents = PLAYLIST_CPM_BASE
+
+        # Apply recency boost if post is fresh (< 7 days old)
+        age = (timezone.now() - post.created_at).days
+        if age < PLAYLIST_RECENCY_BOOST_DAYS:
+            cpm_cents = int(cpm_cents * PLAYLIST_RECENCY_BOOST_MULTIPLIER)
+
+        royalty_cents = max(1, int(cpm_cents / 1000))
+
+        # Accumulate by creator
+        creator_id = post.author_id
+        if creator_id not in accruals_by_creator:
+            accruals_by_creator[creator_id] = {
+                "total_cents": 0,
+                "plays": 0,
+                "posts": set(),
+            }
+        accruals_by_creator[creator_id]["total_cents"] += royalty_cents
+        accruals_by_creator[creator_id]["plays"] += 1
+        accruals_by_creator[creator_id]["posts"].add(post_id)
+        accrual_count += 1
+
+    # Create RoyaltyEntry and Transaction for each creator
+    created_count = 0
+    total_cents = 0
+    for creator_id, data in accruals_by_creator.items():
+        try:
+            creator = User.objects.get(id=creator_id)
+        except User.DoesNotExist:
+            continue
+
+        amount_cents = data["total_cents"]
+        if amount_cents <= 0:
+            continue
+
+        # Get creator's membership to calculate dev tax
+        m = membership_for(creator)
+        dev_rate = m.dev_tax_rate
+        dev_cents = round(amount_cents * dev_rate)
+        net_cents = amount_cents - dev_cents
+
+        # Create RoyaltyEntry
+        RoyaltyEntry.objects.create(
+            user=creator,
+            kind=RoyaltyEntry.KIND_ACCRUAL,
+            amount_cents=net_cents,
+            tax_cents=dev_cents,
+            source=f"playlist_streams:{target_date.isoformat()}",
+        )
+
+        # Create Transaction for transparency
+        Transaction.objects.create(
+            user=creator,
+            kind=Transaction.KIND_ROYALTY,
+            resource=Transaction.RES_MONEY,
+            amount_cents=net_cents,
+            dev_tax_cents=dev_cents,
+            note=f"Playlist royalties for {len(data['posts'])} posts ({data['plays']} plays)",
+            app_key="playlistz",
+            target=f"playlistz:royalties",
+        )
+
+        # Log dev tax to platform owner
+        if dev_cents > 0:
+            owner = User.objects.filter(is_staff=True, is_superuser=True).first()
+            if owner:
+                Transaction.objects.create(
+                    user=owner,
+                    kind=Transaction.KIND_INTELLIGENCE,
+                    resource=Transaction.RES_MONEY,
+                    amount_cents=dev_cents,
+                    dev_tax_cents=0,
+                    note=f"Playlist royalty dev tax from {creator.username}",
+                    app_key="playlistz",
+                    target=f"user:{creator_id}",
+                )
+
+        created_count += 1
+        total_cents += amount_cents
+
+    return {
+        "accruals": accrual_count,
+        "creators": created_count,
+        "total_cents": total_cents,
+    }
