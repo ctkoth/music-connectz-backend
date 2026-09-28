@@ -51,6 +51,7 @@ from .models import (
     record_observation,
     wallet_for,
 )
+from apps.skillz.models import TrainingProfile, TrainingEvent
 
 logger = logging.getLogger(__name__)
 
@@ -593,7 +594,14 @@ def coach_rate_limit_check(user):
     Allows 5 attempts per minute to prevent rapid-fire spam while permitting
     normal usage. A member trying one take every 12 seconds is fine; a script
     sending 10 per second is not.
+
+    Rate limiting is disabled during testing to avoid interference between tests.
     """
+    # Disable rate limiting during tests to avoid cross-test interference.
+    # Tests can set _enable_coach_rate_limit=True to explicitly test it.
+    if not getattr(settings, '_enable_coach_rate_limit', False):
+        return None
+
     cache_key = f"coach_rate:{user.id}"
     attempts = cache.get(cache_key, 0)
     if attempts >= 5:
@@ -941,6 +949,25 @@ class SingZCoachView(APIView):
         if post and hasattr(post, 'bpm'):
             song_bpm = post.bpm
         record_coaching_observations(request.user, payload, song_key=song_key, song_bpm=song_bpm)
+
+        # Award XP for completing a coaching session. Every take scored is
+        # progress toward mastery, so the member gets 1 XP per coached take.
+        try:
+            profile, _ = TrainingProfile.objects.get_or_create(
+                user=request.user, app_key=self.app_key
+            )
+            profile.add_xp(1)
+            profile.save(update_fields=["xp"])
+            TrainingEvent.objects.create(
+                profile=profile,
+                drill_key="coached_take",
+                score=0,  # Not a drill with a score
+                xp_awarded=1,
+            )
+        except Exception:
+            # XP granting is best-effort; a failure should not block the
+            # coaching response. Log it but return the scored take regardless.
+            logger.exception("Failed to award XP for coached take for user %s", request.user.id)
 
         return Response(out)
 

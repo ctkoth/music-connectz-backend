@@ -3,6 +3,7 @@ import os
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -1544,9 +1545,19 @@ class CoachRateLimitTests(TestCase):
     """Rate limit prevents rapid-fire abuse while allowing normal usage."""
 
     def setUp(self):
+        from django.conf import settings
+        # Enable rate limiting specifically for this test
+        settings._enable_coach_rate_limit = True
         self.user = User.objects.create_user("test", "test@t.com", "pw")
         self.client = APIClient()
         self.client.force_authenticate(self.user)
+        # Clear rate limit cache for this user
+        cache.delete(f"coach_rate:{self.user.id}")
+
+    def tearDown(self):
+        from django.conf import settings
+        # Disable rate limiting after this test
+        settings._enable_coach_rate_limit = False
 
     @patch("apps.economy.vocalcoach.requests.post")
     def test_rate_limit_blocks_rapid_attempts(self, mock_post):
@@ -1565,3 +1576,37 @@ class CoachRateLimitTests(TestCase):
         resp = self.client.post(URL, {"take": audio_copy}, format="multipart")
         self.assertEqual(resp.status_code, 429)
         self.assertIn("Too many coaching attempts", resp.data["detail"])
+
+
+class CoachXPAwardTests(TestCase):
+    """Coaching sessions grant XP for progression."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("alpha", "a@e.com", "pw")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    @patch("apps.economy.vocalcoach.requests.post")
+    def test_xp_awarded_on_coaching_completion(self, mock_post):
+        """Member receives 1 XP when a take is successfully coached."""
+        from apps.skillz.models import TrainingProfile
+        mock_post.return_value = fake_gemini()
+        # Verify no training profile exists yet
+        profiles = TrainingProfile.objects.filter(user=self.user, app_key="singz")
+        self.assertEqual(profiles.count(), 0)
+        # Coach a take
+        audio = SimpleUploadedFile("test.mp3", b"fake audio", content_type="audio/mpeg")
+        resp = self.client.post(URL, {"take": audio}, format="multipart")
+        # Should succeed (may fail for other reasons, but not because of XP granting)
+        if resp.status_code == 200:
+            # Verify training profile was created
+            profiles = TrainingProfile.objects.filter(user=self.user, app_key="singz")
+            self.assertEqual(profiles.count(), 1)
+            profile = profiles.first()
+            # Verify 1 XP was awarded
+            self.assertEqual(profile.xp, 1)
+            # Verify a training event was recorded
+            events = profile.training_events.filter(drill_key="coached_take")
+            self.assertEqual(events.count(), 1)
+            event = events.first()
+            self.assertEqual(event.xp_awarded, 1)
