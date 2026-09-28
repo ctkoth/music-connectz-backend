@@ -1,6 +1,17 @@
 from rest_framework import serializers
 
-from .models import Transaction, Wallet
+from .models import RoyaltyEntry, Transaction, Wallet
+
+
+class RoyaltyEntrySerializer(serializers.ModelSerializer):
+    amount = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RoyaltyEntry
+        fields = ["kind", "amount_cents", "amount", "source", "created_at"]
+
+    def get_amount(self, obj):
+        return round(obj.amount_cents / 100, 2)
 
 
 class WalletSerializer(serializers.ModelSerializer):

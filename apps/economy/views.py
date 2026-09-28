@@ -40,7 +40,7 @@ from .models import (
     storage_used_bytes,
     wallet_for,
 )
-from .serializers import TransactionSerializer, WalletSerializer
+from .serializers import RoyaltyEntrySerializer, TransactionSerializer, WalletSerializer
 from .serializers_metz import (
     PracticeSessionSerializer,
     DrumPatternSerializer,
@@ -770,7 +770,14 @@ class WalletView(APIView):
         from .models import settle_energy
         w = settle_energy(request.user)
         recent = request.user.transactions.all()[:50]
-        return Response({"wallet": WalletSerializer(w).data, "transactions": TransactionSerializer(recent, many=True).data})
+        # Royalty entries grouped by source, descending by amount, so the largest
+        # earnings appear first and the member can see where their money came from.
+        royalties = request.user.royalty_entries.filter(kind=RoyaltyEntry.KIND_ACCRUAL).order_by("-amount_cents")
+        return Response({
+            "wallet": WalletSerializer(w).data,
+            "transactions": TransactionSerializer(recent, many=True).data,
+            "royalties": RoyaltyEntrySerializer(royalties, many=True).data,
+        })
 
 
 class AddFundsView(APIView):

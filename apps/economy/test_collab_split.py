@@ -261,3 +261,30 @@ class RatingSplitTests(TestCase):
         self.assertEqual(alpha_royalties[0].amount_cents, 600)
         self.assertEqual(beta_royalties[0].amount_cents, 400)
         self.assertIn("Paid Collab", alpha_royalties[0].source)
+
+    def test_wallet_api_returns_royalty_entries(self):
+        """The wallet API endpoint returns royalty entries grouped by source."""
+        deal = CollabDeal.objects.create(
+            initiator=self.a,
+            title="Paid Collab",
+            currency=CollabDeal.CURRENCY_MONEY,
+            status=CollabDeal.STATUS_FUNDED,
+            participants=[
+                {"username": "alpha", "receives_cents": 600, "funded": True},
+                {"username": "beta", "receives_cents": 400, "funded": True},
+            ],
+            held_cents=1000,
+        )
+        from apps.economy.collab import release_deal
+        release_deal(deal)
+        # Authenticate as alpha and fetch wallet
+        self.client.force_authenticate(self.a)
+        resp = self.client.get("/api/economy/wallet/")
+        self.assertEqual(resp.status_code, 200)
+        # Check that royalties are returned
+        self.assertIn("royalties", resp.data)
+        royalties = resp.data["royalties"]
+        self.assertEqual(len(royalties), 1)
+        self.assertEqual(royalties[0]["amount_cents"], 600)
+        self.assertEqual(royalties[0]["amount"], 6.0)
+        self.assertIn("Paid Collab", royalties[0]["source"])
