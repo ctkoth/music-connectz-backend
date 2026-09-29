@@ -240,10 +240,15 @@ def _routine_dict(r):
             "updated_at": r.updated_at.isoformat()}
 
 
+# A 50-rep bodyweight set is real; 32767 (the column's ceiling) is a typo.
+MAX_REPS_PER_SET = 1000
+
+
 def _set_dict(s):
     return {"id": s.id, "exercise_id": s.exercise_id, "exercise_name": s.exercise.name,
             "set_number": s.set_number, "reps": s.reps,
-            "weight_kg": float(s.weight_kg) if s.weight_kg is not None else None}
+            "weight_kg": float(s.weight_kg) if s.weight_kg is not None else None,
+            "rest_seconds": s.rest_seconds, "created_at": s.created_at.isoformat()}
 
 
 def _session_dict(sess, sets=None):
@@ -577,6 +582,9 @@ class BodieZSetsView(APIView):
             return Response({"detail": "reps must be a number."}, status=status.HTTP_400_BAD_REQUEST)
         if reps <= 0:
             return Response({"detail": "reps must be positive."}, status=status.HTTP_400_BAD_REQUEST)
+        if reps > MAX_REPS_PER_SET:
+            return Response({"detail": f"reps can be at most {MAX_REPS_PER_SET} per set."},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         weight_kg = request.data.get("weight_kg")
         if weight_kg is not None:
@@ -588,8 +596,10 @@ class BodieZSetsView(APIView):
                 return Response({"detail": "weight_kg cannot be negative."}, status=status.HTTP_400_BAD_REQUEST)
 
         set_number = sess.sets.filter(exercise=exercise).count() + 1
+        prev = sess.sets.order_by("-created_at").first()
+        rest = int((timezone.now() - prev.created_at).total_seconds()) if prev else None
         s = BodieZSet.objects.create(session=sess, exercise=exercise, set_number=set_number,
-                                      reps=reps, weight_kg=weight_kg)
+                                      reps=reps, weight_kg=weight_kg, rest_seconds=rest)
         return Response(_set_dict(s), status=status.HTTP_201_CREATED)
 
 

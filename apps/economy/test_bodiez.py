@@ -1445,3 +1445,34 @@ class CleanTrialSplitTests(TestCase):
         out = clean_trial_split([{"title": "Day 1", "exercises": [
             {"exercise_id": self.ex.id, "order": 0, "sets": 3, "reps": -50}]}])
         self.assertEqual(out[0]["exercises"][0]["reps"], 1)
+
+
+class BodieZRestAndRepsTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="rest1", password="pw")
+        self.client.force_authenticate(user=self.user)
+        self.curl = BodieZExercise.objects.create(name="Test Curl", muscle_group="biceps", equipment="dumbbell")
+        self.sess = BodieZSession.objects.create(user=self.user)
+        self.url = f"/api/economy/bodiez/sessions/{self.sess.id}/sets/"
+
+    def test_first_set_has_no_rest(self):
+        r = self.client.post(self.url, {"exercise_id": self.curl.id, "reps": 10}, format="json")
+        self.assertIsNone(r.data["rest_seconds"])
+
+    def test_rest_is_measured_from_previous_set_not_typed(self):
+        first = BodieZSet.objects.create(session=self.sess, exercise=self.curl, set_number=1, reps=10)
+        BodieZSet.objects.filter(id=first.id).update(created_at=timezone.now() - timedelta(seconds=90))
+        r = self.client.post(self.url, {"exercise_id": self.curl.id, "reps": 10, "rest_seconds": 5},
+                             format="json")
+        self.assertGreaterEqual(r.data["rest_seconds"], 90)
+        self.assertLess(r.data["rest_seconds"], 100)
+
+    def test_fifty_reps_is_accepted(self):
+        r = self.client.post(self.url, {"exercise_id": self.curl.id, "reps": 50}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(r.data["reps"], 50)
+
+    def test_absurd_reps_refused_not_500(self):
+        r = self.client.post(self.url, {"exercise_id": self.curl.id, "reps": 40000}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)

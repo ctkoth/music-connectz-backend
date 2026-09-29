@@ -5705,6 +5705,9 @@ class BodieZSet(models.Model):
     set_number = models.PositiveSmallIntegerField()
     reps = models.PositiveSmallIntegerField()
     weight_kg = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    # Seconds since the previous set in this session, measured by the server at
+    # log time — never typed by the member. Null on a session's first set.
+    rest_seconds = models.PositiveIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
