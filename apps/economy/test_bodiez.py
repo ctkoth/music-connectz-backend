@@ -1476,3 +1476,34 @@ class BodieZRestAndRepsTests(TestCase):
     def test_absurd_reps_refused_not_500(self):
         r = self.client.post(self.url, {"exercise_id": self.curl.id, "reps": 40000}, format="json")
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class BodieZRoutineGoalTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="goal1", password="pw")
+        self.client.force_authenticate(user=self.user)
+
+    def test_routine_saves_goal_and_session_carries_it(self):
+        r = self.client.post("/api/economy/bodiez/routines/",
+                             {"title": "Heavy", "exercises": [], "goal": "strength_training"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(r.data["goal"], "strength_training")
+        s = self.client.post("/api/economy/bodiez/sessions/", {"routine_id": r.data["id"]}, format="json")
+        self.assertEqual(s.data["routine_goal"], "strength_training")
+
+    def test_unknown_goal_refused(self):
+        r = self.client.post("/api/economy/bodiez/routines/",
+                             {"title": "X", "exercises": [], "goal": "strength"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_patch_goal_and_clear_it(self):
+        routine = BodieZRoutine.objects.create(user=self.user, title="T", exercises=[])
+        url = f"/api/economy/bodiez/routines/{routine.id}/"
+        self.assertEqual(self.client.patch(url, {"goal": "toning"}, format="json").data["goal"], "toning")
+        self.assertEqual(self.client.patch(url, {"goal": ""}, format="json").data["goal"], "")
+
+    def test_every_goal_key_fits_the_column(self):
+        from .bodiez import GOALS
+        width = BodieZRoutine._meta.get_field("goal").max_length
+        self.assertTrue(all(len(k) <= width for k in GOALS))

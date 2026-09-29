@@ -5662,6 +5662,9 @@ class BodieZRoutine(models.Model):
     exercises = models.JSONField(default=list)
     bucket = models.CharField(max_length=10, choices=BODIEZ_BUCKETS, default="inbox", db_index=True)
     day_tag = models.CharField(max_length=3, choices=BODIEZ_DAY_TAGS, blank=True, default="")
+    # A key of bodiez.GOALS (validated there, which is where the protocol and
+    # its citation live) — blank when the routine was built without one.
+    goal = models.CharField(max_length=20, blank=True, default="")
     scheduled_for = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

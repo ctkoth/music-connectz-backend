@@ -236,6 +236,7 @@ SPLITS = {
 def _routine_dict(r):
     return {"id": r.id, "title": r.title, "description": r.description,
             "exercises": r.exercises, "bucket": r.bucket, "day_tag": r.day_tag,
+            "goal": r.goal,
             "scheduled_for": r.scheduled_for.isoformat() if r.scheduled_for else None,
             "updated_at": r.updated_at.isoformat()}
 
@@ -257,6 +258,7 @@ def _session_dict(sess, sets=None):
         "id": sess.id,
         "routine_id": sess.routine_id,
         "routine_title": sess.routine.title if sess.routine_id and sess.routine else None,
+        "routine_goal": sess.routine.goal if sess.routine_id and sess.routine else "",
         "started_at": sess.started_at.isoformat(),
         "ended_at": sess.ended_at.isoformat() if sess.ended_at else None,
         "notes": sess.notes,
@@ -343,8 +345,13 @@ class BodieZRoutinesView(APIView):
         day_tag = request.data.get("day_tag")
         day_tag = day_tag if day_tag in _DAY_TAG_KEYS else ""
         description = str(request.data.get("description") or "").strip()[:200]
+        goal = request.data.get("goal") or ""
+        if goal and goal not in GOALS:
+            return Response({"detail": f"goal must be one of {sorted(GOALS)}, or blank."},
+                            status=status.HTTP_400_BAD_REQUEST)
         routine = BodieZRoutine.objects.create(user=request.user, title=title, exercises=exercises,
-                                                bucket=bucket, day_tag=day_tag, description=description)
+                                                bucket=bucket, day_tag=day_tag, description=description,
+                                                goal=goal)
         return Response(_routine_dict(routine), status=status.HTTP_201_CREATED)
 
 
@@ -459,6 +466,12 @@ class BodieZRoutineDetailView(APIView):
                 return Response({"detail": f"day_tag must be one of {sorted(_DAY_TAG_KEYS)}, or blank."},
                                  status=status.HTTP_400_BAD_REQUEST)
             routine.day_tag = day_tag
+        if "goal" in request.data:
+            goal = request.data.get("goal") or ""
+            if goal and goal not in GOALS:
+                return Response({"detail": f"goal must be one of {sorted(GOALS)}, or blank."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            routine.goal = goal
         if "description" in request.data:
             routine.description = str(request.data.get("description") or "").strip()[:200]
         if "scheduled_for" in request.data:
