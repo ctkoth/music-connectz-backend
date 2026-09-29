@@ -178,6 +178,7 @@ from .beatz import (
     BeatListView, BeatDetailView, BeatPurchaseView, BeatUsageReportView,
     BeatEarningsView, ProducerBeatsView,
 )
+from .sonday import SondayBoardViewSet, SondayCardViewSet
 
 urlpatterns = [
     path("wallet/", WalletView.as_view(), name="economy-wallet"),
@@ -568,4 +569,13 @@ urlpatterns = [
     path("beatz/purchases/<int:purchase_id>/report-usage/", BeatUsageReportView.as_view(), name="economy-beatz-report-usage"),
     path("beatz/earnings/", BeatEarningsView.as_view(), name="economy-beatz-earnings"),
     path("beatz/my-beats/", ProducerBeatsView.as_view(), name="economy-beatz-my-beats"),
+    # SondayZ — Path 5 Kanban board for creative project management (Premium-only)
+    path("sonday/", SondayBoardViewSet.as_view({"get": "list", "post": "create"}), name="economy-sonday-boards"),
+    path("sonday/<int:id>/", SondayBoardViewSet.as_view({"get": "retrieve", "patch": "partial_update", "put": "update", "delete": "destroy"}), name="economy-sonday-board"),
+    path("sonday/<int:id>/add_column/", SondayBoardViewSet.as_view({"post": "add_column"}), name="economy-sonday-add-column"),
+    path("sonday/<int:id>/invite_user/", SondayBoardViewSet.as_view({"post": "invite_user"}), name="economy-sonday-invite-user"),
+    path("sonday/<int:id>/permissions/", SondayBoardViewSet.as_view({"get": "permissions"}), name="economy-sonday-permissions"),
+    path("sonday/cards/", SondayCardViewSet.as_view({"get": "list", "post": "create"}), name="economy-sonday-cards"),
+    path("sonday/cards/<int:id>/", SondayCardViewSet.as_view({"get": "retrieve", "patch": "partial_update", "put": "update", "delete": "destroy"}), name="economy-sonday-card"),
+    path("sonday/cards/<int:id>/move/", SondayCardViewSet.as_view({"post": "move"}), name="economy-sonday-card-move"),
 ]

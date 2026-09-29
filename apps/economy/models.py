@@ -6733,3 +6733,146 @@ class BeatUsage(models.Model):
 
     def __str__(self):
         return f"Beat usage: {self.purchase.beat.title} by {self.purchase.buyer.username}"
+
+
+# ============================================================================
+# Path 5: Sonday — Monday.com-style board for organizing creative projects
+# ============================================================================
+
+class SondayBoard(models.Model):
+    """Kanban board for organizing creative work.
+
+    A board has columns (e.g., Draft, In Progress, Review, Done) and cards
+    move between them. Premium-only feature. Supports sharing with collaborators.
+    Cards can link to external resources (takes, posts, collabs) for
+    cross-pollination.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="sonday_boards")
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    is_public = models.BooleanField(default=False)  # anyone with link can view (read-only)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)  # soft delete
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["user", "-created_at"])]
+
+    def __str__(self):
+        return f"Board: {self.name}"
+
+
+class SondayColumn(models.Model):
+    """Column in a Sonday board (e.g., Draft, In Progress, Review, Done)."""
+
+    board = models.ForeignKey(SondayBoard, on_delete=models.CASCADE,
+                              related_name="columns")
+    key = models.CharField(max_length=20)  # e.g., "draft", "inprogress", "done"
+    label = models.CharField(max_length=100)  # e.g., "Drafts", "In Progress"
+    position = models.IntegerField(default=0)  # order within board
+    is_default = models.BooleanField(default=False)  # part of template
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("position",)
+        indexes = [models.Index(fields=["board", "position"])]
+        unique_together = [("board", "key")]
+
+    def __str__(self):
+        return f"{self.board.name} → {self.label}"
+
+
+class SondayCard(models.Model):
+    """Card in a Sonday column."""
+
+    board = models.ForeignKey(SondayBoard, on_delete=models.CASCADE,
+                              related_name="cards")
+    column = models.ForeignKey(SondayColumn, on_delete=models.SET_NULL,
+                               null=True, blank=True, related_name="cards")
+    title = models.CharField(max_length=500)
+    description = models.TextField(blank=True, default="")
+    position = models.IntegerField(default=9999)  # order within column
+    color = models.CharField(max_length=20, null=True, blank=True)  # e.g., "red", "blue"
+    due_date = models.DateField(null=True, blank=True)
+
+    # Cross-pollination: link to external resource
+    linked_app_key = models.CharField(max_length=50, null=True, blank=True)
+    # e.g., "singz", "rapz", "postz", "collabz", "uploadz"
+    linked_target = models.CharField(max_length=500, null=True, blank=True)
+    # e.g., "singz:coach:id=123"
+
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                                   null=True, related_name="sonday_cards_created")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)  # soft delete
+
+    class Meta:
+        ordering = ("position",)
+        indexes = [models.Index(fields=["board", "-created_at"]),
+                   models.Index(fields=["column", "position"])]
+
+    def __str__(self):
+        return f"Card: {self.title}"
+
+
+class SondayPermission(models.Model):
+    """Access control for a board (collaborators)."""
+
+    ROLE_OWNER = "owner"
+    ROLE_EDITOR = "editor"
+    ROLE_VIEWER = "viewer"
+    ROLE_CHOICES = [
+        (ROLE_OWNER, "Owner"),
+        (ROLE_EDITOR, "Editor"),
+        (ROLE_VIEWER, "Viewer"),
+    ]
+
+    board = models.ForeignKey(SondayBoard, on_delete=models.CASCADE,
+                              related_name="permissions")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("board", "user")]
+        indexes = [models.Index(fields=["board", "user"])]
+
+    def __str__(self):
+        return f"{self.user.username} → {self.board.name} ({self.role})"
+
+
+class SondayActivity(models.Model):
+    """Audit log for card actions (for undo/redo and automation triggers)."""
+
+    ACTION_CREATED = "created"
+    ACTION_MOVED = "moved"
+    ACTION_UPDATED = "updated"
+    ACTION_DELETED = "deleted"
+    ACTION_CHOICES = [
+        (ACTION_CREATED, "Created"),
+        (ACTION_MOVED, "Moved"),
+        (ACTION_UPDATED, "Updated"),
+        (ACTION_DELETED, "Deleted"),
+    ]
+
+    card = models.ForeignKey(SondayCard, on_delete=models.CASCADE,
+                             related_name="activities")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                             null=True)
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    from_column = models.CharField(max_length=20, null=True, blank=True)
+    to_column = models.CharField(max_length=20, null=True, blank=True)
+    details = models.JSONField(default=dict, blank=True)  # arbitrary metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=["card", "-created_at"])]
+
+    def __str__(self):
+        return f"{self.card.title} → {self.action}"
