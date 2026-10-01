@@ -88,9 +88,21 @@ def exchange_github(code: str, redirect_uri: str = ""):
         )
     except requests.RequestException:
         raise OAuthError("Could not reach GitHub to verify sign-in.")
-    token = token_resp.json().get("access_token")
+    try:
+        body = token_resp.json() or {}
+    except ValueError:
+        body = {}
+    token = body.get("access_token")
     if not token:
-        raise OAuthError("GitHub did not return an access token.")
+        # GitHub answers a refused exchange with 200 and an error_description
+        # ("redirect_uri MUST match...", "code ... incorrect or expired",
+        # "client_id and/or client_secret passed are incorrect"). Say it: the
+        # reason is the whole fix, and a generic line sent this to guesswork.
+        why = (body.get("error_description") or body.get("error") or "").strip()
+        raise OAuthError(
+            f"GitHub did not return an access token: {why}" if why
+            else "GitHub did not return an access token."
+        )
 
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
     user = requests.get("https://api.github.com/user", headers=headers, timeout=10).json()
