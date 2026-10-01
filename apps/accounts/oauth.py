@@ -320,13 +320,24 @@ def access_token_for(provider: str, code: str, redirect_uri: str = "", code_veri
 
     try:
         token_resp = requests.post(cfg["token_url"], data=body, headers=headers, auth=auth, timeout=10)
-        token = (token_resp.json() or {}).get("access_token")
+        reply = token_resp.json() or {}
+        token = reply.get("access_token")
     except requests.RequestException:
         raise OAuthError(f"Could not reach {provider.title()} to verify sign-in.")
     except ValueError:
         raise OAuthError(f"{provider.title()} returned an unexpected token response.")
     if not token:
-        raise OAuthError(f"{provider.title()} did not return an access token.")
+        # The provider says why (invalid_client, redirect_uri mismatch, expired
+        # code, an AADSTS code...) and that sentence is the whole fix. First
+        # line only: Microsoft appends trace/correlation IDs on later lines.
+        why = reply.get("error_description") or reply.get("error") or ""
+        if isinstance(why, dict):
+            why = why.get("message") or ""
+        why = str(why).strip().splitlines()[0][:300] if str(why).strip() else ""
+        raise OAuthError(
+            f"{provider.title()} did not return an access token: {why}" if why
+            else f"{provider.title()} did not return an access token."
+        )
     return token
 
 
