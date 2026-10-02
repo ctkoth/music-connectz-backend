@@ -1200,6 +1200,9 @@ class MembersView(APIView):
         from .metricz import matches as metric_matches  # metricz imports this module
         uses = multi("uses")
         attracted = multi("attracted")
+        # PersonaZ: ?personas=producer,mixengineer — members who hold ANY of
+        # them. The PersonaZ screen's "who else is a Producer" door.
+        persona_keys = set(multi("personas"))
         if (uses or attracted) and adult_only_reason(request.user):
             uses = attracted = []
         # PersonalitieZ: ?ie=I&tf=F, or ?personality=INFP for all four.
@@ -1282,6 +1285,8 @@ class MembersView(APIView):
                 # concluding there are no Introverts here.
                 if not personality_dict(p.personality).keys() >= personality_wanted.keys():
                     personality_undeclared += 1
+                continue
+            if persona_keys and not persona_keys & {str(x.get("key") or "") for x in personas_of(p)}:
                 continue
             if uses and not metric_matches("substancez", p, uses):
                 continue
