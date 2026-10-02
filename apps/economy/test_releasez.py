@@ -248,3 +248,13 @@ class QuotaAndQueueTests(ReleaseBase):
         c = APIClient(); c.force_authenticate(owner)
         rows = c.get("/api/economy/distributez/queue/").data["releases"]
         self.assertEqual([(r["id"], r["username"]) for r in rows], [(rel["id"], "maker")])
+
+
+class MyPostsFeedTests(ReleaseBase):
+    def test_mine_lists_only_my_posts(self):
+        pk = self.make_post()
+        other = User.objects.create_user(username="other", password=PW)
+        c = APIClient(); c.force_authenticate(other)
+        c.post("/api/economy/postz/", {"title": "Theirs", "genre": "Trap", "items": [AUDIO]}, format="json")
+        ids = [p["id"] for p in self.client.get("/api/economy/postz/?mine=1").data["posts"]]
+        self.assertEqual(ids, [pk])
