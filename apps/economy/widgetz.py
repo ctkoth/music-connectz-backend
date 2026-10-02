@@ -50,6 +50,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .statz_trial import feature_tier
 from .links import safe_browsing_check, scan_available
 from .models import (
     LINK_CLICK_MIN_ACTIVE_SECONDS,
@@ -409,7 +410,7 @@ class WidgetZView(APIView):
             # instead of keeping a second copy of it.
             "widgets_open": limits_for(m.tier)["widgets_open"],
             "page_widgets": {
-                "allowed": can_frame_pages(m.tier),
+                "allowed": can_frame_pages(feature_tier(request.user)),
                 "needs_tier": TIER_STATZ,
                 "scan_available": scan_available(),
                 "why": "A framed page borrows this app's chrome, so it's StatZ and "
@@ -447,4 +448,4 @@ class WidgetOpenView(APIView):
             from django.contrib.auth import get_user_model
             owner = get_user_model().objects.filter(username=oname).first()
         m = membership_for(request.user)
-        return Response(widget_for(url, m.tier, owner))
+        return Response(widget_for(url, feature_tier(request.user), owner))
