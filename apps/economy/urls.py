@@ -43,7 +43,7 @@ from .adz import AdzView, AdDetailView, AdRewardView
 from .rewards import (AdmobConfigView, AdmobSsvView, OfferzView,
                       OfferzCallbackView)
 from .translate import TranslateView
-from .gemini import GeminiImageView, GeminiVideoView, GeminiVideoStatusView
+from .gemini import GeminiImageView
 from .notifications import NotificationsView
 from .earn import EarnView
 from .battlez import (BattlesView, BattleChallengeView, BattleDetailView,
@@ -53,6 +53,7 @@ from .opportunitiez import OpportunitieZView
 from .sentencez import SentenceRoyaltyView, SentenceView
 from .statz_trial import StatzTrialView
 from .viewz import ViewBeatView, ViewCountsView, ViewStartView, ViewTimelineView
+from .videoz import VideoDetailView, VideoView
 from .instrumentalz import InstrumentalMidiView, InstrumentalMoodView, InstrumentalView
 from .intelligence_royalty import IntelligenceTargetsView, IntelligenceUseDetailView, IntelligenceUsesView
 from .keyconnectz import (KeyboardView, KeySpeakView, KeyTranscribeView,
@@ -206,6 +207,8 @@ urlpatterns = [
     path("views/beat/", ViewBeatView.as_view(), name="economy-views-beat"),
     path("views/counts/", ViewCountsView.as_view(), name="economy-views-counts"),
     path("views/timeline/", ViewTimelineView.as_view(), name="economy-views-timeline"),
+    path("videoz/", VideoView.as_view(), name="economy-videoz"),
+    path("videoz/<int:pk>/", VideoDetailView.as_view(), name="economy-videoz-detail"),
     path("instrumentalz/", InstrumentalView.as_view(), name="economy-instrumentalz"),
     path("instrumentalz/moods/", InstrumentalMoodView.as_view(), name="economy-instrumentalz-moods"),
     path("instrumentalz/<int:pk>/midi/", InstrumentalMidiView.as_view(), name="economy-instrumentalz-midi"),
@@ -259,8 +262,6 @@ urlpatterns = [
     path("occ/workz/<int:pk>/unshare/", OccWorkUnshareView.as_view(), name="economy-occ-work-unshare"),
     path("translate/", TranslateView.as_view(), name="economy-translate"),
     path("gemini/image/", GeminiImageView.as_view(), name="economy-gemini-image"),
-    path("gemini/video/", GeminiVideoView.as_view(), name="economy-gemini-video"),
-    path("gemini/video/status/", GeminiVideoStatusView.as_view(), name="economy-gemini-video-status"),
     # CallZ. The rate route is separate and comes FIRST in the flow: a member
     # asks what a call costs before anything rings, which is the whole
     # cost/gain rule for a feature priced by the minute.

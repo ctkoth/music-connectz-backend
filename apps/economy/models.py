@@ -6919,6 +6919,7 @@ class IntelligenceUse(models.Model):
 
     SOURCE_SENTENCE = "sentence"
     SOURCE_INSTRUMENTAL = "instrumental"
+    SOURCE_VIDEO = "video"
     TARGET_COLLAB = "collab"
     TARGET_BATTLE = "battle"
     TARGET_RELEASE = "release"
@@ -6995,3 +6996,27 @@ class ViewSession(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=["owner", "started_at"])]
+
+
+class VideoWork(models.Model):
+    """One Video ConnectZ render. Long-running: started, polled, then done
+    or failed. The price is HELD at start (held_promptz / held_cash) and
+    either kept on success or handed back in full on failure."""
+
+    STATUS_PENDING, STATUS_DONE, STATUS_FAILED = "pending", "done", "failed"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="video_works")
+    kind = models.CharField(max_length=12)
+    prompt = models.TextField()
+    aspect = models.CharField(max_length=8, default="16:9")
+    face = models.ForeignKey("Face", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    operation = models.CharField(max_length=300, blank=True, default="")
+    status = models.CharField(max_length=8, default=STATUS_PENDING)
+    upload = models.ForeignKey("Upload", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    held_promptz = models.PositiveIntegerField(default=0)
+    held_cash = models.PositiveIntegerField(default=0)
+    error = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]

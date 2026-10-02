@@ -1,4 +1,4 @@
-"""Gemini generation for Image ConnectZ (image) + Video ConnectZ (Veo video).
+"""Gemini generation for Image ConnectZ (image). Video lives in videoz.py.
 
 Uses Google's Generative Language REST API. Charges the AI-cost minimum (PromptZ
 first, then cash) like the rest of the AI suite. Every endpoint 503s cleanly
@@ -273,65 +273,3 @@ class GeminiImageView(APIView):
 
         cost = _bill(request.user, f"Image ConnectZ (Gemini)")
         return Response({"image": f"data:{mime};base64,{img}", "cost_cents": cost, "money": round(wallet_for(request.user).money_cents / 100, 2)})
-
-
-class GeminiVideoView(APIView):
-    """POST { prompt } → start a Veo video generation; returns an operation name
-    to poll. Video gen is long-running (~1–2 min)."""
-
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        prompt = str((request.data or {}).get("prompt", "")).strip()
-        if not prompt:
-            return Response({"detail": "prompt required"}, status=status.HTTP_400_BAD_REQUEST)
-        key = _key()
-        if not key:
-            return Response({"detail": "Video generation isn't configured — set GEMINI_API_KEY on the backend.", "operation": None},
-                            status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        cost = ai_cost("standard")
-        if cost and not can_afford_ai(request.user, cost):
-            return Response({"detail": "Not enough PromptZ / balance.", "cost_cents": cost}, status=status.HTTP_402_PAYMENT_REQUIRED)
-
-        model = os.environ.get("GEMINI_VIDEO_MODEL", "veo-3.0-generate-preview")
-        try:
-            r = requests.post(
-                f"{BASE}/models/{model}:predictLongRunning?key={key}",
-                json={"instances": [{"prompt": prompt}]},
-                timeout=60,
-            )
-            data = r.json()
-            op = data.get("name")
-            if not op:
-                detail = (data.get("error") or {}).get("message") or "Could not start video generation."
-                return Response({"detail": f"Veo: {detail}"[:200], "operation": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        except Exception as exc:
-            return Response({"detail": f"Veo error: {exc}"[:200], "operation": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-
-        cost = _bill(request.user, "Video ConnectZ (Veo)")
-        return Response({"operation": op, "status": "pending", "cost_cents": cost})
-
-
-class GeminiVideoStatusView(APIView):
-    """POST { operation } → poll a Veo generation; returns { done, video_url }."""
-
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        op = str((request.data or {}).get("operation", "")).strip()
-        key = _key()
-        if not op or not key:
-            return Response({"detail": "operation and GEMINI_API_KEY required"}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            r = requests.get(f"{BASE}/{op}?key={key}", timeout=30)
-            data = r.json()
-            if not data.get("done"):
-                return Response({"done": False})
-            resp = data.get("response") or {}
-            uri = None
-            samples = (resp.get("generateVideoResponse") or {}).get("generatedSamples") or resp.get("generatedSamples") or []
-            if samples:
-                uri = (samples[0].get("video") or {}).get("uri") or samples[0].get("uri")
-            return Response({"done": True, "video_url": uri and f"{uri}&key={key}" if uri else None})
-        except Exception as exc:
-            return Response({"detail": f"Veo poll error: {exc}"[:200], "done": False}, status=status.HTTP_503_SERVICE_UNAVAILABLE)

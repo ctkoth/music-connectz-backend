@@ -113,6 +113,9 @@ def _source(user, kind, sid):
         return SentenceWork.objects.filter(pk=sid, user=user).first()
     if kind == IntelligenceUse.SOURCE_INSTRUMENTAL:
         return InstrumentalWork.objects.filter(pk=sid, user=user).first()
+    if kind == IntelligenceUse.SOURCE_VIDEO:
+        from .models import VideoWork
+        return VideoWork.objects.filter(pk=sid, user=user, status=VideoWork.STATUS_DONE).first()
     return None
 
 
@@ -122,6 +125,9 @@ def share_for(kind, work, text):
     if kind == IntelligenceUse.SOURCE_SENTENCE:
         from .sentencez import royalty_pct
         return Decimal(str(royalty_pct(work.text, text or work.text))), text or work.text
+    if kind == IntelligenceUse.SOURCE_VIDEO:
+        from .videoz import ROYALTY_PCT as VIDEO_PCT
+        return Decimal(VIDEO_PCT), ""
     from .instrumentalz import ROYALTY_PCT
     return Decimal(ROYALTY_PCT), ""
 
