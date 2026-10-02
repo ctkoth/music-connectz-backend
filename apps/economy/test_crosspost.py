@@ -212,7 +212,7 @@ class DestinationListTests(TestCase):
 
     def test_the_free_doors_say_free(self):
         p = self.post_with(media_type="audio", media_url="/media/uploads/1/take.webm")
-        for app in ("collabz", "playlistz", "battlez", "occ", "directz"):
+        for app in ("collabz", "playlistz", "battlez", "occ", "distributez"):
             self.assertEqual(find(self.dests(p), app)["cost"]["amount"], 0)
 
     # ---- doors that are honestly shut ----
@@ -225,7 +225,7 @@ class DestinationListTests(TestCase):
     def test_a_release_is_the_authors_to_start(self):
         p = self.post_with(author=self.them, media_type="audio",
                            media_url="/media/uploads/2/take.webm")
-        d = find(self.dests(p), "directz")
+        d = find(self.dests(p), "distributez")
         self.assertFalse(d["available"])
         self.assertIn("your own post", d["needs"][0])
 
@@ -234,7 +234,7 @@ class DestinationListTests(TestCase):
         p = self.post_with(author=self.them, media_type="audio",
                            media_url="/media/uploads/2/take.webm",
                            contributors=[{"username": "maker", "slot": "audio"}])
-        self.assertTrue(find(self.dests(p), "directz")["available"])
+        self.assertTrue(find(self.dests(p), "distributez")["available"])
 
     # ---- what travels with the post ----
     def test_the_post_travels_with_its_work_so_nothing_is_reattached(self):

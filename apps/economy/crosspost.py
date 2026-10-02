@@ -383,9 +383,9 @@ def destinations_for(post, user, media, *, price=None, collabs=0, take_bytes=Non
     # DirectZ fills a release from the four assets a distributor asks for, and
     # only the people whose work it is may release it.
     out.append({
-        "app": "directz",
+        "app": "distributez",
         "label": "Fill a release from it",
-        "target": "directz-releases",
+        "target": "distributez-releases",
         "action": "distribute",
         "what": "The song, the video, the cover and the lyrics are already on this "
                 "post — a release gets filled from them rather than retyped.",

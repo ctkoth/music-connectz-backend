@@ -26,8 +26,34 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import CollabDeal, Post, Release, profile_for
+from .models import (TIER_FREE, CollabDeal, Post, Release, membership_for,
+                     notify, profile_for)
 from .postz import media_slots
+
+
+# What a submission IS, said once and served with every list: Music ConnectZ
+# does not upload to stores itself. A submission goes to the platform owner,
+# who distributes it and credits the royalties back against it in RoyaltieZ.
+# A screen that let "Submit" read as "it's on Spotify now" would be the
+# substance rule with a release date attached.
+HOW_IT_WORKS = ("Submitting sends the release to the Music ConnectZ team, who put it out to "
+                "the stores and credit what it earns to your RoyaltieZ, tagged with this release.")
+
+# Free sends one release a calendar month; Premium and StatZ, as many as they
+# like. The ladder rule: a tier says how OFTEN, never whether — a Free member
+# can always release.
+FREE_PER_MONTH = 1
+
+
+def quota_for(user):
+    """{per_month, used, left} for this calendar month — per_month None = no cap."""
+    tier = membership_for(user).tier
+    if tier != TIER_FREE:
+        return {"tier": tier, "per_month": None, "used": None, "left": None}
+    now = timezone.now()
+    used = Release.objects.filter(user=user, status=Release.STATUS_SUBMITTED,
+                                  submitted_at__year=now.year, submitted_at__month=now.month).count()
+    return {"tier": tier, "per_month": FREE_PER_MONTH, "used": used, "left": max(0, FREE_PER_MONTH - used)}
 
 
 def release_dict(r):
@@ -55,8 +81,10 @@ def release_dict(r):
         "locked": (sorted(Release.LOCKED_ONCE_SUBMITTED)
                    if r.status == Release.STATUS_SUBMITTED else []),
         # Where it came from, so a release is never a dead end.
+        # Posts live in PostZ and every post has its own address; the old
+        # door named "social", which is SocialiZeZ, where no post is.
         "source_post": ({"id": r.source_post_id, "title": r.source_post.title,
-                         "open_in": "social", "target": f"post-{r.source_post_id}"}
+                         "open_in": "postz", "url": f"/p/{r.source_post_id}"}
                         if r.source_post_id and r.source_post else None),
         "source_deal": ({"id": r.source_deal_id, "title": r.source_deal.title,
                          "open_in": "collabz", "target": f"deal-{r.source_deal_id}"}
@@ -144,6 +172,11 @@ class ReleasesView(APIView):
             "ready": sum(1 for r in out if r["ready"] and r["status"] != Release.STATUS_SUBMITTED),
             # Stated once, from the model, so the client can't invent its own list.
             "required": [label for _, label in Release.REQUIRED],
+            # Before the button, never after: how many you can still send this
+            # month, and what sending actually does.
+            "quota": quota_for(request.user),
+            "how_it_works": HOW_IT_WORKS,
+            "is_owner": bool(request.user.is_staff or request.user.is_superuser),
         })
 
 
@@ -238,10 +271,42 @@ class ReleaseSubmitView(APIView):
                  "missing": missing},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        q = quota_for(request.user)
+        if q["per_month"] is not None and q["left"] <= 0:
+            return Response(
+                {"detail": f"Free sends {q['per_month']} release a month and this month's is used. "
+                           "It stays ready here — send it next month, or Premium sends as many as you like.",
+                 "quota": q, "upgrade": {"tab": "membershipz", "target": "membershipz-plans"}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         r.status = Release.STATUS_SUBMITTED
         r.submitted_at = timezone.now()
         r.save(update_fields=["status", "submitted_at", "updated_at"])
-        return Response(release_dict(r))
+        # The owner distributes it, so the owner is told — a queue nobody is
+        # told about is a release that sits.
+        from .views import platform_owner
+        owner = platform_owner()
+        if owner and owner.id != request.user.id:
+            notify(owner, "system", f"@{request.user.username} sent a release: “{r.title}”",
+                   actor=request.user, item_id=f"release:{r.id}")
+        return Response({**release_dict(r), "quota": quota_for(request.user)})
+
+
+class ReleaseQueueView(APIView):
+    """GET /api/economy/distributez/queue/ — OWNER: every submitted release,
+    oldest first, with whose it is. Crediting what one earned goes through
+    RoyaltyAccrueView with its release_id, which already applies any
+    IntelligenceZ cut."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not (request.user.is_staff or request.user.is_superuser):
+            return Response({"detail": "Only the platform owner sees the release queue."},
+                            status=status.HTTP_403_FORBIDDEN)
+        rows = (Release.objects.filter(status=Release.STATUS_SUBMITTED)
+                .select_related("user", "source_post", "source_deal").order_by("submitted_at")[:300])
+        return Response({"releases": [{**release_dict(r), "username": r.user.username} for r in rows]})
 
 
 def populate_from_deal(release, deal):

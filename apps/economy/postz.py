@@ -509,6 +509,13 @@ class PostsView(APIView):
     def get(self, request):
         sort = (request.query_params.get("sort") or "hot").lower()
         qs = Post.objects.select_related("author", "author__membership").exclude(visibility="private").order_by("-created_at")[:300]
+        # ?mine=1 — only my own posts, all of them rather than the newest 300
+        # platform-wide. DistributeZ starts a release from one of YOUR posts,
+        # and an older track must not fall out of reach because the platform
+        # grew past it (the same bug CollabParticipant fixed for deals).
+        if request.query_params.get("mine") in ("1", "true"):
+            qs = Post.objects.select_related("author", "author__membership").filter(
+                author=request.user).exclude(visibility="private").order_by("-created_at")[:500]
         mine = Post.objects.filter(author=request.user, visibility="private")
         # A collab post belongs to its contributors too, so a private one has
         # to reach them — `can_view_post` already allows it, but the query never

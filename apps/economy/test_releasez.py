@@ -75,7 +75,9 @@ class AutoPopulateTests(ReleaseBase):
         pk = self.make_post()
         r = self.distribute(pk)
         self.assertEqual(r.data["source_post"]["id"], pk)
-        self.assertEqual(r.data["source_post"]["target"], f"post-{pk}")
+        # Posts live in PostZ at their own address — not SocialiZeZ.
+        self.assertEqual(r.data["source_post"]["open_in"], "postz")
+        self.assertEqual(r.data["source_post"]["url"], f"/p/{pk}")
 
 
 class SaysWhatIsMissingTests(ReleaseBase):
@@ -207,3 +209,52 @@ class MineOnlyTests(ReleaseBase):
         r = self.client.delete(f"{RELEASES}{rel['id']}/")
         self.assertTrue(r.data["deleted"])
         self.assertTrue(Post.objects.filter(pk=pk).exists())
+
+
+class QuotaAndQueueTests(ReleaseBase):
+    """Free sends one release a calendar month; the owner is told and queues it."""
+
+    def ready_release(self):
+        return self.distribute(self.make_post()).data
+
+    def test_free_sends_one_a_month_and_is_told_before_and_after(self):
+        m = membership_for(self.user); m.tier = "free"; m.save(update_fields=["tier", "updated_at"])
+        q = self.client.get(RELEASES).data["quota"]
+        self.assertEqual((q["per_month"], q["left"]), (1, 1))
+        first, second = self.ready_release(), self.ready_release()
+        self.assertEqual(self.client.post(f"{RELEASES}{first['id']}/submit/", {}, format="json").status_code, 200)
+        r = self.client.post(f"{RELEASES}{second['id']}/submit/", {}, format="json")
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.data["quota"]["left"], 0)
+        self.assertEqual(Release.objects.get(pk=second["id"]).status, Release.STATUS_READY)
+
+    def test_paid_tiers_are_not_capped(self):
+        q = self.client.get(RELEASES).data["quota"]
+        self.assertIsNone(q["per_month"])
+        for _ in range(3):
+            rel = self.ready_release()
+            self.assertEqual(self.client.post(f"{RELEASES}{rel['id']}/submit/", {}, format="json").status_code, 200)
+
+    def test_the_list_says_what_submitting_actually_does(self):
+        self.assertIn("RoyaltieZ", self.client.get(RELEASES).data["how_it_works"])
+
+    def test_the_owner_is_told_and_sees_the_queue_and_nobody_else_does(self):
+        from apps.economy.models import Notification
+        owner = User.objects.create_user(username="koth", password=PW, is_staff=True, is_superuser=True)
+        rel = self.ready_release()
+        self.client.post(f"{RELEASES}{rel['id']}/submit/", {}, format="json")
+        self.assertTrue(Notification.objects.filter(user=owner, item_id=f"release:{rel['id']}").exists())
+        self.assertEqual(self.client.get("/api/economy/distributez/queue/").status_code, 403)
+        c = APIClient(); c.force_authenticate(owner)
+        rows = c.get("/api/economy/distributez/queue/").data["releases"]
+        self.assertEqual([(r["id"], r["username"]) for r in rows], [(rel["id"], "maker")])
+
+
+class MyPostsFeedTests(ReleaseBase):
+    def test_mine_lists_only_my_posts(self):
+        pk = self.make_post()
+        other = User.objects.create_user(username="other", password=PW)
+        c = APIClient(); c.force_authenticate(other)
+        c.post("/api/economy/postz/", {"title": "Theirs", "genre": "Trap", "items": [AUDIO]}, format="json")
+        ids = [p["id"] for p in self.client.get("/api/economy/postz/?mine=1").data["posts"]]
+        self.assertEqual(ids, [pk])

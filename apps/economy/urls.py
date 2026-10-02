@@ -92,7 +92,7 @@ from .gamez import GameAssetView, GameDetailView, GamezView
 from .gamez_build import GameBuildView, GamePlayView
 from .occ_suggest import OccSuggestView
 from .releasez import (CollabDistributeView, PostDistributeView, ReleaseDetailView,
-                       ReleaseSubmitView, ReleasesView)
+                       ReleaseQueueView, ReleaseSubmitView, ReleasesView)
 from .collab_files import CollabFileDetailView, CollabFilesView
 from .venuez import (VenueBookView, VenueBookingCancelView, VenueQuoteView,
                      VenueBookingRespondView, VenueDetailView, VenueListView,
@@ -537,6 +537,7 @@ urlpatterns = [
     path("distributez/releases/", ReleasesView.as_view(), name="economy-releases"),
     path("distributez/releases/<int:pk>/", ReleaseDetailView.as_view(), name="economy-release"),
     path("distributez/releases/<int:pk>/submit/", ReleaseSubmitView.as_view(), name="economy-release-submit"),
+    path("distributez/queue/", ReleaseQueueView.as_view(), name="economy-release-queue"),
     path("distributez/transcode/", TranscodeView.as_view(), name="economy-distributez-transcode"),
     path("distributez/lyrics/", LyricsView.as_view(), name="economy-distributez-lyrics"),
     path("adz/", AdzView.as_view(), name="economy-adz"),
