@@ -23,6 +23,7 @@ from django.utils.dateparse import parse_datetime
 
 from .models import VenueBooking, VenueEvent, award_spinaz, spend_spinaz, wallet_for
 from .postz import charge_skill_energy, post_cost_cents, skill_prices, skills_from
+from .gates import clean_gates, describe, failing_gate, member_metrics
 
 
 def provider_for(event, visitor):
@@ -127,6 +128,17 @@ def seats_left(event):
     return max(0, event.capacity - taken)
 
 
+def gate_fail(user, event):
+    """The range this member is outside of, or None. Distance is measured from
+    the host's shared location, the way BattleZ measures it."""
+    if not event.gates:
+        return None
+    from .models import profile_for
+    hp = profile_for(event.host)
+    origin = (hp.lat, hp.lng) if (hp.share_location and hp.lat is not None) else (None, None)
+    return failing_gate(member_metrics(profile_for(user), origin), event.gates)
+
+
 def can_book(user, event):
     """(ok, reason). Every refusal is a sentence somebody can act on."""
     if event.host_id == user.id:
@@ -140,6 +152,9 @@ def can_book(user, event):
     ok, why = age_ok(user, event)
     if not ok:
         return False, why
+    failed = gate_fail(user, event)
+    if failed:
+        return False, f"This one is gated on {describe(failed, event.gates)} — you're outside it."
     return True, ""
 
 
@@ -302,6 +317,7 @@ def event_dict(event, viewer):
         "mine": mine,
         "kind": event.kind,
         "category": event.category,
+        "gates": event.gates,
         "spinaz_price": event.spinaz_price,
         "title": event.title,
         "description": event.description,
@@ -411,6 +427,7 @@ class VenueListView(APIView):
             skills=skills, capacity=_int(d, "capacity", 1, 1, 500),
             min_age=_int(d, "min_age", 0, 0, 99),
             category=category, spinaz_price=spinaz_price,
+            gates=clean_gates(d.get("gates")),
         )
         return Response(event_dict(event, request.user),
                         status=status.HTTP_201_CREATED)
@@ -596,6 +613,11 @@ class VenueBookingRespondView(APIView):
             age_pass, age_why = age_ok(b.visitor, b.event)
             if not age_pass:
                 return Response({"detail": age_why}, status=status.HTTP_409_CONFLICT)
+            failed = gate_fail(b.visitor, b.event)
+            if failed:
+                return Response({"detail": f"@{b.visitor.username} is outside this room's "
+                                           f"{describe(failed, b.event.gates)} gate now."},
+                                status=status.HTTP_409_CONFLICT)
 
         if accept and b.event.kind == VenueEvent.KIND_SESSION and b.quoted_cents:
             short = open_escrow(b, request.user, b.visitor)

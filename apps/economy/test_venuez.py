@@ -683,3 +683,31 @@ class SkillPricedRoomsPayInMoney(TestCase):
         self.assertEqual(CollabDeal.objects.get(id=deal.id).status, "released")
         self.assertEqual(self.cash(self.host), 15000)
         self.assertEqual(self.cash(self.visitor), 5000)
+
+
+class VenueRangeGates(TestCase):
+    """The five exclusive range gates, now on VenueZ rooms too."""
+
+    def setUp(self):
+        self.host = User.objects.create_user(username="ghost", password="pw")
+        self.adult = User.objects.create_user(username="adult", password="pw")
+        self.unknown = User.objects.create_user(username="noage", password="pw")
+        p = profile_for(self.adult); p.birthday = "1990-01-01"; p.save()
+        self.ev = _event(self.host, VenueEvent.KIND_FREE, gates={"age": [25, 40]})
+
+    def test_inside_the_range_can_ask(self):
+        self.assertTrue(venuez.can_book(self.adult, self.ev)[0])
+
+    def test_no_value_is_out_because_gates_are_exclusive(self):
+        ok, why = venuez.can_book(self.unknown, self.ev)
+        self.assertFalse(ok)
+        self.assertIn("age 25–40", why)
+
+    def test_gates_are_cleaned_on_create_and_served(self):
+        self.client.force_login(self.host)
+        r = self.client.post("/api/economy/venuez/", {
+            "title": "Gated", "area": "Denver", "kind": "free",
+            "starts_at": (timezone.now() + timedelta(days=1)).isoformat(),
+            "gates": {"rating": [7, None], "junk": [1, 2]},
+        }, "application/json")
+        self.assertEqual(r.json()["gates"], {"rating": [7.0, None]})

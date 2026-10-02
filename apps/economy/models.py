@@ -3077,6 +3077,9 @@ class VenueEvent(models.Model):
     capacity = models.PositiveSmallIntegerField(default=1)
     category = models.CharField(max_length=12, choices=CATEGORY_CHOICES,
                                 default=CATEGORY_MUSIC, db_index=True)
+    # The same five range gates CollabZ, BattleZ and member search use
+    # (gates.py), exclusive: a set range keeps out anyone with no value for it.
+    gates = models.JSONField(default=dict, blank=True)
     spinaz_price = models.PositiveIntegerField(default=0)
 
     # An IRL room is not a feed. A venue that serves alcohol or is otherwise
