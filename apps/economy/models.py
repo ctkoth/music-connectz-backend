@@ -1962,7 +1962,7 @@ def can_view_post(post, user):
 class Notification(models.Model):
     """An in-app notification for `user`, optionally caused by `actor`."""
     KIND_CHOICES = [
-        ("follow", "Follow"), ("rate", "Rating"), ("like", "Like"),
+        ("follow", "Follow"), ("rate", "Rating"), ("like", "Like"), ("partnerz", "PartnerZ"),
         ("comment", "Comment"), ("join", "Restricted join"), ("pay", "Payment"),
         ("message", "Message"), ("system", "System"), ("habit_reminder", "Habit reminder"),
     ]
@@ -2939,6 +2939,9 @@ class CollabDeal(models.Model):
     # Settlement plan: [{username, tier, worth_cents, pays_cents, receives_cents,
     # tax_cents, funded, stake_paid}]
     participants = models.JSONField(default=list, blank=True)
+    # [[username, username], ...] — FriendZ pairs whose third work together
+    # this deal was, i.e. who became PartnerZ❤️ when it released.
+    partnered = models.JSONField(default=list, blank=True)
     held_cents = models.PositiveIntegerField(default=0)
     held_spinaz = models.PositiveIntegerField(default=0)
     held_stake_spinaz = models.PositiveIntegerField(default=0)
@@ -3758,6 +3761,8 @@ class Battle(models.Model):
     image_url = models.CharField(max_length=500, blank=True, default="")
     lyrics = models.TextField(blank=True, default="")
     genre = models.CharField(max_length=40, blank=True, default="")
+    # FriendZ pairs who became PartnerZ❤️ when this battle settled.
+    partnered = models.JSONField(default=list, blank=True)
     # The same five exclusive ranges search and VenueZ use. One spec, so what a
     # host advertises and what the door enforces cannot diverge.
     gates = models.JSONField(default=dict, blank=True)

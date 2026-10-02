@@ -109,6 +109,7 @@ def battle_dict(b, request=None, with_entries=True, batched=None):
         "accepted_at": b.accepted_at.isoformat() if b.accepted_at else None,
         "ends_at": b.ends_at.isoformat() if b.ends_at else None,
         "winner": b.winner.username if b.winner else "",
+        "partnered": b.partnered or [],
         "settled_at": b.settled_at.isoformat() if b.settled_at else None,
         "min_ratings": BATTLE_MIN_RATINGS,
         "created_at": b.created_at.isoformat(),
@@ -470,8 +471,11 @@ def settle_battle(battle):
     # Swallowed — the pool has already paid out.
     if battle.winner_id:
         try:
-            from .groupz import note_work
-            note_work(list(battle.entries.values_list("user_id", flat=True)), battles=1)
+            from .groupz import announce_partners, note_work
+            crossed = note_work(list(battle.entries.values_list("user_id", flat=True)), battles=1)
+            if crossed:
+                battle.partnered = announce_partners(crossed, "battle", battle.title, item_id=battle.item_key)
+                battle.save(update_fields=["partnered"])
         except Exception:
             pass
     return battle

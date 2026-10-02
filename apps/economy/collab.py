@@ -117,6 +117,7 @@ def deal_dict(deal, me=None, days_cache=None):
         # deal that isn't funded yet this is the window that WILL apply, which
         # is the only version of it worth showing a payer.
         "auto_release_days": escrow_release_days(deal, days_cache),
+        "partnered": deal.partnered or [],
         "auto_release_default_days": settings.ESCROW_AUTO_RELEASE_DAYS,
         # A shortened window with no reason on it reads as a bug. Naming the
         # thing that shortened it is the gain half of the cost/gain rule: the
@@ -418,8 +419,12 @@ def release_deal(deal, note="collab release"):
     # a tally must never be able to undo that.
     if moved:
         try:
-            from .groupz import note_work
-            note_work([u.pk for u in people], collabs=1)
+            from .groupz import announce_partners, note_work
+            crossed = note_work([u.pk for u in people], collabs=1)
+            if crossed:
+                deal.partnered = announce_partners(crossed, "collab", deal.title or "this deal",
+                                                   item_id=f"collab:{deal.pk}")
+                deal.save(update_fields=["partnered"])
         except Exception:
             pass
     return deal
