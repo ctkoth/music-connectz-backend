@@ -21,7 +21,7 @@ for the same reason: a price the counterparty can set is not a price.
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from .models import VenueBooking, VenueEvent, wallet_for
+from .models import VenueBooking, VenueEvent, award_spinaz, spend_spinaz, wallet_for
 from .postz import charge_skill_energy, post_cost_cents, skill_prices, skills_from
 
 
@@ -46,6 +46,16 @@ def quote_for(event, visitor, skills=None, hours=None):
     hours = max(1, int(hours or event.hours or 1))
     names = [s for s in (skills if skills is not None else event.skills) or []
              if isinstance(s, str)][:40]
+
+    if event.kind == VenueEvent.KIND_SPINAZ:
+        # Flat entry, not skill-priced: the room's price is the room's, and it
+        # is the same for every visitor and every number of hours.
+        return {
+            "kind": event.kind, "free": False, "amount_cents": 0,
+            "spinaz": event.spinaz_price,
+            "payer": "visitor", "payee": "host", "payer_is_host": False,
+            "hours": hours, "basis": event.basis, "lines": [], "unpriced": [],
+        }
 
     provider = provider_for(event, visitor)
     if provider is None:
@@ -133,6 +143,38 @@ def can_book(user, event):
     return True, ""
 
 
+def _venue_target(event):
+    return {"app_key": "venuez", "target": f"venuez:{event.id}"}
+
+
+def refund_spinaz(b, why):
+    """Give a held entry back to the visitor. Safe to call twice."""
+    if b.spinaz_held and not b.spinaz_settled:
+        award_spinaz(b.visitor, b.spinaz_held, f"VenueZ refund — {why}: {b.event.title}",
+                     **_venue_target(b.event))
+        b.spinaz_settled = True
+        b.save(update_fields=["spinaz_settled"])
+
+
+def settle_spinaz(event):
+    """Pay held entries to the host once the event has started.
+
+    Lazy, on read: nothing in this app runs on a timer, and the host is the
+    one who looks at their own past rooms. Before the start nothing has been
+    paid to anybody, so a cancel is a clean refund rather than a claw-back.
+    """
+    if event.kind != VenueEvent.KIND_SPINAZ or event.starts_at > timezone.now():
+        return
+    due = event.bookings.filter(status=VenueBooking.STATUS_ACCEPTED,
+                                spinaz_held__gt=0, spinaz_settled=False)
+    for b in due.select_related("visitor"):
+        award_spinaz(event.host, b.spinaz_held,
+                     f"VenueZ entry from {b.visitor.username}: {event.title}",
+                     **_venue_target(event))
+        b.spinaz_settled = True
+        b.save(update_fields=["spinaz_settled"])
+
+
 def address_for(event, user):
     """The doorstep, and only for somebody entitled to stand on it.
 
@@ -174,6 +216,8 @@ def booking_dict(b, viewer):
         # difference between a price and a bill.
         "quoted_cents": b.quoted_cents,
         "payer_is_host": b.payer_is_host,
+        "spinaz_held": b.spinaz_held,
+        "spinaz_settled": b.spinaz_settled,
         "mine": b.visitor_id == viewer.id,
         "created_at": b.created_at,
     }
@@ -181,6 +225,7 @@ def booking_dict(b, viewer):
 
 def event_dict(event, viewer):
     """One venue, and everything a member needs BEFORE committing to it."""
+    settle_spinaz(event)
     q = quote_for(event, viewer)
     ok, why = can_book(viewer, event)
     mine = event.host_id == viewer.id
@@ -190,6 +235,8 @@ def event_dict(event, viewer):
         "host": event.host.username,
         "mine": mine,
         "kind": event.kind,
+        "category": event.category,
+        "spinaz_price": event.spinaz_price,
         "title": event.title,
         "description": event.description,
         "area": event.area,
@@ -238,13 +285,15 @@ class VenueListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        cat = request.query_params.get("category", "")
         rows = (VenueEvent.objects
                 .filter(starts_at__gte=timezone.now())
-                .exclude(status=VenueEvent.STATUS_CANCELLED)
-                .select_related("host")
-                .prefetch_related("bookings__visitor")[:100])
-        mine = (VenueEvent.objects.filter(host=request.user)
-                .select_related("host").prefetch_related("bookings__visitor")[:100])
+                .exclude(status=VenueEvent.STATUS_CANCELLED))
+        mine = VenueEvent.objects.filter(host=request.user)
+        if cat in dict(VenueEvent.CATEGORY_CHOICES):
+            rows, mine = rows.filter(category=cat), mine.filter(category=cat)
+        rows = rows.select_related("host").prefetch_related("bookings__visitor")[:100]
+        mine = mine.select_related("host").prefetch_related("bookings__visitor")[:100]
         seen, out = set(), []
         for e in list(rows) + list(mine):
             if e.id in seen:
@@ -262,8 +311,16 @@ class VenueListView(APIView):
             return Response({"detail": "A venue needs a title and an area."},
                             status=status.HTTP_400_BAD_REQUEST)
         if kind not in dict(VenueEvent.KIND_CHOICES):
-            return Response({"detail": "kind must be performance|session|free"},
+            return Response({"detail": "kind must be performance|session|free|spinaz"},
                             status=status.HTTP_400_BAD_REQUEST)
+        spinaz_price = _int(d, "spinaz_price", 0, 0, 100000)
+        if kind == VenueEvent.KIND_SPINAZ and spinaz_price < 1:
+            return Response({"detail": "A SpinaZ room needs an entry price of at least 1 🍥."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if kind != VenueEvent.KIND_SPINAZ:
+            spinaz_price = 0
+        category = d.get("category") if d.get("category") in dict(VenueEvent.CATEGORY_CHOICES) \
+            else VenueEvent.CATEGORY_MUSIC
 
         starts_at = parse_datetime(str(d.get("starts_at", "")))
         if not starts_at:
@@ -287,6 +344,7 @@ class VenueListView(APIView):
             starts_at=starts_at, hours=_int(d, "hours", 1, 1, 24), basis=basis,
             skills=skills, capacity=_int(d, "capacity", 1, 1, 500),
             min_age=_int(d, "min_age", 0, 0, 99),
+            category=category, spinaz_price=spinaz_price,
         )
         return Response(event_dict(event, request.user),
                         status=status.HTTP_201_CREATED)
@@ -311,6 +369,8 @@ class VenueDetailView(APIView):
                             status=status.HTTP_404_NOT_FOUND)
         event.status = VenueEvent.STATUS_CANCELLED
         event.save(update_fields=["status"])
+        for b in event.bookings.filter(spinaz_held__gt=0, spinaz_settled=False).select_related("visitor", "event"):
+            refund_spinaz(b, "the host cancelled")
         return Response(event_dict(event, request.user))
 
 
@@ -347,8 +407,21 @@ class VenueBookView(APIView):
         #
         # Only the skills the visitor NAMED are charged for. Falling back to the
         # room's own list would bill somebody for a line they never wrote.
+        held = 0
+        if event.kind == VenueEvent.KIND_SPINAZ:
+            if spend_spinaz(request.user, event.spinaz_price,
+                            f"VenueZ entry held: {event.title}", **_venue_target(event)) is None:
+                have = max(0, wallet_for(request.user).spinaz or 0)
+                return Response({"detail": f"Entry is {event.spinaz_price} 🍥 and you have {have}.",
+                                 "spinaz_needed": event.spinaz_price, "spinaz_available": have},
+                                status=status.HTTP_402_PAYMENT_REQUIRED)
+            held = event.spinaz_price
+
         energy, denied = charge_skill_energy(request.user, asked)
         if denied:
+            if held:
+                award_spinaz(request.user, held, f"VenueZ entry returned: {event.title}",
+                             **_venue_target(event))
             body, code = denied
             body["detail"] = (f"Asking for this seat costs {body['energy_needed']} ⚡ "
                               f"and you have {body['energy_available']}.")
@@ -357,6 +430,7 @@ class VenueBookView(APIView):
         b = VenueBooking.objects.create(
             event=event, visitor=request.user, skills=skills, hours=hours,
             quoted_cents=q["amount_cents"], payer_is_host=q.get("payer_is_host", False),
+            spinaz_held=held,
         )
 
         # ZodiacZ — Sagittarius goes. Every VenuZ room is a physical one, so
@@ -447,6 +521,8 @@ class VenueBookingRespondView(APIView):
         b.status = (VenueBooking.STATUS_ACCEPTED if accept
                     else VenueBooking.STATUS_DECLINED)
         b.save(update_fields=["status"])
+        if not accept:
+            refund_spinaz(b, "declined")
         return Response({"booking": booking_dict(b, request.user),
                          "venue": event_dict(b.event, request.user)})
 
@@ -466,8 +542,13 @@ class VenueBookingCancelView(APIView):
         if b.status in (VenueBooking.STATUS_ATTENDED, VenueBooking.STATUS_CANCELLED):
             return Response({"detail": f"That booking is already {b.status}."},
                             status=status.HTTP_409_CONFLICT)
+        # Once the room has started the entry is the host's; before, it was
+        # never anybody's but the visitor's, so it goes straight back.
+        settle_spinaz(b.event)
+        b.refresh_from_db()
         b.status = VenueBooking.STATUS_CANCELLED
         b.save(update_fields=["status"])
+        refund_spinaz(b, "cancelled")
         return Response({"booking": booking_dict(b, request.user),
                          "venue": event_dict(b.event, request.user)})
 

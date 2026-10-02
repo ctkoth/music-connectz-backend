@@ -507,3 +507,90 @@ class TheQuoteMatchesTheCharge(TestCase):
         d = self._quote(ev).json()
         self.assertTrue(d["quote"]["free"])
         self.assertEqual(d["energy"]["cost"], 0)
+
+
+class SpinazRoomsAndFitness(TestCase):
+    """A flat 🍥 entry: held at the ask, refunded before the start, paid after."""
+
+    def setUp(self):
+        from .models import award_spinaz
+        self.host = User.objects.create_user(username="gym", password="pw")
+        self.visitor = User.objects.create_user(username="lifter", password="pw")
+        award_spinaz(self.visitor, 100, "test")
+        self.ev = _event(self.host, VenueEvent.KIND_SPINAZ, spinaz_price=30,
+                         category=VenueEvent.CATEGORY_FITNESS, skills=[])
+
+    def bal(self, u):
+        return wallet_for(u).spinaz
+
+    def ask(self):
+        self.client.force_login(self.visitor)
+        return self.client.post(f"/api/economy/venuez/{self.ev.id}/book/", {}, "application/json")
+
+    def respond(self, bid, accept):
+        self.client.force_login(self.host)
+        return self.client.post(f"/api/economy/venuez/bookings/{bid}/respond/",
+                                {"accept": accept}, "application/json")
+
+    def test_quote_states_the_entry_before_asking(self):
+        q = venuez.quote_for(self.ev, self.visitor)
+        self.assertEqual((q["spinaz"], q["payer"], q["amount_cents"]), (30, "visitor", 0))
+
+    def test_asking_holds_the_entry_and_the_host_is_not_paid_yet(self):
+        r = self.ask()
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(self.bal(self.visitor), 70)
+        self.assertEqual(self.bal(self.host), 0)
+        self.respond(r.json()["booking"]["id"], True)
+        self.assertEqual(self.bal(self.host), 0)
+
+    def test_declining_refunds(self):
+        bid = self.ask().json()["booking"]["id"]
+        self.respond(bid, False)
+        self.assertEqual(self.bal(self.visitor), 100)
+
+    def test_cancelling_before_start_refunds_even_after_accept(self):
+        bid = self.ask().json()["booking"]["id"]
+        self.respond(bid, True)
+        self.client.force_login(self.visitor)
+        self.client.post(f"/api/economy/venuez/bookings/{bid}/cancel/", {}, "application/json")
+        self.assertEqual((self.bal(self.visitor), self.bal(self.host)), (100, 0))
+
+    def test_host_is_paid_once_it_starts_and_a_late_cancel_does_not_mint(self):
+        bid = self.ask().json()["booking"]["id"]
+        self.respond(bid, True)
+        VenueEvent.objects.filter(id=self.ev.id).update(starts_at=timezone.now() - timedelta(minutes=5))
+        self.client.force_login(self.host)
+        self.client.get(f"/api/economy/venuez/{self.ev.id}/")
+        self.assertEqual((self.bal(self.visitor), self.bal(self.host)), (70, 30))
+        self.client.force_login(self.visitor)
+        self.client.post(f"/api/economy/venuez/bookings/{bid}/cancel/", {}, "application/json")
+        self.client.force_login(self.host)
+        self.client.get(f"/api/economy/venuez/{self.ev.id}/")
+        self.assertEqual(self.bal(self.visitor) + self.bal(self.host), 100)
+
+    def test_host_cancelling_the_room_refunds_everyone(self):
+        self.ask()
+        self.client.force_login(self.host)
+        self.client.delete(f"/api/economy/venuez/{self.ev.id}/")
+        self.assertEqual(self.bal(self.visitor), 100)
+
+    def test_cannot_ask_without_enough_spinaz(self):
+        poor = User.objects.create_user(username="poor", password="pw")
+        self.client.force_login(poor)
+        r = self.client.post(f"/api/economy/venuez/{self.ev.id}/book/", {}, "application/json")
+        self.assertEqual(r.status_code, 402)
+        self.assertFalse(VenueBooking.objects.filter(visitor=poor).exists())
+
+    def test_spinaz_room_needs_a_price_and_category_filters(self):
+        self.client.force_login(self.host)
+        base = {"title": "Leg day", "area": "Denver", "kind": "spinaz",
+                "starts_at": (timezone.now() + timedelta(days=2)).isoformat()}
+        self.assertEqual(self.client.post("/api/economy/venuez/", base, "application/json").status_code, 400)
+        ok = self.client.post("/api/economy/venuez/", {**base, "spinaz_price": 15, "category": "fitness"},
+                              "application/json")
+        self.assertEqual(ok.status_code, 201)
+        _event(self.host, VenueEvent.KIND_FREE, title="Open mic")
+        self.client.force_login(self.visitor)
+        fit = self.client.get("/api/economy/venuez/?category=fitness").json()["venues"]
+        self.assertTrue(fit and all(v["category"] == "fitness" for v in fit))

@@ -3022,11 +3022,22 @@ class VenueEvent(models.Model):
     KIND_PERFORMANCE = "performance"
     KIND_SESSION = "session"
     KIND_FREE = "free"
+    # A flat entry in 🍥, visitor to host. Held from the visitor when they ask
+    # and paid to the host only once the event has started, so an accept-then-
+    # cancel between two accounts cannot mint coins.
+    KIND_SPINAZ = "spinaz"
     KIND_CHOICES = [
         (KIND_PERFORMANCE, "Performance — the visitor pays the host"),
         (KIND_SESSION, "Session — the host pays the visitor"),
         (KIND_FREE, "Free — nobody pays"),
+        (KIND_SPINAZ, "SpinaZ — the visitor pays the host a flat 🍥 entry"),
     ]
+
+    # What the room is FOR, so a lifter looking for a gym session is not
+    # scrolling open mics. It changes who finds it, never how it is priced.
+    CATEGORY_MUSIC = "music"
+    CATEGORY_FITNESS = "fitness"
+    CATEGORY_CHOICES = [(CATEGORY_MUSIC, "Music"), (CATEGORY_FITNESS, "Fitness / lifting")]
 
     BASIS_HOUR = "hour"
     BASIS_TOTAL = "total"
@@ -3064,6 +3075,9 @@ class VenueEvent(models.Model):
     # somebody books cannot move the price of a booking already agreed.
     skills = models.JSONField(default=list, blank=True)
     capacity = models.PositiveSmallIntegerField(default=1)
+    category = models.CharField(max_length=12, choices=CATEGORY_CHOICES,
+                                default=CATEGORY_MUSIC, db_index=True)
+    spinaz_price = models.PositiveIntegerField(default=0)
 
     # An IRL room is not a feed. A venue that serves alcohol or is otherwise
     # adults-only says so here and the booking path enforces it, rather than
@@ -3124,6 +3138,10 @@ class VenueBooking(models.Model):
     hours = models.PositiveSmallIntegerField(default=1)
     quoted_cents = models.PositiveIntegerField(default=0)
     payer_is_host = models.BooleanField(default=False)
+    # 🍥 taken from the visitor at request and not yet anybody's; `spinaz_settled`
+    # flips when it is paid to the host (event started) or refunded.
+    spinaz_held = models.PositiveIntegerField(default=0)
+    spinaz_settled = models.BooleanField(default=False)
 
     # The money lives in CollabZ's escrow, not in a second one here.
     deal = models.OneToOneField(CollabDeal, on_delete=models.SET_NULL, null=True,
