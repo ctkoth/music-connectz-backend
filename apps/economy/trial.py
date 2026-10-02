@@ -379,6 +379,10 @@ class PublicTiersView(APIView):
                 "key": tier_key,
                 "label": {"free": "Free", "premium": "Premium", "statz": "StatZ"}.get(tier_key, tier_key),
                 "price_cents": price,
+                # Both intervals, so MembershipZ and every upgrade panel quote
+                # the server's price and never type "$90/yr".
+                "month_cents": price,
+                "year_cents": limits.pop("year_cents", 0),
                 "upload_mb": limits["upload_mb"],
                 "storage_mb": limits["storage_mb"],
                 "char_limit": limits["char_limit"],

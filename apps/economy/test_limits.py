@@ -16,12 +16,14 @@ class CharLimitTests(TestCase):
         self.assertFalse(chars_unlimited(TIER_FREE))
         self.assertFalse(chars_unlimited(TIER_PREMIUM))
 
-    def test_statz_is_unlimited(self):
-        self.assertTrue(chars_unlimited(TIER_STATZ))
+    def test_statz_is_five_thousand(self):
+        # Corey's ladder: 400 / 1,500 / 5,000 — every tier a number.
+        self.assertEqual(limits_for(TIER_STATZ)["char_limit"], 5000)
+        self.assertFalse(chars_unlimited(TIER_STATZ))
 
 
 class MessageCapTests(TestCase):
-    """The cap is enforced on send, so this is where unlimited has to hold."""
+    """The cap is enforced on send, so this is where each tier's number has to hold."""
 
     def setUp(self):
         self.client = APIClient()
@@ -41,19 +43,22 @@ class MessageCapTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn("400-character limit", resp.data["detail"])
 
-    def test_statz_sends_far_past_the_old_5000_cap(self):
+    def test_statz_sends_5000_and_is_refused_past_it(self):
         self._tier(TIER_STATZ)
-        body = "x" * 50_000
         resp = self.client.post("/api/economy/messages/",
-                                {"to": "peer", "body": body}, format="json")
+                                {"to": "peer", "body": "x" * 5000}, format="json")
         self.assertEqual(resp.status_code, 201, resp.content)
         # and it is stored whole, not silently truncated
-        self.assertEqual(len(Message.objects.get(sender=self.me).body), 50_000)
+        self.assertEqual(len(Message.objects.get(sender=self.me).body), 5000)
+        resp = self.client.post("/api/economy/messages/",
+                                {"to": "peer", "body": "x" * 5001}, format="json")
+        self.assertEqual(resp.status_code, 400)
 
-    def test_limits_endpoint_flags_unlimited_for_the_client(self):
+    def test_limits_endpoint_states_each_tier_number(self):
         self._tier(TIER_STATZ)
         data = self.client.get("/api/economy/limits/").data
-        self.assertTrue(data["char_limit_unlimited"])
+        self.assertFalse(data["char_limit_unlimited"])
+        self.assertEqual(data["char_limit"], 5000)
         self._tier(TIER_PREMIUM)
         data = self.client.get("/api/economy/limits/").data
         self.assertFalse(data["char_limit_unlimited"])

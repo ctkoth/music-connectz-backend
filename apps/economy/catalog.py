@@ -110,10 +110,11 @@ TIER_LIMITS = {
                 "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 5},
     TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 15,
                    "widgets_open": 12, "custom_groups": 5, "soundcloud_import": 25},
-    # StatZ writes without a character cap — the client already advertised this
-    # ("StatZ char limit: Unlimited") while the server was still cutting at
-    # 5000, so a StatZ member was told one thing and refused another.
-    TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999,
+    # StatZ is 5,000 — Corey's ladder is 400 / 1,500 / 5,000, every tier a
+    # number a member can check. It was briefly unlimited; nothing already
+    # written over 5,000 is cut, because the cap is applied on WRITE (a
+    # stored bio stays as it is until its owner edits it).
+    TIER_STATZ: {"char_limit": 5000, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999,
                  "widgets_open": 40, "custom_groups": 20, "soundcloud_import": 200},
     # Owner god-mode: effectively unlimited.
     TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760, "embeds_per_post": 999,
@@ -158,8 +159,9 @@ def tier_ladder():
     when the ladder moves, so a member would be sold a number the server does
     not honour.
     """
-    prices = tier_month_cents()
-    return {t: {**TIER_LIMITS[t], "month_cents": prices.get(t, 0)} for t in PUBLIC_TIERS}
+    prices, yearly = tier_month_cents(), tier_year_cents()
+    return {t: {**TIER_LIMITS[t], "month_cents": prices.get(t, 0), "year_cents": yearly.get(t, 0)}
+            for t in PUBLIC_TIERS}
 
 
 def limits_for(tier):
@@ -354,30 +356,25 @@ AI_MODEL_COSTS = {
 }
 
 
-# ---- Subscription pricing.
+# ---- Subscription pricing — Corey's numbers, typed once.
 #
-# Two rules hold the ladder together, and both are load-bearing:
+#     Premium   $10/mo   $90/yr    (three months free)
+#     StatZ     $15/mo   $150/yr   (two months free)
 #
-#   1. Annual is four months free (33% off) at EVERY tier. One discount to
-#      explain, and the bigger commitment never gets the smaller reward.
-#   2. StatZ is 2.5x Premium. The gap has to be wide enough that Premium is a
-#      real choice — if StatZ costs a couple of dollars more and buys unlimited
-#      characters, the whole AI layer, CallZ and SpecZ, nobody sane picks the
-#      middle tier and it stops earning its place on the page.
-#
-# Everything below is derived, not typed twice, so the two rules can't drift.
+# Annual is always cheaper than twelve months, and StatZ always costs more
+# than Premium at the same interval. Those two are the rules the tests hold;
+# the exact discount is a price, and prices are Corey's call.
 
-# Premium — the mid subscription (lower fees, 2x energy, 5 daily prompts).
-PREMIUM_MONTH_CENTS = 600                            # $6/mo
-PREMIUM_YEAR_CENTS = PREMIUM_MONTH_CENTS * 8         # $48/yr — four months free
+PREMIUM_MONTH_CENTS = 1000                           # $10/mo
+PREMIUM_YEAR_CENTS = 9000                            # $90/yr
 PREMIUM_PLANS = {
     "year": {"mode": "subscription", "cents": PREMIUM_YEAR_CENTS, "interval": "year", "kind": "premium_sub"},
     "month": {"mode": "subscription", "cents": PREMIUM_MONTH_CENTS, "interval": "month", "kind": "premium_sub"},
 }
 
-# StatZ — the top subscription (no character limit, the AI layer, CallZ, SpecZ).
+# StatZ — the top subscription.
 STATZ_MONTH_CENTS = 1500                             # $15/mo
-STATZ_YEAR_CENTS = STATZ_MONTH_CENTS * 8             # $120/yr — four months free
+STATZ_YEAR_CENTS = 15000                             # $150/yr
 LIFETIME_PRICE_CENTS = 30000                         # $300 one-time, StatZ forever
 STATZ_PLANS = {
     "lifetime": {"mode": "payment", "cents": LIFETIME_PRICE_CENTS, "interval": None, "kind": "lifetime"},
@@ -385,29 +382,40 @@ STATZ_PLANS = {
     "month": {"mode": "subscription", "cents": STATZ_MONTH_CENTS, "interval": "month", "kind": "statz_sub"},
 }
 
-# Founding StatZ offer: the first 50 members get StatZ at 50% off — as a
-# one-time lifetime seat, or grandfathered founding rates by year / month.
-# Derived from the StatZ prices above so the discount is always genuinely half.
+# Founding StatZ: the first 50 members get the LIFETIME seat at half price.
+#
+# It used to be half off the monthly and yearly plans too, and at Premium
+# $10/mo that inverts the ladder: half of StatZ is $7.50/mo and $75/yr, both
+# under Premium, so the first 50 would pay less for more. This file said so in
+# an assertion and named the fix — make the founding discount lifetime-only —
+# and that is what it is now. Anybody already holding a founding subscription
+# keeps it: Stripe bills an existing subscription at the price it was opened
+# with, so this changes what can be bought, never what somebody already has.
 FOUNDING_TIER = TIER_STATZ
 FOUNDING_LIMIT = 50
 FOUNDING_DISCOUNT = 0.50              # first 50 pay half
 _half = lambda cents: int(cents * (1 - FOUNDING_DISCOUNT))
 FOUNDING_PRICE_CENTS = _half(LIFETIME_PRICE_CENTS)   # $150 lifetime
-FOUNDING_YEAR_CENTS = _half(STATZ_YEAR_CENTS)        # $60/yr
-FOUNDING_MONTH_CENTS = _half(STATZ_MONTH_CENTS)      # $7.50/mo
-# Plan -> (Stripe mode, unit amount cents, recurring interval or None)
+# Kept as names (and served as null) so a client that reads them renders
+# nothing rather than breaking: an endpoint may lose a VALUE, never a key.
+FOUNDING_YEAR_CENTS = None
+FOUNDING_MONTH_CENTS = None
 FOUNDING_PLANS = {
     "lifetime": {"mode": "payment", "cents": FOUNDING_PRICE_CENTS, "interval": None, "kind": "lifetime"},
-    "year": {"mode": "subscription", "cents": FOUNDING_YEAR_CENTS, "interval": "year", "kind": "founding_sub"},
-    "month": {"mode": "subscription", "cents": FOUNDING_MONTH_CENTS, "interval": "month", "kind": "founding_sub"},
 }
 
-# The founding discount must never price the top tier below the middle one.
-# At Premium $10/mo this assertion fails: founding StatZ is $7.50, so the first
-# 50 members would pay less for more. It is here so that can't ship unnoticed.
-assert FOUNDING_MONTH_CENTS > PREMIUM_MONTH_CENTS, (
-    f"Founding StatZ (${FOUNDING_MONTH_CENTS / 100:.2f}/mo) must cost more than "
-    f"Premium (${PREMIUM_MONTH_CENTS / 100:.2f}/mo) — the ladder is inverted.")
+# The ladder must never invert: StatZ above Premium at every interval, annual
+# under twelve months, and the founding seat — StatZ for life — worth more
+# than a single year of Premium.
+assert STATZ_MONTH_CENTS > PREMIUM_MONTH_CENTS and STATZ_YEAR_CENTS > PREMIUM_YEAR_CENTS, "StatZ must cost more than Premium."
+assert PREMIUM_YEAR_CENTS < PREMIUM_MONTH_CENTS * 12 and STATZ_YEAR_CENTS < STATZ_MONTH_CENTS * 12, "Annual must beat monthly."
+assert FOUNDING_PRICE_CENTS > PREMIUM_YEAR_CENTS, "The founding lifetime seat undercuts a year of Premium."
+
+
+def tier_year_cents():
+    """What each public tier costs a year, in cents — the annual half of
+    `tier_month_cents`, so no screen types "$90/yr"."""
+    return {TIER_FREE: 0, TIER_PREMIUM: PREMIUM_YEAR_CENTS, TIER_STATZ: STATZ_YEAR_CENTS}
 
 
 def ai_cost(model):
