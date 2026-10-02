@@ -28,6 +28,7 @@ TRIAL_MINUTES = 60
 FEATURES = [
     {"key": "mood_search", "label": "Search keys by mood", "tab": "instrumentalconnectz", "target": "instrumental-mood"},
     {"key": "page_widgets", "label": "Open any scanned site as a widget", "tab": "profilez", "target": "widgets"},
+    {"key": "advanced_horoscope", "label": "The advanced daily horoscope", "tab": "zodiacz", "target": "zodiacz-advanced"},
 ]
 UPGRADE = {"tab": "membershipz", "target": "membershipz-plans", "label": "Upgrade to StatZ"}
 

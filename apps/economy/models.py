@@ -7031,8 +7031,10 @@ class Horoscope(models.Model):
     that sign. See metricz.py: a reading, never a measurement."""
     sign = models.CharField(max_length=12)
     day = models.DateField()
+    # "basic" (free, everybody) or "advanced" (StatZ) — one row each per day.
+    level = models.CharField(max_length=8, default="basic")
     reading = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ("sign", "day")
+        unique_together = ("sign", "day", "level")

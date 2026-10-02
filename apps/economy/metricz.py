@@ -24,6 +24,7 @@ Three rules, the same ones the profile fields already follow:
     that sign, so twelve model calls a day is the whole cost and no member is
     ever charged for one.
 """
+import datetime
 import json
 import logging
 import re
@@ -40,6 +41,7 @@ from .gemini import _key, generate_content
 from .models import (Horoscope, Profile, adult_only_reason, blocked_user_ids,
                      profile_is_minor, zodiac_for)
 from .social import ACTIVE_STANCES, clean_substances
+from .statz_trial import has_statz
 
 logger = logging.getLogger(__name__)
 
@@ -214,51 +216,121 @@ def _clean(data):
     return out
 
 
-def _write(sign, day):
-    """One model call for one sign's day. None when it can't be written."""
+# ---- The advanced reading (StatZ) ------------------------------------------
+#
+# Same rules as the daily one — a reading, never a measurement, written once
+# per sign per day and shared — so the whole platform's cost is still at most
+# 24 calls a day however many StatZ members open it. What it adds is DEPTH in
+# the places members asked for (love and money), the next seven days, and the
+# one thing this app has that a newspaper horoscope does not: who to MAKE
+# something with. Every line it adds is somewhere a member can go and act.
+ADV_SECTIONS = ("love_single", "love_partnered", "money_earning", "money_spending",
+                "career", "challenge", "affirmation")
+
+
+def _adv_prompt(sign, day):
+    dates = dict((n, d) for n, _, d in ZODIAC)[sign]
+    week = ", ".join(f"{(day + datetime.timedelta(days=i)):%A}" for i in range(7))
+    return (
+        f"Write today's ADVANCED horoscope for {sign} ({dates}) for {day:%A, %B %d, %Y}, for "
+        "members of Music ConnectZ — musicians, producers, dancers, designers and other creatives. "
+        "Deeper and more specific than a daily horoscope; warm, grounded, second person. No "
+        "fatalism; no medical or legal advice; money talk stays about creative work (pricing a "
+        "feature, chasing an invoice, choosing what to spend on) — never investments, gambling, "
+        "loans or substances. Answer ONLY with JSON: {"
+        "\"love_single\": 3 sentences for someone single, "
+        "\"love_partnered\": 3 sentences for someone in a relationship, "
+        "\"money_earning\": 3 sentences about earning from their art today, "
+        "\"money_spending\": 2 sentences about what is and isn't worth spending on, "
+        "\"career\": 3 sentences about their music or creative career, "
+        "\"collab_signs\": [two of the twelve signs who are good to create with today], "
+        "\"collab_why\": 1 sentence on why, "
+        "\"friction_sign\": one sign to go gently with today, "
+        "\"power_hours\": a short time window like \"7–9pm\" that suits creating today, "
+        f"\"week\": an array of exactly 7 one-sentence notes, one each for {week}, "
+        "\"challenge\": 1 sentence, a small creative challenge for today, "
+        "\"affirmation\": 1 short first-person sentence}"
+    )
+
+
+def _clean_adv(data):
+    if not isinstance(data, dict):
+        return None
+    out = {}
+    for k in ADV_SECTIONS:
+        v = str(data.get(k) or "").strip()
+        if not v:
+            return None
+        out[k] = v[:900]
+    signs = [str(x).strip().title() for x in (data.get("collab_signs") or []) if isinstance(x, str)]
+    out["collab_signs"] = [x for x in signs if x in SIGN_NAMES][:2]
+    out["collab_why"] = str(data.get("collab_why") or "")[:300]
+    f = str(data.get("friction_sign") or "").strip().title()
+    out["friction_sign"] = f if f in SIGN_NAMES else ""
+    out["power_hours"] = str(data.get("power_hours") or "")[:30]
+    week = [str(x).strip()[:300] for x in (data.get("week") or []) if str(x).strip()]
+    if len(week) != 7:
+        return None
+    out["week"] = week
+    return out
+
+
+_LEVELS = {
+    "basic": (_prompt, _clean, "ZodiacZ horoscope"),
+    "advanced": (_adv_prompt, _clean_adv, "ZodiacZ advanced horoscope"),
+}
+
+
+def _write(sign, day, level="basic"):
+    """One model call for one sign's day at one level. None when it can't be written."""
     key = _key()
     if not key:
         return None
-    body = {"contents": [{"parts": [{"text": _prompt(sign, day)}]}],
+    prompt, clean, label = _LEVELS[level]
+    body = {"contents": [{"parts": [{"text": prompt(sign, day)}]}],
             "generationConfig": {"temperature": 0.9, "responseMimeType": "application/json"}}
     try:
-        resp, _ = generate_content("text", body, key=key, timeout=40, label="ZodiacZ horoscope")
+        resp, _ = generate_content("text", body, key=key, timeout=45, label=label)
     except requests.RequestException:
-        logger.exception("ZodiacZ horoscope: could not reach Gemini")
+        logger.exception("%s: could not reach Gemini", label)
         return None
     if resp is None or resp.status_code != 200:
-        logger.error("ZodiacZ horoscope: %s — %s", getattr(resp, "status_code", 0), getattr(resp, "text", "")[:300])
+        logger.error("%s: %s — %s", label, getattr(resp, "status_code", 0), getattr(resp, "text", "")[:300])
         return None
     try:
         parts = resp.json()["candidates"][0]["content"]["parts"]
         raw = "".join(str(p.get("text", "")) for p in parts if isinstance(p, dict))
         m = re.search(r"\{.*\}", raw, re.S)
-        return _clean(json.loads(m.group(0) if m else raw))
+        return clean(json.loads(m.group(0) if m else raw))
     except Exception:
         return None
 
 
-def horoscope_for(sign, day=None):
-    """Today's reading for `sign`, written on first ask and kept for the day."""
+def horoscope_for(sign, day=None, level="basic"):
+    """Today's reading for `sign` at `level`, written on first ask and kept for the day."""
     day = day or timezone.localdate()
-    row = Horoscope.objects.filter(sign=sign, day=day).first()
+    row = Horoscope.objects.filter(sign=sign, day=day, level=level).first()
     if row:
         return row.reading
-    reading = _write(sign, day)
+    reading = _write(sign, day, level)
     if not reading:
         return None
     try:
-        Horoscope.objects.create(sign=sign, day=day, reading=reading)
+        Horoscope.objects.create(sign=sign, day=day, level=level, reading=reading)
     except IntegrityError:
         # Two members asked for the same sign in the same second; the first
         # write wins and both read it, so nobody sees two different days.
-        row = Horoscope.objects.filter(sign=sign, day=day).first()
+        row = Horoscope.objects.filter(sign=sign, day=day, level=level).first()
         return row.reading if row else reading
     return reading
 
 
 class HoroscopeView(APIView):
-    """GET /api/economy/horoscope/<sign>/ — today's detailed reading. Free."""
+    """GET /api/economy/horoscope/<sign>/[?level=advanced] — today's reading.
+
+    The daily reading is free for everybody. `advanced` is StatZ (or the
+    StatZ free-hour sample); asking without it answers 403 with what it is
+    and where to get it, never an empty panel."""
 
     permission_classes = [IsAuthenticated]
 
@@ -271,7 +343,16 @@ class HoroscopeView(APIView):
         base = {"sign": sign, "emoji": emoji, "dates": dates, "day": day.isoformat(),
                 "note": HOROSCOPE_NOTE, "cost": 0,
                 "members_tab": {"tab": "zodiacz", "sign": sign}}
-        reading = horoscope_for(sign, day)
+        level = "advanced" if request.query_params.get("level") == "advanced" else "basic"
+        base["level"] = level
+        base["advanced_available"] = has_statz(request.user)
+        if level == "advanced" and not base["advanced_available"]:
+            return Response({**base, "reading": None, "tier": "statz",
+                             "detail": "The advanced reading — love single and taken, money earned and spent, "
+                                       "your music career, who to create with, and the week ahead — is a "
+                                       "StatZ feature. The daily reading stays free."},
+                            status=status.HTTP_403_FORBIDDEN)
+        reading = horoscope_for(sign, day, level)
         if not reading:
             return Response({**base, "reading": None,
                              "detail": "Today's reading isn't written yet — try again in a minute."},

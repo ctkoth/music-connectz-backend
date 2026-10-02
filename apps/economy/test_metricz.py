@@ -136,3 +136,54 @@ class HoroscopeTests(TestCase):
 
     def test_unknown_sign(self, _):
         self.assertEqual(self.c.get("/api/economy/horoscope/ophiuchus/").status_code, 404)
+
+
+ADV = ('{"love_single":"a.","love_partnered":"b.","money_earning":"c.","money_spending":"d.",'
+       '"career":"e.","collab_signs":["leo","Pisces","Ophiuchus"],"collab_why":"f.","friction_sign":"taurus",'
+       '"power_hours":"7–9pm","week":["1","2","3","4","5","6","7"],"challenge":"g.","affirmation":"h."}')
+
+
+@patch("apps.economy.metricz._key", return_value="K")
+class AdvancedHoroscopeTests(TestCase):
+    def setUp(self):
+        self.u = member("adv")
+        self.c = APIClient(); self.c.force_authenticate(self.u)
+
+    def tier(self, t):
+        from apps.economy.models import membership_for
+        m = membership_for(self.u); m.tier = t; m.save()
+
+    def test_free_is_told_what_it_is_and_never_charged_a_call(self, _):
+        with patch("apps.economy.metricz.generate_content") as g:
+            r = self.c.get("/api/economy/horoscope/leo/?level=advanced")
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.json()["tier"], "statz")
+        self.assertFalse(r.json()["advanced_available"])
+        g.assert_not_called()
+
+    def test_statz_gets_it_cached_apart_from_the_daily_one(self, _):
+        self.tier("statz")
+        with patch("apps.economy.metricz.generate_content",
+                   side_effect=[(gemini_reply(ADV), ["m"]), (gemini_reply(GOOD), ["m"])]) as g:
+            a = self.c.get("/api/economy/horoscope/leo/?level=advanced").json()
+            again = self.c.get("/api/economy/horoscope/leo/?level=advanced").json()
+            basic = self.c.get("/api/economy/horoscope/leo/").json()
+        self.assertEqual(g.call_count, 2)
+        self.assertEqual(a["reading"], again["reading"])
+        self.assertEqual(a["reading"]["collab_signs"], ["Leo", "Pisces"])   # unknown sign dropped
+        self.assertEqual(a["reading"]["friction_sign"], "Taurus")
+        self.assertEqual(len(a["reading"]["week"]), 7)
+        self.assertEqual(basic["reading"]["overview"], "Big day.")
+        self.assertEqual(Horoscope.objects.filter(sign="Leo").count(), 2)
+
+    def test_the_statz_sample_opens_it(self, _):
+        self.c.post("/api/economy/statz-trial/")
+        with patch("apps.economy.metricz.generate_content", return_value=(gemini_reply(ADV), ["m"])):
+            self.assertEqual(self.c.get("/api/economy/horoscope/leo/?level=advanced").status_code, 200)
+
+    def test_a_week_that_is_not_seven_days_is_not_stored(self, _):
+        self.tier("statz")
+        bad = ADV.replace('["1","2","3","4","5","6","7"]', '["1","2"]')
+        with patch("apps.economy.metricz.generate_content", return_value=(gemini_reply(bad), ["m"])):
+            self.assertEqual(self.c.get("/api/economy/horoscope/leo/?level=advanced").status_code, 503)
+        self.assertFalse(Horoscope.objects.exists())
