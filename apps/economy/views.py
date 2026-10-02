@@ -1257,14 +1257,35 @@ class RoyaltyAccrueView(APIView):
             if not target:
                 return Response({"detail": f"No member called {username}."},
                                 status=status.HTTP_404_NOT_FOUND)
+        # A DistributeZ release's income: if the member attached an
+        # IntelligenceZ piece to it, K-Oth's share stays with the owner.
+        cut, pct = 0, 0
+        release_id = request.data.get("release_id")
+        if release_id:
+            from .intelligence_royalty import cut_of, record_paid
+            from .models import Release
+            release = Release.objects.filter(pk=release_id, user=target).first()
+            if not release:
+                return Response({"detail": "That release isn't theirs."}, status=status.HTTP_400_BAD_REQUEST)
+            cut, pct = cut_of(target, "release", release.pk, amount_cents)
+        source = str(request.data.get("source", ""))[:200]
         w = wallet_for(target)
-        w.royalties_cents += amount_cents
+        w.royalties_cents += amount_cents - cut
         w.save(update_fields=["royalties_cents", "updated_at"])
         RoyaltyEntry.objects.create(
-            user=target, kind=RoyaltyEntry.KIND_ACCRUAL, amount_cents=amount_cents,
-            source=str(request.data.get("source", ""))[:200],
+            user=target, kind=RoyaltyEntry.KIND_ACCRUAL, amount_cents=amount_cents - cut,
+            source=(source + (f" · −{pct:g}% IntelligenceZ royalty" if cut else ""))[:200],
         )
-        return Response({"username": target.username,
+        if cut:
+            ow = wallet_for(request.user)
+            ow.royalties_cents += cut
+            ow.save(update_fields=["royalties_cents", "updated_at"])
+            RoyaltyEntry.objects.create(
+                user=request.user, kind=RoyaltyEntry.KIND_ACCRUAL, amount_cents=cut,
+                source=f"IntelligenceZ royalty {pct:g}% from @{target.username} — release #{release_id}"[:200],
+            )
+            record_paid(target, "release", int(release_id), cut, "money")
+        return Response({"username": target.username, "intelligence_cut_cents": cut,
                          "royalties_cents": w.royalties_cents, "royalties": w.royalties})
 
 

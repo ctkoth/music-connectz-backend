@@ -6901,3 +6901,34 @@ class SentenceWork(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class IntelligenceUse(models.Model):
+    """An IntelligenceZ piece a member used in a deal, a battle or a release.
+
+    `royalty_pct` is frozen when the piece is attached, from the text actually
+    used, so the share stated before attaching is the share taken at payout.
+    The cut comes out of the ATTACHING member's own earnings only; nobody else
+    in the deal pays for a choice they did not make.
+    """
+
+    SOURCE_SENTENCE = "sentence"
+    TARGET_COLLAB = "collab"
+    TARGET_BATTLE = "battle"
+    TARGET_RELEASE = "release"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="intelligence_uses")
+    source_kind = models.CharField(max_length=16)
+    source_id = models.PositiveIntegerField()
+    target_kind = models.CharField(max_length=12)
+    target_id = models.PositiveIntegerField()
+    text = models.TextField(blank=True, default="")
+    royalty_pct = models.DecimalField(max_digits=5, decimal_places=2)
+    paid_cents = models.PositiveIntegerField(default=0)
+    paid_spinaz = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("source_kind", "source_id", "target_kind", "target_id")
+        indexes = [models.Index(fields=["target_kind", "target_id"])]
+        ordering = ["-created_at"]

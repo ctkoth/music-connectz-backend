@@ -51,6 +51,7 @@ from .battlez import (BattlesView, BattleChallengeView, BattleDetailView,
                       BattleWagerView, MoneyBattleVoteView)
 from .opportunitiez import OpportunitieZView
 from .sentencez import SentenceRoyaltyView, SentenceView
+from .intelligence_royalty import IntelligenceTargetsView, IntelligenceUseDetailView, IntelligenceUsesView
 from .keyconnectz import (KeyboardView, KeySpeakView, KeyTranscribeView,
                           KeyTranslateView)
 from .playlistz import (PlaylistCollaboratorsView, PlaylistDetailView,
@@ -197,6 +198,9 @@ urlpatterns = [
     path("battlez/<int:pk>/enter/", BattleEnterView.as_view(), name="economy-battle-enter"),
     # KeyConnectZ — the keyboard. Wallpaper is Premium; translate is free.
     path("sentencez/", SentenceView.as_view(), name="economy-sentencez"),
+    path("intelligence/targets/", IntelligenceTargetsView.as_view(), name="economy-intelligence-targets"),
+    path("intelligence/uses/", IntelligenceUsesView.as_view(), name="economy-intelligence-uses"),
+    path("intelligence/uses/<int:pk>/", IntelligenceUseDetailView.as_view(), name="economy-intelligence-use"),
     path("sentencez/<int:pk>/royalty/", SentenceRoyaltyView.as_view(), name="economy-sentencez-royalty"),
     path("keyz/", KeyboardView.as_view(), name="economy-keyz"),
     path("keyz/translate/", KeyTranslateView.as_view(), name="economy-keyz-translate"),

@@ -355,6 +355,8 @@ def release_deal(deal, note="collab release"):
     # auto-releases on its own, so counting one would make the list free.
     moved = bool(deal.held_cents or deal.held_spinaz or deal.held_stake_spinaz)
 
+    from .intelligence_royalty import cut_of, pay_owner_money, pay_owner_spinaz, record_paid
+    owed = []  # (user, cut, pct) — paid to the owner after every wallet here is saved
     paid_out = 0
     for entry in deal.participants:
         user = User.objects.filter(username=entry.get("username")).first()
@@ -362,24 +364,39 @@ def release_deal(deal, note="collab release"):
             continue
         recv = int(entry.get("receives_cents") or 0)
         stake = int(entry.get("stake_paid") or 0)
+        # K-Oth's IntelligenceZ royalty comes out of THIS member's share only,
+        # and only if they attached a piece to this deal themselves.
+        cut, pct = cut_of(user, "collab", deal.pk, recv)
+        net = recv - cut
+        tag = f" · −{pct:g}% IntelligenceZ royalty" if cut else ""
+        if cut:
+            owed.append((user, cut, pct))
         w = _locked_wallet(user)
         if deal.currency == CollabDeal.CURRENCY_MONEY:
             if recv:
-                w.money_cents += recv
+                w.money_cents += net
                 paid_out += recv
-                Transaction.objects.create(user=user, kind=Transaction.KIND_REWARD, amount_cents=recv, dev_tax_cents=0, note=f"CollabZ escrow: {deal.title}"[:200])
+                Transaction.objects.create(user=user, kind=Transaction.KIND_REWARD, amount_cents=net, dev_tax_cents=0, note=f"CollabZ escrow: {deal.title}{tag}"[:200])
                 # Record royalty split accrual
                 RoyaltyEntry.objects.create(
                     user=user,
                     kind=RoyaltyEntry.KIND_ACCRUAL,
-                    amount_cents=recv,
+                    amount_cents=net,
                     source=f"CollabZ: {deal.title}"[:200],
                 )
         else:
             if recv:
-                w.spinaz += recv
+                w.spinaz += net
         w.spinaz += stake  # good-faith stake returned
         w.save(update_fields=["money_cents", "spinaz", "updated_at"])
+    for user, cut, pct in owed:
+        note = f"IntelligenceZ royalty {pct:g}% from @{user.username} — CollabZ: {deal.title}"
+        if deal.currency == CollabDeal.CURRENCY_MONEY:
+            pay_owner_money(cut, note)
+            record_paid(user, "collab", deal.pk, cut, "money")
+        else:
+            pay_owner_spinaz(cut, note)
+            record_paid(user, "collab", deal.pk, cut, "spinaz")
     # Platform keeps the residual held money as developer tax on the deal.
     if deal.currency == CollabDeal.CURRENCY_MONEY:
         platform_tax = max(0, deal.held_cents - paid_out)

@@ -425,14 +425,22 @@ def settle_battle(battle):
         pot = sum(w.amount for w in wagers)
         staked = sum(w.amount for w in winners)
         if winners and staked:
+            from .intelligence_royalty import cut_of, pay_owner_spinaz, record_paid
             handed = 0
             # Biggest stake last so the rounding remainder lands there and the
             # pot comes out exactly — nothing evaporates.
             for i, w in enumerate(sorted(winners, key=lambda x: x.amount)):
                 share = pot - handed if i == len(winners) - 1 else int(pot * w.amount / staked)
                 handed += 0 if i == len(winners) - 1 else share
-                award_spinaz(w.user, share, f"BattleZ win: {battle.title}", app_key="battlez")
-                w.paid_out = share
+                # Only a contestant who attached an IntelligenceZ piece to this
+                # battle owes K-Oth a share, and only of their own winnings.
+                cut, pct = cut_of(w.user, "battle", battle.pk, share)
+                tag = f" · −{pct:g}% IntelligenceZ royalty" if cut else ""
+                award_spinaz(w.user, share - cut, f"BattleZ win: {battle.title}{tag}", app_key="battlez")
+                if cut:
+                    pay_owner_spinaz(cut, f"IntelligenceZ royalty {pct:g}% from @{w.user.username} — BattleZ: {battle.title}")
+                    record_paid(w.user, "battle", battle.pk, cut, "spinaz")
+                w.paid_out = share - cut
                 w.save(update_fields=["paid_out"])
         else:
             # Nobody backed the winner — the losers' stakes go back rather than
