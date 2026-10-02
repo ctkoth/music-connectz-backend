@@ -265,11 +265,18 @@ class FaceZView(APIView):
 
     def get(self, request):
         mine = [_face_dict(f, request) for f in request.user.faces.all()[:100]]
-        feed = [
+        # The feed is faces to RATE, which is rating people on looks — the
+        # same adult-only surface as AttractivenessRateView. It had no wall:
+        # a minor could rate strangers' faces and a minor's face sat in every
+        # stranger's feed. Both directions are closed now, exactly as there.
+        why = adult_only_reason(request.user)
+        feed = [] if why else [
             _face_dict(f, request)
-            for f in Face.objects.exclude(owner=request.user).select_related("owner").order_by("-created_at")[:60]
-        ]
-        return Response({"mine": mine, "feed": feed})
+            for f in Face.objects.exclude(owner=request.user).select_related("owner", "owner__mcz_profile")
+                                 .order_by("-created_at")[:120]
+            if not is_minor(f.owner)
+        ][:60]
+        return Response({"mine": mine, "feed": feed, "feed_locked": why})
 
     def post(self, request):
         img = request.FILES.get("image")
@@ -308,6 +315,11 @@ class FaceRateView(APIView):
             return Response({"detail": "face not found"}, status=status.HTTP_404_NOT_FOUND)
         if f.owner_id == request.user.id:
             return Response({"detail": "can't rate your own face"}, status=status.HTTP_400_BAD_REQUEST)
+        # Rating a face is rating somebody on looks: adults only, both ends.
+        for who in (request.user, f.owner):
+            reason = adult_only_reason(who)
+            if reason:
+                return Response({"detail": reason, "adult_only": True}, status=status.HTTP_403_FORBIDDEN)
         try:
             score = int(request.data.get("score"))
         except (TypeError, ValueError):
