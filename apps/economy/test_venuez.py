@@ -218,6 +218,9 @@ class Endpoints(TestCase):
         self.other = User.objects.create_user(username="eo", password="pw")
         _priced(self.host, Mixing=5000)
         _priced(self.visitor, Mixing=700)
+        # Paid rooms move real money now, so everyone here can cover a seat.
+        for u in (self.host, self.visitor, self.other):
+            w = wallet_for(u); w.money_cents = 100000; w.save()
 
     def _mk(self, kind=VenueEvent.KIND_PERFORMANCE, **kw):
         return _event(self.host, kind, address="12 Real Street", **kw)
@@ -594,3 +597,89 @@ class SpinazRoomsAndFitness(TestCase):
         self.client.force_login(self.visitor)
         fit = self.client.get("/api/economy/venuez/?category=fitness").json()["venues"]
         self.assertTrue(fit and all(v["category"] == "fitness" for v in fit))
+
+
+class SkillPricedRoomsPayInMoney(TestCase):
+    """The frozen quote is real money, held in CollabZ escrow, paid to the provider."""
+
+    def setUp(self):
+        self.host = User.objects.create_user(username="coachh", password="pw")
+        self.visitor = User.objects.create_user(username="client", password="pw")
+        _priced(self.host, Training=2500)
+        _priced(self.visitor, Training=1000)
+        for u, c in ((self.host, 10000), (self.visitor, 10000)):
+            w = wallet_for(u); w.money_cents = c; w.save()
+        self.perf = _event(self.host, VenueEvent.KIND_PERFORMANCE, skills=["Training"], hours=2)
+
+    def cash(self, u):
+        return wallet_for(u).money_cents
+
+    def ask(self, ev, who=None):
+        self.client.force_login(who or self.visitor)
+        return self.client.post(f"/api/economy/venuez/{ev.id}/book/", {}, "application/json")
+
+    def respond(self, bid, accept):
+        self.client.force_login(self.host)
+        return self.client.post(f"/api/economy/venuez/bookings/{bid}/respond/",
+                                {"accept": accept}, "application/json")
+
+    def test_asking_a_performance_holds_the_visitors_money_in_escrow(self):
+        r = self.ask(self.perf)
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(self.cash(self.visitor), 5000)          # 2500 x 2h held
+        self.assertEqual(self.cash(self.host), 10000)            # not paid yet
+        esc = r.json()["booking"]["escrow"]
+        self.assertEqual(esc["status"], "funded")
+        from .models import CollabDeal
+        self.assertEqual(CollabDeal.objects.get(id=esc["deal"]).held_cents, 5000)
+
+    def test_short_visitor_is_refused_and_nothing_is_left_behind(self):
+        w = wallet_for(self.visitor); w.money_cents = 100; w.save()
+        r = self.ask(self.perf)
+        self.assertEqual(r.status_code, 402)
+        self.assertIn("short", r.json()["detail"])
+        self.assertFalse(VenueBooking.objects.filter(visitor=self.visitor).exists())
+        self.assertEqual(self.cash(self.visitor), 100)
+
+    def test_decline_and_early_cancel_refund(self):
+        bid = self.ask(self.perf).json()["booking"]["id"]
+        self.respond(bid, False)
+        self.assertEqual(self.cash(self.visitor), 10000)
+        ev2 = _event(self.host, VenueEvent.KIND_PERFORMANCE, skills=["Training"], title="Two")
+        bid = self.ask(ev2).json()["booking"]["id"]
+        self.respond(bid, True)
+        self.client.force_login(self.visitor)
+        self.client.post(f"/api/economy/venuez/bookings/{bid}/cancel/", {}, "application/json")
+        self.assertEqual(self.cash(self.visitor), 10000)
+
+    def test_host_calling_it_off_refunds(self):
+        self.ask(self.perf)
+        self.client.force_login(self.host)
+        self.client.delete(f"/api/economy/venuez/{self.perf.id}/")
+        self.assertEqual(self.cash(self.visitor), 10000)
+
+    def test_session_charges_the_host_at_accept_and_blocks_if_short(self):
+        sess = _event(self.host, VenueEvent.KIND_SESSION, skills=["Training"], hours=1, title="Jam")
+        bid = self.ask(sess).json()["booking"]["id"]
+        self.assertEqual(self.cash(self.visitor), 10000)
+        w = wallet_for(self.host); w.money_cents = 50; w.save()
+        r = self.respond(bid, True)
+        self.assertEqual(r.status_code, 402)
+        self.assertEqual(VenueBooking.objects.get(id=bid).status, "requested")
+        w.money_cents = 10000; w.save()
+        self.assertEqual(self.respond(bid, True).status_code, 200)
+        self.assertEqual(self.cash(self.host), 9000)              # visitor's 1000 rate
+
+    def test_released_after_the_room_and_window_to_the_provider(self):
+        from .models import CollabDeal
+        bid = self.ask(self.perf).json()["booking"]["id"]
+        self.respond(bid, True)
+        deal = VenueBooking.objects.get(id=bid).deal
+        self.assertGreater(deal.auto_release_at, self.perf.starts_at)
+        VenueEvent.objects.filter(id=self.perf.id).update(starts_at=timezone.now() - timedelta(days=30))
+        CollabDeal.objects.filter(id=deal.id).update(auto_release_at=timezone.now() - timedelta(minutes=1))
+        self.client.force_login(self.host)
+        self.client.get(f"/api/economy/venuez/{self.perf.id}/")
+        self.assertEqual(CollabDeal.objects.get(id=deal.id).status, "released")
+        self.assertEqual(self.cash(self.host), 15000)
+        self.assertEqual(self.cash(self.visitor), 5000)

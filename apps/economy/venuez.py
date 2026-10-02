@@ -203,6 +203,64 @@ from rest_framework.response import Response            # noqa: E402
 from rest_framework.views import APIView                # noqa: E402
 
 
+# ---- Money for skill-priced rooms ------------------------------------------
+# A quote that nothing ever charged is a price nobody is paid. The money goes
+# through CollabZ's escrow — the same deal, window, release and dispute every
+# collab has — rather than a second place cash can sit.
+#
+#   performance  the visitor's money is held when they ASK (asking at the
+#                stated price is their agreement)
+#   session      the host's money is held when they ACCEPT
+#
+# Declining, cancelling before the start, or the host calling the room off
+# refunds it. Otherwise it releases to the provider after the room has run
+# plus the normal CollabZ dispute window, or sooner if the payer releases it.
+
+def open_escrow(b, payer, payee):
+    """Hold the frozen quote from `payer` in a CollabDeal for `payee`.
+    Returns None, or the shortfall in cents when the payer can't cover it."""
+    from datetime import timedelta
+    from .collab import _locked_wallet, escrow_release_days
+    from .models import CollabDeal, Transaction, membership_for
+    cents = int(b.quoted_cents or 0)
+    if cents <= 0 or b.deal_id:
+        return None
+    w = _locked_wallet(payer)
+    if w.money_cents < cents:
+        return cents - w.money_cents
+    w.money_cents -= cents
+    w.save(update_fields=["money_cents", "updated_at"])
+    title = f"VenueZ: {b.event.title}"[:160]
+    Transaction.objects.create(user=payer, kind=Transaction.KIND_SPEND, amount_cents=-cents,
+                               dev_tax_cents=0, note=f"VenueZ escrow hold: {b.event.title}"[:200])
+    deal = CollabDeal.objects.create(
+        initiator=b.event.host, title=title, currency=CollabDeal.CURRENCY_MONEY,
+        status=CollabDeal.STATUS_FUNDED, held_cents=cents,
+        participants=[
+            {"username": payer.username, "tier": membership_for(payer).tier, "worth_cents": 0,
+             "pays_cents": cents, "receives_cents": 0, "funded": True, "stake_paid": 0},
+            {"username": payee.username, "tier": membership_for(payee).tier, "worth_cents": cents,
+             "pays_cents": 0, "receives_cents": cents, "funded": False, "stake_paid": 0},
+        ],
+    )
+    # The window starts when the room ENDS, not when it was booked — a room
+    # three weeks out must not pay out before anybody has stood in it.
+    ends = b.event.starts_at + timedelta(hours=b.hours or b.event.hours or 1)
+    deal.auto_release_at = max(ends, timezone.now()) + timedelta(days=escrow_release_days(deal))
+    deal.save(update_fields=["auto_release_at"])
+    b.deal = deal
+    b.save(update_fields=["deal"])
+    return None
+
+
+def refund_escrow(b):
+    from .collab import refund_deal
+    from .models import CollabDeal
+    if b.deal_id and b.deal.status in (CollabDeal.STATUS_FUNDED, CollabDeal.STATUS_DELIVERED,
+                                       CollabDeal.STATUS_DISPUTED):
+        refund_deal(b.deal)
+
+
 def booking_dict(b, viewer):
     return {
         "id": b.id,
@@ -217,6 +275,10 @@ def booking_dict(b, viewer):
         "quoted_cents": b.quoted_cents,
         "payer_is_host": b.payer_is_host,
         "spinaz_held": b.spinaz_held,
+        # Where the money is: the CollabZ deal holding it, so either side can
+        # release, dispute or just see when it pays.
+        "escrow": ({"deal": b.deal_id, "status": b.deal.status,
+                    "auto_release_at": b.deal.auto_release_at} if b.deal_id else None),
         "spinaz_settled": b.spinaz_settled,
         "mine": b.visitor_id == viewer.id,
         "created_at": b.created_at,
@@ -226,6 +288,10 @@ def booking_dict(b, viewer):
 def event_dict(event, viewer):
     """One venue, and everything a member needs BEFORE committing to it."""
     settle_spinaz(event)
+    if event.starts_at <= timezone.now():
+        from .collab import maybe_auto_release
+        for bk in event.bookings.filter(deal__isnull=False).select_related("deal"):
+            maybe_auto_release(bk.deal)
     q = quote_for(event, viewer)
     ok, why = can_book(viewer, event)
     mine = event.host_id == viewer.id
@@ -371,6 +437,8 @@ class VenueDetailView(APIView):
         event.save(update_fields=["status"])
         for b in event.bookings.filter(spinaz_held__gt=0, spinaz_settled=False).select_related("visitor", "event"):
             refund_spinaz(b, "the host cancelled")
+        for b in event.bookings.filter(deal__isnull=False).select_related("deal"):
+            refund_escrow(b)
         return Response(event_dict(event, request.user))
 
 
@@ -432,6 +500,17 @@ class VenueBookView(APIView):
             quoted_cents=q["amount_cents"], payer_is_host=q.get("payer_is_host", False),
             spinaz_held=held,
         )
+        if event.kind == VenueEvent.KIND_PERFORMANCE and b.quoted_cents:
+            short = open_escrow(b, request.user, event.host)
+            if short:
+                # Undo the booking, the ⚡ and any 🍥 in one go — nothing was asked for.
+                transaction.set_rollback(True)
+                return Response({
+                    "detail": f"This seat is ${b.quoted_cents / 100:.2f} and you're "
+                              f"${short / 100:.2f} short.",
+                    "insufficient": True, "resource": "money",
+                    "need_cents": b.quoted_cents, "short_cents": short,
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
 
         # ZodiacZ — Sagittarius goes. Every VenuZ room is a physical one, so
         # asking for a seat IS the action; the stretch is the length of the
@@ -518,11 +597,21 @@ class VenueBookingRespondView(APIView):
             if not age_pass:
                 return Response({"detail": age_why}, status=status.HTTP_409_CONFLICT)
 
+        if accept and b.event.kind == VenueEvent.KIND_SESSION and b.quoted_cents:
+            short = open_escrow(b, request.user, b.visitor)
+            if short:
+                return Response({
+                    "detail": f"Accepting pays @{b.visitor.username} ${b.quoted_cents / 100:.2f} "
+                              f"and you're ${short / 100:.2f} short.",
+                    "insufficient": True, "resource": "money",
+                    "need_cents": b.quoted_cents, "short_cents": short,
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
         b.status = (VenueBooking.STATUS_ACCEPTED if accept
                     else VenueBooking.STATUS_DECLINED)
         b.save(update_fields=["status"])
         if not accept:
             refund_spinaz(b, "declined")
+            refund_escrow(b)
         return Response({"booking": booking_dict(b, request.user),
                          "venue": event_dict(b.event, request.user)})
 
@@ -549,6 +638,10 @@ class VenueBookingCancelView(APIView):
         b.status = VenueBooking.STATUS_CANCELLED
         b.save(update_fields=["status"])
         refund_spinaz(b, "cancelled")
+        # Before the start the money goes straight back. After it, the room
+        # happened (or didn't) and that is what CollabZ's dispute is for.
+        if b.event.starts_at > timezone.now():
+            refund_escrow(b)
         return Response({"booking": booking_dict(b, request.user),
                          "venue": event_dict(b.event, request.user)})
 
