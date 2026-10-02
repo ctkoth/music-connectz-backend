@@ -5738,6 +5738,9 @@ class BodieZSet(models.Model):
     # Seconds since the previous set in this session, measured by the server at
     # log time — never typed by the member. Null on a session's first set.
     rest_seconds = models.PositiveIntegerField(null=True, blank=True)
+    # Set once a pre-pounds set is re-read as pounds (see bodiez.LB_SWITCH_AT),
+    # so the conversion can never be applied twice.
+    converted_from_lb = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

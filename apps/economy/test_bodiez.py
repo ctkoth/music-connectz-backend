@@ -1580,3 +1580,50 @@ class BodieZSessionSummaryTests(TestCase):
         s = BodieZSession.objects.create(user=other)
         r = self.client.get(f"/api/economy/bodiez/sessions/{s.id}/summary/")
         self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class BodieZLbFixTests(TestCase):
+    def setUp(self):
+        from .bodiez import LB_SWITCH_AT
+        self.cut = LB_SWITCH_AT
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="lbfix", password="pw")
+        self.client.force_authenticate(user=self.user)
+        self.ex = BodieZExercise.objects.create(name="Test Curl LB", muscle_group="biceps", equipment="dumbbell")
+        self.sess = BodieZSession.objects.create(user=self.user)
+
+    def _set(self, w, when, user_sess=None):
+        x = BodieZSet.objects.create(session=user_sess or self.sess, exercise=self.ex,
+                                     set_number=1, reps=12, weight_kg=w)
+        BodieZSet.objects.filter(id=x.id).update(created_at=when)
+        return x.id
+
+    def test_pre_switch_sets_become_the_pounds_that_were_typed(self):
+        old = self._set(35, self.cut - timedelta(hours=1))
+        new = self._set(15.88, self.cut + timedelta(hours=1))
+        bw = self._set(None, self.cut - timedelta(hours=1))
+        self.assertEqual(self.client.get("/api/economy/bodiez/lb-fix/").data["sets"], 1)
+        self.assertEqual(self.client.post("/api/economy/bodiez/lb-fix/").data["sets"], 1)
+        self.assertEqual(float(BodieZSet.objects.get(id=old).weight_kg), 15.88)
+        self.assertEqual(float(BodieZSet.objects.get(id=new).weight_kg), 15.88)
+        self.assertIsNone(BodieZSet.objects.get(id=bw).weight_kg)
+
+    def test_converting_twice_changes_nothing(self):
+        old = self._set(35, self.cut - timedelta(hours=1))
+        self.client.post("/api/economy/bodiez/lb-fix/")
+        self.assertEqual(self.client.post("/api/economy/bodiez/lb-fix/").data["sets"], 0)
+        self.assertEqual(float(BodieZSet.objects.get(id=old).weight_kg), 15.88)
+
+    def test_only_the_callers_own_sets(self):
+        other = User.objects.create_user(username="lbfix2", password="pw")
+        theirs = self._set(35, self.cut - timedelta(hours=1), BodieZSession.objects.create(user=other))
+        self.client.post("/api/economy/bodiez/lb-fix/")
+        self.assertEqual(float(BodieZSet.objects.get(id=theirs).weight_kg), 35.0)
+
+    def test_pre_switch_routine_targets_convert_once(self):
+        r = BodieZRoutine.objects.create(user=self.user, title="Old", exercises=[
+            {"exercise_id": self.ex.id, "order": 0, "sets": 4, "reps": 12, "weight_kg": 35}])
+        BodieZRoutine.objects.filter(id=r.id).update(updated_at=self.cut - timedelta(days=1))
+        self.assertEqual(self.client.post("/api/economy/bodiez/lb-fix/").data["routines"], 1)
+        self.assertEqual(BodieZRoutine.objects.get(id=r.id).exercises[0]["weight_kg"], 15.88)
+        self.assertEqual(self.client.post("/api/economy/bodiez/lb-fix/").data["routines"], 0)

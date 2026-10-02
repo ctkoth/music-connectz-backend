@@ -241,6 +241,56 @@ def _routine_dict(r):
             "updated_at": r.updated_at.isoformat()}
 
 
+# Until this moment the weight box was labelled kg for everyone, so a US
+# member typed pounds into it and the number was stored as kilograms (35 lb
+# saved as 35 kg, read back as 77 lb). Sets from before it can be re-read as
+# pounds by their owner — only by their owner, because only they know which
+# unit they meant.
+from datetime import datetime, timezone as _tz  # noqa: E402
+LB_SWITCH_AT = datetime(2026, 10, 2, 19, 20, tzinfo=_tz.utc)
+KG_PER_LB = Decimal("0.45359237")
+
+
+def _lb_fix_scope(user):
+    sets = BodieZSet.objects.filter(session__user=user, created_at__lt=LB_SWITCH_AT,
+                                    weight_kg__isnull=False, converted_from_lb=False)
+    routines = [r for r in BodieZRoutine.objects.filter(user=user, updated_at__lt=LB_SWITCH_AT)
+                if any(isinstance(e, dict) and e.get("weight_kg") not in (None, "")
+                       and not e.get("lb_fixed") for e in (r.exercises or []))]
+    return sets, routines
+
+
+class BodieZLbFixView(APIView):
+    """GET how many pre-pounds weights this member has; POST converts them."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        sets, routines = _lb_fix_scope(request.user)
+        sample = sets.order_by("-created_at").first()
+        return Response({
+            "cutoff": LB_SWITCH_AT.isoformat(),
+            "sets": sets.count(), "routines": len(routines),
+            "example_kg": float(sample.weight_kg) if sample else None,
+        })
+
+    def post(self, request):
+        sets, routines = _lb_fix_scope(request.user)
+        n = 0
+        for x in sets:
+            x.weight_kg = (x.weight_kg * KG_PER_LB).quantize(Decimal("0.01"))
+            x.converted_from_lb = True
+            x.save(update_fields=["weight_kg", "converted_from_lb"])
+            n += 1
+        for r in routines:
+            for e in r.exercises:
+                if isinstance(e, dict) and e.get("weight_kg") not in (None, "") and not e.get("lb_fixed"):
+                    e["weight_kg"] = round(float(e["weight_kg"]) * float(KG_PER_LB), 2)
+                    e["lb_fixed"] = True
+            # update() so updated_at does not move — the routine was not edited.
+            BodieZRoutine.objects.filter(id=r.id).update(exercises=r.exercises)
+        return Response({"sets": n, "routines": len(routines)})
+
+
 # A 50-rep bodyweight set is real; 32767 (the column's ceiling) is a typo.
 MAX_REPS_PER_SET = 1000
 
