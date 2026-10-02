@@ -8,39 +8,65 @@ User = get_user_model()
 
 
 class PricingLadderTests(TestCase):
-    """The two rules the ladder rests on. These are arithmetic, not taste — if
-    either breaks, a tier stops making sense to buy."""
+    """The rules the ladder rests on, and Corey's published numbers."""
 
-    def test_annual_is_four_months_free_at_every_tier(self):
-        # One discount to explain, and the bigger commitment never gets the
-        # smaller reward.
-        self.assertEqual(catalog.PREMIUM_YEAR_CENTS, catalog.PREMIUM_MONTH_CENTS * 8)
-        self.assertEqual(catalog.STATZ_YEAR_CENTS, catalog.STATZ_MONTH_CENTS * 8)
+    def test_annual_beats_twelve_months_at_every_tier(self):
+        self.assertLess(catalog.PREMIUM_YEAR_CENTS, catalog.PREMIUM_MONTH_CENTS * 12)
+        self.assertLess(catalog.STATZ_YEAR_CENTS, catalog.STATZ_MONTH_CENTS * 12)
 
-    def test_statz_is_a_real_step_above_premium(self):
-        # StatZ buys unlimited characters, the whole AI layer, CallZ and SpecZ.
-        # If it costs barely more than Premium, Premium is the tier nobody picks.
-        self.assertGreaterEqual(
-            catalog.STATZ_MONTH_CENTS, catalog.PREMIUM_MONTH_CENTS * 2,
-            "StatZ must be at least 2x Premium or the middle tier is dead weight.")
+    def test_statz_costs_more_than_premium_at_every_interval(self):
+        self.assertGreater(catalog.STATZ_MONTH_CENTS, catalog.PREMIUM_MONTH_CENTS)
+        self.assertGreater(catalog.STATZ_YEAR_CENTS, catalog.PREMIUM_YEAR_CENTS)
 
     def test_founding_statz_never_undercuts_premium(self):
         # The half-price founding seat must still cost more than the tier below
         # it, or the first 50 members pay less for more.
         self.assertGreater(catalog.FOUNDING_MONTH_CENTS, catalog.PREMIUM_MONTH_CENTS)
         self.assertGreater(catalog.FOUNDING_YEAR_CENTS, catalog.PREMIUM_YEAR_CENTS)
+        self.assertGreater(catalog.FOUNDING_PRICE_CENTS, catalog.PREMIUM_YEAR_CENTS)
 
     def test_founding_really_is_half(self):
         self.assertEqual(catalog.FOUNDING_MONTH_CENTS * 2, catalog.STATZ_MONTH_CENTS)
         self.assertEqual(catalog.FOUNDING_YEAR_CENTS * 2, catalog.STATZ_YEAR_CENTS)
         self.assertEqual(catalog.FOUNDING_PRICE_CENTS * 2, catalog.LIFETIME_PRICE_CENTS)
+        self.assertEqual(set(catalog.FOUNDING_PLANS), {"lifetime", "year", "month"})
 
     def test_the_published_numbers(self):
-        self.assertEqual(catalog.PREMIUM_MONTH_CENTS, 600)     # $6/mo
-        self.assertEqual(catalog.PREMIUM_YEAR_CENTS, 4800)     # $48/yr
+        self.assertEqual(catalog.PREMIUM_MONTH_CENTS, 700)     # $7/mo
+        self.assertEqual(catalog.PREMIUM_YEAR_CENTS, 6000)     # $60/yr
         self.assertEqual(catalog.STATZ_MONTH_CENTS, 1500)      # $15/mo
-        self.assertEqual(catalog.STATZ_YEAR_CENTS, 12000)      # $120/yr
+        self.assertEqual(catalog.STATZ_YEAR_CENTS, 15000)      # $150/yr
         self.assertEqual(catalog.LIFETIME_PRICE_CENTS, 30000)  # $300 once
+
+    def test_the_tiers_endpoint_quotes_both_intervals(self):
+        tiers = {t["key"]: t for t in APIClient().get("/api/economy/tiers/").json()["tiers"]}
+        self.assertEqual((tiers["premium"]["month_cents"], tiers["premium"]["year_cents"]), (700, 6000))
+        self.assertEqual((tiers["statz"]["month_cents"], tiers["statz"]["year_cents"]), (1500, 15000))
+        self.assertGreaterEqual(tiers["statz"]["char_limit"], catalog.UNLIMITED_CHARS)
+
+
+class OwnerTierSwitchTests(TestCase):
+    """Only the owner may set a tier by hand, and the choice sticks."""
+
+    def test_a_member_cannot_make_themselves_statz(self):
+        u = User.objects.create_user("m", "m@e.com", "pw-Long-enough-1")
+        c = APIClient(); c.force_authenticate(u)
+        r = c.post("/api/economy/membership/", {"tier": "statz"}, format="json")
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(models.membership_for(u).tier, "free")
+
+    def test_the_owner_defaults_to_statz_and_a_chosen_tier_survives(self):
+        from django.test import override_settings
+        with override_settings(OWNER_USERNAMES=["K-Oth"], OWNER_EMAILS=[]):
+            u = User.objects.create_user("K-Oth", "k@e.com", "pw-Long-enough-1")
+            c = APIClient(); c.force_authenticate(u)
+            d = c.get("/api/economy/membership/").json()
+            self.assertEqual(d["tier"], "statz")
+            self.assertIn("free", d["switchable"])
+            self.assertEqual(c.post("/api/economy/membership/", {"tier": "free"}, format="json").status_code, 200)
+            # Every membership read runs ensure_owner; a pinned Free stays Free.
+            self.assertEqual(c.get("/api/economy/membership/").json()["tier"], "free")
+            self.assertEqual(c.get("/api/economy/limits/").json()["char_limit"], 400)
 
 
 class PromptAllowanceMarginTests(TestCase):

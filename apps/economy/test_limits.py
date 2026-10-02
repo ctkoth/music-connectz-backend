@@ -21,7 +21,7 @@ class CharLimitTests(TestCase):
 
 
 class MessageCapTests(TestCase):
-    """The cap is enforced on send, so this is where unlimited has to hold."""
+    """The cap is enforced on send, so this is where each tier's number has to hold."""
 
     def setUp(self):
         self.client = APIClient()

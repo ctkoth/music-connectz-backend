@@ -81,6 +81,10 @@ class Membership(models.Model):
     last_seen = models.DateTimeField(null=True, blank=True, db_index=True)
     # Founding lifetime membership: tier never expires and never re-bills.
     lifetime = models.BooleanField(default=False, db_index=True)
+    # The owner picked this tier by hand, to test what a member on it sees.
+    # `ensure_owner` normally lifts the owner to StatZ; a pinned choice is the
+    # one thing it leaves alone, or testing Free would last one request.
+    owner_pinned = models.BooleanField(default=False)
     # Founding member: claimed StatZ in the Founding 50 (any plan). Powers the badge.
     founding = models.BooleanField(default=False, db_index=True)
     # Stripe customer id for founding StatZ subscriptions (year/month), so a
@@ -7020,3 +7024,17 @@ class VideoWork(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class Horoscope(models.Model):
+    """One sign's reading for one day — written once, read by everybody with
+    that sign. See metricz.py: a reading, never a measurement."""
+    sign = models.CharField(max_length=12)
+    day = models.DateField()
+    # "basic" (free, everybody) or "advanced" (StatZ) — one row each per day.
+    level = models.CharField(max_length=8, default="basic")
+    reading = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("sign", "day", "level")

@@ -114,6 +114,14 @@ def ensure_owner(user):
     tier_before = membership_for(user).tier
     grant_badge(user, "owner")
     m = membership_for(user)
+    if m.owner_pinned:
+        # A tier the owner chose by hand to test — Free, Premium, StatZ or
+        # Debug — stands until they choose another. The badge may have just
+        # applied StatZ over it, so put it back.
+        if m.tier != tier_before:
+            m.tier = tier_before
+            m.save(update_fields=["tier", "updated_at"])
+        return m
     if tier_before == TIER_DEBUG and m.tier != TIER_DEBUG:
         # The badge applies StatZ the moment it lands. A deliberate Debug
         # switch outranks it, which has always been this function's rule.
@@ -816,25 +824,39 @@ class AddFundsView(APIView):
 
 
 class MembershipView(APIView):
-    """GET current tier; POST sets it (dev/testing — real upgrades go via billing)."""
+    """GET current tier; POST sets it — OWNER ONLY, for testing what each tier
+    sees. Everybody else changes tier through checkout.
+
+    This POST used to be open to any member "for dev/testing", which meant
+    anybody could make themselves StatZ for nothing with one request. No
+    screen called it, so closing it breaks nothing anybody uses.
+    """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         ensure_owner(request.user)  # self-heal owner promotion on any membership load
         m = membership_for(request.user)
-        return Response({"tier": m.tier, "dev_tax_rate": m.dev_tax_rate, "rates": DEV_TAX, "lifetime": m.lifetime, "founding": m.founding, "is_owner": is_owner(request.user)})
+        owner = is_owner(request.user)
+        out = {"tier": m.tier, "dev_tax_rate": m.dev_tax_rate, "rates": DEV_TAX, "lifetime": m.lifetime,
+               "founding": m.founding, "is_owner": owner}
+        if owner:
+            out["switchable"] = ["free", "premium", TIER_STATZ, TIER_DEBUG]
+            out["owner_pinned"] = m.owner_pinned
+        return Response(out)
 
     def post(self, request):
         tier = str(request.data.get("tier", "")).lower()
         if tier not in VALID_TIERS:
             return Response({"detail": f"tier must be one of {sorted(VALID_TIERS)}"}, status=status.HTTP_400_BAD_REQUEST)
-        if tier in OWNER_ONLY_TIERS and not is_owner(request.user):
-            return Response({"detail": "Debug tier is owner-only."}, status=status.HTTP_403_FORBIDDEN)
+        if not is_owner(request.user):
+            return Response({"detail": "Tiers change through checkout — MembershipZ has the plans."},
+                            status=status.HTTP_403_FORBIDDEN)
         m = membership_for(request.user)
         m.tier = tier
-        m.save(update_fields=["tier", "updated_at"])
-        return Response({"tier": m.tier, "dev_tax_rate": m.dev_tax_rate})
+        m.owner_pinned = True
+        m.save(update_fields=["tier", "owner_pinned", "updated_at"])
+        return Response({"tier": m.tier, "dev_tax_rate": m.dev_tax_rate, "owner_pinned": True})
 
 
 class OwnerClaimView(APIView):

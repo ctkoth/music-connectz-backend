@@ -53,6 +53,7 @@ from .opportunitiez import OpportunitieZView
 from .sentencez import SentenceRoyaltyView, SentenceView
 from .statz_trial import StatzTrialView
 from .viewz import ViewBeatView, ViewCountsView, ViewStartView, ViewTimelineView
+from .metricz import HoroscopeView, MetricZView
 from .videoz import VideoDetailView, VideoView
 from .instrumentalz import InstrumentalMidiView, InstrumentalMoodView, InstrumentalView
 from .intelligence_royalty import IntelligenceTargetsView, IntelligenceUseDetailView, IntelligenceUsesView
@@ -209,6 +210,8 @@ urlpatterns = [
     path("views/timeline/", ViewTimelineView.as_view(), name="economy-views-timeline"),
     path("videoz/", VideoView.as_view(), name="economy-videoz"),
     path("videoz/<int:pk>/", VideoDetailView.as_view(), name="economy-videoz-detail"),
+    path("metricz/<str:kind>/", MetricZView.as_view(), name="economy-metricz"),
+    path("horoscope/<str:sign>/", HoroscopeView.as_view(), name="economy-horoscope"),
     path("instrumentalz/", InstrumentalView.as_view(), name="economy-instrumentalz"),
     path("instrumentalz/moods/", InstrumentalMoodView.as_view(), name="economy-instrumentalz-moods"),
     path("instrumentalz/<int:pk>/midi/", InstrumentalMidiView.as_view(), name="economy-instrumentalz-midi"),

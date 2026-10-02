@@ -37,14 +37,14 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .gemini import BASE, _key
-from .models import Face, Transaction, Upload, VideoWork, wallet_for
+from .catalog import over_char_limit
+from .models import Face, Transaction, Upload, VideoWork, membership_for, wallet_for
 from .media import stable_media_url
 from .views import credit_owner
 
 logger = logging.getLogger(__name__)
 
 ROYALTY_PCT = 10
-PROMPT_MAX = 1000
 GIVE_UP_AFTER = timedelta(minutes=20)
 ASPECTS = ("16:9", "9:16")
 MODELS = ("veo-3.0-fast-generate-001", "veo-3.0-generate-001", "veo-3.0-generate-preview")
@@ -139,8 +139,11 @@ class VideoView(APIView):
         aspect = str(d.get("aspect", "16:9"))
         if kind not in KINDS:
             return Response({"detail": "Pick a music, bio or promo video."}, status=status.HTTP_400_BAD_REQUEST)
-        if not prompt or len(prompt) > PROMPT_MAX:
-            return Response({"detail": f"Describe the video in up to {PROMPT_MAX} characters."},
+        if not prompt:
+            return Response({"detail": "Describe the video."}, status=status.HTTP_400_BAD_REQUEST)
+        cap = over_char_limit(prompt, membership_for(request.user).tier)
+        if cap:
+            return Response({"detail": f"Your tier writes up to {cap:,} characters here — upgrade in MembershipZ for more.", "char_limit": cap},
                             status=status.HTTP_400_BAD_REQUEST)
         if aspect not in ASPECTS:
             return Response({"detail": "16:9 or 9:16."}, status=status.HTTP_400_BAD_REQUEST)

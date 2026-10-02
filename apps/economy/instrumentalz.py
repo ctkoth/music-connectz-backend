@@ -27,9 +27,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import ai_cost
+from .catalog import ai_cost, over_char_limit
 from .gemini import _bill, _key, generate_content
-from .models import (InstrumentalWork, can_afford_ai, daily_prompt_covers,
+from .models import (InstrumentalWork, membership_for, can_afford_ai, daily_prompt_covers,
                      daily_prompt_state)
 
 logger = logging.getLogger(__name__)
@@ -271,7 +271,11 @@ class InstrumentalView(APIView):
     def post(self, request):
         d = request.data or {}
         genre = str(d.get("genre", "")).strip()[:60]
-        brief = str(d.get("brief", "")).strip()[:500]
+        brief = str(d.get("brief", "")).strip()
+        cap = over_char_limit(brief, membership_for(request.user).tier)
+        if cap:
+            return Response({"detail": f"Your tier writes up to {cap:,} characters here — upgrade in MembershipZ for more.", "char_limit": cap},
+                            status=status.HTTP_400_BAD_REQUEST)
         instruments = [i for i in dict.fromkeys(d.get("instruments") or []) if i in INSTRUMENTS][:MAX_TRACKS]
         key = str(d.get("key", ""))
         try:

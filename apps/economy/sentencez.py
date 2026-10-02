@@ -26,16 +26,15 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import ai_cost
+from .catalog import ai_cost, over_char_limit
 from .gemini import _bill, _key, generate_content
-from .models import (SentenceWork, can_afford_ai, daily_prompt_covers,
+from .models import (SentenceWork, membership_for, can_afford_ai, daily_prompt_covers,
                      daily_prompt_state, profile_for)
 from .personaz import personas_of
 
 logger = logging.getLogger(__name__)
 
 KOTH_ROYALTY_PCT = 10
-TOPIC_MAX = 2000
 CONTRACT_PERSONAS = ("manager", "arscout")
 
 # Corey's voice. Both repos are public, so his lyrics are NOT committed: they
@@ -229,8 +228,9 @@ class SentenceView(APIView):
         topic = str(d.get("topic", "")).strip()
         if not topic:
             return Response({"detail": "Say what it's about."}, status=status.HTTP_400_BAD_REQUEST)
-        if len(topic) > TOPIC_MAX:
-            return Response({"detail": f"Keep the brief under {TOPIC_MAX} characters."},
+        cap = over_char_limit(topic, membership_for(request.user).tier)
+        if cap:
+            return Response({"detail": f"Your tier writes up to {cap:,} characters here — upgrade in MembershipZ for more.", "char_limit": cap},
                             status=status.HTTP_400_BAD_REQUEST)
         genre = str(d.get("genre", "")).strip()[:60]
         majority = _int(d.get("majority"), 0, 4) if kind == "lyrics" else None
@@ -267,7 +267,7 @@ class SentenceView(APIView):
             return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
                             status=status.HTTP_402_PAYMENT_REQUIRED)
         work = SentenceWork.objects.create(
-            user=request.user, kind=kind, topic=topic[:TOPIC_MAX], text=text,
+            user=request.user, kind=kind, topic=topic, text=text,
             inputs={"genre": genre, "majority": majority, "minority": minority},
         )
         return Response({**_work_dict(work), "charged_cents": charged}, status=status.HTTP_201_CREATED)

@@ -122,3 +122,14 @@ class VideoTests(TestCase):
                                                             "target_kind": "release", "target_id": rel.id}, format="json")
         self.assertEqual(r.status_code, 201, r.content)
         self.assertEqual(r.json()["royalty_pct"], 10.0)
+
+
+@patch("apps.economy.videoz._key", return_value=KEY)
+class VideoPromptTierCapTests(TestCase):
+    def test_the_prompt_answers_to_the_tier_char_limit(self, _):
+        u = User.objects.create_user("free1", "f@e.com", "pw-Long-enough-1")
+        c = APIClient(); c.force_authenticate(u)
+        r = c.post(URL, {"kind": "music", "prompt": "x" * 401, "aspect": "16:9"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.json()["char_limit"], 400)
+        self.assertFalse(VideoWork.objects.exists())

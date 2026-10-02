@@ -137,3 +137,12 @@ class RegisterTests(TestCase):
         p = sentencez.prompt_for("post", "new single")
         self.assertIn("radically transparent", p)
         self.assertNotIn("homophones", p)
+
+
+class SentenceTierCapTests(TestCase):
+    def test_the_brief_answers_to_the_tier_char_limit(self):
+        u = get_user_model().objects.create_user("capped", "c@e.com", "pw-Long-enough-1")
+        c = APIClient(); c.force_authenticate(u)
+        r = c.post(URL, {"kind": "caption", "topic": "x" * 401}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.json()["char_limit"], 400)
