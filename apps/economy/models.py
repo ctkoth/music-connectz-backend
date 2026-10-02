@@ -6882,3 +6882,22 @@ class SondayActivity(models.Model):
 
     def __str__(self):
         return f"{self.card.title} → {self.action}"
+
+
+# ---- Sentence ConnectZ ----
+class SentenceWork(models.Model):
+    """One piece Sentence ConnectZ wrote, kept exactly as written.
+
+    The original is the baseline K-Oth's royalty is scaled against when the
+    piece is used (sentencez.kept_share), so it is never edited in place.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sentence_works")
+    kind = models.CharField(max_length=16)
+    topic = models.TextField()
+    inputs = models.JSONField(default=dict, blank=True)
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
