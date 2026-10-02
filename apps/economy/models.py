@@ -6913,6 +6913,7 @@ class IntelligenceUse(models.Model):
     """
 
     SOURCE_SENTENCE = "sentence"
+    SOURCE_INSTRUMENTAL = "instrumental"
     TARGET_COLLAB = "collab"
     TARGET_BATTLE = "battle"
     TARGET_RELEASE = "release"
@@ -6931,4 +6932,25 @@ class IntelligenceUse(models.Model):
     class Meta:
         unique_together = ("source_kind", "source_id", "target_kind", "target_id")
         indexes = [models.Index(fields=["target_kind", "target_id"])]
+        ordering = ["-created_at"]
+
+
+class InstrumentalWork(models.Model):
+    """One loop Instrumental ConnectZ composed: validated notes per part.
+
+    The notes are stored, not a file — the .mid is rendered on download, so
+    a fix to the writer reaches every piece already made.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="instrumental_works")
+    genre = models.CharField(max_length=60, blank=True, default="")
+    instruments = models.JSONField(default=list)
+    bpm = models.PositiveSmallIntegerField()
+    key = models.CharField(max_length=12)
+    bars = models.PositiveSmallIntegerField(default=4)
+    brief = models.TextField(blank=True, default="")
+    tracks = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
         ordering = ["-created_at"]

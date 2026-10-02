@@ -20,8 +20,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import (Battle, CollabDeal, CollabParticipant, IntelligenceUse, Release,
-                     SentenceWork, Transaction, award_spinaz, wallet_for)
+from .models import (Battle, CollabDeal, CollabParticipant, InstrumentalWork, IntelligenceUse,
+                     Release, SentenceWork, Transaction, award_spinaz, wallet_for)
 
 MAX_TOTAL_PCT = Decimal("50")
 TARGETS = (IntelligenceUse.TARGET_COLLAB, IntelligenceUse.TARGET_BATTLE, IntelligenceUse.TARGET_RELEASE)
@@ -111,7 +111,19 @@ def eligible(user, kind, tid):
 def _source(user, kind, sid):
     if kind == IntelligenceUse.SOURCE_SENTENCE:
         return SentenceWork.objects.filter(pk=sid, user=user).first()
+    if kind == IntelligenceUse.SOURCE_INSTRUMENTAL:
+        return InstrumentalWork.objects.filter(pk=sid, user=user).first()
     return None
+
+
+def share_for(kind, work, text):
+    """K-Oth's share for this piece as used. Text is scaled by what survives an
+    edit; a MIDI isn't edited in-app, so it is the flat rate."""
+    if kind == IntelligenceUse.SOURCE_SENTENCE:
+        from .sentencez import royalty_pct
+        return Decimal(str(royalty_pct(work.text, text or work.text))), text or work.text
+    from .instrumentalz import ROYALTY_PCT
+    return Decimal(ROYALTY_PCT), ""
 
 
 def _use_dict(u):
@@ -151,7 +163,6 @@ class IntelligenceUsesView(APIView):
 
     @transaction.atomic
     def post(self, request):
-        from .sentencez import royalty_pct
         d = request.data or {}
         source = str(d.get("source", ""))
         try:
@@ -165,8 +176,7 @@ class IntelligenceUsesView(APIView):
         if kind not in TARGETS or not eligible(request.user, kind, tid):
             return Response({"detail": "You can only use it in an open deal or battle you're in, or a release of yours."},
                             status=status.HTTP_400_BAD_REQUEST)
-        text = str(d.get("text", "")) or work.text
-        pct = Decimal(str(royalty_pct(work.text, text)))
+        pct, text = share_for(source, work, str(d.get("text", "") or ""))
         use, _ = IntelligenceUse.objects.update_or_create(
             source_kind=source, source_id=sid, target_kind=kind, target_id=tid,
             defaults={"user": request.user, "text": text, "royalty_pct": pct})
