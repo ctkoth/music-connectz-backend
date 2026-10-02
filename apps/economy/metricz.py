@@ -25,6 +25,7 @@ Three rules, the same ones the profile fields already follow:
     ever charged for one.
 """
 import datetime
+import hashlib
 import json
 import logging
 import re
@@ -63,6 +64,96 @@ ZODIAC = [
 ]
 SIGN_NAMES = [z[0] for z in ZODIAC]
 
+# Corey's read on each sign, carried over from v2.2 (src/mcz2/zodiac.js), where
+# it lived in a screen that is not mounted — so the live app had lost it.
+SIGN_READ = {
+    "Capricorn": "The grinder. You build the empire brick by brick — disciplined, ambitious, and quietly running the label while everyone else is freestyling.",
+    "Aquarius": "The visionary. Weird in the best way — genre-bending ideas nobody else hears yet. You're already three sounds ahead of the trend.",
+    "Pisces": "The dreamer. Pure emotion straight to the mic — your melodies feel like water. Protect that sensitivity; it's your whole sound.",
+    "Aries": "The starter. First on the beat, first in the booth, first to drop. Raw energy and zero fear — you set the tempo for the whole room.",
+    "Taurus": "The craftsman. You don't rush a mix — you build a groove that lasts. Loyal, luxurious, and stubborn enough to finish the album.",
+    "Gemini": "The switch-hitter. Two flows, two moods, endless bars. You rap, you sing, you produce — versatility is your signature.",
+    "Cancer": "The heart. Your music hits people right in the feelings — nostalgic hooks and home-grown loyalty. You build a real fanbase, not just streams.",
+    "Leo": "The star. Born for the stage — presence for days. When you perform, the spotlight was already yours. Just don't forget the team.",
+    "Virgo": "The perfectionist. You hear the one frequency that's off. Clean mixes, tight edits, flawless metadata — the engineer everyone needs.",
+    "Libra": "The collaborator. You balance the room and make the feature happen. Great ear for harmony, better instinct for the right partnership.",
+    "Scorpio": "The intensity. Deep, magnetic, all-in. Your music has a dangerous edge people can't stop replaying. You don't do half-effort.",
+    "Sagittarius": "The explorer. Global sound, restless creativity — you'd cut a track on three continents. Freedom is the whole vibe.",
+}
+ELEMENT = {"Aries": "Fire", "Leo": "Fire", "Sagittarius": "Fire",
+           "Taurus": "Earth", "Virgo": "Earth", "Capricorn": "Earth",
+           "Gemini": "Air", "Libra": "Air", "Aquarius": "Air",
+           "Cancer": "Water", "Scorpio": "Water", "Pisces": "Water"}
+_COMPLEMENT = {"Fire": "Air", "Air": "Fire", "Earth": "Water", "Water": "Earth"}
+
+
+def compatibility(a, b):
+    """v2.2's element read on two signs, in Corey's voice. A horoscope's
+    answer about two SIGNS — never a score on a person, never used to rank or
+    filter anybody, which is what keeps it on the right side of the substance
+    rule. Same element flows, Fire/Air and Earth/Water complement, the rest
+    clash; opposite signs (six apart) get a spark."""
+    if a not in ELEMENT or b not in ELEMENT:
+        return None
+    ea, eb = ELEMENT[a], ELEMENT[b]
+    if a == b:
+        score, note = 8, ("Two of the same sign — instant understanding, but you'll double each other's blind "
+                          "spots. Mirror energy: powerful when aligned, loud when not.")
+    elif ea == eb:
+        score, note = 9, (f"Same element ({ea}) — you move at the same tempo and just get each other. Natural "
+                          "creative chemistry; watch that you challenge, not just echo.")
+    elif _COMPLEMENT[ea] == eb:
+        score, note = 8, (f"{ea} + {eb} complement — opposite strengths that cover each other's gaps. This is "
+                          "the collab that actually finishes the album.")
+    else:
+        score, note = 5, (f"{ea} + {eb} clash — different speeds and priorities. Real sparks either way; make "
+                          "the friction the sound instead of the argument.")
+    if abs(SIGN_NAMES.index(a) - SIGN_NAMES.index(b)) == 6:
+        score = min(10, score + 1)
+    return {"a": a, "b": b, "element_a": ea, "element_b": eb, "score": score, "out_of": 10, "note": note}
+
+
+# The house reading — v2.2's deterministic one, in Corey's voice. It costs
+# nothing and needs no key, so it is what a member gets when the written
+# reading cannot be had (no key, the model down). Same sign + same day = same
+# reading, for everybody, refreshed at midnight.
+_VIBE = [
+    "The stars cleared their throat for you today — energy's up, ego's in check, go make something.",
+    "Today's a green light. The universe already signed off; you're just waiting on yourself.",
+    "Slow morning, loud afternoon. Save the big move for when the room warms up.",
+    "You're magnetic today — people are gonna reach out. Answer the ones that matter.",
+    "Low-key power day. Nobody sees the grind but the results show up in a week.",
+    "Creative floodgates are open. Catch the idea now, it won't knock twice.",
+    "Cosmic curveball incoming — roll with it, don't fight it. The detour's the plot.",
+]
+_FOCUS = [
+    "Lean into your craft — finish the thing you keep almost-finishing.",
+    "Money's moving your way. Handle a payment, price your work, don't undersell.",
+    "Collabs are blessed today. Slide in that DM, book the session.",
+    "Post it. Your audience is listening louder than usual right now.",
+    "Rest is the move. You can't pour from an empty 808.",
+    "Learn one new thing today — a plugin, a chord, a trick. It compounds.",
+    "Handle the boring admin — metadata, contracts, the follow-up email. Future you says thanks.",
+]
+_CAUTION = [
+    "Watch the overthinking — first instinct's usually the hit.",
+    "Don't chase clout today; the real ones aren't in the comments.",
+    "Guard your energy — one draining conversation can eat the whole session.",
+    "Don't drop it half-baked just because you're impatient. Let it breathe.",
+    "Skip the comparison scroll — your timeline isn't your competition.",
+    "Say no to one thing today so you can say yes to your work.",
+]
+_COLORS = ["Neon Pink", "Cyan", "Gold", "Purple", "Electric Blue", "Crimson", "Lime"]
+
+
+def house_reading(sign, day):
+    seed = int(hashlib.sha256(f"{sign}-{day.isoformat()}".encode()).hexdigest()[:8], 16)
+    pick = lambda pool, off: pool[(seed + off) % len(pool)]
+    same = [n for n in SIGN_NAMES if ELEMENT[n] == _COMPLEMENT[ELEMENT[sign]]]
+    return {"overview": pick(_VIBE, 0), "music": pick(_FOCUS, 3), "wellbeing": pick(_CAUTION, 7),
+            "mood": "", "lucky_color": pick(_COLORS, 5), "lucky_number": (seed % 9) + 1,
+            "best_match": same[seed % len(same)], "source": "house"}
+
 # Keys match what ProfileZ already stores, so every existing declaration counts.
 SUBSTANCES = [
     ("cigarettes", "Cigarettes", "🚬"),
@@ -98,7 +189,8 @@ KINDS = {
 
 def _options(kind):
     if kind == "zodiacz":
-        return [{"key": n, "label": n, "emoji": e, "dates": d} for n, e, d in ZODIAC]
+        return [{"key": n, "label": n, "emoji": e, "dates": d, "element": ELEMENT[n], "read": SIGN_READ[n]}
+                for n, e, d in ZODIAC]
     if kind == "substancez":
         return [{"key": k, "label": l, "emoji": e} for k, l, e in SUBSTANCES]
     return [{"key": k, "label": l, "emoji": e} for k, l, e in PARTNER_GENDERS]
@@ -341,8 +433,11 @@ class HoroscopeView(APIView):
         emoji, dates = {n: (e, d) for n, e, d in ZODIAC}[sign]
         day = timezone.localdate()
         base = {"sign": sign, "emoji": emoji, "dates": dates, "day": day.isoformat(),
-                "note": HOROSCOPE_NOTE, "cost": 0,
+                "note": HOROSCOPE_NOTE, "cost": 0, "element": ELEMENT[sign], "about": SIGN_READ[sign],
                 "members_tab": {"tab": "zodiacz", "sign": sign}}
+        other = str(request.query_params.get("with", "")).strip().title()
+        if other in SIGN_NAMES:
+            base["compatibility"] = compatibility(sign, other)
         level = "advanced" if request.query_params.get("level") == "advanced" else "basic"
         base["level"] = level
         base["advanced_available"] = has_statz(request.user)
@@ -353,6 +448,10 @@ class HoroscopeView(APIView):
                                        "StatZ feature. The daily reading stays free."},
                             status=status.HTTP_403_FORBIDDEN)
         reading = horoscope_for(sign, day, level)
+        if not reading and level == "basic":
+            # Never an empty panel for the free reading: the house one is
+            # always there, says it is, and costs nothing.
+            return Response({**base, "reading": house_reading(sign, day)})
         if not reading:
             return Response({**base, "reading": None,
                              "detail": "Today's reading isn't written yet — try again in a minute."},

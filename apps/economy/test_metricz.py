@@ -128,11 +128,28 @@ class HoroscopeTests(TestCase):
             d = self.c.get("/api/economy/horoscope/leo/").json()
         self.assertEqual(d["reading"]["overview"], "Big day.")
 
-    def test_unusable_answer_is_not_stored(self, _):
+    def test_unusable_answer_is_not_stored_and_the_house_reading_stands_in(self, _):
         with patch("apps.economy.metricz.generate_content", return_value=(gemini_reply('{"overview":"x"}'), ["m"])):
             r = self.c.get("/api/economy/horoscope/leo/")
-        self.assertEqual(r.status_code, 503)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["reading"]["source"], "house")
         self.assertFalse(Horoscope.objects.exists())
+
+    def test_no_key_still_reads_and_the_house_reading_is_the_same_all_day(self, key):
+        key.return_value = ""
+        a = self.c.get("/api/economy/horoscope/leo/").json()
+        b = self.c.get("/api/economy/horoscope/leo/").json()
+        self.assertEqual(a["reading"], b["reading"])
+        self.assertEqual(a["element"], "Fire")
+        self.assertIn("The star.", a["about"])
+
+    def test_compatibility_is_about_signs(self, _):
+        with patch("apps.economy.metricz.generate_content", return_value=(gemini_reply(GOOD), ["m"])):
+            d = self.c.get("/api/economy/horoscope/leo/?with=aquarius").json()
+        c = d["compatibility"]
+        self.assertEqual((c["element_a"], c["element_b"]), ("Fire", "Air"))
+        self.assertEqual(c["score"], 9)       # complement 8, opposite signs +1
+        self.assertIn("complement", c["note"])
 
     def test_unknown_sign(self, _):
         self.assertEqual(self.c.get("/api/economy/horoscope/ophiuchus/").status_code, 404)
@@ -187,3 +204,13 @@ class AdvancedHoroscopeTests(TestCase):
         with patch("apps.economy.metricz.generate_content", return_value=(gemini_reply(bad), ["m"])):
             self.assertEqual(self.c.get("/api/economy/horoscope/leo/?level=advanced").status_code, 503)
         self.assertFalse(Horoscope.objects.exists())
+
+
+class CompatibilityTests(TestCase):
+    def test_the_v22_rules(self):
+        from apps.economy.metricz import compatibility
+        self.assertEqual(compatibility("Aries", "Leo")["score"], 9)        # same element
+        self.assertEqual(compatibility("Aries", "Aries")["score"], 8)      # same sign
+        self.assertEqual(compatibility("Aries", "Cancer")["score"], 5)     # clash
+        self.assertEqual(compatibility("Aries", "Libra")["score"], 9)      # complement + opposite
+        self.assertIsNone(compatibility("Aries", "Ophiuchus"))
