@@ -6954,3 +6954,12 @@ class InstrumentalWork(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class StatzTrial(models.Model):
+    """One timed StatZ sample per member, ever. The end time is the server's,
+    so the countdown on screen cannot be reset by a reload."""
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="statz_trial")
+    started_at = models.DateTimeField(auto_now_add=True)
+    ends_at = models.DateTimeField()

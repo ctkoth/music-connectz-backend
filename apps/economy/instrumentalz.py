@@ -27,10 +27,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import TIER_DEBUG, TIER_STATZ, ai_cost
+from .catalog import ai_cost
 from .gemini import _bill, _key, generate_content
 from .models import (InstrumentalWork, can_afford_ai, daily_prompt_covers,
-                     daily_prompt_state, membership_for)
+                     daily_prompt_state)
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,6 @@ BARS = (4, 8)
 MAX_TRACKS = 6
 MAX_NOTES = 400
 TPB = 480  # ticks per beat
-MOOD_SEARCH_TIERS = (TIER_STATZ, TIER_DEBUG)
 
 # General MIDI programs. Drums ride channel 10 (index 9) and take no program.
 INSTRUMENTS = {
@@ -110,7 +109,8 @@ def search_keys(query):
 
 
 def can_search_mood(user):
-    return membership_for(user).tier in MOOD_SEARCH_TIERS
+    from .statz_trial import has_statz
+    return has_statz(user)
 
 
 def key_signature(key):
