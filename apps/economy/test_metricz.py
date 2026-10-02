@@ -214,3 +214,14 @@ class CompatibilityTests(TestCase):
         self.assertEqual(compatibility("Aries", "Cancer")["score"], 5)     # clash
         self.assertEqual(compatibility("Aries", "Libra")["score"], 9)      # complement + opposite
         self.assertIsNone(compatibility("Aries", "Ophiuchus"))
+
+
+class PersonaFilterTests(TestCase):
+    def test_members_by_persona(self):
+        me = member("me")
+        member("prod", personas=[{"key": "producer", "name": "Producer", "skills": []}])
+        member("mix", personas=[{"key": "mixengineer", "name": "Mix Engineer", "skills": []}])
+        c = APIClient(); c.force_authenticate(me)
+        names = lambda q: {m["username"] for m in c.get(f"/api/economy/members/?{q}").json()["members"]}
+        self.assertEqual(names("personas=producer"), {"prod"})
+        self.assertEqual(names("personas=producer,mixengineer"), {"prod", "mix"})
