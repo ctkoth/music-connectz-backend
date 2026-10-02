@@ -1182,6 +1182,14 @@ class MembersView(APIView):
         # ("use"/"sometimes"). Undeclared counts as sober-friendly.
         substances = multi("substances")
         sober_only = request.query_params.get("sober") in ("1", "true", "True")
+        # The other direction, for the SubstanceZ and PreferenceZ apps: members
+        # who DECLARE using any of ?uses=, or being attracted to any of
+        # ?attracted=. Adult-only both ways — see metricz.py.
+        from .metricz import matches as metric_matches  # metricz imports this module
+        uses = multi("uses")
+        attracted = multi("attracted")
+        if (uses or attracted) and adult_only_reason(request.user):
+            uses = attracted = []
         # PersonalitieZ: ?ie=I&tf=F, or ?personality=INFP for all four.
         #
         # It lands HERE rather than in a dating screen of its own because
@@ -1262,6 +1270,10 @@ class MembersView(APIView):
                 # concluding there are no Introverts here.
                 if not personality_dict(p.personality).keys() >= personality_wanted.keys():
                     personality_undeclared += 1
+                continue
+            if uses and not metric_matches("substancez", p, uses):
+                continue
+            if attracted and not metric_matches("preferencez", p, attracted):
                 continue
             if substances:
                 # Rows saved by the old client hold a list, not a dict.

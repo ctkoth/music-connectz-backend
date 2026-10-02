@@ -7020,3 +7020,15 @@ class VideoWork(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class Horoscope(models.Model):
+    """One sign's reading for one day — written once, read by everybody with
+    that sign. See metricz.py: a reading, never a measurement."""
+    sign = models.CharField(max_length=12)
+    day = models.DateField()
+    reading = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("sign", "day")
