@@ -1671,6 +1671,19 @@ the "20 free prompts" figure drifted into nine places.
 
 ---
 
+
+### Corey's fixed numbers — do not change without him saying so
+
+- **StatZ character limit: UNLIMITED.** Never a number. It was set to 5,000
+  for a day and Corey reversed it with "never change statz char limit from
+  unlimited". `test_limits.test_statz_is_unlimited` and the two
+  `test_bio` no-ceiling tests pin it.
+- **Premium: $7/mo, $60/yr.** "dont change premiums price from 7/60".
+  `test_pricing.test_the_published_numbers` pins it.
+
+A tidier ladder, a margin argument or a "consistency" pass is not a reason
+to move either. Ask him first.
+
 ## RapZ judges five dimensions of the take, plus the register it detects
 
 A rap take is scored on **Flow 🌊, Timing ⏱️, Breath 🫁, Clarity 🔍 and Delivery 🔥** — dimensions about how the verse sits rather than what it says. That is deliberate. The model hears the performance; scoring on what makes a rap *good* is a conversation between the member and their listeners.
