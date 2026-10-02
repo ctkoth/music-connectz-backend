@@ -40,16 +40,30 @@ CONTRACT_PERSONAS = ("manager", "arscout")
 
 # Corey's voice. Both repos are public, so his lyrics are NOT committed: they
 # are read from a Render Secret File (or the env var), samples separated by a
-# line holding only "---". With neither set the writer uses VOICE_NOTES alone,
+# line holding only "---". With neither set the writer uses the voice notes alone,
 # which describe how he writes without quoting anything he wrote.
 VOICE_FILE = os.environ.get("SENTENCEZ_VOICE_FILE", "/etc/secrets/sentencez_voice.txt")
-VOICE_NOTES = (
+# Corey's two registers, from his own voice profile. Never blended: lyrics,
+# captions and posts take the personal one, essays the academic one, and the
+# legal kinds neither.
+PERSONAL_VOICE = (
+    "Values-first and radically transparent: say the real reason, not the polished one. "
+    "Frame things with an eye on legacy and long-term impact, even in short pieces."
+)
+LYRIC_STYLE = (
     "Stack internal and multi-syllable rhymes inside lines, not only at line ends. "
     "Play on homophones and split words, written out so the double meaning shows: "
     "k(no)w, chews (choose), worth/worse. Run bars on across line breaks the way speech does. "
     "Be candid and self-reflective, including about your own faults, and turn it toward growth. "
-    "Plain, conversational vocabulary; confidence without polish; the occasional brand-style Z "
-    "(ConnectZ, SkillZ) when talking about the platform."
+    "Plain, conversational vocabulary; confidence without polish."
+)
+ACADEMIC_VOICE = (
+    "Open every heading and every paragraph with an emoji. Headings are plain text on their own line. "
+    "Use contractions — conversational, not stiff — and em dashes freely. Use Music ConnectZ, the "
+    "author's own music platform, as a recurring real-world example. Cite in full APA 7 in-text and end "
+    "with an APA 7 References section, but cite ONLY sources listed in the brief, with their exact "
+    "details; never invent a source. Where a claim needs a citation the brief doesn't supply, write "
+    "[CITATION NEEDED]."
 )
 
 
@@ -132,8 +146,11 @@ def prompt_for(kind, topic, genre="", majority=None, minority=None):
             rule.append(f"- The remaining lines (the minority) rhyme on their last {minority} "
                         f"syllable{'s' if minority > 1 else ''}.")
         lines.append("\n".join(rule))
-    if kind not in LEGAL_KINDS:
-        lines.append("VOICE: " + VOICE_NOTES)
+    if kind == "essay":
+        lines.append("VOICE: " + ACADEMIC_VOICE)
+    elif kind not in LEGAL_KINDS:
+        lines.append("VOICE: " + PERSONAL_VOICE + (" " + LYRIC_STYLE if kind == "lyrics" else ""))
+    if kind in ("lyrics", "caption", "post"):
         samples = voice_samples()
         if samples:
             lines.append("Match the voice of these samples — vocabulary, rhythm, wordplay, attitude — "

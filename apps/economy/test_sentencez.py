@@ -118,3 +118,22 @@ class VoiceTests(TestCase):
             p = sentencez.prompt_for("contract", "a deal")
         self.assertNotIn("bars one", p)
         self.assertNotIn("VOICE:", p)
+
+
+class RegisterTests(TestCase):
+    def test_essays_take_the_academic_register_and_never_invent_sources(self):
+        p = sentencez.prompt_for("essay", "streaming payouts")
+        self.assertIn("APA 7", p)
+        self.assertIn("never invent a source", p)
+        self.assertNotIn("radically transparent", p)
+
+    def test_lyrics_take_the_personal_register_not_the_academic_one(self):
+        p = sentencez.prompt_for("lyrics", "rain")
+        self.assertIn("radically transparent", p)
+        self.assertIn("homophones", p)
+        self.assertNotIn("APA", p)
+
+    def test_posts_get_the_personal_register_without_lyric_tricks(self):
+        p = sentencez.prompt_for("post", "new single")
+        self.assertIn("radically transparent", p)
+        self.assertNotIn("homophones", p)
