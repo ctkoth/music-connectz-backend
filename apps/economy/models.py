@@ -1962,7 +1962,7 @@ def can_view_post(post, user):
 class Notification(models.Model):
     """An in-app notification for `user`, optionally caused by `actor`."""
     KIND_CHOICES = [
-        ("follow", "Follow"), ("rate", "Rating"), ("like", "Like"),
+        ("follow", "Follow"), ("rate", "Rating"), ("like", "Like"), ("partnerz", "PartnerZ"),
         ("comment", "Comment"), ("join", "Restricted join"), ("pay", "Payment"),
         ("message", "Message"), ("system", "System"), ("habit_reminder", "Habit reminder"),
     ]
@@ -2939,6 +2939,9 @@ class CollabDeal(models.Model):
     # Settlement plan: [{username, tier, worth_cents, pays_cents, receives_cents,
     # tax_cents, funded, stake_paid}]
     participants = models.JSONField(default=list, blank=True)
+    # [[username, username], ...] — FriendZ pairs whose third work together
+    # this deal was, i.e. who became PartnerZ❤️ when it released.
+    partnered = models.JSONField(default=list, blank=True)
     held_cents = models.PositiveIntegerField(default=0)
     held_spinaz = models.PositiveIntegerField(default=0)
     held_stake_spinaz = models.PositiveIntegerField(default=0)
@@ -3758,6 +3761,8 @@ class Battle(models.Model):
     image_url = models.CharField(max_length=500, blank=True, default="")
     lyrics = models.TextField(blank=True, default="")
     genre = models.CharField(max_length=40, blank=True, default="")
+    # FriendZ pairs who became PartnerZ❤️ when this battle settled.
+    partnered = models.JSONField(default=list, blank=True)
     # The same five exclusive ranges search and VenueZ use. One spec, so what a
     # host advertises and what the door enforces cannot diverge.
     gates = models.JSONField(default=dict, blank=True)
@@ -6963,3 +6968,25 @@ class StatzTrial(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="statz_trial")
     started_at = models.DateTimeField(auto_now_add=True)
     ends_at = models.DateTimeField()
+
+
+class ViewSession(models.Model):
+    """One stretch of somebody looking at one thing: a post, a profile, a tab.
+
+    A view is a SESSION, not a page load — repeat visits inside
+    viewz.SESSION_GAP extend the same row, so a refresh is not a second view.
+    `owner` is whose thing it is (None for an app tab) and is what the StatZ
+    timeline and the public count are read by.
+    """
+
+    viewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+                               related_name="view_sessions")
+    anon_id = models.CharField(max_length=64, blank=True, default="")
+    target = models.CharField(max_length=80, db_index=True)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+                              related_name="views_received")
+    started_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    ended_at = models.DateTimeField()
+
+    class Meta:
+        indexes = [models.Index(fields=["owner", "started_at"])]

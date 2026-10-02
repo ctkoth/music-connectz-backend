@@ -174,16 +174,51 @@ def note_work(user_ids, *, collabs=0, battles=0):
     Called BY the thing that just settled, once, at the moment it settles.
     Swallowed by its callers: an escrow release and a battle result have to
     land whether or not this does.
+
+    Returns the (a_id, b_id) FriendZ pairs whose tally this work carried to
+    PARTNER_WORKS — the ones who became PartnerZ❤️ just now — so the thing
+    that settled can say so on itself.
     """
     ids = sorted({int(i) for i in user_ids if i})
+    crossed = []
     for n, first in enumerate(ids):
         for second in ids[n + 1:]:
             a, b = _pair(first, second)
             row, _ = Partnership.objects.get_or_create(a_id=a, b_id=b)
+            before = (row.collabs or 0) + (row.battles or 0)
             Partnership.objects.filter(pk=row.pk).update(
                 collabs=F("collabs") + collabs,
                 battles=F("battles") + battles,
                 updated_at=timezone.now())
+            if before < PARTNER_WORKS <= before + collabs + battles and _are_friends(a, b):
+                crossed.append((a, b))
+    return crossed
+
+
+def _are_friends(a, b):
+    """FriendZ = following each other. PartnerZ is FriendZ who finished work."""
+    return (Follow.objects.filter(follower_id=a, following_id=b).exists()
+            and Follow.objects.filter(follower_id=b, following_id=a).exists())
+
+
+def _nth(n):
+    return {1: "1st", 2: "2nd", 3: "3rd"}.get(n, f"{n}th")
+
+
+def announce_partners(crossed, where, title, item_id=""):
+    """Tell both people, and return [[username, username], ...] for the record."""
+    from .models import notify
+    out = []
+    for a, b in crossed:
+        ua, ub = User.objects.filter(pk=a).first(), User.objects.filter(pk=b).first()
+        if not ua or not ub:
+            continue
+        out.append([ua.username, ub.username])
+        for me, them in ((ua, ub), (ub, ua)):
+            notify(me, "partnerz", f"You and @{them.username} are now PartnerZ❤️ — "
+                                   f"“{title}” was your {_nth(PARTNER_WORKS)} {where} together.",
+                   actor=them, item_id=item_id)
+    return out
 
 
 def works_with(user):
