@@ -1110,22 +1110,24 @@ class PostSaleView(APIView):
                 DEV_TAX[membership_for(post.author).tier]
             )
 
-            creator_wallet = wallet_for(post.author)
-            creator_wallet.money_cents = (creator_wallet.money_cents or 0) + creator_net
-            creator_wallet.save(update_fields=["money_cents", "updated_at"])
+            # Everyone credited on the post is paid their share, not only the
+            # member who published it (postsplit.py has the rule).
+            from .postsplit import post_shares
+            for who, cents, basis in post_shares(post, creator_net):
+                if cents <= 0:
+                    continue
+                w = wallet_for(who)
+                w.money_cents = (w.money_cents or 0) + cents
+                w.save(update_fields=["money_cents", "updated_at"])
+                log_resource(who, Transaction.RES_MONEY, cents,
+                             note=f"Post sale (post #{post.id})"
+                                  + ("" if basis == "solo" else f" — your {basis} share"))
 
-            # Log transactions
             log_resource(
                 request.user,
-                Transaction.KIND_MONEY,
+                Transaction.RES_MONEY,
                 -post.price_cents,
                 note=f"Post purchase #{post.id}"
-            )
-            log_resource(
-                post.author,
-                Transaction.KIND_MONEY,
-                creator_net,
-                note=f"Post sale (post #{post.id})"
             )
             credit_owner(request.user, dev_tax, f"Post sale platform fee (post #{post.id})")
 

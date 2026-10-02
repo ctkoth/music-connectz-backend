@@ -627,6 +627,7 @@ def accrue_playlist_royalties_for_date(target_date):
 
     # Group plays by creator
     accruals_by_creator = {}
+    per_post = {}  # post_id -> [post, cents, plays]
     accrual_count = 0
 
     for listen in listens:
@@ -646,8 +647,10 @@ def accrue_playlist_royalties_for_date(target_date):
 
         post = posts_by_id[post_id]
 
-        # Skip if listener is the creator
-        if listen.user_id == post.author_id:
+        # Skip if the listener is the creator — or anyone credited on the post,
+        # since every one of them is now paid from its plays.
+        if listen.user_id == post.author_id or listen.user.username in {
+                c.get("username") for c in (post.contributors or []) if isinstance(c, dict)}:
             continue
 
         # Calculate royalty: 1 play × CPM / 1000 × recency_boost
@@ -660,18 +663,22 @@ def accrue_playlist_royalties_for_date(target_date):
 
         royalty_cents = max(1, int(cpm_cents / 1000))
 
-        # Accumulate by creator
-        creator_id = post.author_id
-        if creator_id not in accruals_by_creator:
-            accruals_by_creator[creator_id] = {
-                "total_cents": 0,
-                "plays": 0,
-                "posts": set(),
-            }
-        accruals_by_creator[creator_id]["total_cents"] += royalty_cents
-        accruals_by_creator[creator_id]["plays"] += 1
-        accruals_by_creator[creator_id]["posts"].add(post_id)
+        # Totalled per POST first and split once below, so a credited
+        # contributor's share of many 1-cent plays isn't rounded away play by play.
+        per_post.setdefault(post_id, [post, 0, 0])
+        per_post[post_id][1] += royalty_cents
+        per_post[post_id][2] += 1
         accrual_count += 1
+
+    from .postsplit import post_shares
+    for post_id, (post, cents, plays) in per_post.items():
+        for who, share, _basis in post_shares(post, cents):
+            if share <= 0:
+                continue
+            row = accruals_by_creator.setdefault(who.id, {"total_cents": 0, "plays": 0, "posts": set()})
+            row["total_cents"] += share
+            row["plays"] += plays
+            row["posts"].add(post_id)
 
     # Create RoyaltyEntry and Transaction for each creator
     created_count = 0
