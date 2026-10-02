@@ -121,11 +121,12 @@ class CommentLengthTests(TestCase):
         self.assertEqual(resp.status_code, 200, resp.content)
         self.assertEqual(SocialComment.objects.get().body, body)
 
-    def test_statz_comment_has_no_ceiling(self):
+    def test_statz_comment_runs_to_five_thousand(self):
         as_tier(self.user, TIER_STATZ)
-        resp = self._comment("c" * 12_000)
+        resp = self._comment("c" * 5000)
         self.assertEqual(resp.status_code, 200, resp.content)
-        self.assertEqual(len(SocialComment.objects.get().body), 12_000)
+        self.assertEqual(len(SocialComment.objects.get().body), 5000)
+        self.assertEqual(self._comment("c" * 5001).status_code, 400)
 
     def test_free_is_refused_past_its_limit_rather_than_truncated(self):
         as_tier(self.user, TIER_FREE)
