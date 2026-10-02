@@ -50,6 +50,7 @@ from .battlez import (BattlesView, BattleChallengeView, BattleDetailView,
                       BattleEnterView, BattleRespondView, BattleSettleView,
                       BattleWagerView, MoneyBattleVoteView)
 from .opportunitiez import OpportunitieZView
+from .sentencez import SentenceRoyaltyView, SentenceView
 from .keyconnectz import (KeyboardView, KeySpeakView, KeyTranscribeView,
                           KeyTranslateView)
 from .playlistz import (PlaylistCollaboratorsView, PlaylistDetailView,
@@ -195,6 +196,8 @@ urlpatterns = [
     path("battlez/<int:pk>/settle/", BattleSettleView.as_view(), name="economy-battle-settle"),
     path("battlez/<int:pk>/enter/", BattleEnterView.as_view(), name="economy-battle-enter"),
     # KeyConnectZ — the keyboard. Wallpaper is Premium; translate is free.
+    path("sentencez/", SentenceView.as_view(), name="economy-sentencez"),
+    path("sentencez/<int:pk>/royalty/", SentenceRoyaltyView.as_view(), name="economy-sentencez-royalty"),
     path("keyz/", KeyboardView.as_view(), name="economy-keyz"),
     path("keyz/translate/", KeyTranslateView.as_view(), name="economy-keyz-translate"),
     # Voice, both directions. Neither is gated by tier — the allowance is, and
