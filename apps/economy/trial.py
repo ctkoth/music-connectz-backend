@@ -34,6 +34,9 @@ from .instruments import DIFFICULTIES, profile_for_app
 from .instruments import (LYRIC_SCORE, MIX_SCORE, rates_lyrics, rates_mix,
                           scores_for)
 from .models import (
+    DEV_TAX,
+    ENERGY_TOPUP_MULT,
+    SUBMISSION_DAILY_CAP,
     TRIAL_CLAIM_DAYS,
     TRIAL_MAX_MB,
     TRIAL_PER_BROWSER,
@@ -394,6 +397,13 @@ class PublicTiersView(APIView):
                 # floors are 2 and 6, so for its own audience it is 3x, and
                 # the copy was understating the thing it was selling.
                 "energy_per_hour": ENERGY_FLOOR_PER_HOUR.get(tier_key, 0),
+                # MembershipZ's comparison table typed these three in, along
+                # with "Free: 1 daily prompt" (it is 3) and "SpecZ marketplace:
+                # StatZ only" (every tier can buy one). Served, so the table
+                # can stop being a second copy of the ladder.
+                "platform_fee_pct": round(DEV_TAX.get(tier_key, 0) * 100, 2),
+                "energy_per_dollar": ENERGY_TOPUP_MULT.get(tier_key, 1),
+                "scored_per_day": SUBMISSION_DAILY_CAP.get(tier_key, 0),
             }
 
             # Add founding info for StatZ
