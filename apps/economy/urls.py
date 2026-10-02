@@ -170,7 +170,7 @@ from .habits import HabitCreateView, HabitCompleteView
 from .bodiez import (
     BodieZBoardView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
     BodieZGoalDetailView, BodieZGoalsView, BodieZRecoveryView, BodieZRoutinesView,
-    BodieZRoutineDetailView, BodieZSessionsView, BodieZSessionDetailView, BodieZSetsView,
+    BodieZRoutineDetailView, BodieZSessionsView, BodieZSessionDetailView, BodieZSessionSummaryView, BodieZSetsView,
     BodieZProgressView, BodieZWeightLogView,
 )
 from .lessonz import (
@@ -473,6 +473,8 @@ urlpatterns = [
     path("bodiez/sessions/", BodieZSessionsView.as_view(), name="economy-bodiez-sessions"),
     path("bodiez/sessions/<int:session_id>/", BodieZSessionDetailView.as_view(),
          name="economy-bodiez-session"),
+    path("bodiez/sessions/<int:session_id>/summary/", BodieZSessionSummaryView.as_view(),
+         name="economy-bodiez-session-summary"),
     path("bodiez/sessions/<int:session_id>/sets/", BodieZSetsView.as_view(),
          name="economy-bodiez-sets"),
     path("bodiez/progress/", BodieZProgressView.as_view(), name="economy-bodiez-progress"),

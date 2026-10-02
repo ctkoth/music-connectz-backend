@@ -1507,3 +1507,76 @@ class BodieZRoutineGoalTests(TestCase):
         from .bodiez import GOALS
         width = BodieZRoutine._meta.get_field("goal").max_length
         self.assertTrue(all(len(k) <= width for k in GOALS))
+
+
+class BodieZSessionSummaryTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="sum1", password="pw")
+        self.client.force_authenticate(user=self.user)
+        self.press = BodieZExercise.objects.create(name="Test Press", muscle_group="chest", equipment="dumbbell")
+        self.pushup = BodieZExercise.objects.create(name="Test Pushup", muscle_group="chest", equipment="bodyweight")
+
+    def _past(self, rows, days_ago=3):
+        s = BodieZSession.objects.create(user=self.user)
+        BodieZSession.objects.filter(id=s.id).update(
+            started_at=timezone.now() - timedelta(days=days_ago),
+            ended_at=timezone.now() - timedelta(days=days_ago) + timedelta(hours=1))
+        for i, (ex, reps, w) in enumerate(rows, 1):
+            BodieZSet.objects.create(session=s, exercise=ex, set_number=i, reps=reps, weight_kg=w)
+
+    def _finish(self, rows):
+        s = BodieZSession.objects.create(user=self.user)
+        for ex, reps, w in rows:
+            self.client.post(f"/api/economy/bodiez/sessions/{s.id}/sets/",
+                             {"exercise_id": ex.id, "reps": reps, "weight_kg": w}, format="json")
+        r = self.client.patch(f"/api/economy/bodiez/sessions/{s.id}/", {"finish": True}, format="json")
+        return r.data["summary"]
+
+    def test_totals_are_sums_of_logged_sets(self):
+        s = self._finish([(self.press, 10, 20), (self.press, 8, 20), (self.pushup, 25, None)])
+        self.assertEqual(s["sets"], 3)
+        self.assertEqual(s["reps"], 43)
+        self.assertEqual(s["volume_kg"], 360.0)
+
+    def test_first_time_is_a_first_not_a_record(self):
+        s = self._finish([(self.press, 10, 20)])
+        self.assertEqual(s["records"], [])
+        self.assertEqual(s["firsts"], ["Test Press"])
+
+    def test_heaviest_rep_and_session_volume_records(self):
+        self._past([(self.press, 10, 20), (self.pushup, 20, None)])
+        s = self._finish([(self.press, 5, 25), (self.pushup, 30, None)])
+        kinds = {(r["kind"], r.get("exercise")) for r in s["records"]}
+        self.assertIn(("heaviest", "Test Press"), kinds)
+        self.assertIn(("reps", "Test Pushup"), kinds)
+        heavy = next(r for r in s["records"] if r["kind"] == "heaviest")
+        self.assertEqual((heavy["value_kg"], heavy["previous_kg"]), (25.0, 20.0))
+        self.assertNotIn("session_volume", {r["kind"] for r in s["records"]})
+
+    def test_more_reps_at_a_lighter_weight_is_not_a_record(self):
+        self._past([(self.press, 10, 20)])
+        s = self._finish([(self.press, 15, 10)])
+        self.assertEqual(s["records"], [])
+
+    def test_session_volume_record_beats_earlier_sessions(self):
+        self._past([(self.press, 10, 20)])
+        s = self._finish([(self.press, 10, 20), (self.press, 10, 20)])
+        vol = [r for r in s["records"] if r["kind"] == "session_volume"]
+        self.assertEqual(vol[0]["value_kg"], 400.0)
+        self.assertEqual(vol[0]["previous_kg"], 200.0)
+
+    def test_summary_names_the_members_coaches_and_is_reopenable(self):
+        from .models import StudentRelationship
+        coach = User.objects.create_user(username="coachy", password="pw")
+        StudentRelationship.objects.create(student=self.user, coach=coach, referral_code="c1")
+        s = self._finish([(self.press, 10, 20)])
+        self.assertEqual(s["coaches"], ["coachy"])
+        again = self.client.get(f"/api/economy/bodiez/sessions/{s['session_id']}/summary/")
+        self.assertEqual(again.data["volume_kg"], 200.0)
+
+    def test_someone_elses_summary_is_not_found(self):
+        other = User.objects.create_user(username="sum2", password="pw")
+        s = BodieZSession.objects.create(user=other)
+        r = self.client.get(f"/api/economy/bodiez/sessions/{s.id}/summary/")
+        self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)

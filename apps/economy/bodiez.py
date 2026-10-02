@@ -76,7 +76,7 @@ from rest_framework.views import APIView
 
 from .models import (BODIEZ_BUCKETS, BODIEZ_DAY_TAGS, BODIEZ_GOAL_KINDS, BodieZExercise,
                      BodieZGoal, BodieZRecoveryLog, BodieZRoutine, BodieZSession, BodieZSet,
-                     BodieZWeightLog)
+                     BodieZWeightLog, StudentRelationship)
 
 _BUCKET_KEYS = {k for k, _ in BODIEZ_BUCKETS}
 _DAY_TAG_KEYS = {k for k, _ in BODIEZ_DAY_TAGS}
@@ -550,6 +550,89 @@ class BodieZSessionsView(APIView):
         return Response(_session_dict(sess), status=status.HTTP_201_CREATED)
 
 
+def session_summary(sess):
+    """What a finished session added up to, and what it beat.
+
+    Every number is a count or a sum of logged sets. A record is only a record
+    against the member's own EARLIER finished sessions: an exercise done for
+    the first time is listed under `firsts`, never called a record, because
+    beating nothing is not beating anything.
+    """
+    sets = list(sess.sets.select_related("exercise"))
+    vol = lambda ss: sum(float(x.weight_kg) * x.reps for x in ss if x.weight_kg is not None)
+    by_ex = defaultdict(list)
+    for x in sets:
+        by_ex[x.exercise_id].append(x)
+
+    prior = BodieZSet.objects.filter(
+        session__user=sess.user, session__ended_at__isnull=False,
+        session__started_at__lt=sess.started_at).exclude(session=sess)
+    prior_by_ex = defaultdict(list)
+    for x in prior.filter(exercise_id__in=list(by_ex)):
+        prior_by_ex[x.exercise_id].append(x)
+
+    exercises, records, firsts = [], [], []
+    for ex_id, ss in by_ex.items():
+        name = ss[0].exercise.name
+        weights = [float(x.weight_kg) for x in ss if x.weight_kg is not None]
+        exercises.append({"exercise_id": ex_id, "name": name, "sets": len(ss),
+                          "reps": sum(x.reps for x in ss), "volume_kg": round(vol(ss), 2),
+                          "top_weight_kg": max(weights) if weights else None})
+        old = prior_by_ex.get(ex_id, [])
+        if not old:
+            firsts.append(name)
+            continue
+        old_w = [float(x.weight_kg) for x in old if x.weight_kg is not None]
+        if weights and old_w and max(weights) > max(old_w):
+            records.append({"kind": "heaviest", "exercise": name,
+                            "value_kg": max(weights), "previous_kg": max(old_w)})
+        # Most reps at one exact weight (or bodyweight) — more reps at a lighter
+        # load than you've used before is not a record, so it is not compared.
+        for w in {x.weight_kg for x in ss}:
+            now_best = max(x.reps for x in ss if x.weight_kg == w)
+            then = [x.reps for x in old if x.weight_kg == w]
+            if then and now_best > max(then):
+                records.append({"kind": "reps", "exercise": name, "reps": now_best,
+                                "previous_reps": max(then),
+                                "weight_kg": float(w) if w is not None else None})
+
+    total = vol(sets)
+    past = defaultdict(float)
+    for x in prior.exclude(weight_kg__isnull=True):
+        past[x.session_id] += float(x.weight_kg) * x.reps
+    if total and past and total > max(past.values()):
+        records.append({"kind": "session_volume", "value_kg": round(total, 2),
+                        "previous_kg": round(max(past.values()), 2)})
+
+    end = sess.ended_at or timezone.now()
+    coaches = list(StudentRelationship.objects.filter(student=sess.user)
+                   .values_list("coach__username", flat=True))
+    return {
+        "session_id": sess.id,
+        "routine_title": sess.routine.title if sess.routine_id and sess.routine else None,
+        "started_at": sess.started_at.isoformat(),
+        "ended_at": sess.ended_at.isoformat() if sess.ended_at else None,
+        "duration_seconds": int((end - sess.started_at).total_seconds()),
+        "sets": len(sets), "reps": sum(x.reps for x in sets),
+        "volume_kg": round(total, 2),
+        "exercises": sorted(exercises, key=lambda e: e["name"]),
+        "records": records, "firsts": sorted(firsts),
+        "coaches": coaches,
+    }
+
+
+class BodieZSessionSummaryView(APIView):
+    """GET /api/economy/bodiez/sessions/{id}/summary/ — totals and records."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, session_id):
+        try:
+            sess = BodieZSession.objects.get(id=session_id, user=request.user)
+        except BodieZSession.DoesNotExist:
+            return Response({"detail": "Session not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(session_summary(sess))
+
+
 class BodieZSessionDetailView(APIView):
     """PATCH /api/economy/bodiez/sessions/{id}/ — finish a session (notes,
     ended_at)."""
@@ -569,7 +652,10 @@ class BodieZSessionDetailView(APIView):
         if notes is not None:
             sess.notes = notes
         sess.save()
-        return Response(_session_dict(sess))
+        out = _session_dict(sess)
+        if sess.ended_at:
+            out["summary"] = session_summary(sess)
+        return Response(out)
 
 
 class BodieZSetsView(APIView):
