@@ -6963,3 +6963,25 @@ class StatzTrial(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="statz_trial")
     started_at = models.DateTimeField(auto_now_add=True)
     ends_at = models.DateTimeField()
+
+
+class ViewSession(models.Model):
+    """One stretch of somebody looking at one thing: a post, a profile, a tab.
+
+    A view is a SESSION, not a page load — repeat visits inside
+    viewz.SESSION_GAP extend the same row, so a refresh is not a second view.
+    `owner` is whose thing it is (None for an app tab) and is what the StatZ
+    timeline and the public count are read by.
+    """
+
+    viewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+                               related_name="view_sessions")
+    anon_id = models.CharField(max_length=64, blank=True, default="")
+    target = models.CharField(max_length=80, db_index=True)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+                              related_name="views_received")
+    started_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    ended_at = models.DateTimeField()
+
+    class Meta:
+        indexes = [models.Index(fields=["owner", "started_at"])]

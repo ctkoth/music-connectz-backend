@@ -52,6 +52,7 @@ from .battlez import (BattlesView, BattleChallengeView, BattleDetailView,
 from .opportunitiez import OpportunitieZView
 from .sentencez import SentenceRoyaltyView, SentenceView
 from .statz_trial import StatzTrialView
+from .viewz import ViewBeatView, ViewCountsView, ViewStartView, ViewTimelineView
 from .instrumentalz import InstrumentalMidiView, InstrumentalMoodView, InstrumentalView
 from .intelligence_royalty import IntelligenceTargetsView, IntelligenceUseDetailView, IntelligenceUsesView
 from .keyconnectz import (KeyboardView, KeySpeakView, KeyTranscribeView,
@@ -201,6 +202,10 @@ urlpatterns = [
     # KeyConnectZ — the keyboard. Wallpaper is Premium; translate is free.
     path("sentencez/", SentenceView.as_view(), name="economy-sentencez"),
     path("statz-trial/", StatzTrialView.as_view(), name="economy-statz-trial"),
+    path("views/start/", ViewStartView.as_view(), name="economy-views-start"),
+    path("views/beat/", ViewBeatView.as_view(), name="economy-views-beat"),
+    path("views/counts/", ViewCountsView.as_view(), name="economy-views-counts"),
+    path("views/timeline/", ViewTimelineView.as_view(), name="economy-views-timeline"),
     path("instrumentalz/", InstrumentalView.as_view(), name="economy-instrumentalz"),
     path("instrumentalz/moods/", InstrumentalMoodView.as_view(), name="economy-instrumentalz-moods"),
     path("instrumentalz/<int:pk>/midi/", InstrumentalMidiView.as_view(), name="economy-instrumentalz-midi"),
