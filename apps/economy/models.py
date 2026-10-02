@@ -6919,6 +6919,7 @@ class IntelligenceUse(models.Model):
 
     SOURCE_SENTENCE = "sentence"
     SOURCE_INSTRUMENTAL = "instrumental"
+    SOURCE_VIDEO = "video"
     TARGET_COLLAB = "collab"
     TARGET_BATTLE = "battle"
     TARGET_RELEASE = "release"
@@ -6985,8 +6986,37 @@ class ViewSession(models.Model):
     target = models.CharField(max_length=80, db_index=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
                               related_name="views_received")
+    # The same two facts FunnelZ keeps about a visit: which share link brought
+    # it (?src=) and the screen shape, measured on the client — never a user
+    # agent, never an address.
+    src = models.CharField(max_length=24, blank=True, default="")
+    dev = models.CharField(max_length=8, blank=True, default="")
     started_at = models.DateTimeField(auto_now_add=True, db_index=True)
     ended_at = models.DateTimeField()
 
     class Meta:
         indexes = [models.Index(fields=["owner", "started_at"])]
+
+
+class VideoWork(models.Model):
+    """One Video ConnectZ render. Long-running: started, polled, then done
+    or failed. The price is HELD at start (held_promptz / held_cash) and
+    either kept on success or handed back in full on failure."""
+
+    STATUS_PENDING, STATUS_DONE, STATUS_FAILED = "pending", "done", "failed"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="video_works")
+    kind = models.CharField(max_length=12)
+    prompt = models.TextField()
+    aspect = models.CharField(max_length=8, default="16:9")
+    face = models.ForeignKey("Face", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    operation = models.CharField(max_length=300, blank=True, default="")
+    status = models.CharField(max_length=8, default=STATUS_PENDING)
+    upload = models.ForeignKey("Upload", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    held_promptz = models.PositiveIntegerField(default=0)
+    held_cash = models.PositiveIntegerField(default=0)
+    error = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
