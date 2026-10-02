@@ -103,7 +103,7 @@ from .ai_models import AiModelView
 from .badgez import BadgeGiftView, BadgezView
 from .bugz import BugTriageView, BugzView
 from .logicz import LogicZView
-from .ratez import RatezView, RatingKindsView
+from .ratez import RateQueueView, RatezView, RatingKindsView
 from .occ_workz import (OccWorkDetailView, OccWorkShareView, OccWorkUnshareView,
                         OccWorkzView, PostOccWorkView)
 from .payments import (
@@ -370,6 +370,7 @@ urlpatterns = [
     path("badgez/gift/", BadgeGiftView.as_view(), name="economy-badgez-gift"),
     path("ratez/", RatezView.as_view(), name="economy-ratez"),
     path("ratez/kinds/", RatingKindsView.as_view(), name="economy-ratez-kinds"),
+    path("ratez/queue/", RateQueueView.as_view(), name="economy-ratez-queue"),
     path("postz/", PostsView.as_view(), name="economy-postz"),
     # Personalized discovery feed based on taste affinity and listening behavior.
     path("postz/discover/", DiscoveryFeedView.as_view(), name="economy-postz-discover"),
