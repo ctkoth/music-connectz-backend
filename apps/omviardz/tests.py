@@ -92,8 +92,9 @@ class TourSpecTests(TestCase):
         self.assertEqual(
             facts["tiers"][TIER_FREE]["char_limit"], TIER_LIMITS[TIER_FREE]["char_limit"]
         )
-        self.assertEqual(facts["tiers"][TIER_STATZ]["char_limit"], 5000)
-        self.assertFalse(facts["tiers"][TIER_STATZ]["char_limit_unlimited"])
+        # StatZ writes without a cap, so the tour must not print the sentinel.
+        self.assertIsNone(facts["tiers"][TIER_STATZ]["char_limit"])
+        self.assertTrue(facts["tiers"][TIER_STATZ]["char_limit_unlimited"])
 
 
 class TourEndpointTests(TestCase):

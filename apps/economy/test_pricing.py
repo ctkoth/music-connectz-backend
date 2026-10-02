@@ -42,7 +42,7 @@ class PricingLadderTests(TestCase):
         tiers = {t["key"]: t for t in APIClient().get("/api/economy/tiers/").json()["tiers"]}
         self.assertEqual((tiers["premium"]["month_cents"], tiers["premium"]["year_cents"]), (700, 6000))
         self.assertEqual((tiers["statz"]["month_cents"], tiers["statz"]["year_cents"]), (1500, 15000))
-        self.assertEqual(tiers["statz"]["char_limit"], 5000)
+        self.assertGreaterEqual(tiers["statz"]["char_limit"], catalog.UNLIMITED_CHARS)
 
 
 class OwnerTierSwitchTests(TestCase):

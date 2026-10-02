@@ -32,9 +32,8 @@ class OverCharLimitTests(TestCase):
     def test_over_returns_the_cap_it_broke(self):
         self.assertEqual(over_char_limit("x" * (FREE_CAP + 1), TIER_FREE), FREE_CAP)
 
-    def test_statz_is_five_thousand(self):
-        self.assertIsNone(over_char_limit("x" * 5000, TIER_STATZ))
-        self.assertEqual(over_char_limit("x" * 5001, TIER_STATZ), 5000)
+    def test_statz_is_never_over(self):
+        self.assertIsNone(over_char_limit("x" * 500_000, TIER_STATZ))
 
     def test_empty_and_none_are_fine(self):
         self.assertIsNone(over_char_limit("", TIER_FREE))
@@ -61,14 +60,12 @@ class BioLengthTests(TestCase):
         self.assertEqual(resp.status_code, 200, resp.content)
         self.assertEqual(Profile.objects.get(user=self.user).bio, bio)
 
-    def test_statz_bio_runs_to_five_thousand(self):
+    def test_statz_bio_has_no_ceiling(self):
         as_tier(self.user, TIER_STATZ)
-        bio = "b" * 5000
+        bio = "b" * 20_000
         resp = self.client.post("/api/economy/profile/", {"bio": bio}, format="json")
         self.assertEqual(resp.status_code, 200, resp.content)
-        self.assertEqual(len(Profile.objects.get(user=self.user).bio), 5000)
-        resp = self.client.post("/api/economy/profile/", {"bio": "b" * 5001}, format="json")
-        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(len(Profile.objects.get(user=self.user).bio), 20_000)
 
     def test_free_is_refused_past_its_limit_and_told_the_number(self):
         as_tier(self.user, TIER_FREE)
@@ -121,12 +118,11 @@ class CommentLengthTests(TestCase):
         self.assertEqual(resp.status_code, 200, resp.content)
         self.assertEqual(SocialComment.objects.get().body, body)
 
-    def test_statz_comment_runs_to_five_thousand(self):
+    def test_statz_comment_has_no_ceiling(self):
         as_tier(self.user, TIER_STATZ)
-        resp = self._comment("c" * 5000)
+        resp = self._comment("c" * 12_000)
         self.assertEqual(resp.status_code, 200, resp.content)
-        self.assertEqual(len(SocialComment.objects.get().body), 5000)
-        self.assertEqual(self._comment("c" * 5001).status_code, 400)
+        self.assertEqual(len(SocialComment.objects.get().body), 12_000)
 
     def test_free_is_refused_past_its_limit_rather_than_truncated(self):
         as_tier(self.user, TIER_FREE)

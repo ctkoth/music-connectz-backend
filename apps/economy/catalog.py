@@ -110,11 +110,9 @@ TIER_LIMITS = {
                 "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 5},
     TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 15,
                    "widgets_open": 12, "custom_groups": 5, "soundcloud_import": 25},
-    # StatZ is 5,000 — Corey's ladder is 400 / 1,500 / 5,000, every tier a
-    # number a member can check. It was briefly unlimited; nothing already
-    # written over 5,000 is cut, because the cap is applied on WRITE (a
-    # stored bio stays as it is until its owner edits it).
-    TIER_STATZ: {"char_limit": 5000, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999,
+    # StatZ writes without a character cap (Corey's call). It was 5,000 for a
+    # day; nothing was lost either way, since the cap is applied on write.
+    TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999,
                  "widgets_open": 40, "custom_groups": 20, "soundcloud_import": 200},
     # Owner god-mode: effectively unlimited.
     TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760, "embeds_per_post": 999,
