@@ -358,15 +358,15 @@ AI_MODEL_COSTS = {
 
 # ---- Subscription pricing — Corey's numbers, typed once.
 #
-#     Premium   $10/mo   $90/yr    (three months free)
+#     Premium   $7/mo    $60/yr    (about three and a half months free)
 #     StatZ     $15/mo   $150/yr   (two months free)
 #
 # Annual is always cheaper than twelve months, and StatZ always costs more
 # than Premium at the same interval. Those two are the rules the tests hold;
 # the exact discount is a price, and prices are Corey's call.
 
-PREMIUM_MONTH_CENTS = 1000                           # $10/mo
-PREMIUM_YEAR_CENTS = 9000                            # $90/yr
+PREMIUM_MONTH_CENTS = 700                            # $7/mo
+PREMIUM_YEAR_CENTS = 6000                            # $60/yr
 PREMIUM_PLANS = {
     "year": {"mode": "subscription", "cents": PREMIUM_YEAR_CENTS, "interval": "year", "kind": "premium_sub"},
     "month": {"mode": "subscription", "cents": PREMIUM_MONTH_CENTS, "interval": "month", "kind": "premium_sub"},
@@ -382,33 +382,34 @@ STATZ_PLANS = {
     "month": {"mode": "subscription", "cents": STATZ_MONTH_CENTS, "interval": "month", "kind": "statz_sub"},
 }
 
-# Founding StatZ: the first 50 members get the LIFETIME seat at half price.
+# Founding StatZ: the first 50 members get StatZ at half price — as a one-time
+# lifetime seat, or grandfathered founding rates by year / month. Derived from
+# the StatZ prices above so the discount is always genuinely half.
 #
-# It used to be half off the monthly and yearly plans too, and at Premium
-# $10/mo that inverts the ladder: half of StatZ is $7.50/mo and $75/yr, both
-# under Premium, so the first 50 would pay less for more. This file said so in
-# an assertion and named the fix — make the founding discount lifetime-only —
-# and that is what it is now. Anybody already holding a founding subscription
-# keeps it: Stripe bills an existing subscription at the price it was opened
-# with, so this changes what can be bought, never what somebody already has.
+# Half of StatZ must still cost more than Premium at every interval, or the
+# first 50 pay less for more. At Premium $10 it did not ($7.50 < $10) and the
+# monthly and yearly seats were withdrawn for a day; at Premium $7 it does
+# again ($7.50 > $7, $75 > $60), so they are back. The assertion below is what
+# decides — move a price and it says whether the founding seats still fit.
 FOUNDING_TIER = TIER_STATZ
 FOUNDING_LIMIT = 50
 FOUNDING_DISCOUNT = 0.50              # first 50 pay half
 _half = lambda cents: int(cents * (1 - FOUNDING_DISCOUNT))
 FOUNDING_PRICE_CENTS = _half(LIFETIME_PRICE_CENTS)   # $150 lifetime
-# Kept as names (and served as null) so a client that reads them renders
-# nothing rather than breaking: an endpoint may lose a VALUE, never a key.
-FOUNDING_YEAR_CENTS = None
-FOUNDING_MONTH_CENTS = None
+FOUNDING_YEAR_CENTS = _half(STATZ_YEAR_CENTS)        # $75/yr
+FOUNDING_MONTH_CENTS = _half(STATZ_MONTH_CENTS)      # $7.50/mo
 FOUNDING_PLANS = {
     "lifetime": {"mode": "payment", "cents": FOUNDING_PRICE_CENTS, "interval": None, "kind": "lifetime"},
+    "year": {"mode": "subscription", "cents": FOUNDING_YEAR_CENTS, "interval": "year", "kind": "founding_sub"},
+    "month": {"mode": "subscription", "cents": FOUNDING_MONTH_CENTS, "interval": "month", "kind": "founding_sub"},
 }
 
 # The ladder must never invert: StatZ above Premium at every interval, annual
-# under twelve months, and the founding seat — StatZ for life — worth more
-# than a single year of Premium.
+# under twelve months, and founding StatZ above Premium at every interval.
 assert STATZ_MONTH_CENTS > PREMIUM_MONTH_CENTS and STATZ_YEAR_CENTS > PREMIUM_YEAR_CENTS, "StatZ must cost more than Premium."
 assert PREMIUM_YEAR_CENTS < PREMIUM_MONTH_CENTS * 12 and STATZ_YEAR_CENTS < STATZ_MONTH_CENTS * 12, "Annual must beat monthly."
+assert FOUNDING_MONTH_CENTS > PREMIUM_MONTH_CENTS and FOUNDING_YEAR_CENTS > PREMIUM_YEAR_CENTS, (
+    "Founding StatZ must cost more than Premium — the ladder is inverted.")
 assert FOUNDING_PRICE_CENTS > PREMIUM_YEAR_CENTS, "The founding lifetime seat undercuts a year of Premium."
 
 

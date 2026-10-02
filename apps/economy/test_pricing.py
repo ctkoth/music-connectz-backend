@@ -18,25 +18,29 @@ class PricingLadderTests(TestCase):
         self.assertGreater(catalog.STATZ_MONTH_CENTS, catalog.PREMIUM_MONTH_CENTS)
         self.assertGreater(catalog.STATZ_YEAR_CENTS, catalog.PREMIUM_YEAR_CENTS)
 
-    def test_founding_is_the_lifetime_seat_only(self):
-        # Half of $15/mo is $7.50 — under Premium's $10. A founding monthly or
-        # yearly plan would let the first 50 pay less for more.
-        self.assertEqual(set(catalog.FOUNDING_PLANS), {"lifetime"})
-        self.assertIsNone(catalog.FOUNDING_MONTH_CENTS)
-        self.assertIsNone(catalog.FOUNDING_YEAR_CENTS)
-        self.assertEqual(catalog.FOUNDING_PRICE_CENTS * 2, catalog.LIFETIME_PRICE_CENTS)
+    def test_founding_statz_never_undercuts_premium(self):
+        # The half-price founding seat must still cost more than the tier below
+        # it, or the first 50 members pay less for more.
+        self.assertGreater(catalog.FOUNDING_MONTH_CENTS, catalog.PREMIUM_MONTH_CENTS)
+        self.assertGreater(catalog.FOUNDING_YEAR_CENTS, catalog.PREMIUM_YEAR_CENTS)
         self.assertGreater(catalog.FOUNDING_PRICE_CENTS, catalog.PREMIUM_YEAR_CENTS)
 
+    def test_founding_really_is_half(self):
+        self.assertEqual(catalog.FOUNDING_MONTH_CENTS * 2, catalog.STATZ_MONTH_CENTS)
+        self.assertEqual(catalog.FOUNDING_YEAR_CENTS * 2, catalog.STATZ_YEAR_CENTS)
+        self.assertEqual(catalog.FOUNDING_PRICE_CENTS * 2, catalog.LIFETIME_PRICE_CENTS)
+        self.assertEqual(set(catalog.FOUNDING_PLANS), {"lifetime", "year", "month"})
+
     def test_the_published_numbers(self):
-        self.assertEqual(catalog.PREMIUM_MONTH_CENTS, 1000)    # $10/mo
-        self.assertEqual(catalog.PREMIUM_YEAR_CENTS, 9000)     # $90/yr
+        self.assertEqual(catalog.PREMIUM_MONTH_CENTS, 700)     # $7/mo
+        self.assertEqual(catalog.PREMIUM_YEAR_CENTS, 6000)     # $60/yr
         self.assertEqual(catalog.STATZ_MONTH_CENTS, 1500)      # $15/mo
         self.assertEqual(catalog.STATZ_YEAR_CENTS, 15000)      # $150/yr
         self.assertEqual(catalog.LIFETIME_PRICE_CENTS, 30000)  # $300 once
 
     def test_the_tiers_endpoint_quotes_both_intervals(self):
         tiers = {t["key"]: t for t in APIClient().get("/api/economy/tiers/").json()["tiers"]}
-        self.assertEqual((tiers["premium"]["month_cents"], tiers["premium"]["year_cents"]), (1000, 9000))
+        self.assertEqual((tiers["premium"]["month_cents"], tiers["premium"]["year_cents"]), (700, 6000))
         self.assertEqual((tiers["statz"]["month_cents"], tiers["statz"]["year_cents"]), (1500, 15000))
         self.assertEqual(tiers["statz"]["char_limit"], 5000)
 
