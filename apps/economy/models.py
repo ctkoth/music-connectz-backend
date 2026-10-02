@@ -6985,6 +6985,11 @@ class ViewSession(models.Model):
     target = models.CharField(max_length=80, db_index=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
                               related_name="views_received")
+    # The same two facts FunnelZ keeps about a visit: which share link brought
+    # it (?src=) and the screen shape, measured on the client — never a user
+    # agent, never an address.
+    src = models.CharField(max_length=24, blank=True, default="")
+    dev = models.CharField(max_length=8, blank=True, default="")
     started_at = models.DateTimeField(auto_now_add=True, db_index=True)
     ended_at = models.DateTimeField()
 

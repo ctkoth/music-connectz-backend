@@ -10,7 +10,10 @@ Two readers:
   * everyone — the total view count under a post or profile: sessions by
     other people that lasted at least MIN_VIEW_SECONDS, nothing padded;
   * StatZ (the sample included) — a timeline where each viewer of YOUR posts
-    and profile is a track and each session is a clip, like a DAW. The
+    and profile is a track and each session is a clip, like a DAW. Somebody
+    without an account gets a track of their own too ("Visitor 3"), with the
+    screen they used and the share link that brought them — never a name, an
+    address or anything that could find them. The
     platform owner can also read every tab ("scope=all").
 
 Who viewed is shown by name to the StatZ owner of what was viewed. That is
@@ -41,6 +44,8 @@ RANGES = {"1h": timedelta(hours=1), "24h": timedelta(hours=24), "7d": timedelta(
 TARGET = re.compile(r"^(post:\d{1,12}|profile:[A-Za-z0-9_]{1,40}|tab:[a-z0-9_]{1,40})$")
 MIN_VIEW_SECONDS = 5          # a view is somebody who stayed, not a page that loaded
 ANON_STARTS_PER_HOUR = 120    # per address — loose, because a carrier's NAT is many phones
+SRC = re.compile(r"^[a-z0-9_]{1,24}$")
+DEVICES = ("phone", "tablet", "desktop")
 NOTICE = "Views are counted, and StatZ creators can see who viewed their posts and profile."
 
 
@@ -87,6 +92,9 @@ class ViewStartView(APIView):
             return Response({"detail": "unknown target"}, status=status.HTTP_404_NOT_FOUND)
         if viewer and owner_id == viewer.id:
             return Response({"id": None, "counted": False})
+        src = str(d.get("src", "")).lower()
+        src = src if SRC.match(src) else ""
+        dev = str(d.get("dev", "")) if d.get("dev") in DEVICES else ""
         now = timezone.now()
         who = {"viewer": viewer} if viewer else {"viewer__isnull": True, "anon_id": anon}
         s = (ViewSession.objects.filter(target=target, ended_at__gte=now - SESSION_GAP, **who)
@@ -96,7 +104,7 @@ class ViewStartView(APIView):
             s.save(update_fields=["ended_at"])
         else:
             s = ViewSession.objects.create(viewer=viewer, anon_id=anon, target=target,
-                                           owner_id=owner_id, ended_at=now)
+                                           owner_id=owner_id, ended_at=now, src=src, dev=dev)
         return Response({"id": s.id, "counted": True, "beat": BEAT})
 
 
@@ -165,9 +173,21 @@ class ViewTimelineView(APIView):
         post_ids = {int(r.target[5:]) for r in rows if r.target.startswith("post:")}
         titles = dict(Post.objects.filter(pk__in=post_ids).values_list("id", "title"))
         lanes = {}
+        visitor_no = {}
         for r in rows:
-            key = r.viewer.username if r.viewer_id else "Visitors"
-            lane = lanes.setdefault(key, {"viewer": key, "member": bool(r.viewer_id), "seconds": 0, "clips": []})
+            if r.viewer_id:
+                key = r.viewer.username
+                lane = lanes.setdefault(key, {"viewer": key, "member": True, "seconds": 0, "clips": []})
+            else:
+                # Somebody without an account: their own track, numbered by
+                # first appearance in this window. The browser's random id
+                # stays on the server — the label is all the owner sees.
+                key = f"anon:{r.anon_id}"
+                n = visitor_no.setdefault(key, len(visitor_no) + 1)
+                lane = lanes.setdefault(key, {"viewer": f"Visitor {n}", "member": False, "seconds": 0,
+                                              "clips": [], "dev": r.dev, "src": r.src})
+                lane["dev"] = lane["dev"] or r.dev
+                lane["src"] = lane["src"] or r.src
             start = max(r.started_at, since)
             secs = max(1, int((r.ended_at - start).total_seconds()))
             lane["seconds"] += secs
@@ -181,6 +201,8 @@ class ViewTimelineView(APIView):
             "can_scope_all": is_owner(request.user),
             "lanes": ordered[:60],
             "total_views": len(rows),
+            "members": sum(1 for l in ordered if l["member"]),
+            "visitors": sum(1 for l in ordered if not l["member"]),
             "total_seconds": sum(l["seconds"] for l in ordered),
             "notice": NOTICE,
         })

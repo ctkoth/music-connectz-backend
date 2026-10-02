@@ -84,3 +84,22 @@ class ViewzTests(TestCase):
         self.assertEqual(every["total_views"], 1)
         with patch("apps.economy.statz_trial.has_statz", return_value=True):
             self.assertEqual(self.c.get(f"{V}timeline/", {"scope": "all"}).json()["scope"], "mine")
+
+
+class VisitorLaneTests(TestCase):
+    def test_each_visitor_is_their_own_track_with_device_and_source(self):
+        owner = User.objects.create_user("own", "o@e.com", "pw-Long-enough-1")
+        post = Post.objects.create(author=owner, title="Drop")
+        t = f"post:{post.id}"
+        anon = APIClient()
+        anon.post(f"{V}start/", {"target": t, "anon_id": "aaa", "src": "instagram", "dev": "phone"}, format="json")
+        anon.post(f"{V}start/", {"target": t, "anon_id": "bbb", "src": "BAD src!", "dev": "toaster"}, format="json")
+        o = APIClient(); o.force_authenticate(owner)
+        with patch("apps.economy.statz_trial.has_statz", return_value=True):
+            d = o.get(f"{V}timeline/").json()
+        lanes = {l["viewer"]: l for l in d["lanes"]}
+        self.assertEqual(set(lanes), {"Visitor 1", "Visitor 2"})
+        self.assertEqual((lanes["Visitor 1"]["dev"], lanes["Visitor 1"]["src"]), ("phone", "instagram"))
+        self.assertEqual((lanes["Visitor 2"]["dev"], lanes["Visitor 2"]["src"]), ("", ""))
+        self.assertEqual((d["members"], d["visitors"]), (0, 2))
+        self.assertNotIn("aaa", str(d))
