@@ -8,6 +8,16 @@ from apps.economy.models import BeatZ, BeatPurchase, BeatUsage, Wallet, Membersh
 User = get_user_model()
 
 
+
+def _give_audio():
+    """A beat can only be sold once it has audio a buyer can hear first."""
+    from apps.economy.models import Upload
+    for b in BeatZ.objects.filter(audio_upload__isnull=True):
+        b.audio_upload = Upload.objects.create(user=b.producer, file=f"uploads/{b.producer_id}/beat{b.id}.mp3",
+                                               name=f"beat{b.id}.mp3", size_bytes=1)
+        b.save(update_fields=["audio_upload"])
+
+
 class BeatListTests(APITestCase):
     """Test beat listing and creation."""
 
@@ -19,21 +29,21 @@ class BeatListTests(APITestCase):
             password="pw12345!"
         )
         Membership.objects.create(user=self.producer1, tier=TIER_FREE)
-        Wallet.objects.create(user=self.producer1, spinaz=5000)
+        Wallet.objects.create(user=self.producer1, spinaz=5000, money_cents=5000)
         self.producer2 = User.objects.create_user(
             username="producer2",
             email="producer2@example.com",
             password="pw12345!"
         )
         Membership.objects.create(user=self.producer2, tier=TIER_FREE)
-        Wallet.objects.create(user=self.producer2, spinaz=5000)
+        Wallet.objects.create(user=self.producer2, spinaz=5000, money_cents=5000)
         self.buyer = User.objects.create_user(
             username="buyer",
             email="buyer@example.com",
             password="pw12345!"
         )
         Membership.objects.create(user=self.buyer, tier=TIER_FREE)
-        Wallet.objects.create(user=self.buyer, spinaz=10000)
+        Wallet.objects.create(user=self.buyer, spinaz=10000, money_cents=10000)
 
         self.beat1 = BeatZ.objects.create(
             producer=self.producer1,
@@ -55,6 +65,7 @@ class BeatListTests(APITestCase):
             license_type=BeatZ.LICENSE_EXCLUSIVE,
             quantity_available=1
         )
+        _give_audio()
 
     def test_list_beats(self):
         """Get list of all beats."""
@@ -145,14 +156,14 @@ class BeatDetailTests(APITestCase):
             password="pw12345!"
         )
         Membership.objects.create(user=self.producer, tier=TIER_FREE)
-        Wallet.objects.create(user=self.producer, spinaz=5000)
+        Wallet.objects.create(user=self.producer, spinaz=5000, money_cents=5000)
         self.other_user = User.objects.create_user(
             username="other",
             email="other@example.com",
             password="pw12345!"
         )
         Membership.objects.create(user=self.other_user, tier=TIER_FREE)
-        Wallet.objects.create(user=self.other_user, spinaz=5000)
+        Wallet.objects.create(user=self.other_user, spinaz=5000, money_cents=5000)
 
         self.beat = BeatZ.objects.create(
             producer=self.producer,
@@ -163,6 +174,7 @@ class BeatDetailTests(APITestCase):
             price_cents=500,
             license_type=BeatZ.LICENSE_NONEXCLUSIVE,
         )
+        _give_audio()
 
     def test_get_beat_details(self):
         """Get details of a specific beat."""
@@ -217,21 +229,21 @@ class BeatPurchaseTests(APITestCase):
             password="pw12345!"
         )
         Membership.objects.create(user=self.producer, tier=TIER_FREE)
-        Wallet.objects.create(user=self.producer, spinaz=1000)
+        Wallet.objects.create(user=self.producer, spinaz=1000, money_cents=1000)
         self.buyer1 = User.objects.create_user(
             username="buyer1",
             email="buyer1@example.com",
             password="pw12345!"
         )
         Membership.objects.create(user=self.buyer1, tier=TIER_FREE)
-        Wallet.objects.create(user=self.buyer1, spinaz=10000)
+        Wallet.objects.create(user=self.buyer1, spinaz=10000, money_cents=10000)
         self.buyer2 = User.objects.create_user(
             username="buyer2",
             email="buyer2@example.com",
             password="pw12345!"
         )
         Membership.objects.create(user=self.buyer2, tier=TIER_FREE)
-        Wallet.objects.create(user=self.buyer2, spinaz=10000)
+        Wallet.objects.create(user=self.buyer2, spinaz=10000, money_cents=10000)
 
         self.nonexclusive_beat = BeatZ.objects.create(
             producer=self.producer,
@@ -253,6 +265,7 @@ class BeatPurchaseTests(APITestCase):
             license_type=BeatZ.LICENSE_EXCLUSIVE,
             quantity_available=1
         )
+        _give_audio()
 
     def test_purchase_nonexclusive_beat(self):
         """Buyer can purchase a non-exclusive beat."""
@@ -326,9 +339,9 @@ class BeatPurchaseTests(APITestCase):
         self.assertEqual(response2.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_insufficient_funds(self):
-        """Buyer without enough SpinaZ cannot purchase."""
+        """Buyer without enough money cannot purchase."""
         self.client.force_authenticate(user=self.buyer1)
-        self.buyer1.wallet.spinaz = 100
+        self.buyer1.wallet.money_cents = 100
         self.buyer1.wallet.save()
 
         response = self.client.post(
@@ -339,7 +352,7 @@ class BeatPurchaseTests(APITestCase):
 
     def test_producer_receives_payout(self):
         """Producer receives payout minus developer cut."""
-        initial_spinaz = self.producer.wallet.spinaz
+        initial_money = self.producer.wallet.money_cents
 
         self.client.force_authenticate(user=self.buyer1)
         response = self.client.post(
@@ -349,7 +362,7 @@ class BeatPurchaseTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
         self.producer.wallet.refresh_from_db()
-        self.assertGreater(self.producer.wallet.spinaz, initial_spinaz)
+        self.assertGreater(self.producer.wallet.money_cents, initial_money)
 
 
 class BeatUsageReportTests(APITestCase):
@@ -363,14 +376,14 @@ class BeatUsageReportTests(APITestCase):
             password="pw12345!"
         )
         Membership.objects.create(user=self.producer, tier=TIER_FREE)
-        Wallet.objects.create(user=self.producer, spinaz=5000)
+        Wallet.objects.create(user=self.producer, spinaz=5000, money_cents=5000)
         self.buyer = User.objects.create_user(
             username="buyer",
             email="buyer@example.com",
             password="pw12345!"
         )
         Membership.objects.create(user=self.buyer, tier=TIER_FREE)
-        Wallet.objects.create(user=self.buyer, spinaz=10000)
+        Wallet.objects.create(user=self.buyer, spinaz=10000, money_cents=10000)
 
         self.beat = BeatZ.objects.create(
             producer=self.producer,
@@ -388,6 +401,7 @@ class BeatUsageReportTests(APITestCase):
             developer_cut_cents=50,
             producer_payout_cents=450,
         )
+        _give_audio()
 
     def test_report_usage(self):
         """Buyer can report usage of purchased beat."""
@@ -434,7 +448,7 @@ class BeatUsageReportTests(APITestCase):
             password="pw12345!"
         )
         Membership.objects.create(user=other_buyer, tier=TIER_FREE)
-        Wallet.objects.create(user=other_buyer, spinaz=5000)
+        Wallet.objects.create(user=other_buyer, spinaz=5000, money_cents=5000)
         self.client.force_authenticate(user=other_buyer)
         data = {"usage_kind": BeatUsage.USAGE_YOUTUBE}
         response = self.client.post(
@@ -455,21 +469,21 @@ class BeatEarningsTests(APITestCase):
             password="pw12345!"
         )
         Membership.objects.create(user=self.producer, tier=TIER_FREE)
-        Wallet.objects.create(user=self.producer, spinaz=5000)
+        Wallet.objects.create(user=self.producer, spinaz=5000, money_cents=5000)
         self.buyer1 = User.objects.create_user(
             username="buyer1",
             email="buyer1@example.com",
             password="pw12345!"
         )
         Membership.objects.create(user=self.buyer1, tier=TIER_FREE)
-        Wallet.objects.create(user=self.buyer1, spinaz=10000)
+        Wallet.objects.create(user=self.buyer1, spinaz=10000, money_cents=10000)
         self.buyer2 = User.objects.create_user(
             username="buyer2",
             email="buyer2@example.com",
             password="pw12345!"
         )
         Membership.objects.create(user=self.buyer2, tier=TIER_FREE)
-        Wallet.objects.create(user=self.buyer2, spinaz=10000)
+        Wallet.objects.create(user=self.buyer2, spinaz=10000, money_cents=10000)
 
         self.beat1 = BeatZ.objects.create(
             producer=self.producer,
@@ -513,6 +527,7 @@ class BeatEarningsTests(APITestCase):
             developer_cut_cents=100,
             producer_payout_cents=900,
         )
+        _give_audio()
 
     def test_get_earnings(self):
         """Producer can view their earnings."""
@@ -544,7 +559,7 @@ class BeatEarningsTests(APITestCase):
             password="pw12345!"
         )
         Membership.objects.create(user=new_producer, tier=TIER_FREE)
-        Wallet.objects.create(user=new_producer, spinaz=5000)
+        Wallet.objects.create(user=new_producer, spinaz=5000, money_cents=5000)
         self.client.force_authenticate(user=new_producer)
         response = self.client.get("/api/economy/beatz/earnings/")
 
@@ -564,21 +579,21 @@ class ProducerBeatsTests(APITestCase):
             password="pw12345!"
         )
         Membership.objects.create(user=self.producer, tier=TIER_FREE)
-        Wallet.objects.create(user=self.producer, spinaz=5000)
+        Wallet.objects.create(user=self.producer, spinaz=5000, money_cents=5000)
         self.other_producer = User.objects.create_user(
             username="other",
             email="other@example.com",
             password="pw12345!"
         )
         Membership.objects.create(user=self.other_producer, tier=TIER_FREE)
-        Wallet.objects.create(user=self.other_producer, spinaz=5000)
+        Wallet.objects.create(user=self.other_producer, spinaz=5000, money_cents=5000)
         self.buyer = User.objects.create_user(
             username="buyer",
             email="buyer@example.com",
             password="pw12345!"
         )
         Membership.objects.create(user=self.buyer, tier=TIER_FREE)
-        Wallet.objects.create(user=self.buyer, spinaz=10000)
+        Wallet.objects.create(user=self.buyer, spinaz=10000, money_cents=10000)
 
         self.beat1 = BeatZ.objects.create(
             producer=self.producer,
@@ -612,6 +627,7 @@ class ProducerBeatsTests(APITestCase):
             developer_cut_cents=50,
             producer_payout_cents=450,
         )
+        _give_audio()
 
     def test_get_my_beats(self):
         """Producer can view their own beats with sales counts."""
@@ -640,3 +656,53 @@ class ProducerBeatsTests(APITestCase):
         response = self.client.get("/api/economy/beatz/my-beats/")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data["beats"]), 0)
+
+
+class BeatMoneyTests(APITestCase):
+    """BeatZ charges real money, needs audio, and exclusive means one buyer."""
+
+    def setUp(self):
+        self.p = User.objects.create_user("bprod", password="pw12345!")
+        self.b = User.objects.create_user("bbuy", password="pw12345!")
+        self.c = User.objects.create_user("bbuy2", password="pw12345!")
+        for u in (self.p, self.b, self.c):
+            Wallet.objects.create(user=u, spinaz=0, money_cents=5000)
+        self.beat = BeatZ.objects.create(producer=self.p, title="X", genre="trap", tempo_bpm=140,
+                                         price_cents=1000, license_type=BeatZ.LICENSE_EXCLUSIVE,
+                                         quantity_available=1)
+
+    def buy(self, u):
+        self.client.force_authenticate(user=u)
+        return self.client.post(f"/api/economy/beatz/{self.beat.id}/purchase/", {})
+
+    def test_no_audio_cannot_be_bought_and_charges_nothing(self):
+        r = self.buy(self.b)
+        self.assertEqual(r.status_code, 400)
+        self.b.wallet.refresh_from_db(); self.assertEqual(self.b.wallet.money_cents, 5000)
+
+    def test_exclusive_one_buyer_money_moves_and_quote_matches(self):
+        _give_audio()
+        self.client.force_authenticate(user=self.b)
+        q = self.client.get(f"/api/economy/beatz/{self.beat.id}/purchase/").json()
+        self.assertTrue(q["can_buy"]); self.assertEqual(q["fee_cents"] + q["producer_cents"], 1000)
+        self.assertEqual(self.buy(self.b).status_code, 201)
+        self.b.wallet.refresh_from_db(); self.p.wallet.refresh_from_db()
+        self.assertEqual(self.b.wallet.money_cents, 4000)
+        self.assertEqual(self.p.wallet.money_cents, 5000 + q["producer_cents"])
+        self.assertEqual(self.b.wallet.spinaz, 0)
+        self.assertEqual(self.buy(self.c).status_code, 400)
+        self.client.force_authenticate(user=self.c)
+        row = self.client.get("/api/economy/beatz/").json()["beats"][0]
+        self.assertFalse(row["can_buy"]); self.assertEqual(row["left"], 0)
+
+    def test_price_bounds(self):
+        self.client.force_authenticate(user=self.p)
+        r = self.client.patch(f"/api/economy/beatz/{self.beat.id}/", {"price_cents": 5})
+        self.assertEqual(r.status_code, 400)
+
+    def test_audio_must_be_your_own_upload(self):
+        from apps.economy.models import Upload
+        theirs = Upload.objects.create(user=self.b, file="uploads/x/a.mp3", name="a.mp3")
+        self.client.force_authenticate(user=self.p)
+        r = self.client.patch(f"/api/economy/beatz/{self.beat.id}/", {"audio_upload_id": theirs.id})
+        self.assertEqual(r.status_code, 400)

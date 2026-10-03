@@ -26,9 +26,65 @@ from apps.economy.models import (
 User = get_user_model()
 
 
-def _beat_dict(beat, buyer=None):
-    """Format a beat for API response."""
-    data = {
+# What a beat may be priced at, in cents of real money (💵). The price is a
+# dollar figure on the screen, so it is charged in dollars — it used to take
+# SpinaZ for a number displayed as cents, which made a "$5" beat cost 500 🍥.
+BEAT_PRICE_MIN_CENTS = 100
+BEAT_PRICE_MAX_CENTS = 50000
+
+
+def _clean_price(value):
+    try:
+        cents = int(value)
+    except (TypeError, ValueError):
+        raise ValueError("Price must be a whole number of cents.")
+    if not BEAT_PRICE_MIN_CENTS <= cents <= BEAT_PRICE_MAX_CENTS:
+        raise ValueError(f"Price must be between ${BEAT_PRICE_MIN_CENTS/100:.2f} "
+                         f"and ${BEAT_PRICE_MAX_CENTS/100:.2f}.")
+    return cents
+
+
+def _audio_for(user, upload_id):
+    """One of the member's own uploads, or None. Raises ValueError otherwise."""
+    if upload_id in (None, ""):
+        return None
+    up = Upload.objects.filter(pk=upload_id, user=user).first()
+    if not up:
+        raise ValueError("That audio isn't one of your uploads.")
+    return up
+
+
+def _split(beat):
+    """(platform fee, producer payout). The fee is the PRODUCER'S tier, the
+    same as a post sale — what a seller keeps is their plan, not the buyer's."""
+    from .models import DEV_TAX, membership_for
+    return split_cents(beat.price_cents, DEV_TAX[membership_for(beat.producer).tier])
+
+
+def _beat_dict(beat, request=None, owned=None, sold=None):
+    """A beat for the screen. `owned` (purchase id or None) and `sold` are
+    batched by the list views; left as None they are looked up per beat."""
+    from .media import stable_media_url
+    user = getattr(request, "user", None)
+    if owned is None and user is not None and user.is_authenticated:
+        owned = BeatPurchase.objects.filter(beat=beat, buyer=user).values_list("id", flat=True).first()
+    if sold is None:
+        sold = beat.purchases.count()
+    exclusive = beat.license_type == BeatZ.LICENSE_EXCLUSIVE
+    left = max(0, (beat.quantity_available or 0) - (sold if exclusive else 0))
+    audio = stable_media_url(beat.audio_upload, request) if beat.audio_upload_id else ""
+    mine = bool(user is not None and beat.producer_id == getattr(user, "id", None))
+    if mine:
+        why_not = "It's your beat."
+    elif owned:
+        why_not = "You already hold a license."
+    elif not audio:
+        why_not = "No audio attached yet — nobody can buy what they can't hear."
+    elif exclusive and sold:
+        why_not = "The exclusive license has been sold."
+    else:
+        why_not = ""
+    return {
         "id": beat.id,
         "producer_id": beat.producer_id,
         "producer": beat.producer.username,
@@ -39,222 +95,201 @@ def _beat_dict(beat, buyer=None):
         "price_cents": beat.price_cents,
         "license_type": beat.license_type,
         "quantity_available": beat.quantity_available,
+        "left": left,
+        "sold": sold,
+        "audio_url": audio or None,
+        "mine": mine,
+        "owned_by_me": bool(owned),
+        "purchase_id": owned or None,
+        "can_buy": not why_not,
+        "why_not": why_not,
         "created_at": beat.created_at,
     }
-    if buyer:
-        purchase = BeatPurchase.objects.filter(
-            beat=beat, buyer=buyer
-        ).first()
-        data["owned_by_me"] = purchase is not None
-        data["purchase_id"] = purchase.id if purchase else None
-    return data
+
+
+def _batch(beats, request):
+    from django.db.models import Count
+    ids = [b.id for b in beats]
+    sold = dict(BeatPurchase.objects.filter(beat_id__in=ids).values_list("beat_id")
+                .annotate(n=Count("id")))
+    owned = dict(BeatPurchase.objects.filter(beat_id__in=ids, buyer=request.user)
+                 .values_list("beat_id", "id"))
+    return [_beat_dict(b, request, owned=owned.get(b.id, 0), sold=sold.get(b.id, 0))
+            for b in beats]
 
 
 class BeatListView(APIView):
     """GET /api/economy/beatz/ — browse all beats.
-    POST /api/economy/beatz/ — producer uploads a new beat.
+    POST /api/economy/beatz/ — producer lists a new beat.
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        """List all beats available for purchase, optionally filtered by genre or producer."""
         genre = request.query_params.get("genre")
         producer_id = request.query_params.get("producer_id")
-
-        beats = BeatZ.objects.all().order_by("-created_at")
-
+        beats = BeatZ.objects.select_related("producer", "audio_upload").order_by("-created_at")
         if genre:
             beats = beats.filter(genre=genre)
         if producer_id:
             beats = beats.filter(producer_id=producer_id)
-
         return Response({
-            "beats": [_beat_dict(b, buyer=request.user) for b in beats]
+            "beats": _batch(list(beats[:200]), request),
+            "min_cents": BEAT_PRICE_MIN_CENTS, "max_cents": BEAT_PRICE_MAX_CENTS,
         })
 
     def post(self, request):
-        """Producer uploads a new beat."""
-        title = request.data.get("title")
-        description = request.data.get("description", "")
-        genre = request.data.get("genre")
-        tempo_bpm = request.data.get("tempo_bpm")
-        price_cents = request.data.get("price_cents")
-        license_type = request.data.get("license_type", BeatZ.LICENSE_NONEXCLUSIVE)
-        quantity_available = request.data.get("quantity_available")
-
+        d = request.data
+        title = str(d.get("title") or "").strip()[:200]
+        genre = str(d.get("genre") or "").strip()[:50]
+        license_type = d.get("license_type", BeatZ.LICENSE_NONEXCLUSIVE)
         if not title:
-            return Response(
-                {"title": "Required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"title": "Required"}, status=status.HTTP_400_BAD_REQUEST)
         if not genre:
-            return Response(
-                {"genre": "Required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        if not tempo_bpm:
-            return Response(
-                {"tempo_bpm": "Required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        if price_cents is None:
-            return Response(
-                {"price_cents": "Required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"genre": "Required"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            tempo = int(d.get("tempo_bpm") or 0)
+        except (TypeError, ValueError):
+            tempo = 0
+        if not 20 <= tempo <= 400:
+            return Response({"tempo_bpm": "Required, 20-400 BPM"}, status=status.HTTP_400_BAD_REQUEST)
+        if d.get("price_cents") is None:
+            return Response({"price_cents": "Required"}, status=status.HTTP_400_BAD_REQUEST)
         if license_type not in [BeatZ.LICENSE_EXCLUSIVE, BeatZ.LICENSE_NONEXCLUSIVE]:
-            return Response(
-                {"license_type": "Must be 'exclusive' or 'nonexclusive'"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if license_type == BeatZ.LICENSE_EXCLUSIVE:
-            quantity_available = quantity_available or 1
-        else:
-            quantity_available = quantity_available or 1000
-
+            return Response({"license_type": "Must be 'exclusive' or 'nonexclusive'"},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            price = _clean_price(d.get("price_cents"))
+            audio = _audio_for(request.user, d.get("audio_upload_id"))
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        # Exclusive is one buyer, always — a stock count above one would make
+        # the word mean nothing.
+        qty = 1 if license_type == BeatZ.LICENSE_EXCLUSIVE else 1000
         beat = BeatZ.objects.create(
-            producer=request.user,
-            title=title,
-            description=description,
-            genre=genre,
-            tempo_bpm=tempo_bpm,
-            price_cents=int(price_cents),
-            license_type=license_type,
-            quantity_available=quantity_available
-        )
-
-        return Response(_beat_dict(beat, buyer=request.user), status=status.HTTP_201_CREATED)
+            producer=request.user, title=title,
+            description=str(d.get("description") or "")[:2000], genre=genre,
+            tempo_bpm=tempo, price_cents=price, license_type=license_type,
+            quantity_available=qty, audio_upload=audio)
+        return Response(_beat_dict(beat, request), status=status.HTTP_201_CREATED)
 
 
 class BeatDetailView(APIView):
-    """GET /api/economy/beatz/<beat_id>/ — get beat details.
-    PATCH /api/economy/beatz/<beat_id>/ — producer updates beat.
+    """GET /api/economy/beatz/<beat_id>/ — beat details.
+    PATCH /api/economy/beatz/<beat_id>/ — producer updates the beat.
     """
     permission_classes = [IsAuthenticated]
 
-    def get_beat(self, beat_id, user):
-        """Get beat, checking ownership only for edit operations."""
-        try:
-            beat = BeatZ.objects.get(id=beat_id)
-        except BeatZ.DoesNotExist:
-            return None
-        return beat
-
     def get(self, request, beat_id):
-        """Get beat details."""
-        beat = self.get_beat(beat_id, request.user)
+        beat = BeatZ.objects.filter(id=beat_id).select_related("producer", "audio_upload").first()
         if not beat:
-            return Response(
-                {"detail": "Beat not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        return Response(_beat_dict(beat, buyer=request.user))
+            return Response({"detail": "Beat not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response(_beat_dict(beat, request))
 
     def patch(self, request, beat_id):
-        """Producer updates beat details."""
-        beat = self.get_beat(beat_id, request.user)
+        beat = BeatZ.objects.filter(id=beat_id).first()
         if not beat:
-            return Response(
-                {"detail": "Beat not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        if beat.producer != request.user:
-            return Response(
-                {"detail": "Only the producer can update this beat"},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
-        if "title" in request.data:
-            beat.title = request.data["title"]
-        if "description" in request.data:
-            beat.description = request.data["description"]
-        if "genre" in request.data:
-            beat.genre = request.data["genre"]
-        if "tempo_bpm" in request.data:
-            beat.tempo_bpm = int(request.data["tempo_bpm"])
-        if "price_cents" in request.data:
-            beat.price_cents = int(request.data["price_cents"])
-        if "quantity_available" in request.data and beat.license_type == BeatZ.LICENSE_EXCLUSIVE:
-            beat.quantity_available = request.data["quantity_available"]
-
+            return Response({"detail": "Beat not found"}, status=status.HTTP_404_NOT_FOUND)
+        if beat.producer_id != request.user.id:
+            return Response({"detail": "Only the producer can update this beat"},
+                            status=status.HTTP_403_FORBIDDEN)
+        d = request.data
+        try:
+            if "title" in d:
+                beat.title = str(d["title"]).strip()[:200] or beat.title
+            if "description" in d:
+                beat.description = str(d["description"])[:2000]
+            if "genre" in d:
+                beat.genre = str(d["genre"]).strip()[:50]
+            if "tempo_bpm" in d:
+                beat.tempo_bpm = int(d["tempo_bpm"])
+            if "price_cents" in d:
+                beat.price_cents = _clean_price(d["price_cents"])
+            if "audio_upload_id" in d:
+                beat.audio_upload = _audio_for(request.user, d["audio_upload_id"])
+        except (TypeError, ValueError) as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         beat.save()
-
-        return Response(_beat_dict(beat, buyer=request.user))
+        return Response(_beat_dict(beat, request))
 
 
 class BeatPurchaseView(APIView):
-    """POST /api/economy/beatz/<beat_id>/purchase/ — buyer purchases a license."""
+    """GET  — the quote: price, your balance, the fee and the producer's cut.
+    POST — buy a license, in real money, atomically."""
     permission_classes = [IsAuthenticated]
 
+    def get(self, request, beat_id):
+        from .models import wallet_for
+        beat = BeatZ.objects.filter(id=beat_id).select_related("producer", "audio_upload").first()
+        if not beat:
+            return Response({"detail": "Beat not found"}, status=status.HTTP_404_NOT_FOUND)
+        fee, payout = _split(beat)
+        return Response({
+            **_beat_dict(beat, request),
+            "balance_cents": wallet_for(request.user).money_cents or 0,
+            "fee_cents": fee, "producer_cents": payout,
+        })
+
     def post(self, request, beat_id):
-        """Purchase a license to a beat."""
+        from django.db import IntegrityError, transaction
+        from .models import Transaction, log_resource, wallet_for
+        from .views import credit_owner
+
+        wallet_for(request.user)
         try:
-            beat = BeatZ.objects.get(id=beat_id)
-        except BeatZ.DoesNotExist:
-            return Response(
-                {"detail": "Beat not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        if beat.producer == request.user:
-            return Response(
-                {"detail": "Cannot purchase your own beat"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if beat.license_type == BeatZ.LICENSE_EXCLUSIVE:
-            existing = BeatPurchase.objects.filter(beat=beat).exists()
-            if existing:
-                return Response(
-                    {"detail": "This exclusive beat is already owned"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-        already_owns = BeatPurchase.objects.filter(
-            beat=beat, buyer=request.user
-        ).exists()
-        if already_owns:
-            return Response(
-                {"detail": "You already own a license to this beat"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        wallet = Wallet.objects.get(user=request.user)
-        if wallet.spinaz < beat.price_cents:
-            return Response(
-                {"detail": f"Insufficient SpinaZ. Need {beat.price_cents}, have {wallet.spinaz}"},
-                status=status.HTTP_402_PAYMENT_REQUIRED
-            )
-
-        wallet.spinaz = F("spinaz") - beat.price_cents
-        wallet.save(update_fields=["spinaz"])
-
-        buyer_membership = request.user.membership
-        developer_cut, producer_payout = split_cents(beat.price_cents, buyer_membership.dev_tax_rate)
-
-        purchase = BeatPurchase.objects.create(
-            buyer=request.user,
-            beat=beat,
-            license_type=beat.license_type,
-            price_cents=beat.price_cents,
-            developer_cut_cents=developer_cut,
-            producer_payout_cents=producer_payout
-        )
-
-        producer_wallet = Wallet.objects.get(user=beat.producer)
-        producer_wallet.spinaz = F("spinaz") + producer_payout
-        producer_wallet.save(update_fields=["spinaz"])
+            with transaction.atomic():
+                # Locked, so two buyers racing for an exclusive can't both win.
+                beat = (BeatZ.objects.select_for_update()
+                        .select_related("producer", "audio_upload").filter(id=beat_id).first())
+                if not beat:
+                    return Response({"detail": "Beat not found"}, status=status.HTTP_404_NOT_FOUND)
+                if beat.producer_id == request.user.id:
+                    return Response({"detail": "Cannot purchase your own beat"},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                if BeatPurchase.objects.filter(beat=beat, buyer=request.user).exists():
+                    return Response({"detail": "You already own a license to this beat"},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                if not beat.audio_upload_id:
+                    return Response({"detail": "This beat has no audio attached yet, so it "
+                                               "can't be sold. Nothing was charged."},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                exclusive = beat.license_type == BeatZ.LICENSE_EXCLUSIVE
+                if exclusive and BeatPurchase.objects.filter(beat=beat).exists():
+                    return Response({"detail": "This exclusive beat is already owned"},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                price = beat.price_cents
+                moved = Wallet.objects.filter(user=request.user, money_cents__gte=price).update(
+                    money_cents=F("money_cents") - price, updated_at=timezone.now())
+                if not moved:
+                    have = wallet_for(request.user).money_cents or 0
+                    return Response(
+                        {"detail": f"Insufficient balance. You need ${price/100:.2f} and have "
+                                   f"${have/100:.2f}. Nothing was charged.",
+                         "price_cents": price, "balance_cents": have},
+                        status=status.HTTP_402_PAYMENT_REQUIRED)
+                fee, payout = _split(beat)
+                purchase = BeatPurchase.objects.create(
+                    buyer=request.user, beat=beat, license_type=beat.license_type,
+                    price_cents=price, developer_cut_cents=fee, producer_payout_cents=payout)
+                wallet_for(beat.producer)
+                Wallet.objects.filter(user=beat.producer).update(
+                    money_cents=F("money_cents") + payout, updated_at=timezone.now())
+                log_resource(beat.producer, Transaction.RES_MONEY, payout,
+                             note=f"BeatZ sale — {beat.title} ({beat.license_type})")
+                log_resource(request.user, Transaction.RES_MONEY, -price,
+                             note=f"BeatZ license — {beat.title} ({beat.license_type})")
+                credit_owner(request.user, fee, f"BeatZ platform fee (beat #{beat.id})")
+        except IntegrityError:
+            return Response({"detail": "You already own a license to this beat. Nothing was charged twice."},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         return Response({
             "id": purchase.id,
             "beat_id": beat.id,
             "license_type": purchase.license_type,
             "price_cents": purchase.price_cents,
-            "producer_payout_cents": producer_payout,
+            "producer_payout_cents": payout,
             "purchased_at": purchase.purchased_at,
+            "balance_after": wallet_for(request.user).money_cents,
         }, status=status.HTTP_201_CREATED)
 
 
@@ -288,7 +323,7 @@ class BeatUsageReportView(APIView):
 
         if post_id:
             try:
-                post = Post.objects.get(id=post_id, creator=request.user)
+                post = Post.objects.get(id=post_id, author=request.user)
             except Post.DoesNotExist:
                 return Response(
                     {"detail": "Post not found"},
@@ -297,7 +332,7 @@ class BeatUsageReportView(APIView):
 
         if upload_id:
             try:
-                upload = Upload.objects.get(id=upload_id, uploader=request.user)
+                upload = Upload.objects.get(id=upload_id, user=request.user)
             except Upload.DoesNotExist:
                 return Response(
                     {"detail": "Upload not found"},
@@ -325,7 +360,7 @@ class BeatEarningsView(APIView):
 
     def get(self, request):
         """Get total earnings and breakdown by beat."""
-        purchases = BeatPurchase.objects.filter(beat__producer=request.user)
+        purchases = BeatPurchase.objects.filter(beat__producer=request.user).select_related("beat")
 
         total_earnings = sum(p.producer_payout_cents for p in purchases)
 
@@ -357,12 +392,7 @@ class ProducerBeatsView(APIView):
         """List all beats uploaded by the requesting producer."""
         beats = BeatZ.objects.filter(producer=request.user).order_by("-created_at")
 
-        return Response({
-            "beats": [
-                {
-                    **_beat_dict(b),
-                    "sales": BeatPurchase.objects.filter(beat=b).count(),
-                }
-                for b in beats
-            ]
-        })
+        rows = _batch(list(beats.select_related("producer", "audio_upload")), request)
+        for r in rows:
+            r["sales"] = r["sold"]
+        return Response({"beats": rows})
