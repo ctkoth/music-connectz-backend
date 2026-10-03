@@ -179,6 +179,10 @@ class MessagesView(APIView):
             return Response({"detail": "can't message yourself"}, status=status.HTTP_400_BAD_REQUEST)
         if other.id in blocked_user_ids(me):
             return Response({"detail": "You've blocked this user (or they blocked you)."}, status=status.HTTP_403_FORBIDDEN)
+        from .gates import reach_block
+        blocked = reach_block(me, other)
+        if blocked:
+            return Response(blocked, status=status.HTTP_403_FORBIDDEN)
         cap = limits_for(membership_for(me).tier)["char_limit"]
         if len(body) > cap:
             return Response({"detail": f"Message exceeds your {cap}-character limit — upgrade for more."}, status=status.HTTP_400_BAD_REQUEST)

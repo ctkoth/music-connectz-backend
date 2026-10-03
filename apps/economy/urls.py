@@ -70,6 +70,7 @@ from .logz import FeaturesView, LogZExportView, LogZView
 from .observationz import ObservationConsentView, ObservationZView
 from .social_verify import SocialReviewQueueView, SocialVerifyView
 from .parcel import ParcelCampaignView
+from .reach import ReachGatesView
 from .autotopup import AutoTopUpView, AutoTopUpCancelView
 from .identity import IdentityView
 from .collab import (
@@ -358,6 +359,7 @@ urlpatterns = [
     # What the AI couldn't confirm goes to a person, not to a wall.
     path("social/reviews/", SocialReviewQueueView.as_view(), name="economy-social-reviews"),
     path("members/", MembersView.as_view(), name="economy-members"),
+    path("reach/", ReachGatesView.as_view(), name="economy-reach"),
     path("members/<str:username>/", MemberProfileView.as_view(), name="economy-member"),
     # RateZ — every rating, classified for what it actually measures.
     # BadgeZ — a title you wear and an effect you feel.

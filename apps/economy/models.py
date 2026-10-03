@@ -975,6 +975,9 @@ class Profile(models.Model):
     # One CharField rather than four booleans because it is one answer a
     # member gives once, and because the filter reads it as a whole.
     personality = models.CharField(max_length=4, blank=True, default="", db_index=True)
+    # "Who can reach me": the five range gates applied to messages and calls
+    # sent TO this member. Empty = everyone, which is the default.
+    contact_gates = models.JSONField(default=dict, blank=True)
     # ReligionZ — a declared tradition from the closed list in religionz.py,
     # or "" for "hasn't said". Same shape as personality and sign: a
     # DECLARATION filterable in MembersView, never a measurement — see

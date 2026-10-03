@@ -128,3 +128,24 @@ def describe(key, gates):
 def refusal(key, gates):
     return {"detail": f"This one is gated on {describe(key, gates)} — you're outside it.",
             "gate": key, "gates": gates}
+
+
+def reach_block(sender, recipient):
+    """Why `sender` may not message or call `recipient`, or None.
+
+    Open unless the recipient set gates. Someone the recipient FOLLOWS always
+    gets through: a filter is for strangers, not for people they chose.
+    Distance is measured from the recipient's shared location.
+    """
+    from .models import Follow, profile_for
+    rp = profile_for(recipient)
+    gates = rp.contact_gates or {}
+    if not gates or Follow.objects.filter(follower=recipient, following=sender).exists():
+        return None
+    origin = (rp.lat, rp.lng) if (rp.share_location and rp.lat is not None) else (None, None)
+    failed = failing_gate(member_metrics(profile_for(sender), origin), gates)
+    if not failed:
+        return None
+    return {"detail": f"@{recipient.username} only takes messages and calls from members with "
+                      f"{describe(failed, gates)}, and you're outside it.",
+            "gate": failed, "gates": gates, "reach": True}

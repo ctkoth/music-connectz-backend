@@ -1158,7 +1158,12 @@ class MemberProfileView(APIView):
             return Response({"detail": "profile not found"}, status=status.HTTP_404_NOT_FOUND)
         p = profile_for(user)
         # recheck only bites on your own profile; _profile_full enforces that.
-        return Response(_profile_full(p, request, recheck=True))
+        out = _profile_full(p, request, recheck=True)
+        # Said on the card BEFORE Message/Call is pressed, not as a refusal after.
+        from .gates import reach_block
+        b = None if p.user_id == request.user.id else reach_block(request.user, p.user)
+        out["reach_block"] = b["detail"] if b else None
+        return Response(out)
 
 
 class MembersView(APIView):
