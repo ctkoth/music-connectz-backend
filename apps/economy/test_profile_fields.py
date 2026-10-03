@@ -14,6 +14,9 @@ class CleanTests(TestCase):
     def test_cover_must_be_our_media(self):
         self.assertEqual(clean_profile_field("cover_url", "https://evil.example/x.png"), "")
         self.assertEqual(clean_profile_field("cover_url", "/api/economy/media/3/a.png"), "/api/economy/media/3/a.png")
+        # The upload endpoint hands out an absolute URL; the path is kept.
+        self.assertEqual(clean_profile_field("cover_url", "https://api.x/api/economy/media/3/a.png"), "/api/economy/media/3/a.png")
+        self.assertEqual(clean_profile_field("cover_url", "javascript:/api/economy/media/1/a"), "")
 
     def test_timezone_shape(self):
         self.assertEqual(clean_profile_field("timezone", "America/Denver"), "America/Denver")

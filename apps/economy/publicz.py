@@ -73,7 +73,10 @@ def public_post_dict(p):
     }
 
 
-def public_profile_dict(p):
+from apps.economy.social import cover_abs  # noqa: E402
+
+
+def public_profile_dict(p, request=None):
     """A member's card as a stranger sees it — the work, not the person.
 
     Skills carry names and rates, deliberately: what somebody does and what
@@ -110,7 +113,7 @@ def public_profile_dict(p):
         # logged-out card: it narrows where somebody lives for no hiring gain.
         "pronouns": p.pronouns, "headline": p.headline, "genres": p.genres or [],
         "influences": p.influences or [], "gear": p.gear or [], "label": p.label,
-        "cover_url": p.cover_url,
+        "cover_url": cover_abs(p.cover_url, request),
         # BadgeZ travels with the card. A shared profile is somebody's proof
         # they are worth hiring, and "ten deals, no dispute" is exactly the
         # part of that a stranger came to find out. Only badges the member
@@ -155,4 +158,4 @@ class PublicProfileView(APIView):
              .filter(user__username__iexact=str(username)[:150]).first())
         if not p:
             return Response({"detail": "profile not found"}, status=status.HTTP_404_NOT_FOUND)
-        return Response(public_profile_dict(p))
+        return Response(public_profile_dict(p, request))

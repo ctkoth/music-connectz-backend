@@ -466,9 +466,23 @@ def clean_profile_field(field, value):
             return None
     if field == "cover_url":
         # Only one of our own uploads, so a profile can't frame an outside page.
-        url = str(value or "").strip()[:300]
-        return url if url.startswith("/api/economy/media/") else ""
+        # The upload endpoint answers with an ABSOLUTE url (the frontend is on
+        # another origin), so keep only the path and rebuild the host on read.
+        from urllib.parse import urlparse
+        raw = str(value or "").strip()
+        u = urlparse(raw)
+        if u.scheme not in ("", "http", "https"):
+            return ""
+        path = u.path[:300]
+        return path if path.startswith("/api/economy/media/") else ""
     return value
+
+
+def cover_abs(path, request=None):
+    """A stored cover path, absolute when a request is there to say the host."""
+    if not path:
+        return ""
+    return request.build_absolute_uri(path) if request is not None else path
 
 
 def _pinned(p):
@@ -657,7 +671,7 @@ def _profile_card(p, request=None, badges=None, audience=None, batched=None):
         "languages": p.languages,
         "pronouns": p.pronouns, "headline": p.headline, "genres": p.genres,
         "influences": p.influences, "gear": p.gear, "label": p.label,
-        "timezone": p.timezone, "cover_url": p.cover_url,
+        "timezone": p.timezone, "cover_url": cover_abs(p.cover_url, request),
         # Only on a single card (batched is None) — the member search would
         # pay one query per row for it.
         "pinned_post": _pinned(p) if batched is None else None,
