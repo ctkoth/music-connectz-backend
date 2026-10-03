@@ -93,3 +93,32 @@ class SettingsStripTests(TestCase):
         finally:
             os.environ.pop("GOOGLE_OAUTH_CLIENT_ID", None)
             importlib.reload(s)
+
+
+class ProfileWithoutIdTests(TestCase):
+    """A profile call that fails must never become a shared identity."""
+
+    def test_missing_id_is_refused_not_none(self):
+        from unittest import mock
+        from apps.accounts import oauth
+
+        tok = mock.Mock(status_code=200); tok.json.return_value = {"access_token": "t"}
+        me = mock.Mock(status_code=403); me.json.return_value = {"error": {"status": 403, "message": "User not registered in the Developer Dashboard"}}
+        with mock.patch.dict("os.environ", {"SPOTIFY_OAUTH_CLIENT_ID": "a", "SPOTIFY_OAUTH_CLIENT_SECRET": "b"}), \
+             mock.patch.object(oauth.requests, "post", return_value=tok), \
+             mock.patch.object(oauth.requests, "get", return_value=me):
+            with self.assertRaises(oauth.OAuthError) as e:
+                oauth.exchange_oauth2("spotify", "code")
+        self.assertIn("Developer Dashboard", str(e.exception))
+
+    def test_200_with_no_id_is_refused(self):
+        from unittest import mock
+        from apps.accounts import oauth
+
+        tok = mock.Mock(status_code=200); tok.json.return_value = {"access_token": "t"}
+        me = mock.Mock(status_code=200); me.json.return_value = {}
+        with mock.patch.dict("os.environ", {"FACEBOOK_OAUTH_CLIENT_ID": "a", "FACEBOOK_OAUTH_CLIENT_SECRET": "b"}), \
+             mock.patch.object(oauth.requests, "post", return_value=tok), \
+             mock.patch.object(oauth.requests, "get", return_value=me):
+            with self.assertRaises(oauth.OAuthError):
+                oauth.exchange_oauth2("facebook", "code")
