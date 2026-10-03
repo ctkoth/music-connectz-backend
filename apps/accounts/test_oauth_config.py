@@ -122,3 +122,20 @@ class ProfileWithoutIdTests(TestCase):
              mock.patch.object(oauth.requests, "get", return_value=me):
             with self.assertRaises(oauth.OAuthError):
                 oauth.exchange_oauth2("facebook", "code")
+
+
+class PendingCreatesInOneStepTests(TestCase):
+    """'I'm new' finishes on the server from the signed pending token."""
+
+    def test_pending_token_creates_and_signs_in(self):
+        from apps.accounts.views import _pending_token
+        from apps.accounts.models import OAuthIdentity
+        tok = _pending_token({"provider": "google", "uid": "g-123", "email": "new@x.com",
+                              "email_verified": True, "name": "New Person", "avatar_url": ""})
+        r = APIClient().post("/api/auth/oauth/google/", {"pending": tok}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertIn("access", r.data)
+        self.assertTrue(OAuthIdentity.objects.filter(provider="google", provider_uid="g-123").exists())
+        # The same token again signs the same person in, never a second account.
+        r2 = APIClient().post("/api/auth/oauth/google/", {"pending": tok}, format="json")
+        self.assertEqual(r2.data["user"]["username"], r.data["user"]["username"])
