@@ -76,6 +76,8 @@ UNLIMITED_CHARS = 10 ** 9
 # over the new number — a quota that retroactively shrinks turns somebody's
 # stored work into an error message they didn't cause.
 # `soundcloud_import` — tracks one SoundCloud import may bring in at once.
+# None is "the whole catalogue" (StatZ, Corey's call): the importer follows
+# SoundCloud's pages to the end rather than stopping at a number.
 #
 # Volume, not access: posting a SoundCloud link one at a time already works at
 # every tier, because WidgetZ reads the id out of the URL and frames the
@@ -113,10 +115,10 @@ TIER_LIMITS = {
     # StatZ writes without a character cap (Corey's call). It was 5,000 for a
     # day; nothing was lost either way, since the cap is applied on write.
     TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999,
-                 "widgets_open": 40, "custom_groups": 20, "soundcloud_import": 200},
+                 "widgets_open": 40, "custom_groups": 20, "soundcloud_import": None},
     # Owner god-mode: effectively unlimited.
     TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760, "embeds_per_post": 999,
-                 "widgets_open": 999, "custom_groups": 999, "soundcloud_import": 200},
+                 "widgets_open": 999, "custom_groups": 999, "soundcloud_import": None},
 }
 
 

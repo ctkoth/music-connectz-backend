@@ -32,7 +32,10 @@ Nothing. Importing is not posting: an imported draft has been shown to no one.
 The normal cost of a post applies when they publish one, which is the moment it
 reaches anybody.
 """
+from urllib.parse import urlparse
+
 import requests
+from django.db import transaction
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -40,7 +43,8 @@ from rest_framework.views import APIView
 
 from apps.accounts.oauth import OAuthError, access_token_for
 
-from .catalog import limits_for
+from .catalog import limits_for, over_char_limit, UNLIMITED_CHARS, TIER_LIMITS
+from .deadline import Deadline
 from .models import Post, membership_for
 from .widgetz import _player_for
 
@@ -53,8 +57,19 @@ ME_TRACKS = "https://api.soundcloud.com/me/tracks"
 PAGE_LIMIT = 200
 
 
+# One import may keep the member waiting this long. A StatZ catalogue of a
+# thousand tracks is five pages; the budget is for a slow SoundCloud, not a
+# big account. Running out is not a failure: what came in is kept, and a second
+# run picks up the rest because already-imported tracks are skipped.
+IMPORT_BUDGET_SECONDS = 60
+# Pages are only followed on SoundCloud's own API host. `next_href` comes from
+# their response, and the member's token rides on every request that follows
+# it — a link anywhere else would hand the token to whoever served it.
+API_HOST = "api.soundcloud.com"
+
+
 def import_cap(tier):
-    """How many tracks one import may bring in.
+    """How many tracks one import may bring in; None is the whole catalogue.
 
     A ladder on volume, not on access: one-at-a-time posting of a SoundCloud
     link is free at every tier and always has been. Free is 5 rather than 0
@@ -63,26 +78,56 @@ def import_cap(tier):
     return limits_for(tier)["soundcloud_import"]
 
 
-def _tracks(token, limit):
-    """The member's public tracks, newest first. Raises OAuthError on failure."""
+def _get(url, token, params, deadline):
     try:
         r = requests.get(
-            ME_TRACKS,
+            url,
             headers={"Authorization": f"OAuth {token}", "Accept": "application/json"},
-            params={"limit": min(int(limit), PAGE_LIMIT), "linked_partitioning": 1},
-            timeout=20,
+            params=params, timeout=deadline.remaining(cap=20),
         )
     except requests.RequestException:
         raise OAuthError("Could not reach SoundCloud to read your tracks.")
     if r.status_code != 200:
         raise OAuthError("SoundCloud refused to list your tracks. Try authorising again.")
     try:
-        body = r.json()
+        return r.json()
     except ValueError:
         raise OAuthError("SoundCloud returned something this couldn't read.")
-    # `linked_partitioning` wraps the list in an object; without it the list is
-    # bare. Accept both rather than depending on which one they send today.
-    return body.get("collection", body) if isinstance(body, dict) else body
+
+
+def _tracks(token, limit, deadline=None):
+    """The member's tracks, newest first, following every page up to `limit`
+    (None = all of them). Returns (tracks, complete).
+
+    It used to read ONE page of 200 and stop, so a catalogue past 200 was cut
+    short with nothing saying so — "the whole catalogue" on StatZ was the
+    first page of it. `complete` is False when the budget ran out first, and
+    the caller says so rather than calling a partial import done.
+    Raises OAuthError if the FIRST page fails; a later page failing keeps what
+    was already read.
+    """
+    deadline = deadline or Deadline(IMPORT_BUDGET_SECONDS)
+    page = PAGE_LIMIT if limit is None else min(int(limit), PAGE_LIMIT)
+    out = []
+    body = _get(ME_TRACKS, token, {"limit": page, "linked_partitioning": 1}, deadline)
+    while True:
+        # `linked_partitioning` wraps the list in an object; without it the
+        # list is bare. Accept both rather than depending on which they send.
+        batch = body.get("collection", []) if isinstance(body, dict) else (body or [])
+        out.extend(t for t in batch if isinstance(t, dict))
+        if limit is not None and len(out) >= limit:
+            return out[:limit], True
+        nxt = body.get("next_href") if isinstance(body, dict) else None
+        if not nxt or not batch:
+            return out, True
+        if urlparse(nxt).hostname != API_HOST:
+            return out, True
+        if deadline.expired():
+            return out, False
+        try:
+            body = _get(nxt, token, None, deadline)
+        except OAuthError:
+            return out, False
 
 
 def _already_here(user, widget_urls):
@@ -119,6 +164,9 @@ class SoundCloudImportView(APIView):
         return Response({
             "tier": tier,
             "max_tracks": import_cap(tier),
+            # None means the whole catalogue (StatZ). Said as a flag so a client
+            # never renders "Up to null tracks".
+            "whole_catalogue": import_cap(tier) is None,
             "cost": 0,
             "lands_as": "draft",
             "why": "Imported tracks are private until you publish them. Posting "
@@ -135,19 +183,27 @@ class SoundCloudImportView(APIView):
             token = access_token_for(
                 "soundcloud", str(d.get("code") or ""),
                 str(d.get("redirect_uri") or ""), str(d.get("code_verifier") or ""))
-            tracks = _tracks(token, cap)
+            tracks, complete = _tracks(token, cap)
         except OAuthError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         finally:
             token = None
 
-        wanted = []
+        char_cap = TIER_LIMITS.get(tier, {}).get("char_limit", UNLIMITED_CHARS)
+        wanted, private = [], 0
         for t in tracks if isinstance(tracks, list) else []:
-            if not isinstance(t, dict):
-                continue
             permalink = (t.get("permalink_url") or "").strip()
             title = (t.get("title") or "").strip()[:160]
             if not (permalink and title):
+                continue
+            # A private track's public player shows "track not found": the
+            # widget needs its secret token, and putting that token into a
+            # post the member might later publish would leak a track they
+            # chose to keep private. Skipped and COUNTED, so the member is
+            # told why their catalogue came in short rather than left to find
+            # holes in it.
+            if (t.get("sharing") or "public") != "public":
+                private += 1
                 continue
             # Resolved through the SAME widget builder `views._parse_embed_url`
             # and the manual "add a track" flow use, so an imported post and a
@@ -159,33 +215,52 @@ class SoundCloudImportView(APIView):
             spec = _player_for(permalink)
             if not spec:
                 continue
-            wanted.append((spec["src"], title, spec.get("aspect", ""), spec.get("height", 0)))
-            if len(wanted) >= cap:
+            desc = (t.get("description") or "").strip()
+            if over_char_limit(desc, tier):
+                desc = desc[:char_cap]
+            wanted.append({"url": spec["src"], "title": title, "aspect": spec.get("aspect", ""),
+                           "height": spec.get("height", 0), "genre": (t.get("genre") or "").strip()[:40],
+                           "description": desc})
+            if cap is not None and len(wanted) >= cap:
                 break
 
-        skipped = _already_here(request.user, {u for u, _, _, _ in wanted})
-        made = [
-            Post.objects.create(
-                author=request.user,
-                title=title,
-                # The player, not a copy of the audio. SoundCloud stays the
-                # host; this is a post that frames their track.
-                embeds=[{"type": "soundcloud", "url": url, "title": title,
-                        "aspect": aspect, "height": height}],
-                visibility="private",
-            )
-            for url, title, aspect, height in wanted if url not in skipped
-        ]
+        skipped = _already_here(request.user, {w["url"] for w in wanted})
+        with transaction.atomic():
+            made = [
+                Post.objects.create(
+                    author=request.user,
+                    title=w["title"],
+                    description=w["description"],
+                    genre=w["genre"],
+                    # The player, not a copy of the audio. SoundCloud stays the
+                    # host; this is a post that frames their track.
+                    embeds=[{"type": "soundcloud", "url": w["url"], "title": w["title"],
+                             "aspect": w["aspect"], "height": w["height"]}],
+                    visibility="private",
+                )
+                for w in wanted if w["url"] not in skipped
+            ]
 
+        parts = [f"{len(made)} track{'' if len(made) == 1 else 's'} imported as drafts. "
+                 "They're private until you publish them."]
+        if skipped:
+            parts.append(f"{len(skipped)} were already here.")
+        if private:
+            parts.append(f"{private} private track{'' if private == 1 else 's'} left on SoundCloud — "
+                         "make them public there to bring them in.")
+        if not complete:
+            parts.append("SoundCloud was slow, so this stopped partway — run it again for the rest; "
+                         "nothing already imported comes in twice.")
         return Response({
             "imported": len(made),
             "already_here": len(skipped),
+            "private_skipped": private,
+            "complete": complete,
             "max_tracks": cap,
+            "whole_catalogue": cap is None,
             # Said out loud because it is the whole reason this is safe to use:
             # the member handed over an authorisation and gets to see that
             # nothing was kept from it.
             "token_kept": False,
-            "detail": (f"{len(made)} track{'' if len(made) == 1 else 's'} imported as "
-                       f"drafts. They're private until you publish them."
-                       + (f" {len(skipped)} were already here." if skipped else "")),
+            "detail": " ".join(parts),
         }, status=status.HTTP_201_CREATED)
