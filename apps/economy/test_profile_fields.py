@@ -37,3 +37,20 @@ class WritersTests(TestCase):
         self.c.post("/api/economy/profile/", {"genres": ["Lo-fi", "lo-fi"], "pronouns": "they/them"}, format="json")
         p.refresh_from_db()
         self.assertEqual((p.genres, p.pronouns), (["Lo-fi"], "they/them"))
+
+
+class PinnedTests(TestCase):
+    def test_pinned_shows_only_own_public_post(self):
+        from apps.economy.models import Post, Profile
+        u = User.objects.create_user("pin", password="pw12345!x")
+        other = User.objects.create_user("oth", password="pw12345!x")
+        mine = Post.objects.create(author=u, title="Best", visibility="public")
+        theirs = Post.objects.create(author=other, title="Not mine", visibility="public")
+        p, _ = Profile.objects.get_or_create(user=u)
+        c = APIClient()
+        p.pinned_post_id = theirs.id; p.save()
+        self.assertIsNone(c.get("/api/economy/public/members/pin/").json()["pinned_post"])
+        p.pinned_post_id = mine.id; p.save()
+        self.assertEqual(c.get("/api/economy/public/members/pin/").json()["pinned_post"]["title"], "Best")
+        mine.visibility = "private"; mine.save()
+        self.assertIsNone(c.get("/api/economy/public/members/pin/").json()["pinned_post"])

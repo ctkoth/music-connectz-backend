@@ -73,7 +73,7 @@ def public_post_dict(p):
     }
 
 
-from apps.economy.social import cover_abs  # noqa: E402
+from apps.economy.social import _pinned, cover_abs  # noqa: E402
 
 
 def public_profile_dict(p, request=None):
@@ -114,6 +114,7 @@ def public_profile_dict(p, request=None):
         "pronouns": p.pronouns, "headline": p.headline, "genres": p.genres or [],
         "influences": p.influences or [], "gear": p.gear or [], "label": p.label,
         "cover_url": cover_abs(p.cover_url, request),
+        "pinned_post": _pinned(p),
         # BadgeZ travels with the card. A shared profile is somebody's proof
         # they are worth hiring, and "ten deals, no dispute" is exactly the
         # part of that a stranger came to find out. Only badges the member
