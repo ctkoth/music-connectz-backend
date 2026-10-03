@@ -32,6 +32,7 @@ from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView, DupeZVerify
 from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
 from .scoreshare import ScoreShareView, score_card_png
+from .weeklybattle import WeeklyBattleView
 from .soundz import SoundZView
 from .coachvoice import CoachVoiceView, CoachSpeakView
 from .dawz import DawZView
@@ -195,6 +196,7 @@ urlpatterns = [
     # OpportunitieZ — what other members are seeking, for collaborators to find.
     path("opportunitiez/", OpportunitieZView.as_view(), name="economy-opportunitiez"),
     # BattleZ — a challenge, gated by the same five ranges as everything else.
+    path("battlez/weekly/", WeeklyBattleView.as_view(), name="economy-battlez-weekly"),
     path("battlez/", BattlesView.as_view(), name="economy-battlez"),
     path("battlez/challenge/", BattleChallengeView.as_view(), name="economy-battle-challenge"),
     path("battlez/moneyvote/", MoneyBattleVoteView.as_view(), name="economy-battle-moneyvote"),

@@ -1424,6 +1424,31 @@ def post_interaction_block(item_id, user, kind):
                 return {"detail": "You're on this deal — you can't rate its contributors."}
         return None
 
+    # battle:<id>:entry:<id> — a battle is decided by people who are NOT in
+    # it. Rating your own take used to be accepted, which let one entrant
+    # supply a judge of their own; in a 1v1 neither contestant may score the
+    # other either. A playable take must also be heard first, the same rule
+    # posts follow.
+    if kind == "rate" and item_id.startswith("battle:") and ":entry:" in item_id:
+        try:
+            entry = BattleEntry.objects.select_related("battle").get(pk=int(item_id.rsplit(":", 1)[1]))
+        except (ValueError, BattleEntry.DoesNotExist):
+            return None
+        uid = getattr(user, "id", None)
+        if entry.user_id == uid:
+            return {"detail": "That's your own take — the room rates it, not you."}
+        b = entry.battle
+        if b.mode == Battle.MODE_1V1 and uid in (b.host_id, b.opponent_id):
+            return {"detail": "You're in this 1v1 — the room decides it, not the contestants."}
+        if (entry.media_type or "").lower() in ("audio", "video") and entry.media_url:
+            heard = ListenProgress.objects.filter(user=user, item_id=item_id).first()
+            if not (heard and (heard.finished or heard.seconds >= LISTEN_REQUIRED_SEC)):
+                got = heard.seconds if heard else 0
+                return {"detail": f"Give it a listen first — {LISTEN_REQUIRED_SEC}s of it, "
+                                  f"and you're {max(0, LISTEN_REQUIRED_SEC - got)}s short.",
+                        "listen_required_sec": LISTEN_REQUIRED_SEC, "listened_sec": got}
+        return None
+
     if not item_id.startswith("post:"):
         return None
     try:
