@@ -182,3 +182,114 @@ class ClassifiedTests(RatezBase):
         r = self.client.get(RATEZ)
         self.assertIsNone(r.data["post"]["median"])
         self.assertEqual(r.data["skill"]["skills"], [])
+
+
+class RatezReadsOnlyWhatTheViewerMaySeeTests(RatezBase):
+    def test_a_private_post_is_not_listed_to_somebody_else(self):
+        self.make_post([], "open")
+        Post.objects.create(author=self.maker, title="secret", visibility="private")
+        c = APIClient(); c.force_authenticate(self.fans[0])
+        titles = [p["title"] for p in c.get(f"{RATEZ}?username=maker").data["post"]["posts"]]
+        self.assertIn("open", titles)
+        self.assertNotIn("secret", titles)
+
+    def test_but_its_owner_still_sees_it(self):
+        Post.objects.create(author=self.maker, title="secret", visibility="private")
+        titles = [p["title"] for p in self.client.get(RATEZ).data["post"]["posts"]]
+        self.assertIn("secret", titles)
+
+    def test_each_post_carries_somewhere_to_go(self):
+        post = self.make_post([])
+        row = self.client.get(RATEZ).data["post"]["posts"][0]
+        self.assertEqual(row["url"], f"/p/{post.id}")
+
+    def test_the_post_list_does_not_cost_a_query_per_post(self):
+        for i in range(3):
+            self.make_post([], f"a{i}")
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        self.client.get(RATEZ)  # first read creates the wallet/profile rows
+        with CaptureQueriesContext(connection) as few:
+            self.client.get(RATEZ)
+        for i in range(10):
+            self.make_post([], f"b{i}")
+        with CaptureQueriesContext(connection) as many:
+            self.client.get(RATEZ)
+        self.assertEqual(len(few.captured_queries), len(many.captured_queries))
+
+
+class AttractivenessIsAdultsOnlyHereTooTests(RatezBase):
+    def test_a_minors_attractiveness_is_locked_with_the_reason(self):
+        from apps.economy.models import profile_for
+        kid = User.objects.create_user(username="kid", password=PW)
+        p = profile_for(kid); p.birthday = f"{timezone.now().year - 14}-01-01"; p.save()
+        a = self.client.get(f"{RATEZ}?username=kid").data["attractiveness"]
+        self.assertIsNone(a["median"])
+        self.assertIn("18+", a["locked"])
+
+    def test_adults_reading_adults_are_not_locked(self):
+        a = self.client.get(f"{RATEZ}?username=fan0").data["attractiveness"]
+        self.assertNotIn("locked", a)
+
+
+class ContributionIsServedTests(RatezBase):
+    def test_contribution_ratings_on_deals_are_counted(self):
+        from apps.economy.models import ItemRating
+        ItemRating.objects.create(user=self.fans[0], item_id="collab:7:maker", score=8)
+        ItemRating.objects.create(user=self.fans[1], item_id="collab:7:maker", score=6)
+        ItemRating.objects.create(user=self.fans[1], item_id="collab:9:maker", score=10)
+        ItemRating.objects.create(user=self.fans[2], item_id="collab:7:notmaker", score=1)
+        c = self.client.get(RATEZ).data["contribution"]
+        self.assertEqual(c["count"], 3)
+        self.assertEqual(c["deals"], 2)
+        self.assertEqual(c["median"], 8)
+
+    def test_no_contribution_ratings_is_none_not_zero(self):
+        self.assertIsNone(self.client.get(RATEZ).data["contribution"]["median"])
+
+
+QUEUE = "/api/economy/ratez/queue/"
+
+
+class RateQueueTests(RatezBase):
+    def queue_for(self, who):
+        c = APIClient(); c.force_authenticate(who)
+        return c.get(QUEUE).data
+
+    def test_it_lists_other_peoples_work_i_have_not_rated(self):
+        post = self.make_post([])
+        ids = [p["id"] for p in self.queue_for(self.fans[0])["posts"]]
+        self.assertIn(post.id, ids)
+
+    def test_never_my_own(self):
+        self.make_post([])
+        self.assertEqual(self.queue_for(self.maker)["posts"], [])
+
+    def test_once_rated_it_leaves_the_queue(self):
+        post = self.make_post([])
+        self.rate(self.fans[0], post, 7)
+        ids = [p["id"] for p in self.queue_for(self.fans[0])["posts"]]
+        self.assertNotIn(post.id, ids)
+
+    def test_private_and_too_new_posts_are_not_offered(self):
+        Post.objects.create(author=self.maker, title="secret", visibility="private")
+        Post.objects.create(author=self.maker, title="just now", visibility="public")
+        self.assertEqual(self.queue_for(self.fans[0])["posts"], [])
+
+    def test_a_track_must_be_heard_first(self):
+        post = self.make_post([])
+        Post.objects.filter(pk=post.pk).update(media_type="audio", media_url="/media/x.mp3")
+        row = self.queue_for(self.fans[0])["posts"][0]
+        self.assertTrue(row["needs_listen"])
+        self.assertEqual(row["url"], f"/p/{post.id}")
+
+    def test_the_gain_is_stated_and_goes_to_zero_at_the_cap(self):
+        from apps.economy.models import RATING_REWARD_DAILY_CAP, award_energy
+        r = self.queue_for(self.fans[0])["reward"]
+        self.assertEqual(r["amount"], 1)
+        self.assertEqual(r["left_today"], r["cap"])
+        for _ in range(RATING_REWARD_DAILY_CAP):
+            award_energy(self.fans[0], 1, "Rating — x")
+        r = self.queue_for(self.fans[0])["reward"]
+        self.assertEqual(r["left_today"], 0)
+        self.assertEqual(r["amount"], 0)
