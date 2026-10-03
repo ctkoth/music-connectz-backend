@@ -8,7 +8,7 @@ psycopg2-binary>=2.9
 gunicorn>=21.2
 whitenoise>=6.6
 python-dotenv>=1.0
-Pillow>=10.0
+Pillow>=10.1  # ImageFont.load_default(size=) for share cards
 requests>=2.31
 PyJWT[crypto]>=2.8
 # Object storage for user uploads (S3 / Cloudflare R2). Active only when

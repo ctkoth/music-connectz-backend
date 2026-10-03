@@ -587,9 +587,11 @@ class CollabDealsView(APIView):
             image_url=str(d.get("image_url", "") or "")[:500],
             lyrics=str(d.get("lyrics", "") or ""),
             items=_clean_items(d.get("items")),
-            split_mode=(CollabDeal.SPLIT_RATING
-                        if str(d.get("split_mode", "")).lower() == CollabDeal.SPLIT_RATING
-                        else CollabDeal.SPLIT_WORTH),
+            # Rating by default: everyone's cut follows what they were judged to
+            # contribute, falling back to agreed worth until enough outsiders rate.
+            split_mode=(CollabDeal.SPLIT_WORTH
+                        if str(d.get("split_mode", "")).lower() == CollabDeal.SPLIT_WORTH
+                        else CollabDeal.SPLIT_RATING),
         )
         # ZodiacZ — Aquarius thinks in groups. `parts` includes the initiator,
         # so "two or more OTHER people" is three on the deal and the stretch is

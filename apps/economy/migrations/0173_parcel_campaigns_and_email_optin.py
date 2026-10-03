@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("economy", "0167_venueevent_gates"),
+        ("economy", "0172_score_share"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

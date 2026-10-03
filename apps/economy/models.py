@@ -112,6 +112,9 @@ class Wallet(models.Model):
     energy = models.IntegerField(default=0)
     spinaz = models.IntegerField(default=0)
     promptz = models.IntegerField(default=0)  # prepaid AI credits; 1 PromptZ = 1¢ of AI spend
+    # The fraction of a ⚡ a bonus-multiplied rating reward earned but could
+    # not pay as a whole unit. Carried so "+25%" pays 1,1,1,2 instead of 1,1,1,1.
+    rating_carry = models.FloatField(default=0)
     # Free daily prompt allowance by tier (free 1 / premium 5 / statz 10). Resets
     # each day — it does NOT stack. `prompt_day` is the YYYY-MM-DD the counter
     # belongs to; a new day zeroes `prompts_used_today`. Prepaid promptz above is
@@ -975,6 +978,9 @@ class Profile(models.Model):
     # One CharField rather than four booleans because it is one answer a
     # member gives once, and because the filter reads it as a whole.
     personality = models.CharField(max_length=4, blank=True, default="", db_index=True)
+    # "Who can reach me": the five range gates applied to messages and calls
+    # sent TO this member. Empty = everyone, which is the default.
+    contact_gates = models.JSONField(default=dict, blank=True)
     # ReligionZ — a declared tradition from the closed list in religionz.py,
     # or "" for "hasn't said". Same shape as personality and sign: a
     # DECLARATION filterable in MembersView, never a measurement — see
@@ -1072,6 +1078,18 @@ class Profile(models.Model):
     # your current reach, and your rate. Format: {active, help_needed, status,
     # current_reach, rate} — all optional and displayed only if active is True.
     seeking = models.JSONField(default=dict, blank=True)
+    # Fields popular profile sites carry (X, LinkedIn, Instagram, Spotify for
+    # Artists, SoundCloud, Bandcamp). All self-declared and optional; none of
+    # them is a measurement and none moves a rating.
+    pronouns = models.CharField(max_length=24, blank=True, default="")
+    headline = models.CharField(max_length=100, blank=True, default="")
+    genres = models.JSONField(default=list, blank=True)
+    influences = models.JSONField(default=list, blank=True)
+    gear = models.JSONField(default=list, blank=True)
+    label = models.CharField(max_length=100, blank=True, default="")
+    timezone = models.CharField(max_length=48, blank=True, default="")
+    pinned_post_id = models.PositiveIntegerField(null=True, blank=True)
+    cover_url = models.CharField(max_length=300, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
 
 
@@ -1406,6 +1424,31 @@ def post_interaction_block(item_id, user, kind):
                 return {"detail": "You're on this deal — you can't rate its contributors."}
         return None
 
+    # battle:<id>:entry:<id> — a battle is decided by people who are NOT in
+    # it. Rating your own take used to be accepted, which let one entrant
+    # supply a judge of their own; in a 1v1 neither contestant may score the
+    # other either. A playable take must also be heard first, the same rule
+    # posts follow.
+    if kind == "rate" and item_id.startswith("battle:") and ":entry:" in item_id:
+        try:
+            entry = BattleEntry.objects.select_related("battle").get(pk=int(item_id.rsplit(":", 1)[1]))
+        except (ValueError, BattleEntry.DoesNotExist):
+            return None
+        uid = getattr(user, "id", None)
+        if entry.user_id == uid:
+            return {"detail": "That's your own take — the room rates it, not you."}
+        b = entry.battle
+        if b.mode == Battle.MODE_1V1 and uid in (b.host_id, b.opponent_id):
+            return {"detail": "You're in this 1v1 — the room decides it, not the contestants."}
+        if (entry.media_type or "").lower() in ("audio", "video") and entry.media_url:
+            heard = ListenProgress.objects.filter(user=user, item_id=item_id).first()
+            if not (heard and (heard.finished or heard.seconds >= LISTEN_REQUIRED_SEC)):
+                got = heard.seconds if heard else 0
+                return {"detail": f"Give it a listen first — {LISTEN_REQUIRED_SEC}s of it, "
+                                  f"and you're {max(0, LISTEN_REQUIRED_SEC - got)}s short.",
+                        "listen_required_sec": LISTEN_REQUIRED_SEC, "listened_sec": got}
+        return None
+
     if not item_id.startswith("post:"):
         return None
     try:
@@ -1499,6 +1542,9 @@ class Post(models.Model):
     # whoever happened to publish it would be the same erasure the escrow
     # exists to prevent, one step later.
     contributors = models.JSONField(default=list, blank=True)
+    # The five range gates (gates.py), enforced when somebody joins a
+    # restricted post. Exclusive, like every other surface that has them.
+    gates = models.JSONField(default=dict, blank=True)
     # The deal it came out of, when it came out of one. SET_NULL so deleting a
     # deal never takes the published work with it.
     source_deal = models.ForeignKey("CollabDeal", on_delete=models.SET_NULL, null=True,
@@ -1852,7 +1898,7 @@ RATING_REWARD_DAILY_CAP = 20
 RATING_NOTE = "Rating"
 
 
-def reward_for_rating(user, what="", visibility="public", collab_multiplier=1.0):
+def reward_for_rating(user, what="", visibility="", collab_multiplier=1.0):
     """Credit the rating reward, respecting the daily cap. Returns what landed.
 
     Public visibility earns +25% bonus on leaderboards.
@@ -1871,7 +1917,12 @@ def reward_for_rating(user, what="", visibility="public", collab_multiplier=1.0)
         return 0
     note = f"{RATING_NOTE} — {what}" if what else RATING_NOTE
     multiplier = visibility_multiplier(visibility) * collab_multiplier
-    awarded = int(RATING_REWARD_ENERGY * multiplier)
+    # Whole ⚡ only, with the fraction carried: without the carry, int(1 × 1.25)
+    # is 1 and every advertised bonus paid exactly nothing.
+    w = wallet_for(user)
+    total = RATING_REWARD_ENERGY * multiplier + (w.rating_carry or 0)
+    awarded = int(total + 1e-9)
+    Wallet.objects.filter(pk=w.pk).update(rating_carry=round(total - awarded, 6))
     award_energy(user, awarded, note, visibility=visibility)
 
     # ZodiacZ — Libra weighs things. This is the one funnel every paying rating
@@ -7086,3 +7137,42 @@ class Horoscope(models.Model):
 
     class Meta:
         unique_together = ("sign", "day", "level")
+
+
+class ScoreShare(models.Model):
+    """A scored take somebody can share: the score and verdict the coach
+    actually gave, minted SERVER-SIDE at the moment it answered.
+
+    Never created from anything the client sends — a share card that took a
+    number from the request would let anybody post "10/10 from the AI coach"
+    for a take that scored 4, which is the substance rule's failure case with
+    our name on it. The link carries a random token, so takes cannot be walked.
+    """
+    token = models.CharField(max_length=32, unique=True, db_index=True)
+    app_key = models.CharField(max_length=32)
+    score = models.PositiveSmallIntegerField()
+    verdict = models.CharField(max_length=400, blank=True, default="")
+    genre = models.CharField(max_length=60, blank=True, default="")
+    # A member's own take carries their handle, which is also the referral
+    # code the card's "get yours" link uses. A trial take has nobody to name.
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                             on_delete=models.CASCADE, related_name="score_shares")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+def mint_score_share(app_key, payload, user=None, genre=""):
+    """The share token for a scored take, or "" when there is no score.
+    Best-effort: a failure here must never cost anybody their result."""
+    import secrets
+    try:
+        score = payload.get("score")
+        if score is None:
+            return ""
+        row = ScoreShare.objects.create(
+            token=secrets.token_urlsafe(12)[:16], app_key=str(app_key)[:32],
+            score=int(score), verdict=str(payload.get("verdict") or "")[:400],
+            genre=str(genre or "")[:60],
+            user=user if getattr(user, "is_authenticated", False) else None)
+        return row.token
+    except Exception:
+        return ""

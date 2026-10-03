@@ -920,6 +920,10 @@ class SingZCoachView(APIView):
                  str((stored or {}).get("id") or "")),
         )
         out = {**payload, "cost_cents": charged}
+        # A shareable card for this take, minted from the coach's own answer.
+        from .models import mint_score_share
+        _share = mint_score_share(self.app_key, payload, user=request.user, genre=genre)
+        out["share_url"] = f"/s/{_share}" if _share else ""
         if stored is not None and post is None:
             # A scored take is never a dead end either: the score offers the way
             # back to the day it came from.

@@ -235,7 +235,9 @@ class BattleEnterView(APIView):
             if not side_of(b, request.user):
                 return Response({"detail": "This is a 1v1 — only the two contestants put takes up."},
                                 status=status.HTTP_403_FORBIDDEN)
-        elif b.host_id == request.user.id:
+        elif b.host_id == request.user.id and b.kind != "weekly":
+            # The Weekly Open is hosted by the platform account, which is a
+            # person too — they enter like anybody else.
             return Response({"detail": "You can't enter your own battle."},
                             status=status.HTTP_400_BAD_REQUEST)
 
@@ -316,8 +318,9 @@ class BattleEnterView(APIView):
                     status=status.HTTP_402_PAYMENT_REQUIRED)
             award_spinaz(b.host, b.entry_spinaz, f"BattleZ entry from @{request.user.username}", app_key="battlez")
         settle_together(_people, _was_beginner)
-        notify(b.host, "join", f"@{request.user.username} entered '{b.title}' ⚔️",
-               actor=request.user, item_id=b.item_key)
+        if b.kind != "weekly":      # the weekly host would be told of every entrant
+            notify(b.host, "join", f"@{request.user.username} entered '{b.title}' ⚔️",
+                   actor=request.user, item_id=b.item_key)
         return Response({"entry": entry_dict(entry, request),
                          "battle": battle_dict(b, request), **energy},
                         status=status.HTTP_201_CREATED)

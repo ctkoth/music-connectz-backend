@@ -645,8 +645,8 @@ class WhatHappensAfterTheAccountTests(TestCase):
 
     def test_a_provider_comes_from_the_one_provider_list(self):
         """Not a tuple typed into the view. The first draft of this typed the
-        eight names in and got it wrong immediately — it listed "apple", which
-        `provider_requirements()` has commented out, so the funnel would have
+        eight names in and got it wrong immediately — it listed "apple" back when
+        `provider_requirements()` had it commented out, so the funnel would have
         accepted a step no button on the platform can fire."""
         from apps.accounts.oauth import provider_requirements
         known = sorted(provider_requirements())
@@ -656,7 +656,7 @@ class WhatHappensAfterTheAccountTests(TestCase):
         stored = {e.meta.get("provider")
                   for e in FunnelEvent.objects.filter(kind="oauth_linked")}
         self.assertEqual(stored, set(known))
-        self.assertNotIn("apple", known)
+        self.assertNotIn("myspace", known)  # a name no button fires is refused
 
     def test_a_link_failure_never_stores_the_error_text(self):
         """The client sends `error: linkErr.message`, which is whatever the

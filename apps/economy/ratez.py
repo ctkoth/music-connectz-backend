@@ -190,6 +190,14 @@ class RatezView(APIView):
         })
 
 
+def rating_reward(user):
+    """The gain a rating pays this member right now, for showing BEFORE they rate."""
+    left, cap = rating_reward_left(user)
+    return {"resource": "energy", "amount": RATING_REWARD_ENERGY if left else 0,
+            "left_today": left, "cap": cap,
+            "public_bonus_pct": 25, "per_collaborator_pct": 10}
+
+
 def rating_reward_left(user):
     """How many more ratings today still pay, so the gain is stated honestly.
 
@@ -235,18 +243,50 @@ class RateQueueView(APIView):
         counts = dict(ItemRating.objects.filter(item_id__in=keys)
                       .values_list("item_id").annotate(n=Count("id")))
         left, cap = rating_reward_left(me)
-        return Response({
-            "reward": {"resource": "energy", "amount": RATING_REWARD_ENERGY if left else 0,
-                       "left_today": left, "cap": cap},
-            "posts": [{
+        # How much of each one this member has already heard — one query, so
+        # the queue can say "8s to go" and unlock rating in place.
+        from .models import LISTEN_REQUIRED_SEC, ListenProgress
+        heard = {lp.item_id: lp for lp in ListenProgress.objects.filter(user=me, item_id__in=keys)}
+
+        def play(p):
+            """The recording to play in the queue card itself, so rating never
+            means leaving the queue to find the post."""
+            if p.media_type in ("audio", "video") and p.media_url:
+                return p.media_type, p.media_url
+            for it in (p.items or []):
+                kind = (it.get("type") or "").lower()
+                if kind in ("audio", "video") and it.get("url"):
+                    return kind, it["url"]
+            return "", ""
+
+        def listened(p):
+            lp = heard.get(f"post:{p.id}")
+            return (lp.seconds if lp else 0), bool(lp and lp.finished)
+
+        rows = []
+        for p in posts:
+            gated = heard_enough_required(p)
+            secs, done = listened(p)
+            kind, url = play(p)
+            rows.append({
                 "id": p.id, "item_key": f"post:{p.id}", "title": p.title,
                 "author": p.author.username, "media_type": p.media_type or "",
-                "needs_listen": heard_enough_required(p),
+                # Gated AND not yet heard enough — the rate endpoint's own rule.
+                "needs_listen": gated and not (done or secs >= LISTEN_REQUIRED_SEC),
+                "listen_gated": gated,
+                "listened_sec": min(secs, LISTEN_REQUIRED_SEC),
+                "listen_required_sec": LISTEN_REQUIRED_SEC,
+                "play_kind": kind, "play_url": url,
+                "genre": p.genre or "",
                 "rating": medians.get(f"post:{p.id}"),
                 "count": counts.get(f"post:{p.id}", 0),
                 "skills_used": p.skills_used or [],
                 "url": f"/p/{p.id}",
-            } for p in posts],
+            })
+        return Response({
+            "reward": {"resource": "energy", "amount": RATING_REWARD_ENERGY if left else 0,
+                       "left_today": left, "cap": cap},
+            "posts": rows,
         })
 
 

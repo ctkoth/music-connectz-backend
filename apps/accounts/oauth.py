@@ -9,8 +9,9 @@ Env vars expected (set on Render):
     GOOGLE_OAUTH_CLIENT_ID
     GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET
 
-Note: Apple OAuth support is retained but temporarily disabled pending
-configuration fixes. Use OAUTH2_PROVIDERS for Spotify, SoundCloud, etc.
+    APPLE_OAUTH_CLIENT_ID  (the Services ID, e.g. net.musicconnectz.signin)
+
+Use OAUTH2_PROVIDERS for Spotify, SoundCloud, etc.
 """
 import os
 
@@ -105,7 +106,12 @@ def exchange_github(code: str, redirect_uri: str = ""):
         )
 
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
-    user = requests.get("https://api.github.com/user", headers=headers, timeout=10).json()
+    try:
+        user = requests.get("https://api.github.com/user", headers=headers, timeout=10).json()
+    except (requests.RequestException, ValueError):
+        raise OAuthError("Could not load your GitHub profile.")
+    if not isinstance(user, dict):
+        user = {}
 
     # A malformed/error response would otherwise sail through as uid "None",
     # which every failed sign-in would then share.
@@ -207,7 +213,7 @@ OAUTH2_PROVIDERS = {
                           "name": u.get("displayName") or "", "avatar_url": ""},
     },
     "facebook": {
-        "token_url": "https://graph.facebook.com/v18.0/oauth/access_token",
+        "token_url": "https://graph.facebook.com/v23.0/oauth/access_token",
         "userinfo_url": "https://graph.facebook.com/me?fields=id,name,email,picture.type(large)",
         "map": lambda u: {"uid": str(u.get("id")), "email": (u.get("email") or ""),
                           "name": u.get("name") or "",
@@ -246,7 +252,9 @@ def provider_requirements():
     needs = {
         "google": ("GOOGLE_OAUTH_CLIENT_ID",),          # ID token, verified by audience
         "github": ("GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET"),
-        # "apple": temporarily disabled; verify_apple() retained for re-enabling
+        # Apple JS popup returns an identity token verified against our Services
+        # ID, so the ID is the only setting it needs. Unset = no button.
+        "apple": ("APPLE_OAUTH_CLIENT_ID",),
     }
     for name in OAUTH2_PROVIDERS:
         needs[name] = (f"{name.upper()}_OAUTH_CLIENT_ID",
@@ -353,14 +361,27 @@ def exchange_oauth2(provider: str, code: str, redirect_uri: str = "", code_verif
     token = access_token_for(provider, code, redirect_uri, code_verifier)
 
     try:
-        profile = requests.get(
+        resp = requests.get(
             cfg["userinfo_url"], headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=10
-        ).json()
+        )
+        profile = resp.json()
     except (requests.RequestException, ValueError):
         raise OAuthError(f"Could not load your {provider.title()} profile.")
+    if resp.status_code != 200 or not isinstance(profile, dict):
+        # Spotify answers 403 here for anybody not on a development-mode app's
+        # allowlist; say so rather than a generic failure.
+        why = ""
+        if isinstance(profile, dict):
+            err = profile.get("error")
+            why = (err.get("message") if isinstance(err, dict) else err) or profile.get("message") or ""
+        raise OAuthError(f"{provider.title()} refused to share your profile"
+                         + (f": {str(why)[:200]}" if why else "."))
 
-    info = cfg["map"](profile or {})
-    if not info.get("uid"):
+    info = cfg["map"](profile)
+    # str(None) is "None" — truthy — so a profile with no id used to become
+    # the identity "None", shared by every sign-in whose profile came back
+    # empty. One person's account handed to the next.
+    if str(info.get("uid") or "").strip() in ("", "None", "null"):
         raise OAuthError(f"{provider.title()} did not return a user id.")
     info["provider"] = provider
     info["email"] = (info.get("email") or "").lower()

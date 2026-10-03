@@ -321,6 +321,10 @@ class CallsView(APIView):
         if other.id in blocked_user_ids(request.user):
             return Response({"detail": "You can't call this member."},
                             status=status.HTTP_403_FORBIDDEN)
+        from .gates import reach_block
+        blocked = reach_block(request.user, other)
+        if blocked:
+            return Response(blocked, status=status.HTTP_403_FORBIDDEN)
         if Call.objects.filter(models_q_for(request.user),
                                status__in=(Call.STATUS_RINGING, Call.STATUS_LIVE)).exists():
             return Response({"detail": "You're already on a call."},

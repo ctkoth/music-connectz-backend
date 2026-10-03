@@ -50,7 +50,7 @@ from .serializers_metz import (
     TakeAnalysisSerializer,
 )
 from .models import PracticeSession, DrumPattern, ToolPreference, PatternShare, DrillTake, TakeAnalysis
-from .models import Habit
+from .models import Habit, Wallet
 # The one list of provider names, so the funnel cannot come to disagree
 # with the sign-in buttons about which providers exist.
 from apps.accounts.oauth import provider_requirements
@@ -303,7 +303,10 @@ class PublicStatsView(APIView):
     good."
     """
 
-    permission_classes = [AllowAny]
+    # Members only (Corey's call): a small honest number reads as an empty
+    # room to somebody deciding whether to join, so a logged-out visitor is
+    # never shown it. Members still see the community grow in the header.
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         online_cutoff = timezone.now() - timedelta(minutes=5)
@@ -923,6 +926,13 @@ class PromptzBuyView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    def get(self, request):
+        """What a purchase buys, before it is made."""
+        from .catalog import PROMPTZ_BONUS
+        w = wallet_for(request.user)
+        return Response({"promptz_per_cent": PROMPTZ_BONUS, "money_cents": w.money_cents or 0,
+                         "examples": [{"cents": c, "promptz": round(c * PROMPTZ_BONUS)} for c in (100, 500, 1000)]})
+
     def post(self, request):
         pay_cents = int((request.data or {}).get("cents") or 0)
         if pay_cents <= 0:
@@ -933,14 +943,20 @@ class PromptzBuyView(APIView):
                             status=status.HTTP_402_PAYMENT_REQUIRED)
         from .catalog import PROMPTZ_BONUS
 
-        w.money_cents -= pay_cents
+        # One conditional statement, so two taps racing can't both pass the check.
+        from django.db.models import F
+        if not Wallet.objects.filter(pk=w.pk, money_cents__gte=pay_cents).update(
+                money_cents=F("money_cents") - pay_cents):
+            return Response({"detail": "Not enough balance — add funds first.", "cost_cents": pay_cents},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
+        w.refresh_from_db()
         # Buy at 80% of face value. The rate is named in catalog.py rather than
         # written here, because it is what makes pass-through AI pricing a loss
         # — and a pricing relationship only one file can see is one nothing else
         # can price against.
         granted = round(pay_cents * PROMPTZ_BONUS)
-        w.promptz = (w.promptz or 0) + granted
-        w.save(update_fields=["money_cents", "promptz", "updated_at"])
+        Wallet.objects.filter(pk=w.pk).update(promptz=F("promptz") + granted)
+        w.refresh_from_db()
         Transaction.objects.create(
             user=request.user, kind=Transaction.KIND_PURCHASE, amount_cents=-pay_cents,
             dev_tax_cents=0, note=f"Bought {granted} PromptZ 🏷️",
@@ -996,9 +1012,12 @@ class PromptzConvertView(APIView):
         # Charge only for whole PromptZ. The remainder stays in their wallet.
         granted = spend // SPINAZ_PER_PROMPTZ
         charged = granted * SPINAZ_PER_PROMPTZ
-        w.spinaz -= charged
-        w.promptz = (w.promptz or 0) + granted
-        w.save(update_fields=["spinaz", "promptz", "updated_at"])
+        from django.db.models import F
+        if not Wallet.objects.filter(pk=w.pk, spinaz__gte=charged).update(
+                spinaz=F("spinaz") - charged, promptz=F("promptz") + granted):
+            return Response({"detail": f"That's {charged} 🍥 and you don't have it any more."},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
+        w.refresh_from_db()
         Transaction.objects.create(
             user=request.user, kind=Transaction.KIND_PURCHASE, amount_cents=0,
             dev_tax_cents=0, note=f"−{charged} 🍥 → +{granted} 🏷️",

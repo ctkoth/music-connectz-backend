@@ -251,11 +251,16 @@ class TrialCoachView(APIView):
             anon_id=anon_id, result=payload,
             scored=payload.get("score") is not None,
         )
+        from .models import mint_score_share
+        share = mint_score_share(self.app_key, payload, genre=data.get("genre", ""))
         return Response({
             **payload,
             "trial": True,
             "cost_cents": 0,
             "claim_token": take.token,
+            # The card a visitor can post: the score the coach gave, minted
+            # here so nothing the browser sends can change it.
+            "share_url": f"/s/{share}" if share else "",
             # Not a dead end: the take they just made opens inside the app once
             # they join, rather than vanishing with the tab.
             "open_in": f"{self.app_key}:coach",

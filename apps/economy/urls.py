@@ -31,6 +31,8 @@ from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView, DupeZVerify
                     DupeZReviewView, DupeZView)
 from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
+from .scoreshare import ScoreShareView, score_card_png
+from .weeklybattle import WeeklyBattleView
 from .soundz import SoundZView
 from .coachvoice import CoachVoiceView, CoachSpeakView
 from .dawz import DawZView
@@ -70,6 +72,7 @@ from .logz import FeaturesView, LogZExportView, LogZView
 from .observationz import ObservationConsentView, ObservationZView
 from .social_verify import SocialReviewQueueView, SocialVerifyView
 from .parcel import ParcelCampaignView, ParcelEmailPrefView, ParcelUnsubscribeView
+from .reach import ReachGatesView
 from .autotopup import AutoTopUpView, AutoTopUpCancelView
 from .identity import IdentityView
 from .collab import (
@@ -193,6 +196,7 @@ urlpatterns = [
     # OpportunitieZ — what other members are seeking, for collaborators to find.
     path("opportunitiez/", OpportunitieZView.as_view(), name="economy-opportunitiez"),
     # BattleZ — a challenge, gated by the same five ranges as everything else.
+    path("battlez/weekly/", WeeklyBattleView.as_view(), name="economy-battlez-weekly"),
     path("battlez/", BattlesView.as_view(), name="economy-battlez"),
     path("battlez/challenge/", BattleChallengeView.as_view(), name="economy-battle-challenge"),
     path("battlez/moneyvote/", MoneyBattleVoteView.as_view(), name="economy-battle-moneyvote"),
@@ -277,6 +281,9 @@ urlpatterns = [
     # JavaScript. See sharecard.py and the vercel.json note in the PR.
     path("share/u/<str:username>", profile_card, name="share-profile"),
     path("share/p/<int:pk>", post_card, name="share-post"),
+    # Shareable score cards: JSON for the page + a 1200x630 image for crawlers.
+    path("scores/<str:token>/", ScoreShareView.as_view(), name="score-share"),
+    path("scores/<str:token>/card.png", score_card_png, name="score-share-card"),
     path("soundz/", SoundZView.as_view(), name="economy-soundz"),
     path("coachvoice/", CoachVoiceView.as_view(), name="economy-coachvoice"),
     path("coachvoice/speak/", CoachSpeakView.as_view(), name="economy-coachvoice-speak"),
@@ -358,6 +365,7 @@ urlpatterns = [
     # What the AI couldn't confirm goes to a person, not to a wall.
     path("social/reviews/", SocialReviewQueueView.as_view(), name="economy-social-reviews"),
     path("members/", MembersView.as_view(), name="economy-members"),
+    path("reach/", ReachGatesView.as_view(), name="economy-reach"),
     path("members/<str:username>/", MemberProfileView.as_view(), name="economy-member"),
     # RateZ — every rating, classified for what it actually measures.
     # BadgeZ — a title you wear and an effect you feel.

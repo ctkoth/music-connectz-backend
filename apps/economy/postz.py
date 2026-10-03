@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from .catalog import edit_window_for
 from .crosspost import coach_cap, coach_price, destinations_for, take_state_for
+from .gates import clean_gates, failing_gate, member_metrics, refusal
 from .models import (
     CollabDeal,
     Wallet,
@@ -116,8 +117,37 @@ def media_slots(p):
 _UNSET = object()
 
 
+def _bought_ids(request, ids):
+    """Which of `ids` this member has bought — one query for a whole feed."""
+    u = getattr(request, "user", None)
+    if not ids or not getattr(u, "is_authenticated", False):
+        return set()
+    from .models import PostSale
+    return set(PostSale.objects.filter(buyer_id=u.id, post_id__in=ids)
+               .values_list("post_id", flat=True))
+
+
+# What a post may be priced at, in cents. 0 is free.
+POST_PRICE_MIN_CENTS = 100
+POST_PRICE_MAX_CENTS = 50000
+
+
+def clean_post_price(value):
+    """Cents, or None for free. Raises ValueError with a member-facing reason."""
+    try:
+        cents = int(value or 0)
+    except (TypeError, ValueError):
+        raise ValueError("Price must be a whole number of cents.")
+    if cents <= 0:
+        return None
+    if not POST_PRICE_MIN_CENTS <= cents <= POST_PRICE_MAX_CENTS:
+        raise ValueError(f"Price must be between ${POST_PRICE_MIN_CENTS/100:.2f} "
+                         f"and ${POST_PRICE_MAX_CENTS/100:.2f}, or free.")
+    return cents
+
+
 def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_UNSET,
-               cap=None, shares=None, joins=None, rating=_UNSET):
+               cap=None, shares=None, joins=None, rating=_UNSET, bought=_UNSET):
     vibe = up - down
     media = media_slots(p)
     if take_state is _UNSET:
@@ -163,6 +193,12 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
         "freestyle": p.freestyle,
         "skills_used": p.skills_used or [],
         "visibility": p.visibility,
+        # Buy: the price is on the card so the button can carry it BEFORE it
+        # is pressed. None/0 is free. `bought` is batched by the feeds.
+        "price_cents": p.price_cents or 0,
+        "bought": (_bought_ids(request, [p.id]).__contains__(p.id)
+                   if bought is _UNSET else bool(bought)),
+        "gates": p.gates,
         "allow_in_playlists": p.allow_in_playlists,
         # Age from the SERVER's clock, so the client's unlock countdowns can't
         # drift from the checks the API actually runs.
@@ -432,6 +468,7 @@ def create_post(user, d):
         freestyle=freestyle,
         skills_used=skills,
         allow_in_playlists=bool(d.get("allow_in_playlists", True)),
+        gates=clean_gates(d.get("gates")),
     )
     if is_submission:
         record_submission(user)
@@ -562,12 +599,14 @@ class PostsView(APIView):
         joins = dict(PostJoin.objects.filter(post_id__in=ids)
                      .values_list("post_id").annotate(n=Count("id")))
         ratings = item_rating_medians([f"post:{i}" for i in ids])
+        bought = _bought_ids(request, ids)
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
                             collabs=deals.get(p.id, 0), price=price, cap=cap,
                             take_state=sizes.get(p.id),
                             shares=shares.get(p.id, 0),
                             joins=joins.get(p.id, 0) if p.visibility == "restricted" else 0,
-                            rating=ratings.get(f"post:{p.id}"))
+                            rating=ratings.get(f"post:{p.id}"),
+                            bought=p.id in bought)
                  for p in visible]
 
         now = timezone.now()
@@ -585,7 +624,9 @@ class PostsView(APIView):
             posts.sort(key=lambda d: (d["rating"] or 0, d["vibe"]), reverse=True)
         else:  # hot
             posts.sort(key=lambda d: hot(d, by_id[d["id"]]), reverse=True)
-        return Response({"posts": posts[:100], "sort": sort})
+        from .ratez import rating_reward
+        return Response({"posts": posts[:100], "sort": sort,
+                         "rating_reward": rating_reward(request.user)})
 
     def post(self, request):
         d = request.data
@@ -631,6 +672,19 @@ class PostsView(APIView):
             p.allow_in_playlists = bool(d["allow_in_playlists"])
             p.save(update_fields=["allow_in_playlists"])
             if len(d) <= 2:            # edit_id + the flag: nothing else to do
+                return Response(_post_dict(p, request))
+        if "price_cents" in d:
+            # A setting, like visibility: pricing old work is the point.
+            # Only the publisher prices it — every credited member is paid.
+            if not mine:
+                return Response({"detail": "Only the member who published this can price it."},
+                                status=status.HTTP_403_FORBIDDEN)
+            try:
+                p.price_cents = clean_post_price(d["price_cents"])
+            except ValueError as e:
+                return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            p.save(update_fields=["price_cents"])
+            if len(d) <= 2:
                 return Response(_post_dict(p, request))
         if "visibility" in d:
             # Also a SETTING, not content, and held to no edit window for the
@@ -782,6 +836,13 @@ class PostJoinView(APIView):
             return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
         if p.visibility != "restricted":
             return Response({"detail": "post is not restricted"}, status=status.HTTP_400_BAD_REQUEST)
+        if p.gates and request.user.id != p.author_id:
+            from .models import profile_for
+            ap = profile_for(p.author)
+            origin = (ap.lat, ap.lng) if (ap.share_location and ap.lat is not None) else (None, None)
+            failed = failing_gate(member_metrics(profile_for(request.user), origin), p.gates)
+            if failed:
+                return Response(refusal(failed, p.gates), status=status.HTTP_403_FORBIDDEN)
         ip = _client_ip(request)
         active = max(0, int(request.data.get("active_seconds") or 0))
         join, created = PostJoin.objects.get_or_create(
@@ -815,8 +876,10 @@ class PostJoinView(APIView):
             return False
         if PostJoin.objects.filter(post__author=p.author, rewarded=True, joined_at__gte=day_ago).count() >= JOIN_REWARD_DAILY_CAP_PER_AUTHOR:
             return False
-        award_spinaz(p.author, RESTRICTED_JOIN_REWARD_SPINAZ,
-                     note=f"Restricted join on '{p.title}'", app_key="postz")
+        from .postsplit import post_shares
+        for who, share, _b in post_shares(p, RESTRICTED_JOIN_REWARD_SPINAZ):
+            if share > 0:
+                award_spinaz(who, share, note=f"Restricted join on '{p.title}'", app_key="postz")
         join.rewarded = True
         join.save(update_fields=["rewarded"])
         notify(p.author, "join", f"@{user.username} joined '{p.title}' — you earned +{RESTRICTED_JOIN_REWARD_SPINAZ} 🍥", actor=user, item_id=f"post:{p.id}")
@@ -1019,13 +1082,15 @@ class DiscoveryFeedView(APIView):
         joins = dict(PostJoin.objects.filter(post_id__in=ids)
                      .values_list("post_id").annotate(n=Count("id")))
         ratings = item_rating_medians([f"post:{i}" for i in ids])
+        bought = _bought_ids(request, ids)
 
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
                             collabs=deals.get(p.id, 0), price=price, cap=cap,
                             take_state=sizes.get(p.id),
                             shares=shares.get(p.id, 0),
                             joins=joins.get(p.id, 0) if p.visibility == "restricted" else 0,
-                            rating=ratings.get(f"post:{p.id}"))
+                            rating=ratings.get(f"post:{p.id}"),
+                            bought=p.id in bought)
                  for p in recommendations]
 
         return Response({
@@ -1036,111 +1101,99 @@ class DiscoveryFeedView(APIView):
 
 
 class PostSaleView(APIView):
-    """Purchase a post to support the creator.
+    """Buy a post — real money, paid to everyone credited on it.
 
-    POST: Buy access to a paid post.
-    GET: Check if user has purchased a post.
+    GET is the quote: the price, the buyer's balance, and where the money
+    goes (the platform fee and what the creators get), so the button can say
+    all of it before it is pressed. POST buys, atomically.
     """
 
     permission_classes = [IsAuthenticated]
 
-    def get(self, request, pk):
-        """Check if user has access to this post (either author, or purchased)."""
-        try:
-            post = Post.objects.get(pk=pk)
-        except Post.DoesNotExist:
-            return Response({"detail": "Post not found"}, status=status.HTTP_404_NOT_FOUND)
+    @staticmethod
+    def _split(post):
+        fee, net = split_cents(post.price_cents or 0,
+                               DEV_TAX[membership_for(post.author).tier])
+        return fee, net
 
-        user_has_access = (
-            post.author_id == request.user.id or
-            post.sales.filter(buyer_id=request.user.id).exists()
-        )
+    def get(self, request, pk):
+        post = Post.objects.filter(pk=pk).select_related("author").first()
+        if not post:
+            return Response({"detail": "Post not found"}, status=status.HTTP_404_NOT_FOUND)
+        is_author = post.author_id == request.user.id
+        bought = post.sales.filter(buyer_id=request.user.id).exists()
+        fee, net = self._split(post)
+        from .postsplit import post_shares
         return Response({
-            "has_access": user_has_access,
-            "price_cents": post.price_cents,
-            "is_author": post.author_id == request.user.id,
+            "price_cents": post.price_cents or 0,
+            "is_author": is_author,
+            "bought": bought,
+            "has_access": is_author or bought,
+            "balance_cents": wallet_for(request.user).money_cents or 0,
+            "fee_cents": fee,
+            "creators_cents": net,
+            "paid_to": [{"username": who.username, "cents": c, "basis": basis}
+                        for who, c, basis in post_shares(post, net) if c > 0],
+            "sales": post.sales.count() if is_author else None,
+            "min_cents": POST_PRICE_MIN_CENTS, "max_cents": POST_PRICE_MAX_CENTS,
         })
 
     def post(self, request, pk):
-        """Buy a post."""
-        try:
-            post = Post.objects.get(pk=pk)
-        except Post.DoesNotExist:
+        from django.db import IntegrityError
+        from django.db.models import F
+        from .models import PostSale, Wallet
+
+        post = Post.objects.filter(pk=pk).select_related("author").first()
+        if not post:
             return Response({"detail": "Post not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        # Cannot buy your own post
         if post.author_id == request.user.id:
-            return Response(
-                {"detail": "You can't buy your own post"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Post must be priced
-        if not post.price_cents:
-            return Response(
-                {"detail": "This post is free"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Check if already purchased
+            return Response({"detail": "You can't buy your own post"},
+                            status=status.HTTP_400_BAD_REQUEST)
+        price = post.price_cents or 0
+        if not price:
+            return Response({"detail": "This post is free"}, status=status.HTTP_400_BAD_REQUEST)
         if request.user.post_purchases.filter(post=post).exists():
-            return Response(
-                {"detail": "Already purchased"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"detail": "You already bought this."},
+                            status=status.HTTP_400_BAD_REQUEST)
 
-        # Check wallet balance
-        wallet = wallet_for(request.user)
-        if not wallet or (wallet.money_cents or 0) < post.price_cents:
-            return Response(
-                {"detail": f"Insufficient balance. Need ${post.price_cents/100:.2f}"},
-                status=status.HTTP_402_PAYMENT_REQUIRED
-            )
-
-        # Process the sale
-        from .models import PostSale
-        with transaction.atomic():
-            # Debit buyer
-            wallet.money_cents = (wallet.money_cents or 0) - post.price_cents
-            wallet.save(update_fields=["money_cents", "updated_at"])
-
-            # Create sale record
-            PostSale.objects.create(
-                post=post,
-                buyer=request.user,
-                price_cents=post.price_cents
-            )
-
-            # Credit creator (after dev tax)
-            dev_tax, creator_net = split_cents(
-                post.price_cents,
-                DEV_TAX[membership_for(post.author).tier]
-            )
-
-            # Everyone credited on the post is paid their share, not only the
-            # member who published it (postsplit.py has the rule).
-            from .postsplit import post_shares
-            for who, cents, basis in post_shares(post, creator_net):
-                if cents <= 0:
-                    continue
-                w = wallet_for(who)
-                w.money_cents = (w.money_cents or 0) + cents
-                w.save(update_fields=["money_cents", "updated_at"])
-                log_resource(who, Transaction.RES_MONEY, cents,
-                             note=f"Post sale (post #{post.id})"
-                                  + ("" if basis == "solo" else f" — your {basis} share"))
-
-            log_resource(
-                request.user,
-                Transaction.RES_MONEY,
-                -post.price_cents,
-                note=f"Post purchase #{post.id}"
-            )
-            credit_owner(request.user, dev_tax, f"Post sale platform fee (post #{post.id})")
+        wallet_for(request.user)
+        fee, net = self._split(post)
+        from .postsplit import post_shares
+        try:
+            with transaction.atomic():
+                # Check and debit in ONE statement, so two taps can't both pass
+                # the balance check (the old read-modify-write could overdraw).
+                moved = Wallet.objects.filter(user=request.user, money_cents__gte=price).update(
+                    money_cents=F("money_cents") - price, updated_at=timezone.now())
+                if not moved:
+                    have = wallet_for(request.user).money_cents or 0
+                    return Response(
+                        {"detail": f"You need ${price/100:.2f} and have ${have/100:.2f}. "
+                                   "Nothing was charged.",
+                         "price_cents": price, "balance_cents": have},
+                        status=status.HTTP_402_PAYMENT_REQUIRED)
+                # unique (post, buyer): a racing second buy fails here and the
+                # debit above rolls back with it.
+                PostSale.objects.create(post=post, buyer=request.user, price_cents=price)
+                for who, cents, basis in post_shares(post, net):
+                    if cents <= 0:
+                        continue
+                    wallet_for(who)
+                    Wallet.objects.filter(user=who).update(
+                        money_cents=F("money_cents") + cents, updated_at=timezone.now())
+                    log_resource(who, Transaction.RES_MONEY, cents,
+                                 note=f"Post sale (post #{post.id})"
+                                      + ("" if basis == "solo" else f" — your {basis} share"))
+                log_resource(request.user, Transaction.RES_MONEY, -price,
+                             note=f"Post purchase #{post.id}")
+                credit_owner(request.user, fee, f"Post sale platform fee (post #{post.id})")
+        except IntegrityError:
+            return Response({"detail": "You already bought this. Nothing was charged twice."},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         return Response({
             "success": True,
-            "price_cents": post.price_cents,
-            "balance_after": wallet.money_cents,
-            "message": f"You've supported {post.author.username}!"
+            "price_cents": price,
+            "balance_after": wallet_for(request.user).money_cents,
+            "message": f"Bought — {post.author.username} has been paid.",
         }, status=status.HTTP_201_CREATED)
