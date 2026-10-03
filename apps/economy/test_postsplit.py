@@ -82,3 +82,43 @@ class PaidOutToEveryone(TestCase):
         accrue_playlist_royalties_for_date(timezone.now().date())
         users = set(RoyaltyEntry.objects.filter(kind=RoyaltyEntry.KIND_ACCRUAL).values_list("user__username", flat=True))
         self.assertEqual(users, {"ann", "ben"})
+
+
+class GatesOnPostsAndLessons(TestCase):
+    def setUp(self):
+        from .models import profile_for
+        self.author = User.objects.create_user(username="gauth", password="pw")
+        self.adult = User.objects.create_user(username="gadult", password="pw")
+        self.noage = User.objects.create_user(username="gnoage", password="pw")
+        p = profile_for(self.adult); p.birthday = "1990-01-01"; p.save()
+
+    def test_restricted_post_join_respects_gates(self):
+        post = Post.objects.create(author=self.author, title="VIP", visibility="restricted",
+                                   gates={"age": [21, None]})
+        self.client.force_login(self.noage)
+        r = self.client.post(f"/api/economy/postz/{post.id}/join/", {}, "application/json")
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.json()["gate"], "age")
+        self.client.force_login(self.adult)
+        self.assertEqual(self.client.post(f"/api/economy/postz/{post.id}/join/", {}, "application/json").status_code, 200)
+
+    def test_lesson_booking_respects_gates(self):
+        from apps.lessonz.models import LessonOffer
+        offer = LessonOffer.objects.create(teacher=self.author, skill="bars", title="Bars 101",
+                                           gates={"age": [21, None]})
+        self.client.force_login(self.noage)
+        r = self.client.post("/api/lessonz/bookings/", {"offer": offer.id, "method": "remote"}, "application/json")
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.json()["gate"], "age")
+
+    def test_new_collab_deals_split_by_rating_unless_worth_is_chosen(self):
+        from .models import CollabDeal
+        other = User.objects.create_user(username="gpart", password="pw")
+        self.client.force_login(self.author)
+        base = {"title": "Song", "currency": "money",
+                "participants": [{"username": "gauth", "worth_cents": 0}, {"username": "gpart", "worth_cents": 0}]}
+        r = self.client.post("/api/economy/collab/", base, "application/json")
+        self.assertIn(r.status_code, (200, 201), r.content)
+        self.assertEqual(CollabDeal.objects.latest("id").split_mode, "rating")
+        self.client.post("/api/economy/collab/", {**base, "split_mode": "worth"}, "application/json")
+        self.assertEqual(CollabDeal.objects.latest("id").split_mode, "worth")

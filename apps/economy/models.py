@@ -1499,6 +1499,9 @@ class Post(models.Model):
     # whoever happened to publish it would be the same erasure the escrow
     # exists to prevent, one step later.
     contributors = models.JSONField(default=list, blank=True)
+    # The five range gates (gates.py), enforced when somebody joins a
+    # restricted post. Exclusive, like every other surface that has them.
+    gates = models.JSONField(default=dict, blank=True)
     # The deal it came out of, when it came out of one. SET_NULL so deleting a
     # deal never takes the published work with it.
     source_deal = models.ForeignKey("CollabDeal", on_delete=models.SET_NULL, null=True,

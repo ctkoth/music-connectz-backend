@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from .catalog import edit_window_for
 from .crosspost import coach_cap, coach_price, destinations_for, take_state_for
+from .gates import clean_gates, failing_gate, member_metrics, refusal
 from .models import (
     CollabDeal,
     Wallet,
@@ -163,6 +164,7 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
         "freestyle": p.freestyle,
         "skills_used": p.skills_used or [],
         "visibility": p.visibility,
+        "gates": p.gates,
         "allow_in_playlists": p.allow_in_playlists,
         # Age from the SERVER's clock, so the client's unlock countdowns can't
         # drift from the checks the API actually runs.
@@ -432,6 +434,7 @@ def create_post(user, d):
         freestyle=freestyle,
         skills_used=skills,
         allow_in_playlists=bool(d.get("allow_in_playlists", True)),
+        gates=clean_gates(d.get("gates")),
     )
     if is_submission:
         record_submission(user)
@@ -782,6 +785,13 @@ class PostJoinView(APIView):
             return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
         if p.visibility != "restricted":
             return Response({"detail": "post is not restricted"}, status=status.HTTP_400_BAD_REQUEST)
+        if p.gates and request.user.id != p.author_id:
+            from .models import profile_for
+            ap = profile_for(p.author)
+            origin = (ap.lat, ap.lng) if (ap.share_location and ap.lat is not None) else (None, None)
+            failed = failing_gate(member_metrics(profile_for(request.user), origin), p.gates)
+            if failed:
+                return Response(refusal(failed, p.gates), status=status.HTTP_403_FORBIDDEN)
         ip = _client_ip(request)
         active = max(0, int(request.data.get("active_seconds") or 0))
         join, created = PostJoin.objects.get_or_create(
@@ -815,8 +825,10 @@ class PostJoinView(APIView):
             return False
         if PostJoin.objects.filter(post__author=p.author, rewarded=True, joined_at__gte=day_ago).count() >= JOIN_REWARD_DAILY_CAP_PER_AUTHOR:
             return False
-        award_spinaz(p.author, RESTRICTED_JOIN_REWARD_SPINAZ,
-                     note=f"Restricted join on '{p.title}'", app_key="postz")
+        from .postsplit import post_shares
+        for who, share, _b in post_shares(p, RESTRICTED_JOIN_REWARD_SPINAZ):
+            if share > 0:
+                award_spinaz(who, share, note=f"Restricted join on '{p.title}'", app_key="postz")
         join.rewarded = True
         join.save(update_fields=["rewarded"])
         notify(p.author, "join", f"@{user.username} joined '{p.title}' — you earned +{RESTRICTED_JOIN_REWARD_SPINAZ} 🍥", actor=user, item_id=f"post:{p.id}")

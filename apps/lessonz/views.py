@@ -129,9 +129,11 @@ class OfferListCreateView(APIView):
                            "Publish without CallZ, or upgrade to StatZ."},
                 status=status.HTTP_403_FORBIDDEN,
             )
+        from apps.economy.gates import clean_gates
         ser = LessonOfferSerializer(data=data)
         ser.is_valid(raise_exception=True)
-        ser.save(teacher=request.user, skill=skill, rating_snapshot=rating)
+        ser.save(teacher=request.user, skill=skill, rating_snapshot=rating,
+                 gates=clean_gates(data.get("gates")))
         return Response(ser.data, status=status.HTTP_201_CREATED)
 
 
@@ -158,6 +160,13 @@ class BookingListCreateView(APIView):
             return Response({"detail": "Offer not found."}, status=404)
         if offer.teacher_id == request.user.id:
             return Response({"detail": "You can't book your own lesson."}, status=400)
+        if offer.gates:
+            from apps.economy.gates import failing_gate, member_metrics, refusal
+            from apps.economy.models import profile_for
+            origin = (offer.latitude, offer.longitude) if offer.latitude is not None else (None, None)
+            failed = failing_gate(member_metrics(profile_for(request.user), origin), offer.gates)
+            if failed:
+                return Response(refusal(failed, offer.gates), status=403)
 
         method = (data.get("method") or METHOD_IN_PERSON).strip()
         if method == METHOD_IN_PERSON and not offer.in_person_ok:

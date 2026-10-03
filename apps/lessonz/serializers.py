@@ -13,7 +13,7 @@ class LessonOfferSerializer(serializers.ModelSerializer):
         fields = (
             "id", "teacher_username", "persona", "skill", "title", "description",
             "pricing_mode", "price", "currency", "city", "latitude", "longitude",
-            "remote_ok", "in_person_ok", "callz_ok", "rating_snapshot", "is_active",
+            "remote_ok", "in_person_ok", "callz_ok", "rating_snapshot", "is_active", "gates",
             "created_at", "distance_km",
         )
         read_only_fields = ("id", "teacher_username", "rating_snapshot", "created_at", "distance_km")
