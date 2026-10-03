@@ -190,6 +190,14 @@ class RatezView(APIView):
         })
 
 
+def rating_reward(user):
+    """The gain a rating pays this member right now, for showing BEFORE they rate."""
+    left, cap = rating_reward_left(user)
+    return {"resource": "energy", "amount": RATING_REWARD_ENERGY if left else 0,
+            "left_today": left, "cap": cap,
+            "public_bonus_pct": 25, "per_collaborator_pct": 10}
+
+
 def rating_reward_left(user):
     """How many more ratings today still pay, so the gain is stated honestly.
 

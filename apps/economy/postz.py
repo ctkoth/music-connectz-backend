@@ -588,7 +588,9 @@ class PostsView(APIView):
             posts.sort(key=lambda d: (d["rating"] or 0, d["vibe"]), reverse=True)
         else:  # hot
             posts.sort(key=lambda d: hot(d, by_id[d["id"]]), reverse=True)
-        return Response({"posts": posts[:100], "sort": sort})
+        from .ratez import rating_reward
+        return Response({"posts": posts[:100], "sort": sort,
+                         "rating_reward": rating_reward(request.user)})
 
     def post(self, request):
         d = request.data

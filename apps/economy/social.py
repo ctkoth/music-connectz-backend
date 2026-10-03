@@ -276,7 +276,9 @@ class FaceZView(APIView):
                                  .order_by("-created_at")[:120]
             if not is_minor(f.owner)
         ][:60]
-        return Response({"mine": mine, "feed": feed, "feed_locked": why})
+        from .ratez import rating_reward
+        return Response({"mine": mine, "feed": feed, "feed_locked": why,
+                         "rating_reward": rating_reward(request.user)})
 
     def post(self, request):
         img = request.FILES.get("image")
@@ -1163,6 +1165,8 @@ class MemberProfileView(APIView):
         from .gates import reach_block
         b = None if p.user_id == request.user.id else reach_block(request.user, p.user)
         out["reach_block"] = b["detail"] if b else None
+        from .ratez import rating_reward
+        out["rating_reward"] = rating_reward(request.user)
         return Response(out)
 
 

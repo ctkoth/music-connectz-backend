@@ -112,6 +112,9 @@ class Wallet(models.Model):
     energy = models.IntegerField(default=0)
     spinaz = models.IntegerField(default=0)
     promptz = models.IntegerField(default=0)  # prepaid AI credits; 1 PromptZ = 1¢ of AI spend
+    # The fraction of a ⚡ a bonus-multiplied rating reward earned but could
+    # not pay as a whole unit. Carried so "+25%" pays 1,1,1,2 instead of 1,1,1,1.
+    rating_carry = models.FloatField(default=0)
     # Free daily prompt allowance by tier (free 1 / premium 5 / statz 10). Resets
     # each day — it does NOT stack. `prompt_day` is the YYYY-MM-DD the counter
     # belongs to; a new day zeroes `prompts_used_today`. Prepaid promptz above is
@@ -1858,7 +1861,7 @@ RATING_REWARD_DAILY_CAP = 20
 RATING_NOTE = "Rating"
 
 
-def reward_for_rating(user, what="", visibility="public", collab_multiplier=1.0):
+def reward_for_rating(user, what="", visibility="", collab_multiplier=1.0):
     """Credit the rating reward, respecting the daily cap. Returns what landed.
 
     Public visibility earns +25% bonus on leaderboards.
@@ -1877,7 +1880,12 @@ def reward_for_rating(user, what="", visibility="public", collab_multiplier=1.0)
         return 0
     note = f"{RATING_NOTE} — {what}" if what else RATING_NOTE
     multiplier = visibility_multiplier(visibility) * collab_multiplier
-    awarded = int(RATING_REWARD_ENERGY * multiplier)
+    # Whole ⚡ only, with the fraction carried: without the carry, int(1 × 1.25)
+    # is 1 and every advertised bonus paid exactly nothing.
+    w = wallet_for(user)
+    total = RATING_REWARD_ENERGY * multiplier + (w.rating_carry or 0)
+    awarded = int(total + 1e-9)
+    Wallet.objects.filter(pk=w.pk).update(rating_carry=round(total - awarded, 6))
     award_energy(user, awarded, note, visibility=visibility)
 
     # ZodiacZ — Libra weighs things. This is the one funnel every paying rating

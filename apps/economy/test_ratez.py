@@ -293,3 +293,34 @@ class RateQueueTests(RatezBase):
         r = self.queue_for(self.fans[0])["reward"]
         self.assertEqual(r["left_today"], 0)
         self.assertEqual(r["amount"], 0)
+
+
+class RatingBonusIsRealAndStatedUpFront(TestCase):
+    def test_public_bonus_pays_25_percent_over_four_ratings(self):
+        from .models import reward_for_rating, wallet_for
+        u = User.objects.create_user(username="bonusr", password="pw")
+        before = wallet_for(u).energy or 0
+        got = [reward_for_rating(u, f"post {i}", visibility="public") for i in range(4)]
+        self.assertEqual(got, [1, 1, 1, 2])
+        self.assertEqual((wallet_for(u).energy or 0) - before, 5)
+
+    def test_feed_and_member_card_state_the_reward_before_rating(self):
+        from .ratez import rating_reward
+        u = User.objects.create_user(username="bonusq", password="pw")
+        self.assertEqual(rating_reward(u)["amount"], 1)
+        self.client.force_login(u)
+        self.assertEqual(self.client.get("/api/economy/postz/").json()["rating_reward"]["amount"], 1)
+
+
+class PromptzDoorsAreAtomic(TestCase):
+    def test_buy_quote_and_refusal(self):
+        from .models import wallet_for
+        u = User.objects.create_user(username="pbuy", password="pw")
+        w = wallet_for(u); w.money_cents = 100; w.save()
+        self.client.force_login(u)
+        self.assertIn("promptz_per_cent", self.client.get("/api/economy/promptz/buy/").json())
+        self.assertEqual(self.client.post("/api/economy/promptz/buy/", {"cents": 500}, "application/json").status_code, 402)
+        r = self.client.post("/api/economy/promptz/buy/", {"cents": 100}, "application/json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(wallet_for(u).money_cents, 0)
+        self.assertGreater(wallet_for(u).promptz, 0)
