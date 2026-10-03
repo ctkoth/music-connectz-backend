@@ -185,7 +185,7 @@ from .beatz import (
     BeatListView, BeatDetailView, BeatPurchaseView, BeatUsageReportView,
     BeatEarningsView, ProducerBeatsView,
 )
-from .sonday import SondayBoardViewSet, SondayCardViewSet
+from .sonday import SondayBoardViewSet, SondayCardViewSet, SondayMetaView
 
 urlpatterns = [
     path("wallet/", WalletView.as_view(), name="economy-wallet"),
@@ -602,6 +602,9 @@ urlpatterns = [
     path("sonday/<int:id>/add_column/", SondayBoardViewSet.as_view({"post": "add_column"}), name="economy-sonday-add-column"),
     path("sonday/<int:id>/invite_user/", SondayBoardViewSet.as_view({"post": "invite_user"}), name="economy-sonday-invite-user"),
     path("sonday/<int:id>/permissions/", SondayBoardViewSet.as_view({"get": "permissions"}), name="economy-sonday-permissions"),
+    path("sonday/meta/", SondayMetaView.as_view({"get": "retrieve"}), name="economy-sonday-meta"),
+    path("sonday/<int:id>/columns/<int:column_id>/", SondayBoardViewSet.as_view({"patch": "column", "delete": "column"}), name="economy-sonday-column"),
+    path("sonday/<int:id>/members/<int:user_id>/", SondayBoardViewSet.as_view({"delete": "remove_user"}), name="economy-sonday-remove-user"),
     path("sonday/cards/", SondayCardViewSet.as_view({"get": "list", "post": "create"}), name="economy-sonday-cards"),
     path("sonday/cards/<int:id>/", SondayCardViewSet.as_view({"get": "retrieve", "patch": "partial_update", "put": "update", "delete": "destroy"}), name="economy-sonday-card"),
     path("sonday/cards/<int:id>/move/", SondayCardViewSet.as_view({"post": "move"}), name="economy-sonday-card-move"),
