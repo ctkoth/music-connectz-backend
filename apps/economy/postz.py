@@ -693,6 +693,18 @@ class PostsView(APIView):
             # than defaulting to "public" the way creation does: a typo here
             # should never be the thing that publishes a draft.
             new_vis = str(d.get("visibility") or "").strip().lower()
+            # A track that is private on SoundCloud plays through its SECRET
+            # link. Publishing the post hands that link to everybody who can
+            # see it, so it is asked, not assumed — the member kept that track
+            # private somewhere else, on purpose.
+            if new_vis in dict(Post.VIS_CHOICES) and new_vis != "private" and p.visibility == "private":
+                from .soundcloud_import import has_private_track
+                if has_private_track(p) and not d.get("share_private_track"):
+                    return Response({
+                        "detail": "This track is private on SoundCloud. Publishing shares its secret "
+                                  "link with everyone who can see the post.",
+                        "needs_confirm": "share_private_track",
+                    }, status=status.HTTP_409_CONFLICT)
             if new_vis in dict(Post.VIS_CHOICES):
                 was_private = p.visibility == "private"
                 p.visibility = new_vis
@@ -717,7 +729,10 @@ class PostsView(APIView):
                         p.skill_cost_cents += charged
                         vfields.append("skill_cost_cents")
                 p.save(update_fields=vfields)
-            if len(d) <= 2:            # edit_id + visibility: nothing else to do
+            # edit_id + visibility (+ the private-track confirmation): nothing
+            # else to do. Counting the confirmation would push a plain publish
+            # into the content-edit path and its edit window.
+            if len([k for k in d if k != "share_private_track"]) <= 2:
                 return Response(_post_dict(p, request))
         if not owner:
             window = edit_window_for(membership_for(request.user).tier)

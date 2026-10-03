@@ -268,3 +268,53 @@ class PrivateTracksAndDetailsTests(Base):
         self.run_with([dict(track(0), description="x" * 5000)])
         p = Post.objects.get(author=self.me)
         self.assertEqual(len(p.description), 400)
+
+
+class PrivateTracksComeInLockedTests(Base):
+    """A track private on SoundCloud comes in as a private draft, played
+    through its secret link — and publishing it is asked, never assumed."""
+
+    SECRET = "https://api.soundcloud.com/tracks/777?secret_token=s-abc123"
+
+    def run_with(self, tracks):
+        with patch("apps.economy.soundcloud_import.access_token_for", return_value="tok"), \
+             patch("apps.economy.soundcloud_import._tracks", return_value=(tracks, True)):
+            return self.c.post("/api/economy/soundcloud/import/",
+                               {"code": "c", "redirect_uri": "r"}, format="json")
+
+    def private_track(self, **kw):
+        return {**track(9), "id": 777, "sharing": "private", "secret_uri": self.SECRET, **kw}
+
+    def test_it_imports_with_a_player_that_can_play_it(self):
+        r = self.run_with([self.private_track()])
+        self.assertEqual(r.data["imported"], 1)
+        self.assertEqual(r.data["private_imported"], 1)
+        e = Post.objects.get(author=self.me).embeds[0]
+        self.assertTrue(e["private_on_sc"])
+        self.assertTrue(e["url"].startswith("https://w.soundcloud.com/player/?url="))
+        self.assertIn("secret_token", e["url"])
+
+    def test_a_secret_link_off_soundclouds_api_is_refused(self):
+        r = self.run_with([self.private_track(secret_uri="https://evil.example.com/tracks/1?secret_token=s-x")])
+        self.assertEqual(r.data["imported"], 0)
+        self.assertEqual(r.data["private_skipped"], 1)
+
+    def test_publishing_it_asks_first(self):
+        self.run_with([self.private_track()])
+        p = Post.objects.get(author=self.me)
+        url = "/api/economy/postz/"
+        r = self.c.post(url, {"edit_id": p.pk, "visibility": "public"}, format="json")
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(r.data["needs_confirm"], "share_private_track")
+        p.refresh_from_db()
+        self.assertEqual(p.visibility, "private")
+        r = self.c.post(url, {"edit_id": p.pk, "visibility": "public", "share_private_track": True}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        p.refresh_from_db()
+        self.assertEqual(p.visibility, "public")
+
+    def test_a_track_made_public_later_is_not_imported_twice(self):
+        self.run_with([self.private_track()])
+        r = self.run_with([dict(track(9), id=777, sharing="public")])
+        self.assertEqual(r.data["imported"], 0)
+        self.assertEqual(r.data["already_here"], 1)
