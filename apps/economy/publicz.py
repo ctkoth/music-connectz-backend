@@ -106,6 +106,11 @@ def public_profile_dict(p):
         "real_name": public_name(p),
         "bio": p.bio or "",
         "personas": personas,
+        # The work-facing popular-site fields. Timezone stays off the
+        # logged-out card: it narrows where somebody lives for no hiring gain.
+        "pronouns": p.pronouns, "headline": p.headline, "genres": p.genres or [],
+        "influences": p.influences or [], "gear": p.gear or [], "label": p.label,
+        "cover_url": p.cover_url,
         # BadgeZ travels with the card. A shared profile is somebody's proof
         # they are worth hiring, and "ten deals, no dispute" is exactly the
         # part of that a stranger came to find out. Only badges the member

@@ -475,6 +475,13 @@ class MeView(APIView):
             # in economy/social.py about what happens when it gets two.
             p.personality = clean_personality(data["personality"])
             changed.append("personality")
+        # Popular-site profile fields — one cleaner, shared with ProfileView.
+        from apps.economy.social import clean_profile_field
+        for f in ("pronouns", "headline", "genres", "influences", "gear",
+                  "label", "timezone", "pinned_post_id", "cover_url"):
+            if f in data:
+                setattr(p, f, clean_profile_field(f, data[f]))
+                changed.append(f)
         if "religion" in data:
             p.religion = clean_religion(data["religion"])
             changed.append("religion")

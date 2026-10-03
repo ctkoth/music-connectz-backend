@@ -377,7 +377,9 @@ ADULT_ONLY_PROFILE_FIELDS = ("attracted_to", "asexual")
 PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign",
                   "nationalities", "regions", "substances", "sober",
                   "attracted_to", "asexual", "traits", "personas", "links",
-                  "external_followers", "personality", "religion", "languages")
+                  "external_followers", "personality", "religion", "languages",
+                  "pronouns", "headline", "genres", "influences", "gear", "label",
+                  "timezone", "pinned_post_id", "cover_url")
 
 
 # Everything in PROFILE_FIELDS used to be written STRAIGHT off the request
@@ -442,7 +444,40 @@ def clean_profile_field(field, value):
         return str(value or "").strip()[:10] if isinstance(value, str) else ""
     if field in ("display_name", "location", "gender", "sign"):
         return str(value or "")[:120]
+    if field in ("pronouns", "headline", "label", "timezone"):
+        cap = {"pronouns": 24, "headline": 100, "label": 100, "timezone": 48}[field]
+        text = " ".join(str(value or "").split())[:cap]
+        if field == "timezone":
+            import re
+            return text if re.fullmatch(r"[A-Za-z_]+(/[A-Za-z0-9_+\-]+){0,2}", text or "-") else ""
+        return text
+    if field in ("genres", "influences", "gear"):
+        cap = {"genres": 8, "influences": 12, "gear": 20}[field]
+        out, seen = [], set()
+        for x in (value if isinstance(value, list) else []):
+            t = " ".join(str(x).split())[:60]
+            if t and t.lower() not in seen:
+                seen.add(t.lower()); out.append(t)
+        return out[:cap]
+    if field == "pinned_post_id":
+        try:
+            return int(value) if value not in (None, "", 0, "0") else None
+        except (TypeError, ValueError):
+            return None
+    if field == "cover_url":
+        # Only one of our own uploads, so a profile can't frame an outside page.
+        url = str(value or "").strip()[:300]
+        return url if url.startswith("/api/economy/media/") else ""
     return value
+
+
+def _pinned(p):
+    """The member's pinned post, only while it is theirs and still public."""
+    if not p.pinned_post_id:
+        return None
+    post = Post.objects.filter(pk=p.pinned_post_id, author_id=p.user_id,
+                               visibility="public").values("id", "title").first()
+    return post
 
 
 def _avatar_url(p, request):
@@ -620,6 +655,12 @@ def _profile_card(p, request=None, badges=None, audience=None, batched=None):
         "personality_axes": personality_dict(p.personality),
         "religion": p.religion,
         "languages": p.languages,
+        "pronouns": p.pronouns, "headline": p.headline, "genres": p.genres,
+        "influences": p.influences, "gear": p.gear, "label": p.label,
+        "timezone": p.timezone, "cover_url": p.cover_url,
+        # Only on a single card (batched is None) — the member search would
+        # pay one query per row for it.
+        "pinned_post": _pinned(p) if batched is None else None,
         "attracted_to": p.attracted_to,
         # ONE call, two keys. These are the same number under two names —
         # older clients read `median`, newer ones `attractiveness` — and

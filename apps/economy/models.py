@@ -1078,6 +1078,18 @@ class Profile(models.Model):
     # your current reach, and your rate. Format: {active, help_needed, status,
     # current_reach, rate} — all optional and displayed only if active is True.
     seeking = models.JSONField(default=dict, blank=True)
+    # Fields popular profile sites carry (X, LinkedIn, Instagram, Spotify for
+    # Artists, SoundCloud, Bandcamp). All self-declared and optional; none of
+    # them is a measurement and none moves a rating.
+    pronouns = models.CharField(max_length=24, blank=True, default="")
+    headline = models.CharField(max_length=100, blank=True, default="")
+    genres = models.JSONField(default=list, blank=True)
+    influences = models.JSONField(default=list, blank=True)
+    gear = models.JSONField(default=list, blank=True)
+    label = models.CharField(max_length=100, blank=True, default="")
+    timezone = models.CharField(max_length=48, blank=True, default="")
+    pinned_post_id = models.PositiveIntegerField(null=True, blank=True)
+    cover_url = models.CharField(max_length=300, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
 
 
