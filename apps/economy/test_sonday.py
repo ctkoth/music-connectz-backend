@@ -32,16 +32,26 @@ class SondayBoardCreationTests(APITestCase):
         Membership.objects.create(user=self.premium_user, tier=TIER_PREMIUM)
         Wallet.objects.create(user=self.premium_user, spinaz=1000)
 
-    def test_free_user_cannot_create_board(self):
-        """Free users cannot create Sonday boards (Premium-only)."""
+    def test_free_user_gets_one_board_not_none(self):
+        """Free keeps one board; the second asks for Premium and says why.
+
+        It used to be Premium-only — a limit that said "whether", which the
+        tier rules forbid. A Free member now has a board to try it with.
+        """
         self.client.force_authenticate(user=self.free_user)
-        data = {
-            "name": "My Project Board",
-            "description": "Organizing my tracks"
-        }
-        response = self.client.post("/api/economy/sonday/", data)
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertIn("Premium", response.data["detail"])
+        first = self.client.post("/api/economy/sonday/", {"name": "One"})
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        second = self.client.post("/api/economy/sonday/", {"name": "Two"})
+        self.assertEqual(second.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("Premium", second.data["detail"])
+        self.assertEqual(second.data["quota"]["left"], 0)
+
+    def test_the_quota_is_served_before_the_button(self):
+        self.client.force_authenticate(user=self.free_user)
+        q = self.client.get("/api/economy/sonday/meta/").data["quota"]
+        self.assertEqual((q["per_tier"], q["used"], q["left"]), (1, 0, 1))
+        self.client.force_authenticate(user=self.premium_user)
+        self.assertIsNone(self.client.get("/api/economy/sonday/meta/").data["quota"]["left"])
 
     def test_premium_user_can_create_board(self):
         """Premium users can create Sonday boards."""
@@ -593,5 +603,157 @@ class SondayCardCrossPollinationTests(APITestCase):
         self.assertEqual(response.data["linked_target"], "beatz:123")
 
 
-# Import timezone for soft delete test
 from django.utils import timezone
+
+
+class SondayCardsBelongToTheirBoardTests(APITestCase):
+    """The hole this screen could not ship on top of.
+
+    Card read/edit/delete checked nothing — a stranger could read, rewrite and
+    hard-delete a card on somebody else's private board by id (200, 200, 204).
+    """
+
+    def setUp(self):
+        self.owner = User.objects.create_user("owner_s", "o@e.com", "pw12345!")
+        self.stranger = User.objects.create_user("stranger_s", "s@e.com", "pw12345!")
+        self.viewer = User.objects.create_user("viewer_s", "v@e.com", "pw12345!")
+        self.board = SondayBoard.objects.create(user=self.owner, name="secret")
+        self.col = SondayColumn.objects.create(board=self.board, key="draft", label="Draft", position=0)
+        self.col2 = SondayColumn.objects.create(board=self.board, key="done", label="Done", position=1)
+        self.card = SondayCard.objects.create(board=self.board, column=self.col, title="private card")
+        SondayPermission.objects.create(board=self.board, user=self.viewer, role=SondayPermission.ROLE_VIEWER)
+
+    def as_(self, who):
+        c = APIClient(); c.force_authenticate(who); return c
+
+    def url(self):
+        return f"/api/economy/sonday/cards/{self.card.id}/"
+
+    def test_a_stranger_cannot_read_it(self):
+        self.assertEqual(self.as_(self.stranger).get(self.url()).status_code, 404)
+
+    def test_a_stranger_cannot_edit_it(self):
+        r = self.as_(self.stranger).patch(self.url(), {"title": "pwned"}, format="json")
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(SondayCard.objects.get(pk=self.card.pk).title, "private card")
+
+    def test_a_stranger_cannot_delete_it(self):
+        self.assertEqual(self.as_(self.stranger).delete(self.url()).status_code, 404)
+        self.assertIsNone(SondayCard.objects.get(pk=self.card.pk).deleted_at)
+
+    def test_a_viewer_can_read_but_not_write(self):
+        v = self.as_(self.viewer)
+        self.assertEqual(v.get(self.url()).status_code, 200)
+        self.assertEqual(v.patch(self.url(), {"title": "x"}, format="json").status_code, 403)
+        self.assertEqual(v.delete(self.url()).status_code, 403)
+
+    def test_the_owner_edits_and_it_is_logged(self):
+        r = self.as_(self.owner).patch(self.url(), {"title": "renamed", "color": "cyan",
+                                                    "due_date": "2026-12-01"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["title"], "renamed")
+        self.assertEqual(r.data["due_date"], "2026-12-01")
+        self.assertTrue(SondayActivity.objects.filter(card=self.card, action="updated").exists())
+
+    def test_delete_is_soft_and_keeps_the_history(self):
+        self.assertEqual(self.as_(self.owner).delete(self.url()).status_code, 204)
+        card = SondayCard.objects.get(pk=self.card.pk)
+        self.assertIsNotNone(card.deleted_at)
+        self.assertTrue(SondayActivity.objects.filter(card=card, action="deleted").exists())
+        board = self.as_(self.owner).get(f"/api/economy/sonday/{self.board.id}/").data
+        self.assertEqual(board["cards"], [])
+
+    def test_a_card_cannot_move_into_another_boards_column(self):
+        other = SondayBoard.objects.create(user=self.owner, name="other")
+        foreign = SondayColumn.objects.create(board=other, key="x", label="X")
+        r = self.as_(self.owner).post(f"{self.url()}move/", {"column_id": foreign.id}, format="json")
+        self.assertEqual(r.status_code, 404)
+
+    def test_a_bad_colour_or_date_is_refused_not_stored(self):
+        o = self.as_(self.owner)
+        self.assertEqual(o.patch(self.url(), {"color": "<script>"}, format="json").status_code, 400)
+        self.assertEqual(o.patch(self.url(), {"due_date": "tomorrow"}, format="json").status_code, 400)
+
+    def test_a_private_board_reads_as_missing_to_a_stranger(self):
+        r = self.as_(self.stranger).get(f"/api/economy/sonday/{self.board.id}/")
+        self.assertEqual(r.status_code, 404)
+
+
+class SondayBoardRulesTests(APITestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user("owner_b", "o@e.com", "pw12345!")
+        self.editor = User.objects.create_user("editor_b", "e@e.com", "pw12345!")
+        self.board = SondayBoard.objects.create(user=self.owner, name="b")
+        self.col = SondayColumn.objects.create(board=self.board, key="draft", label="Draft", position=0)
+        self.col2 = SondayColumn.objects.create(board=self.board, key="done", label="Done", position=1)
+        SondayPermission.objects.create(board=self.board, user=self.editor, role=SondayPermission.ROLE_EDITOR)
+
+    def as_(self, who):
+        c = APIClient(); c.force_authenticate(who); return c
+
+    def test_only_the_owner_publishes_a_board(self):
+        r = self.as_(self.editor).patch(f"/api/economy/sonday/{self.board.id}/", {"is_public": True}, format="json")
+        self.assertEqual(r.status_code, 403)
+        r = self.as_(self.owner).patch(f"/api/economy/sonday/{self.board.id}/", {"is_public": True}, format="json")
+        self.assertTrue(r.data["is_public"])
+
+    def test_only_the_owner_deletes_and_it_is_soft(self):
+        self.assertEqual(self.as_(self.editor).delete(f"/api/economy/sonday/{self.board.id}/").status_code, 403)
+        self.assertEqual(self.as_(self.owner).delete(f"/api/economy/sonday/{self.board.id}/").status_code, 204)
+        self.assertIsNotNone(SondayBoard.objects.get(pk=self.board.pk).deleted_at)
+
+    def test_invite_by_username_and_the_invitee_is_told(self):
+        from apps.economy.models import Notification
+        friend = User.objects.create_user("friend_b", "f@e.com", "pw12345!")
+        r = self.as_(self.owner).post(f"/api/economy/sonday/{self.board.id}/invite_user/",
+                                      {"username": "@friend_b", "role": "viewer"}, format="json")
+        self.assertEqual(r.status_code, 201)
+        self.assertTrue(Notification.objects.filter(user=friend).exists())
+
+    def test_a_collaborator_can_leave(self):
+        r = self.as_(self.editor).delete(f"/api/economy/sonday/{self.board.id}/members/{self.editor.id}/")
+        self.assertEqual(r.status_code, 204)
+        self.assertFalse(SondayPermission.objects.filter(user=self.editor).exists())
+
+    def test_deleting_a_column_moves_its_cards_rather_than_orphaning_them(self):
+        card = SondayCard.objects.create(board=self.board, column=self.col2, title="t")
+        r = self.as_(self.owner).delete(f"/api/economy/sonday/{self.board.id}/columns/{self.col2.id}/")
+        self.assertEqual(r.status_code, 204)
+        self.assertEqual(SondayCard.objects.get(pk=card.pk).column_id, self.col.id)
+
+    def test_the_last_column_cannot_go(self):
+        self.as_(self.owner).delete(f"/api/economy/sonday/{self.board.id}/columns/{self.col2.id}/")
+        r = self.as_(self.owner).delete(f"/api/economy/sonday/{self.board.id}/columns/{self.col.id}/")
+        self.assertEqual(r.status_code, 400)
+
+    def test_a_column_key_is_derived_from_the_label(self):
+        r = self.as_(self.owner).post(f"/api/economy/sonday/{self.board.id}/add_column/",
+                                      {"label": "Mixing & Mastering"}, format="json")
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data["key"], "mixingmastering")
+
+    def test_a_linked_card_carries_where_it_opens(self):
+        o = self.as_(self.owner)
+        r = o.post("/api/economy/sonday/cards/", {"board_id": self.board.id, "title": "Master it",
+                                                  "linked_target": "/p/12"}, format="json")
+        self.assertEqual(r.data["open_in"], {"url": "/p/12"})
+        self.assertEqual(r.data["column"], self.col.id)  # no column given → the first one
+        r = o.post("/api/economy/sonday/cards/", {"board_id": self.board.id, "title": "Fund it",
+                                                  "linked_app_key": "collabz", "linked_target": "collabz-deals"},
+                   format="json")
+        self.assertEqual(r.data["open_in"], {"tab": "collabz", "target": "collabz-deals"})
+
+    def test_the_board_does_not_cost_a_query_per_card(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        o = self.as_(self.owner)
+        url = f"/api/economy/sonday/{self.board.id}/"
+        SondayCard.objects.create(board=self.board, column=self.col, title="a")
+        o.get(url)
+        with CaptureQueriesContext(connection) as few:
+            o.get(url)
+        for i in range(8):
+            SondayCard.objects.create(board=self.board, column=self.col, title=f"c{i}")
+        with CaptureQueriesContext(connection) as many:
+            o.get(url)
+        self.assertEqual(len(few.captured_queries), len(many.captured_queries))
