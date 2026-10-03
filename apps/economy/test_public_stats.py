@@ -1,4 +1,8 @@
-"""PublicStatsView — the landing page's real member count, no session required.
+"""PublicStatsView — the real member count, now for members only.
+
+It used to answer logged-out callers for the landing page. Corey's call: a
+small honest number reads as an empty room to somebody deciding whether to
+join, so visitors are never shown it.
 
 Two things distinguish it from StatsView (the authenticated one): it must
 answer with no caller identity at all, and it must never mark anybody as
@@ -22,8 +26,14 @@ PUBLIC_STATS = "/api/auth/public-stats/"
 class PublicStatsTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.viewer = User.objects.create_user(username="viewer", password=PW)
+        self.client.force_authenticate(self.viewer)
 
-    def test_answers_with_no_session_at_all(self):
+    def test_a_visitor_with_no_account_is_not_told(self):
+        r = APIClient().get(PUBLIC_STATS)
+        self.assertIn(r.status_code, (401, 403))
+
+    def test_a_member_is(self):
         r = self.client.get(PUBLIC_STATS)
         self.assertEqual(r.status_code, 200)
         self.assertIn("total_members", r.data)

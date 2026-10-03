@@ -303,7 +303,10 @@ class PublicStatsView(APIView):
     good."
     """
 
-    permission_classes = [AllowAny]
+    # Members only (Corey's call): a small honest number reads as an empty
+    # room to somebody deciding whether to join, so a logged-out visitor is
+    # never shown it. Members still see the community grow in the header.
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         online_cutoff = timezone.now() - timedelta(minutes=5)
