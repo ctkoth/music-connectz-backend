@@ -69,7 +69,7 @@ from .messages_view import MessagesView
 from .logz import FeaturesView, LogZExportView, LogZView
 from .observationz import ObservationConsentView, ObservationZView
 from .social_verify import SocialReviewQueueView, SocialVerifyView
-from .parcel import ParcelCampaignView
+from .parcel import ParcelCampaignView, ParcelEmailPrefView, ParcelUnsubscribeView
 from .autotopup import AutoTopUpView, AutoTopUpCancelView
 from .identity import IdentityView
 from .collab import (
@@ -561,6 +561,8 @@ urlpatterns = [
     path("collab/<int:pk>/dispute/", CollabDisputeView.as_view(), name="economy-collab-dispute"),
     path("collab/<int:pk>/refund/", CollabRefundView.as_view(), name="economy-collab-refund"),
     path("parcel/", ParcelCampaignView.as_view(), name="economy-parcel"),
+    path("parcel/email-pref/", ParcelEmailPrefView.as_view(), name="economy-parcel-email-pref"),
+    path("parcel/unsubscribe/", ParcelUnsubscribeView.as_view(), name="economy-parcel-unsubscribe"),
     path("autotopup/", AutoTopUpView.as_view(), name="economy-autotopup"),
     path("autotopup/<int:pk>/cancel/", AutoTopUpCancelView.as_view(), name="economy-autotopup-cancel"),
     path("identity/", IdentityView.as_view(), name="economy-identity"),

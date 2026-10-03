@@ -189,6 +189,16 @@ def limits_for(tier):
 # Clips for listening, characters for reading, because that is the unit each
 # action actually comes in: you speak in clips and you read text. One number
 # per action, published by GET before either button is pressed.
+# Parcel Primate campaigns per rolling 7 days. A campaign can reach up to
+# parcel.MAX_RECIPIENTS people at once, so this is how OFTEN, never whether:
+# Free sends one a week, which is a real newsletter cadence.
+PARCEL_PER_WEEK = {
+    TIER_FREE: 1,
+    TIER_PREMIUM: 7,
+    TIER_STATZ: 21,
+    TIER_DEBUG: 10 ** 6,
+}
+
 KEY_TRANSCRIBE_DAILY_CLIPS = {
     TIER_FREE: 10,
     TIER_PREMIUM: 60,
