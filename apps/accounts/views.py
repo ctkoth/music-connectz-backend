@@ -889,7 +889,7 @@ class OAuthConfigView(APIView):
                 "end in .apps.googleusercontent.com. Check you pasted the client ID "
                 "and not the client secret."
             )
-        # Apple is temporarily disabled; skip the Services ID validation
+        # Apple wants the Services ID (reverse-domain), not the 10-char Team ID.
         if cfg.get("apple") and "." not in cfg.get("apple", ""):
             warnings.append(
                 "APPLE_OAUTH_CLIENT_ID should be the Services ID (a reverse-domain "

@@ -9,8 +9,9 @@ Env vars expected (set on Render):
     GOOGLE_OAUTH_CLIENT_ID
     GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET
 
-Note: Apple OAuth support is retained but temporarily disabled pending
-configuration fixes. Use OAUTH2_PROVIDERS for Spotify, SoundCloud, etc.
+    APPLE_OAUTH_CLIENT_ID  (the Services ID, e.g. net.musicconnectz.signin)
+
+Use OAUTH2_PROVIDERS for Spotify, SoundCloud, etc.
 """
 import os
 
@@ -246,7 +247,9 @@ def provider_requirements():
     needs = {
         "google": ("GOOGLE_OAUTH_CLIENT_ID",),          # ID token, verified by audience
         "github": ("GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET"),
-        # "apple": temporarily disabled; verify_apple() retained for re-enabling
+        # Apple JS popup returns an identity token verified against our Services
+        # ID, so the ID is the only setting it needs. Unset = no button.
+        "apple": ("APPLE_OAUTH_CLIENT_ID",),
     }
     for name in OAUTH2_PROVIDERS:
         needs[name] = (f"{name.upper()}_OAUTH_CLIENT_ID",

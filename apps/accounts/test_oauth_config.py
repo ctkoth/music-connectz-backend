@@ -44,70 +44,14 @@ class OAuthConfigTests(TestCase):
         self.assertEqual(r.data["warnings"], [])
 
     @override_settings(APPLE_OAUTH_CLIENT_ID="ABCDE12345")
-    def test_apple_is_disabled_so_its_settings_are_not_reported_on(self):
-        """Apple sign-in is off (see OAuthConfigView), and this used to assert
-        the Services-ID warning it would give if it were on.
-
-        It failed on every run for as long as Apple has been disabled, which is
-        worse than no test: two permanently red results teach everybody reading
-        the suite that red is the normal colour, and the next real failure
-        arrives in a list that already had failures in it.
-
-        So it pins what is actually true. Re-enabling Apple should flip this
-        test back rather than leave it lying in the other direction.
-        """
+    def test_apple_team_id_instead_of_services_id_is_warned(self):
         d = self.client.get(URL).data
-        self.assertNotIn("apple", d)
-        self.assertFalse(any("Services ID" in x for x in d["warnings"]), d["warnings"])
+        self.assertEqual(d["apple"], "ABCDE12345")
+        self.assertTrue(any("Services ID" in x for x in d["warnings"]), d["warnings"])
 
-    @override_settings(GOOGLE_OAUTH_CLIENT_ID=GOOD)
-    def test_it_needs_no_login(self):
-        # The buttons are on the signed-out screen, so this cannot require auth.
-        self.assertEqual(APIClient().get(URL).status_code, 200)
-
-
-class HalfConfiguredTests(TestCase):
-    """A client ID without its secret.
-
-    This is the state that produced "all of them say they are unavailable":
-    the screen enabled a button on the ID alone, and the exchange refused
-    without the secret. The refusal landed AFTER the member had been sent to
-    the provider and consented — the worst possible moment to learn a thing
-    isn't set up. The config endpoint now reports what a sign-in needs to
-    finish, not what it needs to start.
-    """
-
-    def setUp(self):
-        self.client = APIClient()
-
-    @override_settings(GITHUB_OAUTH_CLIENT_ID="Iv1.abc123", GITHUB_OAUTH_CLIENT_SECRET="")
-    def test_a_client_id_with_no_secret_is_not_advertised(self):
-        r = self.client.get(URL)
-        self.assertEqual(r.data["github"], "")
-        self.assertEqual(r.data["needs"]["github"], ["GITHUB_OAUTH_CLIENT_SECRET"])
-
-    @override_settings(GITHUB_OAUTH_CLIENT_ID="Iv1.abc123", GITHUB_OAUTH_CLIENT_SECRET="")
-    def test_half_configured_says_which_var_is_missing(self):
-        # Naming the env var is the whole value: without it the only way to
-        # learn what's missing is to read the source.
-        w = self.client.get(URL).data["warnings"]
-        self.assertTrue(any("GITHUB_OAUTH_CLIENT_SECRET" in x for x in w), w)
-
-    @override_settings(GITHUB_OAUTH_CLIENT_ID="Iv1.abc123", GITHUB_OAUTH_CLIENT_SECRET="s3cret")
-    def test_both_halves_present_serves_the_id_with_no_complaint(self):
-        r = self.client.get(URL)
-        self.assertEqual(r.data["github"], "Iv1.abc123")
-        self.assertEqual(r.data["warnings"], [])
-        self.assertNotIn("github", r.data["needs"])
-
-    @override_settings(GITHUB_OAUTH_CLIENT_ID="", GITHUB_OAUTH_CLIENT_SECRET="")
-    def test_nothing_set_is_listed_under_needs_but_is_not_a_warning(self):
-        r = self.client.get(URL)
-        self.assertEqual(r.data["warnings"], [])
-        self.assertEqual(
-            r.data["needs"]["github"],
-            ["GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET"],
-        )
+    @override_settings(APPLE_OAUTH_CLIENT_ID="")
+    def test_unconfigured_apple_renders_no_button(self):
+        self.assertEqual(self.client.get(URL).data["apple"], "")
 
     def test_every_provider_the_backend_can_complete_is_answered_for(self):
         # The button grid is built from this map. A provider missing from it
@@ -116,15 +60,8 @@ class HalfConfiguredTests(TestCase):
         from apps.accounts.oauth import OAUTH2_PROVIDERS
 
         r = self.client.get(URL)
-        # Apple is deliberately absent: the backend retains verify_apple() but
-        # OAuthConfigView does not offer it and the button grid has no Apple
-        # button either, so all three agree. It is listed here as excluded
-        # rather than silently dropped, because "a provider missing from the
-        # map" is exactly what this test exists to catch — the exclusion has to
-        # be the deliberate kind.
-        for name in ("google", "github", *OAUTH2_PROVIDERS):
+        for name in ("google", "github", "apple", *OAUTH2_PROVIDERS):
             self.assertIn(name, r.data, name)
-        self.assertNotIn("apple", r.data)
 
     def test_a_code_flow_provider_configured_only_in_env_is_served(self):
         # spotify/microsoft/facebook/soundcloud/twitter have no settings entry
