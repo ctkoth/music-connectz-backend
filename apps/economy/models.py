@@ -7088,3 +7088,42 @@ class Horoscope(models.Model):
 
     class Meta:
         unique_together = ("sign", "day", "level")
+
+
+class ScoreShare(models.Model):
+    """A scored take somebody can share: the score and verdict the coach
+    actually gave, minted SERVER-SIDE at the moment it answered.
+
+    Never created from anything the client sends — a share card that took a
+    number from the request would let anybody post "10/10 from the AI coach"
+    for a take that scored 4, which is the substance rule's failure case with
+    our name on it. The link carries a random token, so takes cannot be walked.
+    """
+    token = models.CharField(max_length=32, unique=True, db_index=True)
+    app_key = models.CharField(max_length=32)
+    score = models.PositiveSmallIntegerField()
+    verdict = models.CharField(max_length=400, blank=True, default="")
+    genre = models.CharField(max_length=60, blank=True, default="")
+    # A member's own take carries their handle, which is also the referral
+    # code the card's "get yours" link uses. A trial take has nobody to name.
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                             on_delete=models.CASCADE, related_name="score_shares")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+def mint_score_share(app_key, payload, user=None, genre=""):
+    """The share token for a scored take, or "" when there is no score.
+    Best-effort: a failure here must never cost anybody their result."""
+    import secrets
+    try:
+        score = payload.get("score")
+        if score is None:
+            return ""
+        row = ScoreShare.objects.create(
+            token=secrets.token_urlsafe(12)[:16], app_key=str(app_key)[:32],
+            score=int(score), verdict=str(payload.get("verdict") or "")[:400],
+            genre=str(genre or "")[:60],
+            user=user if getattr(user, "is_authenticated", False) else None)
+        return row.token
+    except Exception:
+        return ""

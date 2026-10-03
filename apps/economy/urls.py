@@ -31,6 +31,7 @@ from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView, DupeZVerify
                     DupeZReviewView, DupeZView)
 from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
+from .scoreshare import ScoreShareView, score_card_png
 from .soundz import SoundZView
 from .coachvoice import CoachVoiceView, CoachSpeakView
 from .dawz import DawZView
@@ -278,6 +279,9 @@ urlpatterns = [
     # JavaScript. See sharecard.py and the vercel.json note in the PR.
     path("share/u/<str:username>", profile_card, name="share-profile"),
     path("share/p/<int:pk>", post_card, name="share-post"),
+    # Shareable score cards: JSON for the page + a 1200x630 image for crawlers.
+    path("scores/<str:token>/", ScoreShareView.as_view(), name="score-share"),
+    path("scores/<str:token>/card.png", score_card_png, name="score-share-card"),
     path("soundz/", SoundZView.as_view(), name="economy-soundz"),
     path("coachvoice/", CoachVoiceView.as_view(), name="economy-coachvoice"),
     path("coachvoice/speak/", CoachSpeakView.as_view(), name="economy-coachvoice-speak"),
