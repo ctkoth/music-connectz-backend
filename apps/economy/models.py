@@ -5594,11 +5594,35 @@ class UserPreferences(models.Model):
     ]
     language = models.CharField(max_length=5, choices=LANGUAGE_CHOICES, default="en")
     sound_enabled = models.BooleanField(default=True, help_text="Play sound effects")
+    # Parcel Primate email. OFF until the member turns it on: following
+    # somebody is consent to see their posts, not to receive their mail.
+    campaign_email = models.BooleanField(default=False, help_text="Email me campaigns from people I follow")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.user} — {self.language}, notifications={'on' if self.notifications_enabled else 'off'}"
+
+
+class ParcelCampaign(models.Model):
+    """One Parcel Primate send — what went, to whom, through which doors.
+
+    Kept so the sender has a history to look back at, and so the per-tier
+    weekly count is a row count rather than a guess.
+    """
+    sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="parcel_campaigns")
+    subject = models.CharField(max_length=160)
+    body = models.TextField(blank=True, default="")
+    audience = models.CharField(max_length=16)
+    channels = models.JSONField(default=list, blank=True)
+    recipients = models.PositiveIntegerField(default=0)
+    messaged = models.PositiveIntegerField(default=0)
+    emailed = models.PositiveIntegerField(default=0)
+    post = models.ForeignKey("Post", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at",)
 
 
 class BodieZExercise(models.Model):

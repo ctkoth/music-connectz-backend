@@ -496,7 +496,7 @@ class ParcelEmailNotConfiguredTests(APITestCase):
         # Email should be 0 and note should be present
         self.assertEqual(response.data["emailed"], 0)
         self.assertIn("email_note", response.data)
-        self.assertIn("EMAIL_HOST", response.data["email_note"])
+        self.assertIn("switched on", response.data["email_note"])
 
     def test_other_channels_still_work_without_email(self):
         """Other channels work even if email is not configured."""
@@ -522,3 +522,122 @@ class ParcelEmailNotConfiguredTests(APITestCase):
         response = self.client.get("/api/economy/parcel/")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(response.data["email_ready"])
+
+
+from django.core import mail as _mail
+from django.test import TestCase as _TC, override_settings as _ovr
+from apps.economy.models import (
+    Block as _Block, Follow as _Follow, Membership as _M, ParcelCampaign as _PC,
+    UserPreferences as _Prefs, TIER_FREE as _FREE, TIER_PREMIUM as _PREM,
+)
+
+
+@_ovr(EMAIL_HOST="smtp.example.com", EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class CampaignEmailIsOptInTests(_TC):
+    """Following somebody is consent to their posts, not to their mail."""
+
+    def setUp(self):
+        self.me = User.objects.create_user("creator_p", "c@e.com", "pw12345!")
+        _M.objects.create(user=self.me, tier=_PREM)
+        self.yes = User.objects.create_user("wants_p", "yes@e.com", "pw12345!")
+        self.no = User.objects.create_user("silent_p", "no@e.com", "pw12345!")
+        for u in (self.yes, self.no):
+            _Follow.objects.create(follower=u, following=self.me)
+        _Prefs.objects.create(user=self.yes, campaign_email=True)
+        self.c = APIClient(); self.c.force_authenticate(self.me)
+        _mail.outbox = []
+
+    def send(self, **kw):
+        return self.c.post("/api/economy/parcel/", {"subject": "New single", "body": "out friday",
+                                                     "channels": ["email"], **kw}, format="json")
+
+    def test_only_the_follower_who_asked_gets_email(self):
+        r = self.send()
+        self.assertEqual(r.data["emailed"], 1)
+        self.assertEqual([m.to for m in _mail.outbox], [["yes@e.com"]])
+
+    def test_the_count_is_stated_before_sending(self):
+        reach = self.c.get("/api/economy/parcel/").data["reach"]["followers"]
+        self.assertEqual((reach["people"], reach["email"]), (2, 1))
+
+    def test_every_email_carries_a_way_out(self):
+        self.send()
+        m = _mail.outbox[0]
+        self.assertIn("/api/economy/parcel/unsubscribe/?t=", m.body)
+        self.assertIn("List-Unsubscribe", m.extra_headers)
+
+    def test_notifications_off_means_no_campaign_email_either(self):
+        p = _Prefs.objects.get(user=self.yes); p.notifications_enabled = False; p.save()
+        self.assertEqual(self.send().data["emailed"], 0)
+
+
+class UnsubscribeTests(_TC):
+    def setUp(self):
+        from apps.economy.parcel import unsubscribe_token
+        self.u = User.objects.create_user("reader_p", "r@e.com", "pw12345!")
+        _Prefs.objects.create(user=self.u, campaign_email=True)
+        self.url = f"/api/economy/parcel/unsubscribe/?t={unsubscribe_token(self.u)}"
+
+    def test_opening_the_link_changes_nothing(self):
+        # Mail scanners open links; a GET that unsubscribed would act for them.
+        r = self.client.get(self.url)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(_Prefs.objects.get(user=self.u).campaign_email)
+
+    def test_the_button_turns_it_off_without_signing_in(self):
+        r = self.client.post(self.url)
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(_Prefs.objects.get(user=self.u).campaign_email)
+
+    def test_a_forged_token_does_nothing(self):
+        r = self.client.post("/api/economy/parcel/unsubscribe/?t=forged")
+        self.assertEqual(r.status_code, 400)
+        self.assertTrue(_Prefs.objects.get(user=self.u).campaign_email)
+
+    def test_a_member_can_switch_it_themselves(self):
+        c = APIClient(); c.force_authenticate(self.u)
+        self.assertFalse(c.post("/api/economy/parcel/email-pref/", {"campaign_email": False}, format="json").data["campaign_email"])
+        self.assertTrue(c.post("/api/economy/parcel/email-pref/", {"campaign_email": True}, format="json").data["campaign_email"])
+
+
+class HowOftenIsALadderTests(_TC):
+    def setUp(self):
+        self.me = User.objects.create_user("free_p", "f@e.com", "pw12345!")
+        _M.objects.create(user=self.me, tier=_FREE)
+        self.c = APIClient(); self.c.force_authenticate(self.me)
+
+    def send(self, body="hi"):
+        return self.c.post("/api/economy/parcel/", {"subject": "s", "body": body}, format="json")
+
+    def test_free_sends_one_a_week_and_is_told_when_the_next_opens(self):
+        self.assertEqual(self.send().status_code, 201)
+        r = self.send()
+        self.assertEqual(r.status_code, 429)
+        self.assertEqual(r.data["quota"]["left"], 0)
+        self.assertIsNotNone(r.data["quota"]["next_at"])
+
+    def test_the_weekly_count_is_served_before_the_button(self):
+        q = self.c.get("/api/economy/parcel/").data["quota"]
+        self.assertEqual((q["per_week"], q["left"]), (1, 1))
+
+    def test_the_body_answers_to_the_tier_character_limit(self):
+        r = self.send(body="x" * 5000)
+        self.assertEqual(r.status_code, 400)
+        self.assertFalse(_PC.objects.exists())
+
+    def test_a_send_is_kept_with_a_link_to_its_post(self):
+        r = self.send()
+        h = self.c.get("/api/economy/parcel/").data["history"]
+        self.assertEqual(h[0]["post"]["url"], r.data["post"]["url"])
+
+
+class SenderBlocksAreRespectedTests(_TC):
+    def test_somebody_the_sender_blocked_is_not_reached(self):
+        me = User.objects.create_user("blocker_p", "b@e.com", "pw12345!")
+        _M.objects.create(user=me, tier=_PREM)
+        them = User.objects.create_user("blocked_p", "x@e.com", "pw12345!")
+        _Follow.objects.create(follower=them, following=me)
+        _Block.objects.create(blocker=me, blocked=them)
+        c = APIClient(); c.force_authenticate(me)
+        r = c.post("/api/economy/parcel/", {"subject": "s", "channels": ["message"]}, format="json")
+        self.assertEqual(r.data["recipients"], 0)
