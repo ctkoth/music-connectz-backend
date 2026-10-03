@@ -168,7 +168,7 @@ class OAuthVerifierShapeTests(TestCase):
         orig_post, orig_get = oauth_mod.requests.post, oauth_mod.requests.get
         oauth_mod.requests.post = lambda *a, **k: FakeResp()
         oauth_mod.requests.get = lambda *a, **k: type(
-            "R", (), {"json": lambda self: {"id": "42", "email": "x@example.com",
+            "R", (), {"status_code": 200, "json": lambda self: {"id": "42", "email": "x@example.com",
                                             "display_name": "X", "images": []}}
         )()
         try:

@@ -282,6 +282,18 @@ class RateQueueTests(RatezBase):
         row = self.queue_for(self.fans[0])["posts"][0]
         self.assertTrue(row["needs_listen"])
         self.assertEqual(row["url"], f"/p/{post.id}")
+        # Playable right in the queue, with the requirement stated.
+        self.assertEqual((row["play_kind"], row["play_url"]), ("audio", "/media/x.mp3"))
+        self.assertEqual(row["listened_sec"], 0)
+
+    def test_once_heard_enough_it_can_be_rated_from_the_queue(self):
+        from apps.economy.models import LISTEN_REQUIRED_SEC, ListenProgress
+        post = self.make_post([])
+        Post.objects.filter(pk=post.pk).update(media_type="audio", media_url="/media/x.mp3")
+        ListenProgress.objects.create(user=self.fans[0], item_id=f"post:{post.id}", seconds=LISTEN_REQUIRED_SEC)
+        row = self.queue_for(self.fans[0])["posts"][0]
+        self.assertFalse(row["needs_listen"])
+        self.assertTrue(row["listen_gated"])
 
     def test_the_gain_is_stated_and_goes_to_zero_at_the_cap(self):
         from apps.economy.models import RATING_REWARD_DAILY_CAP, award_energy
