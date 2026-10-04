@@ -47,6 +47,7 @@ from .rewards import (AdmobConfigView, AdmobSsvView, OfferzView,
 from .translate import TranslateView
 from .gemini import GeminiImageView
 from .notifications import NotificationsView
+from .push import PushPrefsView, PushSubscribeView, PushTestView, PushView
 from .earn import EarnView
 from .battlez import (BattlesView, BattleChallengeView, BattleDetailView,
                       BattleEnterView, BattleRespondView, BattleSettleView,
@@ -338,6 +339,10 @@ urlpatterns = [
     path("profile/location/", ProfileLocationView.as_view(), name="economy-profile-location"),
     path("follow/", FollowView.as_view(), name="economy-follow"),
     path("notifications/", NotificationsView.as_view(), name="economy-notifications"),
+    path("push/", PushView.as_view(), name="economy-push"),
+    path("push/subscribe/", PushSubscribeView.as_view(), name="economy-push-subscribe"),
+    path("push/prefs/", PushPrefsView.as_view(), name="economy-push-prefs"),
+    path("push/test/", PushTestView.as_view(), name="economy-push-test"),
     path("messages/", MessagesView.as_view(), name="economy-messages"),
     path("habits/", HabitCreateView.as_view(), name="economy-habits"),
     path("habits/<int:habit_id>/complete/", HabitCompleteView.as_view(), name="economy-habit-complete"),

@@ -325,6 +325,13 @@ EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = _env_bool("EMAIL_USE_TLS", "1")
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "Music ConnectZ <no-reply@musicconnectz.net>")
+
+# Push notifications (apps/economy/push.py). Off until BOTH keys are set.
+# Generate the pair once with `npx web-push generate-vapid-keys` and paste
+# them into Render; the private key never goes in the repo or the client.
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "").strip()
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "").strip()
+VAPID_SUBJECT = os.environ.get("VAPID_SUBJECT", "mailto:ctkoth@gmail.com").strip()
 # Send our own loggers to stdout so they land in the Render log stream. Without
 # this, a logger outside the "django" namespace falls back to Python's
 # last-resort handler: WARNING and above only, no timestamp, no logger name —

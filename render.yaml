@@ -35,6 +35,14 @@ services:
         value: "0"
       - key: DATABASE_URL
         sync: false
+      # Push notifications (apps/economy/push.py). Generate once with
+      # `npx web-push generate-vapid-keys`; push stays off until both are set.
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
       - key: GOOGLE_OAUTH_CLIENT_ID
         sync: false
       - key: GITHUB_OAUTH_CLIENT_ID
@@ -178,8 +186,30 @@ services:
       - key: MODAL_TOKEN_SECRET
         sync: false
 
-crons:
-  - id: check-habits-and-notify
-    service: music-connectz-backend
-    schedule: "0 8 * * *"
-    command: "python manage.py check_habits_and_notify"
+  # Habit reminders. This used to be a top-level `crons:` block, which is not
+  # Render blueprint syntax — a cron job is a SERVICE with `type: cron` — so
+  # the reminder job was never created and no reminder ever ran. Hourly now:
+  # the command reminds each member at 6pm in their own timezone, and push.py
+  # turns each reminder into a push for whoever allowed one. It reads the
+  # SAME database and keys as the web service rather than having its own.
+  - type: cron
+    name: music-connectz-habit-reminders
+    runtime: python
+    branch: main
+    rootDir: .
+    schedule: "0 * * * *"
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python manage.py check_habits_and_notify"
+    envVars:
+      - key: DATABASE_URL
+        fromService: {type: web, name: music-connectz-backend, envVarKey: DATABASE_URL}
+      - key: SECRET_KEY
+        fromService: {type: web, name: music-connectz-backend, envVarKey: SECRET_KEY}
+      - key: DEBUG
+        value: "0"
+      - key: VAPID_PUBLIC_KEY
+        fromService: {type: web, name: music-connectz-backend, envVarKey: VAPID_PUBLIC_KEY}
+      - key: VAPID_PRIVATE_KEY
+        fromService: {type: web, name: music-connectz-backend, envVarKey: VAPID_PRIVATE_KEY}
+      - key: VAPID_SUBJECT
+        fromService: {type: web, name: music-connectz-backend, envVarKey: VAPID_SUBJECT}

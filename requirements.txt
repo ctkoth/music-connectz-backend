@@ -64,3 +64,6 @@ numpy>=1.24,<3
 # Named here because take_analyzer._load_audio depends on a real file path
 # existing for that fallback, which is why it spools to a temp file on a bucket.
 soundfile>=0.12
+# Web Push (apps/economy/push.py). Active only when VAPID_PUBLIC_KEY and
+# VAPID_PRIVATE_KEY are set; without them push reports enabled=False.
+pywebpush>=2.0
