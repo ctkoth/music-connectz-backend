@@ -76,9 +76,10 @@ class SubscribeTests(Base):
 class WhatPushesTests(Base):
     def setUp(self):
         super().setUp()
-        # No timezone: quiet hours aren't guessed, so these don't depend on
-        # what time the suite happens to run (QuietHoursTests covers those).
-        self.subscribe(tz="")
+        self.subscribe(tz="UTC")
+        # Quiet hours off (start == end) so these don't depend on what time
+        # the suite happens to run — QuietHoursTests covers quiet hours.
+        UserPreferences.objects.filter(user=self.me).update(quiet_start=0, quiet_end=0)
 
     def notify(self, *a, **kw):
         # Push is sent after commit; TestCase never commits, so run them.
@@ -156,8 +157,19 @@ class QuietHoursTests(Base):
         self.assertTrue(_quiet_now(p, datetime(2026, 7, 1, 7, tzinfo=dt_tz.utc)))
         self.assertFalse(_quiet_now(p, datetime(2026, 7, 1, 20, tzinfo=dt_tz.utc)))
 
-    def test_no_timezone_is_not_guessed(self):
-        self.assertFalse(_quiet_now(self.prefs(""), datetime(2026, 7, 1, 3, tzinfo=dt_tz.utc)))
+    def test_no_timezone_means_us_eastern_not_utc(self):
+        p = self.prefs("")
+        # 03:00 UTC is 11pm in New York — quiet. 15:00 UTC is 11am — not.
+        self.assertTrue(_quiet_now(p, datetime(2026, 7, 1, 3, tzinfo=dt_tz.utc)))
+        self.assertFalse(_quiet_now(p, datetime(2026, 7, 1, 15, tzinfo=dt_tz.utc)))
+
+    def test_the_app_reports_the_browsers_zone_without_push(self):
+        r = self.c.post("/api/economy/push/prefs/", {"tz": "America/Chicago"}, format="json")
+        self.assertEqual(r.data["quiet"]["tz"], "America/Chicago")
+        self.assertFalse(r.data["quiet"]["tz_guessed"])
+
+    def test_an_unknown_zone_is_said_to_be_a_guess(self):
+        self.assertTrue(self.c.get("/api/economy/push/").data["quiet"]["tz_guessed"])
 
     def test_quiet_hours_block_a_push(self):
         self.prefs("UTC", start=0, end=23)
@@ -210,7 +222,9 @@ class HabitReminderTests(TestCase):
         self.run_at(22)
         self.assertEqual(self.reminders(), 0)
 
-    def test_no_timezone_is_treated_as_utc(self):
+    def test_no_timezone_is_treated_as_us_eastern(self):
         UserPreferences.objects.filter(user=self.u).update(push_tz="")
-        self.run_at(18)
+        self.run_at(18)            # 2pm in New York: not yet
+        self.assertEqual(self.reminders(), 0)
+        self.run_at(22)            # 6pm in New York
         self.assertEqual(self.reminders(), 1)

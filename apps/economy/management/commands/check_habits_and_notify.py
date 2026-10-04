@@ -6,8 +6,9 @@ reminder lands at 6pm wherever they are, once a day. It used to run once at
 08:00 UTC, which is 1am in California and 4am in New York: a reminder that
 arrives while somebody is asleep is one they swipe away unread.
 
-A member with no timezone on file (they never allowed push from a browser,
-which is where the zone comes from) is treated as UTC.
+A member with no timezone on file yet is treated as US Eastern (New York /
+Connecticut) — push.DEFAULT_TZ — rather than UTC, which put the reminder in
+the American middle of the night.
 
 The reminder is an in-app Notification, and push.py's signal turns it into a
 push for anybody who allowed one — so this command never talks to a push
@@ -16,21 +17,18 @@ service itself.
 Usage: python manage.py check_habits_and_notify [--dry-run] [--hour N]
 """
 from datetime import timedelta
-from zoneinfo import ZoneInfo
 
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from apps.economy.models import Habit, Notification, UserPreferences
+from apps.economy.push import tz_of
 
 REMINDER_HOUR = 18
 
 
 def _local_now(prefs, now):
-    try:
-        return now.astimezone(ZoneInfo(prefs.push_tz)) if prefs.push_tz else now
-    except Exception:
-        return now
+    return now.astimezone(tz_of(prefs))
 
 
 class Command(BaseCommand):
