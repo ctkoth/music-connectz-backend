@@ -5597,11 +5597,42 @@ class UserPreferences(models.Model):
     # Parcel Primate email. OFF until the member turns it on: following
     # somebody is consent to see their posts, not to receive their mail.
     campaign_email = models.BooleanField(default=False, help_text="Email me campaigns from people I follow")
+    # Push notifications (push.py). Kinds the member switched OFF, their
+    # timezone (sent by the browser at subscribe), and quiet hours in that
+    # timezone — nothing buzzes between quiet_start and quiet_end.
+    push_muted = models.JSONField(default=list, blank=True)
+    push_tz = models.CharField(max_length=64, blank=True, default="")
+    quiet_start = models.PositiveSmallIntegerField(default=22)
+    quiet_end = models.PositiveSmallIntegerField(default=8)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.user} — {self.language}, notifications={'on' if self.notifications_enabled else 'off'}"
+
+
+class PushSubscription(models.Model):
+    """One browser/device a member allowed to receive push notifications.
+
+    The endpoint is the push service's address for that browser. It can run
+    past 500 characters, so it is a TextField and uniqueness rides on its
+    SHA-256 instead — a unique index on a long text column is a Postgres
+    error, not a constraint.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="push_subscriptions")
+    endpoint = models.TextField()
+    endpoint_hash = models.CharField(max_length=64, unique=True)
+    p256dh = models.CharField(max_length=200)
+    auth = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_ok = models.DateTimeField(null=True, blank=True)
+
+
+class PushLog(models.Model):
+    """One push that went out — what the daily cap counts."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="push_log")
+    kind = models.CharField(max_length=16)
+    sent_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
 
 class ParcelCampaign(models.Model):

@@ -1,94 +1,81 @@
-"""Daily habit reminder notifications.
+"""Daily habit reminders, at the member's own evening.
 
-Sends in-app notifications to users for habits they haven't completed today,
-respecting their notifications_enabled preference.
+Runs HOURLY (render.yaml's cron). Each run reminds the members whose local
+hour is REMINDER_HOUR and who have a daily habit not done today — so the
+reminder lands at 6pm wherever they are, once a day. It used to run once at
+08:00 UTC, which is 1am in California and 4am in New York: a reminder that
+arrives while somebody is asleep is one they swipe away unread.
 
-Usage: python manage.py check_habits_and_notify [--dry-run]
+A member with no timezone on file (they never allowed push from a browser,
+which is where the zone comes from) is treated as UTC.
+
+The reminder is an in-app Notification, and push.py's signal turns it into a
+push for anybody who allowed one — so this command never talks to a push
+service itself.
+
+Usage: python manage.py check_habits_and_notify [--dry-run] [--hour N]
 """
-from datetime import datetime, timedelta
+from datetime import timedelta
+from zoneinfo import ZoneInfo
+
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from django.contrib.auth.models import User
 
 from apps.economy.models import Habit, Notification, UserPreferences
 
+REMINDER_HOUR = 18
+
+
+def _local_now(prefs, now):
+    try:
+        return now.astimezone(ZoneInfo(prefs.push_tz)) if prefs.push_tz else now
+    except Exception:
+        return now
+
 
 class Command(BaseCommand):
-    help = "Send daily habit reminder notifications to users who opted in"
+    help = "Remind members of today's unfinished daily habits at 6pm their time (run hourly)"
 
     def add_arguments(self, parser):
-        parser.add_argument(
-            "--dry-run",
-            action="store_true",
-            help="Show what would be sent without actually creating notifications",
-        )
+        parser.add_argument("--dry-run", action="store_true",
+                            help="Show what would be sent without creating notifications")
+        parser.add_argument("--hour", type=int, default=REMINDER_HOUR,
+                            help="Local hour to remind at (default 18)")
 
     def handle(self, *args, **options):
-        dry_run = options.get("dry_run", False)
+        dry = options["dry_run"]
+        hour = options["hour"]
         now = timezone.now()
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        sent = skipped = 0
 
-        # Get all daily habits whose users have opted in for notifications
-        daily_habits = Habit.objects.filter(frequency="daily").select_related("user")
+        habits = Habit.objects.filter(frequency="daily").select_related("user")
+        prefs_by_user = {p.user_id: p for p in UserPreferences.objects.filter(
+            user_id__in=habits.values_list("user_id", flat=True))}
 
-        notified_count = 0
-        skipped_count = 0
-        errors = []
+        for habit in habits:
+            prefs = prefs_by_user.get(habit.user_id)
+            if prefs is None or not prefs.notifications_enabled:
+                skipped += 1
+                continue
+            local = _local_now(prefs, now)
+            if local.hour != hour:
+                skipped += 1
+                continue
+            local_midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
+            if habit.last_completed and habit.last_completed >= local_midnight:
+                skipped += 1
+                continue
+            item = f"habit:{habit.id}"
+            # Once a day, even if the cron fires twice in the hour.
+            if Notification.objects.filter(user=habit.user, kind="habit_reminder", item_id=item,
+                                           created_at__gte=now - timedelta(hours=20)).exists():
+                skipped += 1
+                continue
+            text = f"Still on for today: {habit.title}"
+            if dry:
+                self.stdout.write(f"[DRY RUN] would remind @{habit.user.username}: {text}")
+            else:
+                Notification.objects.create(user=habit.user, kind="habit_reminder", text=text, item_id=item)
+            sent += 1
 
-        for habit in daily_habits:
-            try:
-                # Skip if user doesn't have preferences (shouldn't happen)
-                try:
-                    prefs = UserPreferences.objects.get(user=habit.user)
-                except UserPreferences.DoesNotExist:
-                    skipped_count += 1
-                    continue
-
-                # Skip if user has disabled notifications
-                if not prefs.notifications_enabled:
-                    skipped_count += 1
-                    continue
-
-                # Skip if already completed today
-                if habit.last_completed and habit.last_completed >= today_start:
-                    skipped_count += 1
-                    continue
-
-                # Prepare notification
-                text = f"Time to complete your habit: {habit.title}"
-
-                if dry_run:
-                    self.stdout.write(
-                        f"[DRY RUN] Would notify {habit.user.username}: {text}"
-                    )
-                    notified_count += 1
-                else:
-                    # Create notification
-                    notification = Notification.objects.create(
-                        user=habit.user,
-                        kind="habit_reminder",
-                        text=text,
-                        item_id=f"habit:{habit.id}",
-                    )
-                    self.stdout.write(
-                        self.style.SUCCESS(
-                            f"✓ Notified {habit.user.username}: {habit.title}"
-                        )
-                    )
-                    notified_count += 1
-
-            except Exception as e:
-                errors.append(f"Error processing habit {habit.id}: {str(e)}")
-                self.stdout.write(self.style.ERROR(f"✗ Error: {str(e)}"))
-
-        # Summary
-        self.stdout.write("")
-        self.stdout.write(
-            self.style.SUCCESS(f"✓ Sent {notified_count} habit reminders")
-        )
-        self.stdout.write(self.style.WARNING(f"⊘ Skipped {skipped_count} users"))
-
-        if errors:
-            self.stdout.write(self.style.ERROR(f"✗ {len(errors)} errors occurred:"))
-            for error in errors:
-                self.stdout.write(f"  {error}")
+        self.stdout.write(self.style.SUCCESS(f"Reminded {sent}, skipped {skipped}"))
