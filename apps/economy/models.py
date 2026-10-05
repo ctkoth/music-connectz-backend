@@ -3454,6 +3454,50 @@ class TrialTake(models.Model):
         return f"{self.app_key} trial {self.token[:8]}"
 
 
+class RetakeReminder(models.Model):
+    """A trial visitor asked us to email them their score and remind them to
+    send another take.
+
+    The trial used to end the relationship at the score: no account, no email,
+    so a stranger who scored once was gone for good. The coach's real value is
+    the DIFFERENCE between two takes, which needs a second visit by definition,
+    and nothing here could produce one. See `retake.py`.
+
+    The schedule is fixed and stated before they type an address: the score
+    now, a reminder on day 3, one on day 7, then nothing. `stage` is how far
+    along it is, and counts from `armed_at` — the LATEST take, so somebody who
+    came back on day 2 is not told on day 3 to do what they just did.
+
+    This is the one trial table that holds PII, and it holds it because the
+    visitor typed it into a field that says what it is for. It is never joined
+    to FunnelEvent.
+    """
+    STAGE_SCORE, STAGE_DAY3, STAGE_DAY7 = 1, 2, 3
+
+    email = models.EmailField(max_length=254, db_index=True)
+    app_key = models.CharField(max_length=32, default="singz")
+    trial_take = models.ForeignKey(TrialTake, on_delete=models.SET_NULL,
+                                   null=True, blank=True, related_name="reminders")
+    # The browser that asked, so its next scored take re-arms the schedule.
+    anon_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    # Signs the stop link. Not the claim token: that one keeps a take, and a
+    # forwarded email must not be able to claim somebody's take.
+    token = models.CharField(max_length=64, unique=True, db_index=True)
+    stage = models.PositiveSmallIntegerField(default=0)
+    armed_at = models.DateTimeField(default=timezone.now)
+    failures = models.PositiveSmallIntegerField(default=0)
+    # "unsubscribed", "joined" or "failed". Null while it is live.
+    stopped_at = models.DateTimeField(null=True, blank=True)
+    stop_reason = models.CharField(max_length=16, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"retake {self.app_key} stage {self.stage}"
+
+
 def claim_trial_take(user, token):
     """Attach a trial take to a brand-new account. Returns it, or None.
 
@@ -5307,6 +5351,11 @@ FUNNEL_KINDS = (
     # points OUTWARD — every other kind measures a visitor moving down the
     # funnel, this one measures them widening the top of it.
     ("try_shared", "Trial score shared"),
+    # They typed an email under their score so we could send it and remind
+    # them to come back. The only trial step that can produce a SECOND visit,
+    # which is the thing the coach is actually for. The address itself never
+    # comes here — see RetakeReminder.
+    ("try_email", "Trial score emailed for a retake"),
     ("register_view", "Register screen opened"),
     ("register_success", "Account created"),
     ("login_success", "Logged in"),

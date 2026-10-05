@@ -273,6 +273,10 @@ class RegisterSerializer(serializers.Serializer):
                 claim_trial_take(user, token)
             # The week they built on the BodieZ trial door, if any — already
             # cleaned by validate_trial_split, so this is trusted here.
+            # A trial visitor who asked for retake reminders has joined: the
+            # emails pitch the no-account door, which is wrong advice now.
+            from apps.economy.retake import stop_for_member
+            stop_for_member(user)
             trial_split = validated.get("trial_split") or []
             if trial_split:
                 from apps.economy.bodiez import create_trial_split_routines
