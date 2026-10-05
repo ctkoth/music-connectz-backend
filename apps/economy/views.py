@@ -537,6 +537,7 @@ class FunnelEventView(APIView):
                       # axes, which is a different thing from abandoning.
                       "axes": lambda v: v if isinstance(v, int) and 0 <= v <= 4 else None},
         "try_shared": {},
+        "try_email": {},
         "register_view": {
             "has_ref": lambda v: bool(v),
             "has_trial": lambda v: bool(v),

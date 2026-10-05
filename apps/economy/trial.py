@@ -251,6 +251,8 @@ class TrialCoachView(APIView):
             anon_id=anon_id, result=payload,
             scored=payload.get("score") is not None,
         )
+        from .retake import offer as remind_offer, rearm_for
+        rearm_for(take)
         from .models import mint_score_share
         share = mint_score_share(self.app_key, payload, genre=data.get("genre", ""))
         return Response({
@@ -265,6 +267,9 @@ class TrialCoachView(APIView):
             # they join, rather than vanishing with the tab.
             "open_in": f"{self.app_key}:coach",
             "claim_hint": f"Sign up within {TRIAL_CLAIM_DAYS} days and this take is saved to your account.",
+            # The way back, for somebody not ready to make an account: email
+            # the score and a retake reminder. `ready: false` renders nothing.
+            "remind": remind_offer() if payload.get("score") is not None else None,
         }, status=status.HTTP_201_CREATED)
 
 

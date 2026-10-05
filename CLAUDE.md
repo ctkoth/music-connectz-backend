@@ -1777,3 +1777,30 @@ Same complaint as the section above, sharpened: the trial door was costing signu
 Both bugs shared one root: nothing in the original prompt or request body told the model HOW to be consistent, on the number or on the scale it lived on, so it filled the gap with its own defaults — a released-record reference for one, a creative-writing temperature for the other. `ScaleIsAnchoredTests` and the new `TheScoreIsAJudgementNotACreativeTaskTests` pin both so neither drifts back.
 
 ---
+
+## The trial had no way back, so a stranger who scored once was gone
+
+The trial asked for nothing — no account, no email — so it had nothing to
+come back through, and the coach's real value is the CHANGE between two takes,
+which needs a second visit by definition. `apps/economy/retake.py` is one
+field under the score: the score and drill emailed now, a reminder to send
+the same take again on day 3 and day 7, then nothing — and that schedule is
+stated before the button.
+
+- **The claim token is the proof.** Only a scored trial take can arm one,
+  which ties the abuse ceiling to the trial's own caps; one inbox takes at
+  most `PER_EMAIL_PER_DAY`.
+- **No `EMAIL_HOST`, no field.** The console backend is not a send. `ready`
+  is published and the screen renders nothing without it; the endpoint
+  refuses rather than answering "sent".
+- **Days count from the latest take** (`rearm_for`), joining stops it
+  (`stop_for_member` — the emails pitch the no-account door), and a failed
+  send never advances a stage. The stop link follows `ParcelUnsubscribeView`:
+  GET asks, POST stops, plus RFC 8058 one-click headers.
+- `send_retake_reminders` rides the hourly habit cron, which now gets the web
+  service's SMTP variables. **Set `EMAIL_HOST` (and friends) on the web
+  service or none of this is visible** — that is by design, not a bug.
+- `RetakeReminder` is the one trial table holding PII, because the visitor
+  typed it into a field that says what it is for. It is never joined to
+  `FunnelEvent`; the funnel gets `try_email` and the returns arrive as
+  `src=retake_d3` / `retake_d7`.

@@ -199,7 +199,9 @@ services:
     rootDir: .
     schedule: "0 * * * *"
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "python manage.py check_habits_and_notify"
+    # Retake reminders ride the same hourly job rather than a second paid
+    # cron service. `;` not `&&`: one failing must not stop the other.
+    startCommand: "python manage.py check_habits_and_notify; python manage.py send_retake_reminders"
     envVars:
       - key: DATABASE_URL
         fromService: {type: web, name: music-connectz-backend, envVarKey: DATABASE_URL}
@@ -213,3 +215,16 @@ services:
         fromService: {type: web, name: music-connectz-backend, envVarKey: VAPID_PRIVATE_KEY}
       - key: VAPID_SUBJECT
         fromService: {type: web, name: music-connectz-backend, envVarKey: VAPID_SUBJECT}
+      # The retake reminders send mail, so the cron needs the web service's SMTP.
+      - key: EMAIL_HOST
+        fromService: {type: web, name: music-connectz-backend, envVarKey: EMAIL_HOST}
+      - key: EMAIL_PORT
+        fromService: {type: web, name: music-connectz-backend, envVarKey: EMAIL_PORT}
+      - key: EMAIL_HOST_USER
+        fromService: {type: web, name: music-connectz-backend, envVarKey: EMAIL_HOST_USER}
+      - key: EMAIL_HOST_PASSWORD
+        fromService: {type: web, name: music-connectz-backend, envVarKey: EMAIL_HOST_PASSWORD}
+      - key: DEFAULT_FROM_EMAIL
+        fromService: {type: web, name: music-connectz-backend, envVarKey: DEFAULT_FROM_EMAIL}
+      - key: FRONTEND_URL
+        fromService: {type: web, name: music-connectz-backend, envVarKey: FRONTEND_URL}

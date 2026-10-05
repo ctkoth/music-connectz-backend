@@ -17,6 +17,7 @@ from .religionz import ReligionsView
 from .languagez import LanguagesView
 from .trialdoorz import TrialDoorsView
 from .trial import TrialPublicStatsView, PublicTiersView
+from .retake import RetakeRemindView, RetakeStopView
 from .bodiez_trial import BodieZTrialView
 from .offerz_engine import (FunnelCatalogView, FunnelOfferRedeemView,
                             FunnelOffersView)
@@ -446,6 +447,9 @@ urlpatterns = [
     path("trialdoorz/", TrialDoorsView.as_view(), name="economy-trial-doors"),
     # Public funnel headline stats for non-authenticated trial visitors.
     path("trial/public/stats/", TrialPublicStatsView.as_view(), name="economy-trial-public-stats"),
+    # Email a trial score and remind them to send another take (retake.py).
+    path("trial/remind/", RetakeRemindView.as_view(), name="economy-trial-remind"),
+    path("trial/remind/stop/", RetakeStopView.as_view(), name="economy-trial-remind-stop"),
     path("tiers/", PublicTiersView.as_view(), name="economy-public-tiers"),
     # PersonalitieZ axes — one list, read by the profile toggles, every
     # member search filter, and VybeZ.

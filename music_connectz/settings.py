@@ -301,6 +301,9 @@ MODAL_APP_NAME = os.environ.get("MODAL_APP_NAME", "music-connectz-occ")
 # otherwise the checkout endpoints report it as unavailable and the client hides
 # the button. Where the frontend lives, for building return URLs.
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://musicconnectz.net").rstrip("/")
+# Where THIS API is reachable from outside — for links in email sent by a
+# cron job, which has no request to build an absolute URL from.
+API_PUBLIC_URL = os.environ.get("API_PUBLIC_URL", "https://admin.musicconnectz.net").rstrip("/")
 
 # Platform owner(s) by email — these accounts are auto-promoted to
 # staff/superuser + StatZ on first sign-in. Comma-separated; override via env.
