@@ -5768,12 +5768,66 @@ class BodieZExercise(models.Model):
     # here has been through `links.scanner()`, so it is never a candidate for
     # StatZ's framed-page treatment, whatever the tier.
     demo_url = models.CharField(max_length=300, blank=True, default="")
+    # Accessibility, stated per exercise rather than guessed by a filter.
+    #
+    # `positions` is the set of body positions the movement CAN be done in,
+    # comma-separated (a Bicep Curl is "standing,seated"; a Bench Press is
+    # "lying"). A member who cannot walk is not asking for "easy" exercises,
+    # they are asking for the ones that do not need them on their feet — and
+    # only the exercise knows that.
+    #
+    # `needs_arms` / `needs_legs` say whether that limb must actively move
+    # the load or hold the body up. A Leg Press needs legs and not arms; a
+    # Bench Press needs arms and not legs (feet planted is a preference, not
+    # the movement). Both default to TRUE and positions to "standing":
+    # an untagged exercise is treated as needing everything, so a new row
+    # nobody classified is hidden from an accessibility filter rather than
+    # offered to somebody who cannot do it. A false "you can do this" is the
+    # expensive mistake; a missing option is a gap somebody can see and fill.
+    POSITION_CHOICES = [
+        ("standing", "Standing"), ("seated", "Seated"), ("lying", "Lying"),
+        ("kneeling", "Kneeling"), ("floor", "On the floor"),
+    ]
+    positions = models.CharField(max_length=40, default="standing")
+    needs_arms = models.BooleanField(default=True)
+    needs_legs = models.BooleanField(default=True)
 
     class Meta:
         ordering = ("muscle_group", "name")
 
     def __str__(self):
         return self.name
+
+    @property
+    def position_list(self):
+        return [p for p in (self.positions or "").split(",") if p]
+
+
+class BodieZAccess(models.Model):
+    """What a member's body can and cannot do, so BodieZ only offers what is
+    possible. One row per member, written only by them.
+
+    Three independent answers, never a single "disability" flag — somebody
+    who cannot walk can usually use both arms, and somebody with one arm
+    out of action can usually still do a seated leg press. Collapsing those
+    into one switch would hide exercises a member CAN do.
+
+    - `seated_or_lying_only` — cannot stand or walk; only show exercises that
+      can be done seated or lying.
+    - `arms_ok` / `legs_ok` — when False, hide every exercise that needs
+      that limb. Unusable legs implies seated/lying (see
+      `bodiez.accessible`), because a standing exercise is a leg exercise
+      whether or not it is filed under one.
+
+    This stores what the member told us. Nothing is inferred from what they
+    log, and it never moves a rating, a score or a goal.
+    """
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name="bodiez_access")
+    seated_or_lying_only = models.BooleanField(default=False)
+    arms_ok = models.BooleanField(default=True)
+    legs_ok = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 # The blueprint gives BodieZ the same five-bucket scheduler Lilith already

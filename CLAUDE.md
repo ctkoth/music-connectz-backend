@@ -1804,3 +1804,33 @@ stated before the button.
   typed it into a field that says what it is for. It is never joined to
   `FunnelEvent`; the funnel gets `try_email` and the returns arrive as
   `src=retake_d3` / `retake_d7`.
+
+## BodieZ: what a body can do is a filter, and the muscle rating is progress
+
+**Accessibility is stored per exercise and decided in one place.** Every
+`BodieZExercise` carries `positions` (where it CAN be done: standing, seated,
+lying, kneeling, floor), `needs_arms` and `needs_legs`. `bodiez.accessible()`
+is the only rule, and `GET /bodiez/exercises/` returns **every** exercise with
+an `accessible` flag for the caller — hidden rows are still served, because an
+old session names lifts the member can no longer pick. A member's answers live
+in `BodieZAccess` (`seated_or_lying_only`, `arms_ok`, `legs_ok`; three answers,
+not one "disability" switch). Unusable legs implies seated/lying: a standing
+exercise is a leg exercise whatever muscle it is filed under.
+
+Untagged means **needs everything** (default `standing`, both limbs): a new
+exercise nobody classified is hidden from a restricted member rather than
+offered to somebody who cannot do it. `test_bodiez_access` fails if a library
+row has no known position, or a muscle a seated member can reach has nothing
+for them (Glutes had no exercise at all until migration 0177).
+
+**The muscle "Coach rating" is progress, never effort.** `muscle_coach_ratings`
+compares each lift's latest finished session (best est. 1RM, or best reps for
+bodyweight) with the member's own earlier best: up ≥102% = 10, held = 6, down
+<90% = 3, averaged per muscle; `None` until a lift has two comparable
+sessions. Arithmetic, not a model, like the rest of the Coach. Sets and
+sessions are NOT in it — `volume_score` already measures turning up and says
+so, and a rating that rose with attendance would break the substance rule.
+
+Migration 0177 also wired seven clips that were uploaded to `ctkoth/mcz-media`
+but pointed at by nothing. Their filenames contain spaces, so `demo_url` is
+percent-encoded rather than the file renamed in a repo this one does not own.

@@ -74,8 +74,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import (BODIEZ_BUCKETS, BODIEZ_DAY_TAGS, BODIEZ_GOAL_KINDS, BodieZExercise,
-                     BodieZGoal, BodieZRecoveryLog, BodieZRoutine, BodieZSession, BodieZSet,
+from .models import (BODIEZ_BUCKETS, BODIEZ_DAY_TAGS, BODIEZ_GOAL_KINDS, BodieZAccess,
+                     BodieZExercise, BodieZGoal, BodieZRecoveryLog, BodieZRoutine, BodieZSession, BodieZSet,
                      BodieZWeightLog, StudentRelationship)
 
 _BUCKET_KEYS = {k for k, _ in BODIEZ_BUCKETS}
@@ -84,7 +84,72 @@ _DAY_TAG_KEYS = {k for k, _ in BODIEZ_DAY_TAGS}
 
 def _exercise_dict(ex):
     return {"id": ex.id, "name": ex.name, "muscle_group": ex.muscle_group,
-            "equipment": ex.equipment, "demo_url": ex.demo_url}
+            "equipment": ex.equipment, "demo_url": ex.demo_url,
+            "positions": ex.position_list, "needs_arms": ex.needs_arms,
+            "needs_legs": ex.needs_legs}
+
+
+# Who can do what. ONE function decides, and the exercise list carries its
+# answer as `accessible` on every row, so the client renders a flag instead of
+# re-deriving the rule — a second copy of "unusable legs implies seated" is
+# how a screen ends up offering a standing lift to somebody who cannot stand.
+SEATED_OR_LYING = {"seated", "lying"}
+
+
+def accessible(ex, access):
+    """True if a member with this `BodieZAccess` (or None, meaning no
+    restrictions) can do this exercise."""
+    if access is None:
+        return True
+    if not access.arms_ok and ex.needs_arms:
+        return False
+    if not access.legs_ok and ex.needs_legs:
+        return False
+    # Unusable legs implies no standing — a standing exercise is a leg
+    # exercise whatever muscle it is filed under.
+    must_sit = access.seated_or_lying_only or not access.legs_ok
+    if must_sit and not (SEATED_OR_LYING & set(ex.position_list)):
+        return False
+    return True
+
+
+def _access_dict(access):
+    return {
+        "seated_or_lying_only": bool(access and access.seated_or_lying_only),
+        "arms_ok": True if access is None else access.arms_ok,
+        "legs_ok": True if access is None else access.legs_ok,
+    }
+
+
+class BodieZAccessView(APIView):
+    """GET/PUT /api/economy/bodiez/access/ — what the member's body can do.
+    Written only by the member, about themselves; it filters what BodieZ
+    offers and changes nothing about what they are scored on."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(_access_dict(BodieZAccess.objects.filter(user=request.user).first()))
+
+    def put(self, request):
+        d = request.data or {}
+
+        def flag(key, default):
+            v = d.get(key, default)
+            if isinstance(v, bool):
+                return v
+            if isinstance(v, str) and v.lower() in ("true", "false", "1", "0"):
+                return v.lower() in ("true", "1")
+            return None
+
+        row, _ = BodieZAccess.objects.get_or_create(user=request.user)
+        for key in ("seated_or_lying_only", "arms_ok", "legs_ok"):
+            v = flag(key, getattr(row, key))
+            if v is None:
+                return Response({"error": f"{key} must be true or false."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            setattr(row, key, v)
+        row.save()
+        return Response(_access_dict(row))
 
 
 # Corey's real credential, stated once here rather than on every video — a
@@ -331,7 +396,15 @@ class BodieZExercisesView(APIView):
         # its name would be exactly the kind of claim the substance rule
         # exists to keep off screen.
         credit = DEMO_CREDIT if BodieZExercise.objects.exclude(demo_url="").exists() else ""
-        return Response({"exercises": [_exercise_dict(e) for e in rows], "demo_credit": credit})
+        access = BodieZAccess.objects.filter(user=request.user).first()
+        # EVERY exercise is returned, each flagged. A member's old sessions and
+        # routines still name exercises they can no longer pick, and those rows
+        # must keep their names; hiding is the picker's job, via `accessible`.
+        return Response({
+            "exercises": [{**_exercise_dict(e), "accessible": accessible(e, access)} for e in rows],
+            "demo_credit": credit,
+            "access": _access_dict(access),
+        })
 
 
 class BodieZExerciseHistoryView(APIView):
@@ -775,6 +848,101 @@ class BodieZProgressView(APIView):
         })
 
 
+# --- Coach rating per muscle -------------------------------------------------
+#
+# A muscle's rating is how its own logged lifts MOVED against the member's own
+# earlier best — never against other people and never from how much was done.
+# That second half is the substance rule: sets and sessions are effort, and
+# "ratings may not reward effort", so a member who trains a muscle five days a
+# week and goes nowhere does not get a good number for turning up (the
+# volume_score beside it already measures turning up, and says so).
+#
+# Per exercise, from FINISHED sessions only: each session reduces to one number
+# (best estimated one-rep max for weighted sets, Epley; best single-set reps
+# for bodyweight ones), the latest session is compared to the best of the
+# sessions before it, and it is one of three words:
+#
+#   up    latest >= 102% of the earlier best   10
+#   held  between 90% and 102%                  6   ("ordinary is 6" — see the
+#                                                   vocal coach's scale)
+#   down  latest <  90% of the earlier best     3
+#
+# The muscle's rating is the mean of its exercises' points, rounded. The 90%
+# floor is deliberate: one tired day is not a regression, and a rating that
+# punished it would teach members to skip logging bad sessions. Below it, the
+# bottom is still the bottom — a lift that really fell scores a 3, not a 6.
+#
+# `None` (not 0) until at least one exercise has two comparable sessions: no
+# rating invites a real one, and a fake zero tells a new member they are bad
+# at a muscle they have trained once.
+RATING_UP = 1.02
+RATING_DOWN = 0.90
+RATING_POINTS = {"up": 10, "held": 6, "down": 3}
+RATING_CAVEAT = (
+    "Coach rating compares your latest logged session of each lift for this "
+    "muscle with your own earlier best (estimated one-rep max, or best reps for "
+    "bodyweight lifts): 10 for up, 6 for held, 3 for down, averaged. It says "
+    "how your lifts moved, not how strong you are next to anyone else, and it "
+    "needs two sessions of the same exercise before it says anything."
+)
+
+
+def _session_metric(sets):
+    """(kind, value) for one exercise in one session, or None."""
+    weighted = [s for s in sets if s.weight_kg is not None and s.weight_kg > 0]
+    if weighted:
+        return "est_1rm_kg", max(float(s.weight_kg) * (1 + s.reps / 30) for s in weighted)
+    reps = [s.reps for s in sets if s.reps]
+    return ("reps", float(max(reps))) if reps else None
+
+
+def muscle_coach_ratings(sets):
+    """{muscle_group: {"rating": int|None, "why": str, "exercises": [...]}}
+    for an iterable of finished `BodieZSet` rows (exercise and session
+    already loaded)."""
+    per = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))  # muscle -> ex -> session -> sets
+    for s in sets:
+        per[s.exercise.muscle_group][s.exercise][s.session_id].append(s)
+
+    out = {}
+    for muscle, by_ex in per.items():
+        rated = []
+        for exercise, by_session in by_ex.items():
+            ordered = sorted(by_session.values(), key=lambda ss: ss[0].session.started_at)
+            metrics = [m for m in (_session_metric(ss) for ss in ordered) if m]
+            if len(metrics) < 2:
+                continue
+            kind, latest = metrics[-1]
+            # Like with like: a session logged with weight and one without
+            # are not the same measurement.
+            earlier = [v for k, v in metrics[:-1] if k == kind]
+            if not earlier or max(earlier) <= 0:
+                continue
+            before = max(earlier)
+            ratio = latest / before
+            trend = "up" if ratio >= RATING_UP else "down" if ratio < RATING_DOWN else "held"
+            rated.append({
+                "exercise_id": exercise.id, "exercise_name": exercise.name,
+                "trend": trend, "metric": kind,
+                "latest": round(latest, 1), "earlier_best": round(before, 1),
+            })
+        if not rated:
+            out[muscle] = {"rating": None, "exercises": [],
+                           "why": "Needs two logged sessions of the same exercise to rate."}
+            continue
+        rated.sort(key=lambda r: r["exercise_name"])
+        points = [RATING_POINTS[r["trend"]] for r in rated]
+        n = {t: sum(1 for r in rated if r["trend"] == t) for t in ("up", "held", "down")}
+        bits = [f"{n[t]} {t}" for t in ("up", "held", "down") if n[t]]
+        out[muscle] = {
+            "rating": round(sum(points) / len(points)),
+            "exercises": rated,
+            "why": f"{len(rated)} lift{'s' if len(rated) != 1 else ''} compared: {', '.join(bits)}.",
+        }
+    return out
+
+
+
 class BodieZBodyMapView(APIView):
     """GET /api/economy/bodiez/bodymap/ — which muscles were trained
     recently, which are going stale, which are getting hit every session.
@@ -834,6 +1002,9 @@ class BodieZBodyMapView(APIView):
         by_muscle = defaultdict(list)
         for s in sets:
             by_muscle[s.exercise.muscle_group].append(s)
+        ratings = muscle_coach_ratings(sets)
+        unrated = {"rating": None, "exercises": [],
+                   "why": "Needs two logged sessions of the same exercise to rate."}
 
         rows = []
         for muscle, label in BodieZExercise.MUSCLE_CHOICES:
@@ -842,7 +1013,9 @@ class BodieZBodyMapView(APIView):
                 rows.append({"muscle_group": muscle, "label": label,
                              "last_trained": None, "sets_last_7d": 0,
                              "days_trained_last_7d": 0, "status": "untrained",
-                             "volume_score": 0})
+                             "volume_score": 0,
+                             "coach_rating": None, "coach_why": unrated["why"],
+                             "coach_exercises": []})
                 continue
 
             last_trained = max(s.session.started_at for s in group_sets)
@@ -866,6 +1039,9 @@ class BodieZBodyMapView(APIView):
                 "days_trained_last_7d": days_trained,
                 "status": status_,
                 "volume_score": min(10, round(10 * len(recent) / self.TARGET_WEEKLY_SETS)),
+                "coach_rating": ratings.get(muscle, unrated)["rating"],
+                "coach_why": ratings.get(muscle, unrated)["why"],
+                "coach_exercises": ratings.get(muscle, unrated)["exercises"],
             })
 
         return Response({
@@ -875,6 +1051,7 @@ class BodieZBodyMapView(APIView):
             "stale_after_days": self.STALE_DAYS,
             "target_weekly_sets": self.TARGET_WEEKLY_SETS,
             "volume_citation": self.VOLUME_CITATION,
+            "rating_caveat": RATING_CAVEAT,
         })
 
 

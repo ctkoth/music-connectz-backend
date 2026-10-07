@@ -173,7 +173,7 @@ from .views import (
 )
 from .habits import HabitCreateView, HabitCompleteView
 from .bodiez import (
-    BodieZBoardView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
+    BodieZAccessView, BodieZBoardView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
     BodieZGoalDetailView, BodieZGoalsView, BodieZRecoveryView, BodieZRoutinesView,
     BodieZRoutineDetailView, BodieZSessionsView, BodieZSessionDetailView, BodieZSessionSummaryView, BodieZSetsView, BodieZLbFixView,
     BodieZProgressView, BodieZWeightLogView,
@@ -498,6 +498,7 @@ urlpatterns = [
     path("bodiez/lb-fix/", BodieZLbFixView.as_view(), name="economy-bodiez-lb-fix"),
     path("bodiez/progress/", BodieZProgressView.as_view(), name="economy-bodiez-progress"),
     path("bodiez/board/", BodieZBoardView.as_view(), name="economy-bodiez-board"),
+    path("bodiez/access/", BodieZAccessView.as_view(), name="economy-bodiez-access"),
     path("bodiez/bodymap/", BodieZBodyMapView.as_view(), name="economy-bodiez-bodymap"),
     path("bodiez/coach/", BodieZCoachView.as_view(), name="economy-bodiez-coach"),
     path("bodiez/goals/", BodieZGoalsView.as_view(), name="economy-bodiez-goals"),

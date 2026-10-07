@@ -1152,10 +1152,14 @@ class BodieZShoulderDemoVideoTests(TestCase):
     def test_dumbbell_shoulder_press_is_not_the_barbell_overhead_press(self):
         overhead = BodieZExercise.objects.get(name="Overhead Press")
         self.assertEqual(overhead.equipment, "barbell")
-        self.assertFalse(overhead.demo_url)
         dumbbell_press = BodieZExercise.objects.get(name="Dumbbell Shoulder Press")
         self.assertEqual(dumbbell_press.equipment, "dumbbell")
         self.assertTrue(dumbbell_press.demo_url)
+        # The barbell press once had no clip because the only one on hand was
+        # the dumbbell's. It has its own now (migration 0177) — what must stay
+        # true is that the two never share one.
+        self.assertTrue(overhead.demo_url)
+        self.assertNotEqual(overhead.demo_url, dumbbell_press.demo_url)
 
     def test_lateral_raise_kept_its_id_and_gained_a_demo_url(self):
         lateral = BodieZExercise.objects.get(name="Lateral Raise")
