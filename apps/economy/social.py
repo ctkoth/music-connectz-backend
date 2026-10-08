@@ -342,31 +342,11 @@ class FaceRateView(APIView):
 # always read; the UI was sending a bare list of keys, so `subs.get(k)` hit a
 # list and answered AttributeError — a 500 on Social ConnectZ for anyone who
 # had saved SubstanceZ at all.
-STANCES = ("sometimes", "often")
-# Selections made before frequency existed. Kept distinct rather than guessed
-# into a frequency: we know they picked it, we do not know how often.
-STANCE_LEGACY = "yes"
-ACTIVE_STANCES = {"use", "sometimes", "often", STANCE_LEGACY}
-
-
-def clean_substances(value):
-    """Normalize whatever the client sent into {key: stance}.
-
-    Accepts the current dict form and the legacy list form, so an older client
-    keeps working and an already-saved list is repaired on the next write.
-    """
-    if isinstance(value, dict):
-        out = {}
-        for k, v in list(value.items())[:40]:
-            key = str(k)[:40]
-            stance = str(v or "").lower()
-            if not key:
-                continue
-            out[key] = stance if stance in STANCES else STANCE_LEGACY
-        return out
-    if isinstance(value, list):
-        return {str(k)[:40]: STANCE_LEGACY for k in value[:40] if str(k)}
-    return {}
+#
+# The list, the frequency scale and the cleaner live in substancez.py and are
+# re-exported here so the names this module always had keep working.
+from .substancez import (ACTIVE_STANCES, STANCE_LEGACY, STANCES, clean_substances,  # noqa: E402,F401
+                         within as substance_within)
 
 
 # ---- Cross-user profiles ----
@@ -1257,12 +1237,20 @@ class MembersView(APIView):
         # A member passes if, on every selected substance, they are NOT active
         # ("use"/"sometimes"). Undeclared counts as sober-friendly.
         substances = multi("substances")
+        # "Okay with up to": a member who avoids THC but is fine with someone
+        # who rarely has a drink can say so. Unset keeps the old meaning —
+        # anyone active at all is filtered out. See substancez.within for how
+        # a legacy "yes" (frequency unknown) is treated.
+        substance_max = request.query_params.get("substance_max", "")
         sober_only = request.query_params.get("sober") in ("1", "true", "True")
         # The other direction, for the SubstanceZ and PreferenceZ apps: members
         # who DECLARE using any of ?uses=, or being attracted to any of
         # ?attracted=. Adult-only both ways — see metricz.py.
         from .metricz import matches as metric_matches  # metricz imports this module
         uses = multi("uses")
+        # ?use_freq=often,daily narrows ?uses= to members who declared it at
+        # one of those frequencies. Ignored without `uses`.
+        use_freq = multi("use_freq")
         attracted = multi("attracted")
         # PersonaZ: ?personas=producer,mixengineer — members who hold ANY of
         # them. The PersonaZ screen's "who else is a Producer" door.
@@ -1352,14 +1340,16 @@ class MembersView(APIView):
                 continue
             if persona_keys and not persona_keys & {str(x.get("key") or "") for x in personas_of(p)}:
                 continue
-            if uses and not metric_matches("substancez", p, uses):
+            if uses and not metric_matches("substancez", p, uses, use_freq):
                 continue
             if attracted and not metric_matches("preferencez", p, attracted):
                 continue
             if substances:
                 # Rows saved by the old client hold a list, not a dict.
                 subs = clean_substances(p.substances)
-                if any(subs.get(k) in ACTIVE_STANCES for k in substances):
+                if any(subs.get(k) in ACTIVE_STANCES
+                       and not (substance_max and substance_within(subs[k], substance_max))
+                       for k in substances):
                     continue
             metrics = member_metrics(p, origin)
             if gates and failing_gate(metrics, gates):
@@ -1374,6 +1364,13 @@ class MembersView(APIView):
             card = _profile_card(p, request, badges=worn.get(p.user_id, []),
                                  audience=aud, batched=batched)
             card["distance_km"] = dist
+            if uses:
+                # How often, for the substances THIS search asked about and no
+                # others — the card of a member found under THC says how often
+                # THC, and discloses nothing else they declared. Already inside
+                # the adult-only wall above.
+                subs = clean_substances(p.substances)
+                card["use_frequency"] = {k: subs[k] for k in uses if subs.get(k) in ACTIVE_STANCES}
             results.append(card)
         # Nearest first when a distance origin exists. Distance WINS over the
         # Sexy badge's boost on purpose: "who is near me" is a real need, and

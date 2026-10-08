@@ -42,6 +42,7 @@ from .gemini import _key, generate_content
 from .models import (Horoscope, Profile, adult_only_reason, blocked_user_ids,
                      profile_is_minor, zodiac_for)
 from .social import ACTIVE_STANCES, clean_substances
+from .substancez import FREQUENCIES, FREQUENCY_KEYS, SUBSTANCE_KEYS, SUBSTANCES
 from .statz_trial import has_statz
 
 logger = logging.getLogger(__name__)
@@ -154,21 +155,7 @@ def house_reading(sign, day):
             "mood": "", "lucky_color": pick(_COLORS, 5), "lucky_number": (seed % 9) + 1,
             "best_match": same[seed % len(same)], "source": "house"}
 
-# Keys match what ProfileZ already stores, so every existing declaration counts.
-SUBSTANCES = [
-    ("cigarettes", "Cigarettes", "🚬"),
-    ("caffeine", "Caffeine", "☕"),
-    ("alcohol", "Alcohol", "🍺"),
-    ("thc", "THC", "🍃"),
-    ("heroin", "Heroin", "💉"),
-    ("crack", "Crack", "💎"),
-    ("meth", "Meth", "💎"),
-    ("dxm", "DXM", "🧴"),
-    ("adderall", "Adderall", "💊"),
-    ("opioids", "Opioids", "💊"),
-    ("benzos", "Benzos", "💊"),
-]
-SUBSTANCE_KEYS = [s[0] for s in SUBSTANCES]
+# The list lives in substancez.py (one list, served), imported above.
 
 PARTNER_GENDERS = [
     ("male", "Male", "♂"),
@@ -211,6 +198,12 @@ def counts_for(kind, viewer):
     """{option: members who declared it}, how many declared nothing, and the
     viewer's own answer. Adults only on the adult kinds."""
     counts = {o["key"]: 0 for o in _options(kind)}
+    # SubstanceZ only: how those declarations split by frequency. A count of
+    # "12 use THC" hides whether that is twelve daily users or twelve people
+    # who had it once; `unsaid` is the legacy "yes", kept as its own bucket
+    # rather than folded into a frequency nobody chose.
+    by_freq = {o["key"]: {f: 0 for f in FREQUENCY_KEYS + ["unsaid"]} for o in _options(kind)} \
+        if kind == "substancez" else {}
     undeclared = sober = 0
     adult = KINDS[kind]["adult"]
     blocked = blocked_user_ids(viewer)
@@ -221,19 +214,47 @@ def counts_for(kind, viewer):
         keys = _declared(kind, p)
         for k in keys:
             counts[k] += 1
+        if by_freq and keys:
+            subs = clean_substances(p.substances)
+            for k in keys:
+                by_freq[k][subs[k] if subs[k] in FREQUENCY_KEYS else "unsaid"] += 1
         if not keys:
             undeclared += 1
             if kind == "substancez" and p.sober:
                 sober += 1
-    return counts, undeclared, sober
+    return counts, undeclared, sober, by_freq
 
 
-def matches(kind, p, wanted):
+def matches(kind, p, wanted, freqs=None):
     """Whether profile `p` declared ANY of `wanted` for `kind`. OR within a
-    metric, the rule every multi-select in MembersView already follows."""
+    metric, the rule every multi-select in MembersView already follows.
+
+    `freqs` narrows SubstanceZ to those declared at one of the listed
+    frequencies. A legacy "yes" has no frequency to match, so it never passes a
+    frequency filter — it would be a guess in the searcher's favour.
+    """
     if KINDS[kind]["adult"] and profile_is_minor(p):
         return False
+    if kind == "substancez" and freqs:
+        subs = clean_substances(p.substances)
+        return any(subs.get(k) in freqs for k in wanted)
     return bool(set(wanted) & set(_declared(kind, p)))
+
+
+class SubstanceScaleView(APIView):
+    """GET /api/economy/substancez/ — the substances and the frequency scale.
+
+    The one place both are defined for a screen. Deliberately NOT part of
+    MetricZView: that answer is adult-gated and walks every profile for counts,
+    and the profile editor needs only the two lists. Nothing here is about
+    anybody; it is the vocabulary.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .substancez import scale
+        return Response(scale())
 
 
 class MetricZView(APIView):
@@ -251,17 +272,24 @@ class MetricZView(APIView):
             why = adult_only_reason(request.user)
             if why:
                 return Response({**base, "locked": why, "options": []})
-        counts, undeclared, sober = counts_for(kind, request.user)
+        counts, undeclared, sober, by_freq = counts_for(kind, request.user)
         me = getattr(request.user, "mcz_profile", None)
         mine = _declared(kind, me) if me else []
-        out = {**base, "options": [{**o, "count": counts[o["key"]], "mine": o["key"] in mine}
-                                    for o in _options(kind)],
+        my_subs = clean_substances(me.substances) if me and kind == "substancez" else {}
+        out = {**base, "options": [
+                   {**o, "count": counts[o["key"]], "mine": o["key"] in mine,
+                    **({"by_frequency": by_freq[o["key"]],
+                        # Yours, as you said it — None for the legacy "yes".
+                        "my_frequency": my_subs.get(o["key"]) if my_subs.get(o["key"]) in FREQUENCY_KEYS else None}
+                       if kind == "substancez" else {})}
+                   for o in _options(kind)],
                "undeclared": undeclared, "mine": mine,
                # ProfileZ anchor that sets it — "nothing is a dead end".
                "set_in": {"tab": "profilez", "target": {"zodiacz": "birthday", "substancez": "substancez",
                                                          "preferencez": "preferencez"}[kind]}}
         if kind == "substancez":
             out["sober"] = sober
+            out["frequencies"] = [{"key": k, "label": l, "hint": h} for k, l, h in FREQUENCIES]
         if kind == "zodiacz":
             out["today"] = timezone.localdate().isoformat()
         return Response(out)
