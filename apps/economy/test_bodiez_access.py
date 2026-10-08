@@ -212,3 +212,29 @@ class VideoAuditCommandTests(TestCase):
         self.assertNotIn("Dumbbell Romanian Deadlift", text)  # has a clip, and is standing
         self.assertNotIn("Machine Bench Press", text)      # seated, HAS a clip
         self.assertNotIn("Barbell Squat", text)
+
+
+class ArmFreeLibraryTests(TestCase):
+    """The arm-limited half of the library, pinned so it cannot shrink back."""
+
+    def _count(self, **kw):
+        a = BodieZAccess(**kw)
+        from .bodiez import accessible
+        return sum(1 for e in BodieZExercise.objects.all() if accessible(e, a))
+
+    def test_arm_free_work_has_real_depth(self):
+        self.assertGreaterEqual(self._count(arms_ok=False), 25)
+        self.assertGreaterEqual(self._count(arms_ok=False, seated_or_lying_only=True), 15)
+        self.assertGreaterEqual(self._count(arms_ok=False, legs_ok=False), 4)
+
+    def test_no_arm_free_row_is_an_upper_body_muscle(self):
+        # An exercise that trains the arms needs them. If one of these ever
+        # shows up arm-free, the tag is wrong, not the filter.
+        upper = {"chest", "back", "shoulders", "biceps", "triceps", "forearms"}
+        for e in BodieZExercise.objects.filter(needs_arms=False):
+            self.assertNotIn(e.muscle_group, upper, e.name)
+
+    def test_every_row_has_known_positions(self):
+        known = {"standing", "seated", "lying", "kneeling", "floor"}
+        for e in BodieZExercise.objects.all():
+            self.assertTrue(e.position_list and set(e.position_list) <= known, e.name)
