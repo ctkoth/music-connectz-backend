@@ -65,7 +65,7 @@ XP for. That is a real design question, not a gap to fill silently, so it
 stays a follow-up.
 """
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from django.db.models import Count, Max
@@ -378,6 +378,7 @@ def _session_dict(sess, sets=None):
         "routine_goal": sess.routine.goal if sess.routine_id and sess.routine else "",
         "started_at": sess.started_at.isoformat(),
         "ended_at": sess.ended_at.isoformat() if sess.ended_at else None,
+        "backfilled": sess.backfilled,
         "notes": sess.notes,
         "sets": [_set_dict(s) for s in sets],
     }
@@ -818,7 +819,9 @@ def session_summary(sess):
         "routine_title": sess.routine.title if sess.routine_id and sess.routine else None,
         "started_at": sess.started_at.isoformat(),
         "ended_at": sess.ended_at.isoformat() if sess.ended_at else None,
-        "duration_seconds": int((end - sess.started_at).total_seconds()),
+        "backfilled": sess.backfilled,
+        # A workout typed in afterwards has no measured length; None, never 0.
+        "duration_seconds": None if sess.backfilled else int((end - sess.started_at).total_seconds()),
         "sets": len(sets), "reps": sum(x.reps for x in sets),
         "volume_kg": round(total, 2),
         "exercises": sorted(exercises, key=lambda e: e["name"]),
@@ -837,6 +840,91 @@ class BodieZSessionSummaryView(APIView):
         except BodieZSession.DoesNotExist:
             return Response({"detail": "Session not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(session_summary(sess))
+
+
+MAX_PAST_SETS = 100
+MAX_PAST_DAYS = 365 * 5
+
+
+class BodieZPastSessionView(APIView):
+    """POST /api/economy/bodiez/sessions/past/ — log a workout you already did.
+
+    {date: "YYYY-MM-DD", notes?, sets: [{exercise_id, reps, weight_kg?}, ...]}
+
+    It lands as a FINISHED session on that date, so it feeds records, the body
+    map, goals and the coach exactly as a live one does — and is flagged
+    `backfilled`, because the things a live session has measured by the server
+    (rest between sets, how long it took) are not known and are not invented.
+    Sets are validated by the same rules as the live logger, and nothing is
+    saved unless every one passes.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            day = date.fromisoformat(str(request.data.get("date"))[:10])
+        except ValueError:
+            return Response({"detail": "date must be YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+        today = timezone.localdate()
+        if day > today:
+            return Response({"detail": "That date is in the future — log it once you've done it."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if (today - day).days > MAX_PAST_DAYS:
+            return Response({"detail": "That's more than five years back."}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw = request.data.get("sets")
+        if not isinstance(raw, list) or not raw:
+            return Response({"detail": "Add at least one set."}, status=status.HTTP_400_BAD_REQUEST)
+        if len(raw) > MAX_PAST_SETS:
+            return Response({"detail": f"At most {MAX_PAST_SETS} sets in one workout."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        ids = {r.get("exercise_id") for r in raw if isinstance(r, dict)}
+        try:
+            exercises = {e.id: e for e in BodieZExercise.objects.filter(id__in=ids)}
+        except (ValueError, TypeError):
+            exercises = {}
+        clean = []
+        for i, r in enumerate(raw, 1):
+            if not isinstance(r, dict) or r.get("exercise_id") not in exercises:
+                return Response({"detail": f"Set {i}: unknown exercise."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                reps = int(r.get("reps"))
+            except (TypeError, ValueError):
+                return Response({"detail": f"Set {i}: reps must be a number."}, status=status.HTTP_400_BAD_REQUEST)
+            if not 1 <= reps <= MAX_REPS_PER_SET:
+                return Response({"detail": f"Set {i}: reps must be 1 to {MAX_REPS_PER_SET}."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            weight = r.get("weight_kg")
+            if weight in (None, ""):
+                weight = None
+            else:
+                try:
+                    weight = Decimal(str(weight))
+                except Exception:
+                    return Response({"detail": f"Set {i}: weight must be a number."},
+                                    status=status.HTTP_400_BAD_REQUEST)
+                if weight < 0 or weight >= 10000:
+                    return Response({"detail": f"Set {i}: weight is out of range."},
+                                    status=status.HTTP_400_BAD_REQUEST)
+            clean.append((exercises[r["exercise_id"]], reps, weight))
+
+        # Today: now. Any other day: noon, so the date survives a timezone.
+        when = (timezone.now() if day == today else
+                timezone.make_aware(datetime.combine(day, datetime.min.time().replace(hour=12))))
+        sess = BodieZSession.objects.create(user=request.user, ended_at=when, backfilled=True,
+                                            notes=str(request.data.get("notes") or "")[:2000])
+        # started_at is auto_now_add; set the real date after create.
+        BodieZSession.objects.filter(id=sess.id).update(started_at=when)
+        sess.refresh_from_db()
+        counts = defaultdict(int)
+        for ex, reps, weight in clean:
+            counts[ex.id] += 1
+            BodieZSet.objects.create(session=sess, exercise=ex, set_number=counts[ex.id],
+                                     reps=reps, weight_kg=weight, rest_seconds=None)
+        out = _session_dict(sess)
+        out["summary"] = session_summary(sess)
+        return Response(out, status=status.HTTP_201_CREATED)
 
 
 class BodieZSessionDetailView(APIView):

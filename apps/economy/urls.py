@@ -173,7 +173,7 @@ from .views import (
 )
 from .habits import HabitCreateView, HabitCompleteView
 from .bodiez import (
-    BodieZAccessView, BodieZBoardView, BodieZCustomDaysView, BodieZStepsView, BodieZStepCoachView, BodieZCustomDayDetailView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
+    BodieZAccessView, BodieZBoardView, BodieZCustomDaysView, BodieZStepsView, BodieZPastSessionView, BodieZStepCoachView, BodieZCustomDayDetailView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
     BodieZGoalDetailView, BodieZGoalsView, BodieZRecoveryView, BodieZRoutinesView,
     BodieZRoutineDetailView, BodieZSessionsView, BodieZSessionDetailView, BodieZSessionSummaryView, BodieZSetsView, BodieZLbFixView,
     BodieZProgressView, BodieZWeightLogView,
@@ -493,6 +493,7 @@ urlpatterns = [
     path("bodiez/routines/<int:routine_id>/", BodieZRoutineDetailView.as_view(),
          name="economy-bodiez-routine"),
     path("bodiez/sessions/", BodieZSessionsView.as_view(), name="economy-bodiez-sessions"),
+    path("bodiez/sessions/past/", BodieZPastSessionView.as_view(), name="economy-bodiez-past-session"),
     path("bodiez/sessions/<int:session_id>/", BodieZSessionDetailView.as_view(),
          name="economy-bodiez-session"),
     path("bodiez/sessions/<int:session_id>/summary/", BodieZSessionSummaryView.as_view(),

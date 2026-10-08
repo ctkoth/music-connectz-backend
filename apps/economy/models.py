@@ -5990,6 +5990,10 @@ class BodieZSession(models.Model):
     started_at = models.DateTimeField(auto_now_add=True)
     ended_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True, default="")
+    # Typed in afterwards rather than logged live. The sets still count, but
+    # nothing the server MEASURES (rest between sets, how long it took) exists
+    # for it, and it is never shown as if it did.
+    backfilled = models.BooleanField(default=False)
 
     class Meta:
         ordering = ("-started_at",)

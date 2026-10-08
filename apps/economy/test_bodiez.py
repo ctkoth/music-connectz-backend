@@ -1748,3 +1748,64 @@ class BodieZStepsTests(TestCase):
 
     def test_requires_auth(self):
         self.assertEqual(APIClient().get("/api/economy/bodiez/steps/").status_code, 401)
+
+
+class BodieZPastWorkoutTests(TestCase):
+    URL = "/api/economy/bodiez/sessions/past/"
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="pw1", password="pw")
+        self.client.force_authenticate(user=self.user)
+        self.bench = BodieZExercise.objects.create(name="PW Bench", muscle_group="chest", equipment="barbell")
+        self.day = (timezone.localdate() - timedelta(days=3)).isoformat()
+
+    def _post(self, **kw):
+        body = {"date": self.day, "sets": [{"exercise_id": self.bench.id, "reps": 8, "weight_kg": 60},
+                                           {"exercise_id": self.bench.id, "reps": 6}]}
+        body.update(kw)
+        return self.client.post(self.URL, body, format="json")
+
+    def test_lands_finished_dated_and_flagged(self):
+        r = self._post()
+        self.assertEqual(r.status_code, 201)
+        s = BodieZSession.objects.get(id=r.data["id"])
+        self.assertTrue(s.backfilled and s.ended_at)
+        self.assertEqual(timezone.localtime(s.started_at).date().isoformat(), self.day)
+        self.assertEqual([x.set_number for x in s.sets.all()], [1, 2])
+        self.assertIsNone(s.sets.first().rest_seconds)
+        self.assertIsNone(r.data["summary"]["duration_seconds"])  # not measured, not invented
+        self.assertIsNone(s.sets.last().weight_kg)  # bodyweight stays null, not 0
+
+    def test_feeds_done_before_and_blocks_nothing_live(self):
+        self._post()
+        ex = {e["name"]: e for e in self.client.get("/api/economy/bodiez/exercises/").data["exercises"]}
+        self.assertEqual(ex["PW Bench"]["times_done"], 1)
+        self.assertEqual(self.client.post("/api/economy/bodiez/sessions/", {}, format="json").status_code, 201)
+
+    def test_future_and_ancient_and_junk_refused(self):
+        tomorrow = (timezone.localdate() + timedelta(days=1)).isoformat()
+        self.assertEqual(self._post(date=tomorrow).status_code, 400)
+        self.assertEqual(self._post(date="2001-01-01").status_code, 400)
+        self.assertEqual(self._post(date="nope").status_code, 400)
+        self.assertEqual(self._post(sets=[]).status_code, 400)
+        self.assertEqual(self._post(sets=[{"exercise_id": 999999, "reps": 5}]).status_code, 400)
+        self.assertEqual(self._post(sets=[{"exercise_id": self.bench.id, "reps": 0}]).status_code, 400)
+        self.assertEqual(self._post(sets=[{"exercise_id": self.bench.id, "reps": 5, "weight_kg": -1}]).status_code, 400)
+
+    def test_all_or_nothing(self):
+        r = self._post(sets=[{"exercise_id": self.bench.id, "reps": 5}, {"exercise_id": 999999, "reps": 5}])
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(BodieZSession.objects.filter(user=self.user).count(), 0)
+
+    def test_record_is_judged_against_earlier_sessions_only(self):
+        self._post(date=(timezone.localdate() - timedelta(days=10)).isoformat(),
+                   sets=[{"exercise_id": self.bench.id, "reps": 5, "weight_kg": 100}])
+        r = self._post(sets=[{"exercise_id": self.bench.id, "reps": 5, "weight_kg": 110}])
+        self.assertTrue(any(x["kind"] == "heaviest" for x in r.data["summary"]["records"]))
+        older = self._post(date=(timezone.localdate() - timedelta(days=20)).isoformat(),
+                           sets=[{"exercise_id": self.bench.id, "reps": 5, "weight_kg": 50}])
+        self.assertEqual(older.data["summary"]["firsts"], ["PW Bench"])
+
+    def test_requires_auth(self):
+        self.assertEqual(APIClient().post(self.URL, {}, format="json").status_code, 401)
