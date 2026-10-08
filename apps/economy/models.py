@@ -5814,6 +5814,11 @@ class BodieZExercise(models.Model):
     ]
     positions = models.CharField(max_length=40, default="standing")
     needs_arms = models.BooleanField(default=True)
+    # Of the exercises that need arms: can it be done with ONE, as a normal way
+    # to do it (a single-arm dumbbell row, a single-handle cable press)? False
+    # when unsure — a mistaken False hides a lift, a mistaken True offers one
+    # somebody cannot do.
+    one_arm_ok = models.BooleanField(default=False)
     needs_legs = models.BooleanField(default=True)
 
     class Meta:
@@ -5850,6 +5855,9 @@ class BodieZAccess(models.Model):
                                 related_name="bodiez_access")
     seated_or_lying_only = models.BooleanField(default=False)
     arms_ok = models.BooleanField(default=True)
+    # Can use ONE arm, not none: offers only exercises that work an arm at a
+    # time. Ignored when `arms_ok` is False — no arms is the stricter answer.
+    one_arm_only = models.BooleanField(default=False)
     legs_ok = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 

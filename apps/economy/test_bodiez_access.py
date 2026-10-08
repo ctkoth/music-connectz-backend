@@ -238,3 +238,44 @@ class ArmFreeLibraryTests(TestCase):
         known = {"standing", "seated", "lying", "kneeling", "floor"}
         for e in BodieZExercise.objects.all():
             self.assertTrue(e.position_list and set(e.position_list) <= known, e.name)
+
+
+class OneArmTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="oa1", password="pw")
+        self.client.force_authenticate(user=self.user)
+
+    def _flags(self):
+        return {e["name"]: e["accessible"] for e in self.client.get(URL + "exercises/").data["exercises"]}
+
+    def test_one_arm_keeps_single_arm_work_and_drops_two_handed(self):
+        r = self.client.put(URL + "access/", {"one_arm_only": True}, format="json")
+        self.assertTrue(r.data["one_arm_only"])
+        f = self._flags()
+        for ok in ("Dumbbell Row", "Bicep Curl", "Cable Row", "Machine Bench Press", "Leg Press", "Running"):
+            self.assertTrue(f[ok], ok)
+        for no in ("Barbell Row", "Bench Press", "Push-Up", "Pull-Up", "Kettlebell Goblet Squat", "Squat"):
+            self.assertFalse(f[no], no)
+
+    def test_no_arms_beats_one_arm_and_clears_it(self):
+        self.client.put(URL + "access/", {"one_arm_only": True}, format="json")
+        r = self.client.put(URL + "access/", {"arms_ok": False}, format="json")
+        self.assertFalse(r.data["one_arm_only"])
+        self.assertFalse(self._flags()["Dumbbell Row"])
+
+    def test_one_arm_is_a_superset_of_no_arms(self):
+        self.client.put(URL + "access/", {"arms_ok": False}, format="json")
+        none = {k for k, v in self._flags().items() if v}
+        self.client.put(URL + "access/", {"arms_ok": True, "one_arm_only": True}, format="json")
+        one = {k for k, v in self._flags().items() if v}
+        self.assertTrue(none < one)
+
+    def test_one_arm_never_tags_a_barbell_or_bodyweight_arm_lift(self):
+        for e in BodieZExercise.objects.filter(one_arm_ok=True):
+            self.assertNotIn(e.equipment, ("barbell", "ez_bar"), e.name)
+        for n in ("Push-Up", "Pull-Up", "Dip"):
+            self.assertFalse(BodieZExercise.objects.get(name=n).one_arm_ok, n)
+
+    def test_bad_value_refused(self):
+        self.assertEqual(self.client.put(URL + "access/", {"one_arm_only": "maybe"}, format="json").status_code, 400)

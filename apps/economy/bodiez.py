@@ -87,7 +87,7 @@ def _exercise_dict(ex):
     return {"id": ex.id, "name": ex.name, "muscle_group": ex.muscle_group,
             "equipment": ex.equipment, "demo_url": ex.demo_url,
             "positions": ex.position_list, "needs_arms": ex.needs_arms,
-            "needs_legs": ex.needs_legs}
+            "needs_legs": ex.needs_legs, "one_arm_ok": ex.one_arm_ok}
 
 
 # Who can do what. ONE function decides, and the exercise list carries its
@@ -104,6 +104,8 @@ def accessible(ex, access):
         return True
     if not access.arms_ok and ex.needs_arms:
         return False
+    if access.one_arm_only and ex.needs_arms and not ex.one_arm_ok:
+        return False
     if not access.legs_ok and ex.needs_legs:
         return False
     # Unusable legs implies no standing — a standing exercise is a leg
@@ -118,6 +120,7 @@ def _access_dict(access):
     return {
         "seated_or_lying_only": bool(access and access.seated_or_lying_only),
         "arms_ok": True if access is None else access.arms_ok,
+        "one_arm_only": bool(access and access.one_arm_only),
         "legs_ok": True if access is None else access.legs_ok,
     }
 
@@ -143,12 +146,16 @@ class BodieZAccessView(APIView):
             return None
 
         row, _ = BodieZAccess.objects.get_or_create(user=request.user)
-        for key in ("seated_or_lying_only", "arms_ok", "legs_ok"):
+        for key in ("seated_or_lying_only", "arms_ok", "one_arm_only", "legs_ok"):
             v = flag(key, getattr(row, key))
             if v is None:
                 return Response({"error": f"{key} must be true or false."},
                                 status=status.HTTP_400_BAD_REQUEST)
             setattr(row, key, v)
+        # No arms is the stricter answer; keeping one-arm on beside it would
+        # be two answers that contradict each other.
+        if not row.arms_ok:
+            row.one_arm_only = False
         row.save()
         return Response(_access_dict(row))
 
