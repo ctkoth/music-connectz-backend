@@ -23,6 +23,7 @@ from .models import (
     TIER_DEBUG,
     TIER_STATZ,
     FunnelEvent,
+    FunnelExclusion,
     Membership,
     Post,
     RoyaltyEntry,
@@ -459,6 +460,10 @@ class FunnelEventView(APIView):
     # matters here more than anywhere: the trial's first move is a browser mic
     # dialog, and a permission cliff on a phone is not a cliff on a laptop.
     # One number covering both hides whichever is the problem.
+    # Which field a registration was refused on, from a closed list. The field
+    # name only - never the message, which can quote what the visitor typed.
+    _REG = lambda v: v if v in ("username", "email", "password", "birthday",
+                                "network", "server", "other") else None
     _DEV = lambda v: v if v in ("phone", "tablet", "desktop") else None
     # Why the recorder never started. "Denied" was the only story this funnel
     # could tell, and it was the wrong one most of the time: a camera held by
@@ -515,6 +520,7 @@ class FunnelEventView(APIView):
         "try_send": {},
         "try_failed": {"why": _WHY},
         "try_scored": {},
+        "register_fail": {"why": _REG},
         # Which instrument's onboarding, because a modal that gets skipped on
         # DrumZ and finished on SingZ is one number hiding two.
         "onboard_habit": {"frequency": _FREQ},
@@ -589,6 +595,54 @@ class FunnelEventView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class FunnelExcludeView(APIView):
+    """Owner-only: is THIS browser counted in the funnel? GET/POST
+    /api/auth/funnel/exclude/.
+
+    The owner tests the door as a stranger, and with a funnel this small their
+    own retries are a visible share of it. The browser id is sent by the owner
+    from the browser they mean - the same `anon_id` the funnel already keeps.
+
+    Exclusion is applied when the summary is READ, so it covers events already
+    logged and is undone by posting `excluded: false`.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _owner(self, request):
+        ensure_owner(request.user)
+        return is_owner(request.user)
+
+    def _state(self, anon_id):
+        return {
+            "anon_id_set": bool(anon_id),
+            "excluded": bool(anon_id) and FunnelExclusion.objects.filter(anon_id=anon_id).exists(),
+            "browsers_excluded": FunnelExclusion.objects.count(),
+        }
+
+    def get(self, request):
+        if not self._owner(request):
+            return Response({"detail": "Only the platform owner sees this."},
+                            status=status.HTTP_403_FORBIDDEN)
+        return Response(self._state(str(request.query_params.get("anon_id") or "").strip()[:64]))
+
+    def post(self, request):
+        if not self._owner(request):
+            return Response({"detail": "Only the platform owner sees this."},
+                            status=status.HTTP_403_FORBIDDEN)
+        anon_id = str(request.data.get("anon_id") or "").strip()[:64]
+        if not anon_id:
+            # Private-mode browsers send "". Refuse and say why rather than
+            # storing a row that matches nothing real.
+            return Response({"detail": "This browser has no funnel id to exclude (storage is blocked)."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if request.data.get("excluded", True):
+            FunnelExclusion.objects.get_or_create(anon_id=anon_id)
+        else:
+            FunnelExclusion.objects.filter(anon_id=anon_id).delete()
+        return Response(self._state(anon_id))
+
+
 class FunnelSummaryView(APIView):
     """Owner-only read of the join funnel counts: GET /api/auth/funnel/summary/.
 
@@ -607,7 +661,10 @@ class FunnelSummaryView(APIView):
                             status=status.HTTP_403_FORBIDDEN)
         days = min(max(int(request.query_params.get("days") or 30), 1), 90)
         since = timezone.now() - timedelta(days=days)
-        rows = FunnelEvent.objects.filter(created_at__gte=since)
+        # The owner's own browsers (FunnelExclusion) are left out of every
+        # count below, retroactively. See FunnelExcludeView.
+        excluded = FunnelExclusion.objects.values("anon_id")
+        rows = FunnelEvent.objects.filter(created_at__gte=since).exclude(anon_id__in=excluded)
 
         steps = {}
         for kind, label in FUNNEL_KINDS:
@@ -744,9 +801,26 @@ class FunnelSummaryView(APIView):
                 "devices": split_by("dev", "dev", door_rows),
             })
 
+        # WHY, for the steps that carry a reason: unique browsers per slug.
+        # The slugs were always stored; the screen only ever showed that a
+        # step happened, which is the count without the fix list.
+        reasons = {}
+        for rk in ("try_blocked", "try_mic_denied", "try_failed", "register_fail"):
+            seen = {}
+            for row in all_rows:
+                if row["kind"] != rk:
+                    continue
+                slug = (row["meta"] or {}).get("why") or "unknown"
+                seen.setdefault(slug, set()).add(row["anon_id"])
+            reasons[rk] = sorted(({"why": k, "unique": len(v)} for k, v in seen.items()),
+                                 key=lambda r: -r["unique"])
+
         return Response({
+            "reasons": reasons,
             "days": days,
             "since": since,
+            # How many of the owner's own browsers are left out of these counts.
+            "browsers_excluded": FunnelExclusion.objects.count(),
             "base_kind": base_kind,
             "headline": headline,
             "steps": steps,

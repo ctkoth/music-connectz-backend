@@ -10,6 +10,7 @@ from django.views.static import serve as static_serve
 from apps.economy.views import (
     AllMembersView,
     FunnelEventView,
+    FunnelExcludeView,
     FunnelSummaryView,
     PublicStatsView,
     StatsView,
@@ -159,6 +160,7 @@ urlpatterns = [
     # No session required — a step on the join funnel, logged by a visitor
     # who may never have had one. Owner-only summary sits behind it.
     path("api/auth/funnel/", FunnelEventView.as_view(), name="auth-funnel"),
+    path("api/auth/funnel/exclude/", FunnelExcludeView.as_view(), name="auth-funnel-exclude"),
     path("api/auth/funnel/summary/", FunnelSummaryView.as_view(), name="auth-funnel-summary"),
     path("api/auth/", include("apps.accounts.urls")),
     path("api/economy/", include("apps.economy.urls")),

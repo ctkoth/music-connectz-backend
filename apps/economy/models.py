@@ -5357,6 +5357,12 @@ FUNNEL_KINDS = (
     # comes here — see RetakeReminder.
     ("try_email", "Trial score emailed for a retake"),
     ("register_view", "Register screen opened"),
+    # The submit was REFUSED. register_view -> register_success could not say
+    # whether the people in between left or were told no: 7 opened the form,
+    # 0 created an account, and the rule that refuses (a weak password, a
+    # taken handle) is the very thing recently tightened. The form shows the
+    # server's sentence, but a sentence on one person's screen is not a number.
+    ("register_fail", "Account creation was refused"),
     ("register_success", "Account created"),
     ("login_success", "Logged in"),
     # WHAT HAPPENS NEXT, which this funnel has never been able to see. It ends
@@ -5409,6 +5415,24 @@ class FunnelEvent(models.Model):
 
     def __str__(self):
         return f"{self.kind} @ {self.created_at:%Y-%m-%d %H:%M}"
+
+
+class FunnelExclusion(models.Model):
+    """A browser the owner has said is theirs, so its steps are not counted.
+
+    The owner tests the trial door as a stranger, and a funnel this small
+    shows one person retrying a refused mic 21 times as a finding. Excluded at
+    READ time, in the summary, so it is retroactive for everything that browser
+    already logged and reversible by deleting the row. Nothing is deleted from
+    FunnelEvent: the events happened.
+
+    A browser id, never a person - same promise as FunnelEvent.anon_id.
+    """
+    anon_id = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"exclude {self.anon_id[:8]}"
 
 
 class CoachProfile(models.Model):

@@ -672,3 +672,79 @@ class WhatHappensAfterTheAccountTests(TestCase):
         width = FE._meta.get_field("kind").max_length
         for key, _label in FUNNEL_KINDS:
             self.assertLessEqual(len(key), width, key)
+
+
+class FunnelExcludeTests(TestCase):
+    """The owner's own browser is left out of the counts, retroactively."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_user("own", "own@x.com", PW)
+        self.other = User.objects.create_user("memb", "memb@x.com", PW)
+        for who in ("mine", "stranger"):
+            self.client.post(EVENT, {"kind": "try_view", "anon_id": who}, format="json")
+        self.client.post(EVENT, {"kind": "try_view", "anon_id": "mine"}, format="json")
+
+    def _as_owner(self):
+        from unittest import mock
+        self.client.force_authenticate(self.owner)
+        return mock.patch("apps.economy.views.is_owner", lambda u: u.pk == self.owner.pk)
+
+    def test_excluded_browser_drops_out_of_the_counts_including_past_events(self):
+        with self._as_owner():
+            before = self.client.get(SUMMARY).data["steps"]["try_view"]
+            self.assertEqual((before["unique"], before["events"]), (2, 3))
+            r = self.client.post("/api/auth/funnel/exclude/", {"anon_id": "mine"}, format="json")
+            self.assertTrue(r.data["excluded"])
+            after = self.client.get(SUMMARY).data
+            self.assertEqual((after["steps"]["try_view"]["unique"], after["steps"]["try_view"]["events"]), (1, 1))
+            self.assertEqual(after["browsers_excluded"], 1)
+        # Nothing was deleted.
+        self.assertEqual(FunnelEvent.objects.count(), 3)
+
+    def test_it_can_be_undone(self):
+        with self._as_owner():
+            self.client.post("/api/auth/funnel/exclude/", {"anon_id": "mine"}, format="json")
+            r = self.client.post("/api/auth/funnel/exclude/", {"anon_id": "mine", "excluded": False}, format="json")
+            self.assertFalse(r.data["excluded"])
+            self.assertEqual(self.client.get(SUMMARY).data["steps"]["try_view"]["events"], 3)
+
+    def test_a_blank_browser_id_is_refused(self):
+        with self._as_owner():
+            r = self.client.post("/api/auth/funnel/exclude/", {"anon_id": ""}, format="json")
+            self.assertEqual(r.status_code, 400)
+
+    def test_only_the_owner_may_exclude(self):
+        self.client.force_authenticate(self.other)
+        r = self.client.post("/api/auth/funnel/exclude/", {"anon_id": "stranger"}, format="json")
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(self.client.get("/api/auth/funnel/exclude/").status_code, 403)
+
+
+class FunnelReasonsTests(TestCase):
+    """The summary says WHY, not only that a step happened."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_user("own2", "own2@x.com", PW)
+
+    def _post(self, kind, anon, **meta):
+        r = self.client.post(EVENT, {"kind": kind, "anon_id": anon, "meta": meta}, format="json")
+        self.assertEqual(r.status_code, 204)
+
+    def test_reasons_count_unique_browsers_per_slug(self):
+        from unittest import mock
+        self._post("try_failed", "a", why="empty")
+        self._post("try_failed", "a", why="empty")
+        self._post("try_failed", "b", why="empty")
+        self._post("try_failed", "c", why="timeout")
+        self._post("try_mic_denied", "a", why="notfound")
+        self._post("register_fail", "d", why="password")
+        self._post("register_fail", "e", why="not a slug")
+        self.client.force_authenticate(self.owner)
+        with mock.patch("apps.economy.views.is_owner", lambda u: True):
+            reasons = self.client.get(SUMMARY).data["reasons"]
+        self.assertEqual(reasons["try_failed"], [{"why": "empty", "unique": 2}, {"why": "timeout", "unique": 1}])
+        self.assertEqual(reasons["try_mic_denied"], [{"why": "notfound", "unique": 1}])
+        # An unlisted slug is dropped on arrival, so it counts as unknown.
+        self.assertEqual({r["why"] for r in reasons["register_fail"]}, {"password", "unknown"})
