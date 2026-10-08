@@ -199,3 +199,16 @@ class RdlIsDumbbellTests(TestCase):
         self.assertEqual((rdl.name, rdl.equipment), ("Dumbbell Romanian Deadlift", "dumbbell"))
         self.assertTrue(rdl.demo_url.endswith("Dumbbell%20Romanian%20Deadlift.mp4"))
         self.assertEqual(rdl.muscle_group, "upper_legs")
+
+
+class VideoAuditCommandTests(TestCase):
+    def test_lists_seated_exercises_without_a_clip_and_skips_ones_with_one(self):
+        from io import StringIO
+        from django.core.management import call_command
+        out = StringIO()
+        call_command("bodiez_video_audit", "--seated", stdout=out)
+        text = out.getvalue()
+        self.assertIn("Seated Leg Extension", text)        # seated, no clip
+        self.assertNotIn("Dumbbell Romanian Deadlift", text)  # has a clip, and is standing
+        self.assertNotIn("Machine Bench Press", text)      # seated, HAS a clip
+        self.assertNotIn("Barbell Squat", text)
