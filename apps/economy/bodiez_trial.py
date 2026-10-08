@@ -122,7 +122,7 @@ class BodieZTrialView(APIView):
             # reads — nothing here is a trimmed-down "trial version" of the
             # product, same reason RapZ's trial door forwards the real style
             # list rather than a shorter one.
-            "exercises": [_exercise_dict(e) for e in BodieZExercise.objects.all()],
+            "exercises": [_exercise_dict(e) for e in BodieZExercise.objects.library()],
             # Coach's real, cited rep/set/rest schemes — the same table
             # `BodieZCoachView` serves members, not a trial-only summary of
             # it. A visitor picking "muscle gain" here sees the identical
@@ -166,7 +166,7 @@ class BodieZTrialView(APIView):
         if reps <= 0:
             return Response({"detail": "Reps has to be at least 1."},
                             status=status.HTTP_400_BAD_REQUEST)
-        ex = BodieZExercise.objects.filter(id=exercise_id).first()
+        ex = BodieZExercise.objects.library().filter(id=exercise_id).first()
         if not ex:
             return Response({"detail": "That exercise doesn't exist."},
                             status=status.HTTP_400_BAD_REQUEST)

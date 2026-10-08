@@ -5729,6 +5729,16 @@ class ParcelCampaign(models.Model):
         ordering = ("-created_at",)
 
 
+class BodieZExerciseManager(models.Manager):
+    def visible(self, user):
+        """The library plus this member's own custom exercises — the only
+        exercises they may see, log, plan or set a goal against."""
+        return self.filter(models.Q(created_by__isnull=True) | models.Q(created_by=user))
+
+    def library(self):
+        return self.filter(created_by__isnull=True)
+
+
 class BodieZExercise(models.Model):
     """The movement library. Seeded once by a data migration, not per-user —
     a member picks from this list rather than typing a free-text name, so a
@@ -5755,7 +5765,12 @@ class BodieZExercise(models.Model):
     making the real one ("do I have a barbell") one dropdown option out of
     eleven instead of one out of eight.
     """
-    name = models.CharField(max_length=80, unique=True)
+    # NULL = the shared library everyone sees. Set = a custom exercise the
+    # member made for themselves: visible to them alone, and never part of the
+    # library, the trial door, or anyone else's picker.
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                   on_delete=models.CASCADE, related_name="bodiez_custom_exercises")
+    name = models.CharField(max_length=80)
     # Jefit's own eleven groups (Abs, Back, Biceps, Cardio, Chest, Forearms,
     # Glutes, Shoulders, Triceps, Upper Legs, Lower Legs), plus one Jefit
     # doesn't have: this library's compound lifts (Burpee, Clean and Press,
@@ -5823,8 +5838,19 @@ class BodieZExercise(models.Model):
     one_leg_ok = models.BooleanField(default=False)
     needs_legs = models.BooleanField(default=True)
 
+    objects = BodieZExerciseManager()
+
     class Meta:
         ordering = ("muscle_group", "name")
+        constraints = [
+            # Library names stay unique, as when the column was unique=True;
+            # a member's own names are unique among THEIR exercises, so two
+            # members may each have a "Sled Push" and neither sees the other's.
+            models.UniqueConstraint(fields=["name"], condition=models.Q(created_by__isnull=True),
+                                    name="bodiez_exercise_library_name_uniq"),
+            models.UniqueConstraint(fields=["created_by", "name"], condition=models.Q(created_by__isnull=False),
+                                    name="bodiez_exercise_custom_name_uniq"),
+        ]
 
     def __str__(self):
         return self.name

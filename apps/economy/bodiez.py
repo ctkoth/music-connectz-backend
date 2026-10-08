@@ -88,7 +88,7 @@ def _exercise_dict(ex):
             "equipment": ex.equipment, "demo_url": ex.demo_url,
             "positions": ex.position_list, "needs_arms": ex.needs_arms,
             "needs_legs": ex.needs_legs, "one_arm_ok": ex.one_arm_ok,
-            "one_leg_ok": ex.one_leg_ok}
+            "one_leg_ok": ex.one_leg_ok, "custom": ex.created_by_id is not None}
 
 
 # Who can do what. ONE function decides, and the exercise list carries its
@@ -422,7 +422,7 @@ class BodieZExercisesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        rows = BodieZExercise.objects.all()
+        rows = BodieZExercise.objects.visible(request.user)
         muscle = request.query_params.get("muscle_group")
         if muscle:
             rows = rows.filter(muscle_group=muscle)
@@ -430,7 +430,7 @@ class BodieZExercisesView(APIView):
         # a video — an unearned credential line on a library with no clips to
         # its name would be exactly the kind of claim the substance rule
         # exists to keep off screen.
-        credit = DEMO_CREDIT if BodieZExercise.objects.exclude(demo_url="").exists() else ""
+        credit = DEMO_CREDIT if BodieZExercise.objects.library().exclude(demo_url="").exists() else ""
         access = BodieZAccess.objects.filter(user=request.user).first()
         # EVERY exercise is returned, each flagged. A member's old sessions and
         # routines still name exercises they can no longer pick, and those rows
@@ -490,6 +490,101 @@ class BodieZExerciseHistoryView(APIView):
 
 
 MAX_CUSTOM_DAYS = 20
+MAX_CUSTOM_EXERCISES = 200
+_MUSCLES = {k for k, _ in BodieZExercise.MUSCLE_CHOICES}
+_EQUIPMENT = {k for k, _ in BodieZExercise.EQUIPMENT_CHOICES}
+_POSITIONS = [k for k, _ in BodieZExercise.POSITION_CHOICES]
+
+
+def _flag(v, default):
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str) and v.lower() in ("true", "false", "1", "0"):
+        return v.lower() in ("true", "1")
+    return None
+
+
+class BodieZCustomExerciseView(APIView):
+    """POST /api/economy/bodiez/exercises/custom/ — make an exercise of your own.
+
+    {name, muscle_group, equipment, positions: [..], needs_arms?, needs_legs?,
+     one_arm_ok?, one_leg_ok?}
+
+    Private to the member. The movement tags are THEIR statement about their
+    own exercise, and the same access filter then applies to it as to the
+    library — so a custom lift tagged "needs arms" is hidden from a member who
+    cannot use theirs, exactly like a library one. Untagged defaults are the
+    cautious ones (needs everything, standing).
+
+    A name that is already in the library is refused with that exercise's id:
+    a second "Bench Press" would split the member's history across two rows and
+    quietly break their records, which compare by exercise.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        d = request.data or {}
+        name = " ".join(str(d.get("name") or "").split())
+        if not 2 <= len(name) <= 80:
+            return Response({"detail": "Give the exercise a name of 2 to 80 characters."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        muscle, equipment = d.get("muscle_group"), d.get("equipment")
+        if muscle not in _MUSCLES:
+            return Response({"detail": "Pick the muscle it works."}, status=status.HTTP_400_BAD_REQUEST)
+        if equipment not in _EQUIPMENT:
+            return Response({"detail": "Pick the equipment it uses."}, status=status.HTTP_400_BAD_REQUEST)
+        raw_pos = d.get("positions")
+        if isinstance(raw_pos, str):
+            raw_pos = [p for p in raw_pos.split(",") if p]
+        positions = [p for p in _POSITIONS if p in (raw_pos or [])]  # canonical order, junk dropped
+        if not positions:
+            return Response({"detail": "Say how it can be done: standing, seated, lying, kneeling or on the floor."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        flags = {k: _flag(d.get(k), default) for k, default in
+                 (("needs_arms", True), ("needs_legs", True), ("one_arm_ok", False), ("one_leg_ok", False))}
+        if None in flags.values():
+            return Response({"detail": "Those options must be yes or no."}, status=status.HTTP_400_BAD_REQUEST)
+
+        clash = BodieZExercise.objects.library().filter(name__iexact=name).first()
+        if clash:
+            return Response({"detail": f"{clash.name} is already in the library — use that one so your history stays together.",
+                             "existing_id": clash.id}, status=status.HTTP_400_BAD_REQUEST)
+        mine = BodieZExercise.objects.filter(created_by=request.user)
+        own = mine.filter(name__iexact=name).first()
+        if own:
+            return Response({"detail": f"You already made {own.name}.", "existing_id": own.id},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if mine.count() >= MAX_CUSTOM_EXERCISES:
+            return Response({"detail": f"You can keep {MAX_CUSTOM_EXERCISES} custom exercises. Delete one you don't use."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        ex = BodieZExercise.objects.create(created_by=request.user, name=name, muscle_group=muscle,
+                                           equipment=equipment, positions=",".join(positions), **flags)
+        access = BodieZAccess.objects.filter(user=request.user).first()
+        return Response({**_exercise_dict(ex), "times_done": 0, "last_done": None,
+                         "accessible": accessible(ex, access)}, status=status.HTTP_201_CREATED)
+
+
+class BodieZCustomExerciseDetailView(APIView):
+    """DELETE /api/economy/bodiez/exercises/custom/{id}/ — only your own, and
+    only while nothing uses it. Deleting would erase logged sets (they cascade)
+    and leave routines naming an exercise that no longer exists."""
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, exercise_id):
+        ex = BodieZExercise.objects.filter(id=exercise_id, created_by=request.user).first()
+        if not ex:
+            return Response({"detail": "Exercise not found."}, status=status.HTTP_404_NOT_FOUND)
+        in_routine = any(isinstance(e, dict) and e.get("exercise_id") == ex.id
+                         for r in BodieZRoutine.objects.filter(user=request.user) for e in (r.exercises or []))
+        if (BodieZSet.objects.filter(exercise=ex).exists() or in_routine
+                or BodieZGoal.objects.filter(exercise=ex).exists()):
+            return Response({"detail": "It's in your history, a routine or a goal, so it can't be deleted."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        ex.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 def _own_custom_day(user, raw):
@@ -562,7 +657,7 @@ class BodieZRoutinesView(APIView):
         # that silently 404s a card the moment somebody starts a session
         # from it.
         ids = [e.get("exercise_id") for e in exercises if isinstance(e, dict) and e.get("exercise_id")]
-        valid_ids = set(BodieZExercise.objects.filter(id__in=ids).values_list("id", flat=True))
+        valid_ids = set(BodieZExercise.objects.visible(request.user).filter(id__in=ids).values_list("id", flat=True))
         bad = [i for i in ids if i not in valid_ids]
         if bad:
             return Response({"detail": f"Unknown exercise id(s): {bad}"}, status=status.HTTP_400_BAD_REQUEST)
@@ -614,7 +709,7 @@ def clean_trial_split(raw):
         for e in (day.get("exercises") or [])[:MAX_TRIAL_SPLIT_EXERCISES_PER_DAY]:
             if isinstance(e, dict) and e.get("exercise_id"):
                 all_ids.add(e["exercise_id"])
-    valid_ids = set(BodieZExercise.objects.filter(id__in=all_ids).values_list("id", flat=True))
+    valid_ids = set(BodieZExercise.objects.library().filter(id__in=all_ids).values_list("id", flat=True))
 
     cleaned = []
     for day in days:
@@ -680,7 +775,7 @@ class BodieZRoutineDetailView(APIView):
             if not isinstance(exercises, list):
                 return Response({"detail": "exercises must be a list."}, status=status.HTTP_400_BAD_REQUEST)
             ids = [e.get("exercise_id") for e in exercises if isinstance(e, dict) and e.get("exercise_id")]
-            valid_ids = set(BodieZExercise.objects.filter(id__in=ids).values_list("id", flat=True))
+            valid_ids = set(BodieZExercise.objects.visible(request.user).filter(id__in=ids).values_list("id", flat=True))
             bad = [i for i in ids if i not in valid_ids]
             if bad:
                 return Response({"detail": f"Unknown exercise id(s): {bad}"}, status=status.HTTP_400_BAD_REQUEST)
@@ -924,7 +1019,7 @@ class BodieZPastSessionView(APIView):
 
         ids = {r.get("exercise_id") for r in raw if isinstance(r, dict)}
         try:
-            exercises = {e.id: e for e in BodieZExercise.objects.filter(id__in=ids)}
+            exercises = {e.id: e for e in BodieZExercise.objects.visible(request.user).filter(id__in=ids)}
         except (ValueError, TypeError):
             exercises = {}
         clean = []
@@ -1012,7 +1107,7 @@ class BodieZSetsView(APIView):
             return Response({"detail": "This session is already finished."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            exercise = BodieZExercise.objects.get(id=request.data.get("exercise_id"))
+            exercise = BodieZExercise.objects.visible(request.user).get(id=request.data.get("exercise_id"))
         except (BodieZExercise.DoesNotExist, ValueError, TypeError):
             return Response({"detail": "Unknown exercise."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1520,7 +1615,7 @@ class BodieZGoalsView(APIView):
         exercise = None
         if kind == "strength":
             try:
-                exercise = BodieZExercise.objects.get(id=d.get("exercise_id"))
+                exercise = BodieZExercise.objects.visible(request.user).get(id=d.get("exercise_id"))
             except (BodieZExercise.DoesNotExist, ValueError, TypeError):
                 return Response({"detail": "A strength goal needs a real exercise_id."},
                                  status=status.HTTP_400_BAD_REQUEST)

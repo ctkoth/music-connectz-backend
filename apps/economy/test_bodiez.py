@@ -1902,3 +1902,97 @@ class BodieZPastRoutineTests(TestCase):
 
     def test_routine_is_optional(self):
         self.assertEqual(self.client.post(self.URL, {"date": self.day, "sets": self.sets}, format="json").status_code, 201)
+
+
+class BodieZCustomExerciseTests(TestCase):
+    URL = "/api/economy/bodiez/exercises/custom/"
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="ce1", password="pw")
+        self.other = User.objects.create_user(username="ce2", password="pw")
+        self.client.force_authenticate(user=self.user)
+        self.lib = BodieZExercise.objects.create(name="CE Library Press", muscle_group="chest", equipment="machine")
+
+    def _make(self, **kw):
+        body = {"name": "Sled Push", "muscle_group": "upper_legs", "equipment": "machine",
+                "positions": ["standing"], "needs_arms": True, "needs_legs": True}
+        body.update(kw)
+        return self.client.post(self.URL, body, format="json")
+
+    def _names(self, client=None):
+        r = (client or self.client).get("/api/economy/bodiez/exercises/")
+        return {e["name"]: e for e in r.data["exercises"]}
+
+    def test_create_is_private_and_flagged_custom(self):
+        r = self._make()
+        self.assertEqual((r.status_code, r.data["custom"], r.data["times_done"]), (201, True, 0))
+        self.assertIn("Sled Push", self._names())
+        self.assertTrue(self._names()["Sled Push"]["custom"])
+        self.assertFalse(self._names()["CE Library Press"]["custom"])
+        c2 = APIClient(); c2.force_authenticate(user=self.other)
+        self.assertNotIn("Sled Push", self._names(c2))
+
+    def test_two_members_may_each_have_the_same_name(self):
+        self._make()
+        c2 = APIClient(); c2.force_authenticate(user=self.other)
+        self.assertEqual(c2.post(self.URL, {"name": "Sled Push", "muscle_group": "abs", "equipment": "band",
+                                            "positions": ["lying"]}, format="json").status_code, 201)
+
+    def test_library_name_is_refused_with_the_library_id_and_own_dupes_too(self):
+        r = self._make(name="ce library PRESS")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.data["existing_id"], self.lib.id)
+        self._make()
+        self.assertEqual(self._make(name="sled  push").status_code, 400)
+
+    def test_validation(self):
+        for bad in ({"name": "x"}, {"name": ""}, {"muscle_group": "head"}, {"equipment": "rocket"},
+                    {"positions": []}, {"positions": ["flying"]}, {"needs_arms": "maybe"}):
+            self.assertEqual(self._make(**bad).status_code, 400, bad)
+
+    def test_tags_feed_the_access_filter_and_default_cautiously(self):
+        self.client.put("/api/economy/bodiez/access/", {"arms_ok": False}, format="json")
+        self._make(name="Armless Thing", needs_arms=False)
+        self._make(name="Arm Thing", needs_arms=True)
+        n = self._names()
+        self.assertTrue(n["Armless Thing"]["accessible"])
+        self.assertFalse(n["Arm Thing"]["accessible"])
+        r = self.client.post(self.URL, {"name": "Untagged", "muscle_group": "abs", "equipment": "band",
+                                        "positions": "seated"}, format="json")
+        self.assertEqual((r.data["needs_arms"], r.data["needs_legs"], r.data["one_arm_ok"]), (True, True, False))
+
+    def test_can_be_logged_and_planned_by_owner_only(self):
+        ex = self._make().data["id"]
+        sid = self.client.post("/api/economy/bodiez/sessions/", {}, format="json").data["id"]
+        self.assertEqual(self.client.post(f"/api/economy/bodiez/sessions/{sid}/sets/",
+                                          {"exercise_id": ex, "reps": 5}, format="json").status_code, 201)
+        self.assertEqual(self.client.post("/api/economy/bodiez/routines/", {"title": "R", "exercises": [
+            {"exercise_id": ex, "sets": 3, "reps": 10}]}, format="json").status_code, 201)
+        c2 = APIClient(); c2.force_authenticate(user=self.other)
+        sid2 = c2.post("/api/economy/bodiez/sessions/", {}, format="json").data["id"]
+        self.assertEqual(c2.post(f"/api/economy/bodiez/sessions/{sid2}/sets/",
+                                 {"exercise_id": ex, "reps": 5}, format="json").status_code, 400)
+        self.assertEqual(c2.post("/api/economy/bodiez/routines/", {"title": "R", "exercises": [
+            {"exercise_id": ex}]}, format="json").status_code, 400)
+        day = (timezone.localdate() - timedelta(days=1)).isoformat()
+        self.assertEqual(c2.post("/api/economy/bodiez/sessions/past/", {"date": day, "sets": [
+            {"exercise_id": ex, "reps": 5}]}, format="json").status_code, 400)
+
+    def test_delete_only_unused_and_only_yours(self):
+        ex = self._make().data["id"]
+        c2 = APIClient(); c2.force_authenticate(user=self.other)
+        self.assertEqual(c2.delete(f"{self.URL}{ex}/").status_code, 404)
+        self.assertEqual(self.client.delete(f"{self.URL}{self.lib.id}/").status_code, 404)  # library is not deletable
+        sid = self.client.post("/api/economy/bodiez/sessions/", {}, format="json").data["id"]
+        self.client.post(f"/api/economy/bodiez/sessions/{sid}/sets/", {"exercise_id": ex, "reps": 5}, format="json")
+        self.assertEqual(self.client.delete(f"{self.URL}{ex}/").status_code, 400)   # has history
+        ex2 = self._make(name="Unused One").data["id"]
+        self.assertEqual(self.client.delete(f"{self.URL}{ex2}/").status_code, 204)
+
+    def test_custom_never_reaches_the_library_or_the_trial_door(self):
+        self._make()
+        self.assertFalse(BodieZExercise.objects.library().filter(name="Sled Push").exists())
+        ids = [e["id"] for e in APIClient().get("/api/economy/bodiez/trial/").data.get("exercises", [])] \
+            if hasattr(self, "_trial") else []
+        self.assertNotIn(BodieZExercise.objects.get(name="Sled Push").id, ids)

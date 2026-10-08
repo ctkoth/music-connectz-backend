@@ -26,7 +26,7 @@ def suggested_filename(name):
 
 
 def missing(seated_only=False):
-    rows = BodieZExercise.objects.filter(demo_url="")
+    rows = BodieZExercise.objects.library().filter(demo_url="")
     out = []
     for ex in rows:
         sit = bool({"seated", "lying"} & set(ex.position_list))
@@ -46,9 +46,9 @@ class Command(BaseCommand):
                             help="Only exercises that can be done seated or lying.")
 
     def handle(self, *args, **opts):
-        total = BodieZExercise.objects.count()
+        total = BodieZExercise.objects.library().count()
         rows = missing(opts["seated"])
-        have = BodieZExercise.objects.exclude(demo_url="").count()
+        have = BodieZExercise.objects.library().exclude(demo_url="").count()
         self.stdout.write(f"{have} of {total} exercises have a clip; {len(rows)} listed below.\n")
         section = None
         for ex, sit in rows:

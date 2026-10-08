@@ -173,7 +173,7 @@ from .views import (
 )
 from .habits import HabitCreateView, HabitCompleteView
 from .bodiez import (
-    BodieZAccessView, BodieZBoardView, BodieZCustomDaysView, BodieZStepsView, BodieZPastSessionView, BodieZStepCoachView, BodieZCustomDayDetailView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
+    BodieZAccessView, BodieZBoardView, BodieZCustomDaysView, BodieZStepsView, BodieZCustomExerciseView, BodieZCustomExerciseDetailView, BodieZPastSessionView, BodieZStepCoachView, BodieZCustomDayDetailView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
     BodieZGoalDetailView, BodieZGoalsView, BodieZRecoveryView, BodieZRoutinesView,
     BodieZRoutineDetailView, BodieZSessionsView, BodieZSessionDetailView, BodieZSessionSummaryView, BodieZSetsView, BodieZLbFixView,
     BodieZProgressView, BodieZWeightLogView,
@@ -484,6 +484,9 @@ urlpatterns = [
     # BodieZ — strength training and workout planning. v1: library, routines,
     # session log, and a progress read built from logged sets, not a formula.
     path("bodiez/exercises/", BodieZExercisesView.as_view(), name="economy-bodiez-exercises"),
+    path("bodiez/exercises/custom/", BodieZCustomExerciseView.as_view(), name="economy-bodiez-custom-exercise"),
+    path("bodiez/exercises/custom/<int:exercise_id>/", BodieZCustomExerciseDetailView.as_view(),
+         name="economy-bodiez-custom-exercise-detail"),
     path("bodiez/exercises/<int:exercise_id>/history/", BodieZExerciseHistoryView.as_view(),
          name="economy-bodiez-exercise-history"),
     path("bodiez/custom-days/", BodieZCustomDaysView.as_view(), name="economy-bodiez-custom-days"),
