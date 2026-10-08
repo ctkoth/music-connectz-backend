@@ -173,7 +173,7 @@ from .views import (
 )
 from .habits import HabitCreateView, HabitCompleteView
 from .bodiez import (
-    BodieZAccessView, BodieZBoardView, BodieZCustomDaysView, BodieZCustomDayDetailView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
+    BodieZAccessView, BodieZBoardView, BodieZCustomDaysView, BodieZStepsView, BodieZStepCoachView, BodieZCustomDayDetailView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
     BodieZGoalDetailView, BodieZGoalsView, BodieZRecoveryView, BodieZRoutinesView,
     BodieZRoutineDetailView, BodieZSessionsView, BodieZSessionDetailView, BodieZSessionSummaryView, BodieZSetsView, BodieZLbFixView,
     BodieZProgressView, BodieZWeightLogView,
@@ -508,6 +508,8 @@ urlpatterns = [
     path("bodiez/goals/", BodieZGoalsView.as_view(), name="economy-bodiez-goals"),
     path("bodiez/goals/<int:goal_id>/", BodieZGoalDetailView.as_view(), name="economy-bodiez-goal"),
     path("bodiez/weightlog/", BodieZWeightLogView.as_view(), name="economy-bodiez-weightlog"),
+    path("bodiez/steps/", BodieZStepsView.as_view(), name="economy-bodiez-steps"),
+    path("bodiez/stepz/coach/", BodieZStepCoachView.as_view(), name="economy-bodiez-stepz-coach"),
     path("bodiez/recovery/", BodieZRecoveryView.as_view(), name="economy-bodiez-recovery"),
     path("bodiez/trial/", BodieZTrialView.as_view(), name="economy-bodiez-trial"),
     path("offerz/funnel/", FunnelOffersView.as_view(), name="economy-funnel-offers"),

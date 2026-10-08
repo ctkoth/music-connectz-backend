@@ -76,7 +76,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (BODIEZ_BUCKETS, BODIEZ_DAY_TAGS, BODIEZ_GOAL_KINDS, BodieZAccess,
-                     BodieZCustomDay, BodieZExercise, BodieZGoal, BodieZRecoveryLog, BodieZRoutine, BodieZSession, BodieZSet,
+                     BodieZCustomDay, BodieZExercise, BodieZGoal, BodieZRecoveryLog, BodieZRoutine, BodieZStepLog, BodieZSession, BodieZSet,
                      BodieZWeightLog, StudentRelationship)
 
 _BUCKET_KEYS = {k for k, _ in BODIEZ_BUCKETS}
@@ -1557,3 +1557,68 @@ class BodieZRecoveryView(APIView):
             fatigue=fatigue, notes=str(d.get("notes") or "")[:280],
         )
         return Response(_recovery_dict(log), status=status.HTTP_201_CREATED)
+
+
+# --- StepZ --------------------------------------------------------------
+#
+# The screen was written against a coach that scored cadence, form,
+# stability and endurance "from steps". A step COUNT carries none of that —
+# a number of steps says nothing about how they were taken — so scoring those
+# from it would be the substance rule's failure case: a rating that moves on
+# form completeness, not on the thing it names. The coach endpoint therefore
+# answers only with what a count can honestly give (totals, an average) and
+# leaves `scores`/`medians`/`overall_score` empty, which the screen already
+# renders as "nothing to show". Prefer no number to a fake one.
+DAILY_STEP_GOAL = 10000        # a stated default, not a tier limit
+MAX_STEPS_PER_ENTRY = 100000   # one entry past this is a typo, not a walk
+
+
+def _today_bounds():
+    start = timezone.localtime().replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, start + timedelta(days=1)
+
+
+class BodieZStepsView(APIView):
+    """GET/POST /api/economy/bodiez/steps/ — today's entries and total; add one."""
+    permission_classes = [IsAuthenticated]
+
+    def _payload(self, user):
+        start, end = _today_bounds()
+        rows = list(BodieZStepLog.objects.filter(user=user, logged_at__gte=start, logged_at__lt=end))
+        return {"steps": [{"id": r.id, "count": r.count, "logged_at": r.logged_at.isoformat()} for r in rows],
+                "today_total": sum(r.count for r in rows), "daily_goal": DAILY_STEP_GOAL}
+
+    def get(self, request):
+        return Response(self._payload(request.user))
+
+    def post(self, request):
+        try:
+            count = int(request.data.get("count"))
+        except (TypeError, ValueError):
+            return Response({"detail": "Steps must be a whole number."}, status=status.HTTP_400_BAD_REQUEST)
+        if not 1 <= count <= MAX_STEPS_PER_ENTRY:
+            return Response({"detail": f"Enter between 1 and {MAX_STEPS_PER_ENTRY:,} steps."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        BodieZStepLog.objects.create(user=request.user, count=count)
+        return Response(self._payload(request.user), status=status.HTTP_201_CREATED)
+
+
+class BodieZStepCoachView(APIView):
+    """GET /api/economy/bodiez/stepz/coach/ — what a step count can honestly
+    show. No quality scores: see the note above."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        start, _ = _today_bounds()
+        since = start - timedelta(days=6)
+        rows = BodieZStepLog.objects.filter(user=request.user, logged_at__gte=since)
+        total = sum(r.count for r in rows)
+        days = {timezone.localtime(r.logged_at).date() for r in rows}
+        return Response({
+            "scores": {}, "medians": {}, "overall_score": None, "step_counts": {},
+            "total_steps": total, "days_logged": len(days),
+            "avg_per_logged_day": round(total / len(days)) if days else None,
+            "caveat": ("These are your step totals for the last 7 days. A step count shows how much you "
+                       "moved, not how well — cadence, form and stability can't be read from a number, "
+                       "so none are scored here."),
+        })

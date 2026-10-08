@@ -5896,6 +5896,21 @@ class BodieZCustomDay(models.Model):
         return f"{self.user} — {self.name}"
 
 
+class BodieZStepLog(models.Model):
+    """One entry of steps a member added — from a watch or typed in. A day's
+    total is the SUM of its entries, so logging twice adds rather than
+    overwrites. Nothing here is scored: a count is a count."""
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="bodiez_step_logs")
+    count = models.PositiveIntegerField()
+    logged_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-logged_at", "-id")
+
+    def __str__(self):
+        return f"{self.user} +{self.count}"
+
+
 class BodieZRoutine(models.Model):
     """A saved training plan. `exercises` is JSON for display — the same
     shape `PostContributor` and `CollabParticipant` warn against reading back

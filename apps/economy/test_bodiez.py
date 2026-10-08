@@ -7,7 +7,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework import status
 
-from .models import BodieZCustomDay, BodieZExercise, BodieZRoutine, BodieZSession, BodieZSet
+from .models import BodieZCustomDay, BodieZExercise, BodieZRoutine, BodieZStepLog, BodieZSession, BodieZSet
 
 
 class BodieZExercisesViewTests(TestCase):
@@ -1710,3 +1710,41 @@ class BodieZDoneBeforeTests(TestCase):
         s = BodieZSession.objects.create(user=other, ended_at=timezone.now())
         BodieZSet.objects.create(session=s, exercise=self.bench, set_number=1, reps=5)
         self.assertEqual(self._by_name()["DB Bench"]["times_done"], 0)
+
+
+class BodieZStepsTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="st1", password="pw")
+        self.client.force_authenticate(user=self.user)
+
+    def test_logging_adds_up_and_states_the_goal(self):
+        self.client.post("/api/economy/bodiez/steps/", {"count": 3000}, format="json")
+        r = self.client.post("/api/economy/bodiez/steps/", {"count": 2500}, format="json")
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data["today_total"], 5500)
+        self.assertEqual(len(r.data["steps"]), 2)
+        self.assertEqual(self.client.get("/api/economy/bodiez/steps/").data["daily_goal"], 10000)
+
+    def test_junk_refused(self):
+        for bad in (0, -5, "abc", None, 10**6):
+            r = self.client.post("/api/economy/bodiez/steps/", {"count": bad}, format="json")
+            self.assertEqual(r.status_code, 400, bad)
+
+    def test_only_my_steps_and_only_today(self):
+        other = User.objects.create_user(username="st2", password="pw")
+        BodieZStepLog.objects.create(user=other, count=999)
+        old = BodieZStepLog.objects.create(user=self.user, count=777)
+        BodieZStepLog.objects.filter(id=old.id).update(logged_at=timezone.now() - timedelta(days=2))
+        self.assertEqual(self.client.get("/api/economy/bodiez/steps/").data["today_total"], 0)
+
+    def test_coach_invents_no_scores(self):
+        self.assertEqual(self.client.get("/api/economy/bodiez/stepz/coach/").data["avg_per_logged_day"], None)
+        self.client.post("/api/economy/bodiez/steps/", {"count": 4000}, format="json")
+        d = self.client.get("/api/economy/bodiez/stepz/coach/").data
+        self.assertEqual((d["scores"], d["medians"], d["overall_score"]), ({}, {}, None))
+        self.assertEqual((d["total_steps"], d["avg_per_logged_day"]), (4000, 4000))
+        self.assertTrue(d["caveat"])
+
+    def test_requires_auth(self):
+        self.assertEqual(APIClient().get("/api/economy/bodiez/steps/").status_code, 401)
