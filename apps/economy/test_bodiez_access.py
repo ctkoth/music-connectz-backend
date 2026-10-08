@@ -279,3 +279,34 @@ class OneArmTests(TestCase):
 
     def test_bad_value_refused(self):
         self.assertEqual(self.client.put(URL + "access/", {"one_arm_only": "maybe"}, format="json").status_code, 400)
+
+
+class OneLegTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="ol1", password="pw")
+        self.client.force_authenticate(user=self.user)
+
+    def _flags(self):
+        return {e["name"]: e["accessible"] for e in self.client.get(URL + "exercises/").data["exercises"]}
+
+    def test_one_leg_keeps_single_leg_work_and_drops_two_footed(self):
+        r = self.client.put(URL + "access/", {"one_leg_only": True}, format="json")
+        self.assertTrue(r.data["one_leg_only"])
+        f = self._flags()
+        for ok in ("Seated Leg Extension", "Leg Press", "Single-Leg Press", "Bench Press", "Pec Deck"):
+            self.assertTrue(f[ok], ok)
+        for no in ("Squat", "Lunge", "Deadlift", "Burpee", "Recumbent Bike"):
+            self.assertFalse(f[no], no)
+
+    def test_no_legs_beats_one_leg_and_clears_it(self):
+        self.client.put(URL + "access/", {"one_leg_only": True}, format="json")
+        r = self.client.put(URL + "access/", {"legs_ok": False}, format="json")
+        self.assertFalse(r.data["one_leg_only"])
+
+    def test_one_leg_is_a_superset_of_no_legs(self):
+        self.client.put(URL + "access/", {"legs_ok": False}, format="json")
+        none = {k for k, v in self._flags().items() if v}
+        self.client.put(URL + "access/", {"legs_ok": True, "one_leg_only": True}, format="json")
+        one = {k for k, v in self._flags().items() if v}
+        self.assertTrue(none <= one)

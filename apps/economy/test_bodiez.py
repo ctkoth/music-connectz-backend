@@ -1809,3 +1809,96 @@ class BodieZPastWorkoutTests(TestCase):
 
     def test_requires_auth(self):
         self.assertEqual(APIClient().post(self.URL, {}, format="json").status_code, 401)
+
+
+class BodieZOneSidedTests(TestCase):
+    """A set done with one arm/leg is compared only with sets done the same way."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="os1", password="pw")
+        self.client.force_authenticate(user=self.user)
+        self.press = BodieZExercise.objects.create(name="OS Press", muscle_group="chest", equipment="machine")
+
+    def _set(self, sess, reps, weight, side="", n=1):
+        return BodieZSet.objects.create(session=sess, exercise=self.press, set_number=n, reps=reps,
+                                        weight_kg=weight, one_sided=side)
+
+    def test_live_set_stores_the_marker_and_refuses_junk(self):
+        sid = self.client.post("/api/economy/bodiez/sessions/", {}, format="json").data["id"]
+        url = f"/api/economy/bodiez/sessions/{sid}/sets/"
+        ok = self.client.post(url, {"exercise_id": self.press.id, "reps": 8, "weight_kg": 20, "one_sided": "arm"},
+                              format="json")
+        self.assertEqual((ok.status_code, ok.data["one_sided"]), (201, "arm"))
+        self.assertEqual(self.client.post(url, {"exercise_id": self.press.id, "reps": 8}, format="json").data["one_sided"], "")
+        self.assertEqual(self.client.post(url, {"exercise_id": self.press.id, "reps": 8, "one_sided": "head"},
+                                          format="json").status_code, 400)
+
+    def test_one_arm_set_is_not_a_collapse_beside_a_two_arm_one(self):
+        old = _finished_session(self.user, days_ago=5)
+        self._set(old, 8, 80)                      # two-arm, heavy
+        new = _finished_session(self.user, days_ago=0)
+        self._set(new, 8, 30, side="arm")          # one-arm, light
+        sm = self.client.get(f"/api/economy/bodiez/sessions/{new.id}/summary/").data
+        self.assertEqual(sm["records"], [])
+        self.assertEqual(sm["firsts"], ["OS Press (one arm)"])  # its own lane, a first, never a record or a drop
+
+    def test_one_arm_record_is_judged_against_earlier_one_arm_sets(self):
+        old = _finished_session(self.user, days_ago=5)
+        self._set(old, 8, 25, side="arm")
+        new = _finished_session(self.user, days_ago=0)
+        self._set(new, 8, 30, side="arm")
+        sm = self.client.get(f"/api/economy/bodiez/sessions/{new.id}/summary/").data
+        self.assertTrue(any(r["kind"] == "heaviest" and r["exercise"] == "OS Press (one arm)" for r in sm["records"]))
+
+    def test_coach_does_not_mix_lanes(self):
+        a = _finished_session(self.user, days_ago=9); self._set(a, 8, 80)
+        b = _finished_session(self.user, days_ago=2); self._set(b, 8, 30, side="arm")
+        names = {r["exercise_name"]: r["recommendation"] for r in
+                 self.client.get("/api/economy/bodiez/coach/").data["exercises"] if r["exercise_id"] == self.press.id}
+        self.assertEqual(names, {"OS Press": "not_enough_data", "OS Press (one arm)": "not_enough_data"})
+
+    def test_last_time_matches_the_way_it_is_being_done(self):
+        a = _finished_session(self.user, days_ago=9); self._set(a, 8, 80)
+        b = _finished_session(self.user, days_ago=2); self._set(b, 8, 30, side="arm")
+        url = f"/api/economy/bodiez/exercises/{self.press.id}/history/"
+        self.assertEqual(self.client.get(url).data["last_session"]["sets"][0]["weight_kg"], 80.0)
+        self.assertEqual(self.client.get(url + "?one_sided=arm").data["last_session"]["sets"][0]["weight_kg"], 30.0)
+
+    def test_past_workout_carries_the_marker(self):
+        day = (timezone.localdate() - timedelta(days=2)).isoformat()
+        r = self.client.post("/api/economy/bodiez/sessions/past/", {"date": day, "sets": [
+            {"exercise_id": self.press.id, "reps": 5, "weight_kg": 20, "one_sided": "leg"}]}, format="json")
+        self.assertEqual(r.data["sets"][0]["one_sided"], "leg")
+        bad = self.client.post("/api/economy/bodiez/sessions/past/", {"date": day, "sets": [
+            {"exercise_id": self.press.id, "reps": 5, "one_sided": "x"}]}, format="json")
+        self.assertEqual(bad.status_code, 400)
+
+
+class BodieZPastRoutineTests(TestCase):
+    URL = "/api/economy/bodiez/sessions/past/"
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="pr1", password="pw")
+        self.client.force_authenticate(user=self.user)
+        self.ex = BodieZExercise.objects.create(name="PR Press", muscle_group="chest", equipment="machine")
+        self.day = (timezone.localdate() - timedelta(days=2)).isoformat()
+        self.sets = [{"exercise_id": self.ex.id, "reps": 8, "weight_kg": 40}]
+
+    def test_workout_carries_the_routine(self):
+        r = BodieZRoutine.objects.create(user=self.user, title="Push day")
+        out = self.client.post(self.URL, {"date": self.day, "routine_id": r.id, "sets": self.sets}, format="json")
+        self.assertEqual((out.status_code, out.data["routine_title"]), (201, "Push day"))
+        self.assertEqual(out.data["summary"]["routine_title"], "Push day")
+
+    def test_someone_elses_or_missing_routine_is_a_404_and_saves_nothing(self):
+        other = User.objects.create_user(username="pr2", password="pw")
+        theirs = BodieZRoutine.objects.create(user=other, title="Theirs")
+        for rid in (theirs.id, 999999, "abc"):
+            out = self.client.post(self.URL, {"date": self.day, "routine_id": rid, "sets": self.sets}, format="json")
+            self.assertEqual(out.status_code, 404, rid)
+        self.assertEqual(BodieZSession.objects.filter(user=self.user).count(), 0)
+
+    def test_routine_is_optional(self):
+        self.assertEqual(self.client.post(self.URL, {"date": self.day, "sets": self.sets}, format="json").status_code, 201)

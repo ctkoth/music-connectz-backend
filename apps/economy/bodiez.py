@@ -87,7 +87,8 @@ def _exercise_dict(ex):
     return {"id": ex.id, "name": ex.name, "muscle_group": ex.muscle_group,
             "equipment": ex.equipment, "demo_url": ex.demo_url,
             "positions": ex.position_list, "needs_arms": ex.needs_arms,
-            "needs_legs": ex.needs_legs, "one_arm_ok": ex.one_arm_ok}
+            "needs_legs": ex.needs_legs, "one_arm_ok": ex.one_arm_ok,
+            "one_leg_ok": ex.one_leg_ok}
 
 
 # Who can do what. ONE function decides, and the exercise list carries its
@@ -108,6 +109,8 @@ def accessible(ex, access):
         return False
     if not access.legs_ok and ex.needs_legs:
         return False
+    if access.one_leg_only and ex.needs_legs and not ex.one_leg_ok:
+        return False
     # Unusable legs implies no standing — a standing exercise is a leg
     # exercise whatever muscle it is filed under.
     must_sit = access.seated_or_lying_only or not access.legs_ok
@@ -122,6 +125,7 @@ def _access_dict(access):
         "arms_ok": True if access is None else access.arms_ok,
         "one_arm_only": bool(access and access.one_arm_only),
         "legs_ok": True if access is None else access.legs_ok,
+        "one_leg_only": bool(access and access.one_leg_only),
     }
 
 
@@ -146,7 +150,7 @@ class BodieZAccessView(APIView):
             return None
 
         row, _ = BodieZAccess.objects.get_or_create(user=request.user)
-        for key in ("seated_or_lying_only", "arms_ok", "one_arm_only", "legs_ok"):
+        for key in ("seated_or_lying_only", "arms_ok", "one_arm_only", "legs_ok", "one_leg_only"):
             v = flag(key, getattr(row, key))
             if v is None:
                 return Response({"error": f"{key} must be true or false."},
@@ -156,6 +160,8 @@ class BodieZAccessView(APIView):
         # be two answers that contradict each other.
         if not row.arms_ok:
             row.one_arm_only = False
+        if not row.legs_ok:
+            row.one_leg_only = False
         row.save()
         return Response(_access_dict(row))
 
@@ -369,10 +375,29 @@ class BodieZLbFixView(APIView):
 MAX_REPS_PER_SET = 1000
 
 
+ONE_SIDED = {"": "", "arm": "one arm", "leg": "one leg"}
+
+
+def _clean_side(raw):
+    """"" | "arm" | "leg", or None when it is something else."""
+    raw = "" if raw is None else str(raw).strip().lower()
+    return raw if raw in ONE_SIDED else None
+
+
+def _lane(s):
+    """A set's comparison lane: same exercise, done the same way."""
+    return (s.exercise_id, s.one_sided)
+
+
+def _lane_name(name, side):
+    return f"{name} ({ONE_SIDED[side]})" if side else name
+
+
 def _set_dict(s):
     return {"id": s.id, "exercise_id": s.exercise_id, "exercise_name": s.exercise.name,
             "set_number": s.set_number, "reps": s.reps,
             "weight_kg": float(s.weight_kg) if s.weight_kg is not None else None,
+            "one_sided": s.one_sided,
             "rest_seconds": s.rest_seconds, "created_at": s.created_at.isoformat()}
 
 
@@ -443,16 +468,18 @@ class BodieZExerciseHistoryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, exercise_id):
+        # Last time done THE SAME WAY: a one-arm row is not last week's two-arm row.
+        side = _clean_side(request.query_params.get("one_sided")) or ""
         last_set = (BodieZSet.objects
                     .filter(session__user=request.user, session__ended_at__isnull=False,
-                            exercise_id=exercise_id)
+                            exercise_id=exercise_id, one_sided=side)
                     .order_by("-session__started_at", "-set_number")
                     .select_related("session")
                     .first())
         if not last_set:
             return Response({"last_session": None})
         sets = (BodieZSet.objects
-                .filter(session=last_set.session_id, exercise_id=exercise_id)
+                .filter(session=last_set.session_id, exercise_id=exercise_id, one_sided=side)
                 .order_by("set_number"))
         return Response({
             "last_session": {
@@ -776,23 +803,23 @@ def session_summary(sess):
     vol = lambda ss: sum(float(x.weight_kg) * x.reps for x in ss if x.weight_kg is not None)
     by_ex = defaultdict(list)
     for x in sets:
-        by_ex[x.exercise_id].append(x)
+        by_ex[_lane(x)].append(x)
 
     prior = BodieZSet.objects.filter(
         session__user=sess.user, session__ended_at__isnull=False,
         session__started_at__lt=sess.started_at).exclude(session=sess)
     prior_by_ex = defaultdict(list)
-    for x in prior.filter(exercise_id__in=list(by_ex)):
-        prior_by_ex[x.exercise_id].append(x)
+    for x in prior.filter(exercise_id__in={k[0] for k in by_ex}):
+        prior_by_ex[_lane(x)].append(x)
 
     exercises, records, firsts = [], [], []
-    for ex_id, ss in by_ex.items():
-        name = ss[0].exercise.name
+    for (ex_id, side), ss in by_ex.items():
+        name = _lane_name(ss[0].exercise.name, side)
         weights = [float(x.weight_kg) for x in ss if x.weight_kg is not None]
-        exercises.append({"exercise_id": ex_id, "name": name, "sets": len(ss),
+        exercises.append({"exercise_id": ex_id, "one_sided": side, "name": name, "sets": len(ss),
                           "reps": sum(x.reps for x in ss), "volume_kg": round(vol(ss), 2),
                           "top_weight_kg": max(weights) if weights else None})
-        old = prior_by_ex.get(ex_id, [])
+        old = prior_by_ex.get((ex_id, side), [])
         if not old:
             firsts.append(name)
             continue
@@ -856,7 +883,7 @@ MAX_PAST_DAYS = 365 * 5
 class BodieZPastSessionView(APIView):
     """POST /api/economy/bodiez/sessions/past/ — log a workout you already did.
 
-    {date: "YYYY-MM-DD", notes?, sets: [{exercise_id, reps, weight_kg?}, ...]}
+    {date: "YYYY-MM-DD", routine_id?, notes?, sets: [{exercise_id, reps, weight_kg?}, ...]}
 
     It lands as a FINISHED session on that date, so it feeds records, the body
     map, goals and the coach exactly as a live one does — and is flagged
@@ -878,6 +905,15 @@ class BodieZPastSessionView(APIView):
                             status=status.HTTP_400_BAD_REQUEST)
         if (today - day).days > MAX_PAST_DAYS:
             return Response({"detail": "That's more than five years back."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Optional: the routine this was, so the workout carries its name and
+        # the member's own history reads "Push day" rather than "Ad-hoc".
+        routine = None
+        if request.data.get("routine_id"):
+            routine = BodieZRoutine.objects.filter(id=request.data.get("routine_id"), user=request.user).first() \
+                if str(request.data.get("routine_id")).isdigit() else None
+            if routine is None:
+                return Response({"detail": "Routine not found."}, status=status.HTTP_404_NOT_FOUND)
 
         raw = request.data.get("sets")
         if not isinstance(raw, list) or not raw:
@@ -914,21 +950,25 @@ class BodieZPastSessionView(APIView):
                 if weight < 0 or weight >= 10000:
                     return Response({"detail": f"Set {i}: weight is out of range."},
                                     status=status.HTTP_400_BAD_REQUEST)
-            clean.append((exercises[r["exercise_id"]], reps, weight))
+            side = _clean_side(r.get("one_sided"))
+            if side is None:
+                return Response({"detail": f"Set {i}: one_sided must be blank, arm or leg."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            clean.append((exercises[r["exercise_id"]], reps, weight, side))
 
         # Today: now. Any other day: noon, so the date survives a timezone.
         when = (timezone.now() if day == today else
                 timezone.make_aware(datetime.combine(day, datetime.min.time().replace(hour=12))))
-        sess = BodieZSession.objects.create(user=request.user, ended_at=when, backfilled=True,
+        sess = BodieZSession.objects.create(user=request.user, ended_at=when, backfilled=True, routine=routine,
                                             notes=str(request.data.get("notes") or "")[:2000])
         # started_at is auto_now_add; set the real date after create.
         BodieZSession.objects.filter(id=sess.id).update(started_at=when)
         sess.refresh_from_db()
         counts = defaultdict(int)
-        for ex, reps, weight in clean:
+        for ex, reps, weight, side in clean:
             counts[ex.id] += 1
             BodieZSet.objects.create(session=sess, exercise=ex, set_number=counts[ex.id],
-                                     reps=reps, weight_kg=weight, rest_seconds=None)
+                                     reps=reps, weight_kg=weight, rest_seconds=None, one_sided=side)
         out = _session_dict(sess)
         out["summary"] = session_summary(sess)
         return Response(out, status=status.HTTP_201_CREATED)
@@ -995,11 +1035,15 @@ class BodieZSetsView(APIView):
             if weight_kg < 0:
                 return Response({"detail": "weight_kg cannot be negative."}, status=status.HTTP_400_BAD_REQUEST)
 
+        side = _clean_side(request.data.get("one_sided"))
+        if side is None:
+            return Response({"detail": "one_sided must be blank, arm or leg."}, status=status.HTTP_400_BAD_REQUEST)
+
         set_number = sess.sets.filter(exercise=exercise).count() + 1
         prev = sess.sets.order_by("-created_at").first()
         rest = int((timezone.now() - prev.created_at).total_seconds()) if prev else None
         s = BodieZSet.objects.create(session=sess, exercise=exercise, set_number=set_number,
-                                      reps=reps, weight_kg=weight_kg, rest_seconds=rest)
+                                      reps=reps, weight_kg=weight_kg, rest_seconds=rest, one_sided=side)
         return Response(_set_dict(s), status=status.HTTP_201_CREATED)
 
 
@@ -1080,12 +1124,12 @@ def muscle_coach_ratings(sets):
     already loaded)."""
     per = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))  # muscle -> ex -> session -> sets
     for s in sets:
-        per[s.exercise.muscle_group][s.exercise][s.session_id].append(s)
+        per[s.exercise.muscle_group][(s.exercise, s.one_sided)][s.session_id].append(s)
 
     out = {}
     for muscle, by_ex in per.items():
         rated = []
-        for exercise, by_session in by_ex.items():
+        for (exercise, side), by_session in by_ex.items():
             ordered = sorted(by_session.values(), key=lambda ss: ss[0].session.started_at)
             metrics = [m for m in (_session_metric(ss) for ss in ordered) if m]
             if len(metrics) < 2:
@@ -1100,7 +1144,8 @@ def muscle_coach_ratings(sets):
             ratio = latest / before
             trend = "up" if ratio >= RATING_UP else "down" if ratio < RATING_DOWN else "held"
             rated.append({
-                "exercise_id": exercise.id, "exercise_name": exercise.name,
+                "exercise_id": exercise.id, "one_sided": side,
+                "exercise_name": _lane_name(exercise.name, side),
                 "trend": trend, "metric": kind,
                 "latest": round(latest, 1), "earlier_best": round(before, 1),
             })
@@ -1272,21 +1317,22 @@ class BodieZCoachView(APIView):
         for sess in sessions:
             per_ex = defaultdict(list)
             for s in sess.sets.all():
-                per_ex[s.exercise_id].append(s)
-            for ex_id, ex_sets in per_ex.items():
-                by_exercise[ex_id].append((sess, ex_sets))
+                per_ex[_lane(s)].append(s)
+            for lane, ex_sets in per_ex.items():
+                by_exercise[lane].append((sess, ex_sets))
 
         now = timezone.now()
         rows = []
-        for ex_id, history in by_exercise.items():
+        for (ex_id, side), history in by_exercise.items():
             last_sess, last_sets = history[-1]
             exercise = last_sets[0].exercise
+            ex_name = _lane_name(exercise.name, side)
             days_since = (now - last_sess.started_at).days
             total_sessions = len(history)
 
             if days_since > self.STALE_DAYS and total_sessions >= 3:
                 rows.append({
-                    "exercise_id": ex_id, "exercise_name": exercise.name,
+                    "exercise_id": ex_id, "one_sided": side, "exercise_name": ex_name,
                     "recommendation": "reintroduce",
                     "why": f"Last logged {days_since} days ago after {total_sessions} sessions — "
                            "bring it back, or swap it out on purpose.",
@@ -1296,7 +1342,7 @@ class BodieZCoachView(APIView):
 
             if total_sessions < self.MIN_SESSIONS_FOR_A_CALL:
                 rows.append({
-                    "exercise_id": ex_id, "exercise_name": exercise.name,
+                    "exercise_id": ex_id, "one_sided": side, "exercise_name": ex_name,
                     "recommendation": "not_enough_data",
                     "why": "One logged session isn't a trend yet.",
                     "last_trained": last_sess.started_at.isoformat(),
@@ -1342,7 +1388,7 @@ class BodieZCoachView(APIView):
                     why = "Same total reps as last time — repeat before changing anything."
 
             rows.append({
-                "exercise_id": ex_id, "exercise_name": exercise.name,
+                "exercise_id": ex_id, "one_sided": side, "exercise_name": ex_name,
                 "recommendation": rec, "why": why,
                 "last_trained": last_sess.started_at.isoformat(),
             })

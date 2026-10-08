@@ -5819,6 +5819,8 @@ class BodieZExercise(models.Model):
     # when unsure — a mistaken False hides a lift, a mistaken True offers one
     # somebody cannot do.
     one_arm_ok = models.BooleanField(default=False)
+    # Same for legs: a normal way to do it on ONE leg (single-leg press, curl).
+    one_leg_ok = models.BooleanField(default=False)
     needs_legs = models.BooleanField(default=True)
 
     class Meta:
@@ -5858,6 +5860,8 @@ class BodieZAccess(models.Model):
     # Can use ONE arm, not none: offers only exercises that work an arm at a
     # time. Ignored when `arms_ok` is False — no arms is the stricter answer.
     one_arm_only = models.BooleanField(default=False)
+    # Same for legs: can use ONE leg. Ignored when `legs_ok` is False.
+    one_leg_only = models.BooleanField(default=False)
     legs_ok = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -6027,6 +6031,10 @@ class BodieZSet(models.Model):
     # Set once a pre-pounds set is re-read as pounds (see bodiez.LB_SWITCH_AT),
     # so the conversion can never be applied twice.
     converted_from_lb = models.BooleanField(default=False)
+    # "" = done as the exercise is normally done; "arm"/"leg" = done with ONE
+    # arm / ONE leg. A one-arm set at 40 is not a 40 set, so records, ratings
+    # and "last time" compare a set only with sets done the same way.
+    one_sided = models.CharField(max_length=3, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
