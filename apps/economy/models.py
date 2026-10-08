@@ -5877,6 +5877,25 @@ BODIEZ_DAY_TAGS = (
 )
 
 
+class BodieZCustomDay(models.Model):
+    """A day the member named themselves ("Leg day", "Gym with Sam").
+
+    `BODIEZ_DAY_TAGS` is the weekday list and stays as it was; this is the
+    member's own list beside it, for the split that is not a calendar day.
+    A routine carries ONE of the two, never both. Per-member, so a name is
+    only unique among that member's own days.
+    """
+    user = models.ForeignKey("auth.User", on_delete=models.CASCADE, related_name="bodiez_custom_days")
+    name = models.CharField(max_length=30)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("created_at", "id")
+
+    def __str__(self):
+        return f"{self.user} — {self.name}"
+
+
 class BodieZRoutine(models.Model):
     """A saved training plan. `exercises` is JSON for display — the same
     shape `PostContributor` and `CollabParticipant` warn against reading back
@@ -5925,6 +5944,10 @@ class BodieZRoutine(models.Model):
     exercises = models.JSONField(default=list)
     bucket = models.CharField(max_length=10, choices=BODIEZ_BUCKETS, default="inbox", db_index=True)
     day_tag = models.CharField(max_length=3, choices=BODIEZ_DAY_TAGS, blank=True, default="")
+    # The member's own day instead of a weekday; deleting the day un-tags the
+    # routine rather than deleting it.
+    custom_day = models.ForeignKey(BodieZCustomDay, null=True, blank=True,
+                                   on_delete=models.SET_NULL, related_name="routines")
     # A key of bodiez.GOALS (validated there, which is where the protocol and
     # its citation live) — blank when the routine was built without one.
     goal = models.CharField(max_length=20, blank=True, default="")

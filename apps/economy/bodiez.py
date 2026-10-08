@@ -68,6 +68,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.db.models import Count, Max
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -75,7 +76,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (BODIEZ_BUCKETS, BODIEZ_DAY_TAGS, BODIEZ_GOAL_KINDS, BodieZAccess,
-                     BodieZExercise, BodieZGoal, BodieZRecoveryLog, BodieZRoutine, BodieZSession, BodieZSet,
+                     BodieZCustomDay, BodieZExercise, BodieZGoal, BodieZRecoveryLog, BodieZRoutine, BodieZSession, BodieZSet,
                      BodieZWeightLog, StudentRelationship)
 
 _BUCKET_KEYS = {k for k, _ in BODIEZ_BUCKETS}
@@ -301,6 +302,7 @@ SPLITS = {
 def _routine_dict(r):
     return {"id": r.id, "title": r.title, "description": r.description,
             "exercises": r.exercises, "bucket": r.bucket, "day_tag": r.day_tag,
+            "custom_day_id": r.custom_day_id,
             "goal": r.goal,
             "scheduled_for": r.scheduled_for.isoformat() if r.scheduled_for else None,
             "updated_at": r.updated_at.isoformat()}
@@ -400,8 +402,20 @@ class BodieZExercisesView(APIView):
         # EVERY exercise is returned, each flagged. A member's old sessions and
         # routines still name exercises they can no longer pick, and those rows
         # must keep their names; hiding is the picker's job, via `accessible`.
+        # What THIS member has actually logged, from finished sessions only —
+        # one grouped query for the whole library, never one per row. Absent
+        # (not zero) for an exercise they have never done, so "done before"
+        # is a fact about their history and not a default.
+        done = {r["exercise_id"]: r for r in
+                BodieZSet.objects.filter(session__user=request.user, session__ended_at__isnull=False)
+                .values("exercise_id").annotate(times=Count("session_id", distinct=True),
+                                                last=Max("session__started_at"))}
+        def _done(e):
+            d = done.get(e.id)
+            return ({"times_done": d["times"], "last_done": d["last"].isoformat()} if d
+                    else {"times_done": 0, "last_done": None})
         return Response({
-            "exercises": [{**_exercise_dict(e), "accessible": accessible(e, access)} for e in rows],
+            "exercises": [{**_exercise_dict(e), **_done(e), "accessible": accessible(e, access)} for e in rows],
             "demo_credit": credit,
             "access": _access_dict(access),
         })
@@ -440,6 +454,60 @@ class BodieZExerciseHistoryView(APIView):
         })
 
 
+MAX_CUSTOM_DAYS = 20
+
+
+def _own_custom_day(user, raw):
+    """None for blank, the row for one of the member's own days, "bad" for
+    anything else — somebody else's day id must read exactly like a missing
+    one, so ids can't be probed."""
+    if raw in (None, "", 0, "0"):
+        return None
+    try:
+        return BodieZCustomDay.objects.get(id=int(raw), user=user)
+    except (BodieZCustomDay.DoesNotExist, TypeError, ValueError):
+        return "bad"
+
+
+def _custom_day_dict(d):
+    return {"id": d.id, "name": d.name}
+
+
+class BodieZCustomDaysView(APIView):
+    """GET/POST /api/economy/bodiez/custom-days/ — the member's own named days."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        rows = BodieZCustomDay.objects.filter(user=request.user)
+        return Response({"custom_days": [_custom_day_dict(d) for d in rows], "max": MAX_CUSTOM_DAYS})
+
+    def post(self, request):
+        name = " ".join(str(request.data.get("name") or "").split())[:30]
+        if not name:
+            return Response({"detail": "A day needs a name."}, status=status.HTTP_400_BAD_REQUEST)
+        mine = BodieZCustomDay.objects.filter(user=request.user)
+        if mine.count() >= MAX_CUSTOM_DAYS:
+            return Response({"detail": f"You can keep {MAX_CUSTOM_DAYS} custom days. Delete one to add another."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if mine.filter(name__iexact=name).exists():
+            return Response({"detail": f"You already have a day called {name}."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        return Response(_custom_day_dict(BodieZCustomDay.objects.create(user=request.user, name=name)),
+                        status=status.HTTP_201_CREATED)
+
+
+class BodieZCustomDayDetailView(APIView):
+    """DELETE /api/economy/bodiez/custom-days/{id}/ — routines on that day
+    keep everything and simply lose the tag."""
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, day_id):
+        deleted, _ = BodieZCustomDay.objects.filter(id=day_id, user=request.user).delete()
+        if not deleted:
+            return Response({"detail": "Day not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class BodieZRoutinesView(APIView):
     """GET/POST /api/economy/bodiez/routines/"""
     permission_classes = [IsAuthenticated]
@@ -467,6 +535,11 @@ class BodieZRoutinesView(APIView):
         bucket = bucket if bucket in _BUCKET_KEYS else "inbox"
         day_tag = request.data.get("day_tag")
         day_tag = day_tag if day_tag in _DAY_TAG_KEYS else ""
+        custom_day = _own_custom_day(request.user, request.data.get("custom_day_id"))
+        if custom_day == "bad":
+            return Response({"detail": "That day isn't one of yours."}, status=status.HTTP_400_BAD_REQUEST)
+        if custom_day:
+            day_tag = ""
         description = str(request.data.get("description") or "").strip()[:200]
         goal = request.data.get("goal") or ""
         if goal and goal not in GOALS:
@@ -474,7 +547,7 @@ class BodieZRoutinesView(APIView):
                             status=status.HTTP_400_BAD_REQUEST)
         routine = BodieZRoutine.objects.create(user=request.user, title=title, exercises=exercises,
                                                 bucket=bucket, day_tag=day_tag, description=description,
-                                                goal=goal)
+                                                goal=goal, custom_day=custom_day or None)
         return Response(_routine_dict(routine), status=status.HTTP_201_CREATED)
 
 
@@ -589,6 +662,15 @@ class BodieZRoutineDetailView(APIView):
                 return Response({"detail": f"day_tag must be one of {sorted(_DAY_TAG_KEYS)}, or blank."},
                                  status=status.HTTP_400_BAD_REQUEST)
             routine.day_tag = day_tag
+            if day_tag:
+                routine.custom_day = None
+        if "custom_day_id" in request.data:
+            custom_day = _own_custom_day(request.user, request.data.get("custom_day_id"))
+            if custom_day == "bad":
+                return Response({"detail": "That day isn't one of yours."}, status=status.HTTP_400_BAD_REQUEST)
+            routine.custom_day = custom_day or None
+            if custom_day:
+                routine.day_tag = ""
         if "goal" in request.data:
             goal = request.data.get("goal") or ""
             if goal and goal not in GOALS:
@@ -643,6 +725,7 @@ class BodieZBoardView(APIView):
             # BODIEZ_DAY_TAGS itself would be the second place the order and
             # wording live.
             "day_tag_labels": [{"key": k, "label": v} for k, v in BODIEZ_DAY_TAGS],
+            "custom_days": [_custom_day_dict(d) for d in BodieZCustomDay.objects.filter(user=request.user)],
         })
 
 

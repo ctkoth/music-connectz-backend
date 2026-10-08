@@ -7,7 +7,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework import status
 
-from .models import BodieZExercise, BodieZRoutine, BodieZSession, BodieZSet
+from .models import BodieZCustomDay, BodieZExercise, BodieZRoutine, BodieZSession, BodieZSet
 
 
 class BodieZExercisesViewTests(TestCase):
@@ -1631,3 +1631,82 @@ class BodieZLbFixTests(TestCase):
         self.assertEqual(self.client.post("/api/economy/bodiez/lb-fix/").data["routines"], 1)
         self.assertEqual(BodieZRoutine.objects.get(id=r.id).exercises[0]["weight_kg"], 15.88)
         self.assertEqual(self.client.post("/api/economy/bodiez/lb-fix/").data["routines"], 0)
+
+
+class BodieZCustomDaysTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="cd1", password="pw")
+        self.other = User.objects.create_user(username="cd2", password="pw")
+        self.client.force_authenticate(user=self.user)
+
+    def _day(self, name="Leg day"):
+        return self.client.post("/api/economy/bodiez/custom-days/", {"name": name}, format="json")
+
+    def test_create_list_and_board(self):
+        r = self._day()
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(self.client.get("/api/economy/bodiez/custom-days/").data["custom_days"][0]["name"], "Leg day")
+        self.assertEqual(self.client.get("/api/economy/bodiez/board/").data["custom_days"][0]["id"], r.data["id"])
+
+    def test_blank_duplicate_and_cap_refused(self):
+        self.assertEqual(self._day("  ").status_code, 400)
+        self._day("Leg day")
+        self.assertEqual(self._day("LEG DAY").status_code, 400)
+        from .bodiez import MAX_CUSTOM_DAYS
+        for i in range(MAX_CUSTOM_DAYS - 1):
+            self._day(f"d{i}")
+        self.assertEqual(self._day("one too many").status_code, 400)
+
+    def test_routine_takes_a_custom_day_instead_of_a_weekday(self):
+        day = self._day().data["id"]
+        r = self.client.post("/api/economy/bodiez/routines/",
+                             {"title": "Legs", "day_tag": "mon", "custom_day_id": day}, format="json")
+        self.assertEqual((r.data["custom_day_id"], r.data["day_tag"]), (day, ""))
+        r = self.client.patch(f"/api/economy/bodiez/routines/{r.data['id']}/", {"day_tag": "tue"}, format="json")
+        self.assertEqual((r.data["custom_day_id"], r.data["day_tag"]), (None, "tue"))
+
+    def test_someone_elses_day_is_refused(self):
+        theirs = BodieZCustomDay.objects.create(user=self.other, name="Theirs")
+        r = self.client.post("/api/economy/bodiez/routines/",
+                             {"title": "x", "custom_day_id": theirs.id}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(self.client.delete(f"/api/economy/bodiez/custom-days/{theirs.id}/").status_code, 404)
+
+    def test_deleting_a_day_keeps_the_routine(self):
+        day = self._day().data["id"]
+        rid = self.client.post("/api/economy/bodiez/routines/",
+                               {"title": "Legs", "custom_day_id": day}, format="json").data["id"]
+        self.assertEqual(self.client.delete(f"/api/economy/bodiez/custom-days/{day}/").status_code, 204)
+        self.assertIsNone(BodieZRoutine.objects.get(id=rid).custom_day_id)
+
+
+class BodieZDoneBeforeTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="db1", password="pw")
+        self.client.force_authenticate(user=self.user)
+        self.bench = BodieZExercise.objects.create(name="DB Bench", muscle_group="chest", equipment="barbell")
+        self.squat = BodieZExercise.objects.create(name="DB Squat", muscle_group="upper_legs", equipment="barbell")
+
+    def _by_name(self):
+        rows = self.client.get("/api/economy/bodiez/exercises/").data["exercises"]
+        return {e["name"]: e for e in rows}
+
+    def test_only_finished_sessions_count(self):
+        done = BodieZSession.objects.create(user=self.user, ended_at=timezone.now())
+        BodieZSet.objects.create(session=done, exercise=self.bench, set_number=1, reps=5)
+        BodieZSet.objects.create(session=done, exercise=self.bench, set_number=2, reps=5)
+        open_ = BodieZSession.objects.create(user=self.user)
+        BodieZSet.objects.create(session=open_, exercise=self.squat, set_number=1, reps=5)
+        rows = self._by_name()
+        self.assertEqual(rows["DB Bench"]["times_done"], 1)  # sessions, not sets
+        self.assertTrue(rows["DB Bench"]["last_done"])
+        self.assertEqual(rows["DB Squat"]["times_done"], 0)
+        self.assertIsNone(rows["DB Squat"]["last_done"])
+
+    def test_another_members_history_is_not_mine(self):
+        other = User.objects.create_user(username="db2", password="pw")
+        s = BodieZSession.objects.create(user=other, ended_at=timezone.now())
+        BodieZSet.objects.create(session=s, exercise=self.bench, set_number=1, reps=5)
+        self.assertEqual(self._by_name()["DB Bench"]["times_done"], 0)
