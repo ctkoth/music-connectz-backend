@@ -74,13 +74,20 @@ class SubstanceSearchTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.me = User.objects.create_user("me", "me@e.com", "pw12345678")
-        self.client.force_authenticate(self.me)
+        profile = profile_for(self.me)
+        profile.birthday = "1990-01-01"   # the avoid filter is adult-only
+        profile.save()
+        self.client.force_authenticate(User.objects.get(pk=self.me.pk))
 
     def _member(self, name, substances, sober=False):
         u = User.objects.create_user(name, f"{name}@e.com", "pw12345678")
         p = profile_for(u)
         p.substances = substances
         p.sober = sober
+        # SubstanceZ is PRIVATE until a member opens it (visibility.DEFAULTS);
+        # these members have, which is what makes them findable at all.
+        p.visibility = {"substances": "member"}
+        p.birthday = "1990-01-01"
         p.save()
         return u
 
@@ -177,11 +184,13 @@ class FrequencyReachesTheScreensTests(TestCase):
         p.birthday = "1990-01-01"
         p.save()
 
-    def _member(self, name, substances):
+    def _member(self, name, substances, visibility="member", birthday="1990-01-01"):
         u = User.objects.create_user(name, f"{name}@e.com", "pw12345678")
         p = profile_for(u)
-        p.birthday = "1990-01-01"
+        p.birthday = birthday
         p.substances = substances
+        if visibility:
+            p.visibility = {"substances": visibility}
         p.save()
         return u
 
@@ -249,8 +258,93 @@ class FrequencyReachesTheScreensTests(TestCase):
         self._member("x", {"thc": "daily"})
         self.assertNotIn("use_frequency", self._names()["x"])
 
-    def test_a_minor_cannot_search_by_use_frequency(self):
-        p = profile_for(self.me); p.birthday = "2015-01-01"; p.save()
-        r = self.client.get("/api/economy/members/", {"uses": "thc", "use_freq": "daily"})
-        self.assertNotEqual(r.status_code, 500)
-        self.assertFalse(any("use_frequency" in m for m in r.data.get("members", [])))
+    # --- the wall and the member's own setting (found in review) ---------------
+
+    def _as(self, user):
+        c = APIClient()
+        c.force_authenticate(User.objects.get(pk=user.pk))  # fresh, uncached profile
+        return c
+
+    def _minor_viewer(self):
+        p = profile_for(self.me); p.birthday = "2013-01-01"; p.save()
+        return self._as(self.me)
+
+    def test_a_minor_viewer_cannot_read_frequency_by_uses(self):
+        self._member("adult", {"thc": "daily"})
+        r = self._minor_viewer().get("/api/economy/members/", {"uses": "thc", "use_freq": "daily"})
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(any("use_frequency" in m for m in r.data["members"]))
+        # the filter is dropped, not applied: the adult is not singled out by it
+        self.assertIn("adult", {m["username"] for m in r.data["members"]})
+
+    def test_a_minor_viewer_cannot_step_substance_max_to_read_a_frequency(self):
+        self._member("adult", {"thc": "often"})
+        c = self._minor_viewer()
+        seen = {band: "adult" in {m["username"] for m in c.get(
+                    "/api/economy/members/", {"substances": "thc", "substance_max": band}).data["members"]}
+                for band in FREQUENCY_KEYS}
+        # the same answer at every band: nothing to read off
+        self.assertEqual(len(set(seen.values())), 1, seen)
+
+    def test_a_minors_declaration_is_never_read_off_the_avoid_filter(self):
+        self._member("kid", {"thc": "often"}, birthday="2013-01-01")
+        seen = {band: "kid" in self._names(substances="thc", substance_max=band) for band in FREQUENCY_KEYS}
+        self.assertEqual(len(set(seen.values())), 1, seen)
+
+    def test_a_private_declaration_is_not_matched_filtered_or_shown(self):
+        self._member("hidden", {"thc": "daily"}, visibility=None)   # default: private
+        self.assertNotIn("hidden", self._names(uses="thc"))
+        self.assertNotIn("hidden", self._names(uses="thc", use_freq="daily"))
+        # and the avoid filter must not out them by their absence
+        for band in ("", "rarely", "often", "daily"):
+            params = {"substances": "thc"} | ({"substance_max": band} if band else {})
+            self.assertIn("hidden", self._names(**params), band)
+
+    def test_no_card_reveals_a_private_frequency_even_for_every_key(self):
+        self._member("hidden", {"thc": "daily", "heroin": "rarely"}, visibility=None)
+        everything = ",".join(SUBSTANCE_KEYS)
+        for m in self.client.get("/api/economy/members/", {"uses": everything}).data["members"]:
+            self.assertNotEqual(m["username"], "hidden")
+
+    def test_the_profile_route_redacts_substances_birthday_and_location(self):
+        other = self._member("other", {"heroin": "daily"}, visibility=None)
+        p = profile_for(other); p.location = "Somewhere"; p.save()
+        r = self.client.get("/api/economy/members/other/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["substances"], {})
+        self.assertEqual(r.data["birthday"], "")
+        self.assertEqual(r.data["location"], "")
+
+    def test_the_profile_route_serves_substances_once_the_member_opens_them(self):
+        self._member("open", {"thc": "often"})
+        self.assertEqual(self.client.get("/api/economy/members/open/").data["substances"], {"thc": "often"})
+
+    def test_a_minor_viewer_gets_no_substances_from_the_profile_route_even_when_open(self):
+        self._member("open", {"thc": "often"})
+        r = self._minor_viewer().get("/api/economy/members/open/")
+        self.assertEqual(r.data["substances"], {})
+
+    def test_the_owner_still_sees_their_own_substances(self):
+        p = profile_for(self.me); p.substances = {"thc": "daily"}; p.save()
+        r = self._as(self.me).get("/api/economy/members/me/")
+        self.assertEqual(r.data["substances"], {"thc": "daily"})
+
+    def test_sober_members_are_not_counted_as_having_said_nothing(self):
+        before = self.client.get("/api/economy/metricz/substancez/").data["undeclared"]
+        u = self._member("dry", {}, visibility=None)
+        p = profile_for(u); p.sober = True; p.save()
+        d = self.client.get("/api/economy/metricz/substancez/").data
+        self.assertEqual(d["sober"], 1)
+        self.assertEqual(d["undeclared"], before)       # the sober member is not in "haven't said"
+
+
+    def test_a_private_declaration_is_not_counted_either(self):
+        self._member("shown", {"thc": "daily"})
+        self._member("hidden", {"thc": "daily"}, visibility=None)
+        d = self.client.get("/api/economy/metricz/substancez/").data
+        thc = next(o for o in d["options"] if o["key"] == "thc")
+        # the tile and the list it sits over agree: only the one who opened it
+        self.assertEqual(thc["count"], 1)
+        self.assertEqual(thc["by_frequency"]["daily"], 1)
+        listed = {m["username"] for m in self.client.get("/api/economy/members/", {"uses": "thc"}).data["members"]}
+        self.assertEqual(listed & {"shown", "hidden"}, {"shown"})

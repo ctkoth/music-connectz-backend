@@ -38,11 +38,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .audience import Audience
 from .gemini import _key, generate_content
 from .models import (Horoscope, Profile, adult_only_reason, blocked_user_ids,
                      profile_is_minor, zodiac_for)
 from .social import ACTIVE_STANCES, clean_substances
-from .substancez import FREQUENCIES, FREQUENCY_KEYS, SUBSTANCE_KEYS, SUBSTANCES
+from .substancez import FREQUENCIES, FREQUENCY_KEYS, SUBSTANCE_KEYS, SUBSTANCES, visible_substances
 from .statz_trial import has_statz
 
 logger = logging.getLogger(__name__)
@@ -207,37 +208,56 @@ def counts_for(kind, viewer):
     undeclared = sober = 0
     adult = KINDS[kind]["adult"]
     blocked = blocked_user_ids(viewer)
-    for p in Profile.objects.exclude(user_id__in=blocked).only(
-            "sign", "birthday", "substances", "sober", "attracted_to", "verified_18plus", "user_id"):
+    profiles = list(Profile.objects.exclude(user_id__in=blocked).only(
+        "sign", "birthday", "substances", "sober", "attracted_to", "verified_18plus", "user_id",
+        "visibility"))
+    # SubstanceZ counts are of what THIS viewer may know. A declaration the
+    # member keeps private (the default) must not feed a number either: a tile
+    # saying 5 over a list of 4 is a count that discloses the fifth, and the
+    # setting reads "served to nobody but me".
+    aud = Audience(viewer, [p.user_id for p in profiles]) if kind == "substancez" else None
+    for p in profiles:
         if adult and profile_is_minor(p):
             continue
-        keys = _declared(kind, p)
+        if kind == "substancez":
+            seen = visible_substances(p, viewer, aud)
+            keys = [k for k in SUBSTANCE_KEYS if seen.get(k) in ACTIVE_STANCES]
+        else:
+            seen, keys = None, _declared(kind, p)
         for k in keys:
             counts[k] += 1
         if by_freq and keys:
-            subs = clean_substances(p.substances)
             for k in keys:
-                by_freq[k][subs[k] if subs[k] in FREQUENCY_KEYS else "unsaid"] += 1
+                by_freq[k][seen[k] if seen[k] in FREQUENCY_KEYS else "unsaid"] += 1
         if not keys:
-            undeclared += 1
+            # Sober by choice is a claim, not a blank: counted on its own and
+            # kept out of "haven't said", or the footer reads as though
+            # sober members had said nothing.
             if kind == "substancez" and p.sober:
                 sober += 1
+            else:
+                undeclared += 1
     return counts, undeclared, sober, by_freq
 
 
-def matches(kind, p, wanted, freqs=None):
+def matches(kind, p, wanted, freqs=None, viewer=None, audience=None):
     """Whether profile `p` declared ANY of `wanted` for `kind`. OR within a
     metric, the rule every multi-select in MembersView already follows.
 
-    `freqs` narrows SubstanceZ to those declared at one of the listed
-    frequencies. A legacy "yes" has no frequency to match, so it never passes a
-    frequency filter — it would be a guess in the searcher's favour.
+    SubstanceZ reads only what `viewer` may know (`visible_substances`: the
+    adult wall, and the member's own VisibilitieZ setting). With no viewer it
+    fails closed, as an anonymous one. `freqs` narrows to those declared at one
+    of the listed frequencies; a legacy "yes" has no frequency to match, so it
+    never passes a frequency filter — that would be a guess in the searcher's
+    favour.
     """
     if KINDS[kind]["adult"] and profile_is_minor(p):
         return False
-    if kind == "substancez" and freqs:
-        subs = clean_substances(p.substances)
-        return any(subs.get(k) in freqs for k in wanted)
+    if kind == "substancez":
+        subs = visible_substances(p, viewer, audience)
+        if freqs:
+            return any(subs.get(k) in freqs for k in wanted)
+        return any(subs.get(k) in ACTIVE_STANCES for k in wanted)
     return bool(set(wanted) & set(_declared(kind, p)))
 
 

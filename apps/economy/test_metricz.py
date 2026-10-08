@@ -32,8 +32,10 @@ def teen_birthday():
 class MetricCountTests(TestCase):
     def setUp(self):
         self.me = member("me", birthday="1990-11-01", sign="Scorpio", attracted_to=["female"])
-        member("a", birthday="1991-11-02", sign="Scorpio", substances={"thc": "often"}, attracted_to=["male", "female"])
-        member("b", birthday="1992-04-01", sign="Aries", substances={"alcohol": "sometimes"})
+        member("a", birthday="1991-11-02", sign="Scorpio", substances={"thc": "often"}, attracted_to=["male", "female"],
+               visibility={"substances": "member"})
+        member("b", birthday="1992-04-01", sign="Aries", substances={"alcohol": "sometimes"},
+               visibility={"substances": "member"})
         member("c", sober=True)
         member("teen", birthday=teen_birthday(), substances={"thc": "often"}, attracted_to=["male"])
         self.c = APIClient(); self.c.force_authenticate(self.me)

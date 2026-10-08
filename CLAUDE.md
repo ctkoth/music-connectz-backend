@@ -1834,3 +1834,52 @@ so, and a rating that rose with attendance would break the substance rule.
 Migration 0177 also wired seven clips that were uploaded to `ctkoth/mcz-media`
 but pointed at by nothing. Their filenames contain spaces, so `demo_url` is
 percent-encoded rather than the file renamed in a repo this one does not own.
+
+## SubstanceZ: frequency is a declaration, and the member's own setting still wins
+
+`apps/economy/substancez.py` owns the substance list, the frequency scale
+(`rarely` < `sometimes` < `often` < `daily`) and the cleaner, and serves them at
+`GET /api/economy/substancez/` — ProfileZ, the SubstanceZ app and VybeZ read that,
+nobody retypes it. Each step carries a plain-language `hint` ("most weeks") so
+"often" means one thing. A legacy `yes` (picked before frequency existed) is kept
+as `yes` and never rounded into a frequency; unknown substance keys are dropped.
+
+**Every reader goes through `visible_substances(p, viewer, audience)`**, which
+applies the adult wall in BOTH directions and the member's VisibilitieZ setting
+(`substances` is PRIVATE by default). An adversarial review of the first cut
+found five places that skipped one or both, and each was reproduced:
+
+- `card["use_frequency"]` and `use_freq` were added after `redact()` ran, so a
+  private declaration's frequency was readable — all eleven keys in one call
+  returned the whole row.
+- The avoid filter (`substances=` + `substance_max=`) is a frequency oracle:
+  stepping `substance_max` up one band at a time reads a declared frequency off
+  who appears. It sits inside the adult wall now, a minor's row reads as empty,
+  and a hidden declaration reads as undeclared (so being filtered out can never
+  tell a searcher someone uses X).
+- `_profile_full` added `substances`, `birthday` and `location` AFTER the card
+  was redacted, so `GET /members/<username>/` served them to every signed-in
+  member, minors included. It redacts the finished card now. This one predates
+  frequency; frequency just made what leaked finer.
+- The tile counts and the member list disagreed (5 over a list of 4) because
+  counts ignored visibility. Counts read through the same helper now.
+
+**The visible consequence:** because `substances` defaults to private, the
+SubstanceZ app lists nobody until members open the field in VisibilitieZ. That is
+what the setting promises; opening the default would be a product call, not a fix.
+
+Known drift, accepted: rows saved under the old two-step scale keep their
+`sometimes`/`often` and now read under the defined scale (see the module docstring
+for the cost and the one-line migration if it is ever judged wrong).
+
+**Do not add a card key derived from a profile field without naming it in
+`visibility._DERIVED`, and do not add keys to a card after `redact()` runs.** Both
+are how the setting quietly does nothing.
+
+### And a migration conflict took the deploy down once
+
+Two sessions each added "the next" migration (two `0178`s). Each was fine alone;
+together `migrate` refuses ("Conflicting migrations detected") and the deploy
+fails after a green merge. `test_migration_graph` now fails on more than one leaf.
+Run `makemigrations --check` after pulling main, before pushing — the fix is
+`makemigrations --merge`.

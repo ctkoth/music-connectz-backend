@@ -346,7 +346,7 @@ class FaceRateView(APIView):
 # The list, the frequency scale and the cleaner live in substancez.py and are
 # re-exported here so the names this module always had keep working.
 from .substancez import (ACTIVE_STANCES, STANCE_LEGACY, STANCES, clean_substances,  # noqa: E402,F401
-                         within as substance_within)
+                         visible_substances, within as substance_within)
 
 
 # ---- Cross-user profiles ----
@@ -718,6 +718,15 @@ def _profile_full(p, request, recheck=False):
         # so the card carries the way there.
         "badges_open_in": "badgez",
     })
+    # The keys added just above (substances, birthday, location) went on AFTER
+    # `_profile_card` ran `redact`, so for anybody who was not the owner they
+    # were served whatever the member's settings said — `substances` is
+    # PRIVATE by default and was readable by every signed-in member, a minor
+    # included, with its frequencies. Redact the finished card again.
+    redact(card, p, request.user)
+    if not mine and "substances" in card:
+        # …and the wall, which can_see does not know about.
+        card["substances"] = visible_substances(p, request.user)
     return card
 
 
@@ -1255,8 +1264,13 @@ class MembersView(APIView):
         # PersonaZ: ?personas=producer,mixengineer — members who hold ANY of
         # them. The PersonaZ screen's "who else is a Producer" door.
         persona_keys = set(multi("personas"))
-        if (uses or attracted) and adult_only_reason(request.user):
-            uses = attracted = []
+        adult_wall = bool(adult_only_reason(request.user))
+        if (uses or attracted or substances) and adult_wall:
+            # SubstanceZ and PreferenceZ are adult-only in BOTH directions. The
+            # avoid filter is a SubstanceZ read too: stepping `substance_max`
+            # up one frequency at a time reads a declared frequency off the
+            # results, so it is inside the wall with `uses`.
+            uses = attracted = substances = []
         # PersonalitieZ: ?ie=I&tf=F, or ?personality=INFP for all four.
         #
         # It lands HERE rather than in a dating screen of its own because
@@ -1340,13 +1354,14 @@ class MembersView(APIView):
                 continue
             if persona_keys and not persona_keys & {str(x.get("key") or "") for x in personas_of(p)}:
                 continue
-            if uses and not metric_matches("substancez", p, uses, use_freq):
+            if uses and not metric_matches("substancez", p, uses, use_freq, request.user, aud):
                 continue
             if attracted and not metric_matches("preferencez", p, attracted):
                 continue
             if substances:
-                # Rows saved by the old client hold a list, not a dict.
-                subs = clean_substances(p.substances)
+                # What THIS viewer may know — a minor's, or one the member has
+                # kept private, reads as undeclared (see visible_substances).
+                subs = visible_substances(p, request.user, aud)
                 if any(subs.get(k) in ACTIVE_STANCES
                        and not (substance_max and substance_within(subs[k], substance_max))
                        for k in substances):
@@ -1369,7 +1384,7 @@ class MembersView(APIView):
                 # others — the card of a member found under THC says how often
                 # THC, and discloses nothing else they declared. Already inside
                 # the adult-only wall above.
-                subs = clean_substances(p.substances)
+                subs = visible_substances(p, request.user, aud)
                 card["use_frequency"] = {k: subs[k] for k in uses if subs.get(k) in ACTIVE_STANCES}
             results.append(card)
         # Nearest first when a distance origin exists. Distance WINS over the
