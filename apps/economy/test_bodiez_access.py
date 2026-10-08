@@ -189,3 +189,13 @@ class MuscleCoachRatingTests(TestCase):
         sess = BodieZSession.objects.create(user=self.user)
         BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=200)
         self.assertIsNone(self._chest()[0]["coach_rating"])
+
+
+class RdlIsDumbbellTests(TestCase):
+    def test_there_is_one_rdl_and_it_is_dumbbell_with_the_clip(self):
+        rows = BodieZExercise.objects.filter(name__icontains="romanian")
+        self.assertEqual(rows.count(), 1)
+        rdl = rows.get()
+        self.assertEqual((rdl.name, rdl.equipment), ("Dumbbell Romanian Deadlift", "dumbbell"))
+        self.assertTrue(rdl.demo_url.endswith("Dumbbell%20Romanian%20Deadlift.mp4"))
+        self.assertEqual(rdl.muscle_group, "upper_legs")
