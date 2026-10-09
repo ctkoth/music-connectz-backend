@@ -83,9 +83,10 @@ Release signing reads four env vars, so no keystore is ever committed:
 ANDROID_KEYSTORE_PATH  ANDROID_KEYSTORE_PASSWORD  ANDROID_KEY_ALIAS  ANDROID_KEY_PASSWORD
 ```
 
-Unset → the release build stays unsigned, which Play can still sign on upload.
-In CI the same values come from repository secrets (`ANDROID_KEYSTORE_BASE64`
-holds the keystore).
+Unset → the release build is unsigned, and **Play Console refuses an unsigned
+bundle**. Fine for a build you only want to look at; not for one you upload. In CI
+the same values come from repository secrets (`ANDROID_KEYSTORE_BASE64` holds the
+keystore), and one upload key signs both apps.
 
 ## The one thing that will look broken
 

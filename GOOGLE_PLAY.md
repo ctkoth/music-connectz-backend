@@ -114,8 +114,12 @@ Never commit it. To sign in CI, add these repository secrets
 | `ANDROID_KEY_ALIAS` | `upload` |
 | `ANDROID_KEY_PASSWORD` | key password |
 
-Without them the release bundle is built unsigned, which still uploads fine —
-Play's flow can sign it for you. With them, the bundle arrives signed.
+**Set all four before you run the workflow for a bundle you mean to upload.**
+Without them the release bundle is built UNSIGNED, and Play Console refuses it
+("The Android App Bundle was not signed"). An earlier version of this guide said
+Play would sign it for you; it will not — Play App Signing re-signs what you upload,
+and what you upload has to be signed with your upload key first. The workflow prints
+a warning in the run when the secrets are missing. One upload key can sign both apps.
 
 ---
 

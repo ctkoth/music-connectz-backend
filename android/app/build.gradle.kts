@@ -72,8 +72,8 @@ android {
 
     signingConfigs {
         // Release signing comes from the environment so no keystore is ever
-        // committed. Unset locally -> the release build stays unsigned and
-        // Play's upload flow (or CI) signs it.
+        // committed. Unset -> the release build is unsigned, which is fine to
+        // look at and which Play Console refuses to accept as an upload.
         create("release") {
             val store = System.getenv("ANDROID_KEYSTORE_PATH")
             if (!store.isNullOrBlank() && file(store).exists()) {

@@ -58,8 +58,13 @@ jobs:
           -PsiteUrl=${{ github.event.inputs.site_url || 'https://musicconnectz.net' }}
           -PbodiezUrl=${{ github.event.inputs.bodiez_url || 'https://bodiez.musicconnectz.net' }}
 
-      # Signed when the secrets are set, unsigned otherwise — Play can sign an
-      # unsigned bundle on upload, so a missing keystore is not a failure.
+      # Signed when the secrets are set, unsigned otherwise. An unsigned bundle is
+      # fine to inspect and is REFUSED by Play Console ("The Android App Bundle was
+      # not signed"), so a missing keystore is a warning on the run, not a failure.
+      - name: Say so when the bundles are unsigned
+        if: ${{ env.KEYSTORE_B64 == '' }}
+        run: echo "::warning title=Bundles are unsigned::ANDROID_KEYSTORE_BASE64 is not set, so the .aab files cannot be uploaded to Play. See GOOGLE_PLAY.md section 4."
+
       - name: Decode upload keystore
         if: ${{ env.KEYSTORE_B64 != '' }}
         run: |
