@@ -292,7 +292,7 @@ class FrequencyReachesTheScreensTests(TestCase):
         self.assertEqual(len(set(seen.values())), 1, seen)
 
     def test_a_private_declaration_is_not_matched_filtered_or_shown(self):
-        self._member("hidden", {"thc": "daily"}, visibility=None)   # default: private
+        self._member("hidden", {"thc": "daily"}, visibility="private")
         self.assertNotIn("hidden", self._names(uses="thc"))
         self.assertNotIn("hidden", self._names(uses="thc", use_freq="daily"))
         # and the avoid filter must not out them by their absence
@@ -301,13 +301,13 @@ class FrequencyReachesTheScreensTests(TestCase):
             self.assertIn("hidden", self._names(**params), band)
 
     def test_no_card_reveals_a_private_frequency_even_for_every_key(self):
-        self._member("hidden", {"thc": "daily", "heroin": "rarely"}, visibility=None)
+        self._member("hidden", {"thc": "daily", "heroin": "rarely"}, visibility="private")
         everything = ",".join(SUBSTANCE_KEYS)
         for m in self.client.get("/api/economy/members/", {"uses": everything}).data["members"]:
             self.assertNotEqual(m["username"], "hidden")
 
     def test_the_profile_route_redacts_substances_birthday_and_location(self):
-        other = self._member("other", {"heroin": "daily"}, visibility=None)
+        other = self._member("other", {"heroin": "daily"}, visibility="private")
         p = profile_for(other); p.location = "Somewhere"; p.save()
         r = self.client.get("/api/economy/members/other/")
         self.assertEqual(r.status_code, 200)
@@ -331,7 +331,7 @@ class FrequencyReachesTheScreensTests(TestCase):
 
     def test_sober_members_are_not_counted_as_having_said_nothing(self):
         before = self.client.get("/api/economy/metricz/substancez/").data["undeclared"]
-        u = self._member("dry", {}, visibility=None)
+        u = self._member("dry", {}, visibility="private")
         p = profile_for(u); p.sober = True; p.save()
         d = self.client.get("/api/economy/metricz/substancez/").data
         self.assertEqual(d["sober"], 1)
@@ -340,7 +340,7 @@ class FrequencyReachesTheScreensTests(TestCase):
 
     def test_a_private_declaration_is_not_counted_either(self):
         self._member("shown", {"thc": "daily"})
-        self._member("hidden", {"thc": "daily"}, visibility=None)
+        self._member("hidden", {"thc": "daily"}, visibility="private")
         d = self.client.get("/api/economy/metricz/substancez/").data
         thc = next(o for o in d["options"] if o["key"] == "thc")
         # the tile and the list it sits over agree: only the one who opened it
@@ -348,3 +348,163 @@ class FrequencyReachesTheScreensTests(TestCase):
         self.assertEqual(thc["by_frequency"]["daily"], 1)
         listed = {m["username"] for m in self.client.get("/api/economy/members/", {"uses": "thc"}).data["members"]}
         self.assertEqual(listed & {"shown", "hidden"}, {"shown"})
+
+
+class OpenToMembersByDefaultTests(TestCase):
+    """Corey's call: SubstanceZ is open to members unless the member narrows it."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.me = User.objects.create_user("me", "me@e.com", "pw12345678")
+        p = profile_for(self.me); p.birthday = "1990-01-01"; p.save()
+        self.client.force_authenticate(User.objects.get(pk=self.me.pk))
+
+    def _member(self, name, substances, visibility=None, birthday="1990-01-01"):
+        u = User.objects.create_user(name, f"{name}@e.com", "pw12345678")
+        p = profile_for(u); p.birthday = birthday; p.substances = substances
+        if visibility:
+            p.visibility = {"substances": visibility}
+        p.save()
+        return u
+
+    def test_a_member_who_never_touched_the_setting_is_findable_with_their_frequency(self):
+        from apps.economy.visibility import DEFAULTS, MEMBER
+        self.assertEqual(DEFAULTS["substances"], MEMBER)
+        self._member("fresh", {"thc": "often"})                    # no override at all
+        r = self.client.get("/api/economy/members/", {"uses": "thc"})
+        card = next(m for m in r.data["members"] if m["username"] == "fresh")
+        self.assertEqual(card["use_frequency"], {"thc": "often"})
+
+    def test_narrowing_to_private_still_hides_them(self):
+        self._member("shy", {"thc": "often"}, visibility="private")
+        names = {m["username"] for m in self.client.get("/api/economy/members/", {"uses": "thc"}).data["members"]}
+        self.assertNotIn("shy", names)
+
+    def test_open_by_default_never_opens_a_minor_or_reaches_a_minor_viewer(self):
+        self._member("kid", {"thc": "often"}, birthday="2013-01-01")
+        names = {m["username"] for m in self.client.get("/api/economy/members/", {"uses": "thc"}).data["members"]}
+        self.assertNotIn("kid", names)
+        self._member("adult", {"thc": "often"})
+        p = profile_for(self.me); p.birthday = "2013-01-01"; p.save()
+        c = APIClient(); c.force_authenticate(User.objects.get(pk=self.me.pk))
+        self.assertEqual(c.get("/api/economy/members/adult/").data["substances"], {})
+
+
+class ExistingDeclarationsStayPrivateMigrationTests(TestCase):
+    """Moving a default is retroactive for every unset row. The migration pins
+    whoever had already declared, so nobody's existing declaration opens."""
+
+    def _run(self):
+        from importlib import import_module
+        from django.apps import apps
+        import_module("apps.economy.migrations.0188_pin_existing_substances_private").forwards(apps, None)
+
+    def _profile(self, name, substances, visibility=None):
+        u = User.objects.create_user(name, f"{name}@e.com", "pw12345678")
+        p = profile_for(u); p.substances = substances
+        if visibility is not None:
+            p.visibility = visibility
+        p.save()
+        return u
+
+    def test_an_existing_declarer_with_no_choice_is_pinned_private_and_stays_hidden(self):
+        from apps.economy.visibility import can_see
+        u = self._profile("old", {"thc": "often"})
+        viewer = User.objects.create_user("v", "v@e.com", "pw12345678")
+        self.assertTrue(can_see(profile_for(u), "substances", viewer))     # new default would open them
+        self._run()
+        p = profile_for(User.objects.get(pk=u.pk)); p.refresh_from_db()
+        self.assertEqual(p.visibility["substances"], ["private"])
+        self.assertFalse(can_see(p, "substances", viewer))
+
+    def test_the_older_list_form_counts_as_declared(self):
+        u = self._profile("legacy", ["thc"])
+        self._run()
+        self.assertEqual(profile_for(u).__class__.objects.get(user=u).visibility["substances"], ["private"])
+
+    def test_an_explicit_choice_is_never_overwritten(self):
+        u = self._profile("chose", {"thc": "often"}, {"substances": ["member"]})
+        self._run()
+        self.assertEqual(profile_for(u).__class__.objects.get(user=u).visibility["substances"], ["member"])
+
+    def test_someone_who_never_declared_is_left_on_the_default(self):
+        u = self._profile("blank", {})
+        self._run()
+        self.assertNotIn("substances", profile_for(u).__class__.objects.get(user=u).visibility)
+
+    def test_other_visibility_choices_survive_the_pin(self):
+        u = self._profile("mixed", {"thc": "often"}, {"bio": ["private"]})
+        self._run()
+        vis = profile_for(u).__class__.objects.get(user=u).visibility
+        self.assertEqual(vis["bio"], ["private"])
+        self.assertEqual(vis["substances"], ["private"])
+
+
+class SoberByChoiceTileTests(TestCase):
+    """Sober by choice is an option in the SubstanceZ app, not a footnote."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.me = User.objects.create_user("me", "me@e.com", "pw12345678")
+        p = profile_for(self.me); p.birthday = "1990-01-01"; p.save()
+        self.client.force_authenticate(User.objects.get(pk=self.me.pk))
+
+    def _sober(self, name, visibility=None, birthday="1990-01-01"):
+        u = User.objects.create_user(name, f"{name}@e.com", "pw12345678")
+        p = profile_for(u); p.birthday = birthday; p.sober = True
+        if visibility:
+            p.visibility = {"sober": visibility}
+        p.save()
+        return u
+
+    def _app(self):
+        return self.client.get("/api/economy/metricz/substancez/").data
+
+    def _tile(self, d):
+        return next(o for o in d["options"] if o["key"] == "sober")
+
+    def test_the_tile_is_there_with_a_count_and_no_frequency(self):
+        self._sober("dry")
+        d = self._app()
+        tile = self._tile(d)
+        self.assertEqual((tile["label"], tile["count"]), ("Sober by choice", 1))
+        self.assertNotIn("by_frequency", tile)          # a claim, not a substance
+        self.assertEqual(d["sober"], 1)                  # the old footer key still answers
+
+    def test_its_members_are_listed_under_uses_sober(self):
+        self._sober("dry")
+        names = {m["username"] for m in self.client.get("/api/economy/members/", {"uses": "sober"}).data["members"]}
+        self.assertIn("dry", names)
+
+    def test_a_sober_member_who_hid_it_is_neither_counted_nor_listed(self):
+        self._sober("shy", visibility="private")
+        self.assertEqual(self._tile(self._app())["count"], 0)
+        names = {m["username"] for m in self.client.get("/api/economy/members/", {"uses": "sober"}).data["members"]}
+        self.assertNotIn("shy", names)
+
+    def test_sober_never_satisfies_a_frequency_filter(self):
+        self._sober("dry")
+        r = self.client.get("/api/economy/members/", {"uses": "sober", "use_freq": "daily"})
+        self.assertNotIn("dry", {m["username"] for m in r.data["members"]})
+
+    def test_a_minor_is_not_counted_and_a_minor_viewer_is_walled_out(self):
+        self._sober("kid", birthday="2013-01-01")
+        self.assertEqual(self._tile(self._app())["count"], 0)
+        p = profile_for(self.me); p.birthday = "2013-01-01"; p.save()
+        c = APIClient(); c.force_authenticate(User.objects.get(pk=self.me.pk))
+        self._sober("adult")
+        r = c.get("/api/economy/metricz/substancez/")
+        self.assertTrue(r.data["locked"])
+
+    def test_mine_includes_sober_and_it_is_not_counted_as_having_said_nothing(self):
+        p = profile_for(self.me); p.sober = True; p.save()
+        self.client.force_authenticate(User.objects.get(pk=self.me.pk))
+        d = self._app()
+        self.assertIn("sober", d["mine"])
+        self.assertTrue(self._tile(d)["mine"])
+        self.assertEqual(d["sober"], 1)
+
+    def test_sober_is_not_in_the_profile_editors_substance_list(self):
+        c = APIClient(); c.force_authenticate(self.me)
+        keys = [s["key"] for s in c.get("/api/economy/substancez/").data["substances"]]
+        self.assertNotIn("sober", keys)

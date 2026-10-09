@@ -58,6 +58,20 @@ DEFAULTS = {
     "languages": MEMBER,
     "attracted_to": MEMBER,
     "age": MEMBER,
+    # SubstanceZ is open to members by default (Corey's call): the field exists
+    # to be found by people who live the same way, and a default of private
+    # meant the SubstanceZ app and the avoid-filter had nobody in them until
+    # each member went and found a control. It is still ADULT-ONLY in both
+    # directions whatever this says (`substancez.visible_substances`), and a
+    # member can narrow it to private or an audience at any time.
+    #
+    # Moving a default is NOT a free change, because `Profile.visibility` stores
+    # only deviations — an unset field follows the default, retroactively.
+    # Migration 0188 therefore pins every member who had ALREADY declared
+    # substances under the old private default to private, so what changes is
+    # who is exposed from now on and nobody's existing declaration is opened
+    # without them choosing it.
+    "substances": MEMBER,
 
     # Served to nobody but the member today. `birthday` is the date itself —
     # `age` above is the band, and they are separate fields on purpose, because
@@ -65,7 +79,6 @@ DEFAULTS = {
     # born" are different answers and the second one is a security question.
     "birthday": PRIVATE,
     "location": PRIVATE,
-    "substances": PRIVATE,
     "first_name": PRIVATE,
     "last_name": PRIVATE,
 }

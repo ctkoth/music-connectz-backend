@@ -1864,9 +1864,28 @@ found five places that skipped one or both, and each was reproduced:
 - The tile counts and the member list disagreed (5 over a list of 4) because
   counts ignored visibility. Counts read through the same helper now.
 
-**The visible consequence:** because `substances` defaults to private, the
-SubstanceZ app lists nobody until members open the field in VisibilitieZ. That is
-what the setting promises; opening the default would be a product call, not a fix.
+**Open to members by default (Corey's call).** `visibility.DEFAULTS["substances"]`
+is `member`, so the SubstanceZ app and the avoid filter have people in them
+without each member having to find a control. It is still adult-only in both
+directions whatever the setting says, and a member can narrow it to private or an
+audience at any time. **Moving a default is retroactive**: `Profile.visibility`
+stores only deviations, so an unset row follows the default, including rows
+written when the label said Private. Migration 0188 therefore pins every member
+who had ALREADY declared substances and made no visibility choice to `private`
+— an explicit override — so nobody's existing declaration opens without them
+choosing it. Everyone who declares from now on gets the new default. It is
+one-way on purpose: a reverse could not tell its pins from a member's own
+choice, and un-pinning someone's private declaration cannot be undone. Opening
+the pinned ones too is a one-line backfill if that is ever wanted; it is
+deliberately not the default.
+
+**Sober by choice is a tile, not a footnote.** `metricz` serves it as a real
+option (`key: "sober"`) beside the eleven substances: counted, listed under
+`uses=sober`, in `mine`. It is a claim, so it carries no frequency, never
+satisfies a frequency filter, is not in the profile editor's substance list, and
+follows the `sober` field's own visibility setting (member by default) rather
+than `substances`'. A hidden sober member is not counted, as a hidden
+substance is not.
 
 Known drift, accepted: rows saved under the old two-step scale keep their
 `sometimes`/`often` and now read under the defined scale (see the module docstring

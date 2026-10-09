@@ -33,13 +33,13 @@ class DefaultsAreTodaysBehaviourTests(TestCase):
 
     def test_what_is_member_only_stays_member_only(self):
         for field in ("gender", "sign", "regions", "nationalities", "sober",
-                      "personality", "attracted_to", "age", "avatar"):
+                      "personality", "attracted_to", "age", "avatar", "substances"):
             self.assertEqual(DEFAULTS[field], MEMBER, field)
             self.assertFalse(can_see(self.p, field, None), field)
             self.assertTrue(can_see(self.p, field, member(f"v_{field}")), field)
 
     def test_what_was_served_to_nobody_stays_private(self):
-        for field in ("birthday", "location", "substances", "first_name", "last_name"):
+        for field in ("birthday", "location", "first_name", "last_name"):
             self.assertEqual(DEFAULTS[field], PRIVATE, field)
             self.assertFalse(can_see(self.p, field, None), field)
             self.assertFalse(can_see(self.p, field, member(f"w_{field}")), field)

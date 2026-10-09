@@ -43,6 +43,7 @@ from .gemini import _key, generate_content
 from .models import (Horoscope, Profile, adult_only_reason, blocked_user_ids,
                      profile_is_minor, zodiac_for)
 from .social import ACTIVE_STANCES, clean_substances
+from .visibility import can_see
 from .substancez import FREQUENCIES, FREQUENCY_KEYS, SUBSTANCE_KEYS, SUBSTANCES, visible_substances
 from .statz_trial import has_statz
 
@@ -175,12 +176,21 @@ KINDS = {
 }
 
 
+SOBER_KEY = "sober"
+
+
 def _options(kind):
     if kind == "zodiacz":
         return [{"key": n, "label": n, "emoji": e, "dates": d, "element": ELEMENT[n], "read": SIGN_READ[n]}
                 for n, e, d in ZODIAC]
     if kind == "substancez":
-        return [{"key": k, "label": l, "emoji": e} for k, l, e in SUBSTANCES]
+        # Sober by choice sits beside the substances as a real option, not a
+        # footnote: it is a claim a member makes (see Profile.sober), and a count
+        # with nowhere to go ("3 are sober by choice") is the dead end this
+        # codebase keeps closing. It is not a substance, so it carries no
+        # frequency and is never part of the avoid filter's vocabulary.
+        return ([{"key": k, "label": l, "emoji": e} for k, l, e in SUBSTANCES]
+                + [{"key": SOBER_KEY, "label": "Sober by choice", "emoji": "🚫"}])
     return [{"key": k, "label": l, "emoji": e} for k, l, e in PARTNER_GENDERS]
 
 
@@ -191,7 +201,10 @@ def _declared(kind, p):
         return [sign] if sign in SIGN_NAMES else []
     if kind == "substancez":
         subs = clean_substances(p.substances)
-        return [k for k in SUBSTANCE_KEYS if subs.get(k) in ACTIVE_STANCES]
+        keys = [k for k in SUBSTANCE_KEYS if subs.get(k) in ACTIVE_STANCES]
+        # The member's OWN answer (this feeds `mine`); what others may see goes
+        # through visible_substances and `can_see`, never through here.
+        return keys + ([SOBER_KEY] if p.sober else [])
     return [k for k in PARTNER_KEYS if k in (p.attracted_to or [])]
 
 
@@ -203,7 +216,7 @@ def counts_for(kind, viewer):
     # "12 use THC" hides whether that is twelve daily users or twelve people
     # who had it once; `unsaid` is the legacy "yes", kept as its own bucket
     # rather than folded into a frequency nobody chose.
-    by_freq = {o["key"]: {f: 0 for f in FREQUENCY_KEYS + ["unsaid"]} for o in _options(kind)} \
+    by_freq = {k: {f: 0 for f in FREQUENCY_KEYS + ["unsaid"]} for k in SUBSTANCE_KEYS} \
         if kind == "substancez" else {}
     undeclared = sober = 0
     adult = KINDS[kind]["adult"]
@@ -219,9 +232,16 @@ def counts_for(kind, viewer):
     for p in profiles:
         if adult and profile_is_minor(p):
             continue
+        is_sober = False
         if kind == "substancez":
             seen = visible_substances(p, viewer, aud)
             keys = [k for k in SUBSTANCE_KEYS if seen.get(k) in ACTIVE_STANCES]
+            # Sober by choice is its own field with its own visibility setting
+            # (member by default); a hidden one is not counted, for the same
+            # reason a hidden substance is not.
+            is_sober = bool(p.sober) and can_see(p, "sober", viewer, aud)
+            if is_sober:
+                counts[SOBER_KEY] += 1
         else:
             seen, keys = None, _declared(kind, p)
         for k in keys:
@@ -233,7 +253,7 @@ def counts_for(kind, viewer):
             # Sober by choice is a claim, not a blank: counted on its own and
             # kept out of "haven't said", or the footer reads as though
             # sober members had said nothing.
-            if kind == "substancez" and p.sober:
+            if is_sober:
                 sober += 1
             else:
                 undeclared += 1
@@ -254,6 +274,11 @@ def matches(kind, p, wanted, freqs=None, viewer=None, audience=None):
     if KINDS[kind]["adult"] and profile_is_minor(p):
         return False
     if kind == "substancez":
+        # "sober" is a claim, not a substance: it has no frequency, so it can
+        # never satisfy a frequency filter, and it follows the `sober`
+        # visibility setting rather than the `substances` one.
+        if SOBER_KEY in wanted and not freqs and p.sober and can_see(p, "sober", viewer, audience):
+            return True
         subs = visible_substances(p, viewer, audience)
         if freqs:
             return any(subs.get(k) in freqs for k in wanted)
@@ -301,7 +326,7 @@ class MetricZView(APIView):
                     **({"by_frequency": by_freq[o["key"]],
                         # Yours, as you said it — None for the legacy "yes".
                         "my_frequency": my_subs.get(o["key"]) if my_subs.get(o["key"]) in FREQUENCY_KEYS else None}
-                       if kind == "substancez" else {})}
+                       if kind == "substancez" and o["key"] in by_freq else {})}
                    for o in _options(kind)],
                "undeclared": undeclared, "mine": mine,
                # ProfileZ anchor that sets it — "nothing is a dead end".

@@ -56,7 +56,7 @@ class MetricCountTests(TestCase):
         self.assertEqual(self.opt(d, "thc")["count"], 1)       # the teen's isn't counted
         self.assertEqual(self.opt(d, "alcohol")["count"], 1)
         self.assertEqual(d["sober"], 1)
-        self.assertEqual(len(d["options"]), 11)
+        self.assertEqual(len(d["options"]), 12)   # eleven substances + sober by choice
 
     def test_preference_counts(self):
         d = self.c.get("/api/economy/metricz/preferencez/").json()
