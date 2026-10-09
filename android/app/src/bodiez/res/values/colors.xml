@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The BodieZ artwork's own near-black (INK in tools/make_bodiez_assets.py), so
+     the status bar, splash and adaptive-icon background meet the art with no seam.
+     Overrides main's brand_ink for this flavor only. -->
+<resources>
+    <color name="brand_ink">#030306</color>
+</resources>

@@ -14,6 +14,11 @@ work lives in the web app, so the Android app inherits it — and OmviardZ opens
 on first launch so a brand-new install gets Corey's guided tour instead of a
 stranger's feed.
 
+> **BodieZ is its own app now, with its own listing — read
+> [§13](#13-bodiez-as-its-own-app) for it.** Everything above and below is about
+> Music ConnectZ (flavor `mcz`); BodieZ (flavor `bodiez`) shares the account
+> setup, the signing secrets and the closed-test rules, and differs in what it opens.
+
 ---
 
 ## 1. What you need before you touch the Console
@@ -109,8 +114,12 @@ Never commit it. To sign in CI, add these repository secrets
 | `ANDROID_KEY_ALIAS` | `upload` |
 | `ANDROID_KEY_PASSWORD` | key password |
 
-Without them the release bundle is built unsigned, which still uploads fine —
-Play's flow can sign it for you. With them, the bundle arrives signed.
+**Set all four before you run the workflow for a bundle you mean to upload.**
+Without them the release bundle is built UNSIGNED, and Play Console refuses it
+("The Android App Bundle was not signed"). An earlier version of this guide said
+Play would sign it for you; it will not — Play App Signing re-signs what you upload,
+and what you upload has to be signed with your upload key first. The workflow prints
+a warning in the run when the secrets are missing. One upload key can sign both apps.
 
 ---
 
@@ -387,3 +396,45 @@ The install is the start of the work, not the end.
 [Custom store listings](https://support.google.com/googleplay/android-developer/answer/9867158) ·
 [In-app reviews](https://developer.android.com/guide/playcore/in-app-review) ·
 [Replying to reviews](https://support.google.com/googleplay/android-developer/answer/138230)
+
+---
+
+## 13. BodieZ as its own app
+
+`android/` builds **two** apps (Gradle flavors, one project, one CI run):
+
+| | Music ConnectZ | BodieZ |
+|---|---|---|
+| Package | `net.musicconnectz.app` | `net.musicconnectz.bodiez` |
+| Opens | `musicconnectz.net` | `bodiez.musicconnectz.net` — the **BodieZ-only** web build |
+| Icon | the equalizer mark | the neon athletes from the BodieZ tab |
+| CI artifacts | `music-connectz-apk`, `music-connectz-playstore-bundle` | `bodiez-apk`, `bodiez-playstore-bundle` |
+
+**It opens its own site, not `/bodie` on the main one, and that is the decision to
+understand.** The main site is why §7 and §9 have a Data safety problem
+(orientation, substance use) and a Payments problem (Premium). The BodieZ-only
+shell contains BodieZ and sign-in, so a BodieZ review has neither. A flavor that
+opened `/bodie` would have been the same app in a different icon, carrying all of it.
+
+**The kit — listing text, graphics, screenshots, reviewer notes, Data safety and
+the step-by-step — is in the frontend repo at `play/bodiez/`.** Start with its
+README. The short version of what only you can do: open a Console account, host
+`dist-bodiez/` at `bodiez.musicconnectz.net`, run the workflow, create the app,
+paste Play's signing fingerprint into the BodieZ host's `assetlinks.json`.
+
+Three things this changes about the rest of this guide:
+
+- **Each app needs its own `assetlinks.json`, on the host it opens.** The backend's
+  `/.well-known/assetlinks.json` and `TWA_*` variables are for Music ConnectZ only;
+  BodieZ's lives in the frontend repo at
+  `standalone/bodiez/public/.well-known/assetlinks.json`.
+- **One upload key can sign both** (Play re-signs each app with its own key), so the
+  existing `ANDROID_KEYSTORE_*` secrets cover both bundles. The fingerprint Play
+  shows under App signing is per app — BodieZ's is not Music ConnectZ's.
+- **The closed test is per app** for a personal account. Plan another 12 testers and
+  14 days for BodieZ unless the Console tells you it is waived.
+
+**Regenerating the art:** `python tools/make_bodiez_assets.py` (the source is the
+in-app BodieZ icon, vendored at `brand/bodiez/source-384.png`; 384px, so every output
+is an upscale — a larger master sharpens all of it). **Re-counting the numbers the
+listing quotes:** `python manage.py shell < tools/count_adaptive_exercises.py`.

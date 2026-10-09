@@ -1218,6 +1218,44 @@ its shape are load-bearing and neither is decoration:
   for. The id and the filename must agree, which is what stops the id range
   being walked for a list of everybody's filenames.
 
+## BodieZ is its own Android app, and it opens its own site
+
+`android/` builds two apps from one project (`mcz` and `bodiez` Gradle flavors,
+one CI run, two bundles). The decision worth keeping is what BodieZ OPENS:
+**the BodieZ-only web build on its own host** (`npm run build:bodiez` in the
+frontend, `bodiez.musicconnectz.net`), never `/bodie` on musicconnectz.net.
+
+The first draft pointed at `/bodie`. It would have been the whole Music ConnectZ
+app in a different icon — the profile, orientation, substance-use and
+attractiveness-rating screens that make the main app a Data safety question, and
+the Premium purchase flow that makes it a Play Billing one — with a listing that
+said "a workout log". The shell that avoids all of it already existed in the
+frontend; the Android app wraps that.
+
+Two things that follow, both easy to get backwards:
+
+- **Chrome verifies a TWA against the host it launches into**, so each app needs its
+  own `assetlinks.json` on its own host. This backend's route and `TWA_*` variables
+  are Music ConnectZ's; BodieZ's file lives in the frontend repo
+  (`standalone/bodiez/public/.well-known/`). A draft served a second package from
+  here — it would have verified nothing and had somebody set Render variables and
+  believe it worked.
+- **A number in a store listing is a tier number in copy.** "60 of 90 exercises are
+  seated or lying" is quoted in `play/bodiez/listing/` (frontend) and goes stale the
+  day the library moves. `tools/count_adaptive_exercises.py` prints the current
+  figures; re-run it before every release.
+
+**The Android workflow had never run.** A step's `if` cannot read `secrets`, so GitHub
+refused to parse the file ("Unrecognized named-value: 'secrets'") — 630 runs, every
+one failing before a step started, which reads as a flaky build rather than a dead
+one. Nobody could have pressed "Run workflow" and got a bundle. Fixed by routing the
+secret through the job's `env`. If a workflow "fails" instantly with no steps listed,
+read the parse error before blaming the build.
+
+`test_android_kit` holds what can be held without an Android SDK: distinct
+packages, per-app `asset_statements`, resource references that resolve, art at the
+sizes Play wants. Gradle itself only runs in CI.
+
 ## Testing
 
 - The suite runs on SQLite by default, but production is PostgreSQL, and

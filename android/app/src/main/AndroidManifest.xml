@@ -29,7 +29,7 @@
 
             <meta-data
                 android:name="android.support.customtabs.trusted.DEFAULT_URL"
-                android:value="${siteUrl}" />
+                android:value="${launchUrl}" />
 
             <!-- Native splash while Chrome warms up, so a cold start doesn't
                  flash white. The image is the wordless mark. -->
@@ -59,7 +59,9 @@
             </intent-filter>
 
             <!-- Links to the site open in the app instead of the browser.
-                 autoVerify makes Android check assetlinks.json at install. -->
+                 autoVerify makes Android check assetlinks.json at install.
+                 The host is per flavor (build.gradle.kts): each app captures
+                 links to its OWN site only, so the two never contest a link. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

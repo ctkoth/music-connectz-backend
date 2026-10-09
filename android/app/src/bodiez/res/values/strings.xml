@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  BodieZ's own name and its own site. Both override main's.
+
+  asset_statements names the host BodieZ OPENS — the BodieZ-only build on its own
+  origin — not musicconnectz.net, because Chrome checks a TWA against the host it
+  launches into. That host has to claim this package back from
+  https://<host>/.well-known/assetlinks.json (the frontend repo ships it at
+  standalone/bodiez/public/.well-known/), or the app opens with a URL bar.
+
+  The URL is literal for the reason main's is: Android does not expand @string/
+  references nested inside another string. The checkAssetStatements task in
+  build.gradle.kts fails the build if this drifts from -PbodiezUrl.
+-->
+<resources>
+    <string name="app_name">BodieZ</string>
+
+    <string name="asset_statements" translatable="false">
+        [{ "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {"namespace": "web", "site": "https://bodiez.musicconnectz.net"}}]
+    </string>
+</resources>
