@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .audience import Audience
-from .visibility import redact
+from .visibility import can_see, redact
 from .models import (
     apply_post_rating,
     public_name,
@@ -1341,7 +1341,7 @@ class MembersView(APIView):
                 cn = chinese_zodiac_for(p.birthday)
                 if not cn or cn["animal"] not in signs_cn:
                     continue
-            if sober_only and not p.sober:
+            if sober_only and not (p.sober and can_see(p, "sober", request.user, aud)):
                 continue
             if personality_wanted and not personality_matches(p.personality, personality_wanted):
                 # Counted apart from an ordinary miss. An empty grid has two

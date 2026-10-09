@@ -345,3 +345,37 @@ class AudienceAddsNoPerMemberCostTests(TestCase):
                 for token in ("friends", "fans", "partnerz", "group:1"):
                     aud.allows(o.pk, token)
         self.assertEqual(len(ctx.captured_queries), 0)
+
+
+class MergeVisibilityTests(TestCase):
+    """Choosing a field's DEFAULT must remove an override already stored. It used
+    to be dropped and ignored, so a member who had ever moved a field off its
+    default could never put it back."""
+
+    def test_choosing_the_default_removes_the_stored_override(self):
+        from apps.economy.visibility import merge_visibility
+        got = merge_visibility({"substances": ["private"], "bio": ["private"]}, {"substances": ["member"]})
+        self.assertEqual(got, {"bio": ["private"]})            # substances back to default, bio untouched
+
+    def test_a_non_default_choice_is_stored(self):
+        from apps.economy.visibility import merge_visibility
+        self.assertEqual(merge_visibility({}, {"substances": ["private"]}), {"substances": ["private"]})
+
+    def test_junk_changes_nothing(self):
+        from apps.economy.visibility import merge_visibility
+        base = {"substances": ["private"]}
+        for junk in ({"substances": []}, {"substances": ["nonsense"]}, {"nope": ["public"]}, {"substances": None}):
+            self.assertEqual(merge_visibility(base, junk), base, junk)
+        self.assertEqual(merge_visibility(base, "not a dict"), base)
+        self.assertEqual(merge_visibility(None, {"bio": ["private"]}), {"bio": ["private"]})
+
+    def test_public_then_back_to_the_default_returns_to_the_default(self):
+        from apps.economy.visibility import merge_visibility
+        step = merge_visibility({}, {"substances": ["public"]})
+        self.assertEqual(step, {"substances": ["public"]})
+        self.assertEqual(merge_visibility(step, {"substances": ["member"]}), {})
+
+    def test_an_unrelated_field_is_never_disturbed_by_a_partial_write(self):
+        from apps.economy.visibility import merge_visibility
+        self.assertEqual(merge_visibility({"bio": ["private"], "age": ["public"]}, {"sign": ["private"]}),
+                         {"bio": ["private"], "age": ["public"], "sign": ["private"]})

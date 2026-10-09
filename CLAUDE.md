@@ -1879,6 +1879,15 @@ choice, and un-pinning someone's private declaration cannot be undone. Opening
 the pinned ones too is a one-line backfill if that is ever wanted; it is
 deliberately not the default.
 
+**Choosing a field's default must REMOVE its stored override.** `clean_visibility`
+drops a value equal to the default (the row records choices), and the PATCH merged
+what survived — so a field once moved off its default could never come back: the
+"Members" button answered 200 and changed nothing. With the default moved and
+every earlier declarer pinned to private, that would have been a dead control for
+exactly those members. `visibility.merge_visibility` is the writer now (default →
+pop the override; junk → no change) and `accounts/views.py` uses it. This bug
+predated SubstanceZ and applied to every field.
+
 **Sober by choice is a tile, not a footnote.** `metricz` serves it as a real
 option (`key: "sober"`) beside the eleven substances: counted, listed under
 `uses=sober`, in `mine`. It is a claim, so it carries no frequency, never

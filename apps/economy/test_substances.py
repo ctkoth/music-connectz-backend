@@ -508,3 +508,55 @@ class SoberByChoiceTileTests(TestCase):
         c = APIClient(); c.force_authenticate(self.me)
         keys = [s["key"] for s in c.get("/api/economy/substancez/").data["substances"]]
         self.assertNotIn("sober", keys)
+
+
+class ReopeningAPinnedFieldTests(TestCase):
+    """The migration pins existing declarers to private. The control the profile
+    screen points them at must be able to undo that."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.me = User.objects.create_user("me", "me@e.com", "pw12345678")
+        p = profile_for(self.me); p.birthday = "1990-01-01"; p.substances = {"thc": "often"}
+        p.visibility = {"substances": ["private"]}; p.save()
+        self.client.force_authenticate(User.objects.get(pk=self.me.pk))
+        self.viewer = User.objects.create_user("v", "v@e.com", "pw12345678")
+        vp = profile_for(self.viewer); vp.birthday = "1990-01-01"; vp.save()
+
+    def _sees(self):
+        from apps.economy.visibility import can_see
+        return can_see(profile_for(User.objects.get(pk=self.me.pk)), "substances", User.objects.get(pk=self.viewer.pk))
+
+    def test_pressing_members_on_a_pinned_field_opens_it_to_members(self):
+        self.assertFalse(self._sees())
+        r = self.client.patch("/api/auth/me/", {"visibility": {"substances": ["member"]}}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        row = next(v for v in r.data["visibility"] if v["field"] == "substances")
+        self.assertEqual(row["level"], ["member"])
+        self.assertTrue(self._sees())
+
+    def test_it_can_go_private_again_afterwards(self):
+        self.client.patch("/api/auth/me/", {"visibility": {"substances": ["member"]}}, format="json")
+        self.client.patch("/api/auth/me/", {"visibility": {"substances": ["private"]}}, format="json")
+        self.assertFalse(self._sees())
+
+
+class SoberSearchHonoursVisibilityTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.me = User.objects.create_user("me", "me@e.com", "pw12345678")
+        self.client.force_authenticate(self.me)
+
+    def _sober(self, name, visibility=None):
+        u = User.objects.create_user(name, f"{name}@e.com", "pw12345678")
+        p = profile_for(u); p.sober = True
+        if visibility:
+            p.visibility = {"sober": visibility}
+        p.save()
+
+    def test_sober_filter_lists_open_members_and_not_hidden_ones(self):
+        self._sober("open")
+        self._sober("shy", visibility="private")
+        names = {m["username"] for m in self.client.get("/api/economy/members/", {"sober": "1"}).data["members"]}
+        self.assertIn("open", names)
+        self.assertNotIn("shy", names)

@@ -99,6 +99,32 @@ def as_list(level):
     return []
 
 
+def _normalise(field, level):
+    """One field's requested audiences as they would be stored, or None when
+    the request is junk (an unknown field, or no valid level in it)."""
+    if field not in DEFAULTS:
+        return None
+    wanted = [str(x or "").strip().lower() for x in as_list(level)]
+    keep = [x for x in wanted if x in LEVELS or _is_audience(x)]
+    if not keep:
+        return None
+    # `public` and `member` swallow everything narrower, so a field set to
+    # "public and my friends" is just public. Storing both would be a row
+    # that reads as a restriction it does not apply.
+    if PUBLIC in keep:
+        keep = [PUBLIC]
+    elif MEMBER in keep:
+        keep = [MEMBER]
+    elif PRIVATE in keep and len(keep) > 1:
+        # Private beside an audience is a contradiction — "only me, and
+        # also my friends". The audience is the specific thing they chose,
+        # so private is the half that goes.
+        keep = [x for x in keep if x != PRIVATE]
+    # Order-insensitive and duplicate-free, so two clients sending the same
+    # choice in a different order do not look like different rows.
+    return sorted(set(keep))
+
+
 def clean_visibility(raw):
     """Normalise what a client sent into storable overrides.
 
@@ -109,37 +135,45 @@ def clean_visibility(raw):
     is the member's current exposure.
 
     A value equal to the default is dropped too, so the row records choices
-    rather than restating the defaults back at us.
+    rather than restating the defaults back at us. NOTE what that means for a
+    WRITE: "choose the default" must REMOVE an override that is already stored,
+    not be ignored — `merge_visibility` is the writer that does that.
     """
     if not isinstance(raw, dict):
         return {}
     out = {}
     for field, level in raw.items():
+        keep = _normalise(str(field), level)
+        if keep is None or keep == [DEFAULTS[str(field)]]:
+            continue
+        out[str(field)] = keep
+    return out
+
+
+def merge_visibility(stored, raw):
+    """`stored` overrides with the client's requested changes applied.
+
+    Merged, not replaced (a whole-map write would reset every control a
+    client one version behind does not know about) — and choosing a field's
+    DEFAULT deletes its stored override. Dropping a default-equal value and
+    merging left the old override standing, so a member who had ever moved a
+    field off its default could never put it back: with SubstanceZ now open to
+    members by default and every earlier declarer pinned to private, the
+    "Members" button would have been a silent no-op for exactly those members.
+    Junk (unknown field, no valid level) changes nothing.
+    """
+    out = dict(stored) if isinstance(stored, dict) else {}
+    if not isinstance(raw, dict):
+        return out
+    for field, level in raw.items():
         field = str(field)
-        if field not in DEFAULTS:
+        keep = _normalise(field, level)
+        if keep is None:
             continue
-        wanted = [str(x or "").strip().lower() for x in as_list(level)]
-        keep = [x for x in wanted if x in LEVELS or _is_audience(x)]
-        if not keep:
-            continue
-        # `public` and `member` swallow everything narrower, so a field set to
-        # "public and my friends" is just public. Storing both would be a row
-        # that reads as a restriction it does not apply.
-        if PUBLIC in keep:
-            keep = [PUBLIC]
-        elif MEMBER in keep:
-            keep = [MEMBER]
-        elif PRIVATE in keep and len(keep) > 1:
-            # Private beside an audience is a contradiction — "only me, and
-            # also my friends". The audience is the specific thing they chose,
-            # so private is the half that goes.
-            keep = [x for x in keep if x != PRIVATE]
-        # Order-insensitive and duplicate-free, so two clients sending the same
-        # choice in a different order do not look like different rows.
-        keep = sorted(set(keep))
         if keep == [DEFAULTS[field]]:
-            continue
-        out[field] = keep
+            out.pop(field, None)
+        else:
+            out[field] = keep
     return out
 
 
