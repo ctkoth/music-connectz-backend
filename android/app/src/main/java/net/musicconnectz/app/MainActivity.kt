@@ -14,11 +14,17 @@ import com.google.androidbrowserhelper.trusted.LauncherActivity
  * into OmviardZ. Someone who just installed from Play has never seen the
  * platform, so their first screen is Corey's guided tour rather than a feed of
  * names they don't know. Every launch after that goes straight to the site.
+ *
+ * Only the Music ConnectZ flavor does it (`BuildConfig.FIRST_LAUNCH_TOUR`).
+ * The BodieZ app is the same class with the handoff off: it opens on the BodieZ
+ * tab and stays there.
  */
 class MainActivity : LauncherActivity() {
 
     override fun getLaunchingUrl(): Uri {
         val url = super.getLaunchingUrl()
+
+        if (!BuildConfig.FIRST_LAUNCH_TOUR) return url
 
         // Opened by tapping a link? Honour that link, don't hijack it.
         if (intent?.data != null) return url

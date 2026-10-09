@@ -1,23 +1,29 @@
 name: Android APK
 
-# Builds the installable APK. GitHub's ubuntu runners ship the Android SDK, so
+# Builds the installable APKs. GitHub's ubuntu runners ship the Android SDK, so
 # this is the build that produces a real file you can download and sideload:
-#   Actions -> this run -> Artifacts -> music-connectz-apk
+#   Actions -> this run -> Artifacts -> music-connectz-apk   (Music ConnectZ)
+#                                       bodiez-apk           (BodieZ, its own app)
 #
-# It also builds the Play upload bundle (.aab). Play distributes app bundles,
-# not APKs — the APK is for testing on your own phone.
+# It also builds the Play upload bundles (.aab). Play distributes app bundles,
+# not APKs — the APK is for testing on your own phone. Two flavors, two bundles,
+# because they are two Play listings (see android/app/build.gradle.kts).
 on:
   push:
     branches: ["main"]
-    paths: ["android/**", "tools/make_brand_assets.py", ".github/workflows/android.yml"]
+    paths: ["android/**", "tools/make_brand_assets.py", "tools/make_bodiez_assets.py", ".github/workflows/android.yml"]
   pull_request:
-    paths: ["android/**", "tools/make_brand_assets.py", ".github/workflows/android.yml"]
+    paths: ["android/**", "tools/make_brand_assets.py", "tools/make_bodiez_assets.py", ".github/workflows/android.yml"]
   # Build on demand — this is the button to press when you want an APK.
   workflow_dispatch:
     inputs:
       site_url:
-        description: "Site the app opens"
+        description: "Site Music ConnectZ opens"
         default: "https://musicconnectz.net"
+        required: false
+      bodiez_url:
+        description: "Site BodieZ opens (the BodieZ-only build, on its own host)"
+        default: "https://bodiez.musicconnectz.net"
         required: false
 
 permissions:
@@ -41,8 +47,9 @@ jobs:
 
       - name: Debug APK (sideloadable)
         run: >-
-          ./gradlew --no-daemon assembleDebug
+          ./gradlew --no-daemon assembleMczDebug assembleBodiezDebug
           -PsiteUrl=${{ github.event.inputs.site_url || 'https://musicconnectz.net' }}
+          -PbodiezUrl=${{ github.event.inputs.bodiez_url || 'https://bodiez.musicconnectz.net' }}
 
       # Signed when the secrets are set, unsigned otherwise — Play can sign an
       # unsigned bundle on upload, so a missing keystore is not a failure.
@@ -60,17 +67,30 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: >-
-          ./gradlew --no-daemon bundleRelease
+          ./gradlew --no-daemon bundleMczRelease bundleBodiezRelease
           -PsiteUrl=${{ github.event.inputs.site_url || 'https://musicconnectz.net' }}
+          -PbodiezUrl=${{ github.event.inputs.bodiez_url || 'https://bodiez.musicconnectz.net' }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: music-connectz-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/mcz/debug/*.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bodiez-apk
+          path: android/app/build/outputs/apk/bodiez/debug/*.apk
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
         with:
           name: music-connectz-playstore-bundle
-          path: android/app/build/outputs/bundle/release/*.aab
+          path: android/app/build/outputs/bundle/mczRelease/*.aab
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bodiez-playstore-bundle
+          path: android/app/build/outputs/bundle/bodiezRelease/*.aab
           if-no-files-found: error
