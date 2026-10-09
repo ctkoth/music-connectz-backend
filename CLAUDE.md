@@ -1279,14 +1279,46 @@ Three decisions in it are the ones to keep:
   that merely TAGS the member survives them). A fifth door that calls `user.delete()`
   directly would bring the bug back, which is why a test reads the source of all four.
 
-**What deletion still does not do, on purpose or by omission:** it does not cancel Stripe
-subscriptions or an auto top-up (the ids live on rows that cascade away, so afterwards
-nothing can find them), it does not pay out money (the screens say so), and a
-member's own transaction history cascades with them. The first is a bug waiting for a
-product decision about what happens when Stripe is down; the third contradicted a
-sentence in the privacy policy for as long as the policy existed. If the LLC needs to
-keep financial records for tax, that is an anonymise-don't-cascade change, and the policy
-changes with it.
+### Deleting cancels the billing first, and refuses if it can't
+
+The ids that let anyone cancel a subscription live on rows that cascade away
+(`Membership.stripe_customer_id`, `last_payment_ref`, `AutoTopUp`), so a delete that
+ran first left a card billed monthly by an account nobody could reach. The member
+found out from their bank. `apps/economy/stripe_cancel.py` runs BEFORE
+`user.delete()`, from `erasure.delete_user`, and all four doors get it for free.
+
+- **A failure refuses the delete (502, `CancelFailed.detail`).** The alternative is a
+  deleted account still being charged, which is the worse outcome and the one this
+  exists to prevent. Nothing is lost by refusing: the member retries. The screen, the
+  web page and the privacy policy all say "if it can't be cancelled, the account is not
+  deleted", so changing this means changing four places together.
+- **Cancel is immediate, with no refund of the rest of the paid period.** There is no
+  account left to hold the benefit for the remainder, and every screen says so before
+  the button. Proration is a product decision; this is the version that is true today.
+- **It finds subscriptions by customer, not only by stored id.** A member can have a
+  live subscription whose id was never stored (a checkout that completed after a
+  webhook was missed), so each known customer is LISTED, and the stored ids are
+  retrieved too. `resource_missing` counts as gone; any other error counts as a failure.
+  `canceled` and `incomplete_expired` are done; everything else is cancelled.
+- **A customer another account also references is never swept.** `stripe_customer_id`
+  is not unique, and cancelling "every subscription on this customer" for a customer a
+  second member also uses would bill-stop a stranger. Shared customers are skipped and
+  logged. `dupez.delete_duplicate` cancels the TARGET's billing before the money sweep
+  and passes `billing_stopped=True`, so the cancel happens once and a refusal leaves the
+  duplicate untouched.
+- **One budget (`BUDGET_SECONDS`, 20) over the whole run**, with each call capped at
+  `CALL_TIMEOUT_SECONDS`, following `deadline.py`'s rule that a timeout on a call is not
+  a budget for a request. The worst case can overrun the budget by up to one call.
+- **Not done:** the Stripe *customer* and its saved card are left in Stripe (we cancel
+  billing, we do not erase the payment record), and `AutoTopUpCancelView` still flips
+  `active=False` when its Stripe call fails. Both are in the frontend's
+  `play/bodiez/README.md`.
+
+**What deletion still does not do, on purpose or by omission:** it does not pay out
+money (the screens say so), and a member's own transaction history cascades with them.
+The second contradicted a sentence in the privacy policy for as long as the policy
+existed. If the LLC needs to keep financial records for tax, that is an
+anonymise-don't-cascade change, and the policy changes with it.
 
 The BodieZ paragraph in `public/privacy.html` (frontend) was checked claim by claim
 against this repo before it went live; "we do not show it to other members" needed an
