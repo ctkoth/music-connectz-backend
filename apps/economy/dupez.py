@@ -343,7 +343,8 @@ def delete_duplicate(target, keep=None, *, by, reason=""):
     if keep is not None:
         notify(keep, "system",
                f"@{username} was removed as your duplicate account.", item_id="dupez")
-    target.delete()
+    from apps.accounts.erasure import delete_user
+    delete_user(target)  # the rows cascade; the uploaded files go with them
     return {
         "deleted": username, "kept": keep.username if keep else None,
         "swept": swept, "was": card, "by": by.username, "reason": reason,

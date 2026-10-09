@@ -1256,6 +1256,43 @@ read the parse error before blaming the build.
 packages, per-app `asset_statements`, resource references that resolve, art at the
 sizes Play wants. Gradle itself only runs in CI.
 
+## Deleting an account has to delete what it uploaded, and the policy is a claim about this code
+
+`user.delete()` cascades the ROWS, and a Django `FileField` never deletes its bytes
+when its row goes. There was no `post_delete` signal, no cleanup package and no sweep,
+so every track, video, photo and avatar stayed on the disk (or in the bucket) after
+the member was gone — while the privacy policy and the delete-account page both said
+"your uploads" were deleted. `Face` images and avatars are pictures of people.
+
+`apps/accounts/erasure.py` is the one way to delete an account now, and all four doors
+use it (`MeView.delete`, `UsersView.delete`, `AccountDeleteView`, `dupez.delete_duplicate`).
+Three decisions in it are the ones to keep:
+
+- **Files are found BEFORE the delete** (afterwards the rows that name them are gone) and
+  **removed AFTER it commits** (a rolled-back delete must not leave rows pointing at files
+  somebody already removed).
+- **A storage error is logged, never raised.** The member asked to be deleted and the rows
+  are gone; a bucket having a bad minute is not a reason to 500 and leave a half-deleted
+  account for somebody to retry by hand.
+- **The models are found, not listed.** Any model with a `FileField` and a CASCADE
+  foreign key to the user. A SET_NULL row is kept, so its bytes are kept too (a `Face`
+  that merely TAGS the member survives them). A fifth door that calls `user.delete()`
+  directly would bring the bug back, which is why a test reads the source of all four.
+
+**What deletion still does not do, on purpose or by omission:** it does not cancel Stripe
+subscriptions or an auto top-up (the ids live on rows that cascade away, so afterwards
+nothing can find them), it does not pay out money (the screens say so), and a
+member's own transaction history cascades with them. The first is a bug waiting for a
+product decision about what happens when Stripe is down; the third contradicted a
+sentence in the privacy policy for as long as the policy existed. If the LLC needs to
+keep financial records for tax, that is an anonymise-don't-cascade change, and the policy
+changes with it.
+
+The BodieZ paragraph in `public/privacy.html` (frontend) was checked claim by claim
+against this repo before it went live; "we do not show it to other members" needed an
+exception for the workout summary a member posts or sends themselves, and
+"three movement answers" was five.
+
 ## Testing
 
 - The suite runs on SQLite by default, but production is PostgreSQL, and
