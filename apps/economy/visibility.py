@@ -67,10 +67,11 @@ DEFAULTS = {
     #
     # Moving a default is NOT a free change, because `Profile.visibility` stores
     # only deviations — an unset field follows the default, retroactively.
-    # Migration 0188 therefore pins every member who had ALREADY declared
-    # substances under the old private default to private, so what changes is
-    # who is exposed from now on and nobody's existing declaration is opened
-    # without them choosing it.
+    # Migration 0188 therefore pinned every member who had ALREADY declared
+    # substances under the old private default to private, and 0189 opened
+    # the pins that were provably still untouched (see its docstring for how a
+    # pin is told apart from a member's own choice of Private — it matters,
+    # because the stored value is identical).
     "substances": MEMBER,
 
     # Served to nobody but the member today. `birthday` is the date itself —

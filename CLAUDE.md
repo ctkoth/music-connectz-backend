@@ -1875,9 +1875,23 @@ who had ALREADY declared substances and made no visibility choice to `private`
 — an explicit override — so nobody's existing declaration opens without them
 choosing it. Everyone who declares from now on gets the new default. It is
 one-way on purpose: a reverse could not tell its pins from a member's own
-choice, and un-pinning someone's private declaration cannot be undone. Opening
-the pinned ones too is a one-line backfill if that is ever wanted; it is
-deliberately not the default.
+choice, and un-pinning someone's private declaration cannot be undone.
+
+**Corey then opened the pinned ones too — migration 0189, and only the provable
+pins.** A pin (`["private"]`) is byte-identical to a member choosing Private after
+the default moved, so "open everything that is private" would override real
+choices. They differ in one place: 0188 wrote its pins with
+`save(update_fields=["visibility"])`, which leaves `Profile.updated_at` alone,
+while every normal write (the profile PATCH, the profile POST) saves it. So a
+`["private"]` row whose `updated_at` is not later than the moment 0188 was applied
+(read from `django_migrations`) has not been saved by anybody since the pin and is
+provably one; 0189 opens those by removing the override (they follow the default)
+and tells each member in-app. Anything saved since is ambiguous and stays private
+— the error that cannot be taken back is overriding someone's own decision. It
+uses `.update()` so the cutoff is not moved and a re-run finds nothing. With no
+0188 timestamp it opens nothing. Pinned members who have since edited their
+profile are therefore still private; opening *those* would need either their own
+say-so or accepting that some explicit choices get overridden, and is not done.
 
 **Choosing a field's default must REMOVE its stored override.** `clean_visibility`
 drops a value equal to the default (the row records choices), and the PATCH merged

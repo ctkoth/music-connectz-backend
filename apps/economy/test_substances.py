@@ -560,3 +560,97 @@ class SoberSearchHonoursVisibilityTests(TestCase):
         names = {m["username"] for m in self.client.get("/api/economy/members/", {"sober": "1"}).data["members"]}
         self.assertIn("open", names)
         self.assertNotIn("shy", names)
+
+
+class OpeningThePinnedTests(TestCase):
+    """0189 opens what 0188 pinned — and only what is provably a pin."""
+
+    CUTOFF = None
+
+    def setUp(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        self.now = timezone.now()
+        self.applied = self.now - timedelta(hours=1)     # when "0188" ran
+        self.before = self.applied - timedelta(days=3)   # last saved long before it
+        self.after = self.applied + timedelta(minutes=5) # saved since
+
+    def _mod(self):
+        from importlib import import_module
+        return import_module("apps.economy.migrations.0189_open_pinned_substances")
+
+    def _member(self, name, visibility, saved_at):
+        from apps.economy.models import Profile
+        u = User.objects.create_user(name, f"{name}@e.com", "pw12345678")
+        p = profile_for(u); p.substances = {"thc": "often"}; p.visibility = visibility; p.save()
+        Profile.objects.filter(pk=p.pk).update(updated_at=saved_at)   # update() does not bump it
+        return u
+
+    def _run(self, applied=...):
+        from apps.economy.models import Notification, Profile
+        return self._mod().open_pinned(Profile, Notification, self.applied if applied is ... else applied)
+
+    def _vis(self, u):
+        from apps.economy.models import Profile
+        return Profile.objects.get(user=u).visibility
+
+    def test_an_untouched_pin_is_opened_and_the_member_is_told(self):
+        from apps.economy.models import Notification
+        u = self._member("pinned", {"substances": ["private"]}, self.before)
+        self.assertEqual(self._run(), (1, 0))
+        self.assertNotIn("substances", self._vis(u))             # follows the default now
+        n = Notification.objects.get(user=u)
+        self.assertEqual(n.kind, "system")
+        self.assertIn("SubstanceZ is now open", n.text)
+
+    def test_a_pin_saved_since_may_be_a_choice_so_it_stays_private(self):
+        from apps.economy.models import Notification
+        u = self._member("chose", {"substances": ["private"]}, self.after)
+        self.assertEqual(self._run(), (0, 1))
+        self.assertEqual(self._vis(u)["substances"], ["private"])
+        self.assertFalse(Notification.objects.filter(user=u).exists())
+
+    def test_every_non_private_choice_is_left_alone(self):
+        for name, level in (("pub", ["public"]), ("mem", ["member"]), ("fr", ["friends"])):
+            u = self._member(name, {"substances": level}, self.before)
+            self.assertEqual(self._run(), (0, 0))
+            self.assertEqual(self._vis(u)["substances"], level)
+
+    def test_other_visibility_choices_survive_and_only_substances_is_cleared(self):
+        u = self._member("mixed", {"substances": ["private"], "bio": ["private"]}, self.before)
+        self._run()
+        self.assertEqual(self._vis(u), {"bio": ["private"]})
+
+    def test_it_is_idempotent(self):
+        from apps.economy.models import Notification
+        u = self._member("pinned", {"substances": ["private"]}, self.before)
+        self._run(); self._run()
+        self.assertEqual(Notification.objects.filter(user=u).count(), 1)
+        self.assertEqual(self._run(), (0, 0))
+
+    def test_with_no_proof_of_when_the_pin_was_written_nothing_opens(self):
+        u = self._member("pinned", {"substances": ["private"]}, self.before)
+        self.assertEqual(self._run(applied=None), (0, 0))
+        self.assertEqual(self._vis(u)["substances"], ["private"])
+
+    def test_the_cutoff_is_not_moved_by_opening(self):
+        from apps.economy.models import Profile
+        u = self._member("pinned", {"substances": ["private"]}, self.before)
+        self._run()
+        self.assertEqual(Profile.objects.get(user=u).updated_at, self.before)
+
+    def test_an_opened_member_is_then_findable_and_can_narrow_it_again(self):
+        viewer = User.objects.create_user("v", "v@e.com", "pw12345678")
+        vp = profile_for(viewer); vp.birthday = "1990-01-01"; vp.save()
+        u = self._member("pinned", {"substances": ["private"]}, self.before)
+        p = profile_for(u); p.birthday = "1990-01-01"; p.save()
+        from apps.economy.models import Profile
+        Profile.objects.filter(pk=p.pk).update(updated_at=self.before)
+        c = APIClient(); c.force_authenticate(User.objects.get(pk=viewer.pk))
+        names = lambda: {m["username"] for m in c.get("/api/economy/members/", {"uses": "thc"}).data["members"]}
+        self.assertNotIn("pinned", names())
+        self._run()
+        self.assertIn("pinned", names())
+        own = APIClient(); own.force_authenticate(User.objects.get(pk=u.pk))
+        own.patch("/api/auth/me/", {"visibility": {"substances": ["private"]}}, format="json")
+        self.assertNotIn("pinned", names())
