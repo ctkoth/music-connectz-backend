@@ -314,20 +314,31 @@ def delete_duplicate(target, keep=None, *, by, reason=""):
     finding out afterwards that a balance is gone is not a thing this app gets
     to do twice.
     """
+    def _refuse_if_destroying(owed):
+        if owed and keep is None:
+            raise ValueError(
+                f"That account holds {owed / 100:.2f} in money and royalties. "
+                f"Name an account to sweep it to — deleting it would destroy it."
+            )
+
     card = account_card(target)
     owed = _forfeit(card)
-    if owed and keep is None:
-        raise ValueError(
-            f"That account holds {owed / 100:.2f} in money and royalties. "
-            f"Name an account to sweep it to — deleting it would destroy it."
-        )
+    _refuse_if_destroying(owed)
     # Stop the account's Stripe billing BEFORE anything is moved. It raises
     # `CancelFailed`, a ValueError, which every caller already turns into a
     # refusal that says why; and doing it here, after the money check and before
     # the sweep, means a delete that is refused for either reason has changed
-    # nothing at all.
+    # nothing at all — bar the one case below, where cash arrives DURING the
+    # pass and the billing is already stopped (which is the safe half to hold).
     from apps.economy.stripe_cancel import cancel_for
     cancel_for(target)
+    # Read the cash AGAIN. The Stripe pass is seconds long, not milliseconds, and
+    # an auto-top-up invoice that was paid inside it has credited the wallet: the
+    # figure above would sweep nothing and the delete would destroy the credit,
+    # with a `keep` account named and no refusal.
+    card = account_card(target)
+    owed = _forfeit(card)
+    _refuse_if_destroying(owed)
     swept = {"money_cents": 0, "royalties_cents": 0}
     if owed and keep is not None:
         src, dst = wallet_for(target), wallet_for(keep)

@@ -25,6 +25,7 @@ from .models import (
     grant_lifetime, founding_status, membership_for,
     refund_window, REFUND_WINDOW_DAYS,
 )
+from . import stripe_cancel
 from .serializers import WalletSerializer
 from .models import wallet_for
 from .catalog import FOUNDING_PLANS, FOUNDING_TIER, PREMIUM_PLANS, STATZ_PLANS
@@ -415,6 +416,13 @@ class StripeWebhookView(APIView):
             kind = meta.get("kind")
             uid = meta.get("user_id") or obj.get("client_reference_id")
             user = get_user_model().objects.filter(pk=uid).first() if uid else None
+            if uid and user is None and kind in stripe_cancel.SUBSCRIPTION_KINDS:
+                # Paid for by an account that has been deleted since the Checkout
+                # opened (a session stays payable for hours). There is no row to
+                # attach the subscription to and nobody left to cancel it, so it
+                # is cancelled here, now. A failure raises on purpose: a 5xx makes
+                # Stripe retry, where a 200 is a subscription that bills forever.
+                stripe_cancel.cancel_orphan(obj.get("subscription"), kind, uid)
             if kind == "autotopup" and user:
                 # Saved-card recurring top-up set up — record the subscription so
                 # each future invoice credits the wallet. First invoice credits
@@ -486,6 +494,11 @@ class StripeWebhookView(APIView):
                 ).first()
                 if intent:
                     _complete_intent(intent)
+            if user and kind in stripe_cancel.SUBSCRIPTION_KINDS:
+                # The membership row keeps only the NEWEST customer and
+                # subscription, so Premium followed by StatZ would leave Premium
+                # unnamed by any row. The ledger keeps every one.
+                stripe_cancel.remember(user, obj.get("customer"), obj.get("subscription"), kind)
         elif etype == "identity.verification_session.verified":
             # Stripe Identity confirmed a government ID — set 18+ iff the DOB proves it.
             from .identity import mark_18plus_from_session

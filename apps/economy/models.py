@@ -413,6 +413,35 @@ class AutoTopUp(models.Model):
         return f"AutoTopUp {self.amount_cents}c/{self.interval} {'on' if self.active else 'off'} <{self.user}>"
 
 
+class StripeSubscription(models.Model):
+    """Every Stripe subscription a member has ever started, written once and never
+    overwritten.
+
+    `Membership.stripe_customer_id` and `last_payment_ref` are SCALARS: each new
+    subscription checkout replaces the last one, and every Checkout here creates
+    a brand-new Stripe customer. So a member who bought Premium and later StatZ
+    has the Premium subscription still billing at Stripe and no row on our side
+    that names it — which is exactly what deleting their account needs to find.
+    This is the table that remembers (`stripe_cancel.cancel_for` reads it), and
+    it is the same shape as `Partnership`: a tally of events rather than a second
+    opinion, written by the webhook that already saw the event.
+
+    It is NOT a billing record and nothing reads it for entitlement; the tier
+    still comes from `Membership`.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="stripe_subscriptions")
+    stripe_subscription_id = models.CharField(max_length=255, unique=True)
+    stripe_customer_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    kind = models.CharField(max_length=24, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.stripe_subscription_id} ({self.kind}) <{self.user}>"
+
+
 def upload_path(instance, filename):
     """Namespace uploaded files per user so quotas and cleanup stay isolated."""
     return f"uploads/{instance.user_id}/{filename}"
