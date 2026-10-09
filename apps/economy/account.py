@@ -80,7 +80,9 @@ class AccountDeleteView(APIView):
     def post(self, request):
         if str((request.data or {}).get("confirm", "")) != "DELETE":
             return Response({"detail": 'Send {"confirm": "DELETE"} to confirm.'}, status=status.HTTP_400_BAD_REQUEST)
+        from apps.accounts.erasure import delete_user
+
         u = request.user
         username = u.username
-        u.delete()  # FK cascades remove all owned rows
+        delete_user(u)  # FK cascades remove the rows; erasure.py takes the files
         return Response({"deleted": True, "username": username})

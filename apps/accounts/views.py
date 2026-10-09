@@ -554,9 +554,10 @@ class MeView(APIView):
         """Permanently delete the signed-in account and its owned data. FK
         cascades remove profile, wallet, membership, posts, follows, etc.
         Required for app-store login policies + GDPR/CCPA erasure."""
+        from .erasure import delete_user
+
         user = request.user
-        username = user.username
-        user.delete()
+        delete_user(user)  # rows cascade; the files go with them (see erasure.py)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -924,6 +925,8 @@ class UsersView(APIView):
         if not target:
             return Response({"detail": "user not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Delete the user
-        target.delete()
+        # Delete the user, and the files they uploaded (see erasure.py)
+        from .erasure import delete_user
+
+        delete_user(target)
         return Response({"deleted": username}, status=status.HTTP_200_OK)
