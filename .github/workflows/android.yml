@@ -32,6 +32,13 @@ permissions:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    # A step's `if` cannot read `secrets` — GitHub refuses to parse the whole
+    # workflow ("Unrecognized named-value: 'secrets'"), so this file has been a
+    # failed run on every push, before any step started, and no APK or bundle has
+    # ever come out of it. `env` IS readable in an `if`, so the secret goes through
+    # the job's env and the step asks about that.
+    env:
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
     defaults:
       run:
         working-directory: android
@@ -54,11 +61,9 @@ jobs:
       # Signed when the secrets are set, unsigned otherwise — Play can sign an
       # unsigned bundle on upload, so a missing keystore is not a failure.
       - name: Decode upload keystore
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        if: ${{ env.KEYSTORE_B64 != '' }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/upload.jks"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/upload.jks" >> "$GITHUB_ENV"
 
       - name: Play bundle (.aab)
