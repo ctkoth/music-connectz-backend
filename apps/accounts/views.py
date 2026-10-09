@@ -554,10 +554,18 @@ class MeView(APIView):
         """Permanently delete the signed-in account and its owned data. FK
         cascades remove profile, wallet, membership, posts, follows, etc.
         Required for app-store login policies + GDPR/CCPA erasure."""
+        from apps.economy.stripe_cancel import CancelFailed
+
         from .erasure import delete_user
 
         user = request.user
-        delete_user(user)  # rows cascade; the files go with them (see erasure.py)
+        try:
+            # Billing is cancelled first, then the rows cascade and the files go
+            # with them (erasure.py, stripe_cancel.py). If Stripe cannot be
+            # reached the account is NOT deleted and the member is told why.
+            delete_user(user)
+        except CancelFailed as exc:
+            return Response({"detail": exc.detail}, status=status.HTTP_502_BAD_GATEWAY)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -925,8 +933,14 @@ class UsersView(APIView):
         if not target:
             return Response({"detail": "user not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Delete the user, and the files they uploaded (see erasure.py)
+        # Cancel their billing, delete the user, and the files they uploaded
+        # (see stripe_cancel.py and erasure.py).
+        from apps.economy.stripe_cancel import CancelFailed
+
         from .erasure import delete_user
 
-        delete_user(target)
+        try:
+            delete_user(target)
+        except CancelFailed as exc:
+            return Response({"detail": exc.detail}, status=status.HTTP_502_BAD_GATEWAY)
         return Response({"deleted": username}, status=status.HTTP_200_OK)

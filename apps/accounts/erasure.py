@@ -73,8 +73,18 @@ def purge_files(files):
             log.exception("account erasure: could not remove stored file %r", name)
 
 
-def delete_user(user):
-    """`user.delete()`, and then the stored files, once the delete has committed."""
+def delete_user(user, *, billing_stopped=False):
+    """Cancel their billing, `user.delete()`, then the stored files once it commits.
+
+    Raises `CancelFailed` (a `ValueError`) BEFORE touching anything if a Stripe
+    subscription could not be cancelled: see `economy/stripe_cancel.py` for why
+    that refuses the delete rather than going ahead. `billing_stopped` is for the
+    one caller that has already done it, so a retry or a second door does not
+    pay for the same round trips twice.
+    """
+    if not billing_stopped:
+        from apps.economy.stripe_cancel import cancel_for
+        cancel_for(user)
     files = collect_files(user)
     with transaction.atomic():
         user.delete()
