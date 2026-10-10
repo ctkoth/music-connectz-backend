@@ -210,7 +210,8 @@ class VideoAuditCommandTests(TestCase):
         text = out.getvalue()
         self.assertIn("Seated Leg Extension", text)        # seated, no clip
         self.assertNotIn("Dumbbell Romanian Deadlift", text)  # has a clip, and is standing
-        self.assertNotIn("Machine Bench Press", text)      # seated, HAS a clip
+        # seated, HAS a clip (anchored: "Smith Machine Bench Press" has none)
+        self.assertNotRegex(text, r"chest\s+Machine Bench Press")
         self.assertNotIn("Barbell Squat", text)
 
 
