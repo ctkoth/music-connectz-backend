@@ -2084,3 +2084,25 @@ together `migrate` refuses ("Conflicting migrations detected") and the deploy
 fails after a green merge. `test_migration_graph` now fails on more than one leaf.
 Run `makemigrations --check` after pulling main, before pushing — the fix is
 `makemigrations --merge`.
+
+## RoutineZ: where a routine came from never decides whether it can change
+
+`BodieZRoutine.source` (`member` / `coach` / `session` / `trial`) is a LABEL
+for the routine list, never a permission — every routine goes through the same
+PATCH. A client may only claim `member` or `coach`; `session` is set by
+`sessions/<id>/routine/` and `trial` by `create_trial_split_routines`.
+
+- **A logged workout is editable after the fact.** `PUT sessions/<id>/sets/`
+  replaces a FINISHED session's sets through `clean_set_rows`, the one
+  validator `sessions/past/` also uses. Rows that come back with their `id` keep
+  their measured rest; every rewritten weight is marked `converted_from_lb` so
+  the pounds fix never converts a number typed in the current unit. Only a
+  backfilled workout's date can move — a live one's time was measured.
+- **A workout becomes a routine** (`routine_from_session`): one row per lift,
+  sets = how many were done, target = the TOP set, never an average.
+- **Routine titles are cut to 80** on both writers. SQLite ignored it; a
+  whole-body Coach title ran past the column and would have 500'd on Postgres.
+- Migration 0190 added 96 everyday lifts the library was missing against Jefit
+  (barbell/dumbbell/cable upright row, Arnold press, chin-up, hip thrust…). No
+  barbell RDL — 0178 made the one RDL a dumbbell lift. The listing counts moved
+  with it; re-run `tools/count_adaptive_exercises.py` before a release.

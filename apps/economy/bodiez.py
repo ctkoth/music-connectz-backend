@@ -68,6 +68,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
+from django.db import transaction
 from django.db.models import Count, Max
 from django.utils import timezone
 from rest_framework import status
@@ -316,7 +317,7 @@ def _routine_dict(r):
     return {"id": r.id, "title": r.title, "description": r.description,
             "exercises": r.exercises, "bucket": r.bucket, "day_tag": r.day_tag,
             "custom_day_id": r.custom_day_id,
-            "goal": r.goal,
+            "goal": r.goal, "source": r.source,
             "scheduled_for": r.scheduled_for.isoformat() if r.scheduled_for else None,
             "updated_at": r.updated_at.isoformat()}
 
@@ -647,7 +648,9 @@ class BodieZRoutinesView(APIView):
         return Response({"routines": [_routine_dict(r) for r in rows]})
 
     def post(self, request):
-        title = (request.data.get("title") or "").strip()
+        # Cut to the column: SQLite ignores varchar length and Postgres does
+        # not, so an over-long title passed every test and 500'd in production.
+        title = str(request.data.get("title") or "").strip()[:80]
         if not title:
             return Response({"detail": "Routine needs a title."}, status=status.HTTP_400_BAD_REQUEST)
         exercises = request.data.get("exercises")
@@ -675,10 +678,37 @@ class BodieZRoutinesView(APIView):
         if goal and goal not in GOALS:
             return Response({"detail": f"goal must be one of {sorted(GOALS)}, or blank."},
                             status=status.HTTP_400_BAD_REQUEST)
+        # Only the two a client can honestly claim: it built this by hand, or
+        # one of the Coach builders did. "session" and "trial" are set by the
+        # server paths that actually do those things.
+        source = request.data.get("source")
+        source = source if source in CLIENT_SOURCES else "member"
         routine = BodieZRoutine.objects.create(user=request.user, title=title, exercises=exercises,
                                                 bucket=bucket, day_tag=day_tag, description=description,
-                                                goal=goal, custom_day=custom_day or None)
+                                                goal=goal, custom_day=custom_day or None, source=source)
         return Response(_routine_dict(routine), status=status.HTTP_201_CREATED)
+
+
+CLIENT_SOURCES = {"member", "coach"}
+
+
+class BodieZRoutineCopyView(APIView):
+    """POST /api/economy/bodiez/routines/{id}/copy/ — a new routine that starts
+    as a copy of this one, so a member can change it without losing the one
+    they already run. The copy is theirs ("member"), whoever built the
+    original: from here on they are the one editing it."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, routine_id):
+        src = BodieZRoutine.objects.filter(id=routine_id, user=request.user).first()
+        if src is None:
+            return Response({"detail": "Routine not found."}, status=status.HTTP_404_NOT_FOUND)
+        title = str(request.data.get("title") or f"{src.title} (copy)").strip()[:80]
+        r = BodieZRoutine.objects.create(
+            user=request.user, title=title, description=src.description,
+            exercises=[dict(e) for e in (src.exercises or []) if isinstance(e, dict)],
+            bucket="inbox", day_tag=src.day_tag, custom_day=src.custom_day, goal=src.goal, source="member")
+        return Response(_routine_dict(r), status=status.HTTP_201_CREATED)
 
 
 # The trial's "Build a week" flow computes the split client-side — the same
@@ -747,7 +777,7 @@ def create_trial_split_routines(user, days):
     quietly disagree within a year."""
     for day in days:
         BodieZRoutine.objects.create(user=user, title=day["title"],
-                                      exercises=day["exercises"], bucket="inbox")
+                                      exercises=day["exercises"], bucket="inbox", source="trial")
 
 
 class BodieZRoutineDetailView(APIView):
@@ -766,7 +796,7 @@ class BodieZRoutineDetailView(APIView):
             return Response({"detail": "Routine not found."}, status=status.HTTP_404_NOT_FOUND)
         title = request.data.get("title")
         if title is not None:
-            title = title.strip()
+            title = str(title).strip()[:80]
             if not title:
                 return Response({"detail": "Routine needs a title."}, status=status.HTTP_400_BAD_REQUEST)
             routine.title = title
@@ -975,6 +1005,49 @@ MAX_PAST_SETS = 100
 MAX_PAST_DAYS = 365 * 5
 
 
+def clean_set_rows(user, raw):
+    """Untrusted set rows -> ([(id|None, exercise, reps, weight, side)], None)
+    or ([], "the sentence saying which set and why").
+
+    The ONE validator for a list of sets typed in rather than logged live —
+    a past workout and an edit of a logged one both come through here, so the
+    two can never disagree about what a set may be. All or nothing: the first
+    bad row refuses the lot, and the message names it.
+    """
+    ids = {r.get("exercise_id") for r in raw if isinstance(r, dict)}
+    try:
+        exercises = {e.id: e for e in BodieZExercise.objects.visible(user).filter(id__in=ids)}
+    except (ValueError, TypeError):
+        exercises = {}
+    clean = []
+    for i, r in enumerate(raw, 1):
+        if not isinstance(r, dict) or r.get("exercise_id") not in exercises:
+            return [], f"Set {i}: unknown exercise."
+        try:
+            reps = int(r.get("reps"))
+        except (TypeError, ValueError):
+            return [], f"Set {i}: reps must be a number."
+        if not 1 <= reps <= MAX_REPS_PER_SET:
+            return [], f"Set {i}: reps must be 1 to {MAX_REPS_PER_SET}."
+        weight = r.get("weight_kg")
+        if weight in (None, ""):
+            weight = None
+        else:
+            try:
+                weight = Decimal(str(weight))
+            except Exception:
+                return [], f"Set {i}: weight must be a number."
+            if weight < 0 or weight >= 10000:
+                return [], f"Set {i}: weight is out of range."
+        side = _clean_side(r.get("one_sided"))
+        if side is None:
+            return [], f"Set {i}: one_sided must be blank, arm or leg."
+        set_id = r.get("id")
+        set_id = set_id if isinstance(set_id, int) and not isinstance(set_id, bool) else None
+        clean.append((set_id, exercises[r["exercise_id"]], reps, weight, side))
+    return clean, None
+
+
 class BodieZPastSessionView(APIView):
     """POST /api/economy/bodiez/sessions/past/ — log a workout you already did.
 
@@ -1017,39 +1090,9 @@ class BodieZPastSessionView(APIView):
             return Response({"detail": f"At most {MAX_PAST_SETS} sets in one workout."},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        ids = {r.get("exercise_id") for r in raw if isinstance(r, dict)}
-        try:
-            exercises = {e.id: e for e in BodieZExercise.objects.visible(request.user).filter(id__in=ids)}
-        except (ValueError, TypeError):
-            exercises = {}
-        clean = []
-        for i, r in enumerate(raw, 1):
-            if not isinstance(r, dict) or r.get("exercise_id") not in exercises:
-                return Response({"detail": f"Set {i}: unknown exercise."}, status=status.HTTP_400_BAD_REQUEST)
-            try:
-                reps = int(r.get("reps"))
-            except (TypeError, ValueError):
-                return Response({"detail": f"Set {i}: reps must be a number."}, status=status.HTTP_400_BAD_REQUEST)
-            if not 1 <= reps <= MAX_REPS_PER_SET:
-                return Response({"detail": f"Set {i}: reps must be 1 to {MAX_REPS_PER_SET}."},
-                                status=status.HTTP_400_BAD_REQUEST)
-            weight = r.get("weight_kg")
-            if weight in (None, ""):
-                weight = None
-            else:
-                try:
-                    weight = Decimal(str(weight))
-                except Exception:
-                    return Response({"detail": f"Set {i}: weight must be a number."},
-                                    status=status.HTTP_400_BAD_REQUEST)
-                if weight < 0 or weight >= 10000:
-                    return Response({"detail": f"Set {i}: weight is out of range."},
-                                    status=status.HTTP_400_BAD_REQUEST)
-            side = _clean_side(r.get("one_sided"))
-            if side is None:
-                return Response({"detail": f"Set {i}: one_sided must be blank, arm or leg."},
-                                status=status.HTTP_400_BAD_REQUEST)
-            clean.append((exercises[r["exercise_id"]], reps, weight, side))
+        clean, problem = clean_set_rows(request.user, raw)
+        if problem:
+            return Response({"detail": problem}, status=status.HTTP_400_BAD_REQUEST)
 
         # Today: now. Any other day: noon, so the date survives a timezone.
         when = (timezone.now() if day == today else
@@ -1060,7 +1103,7 @@ class BodieZPastSessionView(APIView):
         BodieZSession.objects.filter(id=sess.id).update(started_at=when)
         sess.refresh_from_db()
         counts = defaultdict(int)
-        for ex, reps, weight, side in clean:
+        for _id, ex, reps, weight, side in clean:
             counts[ex.id] += 1
             BodieZSet.objects.create(session=sess, exercise=ex, set_number=counts[ex.id],
                                      reps=reps, weight_kg=weight, rest_seconds=None, one_sided=side)
@@ -1070,19 +1113,45 @@ class BodieZPastSessionView(APIView):
 
 
 class BodieZSessionDetailView(APIView):
-    """PATCH /api/economy/bodiez/sessions/{id}/ — finish a session (notes,
-    ended_at)."""
+    """PATCH /api/economy/bodiez/sessions/{id}/ — finish a session, or edit a
+    finished one's notes and (for one typed in afterwards) its date.
+    DELETE removes a workout and its sets."""
     permission_classes = [IsAuthenticated]
+
+    def delete(self, request, session_id):
+        deleted, _ = BodieZSession.objects.filter(id=session_id, user=request.user).delete()
+        if not deleted:
+            return Response({"detail": "Session not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def patch(self, request, session_id):
         try:
             sess = BodieZSession.objects.get(id=session_id, user=request.user)
         except BodieZSession.DoesNotExist:
             return Response({"detail": "Session not found."}, status=status.HTTP_404_NOT_FOUND)
+        if request.data.get("date"):
+            # Only a workout typed in afterwards has a date the member chose.
+            # A live one's start and end were measured by the server, and
+            # moving them would make its duration and rest times lie.
+            if not sess.backfilled:
+                return Response({"detail": "A workout logged live keeps the time it happened."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            try:
+                day = date.fromisoformat(str(request.data.get("date"))[:10])
+            except ValueError:
+                return Response({"detail": "date must be YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+            today = timezone.localdate()
+            if day > today:
+                return Response({"detail": "That date is in the future."}, status=status.HTTP_400_BAD_REQUEST)
+            if (today - day).days > MAX_PAST_DAYS:
+                return Response({"detail": "That's more than five years back."}, status=status.HTTP_400_BAD_REQUEST)
+            if day != timezone.localtime(sess.started_at).date():
+                when = timezone.make_aware(datetime.combine(day, datetime.min.time().replace(hour=12)))
+                BodieZSession.objects.filter(id=sess.id).update(started_at=when, ended_at=when)
+                sess.refresh_from_db()
         if request.data.get("finish"):
             if sess.ended_at:
                 return Response({"detail": "Session already finished."}, status=status.HTTP_400_BAD_REQUEST)
-            from django.utils import timezone
             sess.ended_at = timezone.now()
         notes = request.data.get("notes")
         if notes is not None:
@@ -1094,9 +1163,101 @@ class BodieZSessionDetailView(APIView):
         return Response(out)
 
 
-class BodieZSetsView(APIView):
-    """POST /api/economy/bodiez/sessions/{id}/sets/ — log one set."""
+def routine_from_session(sess):
+    """A logged workout -> routine rows: one per lift, in the order it was
+    first done, with the number of sets done and the TOP set's weight and
+    reps as the target. The top set, not an average: the routine is what you
+    did, and an average of a warm-up and a working set is a set nobody did."""
+    by_ex = {}
+    for x in sess.sets.order_by("id"):
+        by_ex.setdefault(x.exercise_id, []).append(x)
+    rows = []
+    for i, (ex_id, ss) in enumerate(by_ex.items()):
+        top = max(ss, key=lambda x: (x.weight_kg if x.weight_kg is not None else Decimal(-1), x.reps))
+        rows.append({"exercise_id": ex_id, "order": i, "sets": len(ss), "reps": top.reps,
+                     "weight_kg": float(top.weight_kg) if top.weight_kg is not None else None})
+    return rows
+
+
+class BodieZSessionRoutineView(APIView):
+    """POST /api/economy/bodiez/sessions/{id}/routine/ — save a logged
+    workout as a new routine. The workout is untouched; the routine is a new
+    row in Inbox that the designer edits like any other."""
     permission_classes = [IsAuthenticated]
+
+    def post(self, request, session_id):
+        sess = BodieZSession.objects.filter(id=session_id, user=request.user).select_related("routine").first()
+        if sess is None:
+            return Response({"detail": "Session not found."}, status=status.HTTP_404_NOT_FOUND)
+        rows = routine_from_session(sess)
+        if not rows:
+            return Response({"detail": "That workout has no sets to build a routine from."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        day = timezone.localtime(sess.started_at).date().isoformat()
+        base = sess.routine.title if sess.routine_id and sess.routine else "Workout"
+        title = str(request.data.get("title") or f"{base} — {day}").strip()[:80]
+        r = BodieZRoutine.objects.create(
+            user=request.user, title=title, exercises=rows, bucket="inbox", source="session",
+            goal=sess.routine.goal if sess.routine_id and sess.routine else "",
+            description=f"Built from your workout on {day}."[:200])
+        return Response(_routine_dict(r), status=status.HTTP_201_CREATED)
+
+
+class BodieZSetsView(APIView):
+    """POST /api/economy/bodiez/sessions/{id}/sets/ — log one set.
+    PUT replaces every set of a FINISHED session — the edit of a workout
+    already logged."""
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request, session_id):
+        try:
+            sess = BodieZSession.objects.get(id=session_id, user=request.user)
+        except BodieZSession.DoesNotExist:
+            return Response({"detail": "Session not found."}, status=status.HTTP_404_NOT_FOUND)
+        # A live session is edited by logging; rewriting it underneath the
+        # logger would break the rest timer's "since the last set".
+        if not sess.ended_at:
+            return Response({"detail": "Finish this session before editing its sets."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        raw = request.data.get("sets")
+        if not isinstance(raw, list) or not raw:
+            return Response({"detail": "A workout needs at least one set — delete the workout instead."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if len(raw) > MAX_PAST_SETS:
+            return Response({"detail": f"At most {MAX_PAST_SETS} sets in one workout."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        clean, problem = clean_set_rows(request.user, raw)
+        if problem:
+            return Response({"detail": problem}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing = {x.id: x for x in sess.sets.all()}
+        counts = defaultdict(int)
+        with transaction.atomic():
+            kept = set()
+            for set_id, ex, reps, weight, side in clean:
+                counts[ex.id] += 1
+                row = existing.get(set_id)
+                if row is None or set_id in kept:
+                    BodieZSet.objects.create(session=sess, exercise=ex, set_number=counts[ex.id],
+                                             reps=reps, weight_kg=weight, rest_seconds=None, one_sided=side,
+                                             converted_from_lb=True)
+                    continue
+                kept.add(set_id)
+                # A kept set keeps its measured rest — that was real — unless
+                # it is now a different lift, when the rest belonged to
+                # something else. converted_from_lb: whatever weight is here
+                # now was typed in the member's current unit, so the pounds
+                # fix must never convert it again.
+                if row.exercise_id != ex.id:
+                    row.rest_seconds = None
+                row.exercise, row.set_number, row.reps = ex, counts[ex.id], reps
+                row.weight_kg, row.one_sided, row.converted_from_lb = weight, side, True
+                row.save(update_fields=["exercise", "set_number", "reps", "weight_kg", "one_sided",
+                                        "rest_seconds", "converted_from_lb"])
+            BodieZSet.objects.filter(id__in=list(existing.keys() - kept)).delete()
+        out = _session_dict(sess)
+        out["summary"] = session_summary(sess)
+        return Response(out)
 
     def post(self, request, session_id):
         try:
