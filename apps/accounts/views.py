@@ -209,6 +209,33 @@ def connections_for(user):
     return out
 
 
+def _provider_vouches(info):
+    """True only when the provider said it confirmed the address it returned.
+
+    `oauth.py` sets `email_verified` per provider and leaves it False for every
+    userinfo endpoint that does not say. An address with no flag is a string the
+    member typed into somebody else's profile, so it never counts.
+    """
+    return bool(info.get("email") and info.get("email_verified"))
+
+
+def _note_email_verified(identity, info):
+    """A returning sign-in can upgrade what the identity says about its address.
+
+    Never the other way: one sign-in where a provider omits the flag is not a
+    reason to take back what an earlier one confirmed. And only a CONFIRMED
+    address replaces the stored one — an unconfirmed address from the provider
+    must not overwrite one the member has already proven.
+    """
+    if not _provider_vouches(info):
+        return
+    email = (info.get("email") or "").lower()
+    if identity.email_verified and identity.email == email:
+        return
+    identity.email, identity.email_verified = email, True
+    identity.save(update_fields=["email", "email_verified"])
+
+
 def _user_from_oauth(info, with_created=False, create=True):
     """Find-or-create a user from a verified OAuth payload, return (user).
 
@@ -237,6 +264,7 @@ def _user_from_oauth(info, with_created=False, create=True):
         provider=info["provider"], provider_uid=info["uid"]
     ).first()
     if identity:
+        _note_email_verified(identity, info)
         return (identity.user, False) if with_created else identity.user
 
     made = False
@@ -301,7 +329,8 @@ def _user_from_oauth(info, with_created=False, create=True):
     OAuthIdentity.objects.get_or_create(
         provider=info["provider"],
         provider_uid=info["uid"],
-        defaults={"user": user, "email": info.get("email", "")},
+        defaults={"user": user, "email": info.get("email", ""),
+                  "email_verified": _provider_vouches(info)},
     )
     return (user, made) if with_created else user
 
@@ -800,6 +829,7 @@ class OAuthLinkView(APIView):
                 provider=info["provider"],
                 provider_uid=info["uid"],
                 email=info.get("email", ""),
+                email_verified=_provider_vouches(info),
             )
 
             return Response(

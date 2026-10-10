@@ -19,6 +19,27 @@ So nothing here decides anything on its own. Three rules hold the whole file:
   carrying the same email is a member's own business and they may close the
   other one themselves. Anything weaker is a claim, and it waits.
 
+## Closing one without signing in to it takes PROOF, and proof is not a percentage
+
+Corey's bar is that deleting a duplicate from the main account, without ever
+signing in to the duplicate, needs better than 90% certainty that it is the same
+person. This is that bar, and it is deliberately NOT a probability:
+
+* There is no calibrated number to give. A "92% likely duplicate" would need a
+  set of labelled duplicates to have been fitted against, and there are none — it
+  would be a number made up to look like a threshold, behind an action nobody can
+  undo (see the first rule above).
+* What can be stated is the evidence, and proof is a stricter bar than 90%: **the
+  provider confirmed the same address on a linked sign-in of BOTH accounts**
+  (`has_proof`). Two accounts that share a confirmed inbox share an owner. An
+  address nobody confirmed is a string somebody typed into a provider's profile —
+  `OAuthLinkView` used to store whatever came back — and counting it let one
+  member close another member's account, and read its email and balance first.
+* Anything short of proof is a CLAIM the member finishes by signing in to the
+  other account (`DupeZVerifyView`), which is proof of a different and better
+  kind: they know both passwords. The app keeps the main account signed in on
+  the device so they can switch straight back.
+
 ## What a delete may destroy, and what it may not
 
 `AccountDeleteView` has always deleted a wallet holding real money without
@@ -109,6 +130,13 @@ def _oauth_emails(u):
             for i in u.oauth_identities.all() if (i.email or "").strip()}
 
 
+def _verified_oauth_emails(u):
+    """Addresses a provider CONFIRMED on one of this account's linked sign-ins."""
+    return {(i.email or "").strip().lower()
+            for i in u.oauth_identities.all()
+            if (i.email or "").strip() and i.email_verified}
+
+
 def _oauth_uids(u):
     return {(i.provider, i.provider_uid) for i in u.oauth_identities.all()}
 
@@ -137,6 +165,7 @@ def signals_between(a, b):
         out.append({"key": "account_email", "detail": ea})
 
     shared_oauth = _oauth_emails(a) & _oauth_emails(b)
+    confirmed_on_both = _verified_oauth_emails(a) & _verified_oauth_emails(b)
     for e in sorted(shared_oauth):
         # The case Corey has: two accounts registered under different emails,
         # both signed in with the same Google or SoundCloud identity. The
@@ -144,10 +173,13 @@ def signals_between(a, b):
         # queried `oauthidentity__email`, and the reverse name is
         # `oauth_identities`, so that branch raised FieldError the moment a
         # real cross-email duplicate existed.
-        out.append({"key": "oauth_email", "detail": e})
+        out.append({"key": "oauth_email", "detail": e,
+                    "proof": e in confirmed_on_both})
 
     for provider, uid in sorted(_oauth_uids(a) & _oauth_uids(b)):
-        out.append({"key": "oauth_provider_uid", "detail": provider})
+        # The very same provider account on both. `unique_together` makes this
+        # unreachable today; if it ever fires it is the strongest thing here.
+        out.append({"key": "oauth_provider_uid", "detail": provider, "proof": True})
 
     shared_ips = _ips(a) & _ips(b)
     for ip in sorted(shared_ips):
@@ -162,12 +194,40 @@ def signals_between(a, b):
 
     for s in out:
         label, weight = SIGNAL_LABELS.get(s["key"], (s["key"], WEAK))
+        # Said in words, because the member and the owner both read these. The
+        # same row of text must not read as proof when it is not.
+        if s["key"] == "oauth_email":
+            label = ("Same email, confirmed by the provider, on a linked sign-in"
+                     if s.get("proof") else
+                     "Same email on a linked sign-in (the provider did not confirm it)")
         s["label"], s["weight"] = label, weight
+        s.setdefault("proof", False)
     return out
 
 
 def has_strong(signals):
     return any(s.get("weight") == STRONG for s in signals)
+
+
+def has_proof(signals):
+    """True when the evidence is proof of control, not a strong hint.
+
+    This is the whole gate for closing an account WITHOUT signing in to it, and
+    it is not `has_strong`: a strong signal says the two are worth an owner's
+    eye, proof says the same person confirmed the same inbox on both. See the
+    module docstring for why this is a rule about evidence and not a percentage.
+    """
+    return any(s.get("proof") for s in signals)
+
+
+# What the screen says when somebody asks why they cannot close it from here.
+# Served, never retyped, for the same reason `rulez` is.
+PROOF_RULE = (
+    "To close another account from here without signing in to it, both accounts "
+    "need the same email confirmed by a provider you signed in with. If they don't, "
+    "sign in to the other account and confirm it from there — this account stays "
+    "signed in on this device, so you can switch straight back."
+)
 
 
 def account_card(u):
@@ -198,6 +258,17 @@ def account_card(u):
         "promptz": w.promptz,
         "sign_ins": sorted({i.provider for i in u.oauth_identities.all()}),
     }
+
+
+def redacted_card(u):
+    """What a member may see of an account they have NOT proven is theirs.
+
+    The handle, and nothing else. `account_card` carries the email, the wallet
+    and the counts — what a delete would destroy — and showing that to somebody
+    whose only claim is a shared address a provider never confirmed would let
+    them read a stranger's email and balance by typing it into a profile.
+    """
+    return {"username": u.username, "redacted": True}
 
 
 def _candidate_pairs(users):
@@ -504,8 +575,26 @@ class DupeZView(APIView):
                 others = [u for u in User.objects.filter(username__in=names)
                           .prefetch_related("oauth_identities").select_related("referred_by")
                           if u.id != me.id]
-                if all(has_strong(signals_between(me, u)) for u in others):
-                    mine.append(g)
+                sigs = {u.username: signals_between(me, u) for u in others}
+                if not all(has_strong(x) for x in sigs.values()):
+                    continue
+                # What a member may SEE of each one depends on whether they
+                # have PROVED it is theirs. A strong signal without proof (an
+                # address a provider never confirmed) is enough to offer the
+                # sign-in route and not enough to show a stranger's email and
+                # balance — which is what the full card holds.
+                accounts = []
+                for a in g["accounts"]:
+                    if a["username"] == me.username:
+                        accounts.append(dict(a, proof=None))
+                    elif has_proof(sigs[a["username"]]):
+                        accounts.append(dict(a, proof=True))
+                    else:
+                        accounts.append({"username": a["username"], "redacted": True, "proof": False})
+                # Pairs between two OTHER accounts name addresses of people the
+                # member has not proven are theirs; only pairs through them.
+                pairs = [p for p in g["pairs"] if me.username in (p["a"], p["b"])]
+                mine.append({**g, "accounts": accounts, "pairs": pairs})
             groups = mine
             weak_pairs = []  # Members don't see weak pairs
 
@@ -516,6 +605,9 @@ class DupeZView(APIView):
             # The rule these groups exist to enforce, served with them so the
             # screen never retypes it.
             "rule": rule("one_account"),
+            # And what closing one without signing in to it takes, for the same
+            # reason: the screen states it, it does not own it.
+            "proof_rule": PROOF_RULE,
         })
 
 
@@ -524,13 +616,16 @@ class DupeZClaimView(APIView):
 
     Two outcomes, and which one you get is decided by whether you can PROVE it:
 
-    * **Same email on both accounts** → you may close the other one yourself,
-      with `confirm: "DELETE"`. It is your account and your email; needing an
-      owner's permission to tidy up your own mess would be a queue that exists
-      to make people wait.
-    * **Anything else** → a claim, reviewed by the owner. Different emails
-      cannot be told apart from somebody pointing at an account that is not
-      theirs, and the difference matters because the answer is a deletion.
+    * **Proof you control both** (`has_proof`: the same email, confirmed by
+      the provider, on a linked sign-in of each) → you may close the other one
+      yourself, with `confirm: "DELETE"`. It is your account and your inbox;
+      needing an owner's permission to tidy up your own mess would be a queue
+      that exists to make people wait.
+    * **Anything else** → a claim. The member finishes it by signing in to the
+      other account and confirming there (`DupeZVerifyView`), or the owner
+      reviews it. Different emails cannot be told apart from somebody pointing
+      at an account that is not theirs, and the difference matters because the
+      answer is a deletion.
     """
 
     permission_classes = [IsAuthenticated]
@@ -558,21 +653,24 @@ class DupeZClaimView(APIView):
 
         signals = signals_between(request.user, target)
         note = str(d.get("note", ""))[:2000]
-        # SELF-SERVE needs proof, not a hunch — and `has_strong` is what
-        # "proof" means here. It was `account_email` alone, which
-        # `accounts_user_email_ci_uniq` (accounts.0002) then made unreachable:
-        # the database refuses a second account on one address, so two live
-        # accounts cannot share one and that signal can no longer fire. Gating
-        # on the strength rather than on the one signal keeps the path open for
-        # the case that DOES still happen, and is the case this module was
-        # written for — different addresses, one verified sign-in behind both.
+        # SELF-SERVE needs PROOF, not a hunch — and `has_proof` is what that
+        # means here, which is stricter than `has_strong` on purpose.
         #
-        # It is not a weaker bar. A shared provider identity means the same
-        # person authenticated with the provider on both accounts, which is at
-        # least as good as two rows agreeing on a string. Anything WEAK still
-        # waits for the owner, which is the whole reason weak signals never
-        # group anybody.
-        proven = has_strong(signals)
+        # It was `has_strong`, and the comment defended it as "the same person
+        # authenticated with the provider on both accounts, which is at least as
+        # good as two rows agreeing on a string". That described a shared
+        # provider identity, which `unique_together` makes unreachable. What
+        # actually fired was `oauth_email`: the same ADDRESS on a sign-in of each
+        # account, and `OAuthLinkView` stored whatever address came back without
+        # asking whether the provider had confirmed it. So one member could link a
+        # provider showing somebody else's address and close that somebody's
+        # account — after reading their email and balance in DupeZ.
+        #
+        # Now the provider must have confirmed the address on BOTH sides, which is
+        # control of the same inbox. Anything less is a claim the member finishes
+        # by signing in to the other account. See the module docstring for why this
+        # is a rule about evidence and not a percentage.
+        proven = has_proof(signals)
 
         if proven:
             card = account_card(target)
@@ -610,11 +708,27 @@ class DupeZClaimView(APIView):
             return Response(receipt)
 
         claim = _open_claim(request.user, target, signals, note)
-        return Response({"claim": _claim_dict(claim), "detail": (
-            "Filed. Nothing here PROVES the two are the same person, so the other "
-            "account has to confirm it before anything is deleted. They've been "
-            "asked — you'll be told either way."
-        )}, status=status.HTTP_202_ACCEPTED)
+        # Why not now, in the member's terms. A strong signal that was not proof
+        # is the case worth explaining: it LOOKS like the same person and the
+        # member will wonder why it was not enough.
+        why = (
+            "The two share an email on a linked sign-in, but the provider never "
+            "confirmed it, so that isn't proof you own both."
+            if has_strong(signals) else
+            "Nothing here proves the two are the same person."
+        )
+        return Response({
+            "claim": _claim_dict(claim),
+            # The way through, as data: the screen offers it as a button rather
+            # than as a sentence somebody has to act on from memory.
+            "confirm_by_sign_in": target.username,
+            "detail": (
+                f"Filed. {why} To finish, sign in to @{target.username} and "
+                "confirm it from there — you stay signed in to this account on "
+                "this device, so you can switch straight back. Or the owner can "
+                "review it."
+            ),
+        }, status=status.HTTP_202_ACCEPTED)
 
 
 def _open_claim(claimant, target, signals, note):
