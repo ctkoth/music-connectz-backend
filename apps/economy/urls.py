@@ -56,6 +56,7 @@ from .battlez import (BattlesView, BattleChallengeView, BattleDetailView,
 from .opportunitiez import OpportunitieZView
 from .sentencez import SentenceRoyaltyView, SentenceView
 from .statz_trial import StatzTrialView
+from .superset import BodieZPairView
 from .viewz import ViewBeatView, ViewCountsView, ViewStartView, ViewTimelineView
 from .metricz import HoroscopeView, MetricZView, SubstanceScaleView
 from .videoz import VideoDetailView, VideoView
@@ -492,6 +493,7 @@ urlpatterns = [
     path("bodiez/custom-days/", BodieZCustomDaysView.as_view(), name="economy-bodiez-custom-days"),
     path("bodiez/custom-days/<int:day_id>/", BodieZCustomDayDetailView.as_view(),
          name="economy-bodiez-custom-day"),
+    path("bodiez/pair/", BodieZPairView.as_view(), name="economy-bodiez-pair"),
     path("bodiez/routines/", BodieZRoutinesView.as_view(), name="economy-bodiez-routines"),
     path("bodiez/routines/<int:routine_id>/copy/", BodieZRoutineCopyView.as_view(),
          name="economy-bodiez-routine-copy"),
