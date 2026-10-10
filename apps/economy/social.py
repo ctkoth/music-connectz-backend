@@ -62,7 +62,7 @@ from .models import (
     ListenProgress, record_listen, LISTEN_REQUIRED_SEC,
 )
 from .badgez import worn_badges, worn_badges_by_user
-from .catalog import AVATAR_MAX_MB, over_char_limit
+from .catalog import AVATAR_MAX_MB, limits_for, over_char_limit
 from .gates import GATE_KEYS, clean_gates, failing_gate, member_metrics, refusal
 from .serializers import WalletSerializer
 from .personaz import clean_link, clean_persona, links_of, personas_of
@@ -387,6 +387,24 @@ PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign
 #     luck.)
 #
 # One cleaner per field, in the one place both writers can reach.
+# Bounds the work one request can ask of the cleaner. Not a tier: see `links_over_cap`.
+LINKS_CEILING = 1000
+
+
+def links_over_cap(user, current, new):
+    """The ceiling `new` breaks for this member, or None if the list fits.
+
+    The ceiling is the tier's `profile_links`, or what the member ALREADY holds if
+    that is more — so a number moving never takes a link away, it only stops more
+    being added. (It was a silent 50 before; somebody may hold 50 on a tier that now
+    says 25.) Editing, reordering and removing are always allowed, because a list
+    that is no longer than the one stored can never be refused.
+    """
+    cap = limits_for(membership_for(user).tier)["profile_links"]
+    allowed = max(cap, len(current or []))
+    return None if len(new) <= allowed else allowed
+
+
 def clean_profile_field(field, value):
     """The stored form of one PROFILE_FIELDS value, from whatever came in."""
     if field == "substances":
@@ -396,7 +414,10 @@ def clean_profile_field(field, value):
     if field == "links":
         if not isinstance(value, list):
             return []
-        return [l for l in (clean_link(x) for x in value[:50]) if l]
+        # A hard ceiling on what ONE request may make the cleaner chew through,
+        # well above every tier. What a member may actually HOLD is
+        # `links_over_cap`, which knows the tier; this only bounds the work.
+        return [l for l in (clean_link(x) for x in value[:LINKS_CEILING]) if l]
     if field in ("nationalities", "regions", "traits", "attracted_to"):
         return [str(x)[:60] for x in value][:30] if isinstance(value, list) else []
     if field == "personality":
@@ -706,6 +727,12 @@ def _profile_full(p, request, recheck=False):
         "overall_count": OverallRating.objects.filter(target=p.user).count(),
         "relationship": relationship(request.user, p.user),
         "energy_per_hour": energy_rate_per_hour(p.user) if mine else None,
+        # The portfolio's ceiling, stated to its owner before they add anything.
+        # `links_limit` is what they may hold NOW (their tier's, or what they
+        # already have if that is more — see links_over_cap); `links_tier_cap` is
+        # the tier's own number, so the screen can say when somebody is over it.
+        **({"links_limit": max(limits_for(membership_for(p.user).tier)["profile_links"], len(links_of(p))),
+            "links_tier_cap": limits_for(membership_for(p.user).tier)["profile_links"]} if mine else {}),
         "verified_18plus": p.verified_18plus,
         # What the badges on this card add up to — yours only. An effect total
         # is a read of somebody's economy, not a thing to publish about them.
@@ -1011,6 +1038,22 @@ class ProfileView(APIView):
         # profile as it WILL be saved: judging the stored row let a member set a
         # teen birthday and an orientation in one request and keep both, because
         # at the top of that request their age was still unknown.
+        # The portfolio has a ceiling per tier and it is SAID, not applied by
+        # quietly cutting the list — the flat 50 this replaced dropped everything
+        # past it and answered 200, so somebody who pasted 60 links saw a clean
+        # save and 10 of them gone. Like the bio, it is judged before anything is
+        # written, so one over-long list does not lose the rest of the edit.
+        if "links" in d:
+            incoming = clean_profile_field("links", d["links"])
+            over = links_over_cap(request.user, links_of(p), incoming)
+            if over is not None:
+                tier_cap = limits_for(membership_for(request.user).tier)["profile_links"]
+                return Response(
+                    {"detail": (f"Your profile holds up to {over} links and this list has {len(incoming)}. "
+                                "Remove some, or move up a tier in MembershipZ for more room."),
+                     "links_limit": over, "links_tier_cap": tier_cap, "links_count": len(incoming)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         for f in PROFILE_FIELDS:
             if f in d:
                 setattr(p, f, clean_profile_field(f, d[f]))

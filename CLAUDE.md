@@ -2195,3 +2195,34 @@ to say yes). **A locked phone pauses a web page and nothing a page can do preven
 that.** Keeping the screen on keeps the rest clock running and the notification
 covers switching to another app; the copy says exactly that rather than promising
 a timer that survives a pocket.
+
+## The portfolio: links ladder, and a ceiling that is said rather than applied
+
+A member's `links` are their portfolio — the tracks, videos, pages and shops that say who
+they are — and they are the one thing on a profile a visitor came for. They had a flat
+**silent 50**: `clean_profile_field` cut the list there and answered 200, so somebody who
+pasted 60 saw a clean save and ten of them gone. `catalog.TIER_LIMITS["profile_links"]`
+is the ladder now (**Free 25, Premium 100, StatZ 300**) and it is **a recommendation,
+Corey's to move**.
+
+- **Generous at the bottom on purpose.** The work is the reason anybody visits a profile,
+  and a tier that rationed it would be rationing the thing the platform exists to show.
+  It ladders because rows are not free — the list rides the full-profile payload and the
+  public page (never the member CARD, which carries no links) — not because links are a
+  luxury. A tier says how MUCH, never whether.
+- **Said, not applied.** `ProfileView.post` judges the list BEFORE writing anything and
+  refuses with the number (`links_limit`, `links_count`) and a sentence the screen shows
+  unreworded — like the bio, so one over-long list cannot lose the rest of the edit.
+- **Nobody loses a link when the number moves** (`links_over_cap`). The ceiling is the
+  tier's or what the member already holds, whichever is MORE: somebody holding 50 on a tier
+  that now says 25 keeps all 50, can reorder and remove them, and cannot add until they are
+  under. A list no longer than the stored one can never be refused.
+- **The cleaner's own bound is not a tier** (`LINKS_CEILING`, 1000): it only limits the work
+  one request can ask of `clean_link`. What a member may HOLD is `links_over_cap`.
+- **The owner is told the ceiling before adding anything**: `links_limit` (what they may
+  hold now) and `links_tier_cap` (their tier's own number) ride their own profile payload and
+  nobody else's. The ladder for every tier is already in `tiers` from `/limits/`, so a screen
+  can say what the next tier holds without typing it.
+- `POST /api/economy/profile/` is the only writer of a profile's links. **Nothing mounted in
+  the frontend could call it** until `PortfolioLinks.jsx` — the feature had a reader on three
+  screens (card, public profile, widget board) and no way to make a link.
