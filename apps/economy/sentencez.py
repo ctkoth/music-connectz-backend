@@ -1,8 +1,13 @@
 """Sentence ConnectZ — the IntelligenceZ writer.
 
 Writes essays, Instagram captions, social posts, lyrics (to a rhyme scheme
-stated in numbers), and — for members who hold the Manager or A&R Scout
-PersonaZ — artist contracts and royalties agreements.
+stated in numbers), resumes, cover letters, poems and bios, and — for members who
+hold the Manager or A&R Scout PersonaZ — artist contracts and royalties agreements.
+
+Whose voice a piece comes out in is declared per kind (`voice`) and served, so a
+screen says it rather than assuming it: lyrics, captions and posts are K-Oth's
+register, essays the academic one, and everything else is written plainly — a
+resume in anybody's house voice is a resume that is not the member's.
 
 Billing follows the coach: the price is published by GET before anything is
 written, a free daily prompt covers a run before any paid balance, and a run
@@ -26,7 +31,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import ai_cost, over_char_limit
+from .catalog import UNLIMITED_CHARS as UNLIMITED_BRIEF
+from .catalog import WRITER_BRIEF_CHARS, ai_cost, over_writer_brief, writer_brief_chars
 from .gemini import _bill, _key, generate_content
 from .models import (SentenceWork, membership_for, can_afford_ai, daily_prompt_covers,
                      daily_prompt_state, profile_for)
@@ -98,9 +104,81 @@ KINDS = {
                           "the request does not state, and make the percentages add to 100")},
 }
 
+# Written FROM what the member supplied, so they may not be written from anything
+# else. A resume is a claim about a person's history; a model filling the gaps with
+# plausible employers and dates produces a document that looks finished and is
+# false, which is the substance rule's failure case with a job application
+# attached. Everything not stated becomes a visible [BRACKETED] blank instead.
+NO_INVENTION = ("Use ONLY the facts stated in the request. Never invent an employer, job title, "
+                "date, degree, certification, number, award or achievement. Where the request leaves "
+                "something out that this document normally carries, write a [BRACKETED PLACEHOLDER] "
+                "for it; do not guess and do not explain the gap outside the brackets.")
+
+KINDS.update({
+    "resume": {"label": "Resume", "emoji": "📄", "plain": True, "no_invention": True,
+               "ask": ("a resume in plain text: a header with name and contact placeholders, a two-line "
+                       "summary, experience newest first with action-led bullets, education, and skills. "
+                       "Keep it to one page unless the request has enough for more"),
+               "hint": ("Paste your history: every role (employer, title, dates, what you did), your "
+                        "education and skills. It writes only what you tell it — nothing is added."),
+               "style_label": "Role you're applying for (optional)"},
+    "cover_letter": {"label": "Cover letter", "emoji": "✉️", "plain": True, "no_invention": True,
+                     "ask": ("a cover letter of about 250 words addressed to the hiring contact: why this "
+                             "role, two concrete things the applicant has done that fit it, and a close"),
+                     "hint": ("The role and company, then what you want them to know about you — your "
+                              "real experience. It writes only what you tell it."),
+                     "style_label": "Tone (optional)"},
+    "poem": {"label": "Poem", "emoji": "🪶", "plain": True,
+             "ask": ("a poem. Follow the form the request names (sonnet, haiku, villanelle…); free verse "
+                     "if it names none. A title, then the poem"),
+             "hint": "What is it about? Name a form or a feeling if you have one.",
+             "style_label": "Form or mood (optional)"},
+    "bio": {"label": "Bio", "emoji": "🙋", "plain": True, "no_invention": True,
+            "ask": ("a short bio of about 100 words in the third person, written for the place the "
+                    "request names, or for a general profile if it names none"),
+            "hint": "Who it is about, what they do, and the two or three facts that matter.",
+            "style_label": "Where it will appear (optional)"},
+})
+
+# Placeholder text for the brief box, per kind. Served so a screen never types
+# the prompt for a kind it was not written for.
+_HINTS = {
+    "lyrics": "What's the song about? Describe the topic, the story, the feeling.",
+    "caption": "What is the post about? Where, who, the mood.",
+    "post": "What should it say?",
+    "essay": ("The prompt, your angle, and every source to cite (author, year, title, publisher, URL). "
+              "It cites only what you list."),
+    "contract": "Who the parties are, what is being agreed, term and territory.",
+    "royalties": "The work, who is on it, and what each person is owed.",
+}
+for _k, _h in _HINTS.items():
+    KINDS[_k]["hint"] = _h
+
+# The order a screen lists them in: what most people came to write first, the
+# persona-gated agreements last so a member without the persona is not shown
+# two locked doors before anything they can use.
+_ORDER = ("resume", "cover_letter", "lyrics", "poem", "bio", "caption", "post", "essay", "contract", "royalties")
+assert set(_ORDER) == set(KINDS), "a kind was added without being placed in _ORDER"
+KINDS = {k: KINDS[k] for k in _ORDER}
+
 LEGAL_KINDS = {k for k, v in KINDS.items() if v.get("personas")}
 LEGAL_NOTE = ("A starting draft, not legal advice. Have a lawyer read it before anybody signs, "
               "and fill every [BRACKETED] blank.")
+# For the documents that claim a history. The writer was told to use only what the
+# member wrote, so what is missing is a visible blank rather than a plausible guess
+# — and the note says to fill them, because a resume sent with a bracket in it is a
+# worse resume than none.
+FILL_NOTE = ("Written from only what you gave it. Fill every [BRACKETED] blank with your real "
+             "details, and read it through before you send it.")
+
+
+def voice_of(kind):
+    """"koth", "academic" or "plain" — whose register the piece is written in."""
+    if kind == "essay":
+        return "academic"
+    if KINDS[kind].get("plain") or kind in LEGAL_KINDS:
+        return "plain"
+    return "koth"
 
 
 def persona_keys(user):
@@ -120,8 +198,16 @@ def kinds_for(user):
         need = k.get("personas") or ()
         out.append({"key": key, "label": k["label"], "emoji": k["emoji"],
                     "allowed": not need or bool(mine & set(need)),
-                    "needs": ["Manager", "A&R Scout"] if need else []})
+                    "needs": ["Manager", "A&R Scout"] if need else [],
+                    "voice": voice_of(key),
+                    "invents_nothing": bool(k.get("no_invention")),
+                    "hint": k.get("hint", ""),
+                    "style_label": k.get("style_label", "Genre / style (optional)")})
     return out
+
+
+def chars_unlimited_brief(tier):
+    return writer_brief_chars(tier) >= UNLIMITED_BRIEF
 
 
 def _int(v, lo, hi):
@@ -145,10 +231,13 @@ def prompt_for(kind, topic, genre="", majority=None, minority=None):
             rule.append(f"- The remaining lines (the minority) rhyme on their last {minority} "
                         f"syllable{'s' if minority > 1 else ''}.")
         lines.append("\n".join(rule))
-    if kind == "essay":
+    voice = voice_of(kind)
+    if voice == "academic":
         lines.append("VOICE: " + ACADEMIC_VOICE)
-    elif kind not in LEGAL_KINDS:
+    elif voice == "koth":
         lines.append("VOICE: " + PERSONAL_VOICE + (" " + LYRIC_STYLE if kind == "lyrics" else ""))
+    if k.get("no_invention"):
+        lines.append(NO_INVENTION)
     if kind in ("lyrics", "caption", "post"):
         samples = voice_samples()
         if samples:
@@ -184,7 +273,8 @@ def _work_dict(w):
     return {"id": w.id, "kind": w.kind, "label": KINDS.get(w.kind, {}).get("label", w.kind),
             "topic": w.topic, "text": w.text, "inputs": w.inputs,
             "created_at": w.created_at.isoformat(),
-            "legal_note": LEGAL_NOTE if w.kind in LEGAL_KINDS else ""}
+            "legal_note": LEGAL_NOTE if w.kind in LEGAL_KINDS else "",
+            "note": FILL_NOTE if KINDS.get(w.kind, {}).get("no_invention") else ""}
 
 
 class SentenceView(APIView):
@@ -198,9 +288,17 @@ class SentenceView(APIView):
         allowance, _, daily_left = daily_prompt_state(request.user)
         free = daily_left > 0 and daily_prompt_covers(cost)
         works = SentenceWork.objects.filter(user=request.user)[:20]
+        tier = membership_for(request.user).tier
         return Response({
             "configured": bool(_key()),
             "kinds": kinds_for(request.user),
+            "brief_limit": writer_brief_chars(tier),
+            # Every tier's number, so a screen can say what the next one takes
+            # without typing it. None is unlimited.
+            "brief_ladder": [{"tier": t, "chars": None if WRITER_BRIEF_CHARS[t] >= UNLIMITED_BRIEF else WRITER_BRIEF_CHARS[t]}
+                             for t in ("free", "premium", "statz")],
+            "brief_unlimited": chars_unlimited_brief(tier),
+            "tier": tier,
             "cost_cents": cost,
             "free_today": free,
             "daily_remaining": daily_left,
@@ -228,9 +326,9 @@ class SentenceView(APIView):
         topic = str(d.get("topic", "")).strip()
         if not topic:
             return Response({"detail": "Say what it's about."}, status=status.HTTP_400_BAD_REQUEST)
-        cap = over_char_limit(topic, membership_for(request.user).tier)
+        cap = over_writer_brief(topic, membership_for(request.user).tier)
         if cap:
-            return Response({"detail": f"Your tier writes up to {cap:,} characters here — upgrade in MembershipZ for more.", "char_limit": cap},
+            return Response({"detail": f"Your tier takes up to {cap:,} characters of brief here — upgrade in MembershipZ for more.", "char_limit": cap},
                             status=status.HTTP_400_BAD_REQUEST)
         genre = str(d.get("genre", "")).strip()[:60]
         majority = _int(d.get("majority"), 0, 4) if kind == "lyrics" else None

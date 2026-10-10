@@ -2131,6 +2131,43 @@ PATCH. A client may only claim `member` or `coach`; `session` is set by
   barbell RDL — 0178 made the one RDL a dumbbell lift. The listing counts moved
   with it; re-run `tools/count_adaptive_exercises.py` before a release.
 
+## Sentence ConnectZ: three kinds that are claims about a person, and a brief that can hold one
+
+The writer gained **resume, cover letter, poem and bio** so it can be a product on its
+own (the frontend's `standalone/sentencez/`). Each kind now declares what a screen needs
+to say about it — `voice`, `hint`, `style_label`, `invents_nothing` — and the screen
+renders it, so a kind added here is usable without a client release.
+
+- **Whose voice is declared, not assumed** (`voice_of`). Lyrics, captions and posts stay
+  K-Oth's register; essays the academic one; **everything else is plain**. Putting a
+  resume in anybody's house voice makes it not the member's, and the legal kinds were
+  already plain for the same reason. The original kinds keep exactly the voice they had
+  (`test_the_original_kinds_keep_the_voice_they_had`).
+- **A document that claims a history may not invent one** (`NO_INVENTION`, on resume,
+  cover letter and bio). A resume is a claim about a person, and a model filling gaps
+  with plausible employers and dates produces something that looks finished and is false
+  — the substance rule with a job application attached. Anything the member did not say
+  becomes a visible `[BRACKETED]` blank, and `FILL_NOTE` on the finished piece says to
+  fill them. A poem carries no such rule: nothing in it is a claim.
+- **The brief has its own ladder** (`catalog.WRITER_BRIEF_CHARS`: Free 3,000, Premium
+  6,000, StatZ unlimited). It was the tier's post limit, 400 characters on Free, and at
+  400 a resume is not harder for a Free member, it is impossible — a tier says how
+  MUCH, never whether. The brief is material the writer works FROM (a work history, the
+  sources an essay must cite), not published text, which is why it is not
+  `over_char_limit`'s. It only ever raises what the writer accepted, and what a run can
+  cost is still capped by `DAILY_PROMPT_MAX_CENTS`. **A recommendation, Corey's to move:**
+  the 3,000/6,000 are judgements, not measurements. StatZ stays unlimited, as ever.
+- **The royalty is unchanged and still only fires on an explicit attach** (`UseIn` in
+  Music ConnectZ). The standalone has no DistributeZ, CollabZ or BattleZ, so it neither
+  asks for nor states one, except a line on lyrics saying the royalty applies if the
+  member later takes the piece to the music platform.
+- **`SentenceWork.kind` is `varchar(16)`**; `cover_letter` is 12. A longer kind name
+  would be invisible on SQLite and a 500 on Postgres.
+- **Nothing identifying is sent to Google**: the request body is the prompt (our
+  instructions and the member's text) and a temperature. The privacy policy says exactly
+  that, and says Google processes it under its own terms — it makes no claim about what
+  Google does with it, because nothing here can check one.
+
 ## Supersets: the Coach chooses, the member always may
 
 Two lifts done back to back, rest after the pair. **Linking two rows of a
@@ -2182,3 +2219,34 @@ to say yes). **A locked phone pauses a web page and nothing a page can do preven
 that.** Keeping the screen on keeps the rest clock running and the notification
 covers switching to another app; the copy says exactly that rather than promising
 a timer that survives a pocket.
+
+## The portfolio: links ladder, and a ceiling that is said rather than applied
+
+A member's `links` are their portfolio — the tracks, videos, pages and shops that say who
+they are — and they are the one thing on a profile a visitor came for. They had a flat
+**silent 50**: `clean_profile_field` cut the list there and answered 200, so somebody who
+pasted 60 saw a clean save and ten of them gone. `catalog.TIER_LIMITS["profile_links"]`
+is the ladder now (**Free 25, Premium 100, StatZ 300**) and it is **a recommendation,
+Corey's to move**.
+
+- **Generous at the bottom on purpose.** The work is the reason anybody visits a profile,
+  and a tier that rationed it would be rationing the thing the platform exists to show.
+  It ladders because rows are not free — the list rides the full-profile payload and the
+  public page (never the member CARD, which carries no links) — not because links are a
+  luxury. A tier says how MUCH, never whether.
+- **Said, not applied.** `ProfileView.post` judges the list BEFORE writing anything and
+  refuses with the number (`links_limit`, `links_count`) and a sentence the screen shows
+  unreworded — like the bio, so one over-long list cannot lose the rest of the edit.
+- **Nobody loses a link when the number moves** (`links_over_cap`). The ceiling is the
+  tier's or what the member already holds, whichever is MORE: somebody holding 50 on a tier
+  that now says 25 keeps all 50, can reorder and remove them, and cannot add until they are
+  under. A list no longer than the stored one can never be refused.
+- **The cleaner's own bound is not a tier** (`LINKS_CEILING`, 1000): it only limits the work
+  one request can ask of `clean_link`. What a member may HOLD is `links_over_cap`.
+- **The owner is told the ceiling before adding anything**: `links_limit` (what they may
+  hold now) and `links_tier_cap` (their tier's own number) ride their own profile payload and
+  nobody else's. The ladder for every tier is already in `tiers` from `/limits/`, so a screen
+  can say what the next tier holds without typing it.
+- `POST /api/economy/profile/` is the only writer of a profile's links. **Nothing mounted in
+  the frontend could call it** until `PortfolioLinks.jsx` — the feature had a reader on three
+  screens (card, public profile, widget board) and no way to make a link.

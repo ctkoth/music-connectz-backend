@@ -107,18 +107,30 @@ UNLIMITED_CHARS = 10 ** 9
 # lanes, so on a phone or a narrow window the SCREEN is the binding constraint
 # and this never bites. It starts to bite on a desktop with room for more,
 # which is exactly where paying for more is a real difference.
+#
+# `profile_links` is how many links a member may hold on their profile — their
+# portfolio: the tracks, videos, pages and shops that say who they are. It was a
+# flat, SILENT 50 for everybody (`social.clean_profile_field` cut the list and
+# said nothing), which is both too few for the member the platform most wants and
+# a limit nobody was ever told. It ladders because rows are not free — the list
+# rides in the full-profile payload and on the public page — but it is generous at
+# the bottom: a Free member's work is the reason anybody visits their profile, and
+# a tier that rationed it would be rationing the thing the platform exists to
+# show. A recommendation, Corey's to move: 25 / 100 / 300. Nobody loses a link
+# when a number moves — a member already over a ceiling keeps what they have and
+# cannot add more (`social.links_over_cap`).
 TIER_LIMITS = {
     TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500, "embeds_per_post": 3,
-                "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 5},
+                "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 5, "profile_links": 25},
     TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 15,
-                   "widgets_open": 12, "custom_groups": 5, "soundcloud_import": 25},
+                   "widgets_open": 12, "custom_groups": 5, "soundcloud_import": 25, "profile_links": 100},
     # StatZ writes without a character cap (Corey's call). It was 5,000 for a
     # day; nothing was lost either way, since the cap is applied on write.
     TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999,
-                 "widgets_open": 40, "custom_groups": 20, "soundcloud_import": None},
+                 "widgets_open": 40, "custom_groups": 20, "soundcloud_import": None, "profile_links": 300},
     # Owner god-mode: effectively unlimited.
     TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760, "embeds_per_post": 999,
-                 "widgets_open": 999, "custom_groups": 999, "soundcloud_import": None},
+                 "widgets_open": 999, "custom_groups": 999, "soundcloud_import": None, "profile_links": 999},
 }
 
 
@@ -261,6 +273,33 @@ def key_voice_ladder():
              "clips": KEY_TRANSCRIBE_DAILY_CLIPS[t],
              "chars": KEY_SPEAK_DAILY_CHARS[t]}
             for t in (TIER_FREE, TIER_PREMIUM, TIER_STATZ)]
+
+
+# Sentence ConnectZ's brief is not a post. It is the material the writer works
+# FROM — a resume is written from a pasted work history, an essay from the sources
+# it must cite — and the 400 characters a Free member may publish in a post is a
+# fraction of one job. At the social limit a resume is not "harder for a free
+# member", it is impossible, which is the ladder rule's whole failure case: a tier
+# may say how MUCH, never whether. So the brief has its own ladder. It only ever
+# raises what the writer accepted (it answered to `char_limit` before), and what it
+# costs is bounded by DAILY_PROMPT_MAX_CENTS, which caps the price of a free run
+# whatever its length.
+WRITER_BRIEF_CHARS = {
+    TIER_FREE: 3000,
+    TIER_PREMIUM: 6000,
+    TIER_STATZ: UNLIMITED_CHARS,
+    TIER_DEBUG: UNLIMITED_CHARS,
+}
+
+
+def writer_brief_chars(tier):
+    return WRITER_BRIEF_CHARS.get(tier, WRITER_BRIEF_CHARS[TIER_FREE])
+
+
+def over_writer_brief(text, tier):
+    """The cap a Sentence ConnectZ brief broke for this tier, or None if it fits."""
+    cap = writer_brief_chars(tier)
+    return None if len(text or "") <= cap else cap
 
 
 def chars_unlimited(tier):
