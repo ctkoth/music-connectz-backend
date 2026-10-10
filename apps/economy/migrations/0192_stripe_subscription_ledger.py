@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("economy", "0189_open_pinned_substances"),
+        ("economy", "0191_bodiez_routine_source"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
