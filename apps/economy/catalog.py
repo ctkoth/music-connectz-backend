@@ -263,6 +263,33 @@ def key_voice_ladder():
             for t in (TIER_FREE, TIER_PREMIUM, TIER_STATZ)]
 
 
+# Sentence ConnectZ's brief is not a post. It is the material the writer works
+# FROM — a resume is written from a pasted work history, an essay from the sources
+# it must cite — and the 400 characters a Free member may publish in a post is a
+# fraction of one job. At the social limit a resume is not "harder for a free
+# member", it is impossible, which is the ladder rule's whole failure case: a tier
+# may say how MUCH, never whether. So the brief has its own ladder. It only ever
+# raises what the writer accepted (it answered to `char_limit` before), and what it
+# costs is bounded by DAILY_PROMPT_MAX_CENTS, which caps the price of a free run
+# whatever its length.
+WRITER_BRIEF_CHARS = {
+    TIER_FREE: 3000,
+    TIER_PREMIUM: 6000,
+    TIER_STATZ: UNLIMITED_CHARS,
+    TIER_DEBUG: UNLIMITED_CHARS,
+}
+
+
+def writer_brief_chars(tier):
+    return WRITER_BRIEF_CHARS.get(tier, WRITER_BRIEF_CHARS[TIER_FREE])
+
+
+def over_writer_brief(text, tier):
+    """The cap a Sentence ConnectZ brief broke for this tier, or None if it fits."""
+    cap = writer_brief_chars(tier)
+    return None if len(text or "") <= cap else cap
+
+
 def chars_unlimited(tier):
     """True when this tier writes without a character cap."""
     return limits_for(tier)["char_limit"] >= UNLIMITED_CHARS

@@ -2106,3 +2106,40 @@ PATCH. A client may only claim `member` or `coach`; `session` is set by
   (barbell/dumbbell/cable upright row, Arnold press, chin-up, hip thrust…). No
   barbell RDL — 0178 made the one RDL a dumbbell lift. The listing counts moved
   with it; re-run `tools/count_adaptive_exercises.py` before a release.
+
+## Sentence ConnectZ: three kinds that are claims about a person, and a brief that can hold one
+
+The writer gained **resume, cover letter, poem and bio** so it can be a product on its
+own (the frontend's `standalone/sentencez/`). Each kind now declares what a screen needs
+to say about it — `voice`, `hint`, `style_label`, `invents_nothing` — and the screen
+renders it, so a kind added here is usable without a client release.
+
+- **Whose voice is declared, not assumed** (`voice_of`). Lyrics, captions and posts stay
+  K-Oth's register; essays the academic one; **everything else is plain**. Putting a
+  resume in anybody's house voice makes it not the member's, and the legal kinds were
+  already plain for the same reason. The original kinds keep exactly the voice they had
+  (`test_the_original_kinds_keep_the_voice_they_had`).
+- **A document that claims a history may not invent one** (`NO_INVENTION`, on resume,
+  cover letter and bio). A resume is a claim about a person, and a model filling gaps
+  with plausible employers and dates produces something that looks finished and is false
+  — the substance rule with a job application attached. Anything the member did not say
+  becomes a visible `[BRACKETED]` blank, and `FILL_NOTE` on the finished piece says to
+  fill them. A poem carries no such rule: nothing in it is a claim.
+- **The brief has its own ladder** (`catalog.WRITER_BRIEF_CHARS`: Free 3,000, Premium
+  6,000, StatZ unlimited). It was the tier's post limit, 400 characters on Free, and at
+  400 a resume is not harder for a Free member, it is impossible — a tier says how
+  MUCH, never whether. The brief is material the writer works FROM (a work history, the
+  sources an essay must cite), not published text, which is why it is not
+  `over_char_limit`'s. It only ever raises what the writer accepted, and what a run can
+  cost is still capped by `DAILY_PROMPT_MAX_CENTS`. **A recommendation, Corey's to move:**
+  the 3,000/6,000 are judgements, not measurements. StatZ stays unlimited, as ever.
+- **The royalty is unchanged and still only fires on an explicit attach** (`UseIn` in
+  Music ConnectZ). The standalone has no DistributeZ, CollabZ or BattleZ, so it neither
+  asks for nor states one, except a line on lyrics saying the royalty applies if the
+  member later takes the piece to the music platform.
+- **`SentenceWork.kind` is `varchar(16)`**; `cover_letter` is 12. A longer kind name
+  would be invisible on SQLite and a 500 on Postgres.
+- **Nothing identifying is sent to Google**: the request body is the prompt (our
+  instructions and the member's text) and a temperature. The privacy policy says exactly
+  that, and says Google processes it under its own terms — it makes no claim about what
+  Google does with it, because nothing here can check one.
