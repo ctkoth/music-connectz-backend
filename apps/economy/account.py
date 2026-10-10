@@ -82,7 +82,12 @@ class AccountDeleteView(APIView):
             return Response({"detail": 'Send {"confirm": "DELETE"} to confirm.'}, status=status.HTTP_400_BAD_REQUEST)
         from apps.accounts.erasure import delete_user
 
+        from .stripe_cancel import CancelFailed
+
         u = request.user
         username = u.username
-        delete_user(u)  # FK cascades remove the rows; erasure.py takes the files
+        try:
+            delete_user(u)  # billing stops first; the rows cascade; erasure.py takes the files
+        except CancelFailed as exc:
+            return Response({"detail": exc.detail}, status=status.HTTP_502_BAD_GATEWAY)
         return Response({"deleted": True, "username": username})

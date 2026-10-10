@@ -314,13 +314,31 @@ def delete_duplicate(target, keep=None, *, by, reason=""):
     finding out afterwards that a balance is gone is not a thing this app gets
     to do twice.
     """
+    def _refuse_if_destroying(owed):
+        if owed and keep is None:
+            raise ValueError(
+                f"That account holds {owed / 100:.2f} in money and royalties. "
+                f"Name an account to sweep it to — deleting it would destroy it."
+            )
+
     card = account_card(target)
     owed = _forfeit(card)
-    if owed and keep is None:
-        raise ValueError(
-            f"That account holds {owed / 100:.2f} in money and royalties. "
-            f"Name an account to sweep it to — deleting it would destroy it."
-        )
+    _refuse_if_destroying(owed)
+    # Stop the account's Stripe billing BEFORE anything is moved. It raises
+    # `CancelFailed`, a ValueError, which every caller already turns into a
+    # refusal that says why; and doing it here, after the money check and before
+    # the sweep, means a delete that is refused for either reason has changed
+    # nothing at all — bar the one case below, where cash arrives DURING the
+    # pass and the billing is already stopped (which is the safe half to hold).
+    from apps.economy.stripe_cancel import cancel_for
+    cancel_for(target)
+    # Read the cash AGAIN. The Stripe pass is seconds long, not milliseconds, and
+    # an auto-top-up invoice that was paid inside it has credited the wallet: the
+    # figure above would sweep nothing and the delete would destroy the credit,
+    # with a `keep` account named and no refusal.
+    card = account_card(target)
+    owed = _forfeit(card)
+    _refuse_if_destroying(owed)
     swept = {"money_cents": 0, "royalties_cents": 0}
     if owed and keep is not None:
         src, dst = wallet_for(target), wallet_for(keep)
@@ -344,7 +362,7 @@ def delete_duplicate(target, keep=None, *, by, reason=""):
         notify(keep, "system",
                f"@{username} was removed as your duplicate account.", item_id="dupez")
     from apps.accounts.erasure import delete_user
-    delete_user(target)  # the rows cascade; the uploaded files go with them
+    delete_user(target, billing_stopped=True)  # cancelled above; the rows cascade, the files go
     return {
         "deleted": username, "kept": keep.username if keep else None,
         "swept": swept, "was": card, "by": by.username, "reason": reason,
@@ -581,9 +599,15 @@ class DupeZClaimView(APIView):
             # `delete_duplicate` is still the only thing that moves it, so the
             # "may never destroy money" guard and the KIND_TRANSFER receipt are
             # the same ones every other delete path goes through.
-            return Response(delete_duplicate(
-                target, request.user, by=request.user,
-                reason="provably the same person, closed by the member"))
+            try:
+                receipt = delete_duplicate(
+                    target, request.user, by=request.user,
+                    reason="provably the same person, closed by the member")
+            except ValueError as e:
+                # Billing that could not be cancelled at Stripe: refused, and
+                # nothing was deleted or swept.
+                return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(receipt)
 
         claim = _open_claim(request.user, target, signals, note)
         return Response({"claim": _claim_dict(claim), "detail": (
@@ -885,9 +909,14 @@ class DupeZVerifyView(APIView):
                 ),
             }, status=status.HTTP_409_CONFLICT)
 
-        receipt = delete_duplicate(request.user, claim.claimant, by=request.user,
-                                   reason=f"confirmed by the account itself "
-                                          f"(claim #{claim.id})")
+        try:
+            receipt = delete_duplicate(request.user, claim.claimant, by=request.user,
+                                       reason=f"confirmed by the account itself "
+                                              f"(claim #{claim.id})")
+        except ValueError as e:
+            # Billing that could not be cancelled: the account stays, the claim
+            # stays open, and the member is told why.
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         # The row outlives the account it was about — CASCADE would take the
         # claim with the target and leave the claimant's side of the story with
         # nothing behind it.

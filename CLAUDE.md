@@ -1279,14 +1279,98 @@ Three decisions in it are the ones to keep:
   that merely TAGS the member survives them). A fifth door that calls `user.delete()`
   directly would bring the bug back, which is why a test reads the source of all four.
 
-**What deletion still does not do, on purpose or by omission:** it does not cancel Stripe
-subscriptions or an auto top-up (the ids live on rows that cascade away, so afterwards
-nothing can find them), it does not pay out money (the screens say so), and a
-member's own transaction history cascades with them. The first is a bug waiting for a
-product decision about what happens when Stripe is down; the third contradicted a
-sentence in the privacy policy for as long as the policy existed. If the LLC needs to
-keep financial records for tax, that is an anonymise-don't-cascade change, and the policy
-changes with it.
+### Deleting cancels the billing first, and refuses if it can't
+
+The ids that let anyone cancel a subscription live on rows that cascade away
+(`Membership.stripe_customer_id`, `last_payment_ref`, `AutoTopUp`), so a delete that
+ran first left a card billed monthly by an account nobody could reach. The member
+found out from their bank. `apps/economy/stripe_cancel.py` runs BEFORE
+`user.delete()`, from `erasure.delete_user`, and all four doors get it for free.
+
+- **A failure refuses the delete (502, `CancelFailed.detail`).** The alternative is a
+  deleted account still being charged, which is the worse outcome and the one this
+  exists to prevent. Nothing is lost by refusing: the member retries. The screen, the
+  web page and the privacy policy all say "if it can't be cancelled, the account is not
+  deleted", so changing this means changing four places together.
+- **Cancel is immediate, with no refund of the rest of the paid period.** There is no
+  account left to hold the benefit for the remainder, and every screen says so before
+  the button. Proration is a product decision; this is the version that is true today.
+- **The membership row cannot be trusted to remember, and the first version of this
+  trusted it.** Every Checkout creates a NEW Stripe customer (none passes `customer=`)
+  and the webhook OVERWRITES `stripe_customer_id` / `last_payment_ref` with the newest.
+  So Premium followed by StatZ — a path MembershipZ offers — leaves two live
+  subscriptions on two customers and one row naming one of them. Review ran exactly
+  that through the real webhook: the delete cancelled StatZ, succeeded, and Premium
+  kept billing. The unit test beside it put both subscriptions on ONE customer, a
+  state this app's checkout cannot produce, and passed for the wrong reason.
+  `StripeSubscription` is the append-only ledger the webhook writes once per
+  subscription (`stripe_cancel.remember`), never overwritten, and `cancel_for` reads it
+  alongside the membership and auto-top-up rows and then LISTS every customer any of
+  them names. `LedgerTests` drives the two-customer case through the real webhook and
+  the real delete; dropping the `remember` call turns it red.
+- **A payment that lands after the account is gone is cancelled on sight.** A Checkout
+  stays payable for hours and its `checkout.session.completed` then names a deleted
+  user; the webhook used to answer 200 with nothing to attach it to. It calls
+  `cancel_orphan` now, and a failure there answers 5xx so Stripe retries — the opposite
+  of every other branch, because a 200 here is a subscription that bills forever.
+  Residual window: a payment that completes INSIDE the few seconds of someone's own
+  delete pass. Not closed; it needs the member to pay and delete in the same breath.
+- **`manage.py backfill_stripe_subscriptions [--write] [--cancel-orphans]`** is the
+  past. The ledger starts empty, so a member who upgraded before it existed still has
+  an unnamed subscription, and accounts deleted before the cancel existed may have
+  subscriptions still billing. Stripe's own Checkout Sessions carry the member's id, so
+  the command reads them, writes the missing ledger rows, and LISTS live subscriptions
+  of deleted accounts; `--cancel-orphans` ends them. Dry by default, and cancelling is
+  its own switch. It needs the live key, so it can only be run where that is set — it
+  has been tested against a fake, never against Stripe.
+- **A customer another account also references is never swept.** `stripe_customer_id`
+  is not unique, and cancelling "every subscription on this customer" for a customer a
+  second member also uses would bill-stop a stranger. Shared customers are skipped and
+  logged. `dupez.delete_duplicate` cancels the TARGET's billing before the money sweep
+  and passes `billing_stopped=True`, so the cancel happens once and a refusal leaves the
+  duplicate untouched. It then re-reads the cash: the pass is seconds, an auto-top-up
+  invoice paid inside it credits the wallet, and a figure read before would sweep
+  nothing and delete the credit.
+- **It fails closed on its own misconfiguration.** Ids on file and no
+  `STRIPE_SECRET_KEY` refuses (billing may exist and nobody can reach it); no ids and
+  no key is a dev box and passes. `resource_missing` is "gone" only when Stripe is not
+  saying a similar object exists in the other mode — a test key asked about a live id
+  answers the same code, and reading that as success would make a wrong key look like a
+  platform where every delete works and nothing is cancelled. Every acceptance is logged.
+- **A refusal after a partial cancel says so.** Stripe's own webhook downgrades the plan
+  the moment a subscription ends, so a member refused after part of it went through
+  sees Free. `CancelFailed.detail` adds that sentence only when something was cancelled.
+- **One budget (`BUDGET_SECONDS`, 15) over the whole run, and the number is measured.**
+  A per-call timeout is not a per-call bound: `requests` applies it to each socket
+  operation and the SDK retries once after a pause, so an 8s setting was measured at
+  16.5s per stalled call, and the budget is only checked between calls. At
+  `CALL_TIMEOUT_SECONDS` 4 a stalled call measured 8.5s, so the worst pass is about
+  24s, inside the 30s `api.js` waits. `test_the_whole_pass_fits_inside_the_wait_the_screen_allows`
+  pins the arithmetic; if the client's wait moves, so does that test.
+- **The Django admin is a door too, and was the fifth.** The stock user admin calls
+  `user.delete()`: no cancel and no file purge. `accounts.admin.UserAdmin` routes single
+  deletes through `delete_user` and says why on a refusal; bulk delete is removed, since
+  Django reports "Successfully deleted N" from the selection size whatever happened to
+  each account.
+- **Not done:** the Stripe *customer* and its saved card are left in Stripe (we cancel
+  billing, we do not erase the payment record), and `AutoTopUpCancelView` still flips
+  `active=False` when its Stripe call fails (which is why the inactive row is still
+  checked). Both are in the frontend's `play/bodiez/README.md`. Also unreviewed:
+  subscriptions attached to a Subscription Schedule.
+- **Pre-existing, found by the review and NOT fixed here:** DupeZ's self-serve close
+  treats `oauth_email` (the same address on two linked sign-ins) as strong proof, and
+  `OAuthLinkView` stores whatever address the provider returned without knowing
+  whether the provider verified it (`oauth.py` says none of its userinfo endpoints
+  say). If a provider lets somebody set an unverified address, that is one member
+  deleting another's account. It was reproduced with rows made the way the link view
+  makes them; whether any provider allows it was not checked. Fix by recording
+  `email_verified` at link time and counting `oauth_email` as strong only where it is true.
+
+**What deletion still does not do, on purpose or by omission:** it does not pay out
+money (the screens say so), and a member's own transaction history cascades with them.
+The second contradicted a sentence in the privacy policy for as long as the policy
+existed. If the LLC needs to keep financial records for tax, that is an
+anonymise-don't-cascade change, and the policy changes with it.
 
 The BodieZ paragraph in `public/privacy.html` (frontend) was checked claim by claim
 against this repo before it went live; "we do not show it to other members" needed an
