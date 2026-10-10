@@ -2143,3 +2143,55 @@ renders it, so a kind added here is usable without a client release.
   instructions and the member's text) and a temperature. The privacy policy says exactly
   that, and says Google processes it under its own terms — it makes no claim about what
   Google does with it, because nothing here can check one.
+
+## Supersets: the Coach chooses, the member always may
+
+Two lifts done back to back, rest after the pair. **Linking two rows of a
+routine by hand is free at every tier** — a superset is an order of work, and a
+tier that could say whether somebody may do two exercises in a row would be the
+ladder rule's first counter-example. What is gated is the Coach CHOOSING the
+partner (`statz_trial.FEATURES["coach_pairing"]`, `POST /bodiez/pair/`), which is
+StatZ's, or the free hour's. Same shape as the framed-page widget: a capability
+on top of a thing everybody already has, which can switch off again without
+taking anything the member made. A routine the Coach already paired stays paired.
+
+`apps/economy/superset.py` offers two pairings and the member picks, because
+they are different ideas: **compound + isolation** (one muscle: bench press then
+fly) and **push + pull** (opposing muscles: bench press then row). Both are
+offered rather than one chosen for them. Compound-then-isolation is the one that
+builds a muscle; push-pull is the one that saves time without costing reps, and
+which is better depends on whether the member is short of minutes or short of
+volume.
+
+Four things hold it:
+
+- **Every fact is declared, never inferred.** `superset_table.TABLE` says, per
+  library exercise BY NAME, compound or isolation and push or pull. By name
+  because ids differ per database (the library is made by migrations). A lift
+  not in it — a member's own custom exercise, cardio, a hold — is never paired,
+  and a custom exercise NAMED like a library lift is still not classified by its
+  name (`test_a_custom_exercise_named_like_a_library_lift…`). `test_superset`
+  fails when a library exercise has no entry, so a lift added by a migration
+  without being classified is a red test, not a Coach that quietly ignores it.
+- **The partner is always something the member can do.** `bodiez.accessible` is
+  the one rule and the equipment they said they own is respected. It adds at most
+  one row per lonely lift and says which it added; the client marks it "added by
+  the Coach" so a pairing can never silently grow a routine.
+- **It is idempotent and leaves hand-made pairs alone.** Running it twice changes
+  nothing the second time; a pair somebody made is not re-made, and a stale label
+  is dropped rather than guessed at. Routine rows are raw JSON, so the pairing is
+  a `group` label (A, B, C…) on two ADJACENT rows; `valid_groups` is the one
+  validator and `src/supersets.js` mirrors it so the two cannot disagree about
+  what a pair is.
+- **A sample never changes the tier.** `has_statz` is the real tier; the free hour
+  only widens what `feature_tier` answers while it runs.
+
+**Rest alerts are client-only and gated by the same state.** Nothing about them
+costs a resource, so there is no server meter; `statz_trial.state` is what the
+screen reads. The sample ending locks the control and says so with a notification
+if the member has already let the site notify them (it never asks for permission
+itself — the rest-alerts control does, because that is when someone has a reason
+to say yes). **A locked phone pauses a web page and nothing a page can do prevents
+that.** Keeping the screen on keeps the rest clock running and the notification
+covers switching to another app; the copy says exactly that rather than promising
+a timer that survives a pocket.
