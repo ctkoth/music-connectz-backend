@@ -107,18 +107,30 @@ UNLIMITED_CHARS = 10 ** 9
 # lanes, so on a phone or a narrow window the SCREEN is the binding constraint
 # and this never bites. It starts to bite on a desktop with room for more,
 # which is exactly where paying for more is a real difference.
+#
+# `profile_links` is how many links a member may hold on their profile — their
+# portfolio: the tracks, videos, pages and shops that say who they are. It was a
+# flat, SILENT 50 for everybody (`social.clean_profile_field` cut the list and
+# said nothing), which is both too few for the member the platform most wants and
+# a limit nobody was ever told. It ladders because rows are not free — the list
+# rides in the full-profile payload and on the public page — but it is generous at
+# the bottom: a Free member's work is the reason anybody visits their profile, and
+# a tier that rationed it would be rationing the thing the platform exists to
+# show. A recommendation, Corey's to move: 25 / 100 / 300. Nobody loses a link
+# when a number moves — a member already over a ceiling keeps what they have and
+# cannot add more (`social.links_over_cap`).
 TIER_LIMITS = {
     TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500, "embeds_per_post": 3,
-                "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 5},
+                "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 5, "profile_links": 25},
     TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 15,
-                   "widgets_open": 12, "custom_groups": 5, "soundcloud_import": 25},
+                   "widgets_open": 12, "custom_groups": 5, "soundcloud_import": 25, "profile_links": 100},
     # StatZ writes without a character cap (Corey's call). It was 5,000 for a
     # day; nothing was lost either way, since the cap is applied on write.
     TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999,
-                 "widgets_open": 40, "custom_groups": 20, "soundcloud_import": None},
+                 "widgets_open": 40, "custom_groups": 20, "soundcloud_import": None, "profile_links": 300},
     # Owner god-mode: effectively unlimited.
     TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760, "embeds_per_post": 999,
-                 "widgets_open": 999, "custom_groups": 999, "soundcloud_import": None},
+                 "widgets_open": 999, "custom_groups": 999, "soundcloud_import": None, "profile_links": 999},
 }
 
 
