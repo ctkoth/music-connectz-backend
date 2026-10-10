@@ -29,6 +29,12 @@ FEATURES = [
     {"key": "mood_search", "label": "Search keys by mood", "tab": "instrumentalconnectz", "target": "instrumental-mood"},
     {"key": "page_widgets", "label": "Open any scanned site as a widget", "tab": "profilez", "target": "widgets"},
     {"key": "advanced_horoscope", "label": "The advanced daily horoscope", "tab": "zodiacz", "target": "zodiacz-advanced"},
+    # BodieZ. The Coach CHOOSING a superset partner, and a rest alert that reaches a
+    # locked phone. Both can honestly switch off when the hour is up: a routine the
+    # Coach already paired stays paired (it is the member's), and linking two lifts
+    # by hand was never gated.
+    {"key": "coach_pairing", "label": "Coach supersets: compound + isolation, push + pull", "tab": "bodiez", "target": "bodiez-pairing"},
+    {"key": "rest_alerts", "label": "Rest alerts and a screen that stays awake", "tab": "bodiez", "target": "bodiez-rest-alerts"},
 ]
 UPGRADE = {"tab": "membershipz", "target": "membershipz-plans", "label": "Upgrade to StatZ"}
 
