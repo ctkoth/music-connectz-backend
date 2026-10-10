@@ -405,6 +405,12 @@ def links_over_cap(user, current, new):
     return None if len(new) <= allowed else allowed
 
 
+def _links_ceiling(p):
+    """What the owner of this profile is told about their portfolio's ceiling."""
+    tier_cap = limits_for(membership_for(p.user).tier)["profile_links"]
+    return {"links_limit": max(tier_cap, len(links_of(p))), "links_tier_cap": tier_cap}
+
+
 def clean_profile_field(field, value):
     """The stored form of one PROFILE_FIELDS value, from whatever came in."""
     if field == "substances":
@@ -731,8 +737,7 @@ def _profile_full(p, request, recheck=False):
         # `links_limit` is what they may hold NOW (their tier's, or what they
         # already have if that is more — see links_over_cap); `links_tier_cap` is
         # the tier's own number, so the screen can say when somebody is over it.
-        **({"links_limit": max(limits_for(membership_for(p.user).tier)["profile_links"], len(links_of(p))),
-            "links_tier_cap": limits_for(membership_for(p.user).tier)["profile_links"]} if mine else {}),
+        **(_links_ceiling(p) if mine else {}),
         "verified_18plus": p.verified_18plus,
         # What the badges on this card add up to — yours only. An effect total
         # is a read of somebody's economy, not a thing to publish about them.
