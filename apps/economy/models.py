@@ -6034,6 +6034,18 @@ class BodieZRoutine(models.Model):
     # its citation live) — blank when the routine was built without one.
     goal = models.CharField(max_length=20, blank=True, default="")
     scheduled_for = models.DateField(null=True, blank=True)
+    # Who built it — a LABEL for the routine list, never a permission. A
+    # routine the Coach built is the member's the moment it is saved, and
+    # every one of them goes through the same designer to be edited; this
+    # only lets the list say where each one came from, so "the Coach made
+    # this" and "I made this" are both visible and both editable.
+    SOURCE_CHOICES = (
+        ("member", "Yours"),
+        ("coach", "Coach-built"),
+        ("session", "From a workout"),
+        ("trial", "From the trial"),
+    )
+    source = models.CharField(max_length=10, choices=SOURCE_CHOICES, default="member")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
