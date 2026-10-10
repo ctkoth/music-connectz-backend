@@ -397,6 +397,31 @@ find both ends. Four things hold it:
   invite are two people, and an accusation built out of a coincidence is worse
   than a duplicate nobody noticed.
 
+### Closing one without signing in to it takes PROOF, and proof is not a percentage
+
+Corey's bar: deleting a duplicate from the main account, without ever signing in to
+it, needs better than 90% certainty it is the same person. This is that bar, and it is
+deliberately NOT a probability. Nothing here is calibrated — there is no set of labelled
+duplicates a "92% likely" could have been fitted against — so the number would be made
+up to look like a threshold, behind an action nobody can undo, which is the first rule
+of this file. What can be stated is the evidence, and **proof is a stricter bar than 90%:
+the provider confirmed the same address on a linked sign-in of BOTH accounts**
+(`dupez.has_proof`). Two accounts sharing a confirmed inbox share an owner.
+
+- **`email_verified` defaults to False and only a confirmed sign-in sets it.** Existing
+  identities start unverified, so until each member signs in with that provider again
+  their linked address proves nothing and the close falls back to a claim. That is the
+  safe direction: the cost is a few more claims, never a wrong deletion.
+- **A claim is finished by signing in to the other account** (`DupeZVerifyView`), which
+  is a better proof than any hint — they know both passwords. The response says
+  `confirm_by_sign_in` with the username, and the client keeps the main account signed in
+  on the device for the switch back.
+- **An account that is not proven tied to yours is not shown in full.** `redacted_card`
+  gives a handle and the reasons, never the email, balance or posts, so the screen cannot
+  be used to read somebody else's account before closing it.
+- **`PROOF_RULE` is the sentence the screen shows**, served with the list; nothing retypes
+  it, same as `rulez`.
+
 ### A delete may destroy work. It may never destroy money.
 
 `AccountDeleteView` has always wiped a wallet holding real cash without a word.
@@ -1357,14 +1382,13 @@ found out from their bank. `apps/economy/stripe_cancel.py` runs BEFORE
   `active=False` when its Stripe call fails (which is why the inactive row is still
   checked). Both are in the frontend's `play/bodiez/README.md`. Also unreviewed:
   subscriptions attached to a Subscription Schedule.
-- **Pre-existing, found by the review and NOT fixed here:** DupeZ's self-serve close
-  treats `oauth_email` (the same address on two linked sign-ins) as strong proof, and
-  `OAuthLinkView` stores whatever address the provider returned without knowing
-  whether the provider verified it (`oauth.py` says none of its userinfo endpoints
-  say). If a provider lets somebody set an unverified address, that is one member
-  deleting another's account. It was reproduced with rows made the way the link view
-  makes them; whether any provider allows it was not checked. Fix by recording
-  `email_verified` at link time and counting `oauth_email` as strong only where it is true.
+- **Pre-existing, found by the review, now fixed:** DupeZ's self-serve close counted
+  `oauth_email` (the same address on two linked sign-ins) as strong proof while
+  `OAuthLinkView` stored whatever address the provider returned without knowing whether
+  the provider verified it — so one member could set an unverified address on their own
+  sign-in and close another member's account. `OAuthIdentity.email_verified` is recorded
+  at link and sign-in time (`_provider_vouches`) and `has_proof` counts the address only
+  when it is true on BOTH accounts. See "Closing one without signing in to it" above.
 
 **What deletion still does not do, on purpose or by omission:** it does not pay out
 money (the screens say so), and a member's own transaction history cascades with them.

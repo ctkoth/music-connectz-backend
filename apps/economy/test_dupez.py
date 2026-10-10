@@ -38,19 +38,30 @@ def member(name, email=""):
     return User.objects.create_user(name, email, PW)
 
 
-def _pair(one, two, shared="shared@gmail.com"):
-    """Two accounts the platform can tell are one person.
+def _pair(one, two, shared="shared@gmail.com", verified=True):
+    """Two accounts the platform can PROVE are one person.
 
     Since `accounts_user_email_ci_uniq` landed, two accounts CANNOT share an
     address — so a duplicate pair is built the way a real one now arrives:
-    different addresses, one sign-in behind both. That is also the case this
-    module was written for ("Corey's three"), and it is equally strong.
+    different addresses, one sign-in behind both. The provider confirmed that
+    address on both, which is what makes it proof rather than a hint; see
+    `_unconfirmed_pair` for the case that is not.
     """
     a = member(one, f"{one}@x.com")
     b = member(two, f"{two}@x.com")
-    oauth(a, "google", f"g-{one}", shared)
-    oauth(b, "soundcloud", f"s-{two}", shared)
+    oauth(a, "google", f"g-{one}", shared, verified=verified)
+    oauth(b, "soundcloud", f"s-{two}", shared, verified=verified)
     return a, b
+
+
+def _unconfirmed_pair(one, two, shared="shared@gmail.com"):
+    """The same shape as `_pair`, with an address no provider confirmed.
+
+    Strong enough for the owner to look at, and NOT proof: it is a string
+    somebody typed into a provider's profile. This is the pair the self-serve
+    close used to accept, and the one a member could aim at somebody else.
+    """
+    return _pair(one, two, shared, verified=False)
 
 
 def _weak_pair(one, two):
@@ -76,9 +87,10 @@ def owner(name="boss"):
     return u
 
 
-def oauth(user, provider, uid, email):
+def oauth(user, provider, uid, email, verified=False):
     return OAuthIdentity.objects.create(user=user, provider=provider,
-                                        provider_uid=uid, email=email)
+                                        provider_uid=uid, email=email,
+                                        email_verified=verified)
 
 
 def client_for(user):
@@ -165,7 +177,7 @@ class SignalTests(TestCase):
         a, b = member("a", "one@x.com"), member("b", "two@x.com")
         a.email = b.email = "same@x.com"          # in memory; see above
         for s in dupez.signals_between(a, b):
-            self.assertEqual(set(s), {"key", "detail", "label", "weight"})
+            self.assertEqual(set(s), {"key", "detail", "label", "weight", "proof"})
 
 
 class GroupTests(TestCase):
@@ -755,3 +767,254 @@ class VerifyTests(TestCase):
                         format="json")
         self.assertEqual(r.status_code, 404)
         self.assertTrue(User.objects.filter(username="them").exists())
+
+
+class ProofGateTests(TestCase):
+    """Closing an account WITHOUT signing in to it takes proof, not a hint.
+
+    Corey's bar was better than 90% certainty. There is no honest number to put
+    on that (nothing to calibrate one against, and the rule above forbids a
+    score behind a deletion), so the bar is evidence: the provider confirmed the
+    same address on both accounts. These pin what falls on each side of it.
+    """
+
+    def _claim(self, who, target, **extra):
+        return client_for(who).post("/api/economy/dupez/claim/",
+                                    {"username": target, "confirm": "DELETE", **extra},
+                                    format="json")
+
+    def test_an_address_no_provider_confirmed_is_strong_but_not_proof(self):
+        a, b = _unconfirmed_pair("a", "b")
+        sig = dupez.signals_between(a, b)
+        self.assertTrue(dupez.has_strong(sig))
+        self.assertFalse(dupez.has_proof(sig))
+
+    def test_confirmed_on_only_one_side_is_not_proof(self):
+        a, b = member("a", "a@x.com"), member("b", "b@x.com")
+        oauth(a, "google", "g1", "same@gmail.com", verified=True)
+        oauth(b, "spotify", "s1", "same@gmail.com", verified=False)
+        self.assertFalse(dupez.has_proof(dupez.signals_between(a, b)))
+
+    def test_confirmed_on_both_sides_is_proof(self):
+        a, b = _pair("a", "b")
+        self.assertTrue(dupez.has_proof(dupez.signals_between(a, b)))
+
+    def test_a_weak_signal_is_never_proof(self):
+        a, b = _weak_pair("a", "b")
+        self.assertFalse(dupez.has_proof(dupez.signals_between(a, b)))
+
+    def test_the_label_never_reads_as_proof_when_it_is_not(self):
+        # Owner and member both read these words; the same sentence must not
+        # appear on the two cases.
+        a, b = _unconfirmed_pair("a", "b")
+        c, d = _pair("c", "d", "other@gmail.com")
+        weak = dupez.signals_between(a, b)[0]["label"]
+        sure = dupez.signals_between(c, d)[0]["label"]
+        self.assertNotEqual(weak, sure)
+        self.assertIn("did not confirm", weak)
+        self.assertIn("confirmed by the provider", sure)
+
+    def test_an_unconfirmed_pair_cannot_be_closed_from_the_main_account(self):
+        a, b = _unconfirmed_pair("me", "dupe")
+        r = self._claim(a, "dupe")
+        self.assertEqual(r.status_code, 202)                    # filed, not deleted
+        self.assertTrue(User.objects.filter(username="dupe").exists())
+        self.assertEqual(AccountClaim.objects.get().status, AccountClaim.OPEN)
+
+    def test_a_claim_says_why_and_offers_the_way_through(self):
+        a, b = _unconfirmed_pair("me", "dupe")
+        r = self._claim(a, "dupe")
+        self.assertEqual(r.data["confirm_by_sign_in"], "dupe")
+        self.assertIn("provider never confirmed", r.data["detail"])
+        self.assertIn("switch straight back", r.data["detail"])
+
+    def test_one_side_confirmed_still_has_to_sign_in(self):
+        a, b = member("me", "me@x.com"), member("dupe", "dupe@x.com")
+        oauth(a, "google", "g1", "same@gmail.com", verified=True)
+        oauth(b, "spotify", "s1", "same@gmail.com", verified=False)
+        self.assertEqual(self._claim(a, "dupe").status_code, 202)
+        self.assertTrue(User.objects.filter(username="dupe").exists())
+
+    def test_the_attack_that_motivated_this_is_a_claim_and_nothing_more(self):
+        # A victim with a confirmed Google address. An attacker links a provider
+        # that returns whatever address they typed, and asks to close the
+        # victim "as their own other account". It used to delete the victim,
+        # sweep their money to the attacker, and show the attacker the victim's
+        # email and balance first.
+        victim = member("victim", "victim@x.com")
+        attacker = member("attacker", "attacker@x.com")
+        oauth(victim, "google", "g-victim", "victim@gmail.com", verified=True)
+        oauth(attacker, "spotify", "s-attacker", "victim@gmail.com", verified=False)
+        w = wallet_for(victim)
+        w.money_cents = 5000
+        w.save()
+        r = self._claim(attacker, "victim")
+        self.assertEqual(r.status_code, 202)
+        self.assertTrue(User.objects.filter(username="victim").exists())
+        self.assertEqual(wallet_for(victim).money_cents, 5000)
+        self.assertEqual(wallet_for(attacker).money_cents, 0)
+
+    def test_proof_still_closes_it_and_still_asks_first(self):
+        a, b = _pair("me", "dupe")
+        r = client_for(a).post("/api/economy/dupez/claim/", {"username": "dupe"}, format="json")
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(self._claim(a, "dupe").status_code, 200)
+        self.assertFalse(User.objects.filter(username="dupe").exists())
+
+    def test_the_owner_can_still_decide_an_unconfirmed_claim(self):
+        a, b = _unconfirmed_pair("me", "dupe")
+        self._claim(a, "dupe")
+        claim = AccountClaim.objects.get()
+        r = client_for(owner()).post("/api/economy/dupez/review/",
+                                     {"id": claim.id, "action": "approve"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(User.objects.filter(username="dupe").exists())
+
+
+class MemberViewRedactionTests(TestCase):
+    """A member sees what they have PROVED is theirs, and a handle for the rest.
+
+    The full card holds the email and the wallet. Showing it for an address no
+    provider confirmed would let a member read a stranger's email and balance by
+    typing the address into a profile.
+    """
+
+    def test_an_unconfirmed_account_is_a_handle_and_nothing_else(self):
+        a, b = _unconfirmed_pair("a", "b")
+        w = wallet_for(b)
+        w.money_cents = 700
+        w.save()
+        r = client_for(a).get("/api/economy/dupez/")
+        (g,) = r.data["groups"]
+        other = next(x for x in g["accounts"] if x["username"] == "b")
+        self.assertEqual(other, {"username": "b", "redacted": True, "proof": False})
+        self.assertNotIn("email", other)
+        self.assertNotIn("money_cents", other)
+
+    def test_a_proven_account_shows_in_full(self):
+        a, b = _pair("a", "b")
+        r = client_for(a).get("/api/economy/dupez/")
+        (g,) = r.data["groups"]
+        other = next(x for x in g["accounts"] if x["username"] == "b")
+        self.assertTrue(other["proof"])
+        self.assertEqual(other["email"], "b@x.com")
+
+    def test_the_members_own_card_is_always_in_full(self):
+        a, b = _unconfirmed_pair("a", "b")
+        r = client_for(a).get("/api/economy/dupez/")
+        (g,) = r.data["groups"]
+        mine = next(x for x in g["accounts"] if x["username"] == "a")
+        self.assertEqual(mine["email"], "a@x.com")
+
+    def test_pairs_between_two_other_accounts_are_not_served(self):
+        a, b = _pair("a", "b")
+        c = member("c", "c@x.com")
+        oauth(c, "github", "h1", "shared@gmail.com", verified=True)
+        r = client_for(a).get("/api/economy/dupez/")
+        for g in r.data["groups"]:
+            for p in g["pairs"]:
+                self.assertIn("a", (p["a"], p["b"]))
+
+    def test_the_owner_still_sees_every_card_in_full(self):
+        _unconfirmed_pair("a", "b")
+        r = client_for(owner()).get("/api/economy/dupez/")
+        (g,) = r.data["groups"]
+        self.assertTrue(all("email" in x for x in g["accounts"]))
+
+    def test_the_proof_rule_is_served_and_not_retyped(self):
+        a, b = _pair("a", "b")
+        r = client_for(a).get("/api/economy/dupez/")
+        self.assertEqual(r.data["proof_rule"], dupez.PROOF_RULE)
+        self.assertIn("switch straight back", r.data["proof_rule"])
+
+
+class SignInToConfirmTests(TestCase):
+    """The route that replaces self-serve when there is no proof.
+
+    The member files the claim from the main account, signs in to the other one
+    (their own password — a better proof than any address) and confirms there.
+    """
+
+    def test_the_whole_route_ends_with_the_cash_on_the_main_account(self):
+        main, dupe = _unconfirmed_pair("main", "dupe")
+        w = wallet_for(dupe)
+        w.money_cents = 900
+        w.save()
+        r = client_for(main).post("/api/economy/dupez/claim/",
+                                  {"username": "dupe"}, format="json")
+        self.assertEqual(r.status_code, 202)
+        # Signed in to the other account now.
+        seen = client_for(dupe).get("/api/economy/dupez/verify/")
+        (claim,) = seen.data["claims"]
+        self.assertEqual(claim["claimant"], "main")
+        self.assertEqual(claim["sweeps_cents"], 900)
+        r = client_for(dupe).post("/api/economy/dupez/verify/",
+                                  {"claim": claim["id"], "agree": True, "confirm": "DELETE"},
+                                  format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["kept"], "main")
+        self.assertFalse(User.objects.filter(username="dupe").exists())
+        self.assertEqual(wallet_for(main).money_cents, 900)
+
+    def test_nobody_but_the_account_itself_can_confirm_it(self):
+        main, dupe = _unconfirmed_pair("main", "dupe")
+        client_for(main).post("/api/economy/dupez/claim/", {"username": "dupe"}, format="json")
+        claim = AccountClaim.objects.get()
+        r = client_for(main).post("/api/economy/dupez/verify/",
+                                  {"claim": claim.id, "agree": True, "confirm": "DELETE"},
+                                  format="json")
+        self.assertEqual(r.status_code, 404)
+        self.assertTrue(User.objects.filter(username="dupe").exists())
+
+
+class ProviderConfirmationIsRecordedTests(TestCase):
+    """`email_verified` has to be stored, or `has_proof` could never be true."""
+
+    def _info(self, **kw):
+        base = {"provider": "google", "uid": "g-1", "email": "me@gmail.com",
+                "email_verified": True, "name": "Me"}
+        base.update(kw)
+        return base
+
+    def test_a_confirmed_address_is_stored_as_confirmed(self):
+        from apps.accounts.views import _user_from_oauth
+        u = _user_from_oauth(self._info())
+        self.assertTrue(OAuthIdentity.objects.get(user=u).email_verified)
+
+    def test_an_unconfirmed_address_is_stored_as_unconfirmed(self):
+        from apps.accounts.views import _user_from_oauth
+        u = _user_from_oauth(self._info(provider="spotify", uid="s-1", email_verified=False))
+        self.assertFalse(OAuthIdentity.objects.get(user=u).email_verified)
+
+    def test_no_address_is_never_confirmed_whatever_the_flag_says(self):
+        from apps.accounts.views import _user_from_oauth
+        u = _user_from_oauth(self._info(email="", email_verified=True))
+        self.assertFalse(OAuthIdentity.objects.get(user=u).email_verified)
+
+    def test_a_later_confirmed_sign_in_upgrades_an_old_row(self):
+        from apps.accounts.views import _user_from_oauth
+        u = member("old", "old@x.com")
+        OAuthIdentity.objects.create(user=u, provider="google", provider_uid="g-old",
+                                     email="me@gmail.com")            # before the column
+        _user_from_oauth(self._info(uid="g-old"))
+        self.assertTrue(OAuthIdentity.objects.get(provider_uid="g-old").email_verified)
+
+    def test_a_later_unconfirmed_sign_in_never_takes_confirmation_back(self):
+        from apps.accounts.views import _user_from_oauth
+        u = member("old", "old@x.com")
+        OAuthIdentity.objects.create(user=u, provider="google", provider_uid="g-old",
+                                     email="me@gmail.com", email_verified=True)
+        _user_from_oauth(self._info(uid="g-old", email="other@gmail.com", email_verified=False))
+        row = OAuthIdentity.objects.get(provider_uid="g-old")
+        self.assertTrue(row.email_verified)
+        self.assertEqual(row.email, "me@gmail.com")
+
+    def test_linking_stores_what_the_provider_said(self):
+        from apps.accounts.views import _pending_token
+        u = member("linker", "linker@x.com")
+        for provider, flag in (("google", True), ("spotify", False)):
+            info = self._info(provider=provider, uid=f"{provider}-1", email_verified=flag)
+            r = client_for(u).post(f"/api/auth/oauth/{provider}/link/",
+                                   {"pending": _pending_token(info)}, format="json")
+            self.assertEqual(r.status_code, 200, r.content)
+            self.assertEqual(OAuthIdentity.objects.get(provider=provider).email_verified, flag)
