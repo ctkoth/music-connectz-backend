@@ -1,29 +1,30 @@
-# Music ConnectZ + BodieZ + IntelligenceZ — Android apps
+# Music ConnectZ + BodieZ + IntelligenceZ + SkillZ — Android apps
 
-Three apps from one project (Gradle product flavors), one Play listing each:
+Four apps from one project (Gradle product flavors), one Play listing each:
 
 | Flavor | App | Package | Opens | Icon |
 |---|---|---|---|---|
 | `mcz` | Music ConnectZ | `net.musicconnectz.app` | `https://musicconnectz.net` | the equalizer mark |
 | `bodiez` | BodieZ | `net.musicconnectz.bodiez` | `https://bodiez.musicconnectz.net` — the BodieZ-only web build, its own host | the neon athletes, same art as the in-app tab |
 | `intelligencez` | IntelligenceZ | `net.musicconnectz.intelligencez` | `https://intelligencez.musicconnectz.net` — the IntelligenceZ-only web build, its own host | the IntelligenceZ sign (neon brain), same art as the in-app tab |
+| `skillz` | SkillZ | `net.musicconnectz.skillz` | `https://skillz.musicconnectz.net` — the SkillZ-only web build, its own host | the SkillZ sign (the ring of performers round the wave mark), as supplied |
 
 Each is a **Trusted Web Activity**: it opens its site full-screen in Chrome with
 no URL bar, so the mobile web app *is* the Android app. That's
 Google's sanctioned route for shipping a web app — a plain WebView wrapper gets
 rejected under the minimum-functionality policy.
 
-All three share one Kotlin file. Everything else is icons, splash, and link
+All four share one Kotlin file. Everything else is icons, splash, and link
 verification — and the differences between the apps are all in
 `app/build.gradle.kts` (the flavors) and `app/src/bodiez/res/`,
-`app/src/intelligencez/res/` (name, icon, splash, colour).
+`app/src/intelligencez/res/`, `app/src/skillz/res/` (name, icon, splash, colour).
 
 ## Get an APK
 
 No Android Studio needed — GitHub → **Actions** → **Android APK** → **Run
-workflow**, then download `music-connectz-apk`, `bodiez-apk` or `intelligencez-apk`.
+workflow**, then download `music-connectz-apk`, `bodiez-apk`, `intelligencez-apk` or `skillz-apk`.
 The Play bundles are `music-connectz-playstore-bundle`, `bodiez-playstore-bundle`
-and `intelligencez-playstore-bundle`.
+`intelligencez-playstore-bundle` and `skillz-playstore-bundle`.
 
 Locally (needs the [Android SDK](https://developer.android.com/studio)):
 
@@ -67,9 +68,10 @@ frontend repo.
 | `app/src/main/res/values/strings.xml` | `asset_statements` — the app's half of link verification. |
 | `app/src/main/res/drawable/ic_launcher_*.xml` | The wordless mark, generated. |
 | `app/src/main/res/mipmap-anydpi-v26/` | Adaptive icon (+ monochrome for Android 13 themed icons). |
-| `app/build.gradle.kts` | The three flavors, `siteUrl` / `bodiezUrl` / `intelligencezUrl` properties, release signing from env, asset-statement sync check. |
+| `app/build.gradle.kts` | The four flavors, `siteUrl` / `bodiezUrl` / `intelligencezUrl` / `skillzUrl` properties, release signing from env, asset-statement sync check. |
 | `app/src/bodiez/res/` | BodieZ's name, adaptive icon, splash and ink colour. Overrides `main` for that flavor only. |
 | `app/src/intelligencez/res/` | IntelligenceZ's name, adaptive icon, splash and ink colour. Overrides `main` for that flavor only. |
+| `app/src/skillz/res/` | SkillZ's name, adaptive icon, splash and ink colour. Overrides `main` for that flavor only. |
 
 **The icons are generated — don't hand-edit them.** Change a colour or a bar in
 [`tools/make_brand_assets.py`](../tools/make_brand_assets.py) and re-run it; the
@@ -105,6 +107,22 @@ name sits near its top edge and a circular launcher mask would take the ends of
 feature graphic is built from the brain alone, not the whole sign — the sign
 shows image and video panels, and the app has neither. The generator lives under
 `android/` so a change to it triggers the Android workflow.
+
+**SkillZ's icon is the SkillZ sign as supplied**: a ring of ten performers round the
+wave mark, with the name along the bottom. Source `tools/skillz-source-1024.png` is the
+supplied 2000px art scaled once, with its four white corners filled with the colour
+beside them (the original is a rounded square on white, and a white notch inside a
+launcher mask is the one flaw a member sees at once):
+
+```bash
+python android/tools/make_skillz_assets.py --play-out <dir>   # --preview masks.png for a mask contact sheet
+```
+
+The adaptive layer holds the sign at 268px of 432 because the name sits near the BOTTOM
+edge; the monochrome (themed-icon) layer is the wave mark alone, since ten painted
+portraits tint to a smudge; and the feature graphic is built from the five portraits of
+coaches the app has (singer, rapper, guitarist, drummer, pianist) — the sign also shows a
+DJ, producer, A&R, illustrator and videographer, and none of those is built.
 
 ## Signing
 
