@@ -69,8 +69,9 @@ def upload(fileobj, mime_type, size_bytes, display_name="take", deadline=None):
         return None, "the coach isn't configured"
     try:
         start = requests.post(
-            f"{UPLOAD_BASE}?key={key}",
+            UPLOAD_BASE,
             headers={
+                "x-goog-api-key": key,    # a header, not ?key= — see gemini._auth
                 "X-Goog-Upload-Protocol": "resumable",
                 "X-Goog-Upload-Command": "start",
                 "X-Goog-Upload-Header-Content-Length": str(size_bytes),
@@ -153,7 +154,8 @@ def wait_active(f, deadline=None):
             return False, "that take took too long to process — try a shorter section"
         try:
             r = requests.get(
-                f"{FILES_BASE}/{f['name'].split('/')[-1]}?key={key}",
+                f"{FILES_BASE}/{f['name'].split('/')[-1]}",
+                headers={"x-goog-api-key": key},
                 # A status check, not a transfer. 20s here meant a stalled
                 # poll cost 20 seconds to learn nothing, forty times over.
                 timeout=deadline.remaining(cap=POLL_TIMEOUT) if deadline else POLL_TIMEOUT)
@@ -172,8 +174,8 @@ def delete(f):
     """Tidy up. Best-effort: files expire in 48 hours anyway, so failing to
     delete one is untidy, never a reason to fail the take that just worked."""
     try:
-        requests.delete(f"{FILES_BASE}/{f['name'].split('/')[-1]}?key={_key()}",
-                        timeout=15)
+        requests.delete(f"{FILES_BASE}/{f['name'].split('/')[-1]}",
+                        headers={"x-goog-api-key": _key()}, timeout=15)
     except requests.RequestException:                    # pragma: no cover
         logger.warning("Files API: could not delete %s", f.get("name"))
 

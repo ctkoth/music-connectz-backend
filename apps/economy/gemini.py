@@ -109,7 +109,8 @@ def _catalogue_for(kind, key):
         # it as one would leave a worker permanently convinced the key can run
         # nothing — the next take should get to ask again.
         try:
-            r = requests.get(f"{BASE}/models", params={"key": key, "pageSize": 200}, timeout=20)
+            r = requests.get(f"{BASE}/models", params={"pageSize": 200},
+                             headers=_auth(key), timeout=20)
         except requests.RequestException:
             logger.exception("Gemini: could not list models")
             return []
@@ -177,7 +178,7 @@ def generate_content(kind, body, *, key, timeout, env_vars=(), label="Gemini"):
     for model in model_chain(kind, *env_vars, key=key):
         tried.append(model)
         resp = requests.post(f"{BASE}/models/{model}:generateContent",
-                             params={"key": key}, json=body, timeout=timeout)
+                             headers=_auth(key), json=body, timeout=timeout)
         if resp.status_code != 404:
             if resp.status_code == 200:
                 _remember(kind, model)
@@ -189,6 +190,19 @@ def generate_content(kind, body, *, key, timeout, env_vars=(), label="Gemini"):
 
 def _key():
     return getattr(settings, "GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
+
+
+def _auth(key):
+    """The key goes in a header, never in the URL.
+
+    `?key=` put the API key in every request line, and `requests` writes the
+    request line into the message of the exceptions it raises ("Max retries
+    exceeded with url: /v1beta/models/…:generateContent?key=AIza…"). Several
+    callers log those and one used to return them to the member, so a DNS blip
+    could print part of the key into a log or a response. The header is the
+    documented alternative and is not part of any exception message.
+    """
+    return {"x-goog-api-key": key}
 
 
 def _bill(user, note, count_daily=False):

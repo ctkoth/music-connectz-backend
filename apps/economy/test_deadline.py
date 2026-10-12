@@ -85,7 +85,7 @@ class ThePollStopsOnTheClockNotTheCountTests(TestCase):
         d = Deadline(2)
         seen = []
 
-        def fake_get(url, timeout=None):
+        def fake_get(url, timeout=None, headers=None):
             seen.append(timeout)
             raise gemini_files.requests.RequestException("nope")
 
