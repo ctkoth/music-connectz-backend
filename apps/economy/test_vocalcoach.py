@@ -136,7 +136,11 @@ class SingZCoachTests(TestCase):
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
     @patch("apps.economy.gemini.requests.post", return_value=fake_gemini({**GOOD, "score": 47}))
     def test_a_wild_score_is_clamped_to_ten(self, _post, _k):
-        self.assertEqual(self.client.post(URL, {"take": take()}, format="multipart").data["score"], 10)
+        # The model's own wild 47 is clamped and kept for audit; the shown
+        # overall is now computed from the dimensions (strength_weighted).
+        d = self.client.post(URL, {"take": take()}, format="multipart").data
+        self.assertEqual(d["model_score"], 10)
+        self.assertEqual(d["score"], 7)
 
 
 class CoachPriceTests(TestCase):
@@ -1610,3 +1614,62 @@ class CoachXPAwardTests(TestCase):
             self.assertEqual(events.count(), 1)
             event = events.first()
             self.assertEqual(event.xp_awarded, 1)
+
+
+class StrengthWeightedOverallTests(TestCase):
+    def test_evidence_takes(self):
+        from apps.economy.vocalcoach import strength_weighted as sw
+        self.assertGreaterEqual(sw({"a": 6, "b": 6, "c": 6, "d": 5, "e": 7}), 6)
+        self.assertGreaterEqual(sw({"a": 7, "b": 7, "c": 7, "d": 8, "e": 7}), 7)
+
+    def test_never_below_mean_and_monotonic(self):
+        from apps.economy.vocalcoach import strength_weighted as sw
+        base = [6, 6, 6, 5, 7]
+        for i in range(5):
+            up = list(base); up[i] += 1
+            self.assertGreaterEqual(sw(dict(enumerate(up))), sw(dict(enumerate(base))))
+        self.assertGreaterEqual(sw(dict(enumerate([3, 9, 9, 9, 9]))), 8)
+        self.assertEqual(sw({}), None)
+
+    def test_weakest_moves_it_least(self):
+        from apps.economy.vocalcoach import strength_weighted as sw
+        a = sw({0: 10, 1: 8, 2: 6, 3: 4, 4: 2}) - sw({0: 10, 1: 8, 2: 6, 3: 4, 4: 1})
+        b = sw({0: 10, 1: 8, 2: 6, 3: 4, 4: 2}) - sw({0: 9, 1: 8, 2: 6, 3: 4, 4: 2})
+        self.assertLessEqual(a, b)
+
+    def _run(self, payload, **kw):
+        import json as _json
+        from apps.economy.vocalcoach import score_take
+        fake = type("R", (), {"status_code": 200, "json": lambda self: {"candidates": [
+            {"content": {"parts": [{"text": _json.dumps(payload)}]}}]}})()
+        with patch("apps.economy.vocalcoach._key", return_value="k"), \
+             patch("apps.economy.gemini.requests.post", return_value=fake):
+            return score_take("rapz", SimpleUploadedFile("t.mp3", b"x"), "audio/mpeg",
+                              genre="Trap", target=None, difficulty="builder", **kw)
+
+    def test_server_overall_keeps_model_score_and_excludes_style(self):
+        out, err = self._run({"score": 6, "scores": {"flow": 6, "timing": 6, "breath": 6,
+                              "clarity": 5, "delivery": 7, "style_match": 10}})
+        self.assertIsNone(err)
+        self.assertEqual(out["model_score"], 6)
+        self.assertEqual(out["score"], 6)
+        self.assertIn("strongest", out["score_rule"])
+
+    def test_unscorable_stays_unscorable(self):
+        out, _ = self._run({"unscorable": "TV noise", "score": None, "scores": {}})
+        self.assertIsNone(out["score"])
+
+    def test_listeners_only_from_real_distinct_non_author_ratings(self):
+        from apps.economy.models import ItemRating, Post
+        from apps.economy.vocalcoach import listeners_for
+        author = User.objects.create_user("au", "au@e.com", "pw12345678")
+        post = Post.objects.create(author=author, title="t")
+        for i in range(2):
+            u = User.objects.create_user(f"r{i}", f"r{i}@e.com", "pw12345678")
+            ItemRating.objects.create(user=u, item_id=f"post:{post.id}", score=9)
+        ItemRating.objects.create(user=author, item_id=f"post:{post.id}", score=10)
+        self.assertIsNone(listeners_for(post))
+        u = User.objects.create_user("r9", "r9@e.com", "pw12345678")
+        ItemRating.objects.create(user=u, item_id=f"post:{post.id}", score=10)
+        self.assertEqual(listeners_for(post)["count"], 3)
+        self.assertIsNone(listeners_for(None))

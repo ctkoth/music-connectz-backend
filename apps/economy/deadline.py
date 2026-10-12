@@ -83,6 +83,18 @@ class Deadline:
         left = max(self.left(), self.floor)
         return min(left, cap) if cap else left
 
+    def holding_back(self, seconds):
+        """A view of the SAME clock with `seconds` kept in reserve.
+
+        The coach has two passes now (Gemini listens, Claude checks the logic)
+        under ONE budget. Pass 1 gets this view, so it can never spend the
+        time pass 2 was promised; pass 2 gets the parent and what is left.
+        Same `started`, so both agree on how long the member has waited.
+        """
+        child = Deadline(max(self.total - float(seconds), self.floor), floor=self.floor)
+        child.started = self.started
+        return child
+
     def __repr__(self):                                   # pragma: no cover
         return f"<Deadline {self.spent():.1f}s of {self.total:.0f}s>"
 
@@ -94,4 +106,10 @@ class Deadline:
 # on an unmoving screen, people conclude it is broken and leave, and on the
 # trial door they leave for good. Env-tunable so it can be moved without a
 # deploy if real traffic says otherwise.
-COACH_BUDGET_SECONDS = 100
+#
+# 100 -> 120 when the Claude logic pass joined the run (coach_think.py). 120 is
+# the ceiling test_deadline pins, and api.js waits 150s, so the server still
+# decides. Pass 1 (Gemini) is handed budget - COACH_THINK_RESERVE_SECONDS, so
+# its leg is 90s (was 100) and pass 2 is promised the last 30.
+COACH_BUDGET_SECONDS = 120
+COACH_THINK_RESERVE_SECONDS = 30

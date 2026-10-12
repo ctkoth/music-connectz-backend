@@ -33,6 +33,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import voicez
 from .models import VoicePrefs, voice_prefs_for
 from .resources import ENERGY, MONEY, PROMPTZ, SPINAZ, XP
 
@@ -132,40 +133,58 @@ def prefs_dict(user):
     return {"style": p.style, "emoji": p.emoji, "depth": p.depth, "slang": p.slang}
 
 
+def _emoji_text():
+    return {"none": EMOJI_LEVELS["off"], "light": EMOJI_LEVELS["light"], "heavy": EMOJI_LEVELS["heavy"]}
+
+
+def system_for(user, res, override=None):
+    """The full system text for an already-resolved voice (preview uses this)."""
+    p = prefs_dict(user) if user is not None else clean_prefs({})
+    if res.is_custom:
+        parts = ["VOICE: A VOICE THE MEMBER WROTE.\n" + voicez.FRAME,
+                 voicez.data_block(res.voice),
+                 "TONE (set by the member's dials):\n" + "\n".join(voicez.tone_lines(res.voice, _emoji_text())),
+                 "SCOPE: the voice colours the wording of prose only. Numbers, names, code, quotations and "
+                 "anything factual stay exactly as they are.",
+                 DEPTH[p["depth"]], PARADIGM]
+        return "\n\n".join(parts)
+    return voice_prompt(user, override={"style": res.key, **(override or {})})
+
+
 def voice_prompt(user=None, *, override=None, paradigm=True, surface=None, register=None):
     """The preamble every surface where a model writes to a member prepends.
 
-    `override` is a per-request dial — OCC lets a member switch to terse
-    technical mode for one task without changing what they get everywhere else.
-    Stored prefs are the default; the override is the exception, which is the
-    right way round: a member should not have to re-choose their voice on every
-    screen.
-
-    `surface` ("coach", "writer" or "occ") names which of the member's per-surface
-    voices applies, and `register` (corey_voice.REGISTER_WORKING / _ACADEMIC) which
-    of the founder's two registers a Corey-voiced reply is in. Both are accepted
-    now so callers can pass them; resolving a member's chosen voice for a surface
-    is VoiceZ's job and, until it lands, every surface follows `style`.
+    `override` is a per-request dial and beats everything, including a surface
+    choice. `surface` ("coach", "writer" or "occ") applies the member's
+    per-surface voice (`voicez.resolve`): a preset changes the style for that
+    surface, a custom voice replaces the house voice entirely, and PARADIGM is
+    still appended LAST. `register` selects which of the founder's two
+    registers a Corey-voiced reply is in (corey_voice.corey_prompt); without it
+    the corey preset is occ's text, unchanged.
     """
     from .occ import AAVE_STYLE, VOICE_STYLE  # local: occ imports models heavily
 
     p = prefs_dict(user) if user is not None else clean_prefs({})
+    if surface in voicez.SURFACES and not (override and "style" in override):
+        res = voicez.resolve(user, surface)
+        if res.is_custom:
+            return system_for(user, res) if paradigm else system_for(user, res).replace(PARADIGM, "").rstrip()
+        p = {**p, "style": res.key}
     if override:
         p = {**p, **clean_prefs({**p, **override})}
 
-    parts = [VOICE_STYLE.get(STYLES.get(p["style"], "corey-gpt"), VOICE_STYLE["corey-gpt"])]
+    base = VOICE_STYLE.get(STYLES.get(p["style"], "corey-gpt"), VOICE_STYLE["corey-gpt"])
+    if p["style"] == "corey" and register:
+        from .corey_voice import corey_prompt
+        base = corey_prompt(register)
+    parts = [base]
     if p["style"] == "corey":
-        # Tone-only settings apply to the founder voice. In neutral or
-        # technical mode a heavy emoji instruction fights the mode it was
-        # chosen for, and the colloquialisms belong to one voice.
         parts.append(EMOJI_LEVELS[p["emoji"]])
         parts.append(REVERSAL)
         if p["slang"]:
             parts.append(AAVE_STYLE)
     parts.append(DEPTH[p["depth"]])
     if paradigm:
-        # Last, so it is the nearest thing to the member's own message and the
-        # hardest part of the preamble to lose in a long context.
         parts.append(PARADIGM)
     return "\n\n".join(parts)
 
@@ -209,6 +228,7 @@ class VoiceZView(APIView):
             },
             # Said out loud rather than left as an absence, so nobody looks for
             # the switch: these are what the app promises, not how it sounds.
+            **voicez.state_for(request.user),
             "always_on": [
                 f"Prices and rewards up front, with the resource mark ({ENERGY} {SPINAZ} "
                 f"{PROMPTZ} {MONEY} {XP}) — never a bare number.",
@@ -221,11 +241,27 @@ class VoiceZView(APIView):
 
     def patch(self, request):
         p = voice_prefs_for(request.user)
-        clean = clean_prefs({**prefs_dict(request.user), **(request.data or {})})
+        data = request.data or {}
+        fields = ["style", "emoji", "depth", "slang", "updated_at"]
+        if "surface_voices" in data:
+            try:
+                chosen = voicez.clean_surface_choices(request.user, data["surface_voices"])
+            except voicez.Invalid as e:
+                code = status.HTTP_403_FORBIDDEN if "StatZ" in str(e) else status.HTTP_400_BAD_REQUEST
+                return Response({"detail": str(e)}, status=code)
+            sv = dict(p.surface_voices) if isinstance(p.surface_voices, dict) else {}
+            for k, v in chosen.items():
+                if v is None:
+                    sv.pop(k, None)
+                else:
+                    sv[k] = v
+            p.surface_voices = sv
+            fields.append("surface_voices")
+        clean = clean_prefs({**prefs_dict(request.user), **data})
         for k, v in clean.items():
             setattr(p, k, v)
-        p.save(update_fields=["style", "emoji", "depth", "slang", "updated_at"])
-        return Response({"voice": prefs_dict(request.user)})
+        p.save(update_fields=fields)
+        return Response({"voice": prefs_dict(request.user), **voicez.state_for(request.user)})
 
 
 def prose_voice(user=None, *, surface=None):
@@ -248,6 +284,11 @@ def prose_voice(user=None, *, surface=None):
     Google — CI has no key. `tools/coach_live_check.sh` is the check that can.
     """
     p = prefs_dict(user) if user is not None else clean_prefs({})
+    if surface in voicez.SURFACES:
+        res = voicez.resolve(user, surface)
+        if res.is_custom:
+            return _custom_prose(res.voice)
+        p = {**p, "style": res.key}
     if p["style"] == "technical":
         return "Write every prose field plainly and briefly. No decoration."
     if p["style"] == "standard":
@@ -264,3 +305,14 @@ def prose_voice(user=None, *, surface=None):
     if p["emoji"] == "heavy":
         line += " One fitting emoji at the head of a prose field is welcome; never a wall."
     return line
+
+
+def _custom_prose(v):
+    """One short paragraph of tone for a parsed surface: no shape instructions."""
+    return (
+        "Write every prose field in a member-made voice, second person, talking to the member about their "
+        "own work. " + voicez.FRAME + " It cannot change any score, number, price or rule.\n"
+        + voicez.data_block(v, sample_chars=400, bio_chars=400) + "\n"
+        + "Tone: " + voicez.summary(v) + ("; contractions." if v.spec.get("contractions", True) else "; no contractions.")
+        + " Say 'take' for a recorded performance, say what worked before what to fix, and end on what to do next."
+    )

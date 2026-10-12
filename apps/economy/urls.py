@@ -43,6 +43,7 @@ from .attractivenessz_view import AttractivenessZView
 from .soundcloud_engagement import SoundCloudEngagementView
 from .appversion import AppVersionView
 from .soundcloud_import import SoundCloudImportView
+from .soundcloud_library import ApplyView as SCLibApplyView, LibraryView as SCLibView, PreviewView as SCLibPreviewView
 from .coachz import CoachStudioView, RateStudentTakeView, AddStudentView
 from .distributez import TranscodeView, LyricsView
 from .adz import AdzView, AdDetailView, AdRewardView
@@ -312,6 +313,9 @@ urlpatterns = [
     path("attractivenessz/", AttractivenessZView.as_view(), name="economy-attractivenessz"),
     path("soundcloud/engagement/", SoundCloudEngagementView.as_view(), name="economy-soundcloud-engagement"),
     path("soundcloud/import/", SoundCloudImportView.as_view(), name="economy-soundcloud-import"),
+    path("soundcloud/library/", SCLibView.as_view(), name="economy-soundcloud-library"),
+    path("soundcloud/library/preview/", SCLibPreviewView.as_view(), name="economy-soundcloud-library-preview"),
+    path("soundcloud/library/apply/", SCLibApplyView.as_view(), name="economy-soundcloud-library-apply"),
     path("coachz/studio/", CoachStudioView.as_view(), name="economy-coachz-studio"),
     path("coachz/rate/", RateStudentTakeView.as_view(), name="economy-coachz-rate"),
     path("coachz/add-student/", AddStudentView.as_view(), name="economy-coachz-add-student"),

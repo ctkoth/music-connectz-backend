@@ -400,7 +400,10 @@ class OccWorkUnshareView(APIView):
         o.save(update_fields=["shared_post", "updated_at"])
         return Response({**output_dict(o, request), "unlinked_post": post_id,
                          "note": "The post is still up — delete it in PostZ if you want it gone.",
-                         "open_in": "social", "target": f"post-{post_id}"})
+                         # PostZ's feed — where the post still is and where it
+                         # is deleted. `social` is SocialConnectZ, and `post-<id>`
+                         # is an anchor nothing renders.
+                         "open_in": "postz", "target": "feed"})
 
 
 class PostOccWorkView(APIView):

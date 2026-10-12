@@ -292,6 +292,18 @@ WRITER_BRIEF_CHARS = {
 }
 
 
+# VoiceZ: how many voices of their own a member may keep. A recommendation,
+# Corey's to move. Presets (Corey / Standard / Technical) are every tier's;
+# MAKING and USING a custom voice is StatZ's, a capability on top of one
+# everybody already has. A lapse pauses voices and never erases them, and a
+# member over a ceiling keeps everything they wrote.
+CUSTOM_VOICE_LIMITS = {TIER_FREE: 0, TIER_PREMIUM: 0, TIER_STATZ: 20, TIER_DEBUG: 20}
+
+
+def custom_voice_limit(tier):
+    return CUSTOM_VOICE_LIMITS.get(tier, 0)
+
+
 def writer_brief_chars(tier):
     return WRITER_BRIEF_CHARS.get(tier, WRITER_BRIEF_CHARS[TIER_FREE])
 

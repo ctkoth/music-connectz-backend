@@ -512,6 +512,71 @@ def create_post(user, d):
     return p, {"energy_charged": charged, "energy": w.energy}, None
 
 
+class VisibilityRefused(Exception):
+    def __init__(self, payload, status):
+        super().__init__(payload.get("detail", ""))
+        self.payload, self.status = payload, status
+
+
+def change_visibility(user, p, new_vis, *, share_private_track=False, strict_funds=False,
+                      backdate_to=None):
+    """THE one way a post's visibility changes (PostZ edit and the SoundCloud
+    library manager both come through here).
+
+    Leaving private is the first moment a post can reach anybody, so that is
+    where the shortfall of its skill cost is charged (imports owe nothing: no
+    skills). A track private on SoundCloud needs `share_private_track`.
+    `strict_funds` refuses (402) instead of taking what is there, for batches.
+    `backdate_to` only ever moves created_at EARLIER, never later, so it cannot
+    bump a post or re-earn the fresh-post royalty boost.
+    Returns {"was", "now", "charged", "owed", "backdated"}.
+    """
+    with transaction.atomic():
+        row = Post.objects.select_for_update().get(pk=p.pk)
+        p.visibility, p.skill_cost_cents = row.visibility, row.skill_cost_cents
+        was = p.visibility
+        leaving = was == "private" and new_vis != "private"
+        if leaving:
+            from .soundcloud_import import has_private_track
+            if has_private_track(p) and not share_private_track:
+                raise VisibilityRefused({
+                    "detail": "This track is private on SoundCloud. Publishing shares its secret "
+                              "link with everyone who can see the post.",
+                    "needs_confirm": "share_private_track",
+                }, status.HTTP_409_CONFLICT)
+        charged = owed = 0
+        fields = ["visibility"]
+        if leaving:
+            cost, _lines = post_cost_cents(user, p.skills_used)
+            owed = max(0, cost - p.skill_cost_cents)
+            if owed:
+                Wallet.objects.get_or_create(user=user)
+                w = Wallet.objects.select_for_update().get(user=user)
+                have = max(0, w.energy or 0)
+                if strict_funds and have < owed:
+                    raise VisibilityRefused({
+                        "detail": f"Publishing this costs {owed} \u26a1 more and you have {have}. Nothing was charged.",
+                        "insufficient": True, "energy_needed": owed, "energy_available": have,
+                    }, status.HTTP_402_PAYMENT_REQUIRED)
+                charged = min(owed, have)
+                if charged:
+                    w.energy = have - charged
+                    w.save(update_fields=["energy", "updated_at"])
+                    p.skill_cost_cents += charged
+                    fields.append("skill_cost_cents")
+                    log_resource(user, Transaction.RES_ENERGY, -charged,
+                                 note=f"Published '{p.title}' (post #{p.id})"[:200],
+                                 app_key="postz", target=f"postz:{p.id}")
+        p.visibility = new_vis
+        p.save(update_fields=fields)
+        backdated = False
+        if leaving and backdate_to and backdate_to < p.created_at:
+            Post.objects.filter(pk=p.pk).update(created_at=backdate_to)
+            p.created_at = backdate_to
+            backdated = True
+    return {"was": was, "now": new_vis, "charged": charged, "owed": owed, "backdated": backdated}
+
+
 class PostCostView(APIView):
     """GET /api/economy/postz/cost/?skills=a,b — what posting this will cost.
 
@@ -737,42 +802,12 @@ class PostsView(APIView):
             # than defaulting to "public" the way creation does: a typo here
             # should never be the thing that publishes a draft.
             new_vis = str(d.get("visibility") or "").strip().lower()
-            # A track that is private on SoundCloud plays through its SECRET
-            # link. Publishing the post hands that link to everybody who can
-            # see it, so it is asked, not assumed — the member kept that track
-            # private somewhere else, on purpose.
-            if new_vis in dict(Post.VIS_CHOICES) and new_vis != "private" and p.visibility == "private":
-                from .soundcloud_import import has_private_track
-                if has_private_track(p) and not d.get("share_private_track"):
-                    return Response({
-                        "detail": "This track is private on SoundCloud. Publishing shares its secret "
-                                  "link with everyone who can see the post.",
-                        "needs_confirm": "share_private_track",
-                    }, status=status.HTTP_409_CONFLICT)
             if new_vis in dict(Post.VIS_CHOICES):
-                was_private = p.visibility == "private"
-                p.visibility = new_vis
-                vfields = ["visibility"]
-                # Going private -> anything else is the moment a post can
-                # first reach anybody. soundcloud_import.py's own promise is
-                # that "the normal cost of a post applies when they publish
-                # one" — imports are created with skill_cost_cents=0 because
-                # nothing was charged at import, so this charges the
-                # SHORTFALL between what the post's current skills_used would
-                # cost today and what has already been charged. A normal
-                # private post (charged in full at creation) has no shortfall
-                # and is never charged twice for the same skills.
-                if was_private and new_vis != "private":
-                    cost, _lines = post_cost_cents(request.user, p.skills_used)
-                    owed = max(0, cost - p.skill_cost_cents)
-                    if owed:
-                        w = wallet_for(request.user)
-                        charged = min(owed, max(0, w.energy))
-                        w.energy -= charged
-                        w.save(update_fields=["energy", "updated_at"])
-                        p.skill_cost_cents += charged
-                        vfields.append("skill_cost_cents")
-                p.save(update_fields=vfields)
+                try:
+                    change_visibility(request.user, p, new_vis,
+                                      share_private_track=bool(d.get("share_private_track")))
+                except VisibilityRefused as refused:
+                    return Response(refused.payload, status=refused.status)
             # edit_id + visibility (+ the private-track confirmation): nothing
             # else to do. Counting the confirmation would push a plain publish
             # into the content-edit path and its edit window.

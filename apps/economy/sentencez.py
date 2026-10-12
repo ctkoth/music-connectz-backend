@@ -38,6 +38,7 @@ from .gemini import _bill, _key, generate_content
 from .models import (SentenceWork, membership_for, can_afford_ai, daily_prompt_covers,
                      daily_prompt_state, profile_for)
 from .personaz import personas_of
+from .voicez import resolve
 from .views import is_owner_candidate
 
 logger = logging.getLogger(__name__)
@@ -195,6 +196,14 @@ FILL_NOTE = ("Written from only what you gave it. Fill every [BRACKETED] blank w
              "details, and read it through before you send it.")
 
 
+# The kinds that take the member's WRITER voice. Creative work is the member's
+# to voice; everything else is a claim about a person (resume, cover letter,
+# bio), follows a standard (essay, APA) or is a legal draft, and a voice must
+# never change what is true. A poem is plain by default (no house register) but
+# makes no claim about anybody, so a custom voice may write it.
+CREATIVE_KINDS = ("lyrics", "poem", "caption", "post")
+
+
 def voice_of(kind):
     """"koth", "academic" or "plain" — whose register the piece is written in."""
     if kind == "essay":
@@ -202,6 +211,10 @@ def voice_of(kind):
     if KINDS[kind].get("plain") or kind in LEGAL_KINDS:
         return "plain"
     return "koth"
+
+
+_EMOJI_TEXT = {"none": "EMOJI: none.", "light": "EMOJI: sparing, only where it helps.",
+               "heavy": "EMOJI: plenty, fitting each line."}
 
 
 def persona_keys(user):
@@ -214,20 +227,31 @@ def persona_keys(user):
     return keys
 
 
-def voice_note(kind, owner=False):
+def voice_note(kind, owner=False, writer=None):
     """What the prompt for this kind actually does about voice, for the screen to say.
 
     Only the essay has anything member-specific to say; the others are stated by
     `voice` alone, so theirs is empty rather than a sentence invented to fill the key.
     """
+    base = ""
     if kind == "essay":
-        return ESSAY_NOTE_OWNER if owner else ESSAY_NOTE_MEMBER
-    return ""
+        base = ESSAY_NOTE_OWNER if owner else ESSAY_NOTE_MEMBER
+    # Member-specific only when the member chose something other than the
+    # default; the default is stated by `voice` alone (the screen says K-Oth's).
+    if writer is not None and writer.is_custom:
+        if kind in CREATIVE_KINDS:
+            return f"Written in your voice '{writer.label}'."
+        return (base + " " if base else "") + f"Your voice '{writer.label}' isn't used here: this kind keeps its own register."
+    if writer is not None and not writer.follows_style and writer.key == "standard" and voice_of(kind) == "koth":
+        return "Written plainly, with none of K-Oth's house style (your Writer voice is Standard)."
+    return base
 
 
 def kinds_for(user):
     mine = persona_keys(user)
     owner = bool(is_owner_candidate(user))
+    from .voicez import resolve
+    writer = resolve(user, "writer")
     out = []
     for key, k in KINDS.items():
         need = k.get("personas") or ()
@@ -235,7 +259,8 @@ def kinds_for(user):
                     "allowed": not need or bool(mine & set(need)),
                     "needs": ["Manager", "A&R Scout"] if need else [],
                     "voice": voice_of(key),
-                    "voice_note": voice_note(key, owner),
+                    "voice_note": voice_note(key, owner, writer),
+                    "takes_voice": key in CREATIVE_KINDS,
                     "invents_nothing": bool(k.get("no_invention")),
                     "hint": k.get("hint", ""),
                     "style_label": k.get("style_label", "Genre / style (optional)")})
@@ -253,7 +278,7 @@ def _int(v, lo, hi):
         return None
 
 
-def prompt_for(kind, topic, genre="", majority=None, minority=None, owner=False):
+def prompt_for(kind, topic, genre="", majority=None, minority=None, owner=False, voice=None):
     k = KINDS[kind]
     lines = [f"Write {k['ask']}.", f"Subject: {topic}"]
     if genre:
@@ -267,17 +292,28 @@ def prompt_for(kind, topic, genre="", majority=None, minority=None, owner=False)
             rule.append(f"- The remaining lines (the minority) rhyme on their last {minority} "
                         f"syllable{'s' if minority > 1 else ''}.")
         lines.append("\n".join(rule))
-    voice = voice_of(kind)
-    if voice == "academic":
+    register = voice_of(kind)
+    custom = voice is not None and voice.is_custom and kind in CREATIVE_KINDS
+    plainer = (voice is not None and not voice.is_custom and voice.key == "standard"
+               and not voice.follows_style and register == "koth")
+    if custom:
+        from . import voicez
+        lines.append("VOICE: Write the piece in the voice described below.\n" + voicez.FRAME + "\n"
+                     + voicez.data_block(voice.voice) + "\n"
+                     + "\n".join(voicez.tone_lines(voice.voice, _EMOJI_TEXT))
+                     + "\nThe voice colours the wording only; the instructions after this still apply.")
+    elif plainer:
+        lines.append("VOICE: Write in a clear, natural register with no house style.")
+    elif register == "academic":
         # The owner's register is the owner's alone; everyone else gets the plain
         # academic one. `owner` defaults to False so a caller that forgets to say
         # gives the safe version, never somebody else's voice.
         lines.append("VOICE: " + (ACADEMIC_VOICE if owner else ACADEMIC_PLAIN))
-    elif voice == "koth":
+    elif register == "koth":
         lines.append("VOICE: " + PERSONAL_VOICE + (" " + LYRIC_STYLE if kind == "lyrics" else ""))
     if k.get("no_invention"):
         lines.append(NO_INVENTION)
-    if kind in ("lyrics", "caption", "post"):
+    if kind in ("lyrics", "caption", "post") and not custom and not plainer:
         samples = voice_samples()
         if samples:
             lines.append("Match the voice of these samples — vocabulary, rhythm, wordplay, attitude — "
@@ -387,7 +423,8 @@ class SentenceView(APIView):
                             status=status.HTTP_402_PAYMENT_REQUIRED)
 
         body = {"contents": [{"parts": [{"text": prompt_for(kind, topic, genre, majority, minority,
-                                                            owner=bool(is_owner_candidate(request.user)))}]}],
+                                                            owner=bool(is_owner_candidate(request.user)),
+                                                            voice=resolve(request.user, "writer"))}]}],
                 "generationConfig": {"temperature": 0.9}}
         try:
             deadline.check("the request was still being prepared when the time ran out")

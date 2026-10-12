@@ -132,7 +132,7 @@ def parse_range(text, ranges):
 
 
 def record(user, app_key, payload, *, difficulty="", genre="", target="",
-           style="", upload=None, source="", ref=""):
+           style="", upload=None, source="", ref="", context=None):
     """Keep one coached take. Best-effort — a score must reach the member
     whether or not it reaches the table.
 
@@ -166,6 +166,9 @@ def record(user, app_key, payload, *, difficulty="", genre="", target="",
             style=str(style or "")[:60],
             range_class=cls, low_note=low, high_note=high,
             upload=upload, source=str(source or "")[:16], ref=str(ref or "")[:64],
+            # What the coach heard, kept so a later gear-advice run can tie its
+            # reasons to THIS take. Not a purchase: upgrades.items is the paid part.
+            upgrades=({"context": context} if context else {}),
         )
     except Exception:                                       # pragma: no cover
         return None

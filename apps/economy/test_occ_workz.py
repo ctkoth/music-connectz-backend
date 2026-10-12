@@ -222,6 +222,8 @@ class ShareTests(WorkzBase):
         post_id = self.client.post(f"{WORKZ}{w['id']}/share/", {}, format="json").data["post_id"]
         resp = self.client.post(f"{WORKZ}{w['id']}/unshare/", {}, format="json")
         self.assertEqual(resp.data["unlinked_post"], post_id)
+        # The note says "delete it in PostZ" — so the door goes to PostZ's feed.
+        self.assertEqual((resp.data["open_in"], resp.data["target"]), ("postz", "feed"))
         self.assertFalse(resp.data["shared"])
         # Retracting something others may have rated is a separate decision,
         # made where the ratings are visible.

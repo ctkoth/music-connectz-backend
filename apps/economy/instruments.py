@@ -259,7 +259,8 @@ def scores_for(app_key, *, lyrics=False, mix=False):
             **(MIX_SCORE if (mix and rates_mix(app_key)) else {})}
 
 
-def prompt_for(app_key, genre, target, difficulty, style=None, lyrics=False, mix=False):
+def prompt_for(app_key, genre, target, difficulty, style=None, lyrics=False, mix=False,
+               listeners=None):
     """The coaching prompt, in this instrument's own terms."""
     p = profile_for_app(app_key)
     lyrics = bool(lyrics) and rates_lyrics(app_key)
@@ -397,12 +398,19 @@ Cents_off: negative = flat, positive = sharp. If pitch is 70+, return []."""
         ',\n  "weak_notes": [{"note": "...", "frequency": 330, "cents_off": 0}, ...]'
         if has_pitch else "")
 
+    # Server-read evidence only (vocalcoach.listeners_for); never member-typed.
+    listener_line = (
+        f"\n- Real listeners on Music ConnectZ rated this post {listeners['median']}/10 "
+        f"across {listeners['count']} ratings — evidence the song connects. It does not "
+        "change what you hear in the performance; score what you hear."
+        if listeners else "")
+
     return f"""You are the Music ConnectZ {p['coach']}. You are listening to one \
 recorded take from a member training in {p['label']}.
 
 Their context:
 - Genre: {genre}{target_line}{style_line}
-- Difficulty: {difficulty}
+- Difficulty: {difficulty}{listener_line}
 
 Score the take and coach it. Write the way a good engineer talks to an artist \
 in the room: direct, specific, second person, no hedging and no flattery. Name \
@@ -435,8 +443,11 @@ a clip with nothing in it; that one is "unscorable" above.
 - 3-4: real attempt, but the fundamentals come apart often enough that it is \
 the first thing to fix.
 - 5-7: a solid, ordinary take from somebody at this level. Things to fix, \
-nothing broken. **Most takes belong here** — 6 is normal, not a failure.
-- 8-9: clearly good for this level — the kind of take that actually lands \
+nothing broken. **Most takes belong here** — 6 is normal, not a failure. \
+7 is the top of this band and it is not ordinary: 7 = clearly above ordinary, a \
+real strength a listener would point to, and nothing that breaks the take.
+- 8-9: 8 = strong across the board, a take that would hold up next to released \
+records in its lane. Clearly good for this level — the kind of take that actually lands \
 with real listeners, not just technically clean. If people who heard it \
 responded strongly, that reaction is real evidence of where this take sits, \
 not something to talk yourself out of over a technicality nobody but \
@@ -513,6 +524,12 @@ note, the fact they went for it. Finding it is the job. An empty strengths list 
 is a failure of listening, not an honest verdict, and it is what turns coaching \
 into a list of complaints somebody closes.
 
+"heard" is the evidence, not the advice: up to 8 concrete observations, each \
+only what you can actually hear, with the time if you are sure of it. Omit \
+anything you are unsure of; an empty list is a correct answer. A second pass \
+checks your advice against these, so an observation you invented here becomes \
+advice somebody follows.
+
 Three things every answer carries, because a score with no destination is a \
 number and not coaching:
 
@@ -531,6 +548,7 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "style_fit": "<how it sits against the style or genre they picked>",
   "song_score": <1-10, or null if there's no actual song here to judge>,
   "song_why": "<one sentence, as a listener: what makes it land or not>",{lyric_fields}{mix_fields}
+  "heard": [{{"t": "<m:ss, or empty if unsure>", "what": "<one plain sentence: what is audible>", "dim": "<one score key above, or other>", "confidence": <1-3>}}, ...],
   "verdict": "<one sentence in that voice, what this take actually is>",
   "strengths": ["<what genuinely worked, named specifically - AT LEAST ONE, always>", "..."],
   "fixes": ["<the moment it goes wrong, and the fix — the two that matter most, worst first>", "..."],

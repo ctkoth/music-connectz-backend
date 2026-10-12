@@ -252,8 +252,69 @@ def _clamp(v, lo=1, hi=10):
         return None
 
 
+SCORE_RULE = ("Overall leans on your strongest parts — your best dimensions count "
+              "most, your weakest counts least.")
+MIN_LISTENERS = 3
+
+
+def strength_weighted(scores):
+    """The overall, from PERFORMANCE dimensions only, leaning on strengths.
+
+    Sort descending and weight by rank: n, n-1, ... 1 (best counts most, weakest
+    least). Round half up, clamp 1-10. Never below the plain mean (weights are
+    monotone, so it is >= the mean), never above the best dimension. Style Match
+    and Song are separate numbers by design and must not be passed in.
+    Returns None when there are no usable scores.
+    """
+    vals = sorted((v for v in (scores or {}).values() if isinstance(v, int)), reverse=True)
+    if not vals:
+        return None
+    n = len(vals)
+    num = sum(v * (n - i) for i, v in enumerate(vals))
+    den = n * (n + 1) / 2
+    return max(1, min(10, int(num / den + 0.5)))
+
+
+def clean_heard(raw, dims):
+    """The listener's observations, whitelisted: max 8, lengths capped, dim in
+    the instrument's own keys (else 'other'), confidence 1-3."""
+    out = []
+    if not isinstance(raw, list):
+        return out
+    for h in raw[:8]:
+        if not isinstance(h, dict) or not str(h.get("what", "")).strip():
+            continue
+        t = str(h.get("t", "") or "").strip()[:8]
+        if t and not re.fullmatch(r"\d{1,2}:\d{2}", t):
+            t = ""
+        dim = str(h.get("dim", "other")).strip()
+        try:
+            conf = max(1, min(3, int(h.get("confidence"))))
+        except (TypeError, ValueError):
+            conf = 1
+        out.append({"t": t, "what": str(h["what"]).strip()[:240],
+                    "dim": dim if dim in dims else "other", "confidence": conf})
+    return out
+
+
+def listeners_for(post, author_excluded=True):
+    """{median, count} from real ItemRating rows on this post, else None.
+
+    Only server-read ratings: distinct raters other than the post's author,
+    at least MIN_LISTENERS. A client-typed number is never consulted.
+    """
+    if post is None:
+        return None
+    from .models import ItemRating, _median
+    rows = ItemRating.objects.filter(item_id=f"post:{post.id}").exclude(user_id=post.author_id)
+    scores = list(rows.values_list("score", flat=True))
+    if len(scores) < MIN_LISTENERS:
+        return None
+    return {"median": _median(scores), "count": len(scores)}
+
+
 def score_take(app_key, f, content_type, *, genre, target, difficulty, style=None,
-               user=None, lyrics=False, mix=False, deadline=None):
+               user=None, lyrics=False, mix=False, deadline=None, listeners=None):
     """Send one take to the model. Returns (payload, error) — exactly one is None.
 
     Shared by the member coach and the no-account trial, deliberately: a trial
@@ -292,6 +353,7 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         style=str(style or "")[:60] or None,
         lyrics=lyrics,
         mix=mix,
+        listeners=listeners,
     )
     # The house voice for the PROSE inside the scored fields, from the member's
     # own row — the short form, not the full preamble. `prompt_for` states the
@@ -299,7 +361,7 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     # answer; a voice note that displaced it would risk a take that scored fine
     # coming back unparseable.
     from .voice import prose_voice
-    prompt = f"{prose_voice(user)}\n\n{prompt}"
+    prompt = f"{prose_voice(user, surface='coach')}\n\n{prompt}"
     # Normalise BEFORE the call. An unsupported container is a refusal we can
     # give instantly and explain, rather than a round trip that comes back as a
     # generic failure the member reads as "my take was bad".
@@ -451,13 +513,24 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         return None, ({"detail": "The coach's reply didn't come back readable. Try again."},
                       status.HTTP_502_BAD_GATEWAY)
 
+    perf = {k: _clamp((parsed.get("scores") or {}).get(k))
+            for k in scores_for(app_key, lyrics=lyrics, mix=mix)}
+    model_score = _clamp(parsed.get("score"))
+    # Performance dimensions only: style_match is closeness, not quality.
+    overall = strength_weighted({k: v for k, v in perf.items() if k != "style_match"})
+    if overall is None:
+        overall = model_score
+    if abs(overall - model_score) >= 2:
+        logger.info("%s coach: model overall %s vs weighted %s", app_key, model_score, overall)
     listy = lambda v: [str(x)[:300] for x in v][:6] if isinstance(v, list) else []
     return {
-        "score": _clamp(parsed.get("score")),
+        "score": overall,
+        "model_score": model_score,
+        "score_rule": SCORE_RULE,
+        "listeners": listeners,
         # One source for the dimension list, so the prompt cannot ask for six
         # and the whitelist keep five.
-        "scores": {k: _clamp((parsed.get("scores") or {}).get(k))
-                   for k in scores_for(app_key, lyrics=lyrics, mix=mix)},
+        "scores": perf,
         "rated_lyrics": lyrics,
         "rated_mix": mix,
         # A scored take is explicitly NOT unscorable, so the client reads one
@@ -485,6 +558,7 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         **({"lyrics_read": str(parsed.get("lyrics_read", ""))[:1200],
             "lyrics_note": str(parsed.get("lyrics_note", ""))[:800]} if lyrics else {}),
         **({"mix_note": str(parsed.get("mix_note", ""))[:800]} if mix else {}),
+        "heard": clean_heard(parsed.get("heard"), set(perf) | {"other"}),
         "strengths": listy(parsed.get("strengths")),
         "fixes": listy(parsed.get("fixes")),
         "next_drill": str(parsed.get("next_drill", ""))[:300],
@@ -851,6 +925,7 @@ class SingZCoachView(APIView):
                 # Only the voice the prose comes back in. The rubric is the
                 # same one the logged-out trial is scored on.
                 user=request.user,
+                listeners=listeners_for(post),
             )
         except Exception:
             # Almost always a recording that is no longer in storage. Say that,

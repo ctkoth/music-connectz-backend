@@ -104,6 +104,9 @@ LOGICZ_TABS = [
               True, tab="profilez"),
          # Same shape again — multi-select this time, because a member
          # commonly speaks several, but the same declared-never-scored rule.
+         _app("VoiceZ", "🎙️",
+              "Write your own voices and choose which one the coach, the writer and OCC speak in. "
+              "It changes wording, never a score or a price.", True, tab="voicez"),
          _app("LanguageZ", "🗣️",
               "The languages you speak, so people who can actually talk to "
               "you can find you. Never moves a rating.", True, tab="profilez"),
