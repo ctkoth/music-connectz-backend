@@ -399,10 +399,65 @@ def bridge(user, app_key):
                     "Bridge work: the drills between the two.")}
 
 
+_HARD_LABEL = {"performer": "Performer", "stageboss": "Stage Boss"}
+_EASY_LABEL = {"starter": "Starter", "builder": "Builder"}
+
+
+def _bare(label):
+    """A dimension's name without its emoji — 'Breath 🫁' reads as 'Breath' inside a
+    sentence. The emoji stays on the chart; here it would be decoration."""
+    import re
+    return re.sub(r"\s*[^\w\s'&/-].*$", "", str(label)).strip() or str(label)
+
+
+def _join(items):
+    items = list(items)
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " or " + items[-1] if items else ""
+
+
+def strain_rule(prof):
+    """The fatigue setting, said as what it DOES.
+
+    The screen used to say only that it "changes when the app eases you off the hard
+    settings", which names the mechanism and not the result. A member picking
+    between three options needs to know what each one costs them: how many weak
+    takes it takes before Performer and Stage Boss are held back. The numbers come
+    from THRESHOLD, LOW_AT and WINDOW_HOURS above, so the sentence cannot drift
+    from the rule it describes.
+
+    Empty for an instrument the coach cannot read strain from (a drummer has no
+    breath score) — the screen hides the control there, as it always has.
+    """
+    watched = [_bare(prof["scores"][d]) for d in STRAIN_DIMENSIONS if d in prof["scores"]]
+    if not watched:
+        return {}
+    names = _join(watched)
+    days = WINDOW_HOURS // 24
+    hard = " and ".join(_HARD_LABEL[d] for d in HARD)
+    easy = " and ".join(_EASY_LABEL[d] for d in _EASY_LABEL)
+    rows = []
+    for key, label in InstrumentProfile.SENSITIVITY:
+        n = THRESHOLD[key]
+        rows.append({
+            "key": key, "label": label, "lows_needed": n,
+            "result": f"{hard} are held back after {n} low {names} scores in {days} days.",
+        })
+    return {
+        "low_at": LOW_AT, "window_hours": WINDOW_HOURS, "days": days, "dimensions": watched,
+        "rows": rows,
+        "summary": (f"A low score is {LOW_AT} out of 10 or under on {names}. This setting is how "
+                    f"many of them, in the last {days} days, it takes before the coach holds "
+                    f"{hard} back and keeps you on {easy} until they roll off."),
+        "never": (f"It never blocks {easy}, never changes a score, and no plan lifts it — "
+                  "it is a health rule, not a feature."),
+    }
+
+
 def progress(user, app_key):
     """Everything the history knows, in one call. It renders as a screen."""
     prof = profile_for_app(app_key)
     row = profile_row(user, app_key)
+    rule = strain_rule(prof)
     takes = TakeScore.objects.filter(user=user, app_key=app_key)[:10]
     return {
         "app_key": app_key, "label": prof["label"],
@@ -415,7 +470,12 @@ def progress(user, app_key):
             "bpm_high": row.bpm_high if row else None,
         },
         "ranges": [{"key": k, "label": l} for k, l in prof["ranges"]],
-        "sensitivities": [{"key": k, "label": l} for k, l in InstrumentProfile.SENSITIVITY],
+        # `result` is new: what picking each one DOES, so the screen can say so
+        # beside the choice. `key` and `label` are unchanged for older clients.
+        "sensitivities": ([{"key": r["key"], "label": r["label"], "lows_needed": r["lows_needed"],
+                            "result": r["result"]} for r in rule["rows"]]
+                          if rule else [{"key": k, "label": l} for k, l in InstrumentProfile.SENSITIVITY]),
+        "strain_rule": ({k: v for k, v in rule.items() if k != "rows"} if rule else {}),
         "detected": detected(user, app_key),
         "bridge": bridge(user, app_key),
         "strain": strain(user, app_key),

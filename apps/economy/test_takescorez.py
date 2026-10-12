@@ -239,6 +239,28 @@ class StrainTests(TestCase):
         self._lows(2)
         self.assertEqual(T.strain(self.u, "singz")["level"], "strain")
 
+    def test_the_setting_says_what_each_choice_does_from_the_rule_itself(self):
+        """The screen was explained as a mechanism ("eases you off the hard settings")
+        and never as a result. Every number in the sentence is the rule's own."""
+        out = T.progress(self.u, "singz")
+        rows = {r["key"]: r for r in out["sensitivities"]}
+        for key, n in T.THRESHOLD.items():
+            self.assertEqual(rows[key]["lows_needed"], n)
+            self.assertIn(f"after {n} low", rows[key]["result"])
+            self.assertIn("Performer and Stage Boss", rows[key]["result"])
+        rule = out["strain_rule"]
+        self.assertEqual(rule["low_at"], T.LOW_AT)
+        self.assertEqual(rule["days"], T.WINDOW_HOURS // 24)
+        self.assertIn("Breath or Range", rule["summary"])
+        self.assertIn("never changes a score", rule["never"])
+        # the keys older clients read are still there
+        self.assertTrue(all("key" in r and "label" in r for r in out["sensitivities"]))
+
+    def test_an_instrument_with_no_strain_signal_has_no_rule_to_explain(self):
+        out = T.progress(member("drummer3"), "drumz")
+        self.assertEqual(out["strain_rule"], {})
+        self.assertTrue(out["sensitivities"])  # still the plain list, as before
+
     def test_an_instrument_with_no_strain_signal_says_unmeasured(self):
         """A clean bill of health nobody examined is worse than none."""
         out = T.strain(member("drummer"), "drumz")
