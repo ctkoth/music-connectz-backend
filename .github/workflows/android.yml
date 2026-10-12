@@ -4,10 +4,11 @@ name: Android APK
 # this is the build that produces a real file you can download and sideload:
 #   Actions -> this run -> Artifacts -> music-connectz-apk   (Music ConnectZ)
 #                                       bodiez-apk           (BodieZ, its own app)
+#                                       intelligencez-apk    (IntelligenceZ, its own app)
 #
 # It also builds the Play upload bundles (.aab). Play distributes app bundles,
-# not APKs — the APK is for testing on your own phone. Two flavors, two bundles,
-# because they are two Play listings (see android/app/build.gradle.kts).
+# not APKs — the APK is for testing on your own phone. Three flavors, three
+# bundles, because they are three Play listings (see android/app/build.gradle.kts).
 on:
   push:
     branches: ["main"]
@@ -24,6 +25,10 @@ on:
       bodiez_url:
         description: "Site BodieZ opens (the BodieZ-only build, on its own host)"
         default: "https://bodiez.musicconnectz.net"
+        required: false
+      intelligencez_url:
+        description: "Site IntelligenceZ opens (the IntelligenceZ-only build, on its own host)"
+        default: "https://intelligencez.musicconnectz.net"
         required: false
 
 permissions:
@@ -54,9 +59,10 @@ jobs:
 
       - name: Debug APK (sideloadable)
         run: >-
-          ./gradlew --no-daemon assembleMczDebug assembleBodiezDebug
+          ./gradlew --no-daemon assembleMczDebug assembleBodiezDebug assembleIntelligencezDebug
           -PsiteUrl=${{ github.event.inputs.site_url || 'https://musicconnectz.net' }}
           -PbodiezUrl=${{ github.event.inputs.bodiez_url || 'https://bodiez.musicconnectz.net' }}
+          -PintelligencezUrl=${{ github.event.inputs.intelligencez_url || 'https://intelligencez.musicconnectz.net' }}
 
       # Signed when the secrets are set, unsigned otherwise. An unsigned bundle is
       # fine to inspect and is REFUSED by Play Console ("The Android App Bundle was
@@ -77,9 +83,10 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: >-
-          ./gradlew --no-daemon bundleMczRelease bundleBodiezRelease
+          ./gradlew --no-daemon bundleMczRelease bundleBodiezRelease bundleIntelligencezRelease
           -PsiteUrl=${{ github.event.inputs.site_url || 'https://musicconnectz.net' }}
           -PbodiezUrl=${{ github.event.inputs.bodiez_url || 'https://bodiez.musicconnectz.net' }}
+          -PintelligencezUrl=${{ github.event.inputs.intelligencez_url || 'https://intelligencez.musicconnectz.net' }}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -95,6 +102,12 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          name: intelligencez-apk
+          path: android/app/build/outputs/apk/intelligencez/debug/*.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
           name: music-connectz-playstore-bundle
           path: android/app/build/outputs/bundle/mczRelease/*.aab
           if-no-files-found: error
@@ -103,4 +116,10 @@ jobs:
         with:
           name: bodiez-playstore-bundle
           path: android/app/build/outputs/bundle/bodiezRelease/*.aab
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: intelligencez-playstore-bundle
+          path: android/app/build/outputs/bundle/intelligencezRelease/*.aab
           if-no-files-found: error

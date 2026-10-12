@@ -33,15 +33,23 @@ from rest_framework.views import APIView
 
 from .catalog import UNLIMITED_CHARS as UNLIMITED_BRIEF
 from .catalog import WRITER_BRIEF_CHARS, ai_cost, over_writer_brief, writer_brief_chars
+from .deadline import Deadline, Expired
 from .gemini import _bill, _key, generate_content
 from .models import (SentenceWork, membership_for, can_afford_ai, daily_prompt_covers,
                      daily_prompt_state, profile_for)
 from .personaz import personas_of
+from .views import is_owner_candidate
 
 logger = logging.getLogger(__name__)
 
 KOTH_ROYALTY_PCT = 10
 CONTRACT_PERSONAS = ("manager", "arscout")
+# How long a member may be kept waiting for one POST, start to finish. The
+# screen used to give up at 30s while the server let the writer run for 60 per
+# model and then charged for a piece nobody was waiting for. The screen reads
+# this from GET and waits LONGER than it, so a server that answers in time is
+# always the one that decides; the model call takes what is left of it.
+BUDGET_SECONDS = 55
 
 # Corey's voice. Both repos are public, so his lyrics are NOT committed: they
 # are read from a Render Secret File (or the env var), samples separated by a
@@ -62,14 +70,29 @@ LYRIC_STYLE = (
     "Be candid and self-reflective, including about your own faults, and turn it toward growth. "
     "Plain, conversational vocabulary; confidence without polish."
 )
+# The citation rules are what makes an essay safe to hand in, and they are the
+# same for everybody: only sources the member listed, never an invented one.
+_APA = ("Cite in full APA 7 in-text and end with an APA 7 References section, but cite ONLY sources "
+        "listed in the brief, with their exact details; never invent a source. Where a claim needs a "
+        "citation the brief doesn't supply, write [CITATION NEEDED].")
+# What every member's essay gets: a plain academic register and the citation rules.
+ACADEMIC_PLAIN = "Write in a clear, formal academic register. Headings are plain text on their own line. " + _APA
+# Corey's own academic register — an emoji on every heading and paragraph,
+# contractions, em dashes, and this platform as the running example. It is HIS
+# voice, so only the platform owner's essays are written in it; handing it to a
+# student writing about streaming payouts put an app they had not mentioned into
+# their essay. Byte-for-byte what the prompt said before the split.
 ACADEMIC_VOICE = (
     "Open every heading and every paragraph with an emoji. Headings are plain text on their own line. "
     "Use contractions — conversational, not stiff — and em dashes freely. Use Music ConnectZ, the "
-    "author's own music platform, as a recurring real-world example. Cite in full APA 7 in-text and end "
-    "with an APA 7 References section, but cite ONLY sources listed in the brief, with their exact "
-    "details; never invent a source. Where a claim needs a citation the brief doesn't supply, write "
-    "[CITATION NEEDED]."
+    "author's own music platform, as a recurring real-world example. " + _APA
 )
+# Said on the screen, per the essay kind, so what the member is told is what the
+# prompt actually does.
+ESSAY_NOTE_MEMBER = ("Clear academic register, APA 7. It cites only the sources you list in the brief — it never "
+                     "makes one up, and writes [CITATION NEEDED] where a claim has no source from you.")
+ESSAY_NOTE_OWNER = ("Your own academic register: an emoji opens every heading and paragraph, contractions and em "
+                    "dashes, and Music ConnectZ as the running example. APA 7, citing only the sources you list.")
 
 
 def voice_samples():
@@ -191,8 +214,20 @@ def persona_keys(user):
     return keys
 
 
+def voice_note(kind, owner=False):
+    """What the prompt for this kind actually does about voice, for the screen to say.
+
+    Only the essay has anything member-specific to say; the others are stated by
+    `voice` alone, so theirs is empty rather than a sentence invented to fill the key.
+    """
+    if kind == "essay":
+        return ESSAY_NOTE_OWNER if owner else ESSAY_NOTE_MEMBER
+    return ""
+
+
 def kinds_for(user):
     mine = persona_keys(user)
+    owner = bool(is_owner_candidate(user))
     out = []
     for key, k in KINDS.items():
         need = k.get("personas") or ()
@@ -200,6 +235,7 @@ def kinds_for(user):
                     "allowed": not need or bool(mine & set(need)),
                     "needs": ["Manager", "A&R Scout"] if need else [],
                     "voice": voice_of(key),
+                    "voice_note": voice_note(key, owner),
                     "invents_nothing": bool(k.get("no_invention")),
                     "hint": k.get("hint", ""),
                     "style_label": k.get("style_label", "Genre / style (optional)")})
@@ -217,7 +253,7 @@ def _int(v, lo, hi):
         return None
 
 
-def prompt_for(kind, topic, genre="", majority=None, minority=None):
+def prompt_for(kind, topic, genre="", majority=None, minority=None, owner=False):
     k = KINDS[kind]
     lines = [f"Write {k['ask']}.", f"Subject: {topic}"]
     if genre:
@@ -233,7 +269,10 @@ def prompt_for(kind, topic, genre="", majority=None, minority=None):
         lines.append("\n".join(rule))
     voice = voice_of(kind)
     if voice == "academic":
-        lines.append("VOICE: " + ACADEMIC_VOICE)
+        # The owner's register is the owner's alone; everyone else gets the plain
+        # academic one. `owner` defaults to False so a caller that forgets to say
+        # gives the safe version, never somebody else's voice.
+        lines.append("VOICE: " + (ACADEMIC_VOICE if owner else ACADEMIC_PLAIN))
     elif voice == "koth":
         lines.append("VOICE: " + PERSONAL_VOICE + (" " + LYRIC_STYLE if kind == "lyrics" else ""))
     if k.get("no_invention"):
@@ -304,6 +343,7 @@ class SentenceView(APIView):
             "daily_remaining": daily_left,
             "daily_allowance": allowance,
             "can_run": bool(_key()) and (free or can_afford_ai(request.user, cost)),
+            "budget_seconds": BUDGET_SECONDS,
             "royalty_pct": KOTH_ROYALTY_PCT,
             "royalty_rule": (f"Using a piece in DistributeZ, CollabZ or BattleZ pays K-Oth "
                              f"{KOTH_ROYALTY_PCT}% of it, scaled by how much of the original you kept — "
@@ -314,6 +354,7 @@ class SentenceView(APIView):
         })
 
     def post(self, request):
+        deadline = Deadline(BUDGET_SECONDS)
         d = request.data or {}
         kind = str(d.get("kind", "")).strip()
         if kind not in KINDS:
@@ -345,10 +386,25 @@ class SentenceView(APIView):
             return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
                             status=status.HTTP_402_PAYMENT_REQUIRED)
 
-        body = {"contents": [{"parts": [{"text": prompt_for(kind, topic, genre, majority, minority)}]}],
+        body = {"contents": [{"parts": [{"text": prompt_for(kind, topic, genre, majority, minority,
+                                                            owner=bool(is_owner_candidate(request.user)))}]}],
                 "generationConfig": {"temperature": 0.9}}
         try:
-            resp, tried = generate_content("text", body, key=key, timeout=60, label="Sentence ConnectZ")
+            deadline.check("the request was still being prepared when the time ran out")
+            resp, tried = generate_content("text", body, key=key, timeout=deadline.remaining(cap=60),
+                                           label="Sentence ConnectZ")
+            # `generate_content` walks a chain of models with ONE timeout each, so
+            # a call can overrun the budget by more than it was given. An answer
+            # that lands after the member's wait is over is not billed: the screen
+            # was told it was still running, and nothing here is theirs yet.
+            deadline.check("the writer was still going when the time ran out")
+        except Expired as e:
+            logger.warning("Sentence ConnectZ: over budget after %.0fs — %s", deadline.spent(), e.message)
+            return Response({"detail": f"The writer is taking longer than it should — {e.message}. "
+                                       "Nothing was charged. Try a shorter brief, or the same one again "
+                                       "in a minute.",
+                             "timed_out": True, "waited_seconds": int(deadline.spent())},
+                            status=status.HTTP_504_GATEWAY_TIMEOUT)
         except requests.RequestException:
             logger.exception("Sentence ConnectZ: could not reach Gemini")
             return Response({"detail": "Couldn't reach the writer. Nothing was charged — try again."},

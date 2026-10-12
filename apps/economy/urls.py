@@ -33,6 +33,7 @@ from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView, DupeZVerify
 from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
 from .scoreshare import ScoreShareView, score_card_png
+from .coachshare import PostCoachView, post_coach_card
 from .weeklybattle import WeeklyBattleView
 from .soundz import SoundZView
 from .coachvoice import CoachVoiceView, CoachSpeakView
@@ -296,6 +297,12 @@ urlpatterns = [
     # Shareable score cards: JSON for the page + a 1200x630 image for crawlers.
     path("scores/<str:token>/", ScoreShareView.as_view(), name="score-share"),
     path("scores/<str:token>/card.png", score_card_png, name="score-share-card"),
+    # The coach's read posted WITH a song, and who may see it (coachshare.py).
+    # `posts/<id>/coach/` is the same view under the name the screens were
+    # briefed with; `postz/` is where every other PostZ route lives.
+    path("postz/<int:pk>/coach/", PostCoachView.as_view(), name="economy-postz-coach"),
+    path("posts/<int:pk>/coach/", PostCoachView.as_view(), name="economy-posts-coach"),
+    path("postz/<int:pk>/coach-card.png", post_coach_card, name="economy-postz-coach-card"),
     path("soundz/", SoundZView.as_view(), name="economy-soundz"),
     path("coachvoice/", CoachVoiceView.as_view(), name="economy-coachvoice"),
     path("coachvoice/speak/", CoachSpeakView.as_view(), name="economy-coachvoice-speak"),

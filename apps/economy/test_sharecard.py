@@ -82,10 +82,32 @@ class PostCardTests(TestCase):
         body = self.client.get(f"/api/economy/share/p/{p.pk}").content.decode()
         self.assertIn("Night Drive — author on Music ConnectZ", body)
 
-    def test_the_score_is_in_the_description_because_it_is_the_shareable_part(self):
+    def test_the_score_is_in_the_title_because_it_is_the_shareable_part(self):
+        # Only a read the coach itself gave (coached_by / source=share), and only
+        # when a stranger may see it — see test_coachshare for the full matrix.
+        p = self.make(visibility="public", score={
+            "score": 8, "app_key": "singz", "coached_by": "author",
+            "verdict": "The hook lands. The last phrase runs out of air."})
+        body = self.client.get(f"/api/economy/share/p/{p.pk}").content.decode()
+        self.assertIn("Night Drive — 8/10 from the Music ConnectZ coach", body)
+        self.assertIn('og:description" content="The hook lands."', body)
+        self.assertIn(f"/api/economy/postz/{p.pk}/coach-card.png", body)
+
+    def test_a_bare_number_in_the_score_column_is_not_the_coachs_word(self):
+        # The column used to be a passthrough for whatever a client POSTed, so a
+        # number with no provenance is the thing a link preview must not repeat.
         p = self.make(visibility="public", score={"score": 8})
         body = self.client.get(f"/api/economy/share/p/{p.pk}").content.decode()
-        self.assertIn("Scored 8/10 by the coach", body)
+        self.assertNotIn("8/10", body)
+        self.assertIn("og-card.png", body)
+
+    def test_a_members_only_read_puts_no_number_in_the_preview(self):
+        p = self.make(visibility="public", score_visibility="members", score={
+            "score": 8, "app_key": "singz", "coached_by": "author",
+            "verdict": "The hook lands."})
+        body = self.client.get(f"/api/economy/share/p/{p.pk}").content.decode()
+        self.assertNotIn("8/10", body)
+        self.assertNotIn("The hook lands", body)
 
     def test_a_private_post_does_not_leak_its_title_through_a_preview(self):
         # A real disclosure dressed as a nicety.

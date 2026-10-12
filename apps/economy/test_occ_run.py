@@ -16,6 +16,8 @@ from apps.economy.models import (
     TIER_STATZ,
     OccOutput,
     OccTask,
+    Transaction,
+    Wallet,
     membership_for,
     wallet_for,
 )
@@ -58,14 +60,23 @@ class NotWiredYetTests(RunBase):
     def test_the_spec_does_not_claim_it_can_execute(self):
         spec = self.client.get(SPEC).data
         self.assertFalse(spec["can_execute"])
-        self.assertIn("isn't connected yet", spec["execute_note"])
+        self.assertEqual(spec["execute_note"], "Running code isn't switched on yet.")
 
     def test_running_returns_503_with_the_reason_not_a_silent_failure(self):
         resp = self.client.post(RUN, {"language": "python", "source": "print(1)"},
                                 format="json")
         self.assertEqual(resp.status_code, 503)
-        self.assertIn("MODAL_TOKEN_ID", resp.data["detail"])
+        # A member's sentence. The env-var names are for whoever runs the server
+        # and go to the log; "Set MODAL_TOKEN_ID…" in front of a member is both
+        # useless to them and a published description of our configuration.
+        self.assertEqual(resp.data["detail"], "Running code isn't switched on yet.")
+        self.assertNotIn("MODAL_TOKEN", str(resp.data))
         self.assertFalse(resp.data["configured"])
+
+    def test_the_operator_still_gets_the_detail_in_the_log(self):
+        with self.assertLogs("apps.economy.occ_run", level="WARNING") as logs:
+            self.client.post(RUN, {"language": "python", "source": "print(1)"}, format="json")
+        self.assertIn("MODAL_TOKEN_ID", "\n".join(logs.output))
 
     def test_nothing_is_charged_when_it_cannot_run(self):
         self.client.post(RUN, {"language": "python", "source": "print(1)"}, format="json")
@@ -125,14 +136,113 @@ class ChargingTests(RunBase):
         self.assertEqual(resp.data["charged"], 3)
         self.assertIn("SyntaxError", resp.data["work"]["description"])
 
-    def test_it_never_charges_energy_the_member_does_not_have(self):
+    def test_a_member_whose_energy_does_not_cover_the_run_is_refused_up_front(self):
+        # It used to run, and bill min(price, balance): a member with 2 ⚡ got a
+        # 120-second container for 2 ⚡, and a member with 0 ⚡ got it free.
         w = wallet_for(self.user)
         w.energy = 2
         w.save(update_fields=["energy"])
-        with patch("apps.economy.occ_run.run_source", return_value=GOOD_RUN):
+        with patch("apps.economy.occ_run.run_source", return_value=GOOD_RUN) as run:
             resp = self.client.post(RUN, {"language": "python", "source": "print(1)"},
                                     format="json")
-        self.assertEqual(resp.data["charged"], 2)
+        self.assertEqual(resp.status_code, 402, resp.data)
+        run.assert_not_called()                          # no container, no platform bill
+        self.assertEqual(OccTask.objects.count(), 0)
+        self.assertEqual(wallet_for(self.user).energy, 2)
+        # The refusal states the numbers and the way forward.
+        self.assertEqual(resp.data["needed"], 120)
+        self.assertEqual(resp.data["affordable_seconds"], 2)
+        self.assertIn("120", resp.data["detail"])
+        self.assertIn("2s or less", resp.data["detail"])
+
+    def test_zero_energy_cannot_run_free(self):
+        w = wallet_for(self.user)
+        w.energy = 0
+        w.save(update_fields=["energy"])
+        with patch("apps.economy.occ_run.run_source", return_value=GOOD_RUN) as run:
+            resp = self.client.post(RUN, {"language": "python", "source": "print(1)"},
+                                    format="json")
+        self.assertEqual(resp.status_code, 402)
+        run.assert_not_called()
+        self.assertEqual(resp.data["affordable_seconds"], 0)
+
+    def test_a_shorter_limit_the_member_can_afford_runs(self):
+        w = wallet_for(self.user)
+        w.energy = 10
+        w.save(update_fields=["energy"])
+        with patch("apps.economy.occ_run.run_source", return_value=GOOD_RUN) as run:
+            resp = self.client.post(RUN, {"language": "python", "source": "print(1)",
+                                          "seconds": 10}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(run.call_args.kwargs["seconds"], 10)
+        self.assertEqual(resp.data["charged"], 3)
+        self.assertEqual(wallet_for(self.user).energy, 7)
+
+    def test_the_debit_is_in_logz_with_its_reason(self):
+        with patch("apps.economy.occ_run.run_source", return_value=GOOD_RUN):
+            self.client.post(RUN, {"language": "python", "source": "print(1)"}, format="json")
+        row = Transaction.objects.get(user=self.user, resource=Transaction.RES_ENERGY)
+        self.assertEqual(row.amount, -3)
+        self.assertEqual(row.app_key, "occ")
+        self.assertEqual(row.target, "occ-run")
+        self.assertIn("python", row.note)
+
+    def test_a_run_that_never_started_writes_no_ledger_row(self):
+        with patch("apps.economy.occ_run.run_source", side_effect=SandboxError("no capacity")):
+            self.client.post(RUN, {"language": "python", "source": "print(1)"}, format="json")
+        self.assertFalse(Transaction.objects.filter(
+            user=self.user, resource=Transaction.RES_ENERGY).exists())
+
+    def test_energy_spent_while_the_container_ran_is_not_overdrawn(self):
+        # The balance covered the ceiling when the run was accepted; another spend
+        # landed while the container ran. The bill is "all you have", never a
+        # negative balance, and the ledger says what really moved.
+        def spend_meanwhile(*a, **kw):
+            Wallet.objects.filter(user=self.user).update(energy=1)
+            return GOOD_RUN
+        with patch("apps.economy.occ_run.run_source", side_effect=spend_meanwhile):
+            resp = self.client.post(RUN, {"language": "python", "source": "print(1)"},
+                                    format="json")
+        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.data["charged"], 1)
+        self.assertEqual(wallet_for(self.user).energy, 0)
+        self.assertEqual(Transaction.objects.get(
+            user=self.user, resource=Transaction.RES_ENERGY).amount, -1)
+
+
+class SpendEnergyTests(TestCase):
+    """`_spend_energy_up_to` is spend_spinaz's shape for Energy: one conditional
+    statement, so a balance cannot be read twice and spent twice."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="spender", password=PW)
+
+    def have(self, n):
+        w = wallet_for(self.user)
+        w.energy = n
+        w.save(update_fields=["energy"])
+
+    def test_it_takes_the_whole_amount_when_the_balance_covers_it(self):
+        from apps.economy.occ_run import _spend_energy_up_to
+        self.have(10)
+        self.assertEqual(_spend_energy_up_to(self.user, 4), 4)
+        self.assertEqual(wallet_for(self.user).energy, 6)
+
+    def test_two_bills_against_one_balance_add_up_instead_of_overwriting(self):
+        # The lost-update shape: both are accepted against 5 ⚡, each wants 3.
+        from apps.economy.occ_run import _spend_energy_up_to
+        self.have(5)
+        self.assertEqual(_spend_energy_up_to(self.user, 3), 3)
+        self.assertEqual(_spend_energy_up_to(self.user, 3), 2)   # what was left
+        self.assertEqual(_spend_energy_up_to(self.user, 3), 0)
+        self.assertEqual(wallet_for(self.user).energy, 0)
+
+    def test_it_never_goes_negative_and_a_zero_spend_is_not_a_spend(self):
+        from apps.economy.occ_run import _spend_energy_up_to
+        self.have(0)
+        self.assertEqual(_spend_energy_up_to(self.user, 50), 0)
+        self.assertEqual(_spend_energy_up_to(self.user, 0), 0)
+        self.assertEqual(_spend_energy_up_to(self.user, -5), 0)
         self.assertEqual(wallet_for(self.user).energy, 0)
 
 
@@ -153,12 +263,44 @@ class GatesAndCapsTests(RunBase):
 
     def test_the_daily_ceiling_is_summed_from_the_runs_themselves(self):
         OccTask.objects.create(user=self.user, title="earlier", kind=OccTask.KIND_BUILD,
-                               status=OccTask.STATUS_DONE, run_seconds=1790)
+                               status=OccTask.STATUS_DONE, run_seconds=1800)
         st = self.client.get(RUN).data
-        self.assertEqual(st["seconds_used_today"], 1790)
+        self.assertEqual(st["seconds_used_today"], 1800)
+        self.assertEqual(st["seconds_left_today"], 0)
         resp = self.client.post(RUN, {"language": "python", "source": "print(1)",
                                       "seconds": 60}, format="json")
         self.assertEqual(resp.status_code, 429)
+
+    def test_the_last_stretch_of_the_day_is_usable(self):
+        # 10s left of 1,800. It used to refuse any run longer than the remainder,
+        # so a one-second script could not run and the final stretch of the
+        # allowance was unusable. Clamped to what is left; refused only at zero.
+        OccTask.objects.create(user=self.user, title="earlier", kind=OccTask.KIND_BUILD,
+                               status=OccTask.STATUS_DONE, run_seconds=1790)
+        with patch("apps.economy.occ_run.run_source", return_value=GOOD_RUN) as run:
+            resp = self.client.post(RUN, {"language": "python", "source": "print(1)",
+                                          "seconds": 60}, format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(run.call_args.kwargs["seconds"], 10)
+        self.assertEqual(resp.data["seconds_allowed"], 10)
+
+    def test_no_seconds_asked_runs_at_what_is_left_not_the_full_ceiling(self):
+        OccTask.objects.create(user=self.user, title="earlier", kind=OccTask.KIND_BUILD,
+                               status=OccTask.STATUS_DONE, run_seconds=1750)
+        with patch("apps.economy.occ_run.run_source", return_value=GOOD_RUN) as run:
+            self.client.post(RUN, {"language": "python", "source": "print(1)"}, format="json")
+        self.assertEqual(run.call_args.kwargs["seconds"], 50)
+
+    def test_the_get_says_how_long_a_run_started_now_can_be(self):
+        # The Run button states a price for the run that WILL be made: the tier's
+        # ceiling, today's remainder and the member's ⚡, whichever bites first.
+        w = wallet_for(self.user)
+        w.energy = 45
+        w.save(update_fields=["energy"])
+        st = self.client.get(RUN).data
+        self.assertEqual(st["max_seconds_now"], 45)
+        self.assertEqual(st["max_cost_now"], 45)
+        self.assertEqual(st["max_cost_per_run"], 120)    # the tier's, unchanged
 
     def test_a_request_over_the_per_run_ceiling_is_clamped_not_refused(self):
         with patch("apps.economy.occ_run.run_source", return_value=GOOD_RUN) as run:
@@ -228,9 +370,13 @@ class SandboxCommandTests(TestCase):
 
     @override_settings(**OFF)
     def test_it_refuses_to_pretend_when_the_tokens_are_missing(self):
-        from apps.economy.modal_sandbox import configured, unavailable_reason
+        from apps.economy.modal_sandbox import (
+            MEMBER_REASON, configured, operator_reason, unavailable_reason)
         self.assertFalse(configured())
-        self.assertIn("MODAL_TOKEN_ID", unavailable_reason())
+        # Two sentences for two readers: the member's, and the operator's.
+        self.assertEqual(unavailable_reason(), MEMBER_REASON)
+        self.assertNotIn("MODAL_TOKEN", unavailable_reason())
+        self.assertIn("MODAL_TOKEN_ID", operator_reason())
 
     def test_the_price_is_a_plain_function_of_seconds(self):
         from apps.economy.modal_sandbox import price_for

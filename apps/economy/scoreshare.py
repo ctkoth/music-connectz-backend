@@ -75,7 +75,7 @@ def _font(size):
     return ImageFont.load_default(size=size)
 
 
-def _wrap(draw, text, font, width):
+def _wrap(draw, text, font, width, max_lines=2):
     words, lines, cur = text.split(), [], ""
     for w in words:
         trial = f"{cur} {w}".strip()
@@ -87,46 +87,91 @@ def _wrap(draw, text, font, width):
             cur = w
     if cur:
         lines.append(cur)
-    if len(lines) > 2:                      # two lines fit above the footer
-        lines = lines[:2]
-        lines[1] = lines[1].rstrip(" .,;:”") + "…”"
+    if len(lines) > max_lines:              # what fits above the footer
+        lines = lines[:max_lines]
+        lines[-1] = lines[-1].rstrip(" .,;:”") + "…”"
     return lines
 
 
-def score_card_png(request, token):
-    """GET /api/economy/scores/<token>/card.png — 1200x630, the size every
-    social preview (Open Graph / X large card) expects."""
+# The two shapes of the same card. 1200x630 is what every social preview
+# (Open Graph / X large card) expects; 1080x1920 is what TikTok, Reels and
+# Stories are — the places a member actually posts a score to.
+CARD_SIZE = (1200, 630)
+STORY_SIZE = (1080, 1920)
+
+
+def wants_story(request):
+    return str(request.GET.get("format", "")).lower() == "story"
+
+
+def render_card(d, story=False):
+    """The score card as PNG bytes, drawn from a plain dict.
+
+    `d` needs `label`, `genre`, `score`, `verdict` and `username` — the shape
+    `share_dict` returns. It is a dict, not a ScoreShare row, so the same card
+    can be drawn for a coach read that lives on a POST (see coachshare.py) and
+    not only for one that has its own share row. The caller decides whether the
+    card may be drawn at all; this only draws.
+    """
     from PIL import Image, ImageDraw
-    row = get_object_or_404(ScoreShare.objects.select_related("user"), token=token)
-    d = share_dict(row)
-    W, H = 1200, 630
+    W, H = STORY_SIZE if story else CARD_SIZE
     img = Image.new("RGB", (W, H), (7, 6, 13))
     g = ImageDraw.Draw(img)
     # Neon frame, the house look.
     g.rounded_rectangle((24, 24, W - 24, H - 24), radius=36, outline=(255, 85, 0), width=6)
     g.rounded_rectangle((36, 36, W - 36, H - 36), radius=30, outline=(56, 227, 255), width=2)
-
-    g.text((80, 70), "MUSIC CONNECTZ", font=_font(34), fill=(56, 227, 255))
-    g.text((80, 120), f"{d['label']} coach" + (f" · {d['genre']}" if d["genre"] else ""),
-           font=_font(40), fill=(255, 255, 255))
-
-    big = _font(220)
-    score = f"{d['score']}"
-    g.text((80, 150), score, font=big, fill=(255, 85, 0))
-    sw = g.textlength(score, font=big)
-    g.text((80 + sw + 16, 310), "/10", font=_font(90), fill=(255, 255, 255))
-
-    y = 420
-    for line in _wrap(g, f"“{d['verdict']}”" if d["verdict"] else "", _font(36), W - 160):
-        g.text((80, y), line, font=_font(36), fill=(220, 220, 230))
-        y += 46
     who = f"@{d['username']}  ·  " if d["username"] else ""
-    g.text((80, H - 92), f"{who}Get your take scored free → musicconnectz.net",
-           font=_font(30), fill=(52, 211, 153))
+    coach_line = f"{d['label']} coach" + (f" · {d['genre']}" if d["genre"] else "")
+    quote = f"“{d['verdict']}”" if d["verdict"] else ""
+    score = f"{d['score']}"
+
+    if not story:
+        g.text((80, 70), "MUSIC CONNECTZ", font=_font(34), fill=(56, 227, 255))
+        g.text((80, 120), coach_line, font=_font(40), fill=(255, 255, 255))
+        big = _font(220)
+        g.text((80, 150), score, font=big, fill=(255, 85, 0))
+        sw = g.textlength(score, font=big)
+        g.text((80 + sw + 16, 310), "/10", font=_font(90), fill=(255, 255, 255))
+        y = 420
+        for line in _wrap(g, quote, _font(36), W - 160):
+            g.text((80, y), line, font=_font(36), fill=(220, 220, 230))
+            y += 46
+        g.text((80, H - 92), f"{who}Get your take scored free → musicconnectz.net",
+               font=_font(30), fill=(52, 211, 153))
+    else:
+        # The same four things, stacked for a phone held upright. Side margins
+        # are wider than the feed card's because Stories overlays its own UI at
+        # the top and bottom edges; nothing that matters sits inside them.
+        g.text((90, 190), "MUSIC CONNECTZ", font=_font(48), fill=(56, 227, 255))
+        for i, line in enumerate(_wrap(g, coach_line, _font(60), W - 180, max_lines=2)):
+            g.text((90, 270 + i * 74), line, font=_font(60), fill=(255, 255, 255))
+        big = _font(520)
+        g.text((90, 470), score, font=big, fill=(255, 85, 0))
+        sw = g.textlength(score, font=big)
+        g.text((90 + sw + 20, 800), "/10", font=_font(150), fill=(255, 255, 255))
+        y = 1130
+        for line in _wrap(g, quote, _font(58), W - 180, max_lines=6):
+            g.text((90, y), line, font=_font(58), fill=(220, 220, 230))
+            y += 76
+        foot = ([f"@{d['username']}"] if d["username"] else []) + [
+            "Get your take scored free", "musicconnectz.net"]
+        y = H - 150 - 66 * len(foot)
+        for line in foot:
+            g.text((90, y), line, font=_font(46), fill=(52, 211, 153))
+            y += 66
 
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
-    resp = HttpResponse(buf.getvalue(), content_type="image/png")
+    return buf.getvalue()
+
+
+def score_card_png(request, token):
+    """GET /api/economy/scores/<token>/card.png — 1200x630, the size every
+    social preview (Open Graph / X large card) expects. `?format=story` is the
+    same card at 1080x1920 for TikTok, Reels and Stories."""
+    row = get_object_or_404(ScoreShare.objects.select_related("user"), token=token)
+    resp = HttpResponse(render_card(share_dict(row), story=wants_story(request)),
+                        content_type="image/png")
     # The row never changes, so crawlers and CDNs may keep it.
     resp["Cache-Control"] = "public, max-age=86400"
     return resp

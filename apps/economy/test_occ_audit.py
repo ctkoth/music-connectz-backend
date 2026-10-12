@@ -254,17 +254,19 @@ class EveryTabGoesSomewhereTests(Base):
         linked = [t for t in self.tabs() if t.get("open_in")]
         self.assertGreaterEqual(len(linked), 12,
                                 "most tabs map to a screen that already exists")
+        # ...and a tab with no screen says so instead of carrying a door.
+        for t in self.tabs():
+            self.assertEqual(bool(t.get("open_in")), t["built"], t["key"])
 
     def test_they_only_point_at_screens_the_client_actually_has(self):
         # An open_in nobody can navigate to is the dead end with extra steps.
-        navigable = {"occ", "social", "habitz", "logz", "profilez", "postz",
-                     "collabz", "battlez", "messagez", "playlistz", "keyconnectz",
-                     "singz", "rapz", "labelz", "groupz", "directz", "mimez",
-                     "lessonz", "specz", "membershipz", "adz", "offerz", "bugz",
-                     "onboardz"}
+        # The allow-list is the one in test_occ_routes (every tab App.jsx mounts);
+        # this used to be a partial copy of it, which is how `callz` and `gamez`
+        # — both mounted — read as unreachable while `imagez` read as fine.
+        from apps.economy.test_occ_routes import MOUNTED_TABS
         for t in self.tabs():
             if t.get("open_in"):
-                self.assertIn(t["open_in"], navigable, t["key"])
+                self.assertIn(t["open_in"], MOUNTED_TABS, t["key"])
 
     def test_the_four_observationz_tabs_land_on_the_screen_that_serves_them(self):
         # CodeZ, PathZ and MistakeZ are ObservationZ kinds — the HabitZ screen

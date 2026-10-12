@@ -1,27 +1,29 @@
-# Music ConnectZ + BodieZ — Android apps
+# Music ConnectZ + BodieZ + IntelligenceZ — Android apps
 
-Two apps from one project (Gradle product flavors), one Play listing each:
+Three apps from one project (Gradle product flavors), one Play listing each:
 
 | Flavor | App | Package | Opens | Icon |
 |---|---|---|---|---|
 | `mcz` | Music ConnectZ | `net.musicconnectz.app` | `https://musicconnectz.net` | the equalizer mark |
 | `bodiez` | BodieZ | `net.musicconnectz.bodiez` | `https://bodiez.musicconnectz.net` — the BodieZ-only web build, its own host | the neon athletes, same art as the in-app tab |
+| `intelligencez` | IntelligenceZ | `net.musicconnectz.intelligencez` | `https://intelligencez.musicconnectz.net` — the IntelligenceZ-only web build, its own host | the IntelligenceZ sign (neon brain), same art as the in-app tab |
 
 Each is a **Trusted Web Activity**: it opens its site full-screen in Chrome with
 no URL bar, so the mobile web app *is* the Android app. That's
 Google's sanctioned route for shipping a web app — a plain WebView wrapper gets
 rejected under the minimum-functionality policy.
 
-Both share one Kotlin file. Everything else is icons, splash, and link
-verification — and the differences between the two apps are all in
-`app/build.gradle.kts` (the flavors) and `app/src/bodiez/res/` (name, icon,
-splash, colour).
+All three share one Kotlin file. Everything else is icons, splash, and link
+verification — and the differences between the apps are all in
+`app/build.gradle.kts` (the flavors) and `app/src/bodiez/res/`,
+`app/src/intelligencez/res/` (name, icon, splash, colour).
 
 ## Get an APK
 
 No Android Studio needed — GitHub → **Actions** → **Android APK** → **Run
-workflow**, then download `music-connectz-apk` or `bodiez-apk`. The Play bundles
-are `music-connectz-playstore-bundle` and `bodiez-playstore-bundle`.
+workflow**, then download `music-connectz-apk`, `bodiez-apk` or `intelligencez-apk`.
+The Play bundles are `music-connectz-playstore-bundle`, `bodiez-playstore-bundle`
+and `intelligencez-playstore-bundle`.
 
 Locally (needs the [Android SDK](https://developer.android.com/studio)):
 
@@ -30,8 +32,11 @@ Locally (needs the [Android SDK](https://developer.android.com/studio)):
 ./gradlew bundleBodiezRelease   # app/build/outputs/bundle/bodiezRelease/app-bodiez-release.aab  (Play wants this)
 ./gradlew assembleMczDebug      # the Music ConnectZ equivalents
 ./gradlew bundleMczRelease
+./gradlew assembleIntelligencezDebug   # app/build/outputs/apk/intelligencez/debug/app-intelligencez-debug.apk
+./gradlew bundleIntelligencezRelease   # app/build/outputs/bundle/intelligencezRelease/app-intelligencez-release.aab
 ./gradlew assembleMczDebug -PsiteUrl=https://staging.musicconnectz.net
 ./gradlew bundleBodiezRelease -PbodiezUrl=https://bodiez.example.net   # a different host for BodieZ
+./gradlew bundleIntelligencezRelease -PintelligencezUrl=https://intelligencez.example.net
 ```
 
 **BodieZ opens its own site, not a path on the main one.** That site is the
@@ -43,6 +48,16 @@ attractiveness-rating screens, and its Premium purchase flow, are what make the
 main app a Data safety and Play Billing question, and the BodieZ-only shell
 contains none of them. See `play/bodiez/README.md` in the frontend repo.
 
+**IntelligenceZ opens its own site for the same reason.** That site is the
+IntelligenceZ-only build in the frontend repo (`npm run build:intelligencez`,
+folder `dist-intelligencez/`), hosted on the host named by `-PintelligencezUrl`
+(default `intelligencez.musicconnectz.net`): sign-in, a hub, and the four
+IntelligenceZ screens that stand alone — Write, Chat, Compose, Master. Nothing in
+it sells anything, because Play's billing rules do not allow selling from an app
+that is not using Play Billing; Video ConnectZ (a fixed price, no free tier) and
+FaceZ are on the main site only. See `play/intelligencez/README.md` in the
+frontend repo.
+
 ## What's in it
 
 | File | Does |
@@ -52,8 +67,9 @@ contains none of them. See `play/bodiez/README.md` in the frontend repo.
 | `app/src/main/res/values/strings.xml` | `asset_statements` — the app's half of link verification. |
 | `app/src/main/res/drawable/ic_launcher_*.xml` | The wordless mark, generated. |
 | `app/src/main/res/mipmap-anydpi-v26/` | Adaptive icon (+ monochrome for Android 13 themed icons). |
-| `app/build.gradle.kts` | The two flavors, `siteUrl` property, release signing from env, asset-statement sync check. |
+| `app/build.gradle.kts` | The three flavors, `siteUrl` / `bodiezUrl` / `intelligencezUrl` properties, release signing from env, asset-statement sync check. |
 | `app/src/bodiez/res/` | BodieZ's name, adaptive icon, splash and ink colour. Overrides `main` for that flavor only. |
+| `app/src/intelligencez/res/` | IntelligenceZ's name, adaptive icon, splash and ink colour. Overrides `main` for that flavor only. |
 
 **The icons are generated — don't hand-edit them.** Change a colour or a bar in
 [`tools/make_brand_assets.py`](../tools/make_brand_assets.py) and re-run it; the
@@ -74,6 +90,21 @@ python tools/make_bodiez_assets.py
 That source is 384px, so the 512px Play icon and the 432px adaptive layers are
 upscales. A larger master dropped in as `brand/bodiez/source-*.png` (and
 `SOURCE` changed) sharpens everything with no other edit.
+
+**IntelligenceZ's icon is the IntelligenceZ sign**, the same artwork as the
+IntelligenceZ tab. Its source is the 2000px original scaled once to 1024px
+(`tools/intelligencez-source-1024.png`), so nothing is an upscale:
+
+```bash
+python android/tools/make_intelligencez_assets.py --play-out <dir>   # --preview masks.png for a mask contact sheet
+```
+
+The adaptive layer holds the sign at 222px of 432, not full-bleed: the sign's
+name sits near its top edge and a circular launcher mask would take the ends of
+"IntelligenceZ" otherwise (`test_android_kit` pins the arithmetic). The Play
+feature graphic is built from the brain alone, not the whole sign — the sign
+shows image and video panels, and the app has neither. The generator lives under
+`android/` so a change to it triggers the Android workflow.
 
 ## Signing
 

@@ -264,3 +264,142 @@ class PlainKindsTests(TestCase):
         self.assertEqual(r.status_code, 201, r.content)
         self.assertEqual(r.json()["label"], "Poem")
         self.assertEqual(r.json()["legal_note"], "")
+
+
+from django.test import override_settings  # noqa: E402
+
+
+@override_settings(OWNER_USERNAMES=["koth"], OWNER_EMAILS=[])
+class BudgetTests(TestCase):
+    """The screen gave up at 30s while the server let the writer run for 60 per
+    model, and then charged for a piece nobody was waiting for any more."""
+
+    def setUp(self):
+        User = get_user_model()
+        User.objects.create_user("koth", "o@e.com", "pw-Long-enough-1")
+        self.user = User.objects.create_user("writer", "w@e.com", "pw-Long-enough-1")
+        self.c = APIClient(); self.c.force_authenticate(self.user)
+
+    def test_the_budget_is_published(self):
+        with patch("apps.economy.sentencez._key", return_value="k"):
+            d = self.c.get(URL).json()
+        self.assertEqual(d["budget_seconds"], 55)
+
+    @patch("apps.economy.sentencez._key", return_value="k")
+    @patch("apps.economy.sentencez.generate_content")
+    def test_the_model_call_gets_what_is_left_of_the_budget(self, gen, _):
+        gen.return_value = (reply("A piece"), ["m"])
+        r = self.c.post(URL, {"kind": "post", "topic": "x"}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertLessEqual(gen.call_args.kwargs["timeout"], sentencez.BUDGET_SECONDS)
+
+    @patch("apps.economy.sentencez.BUDGET_SECONDS", 0.05)
+    @patch("apps.economy.sentencez._key", return_value="k")
+    def test_an_answer_after_the_budget_is_a_504_and_is_not_billed(self, _):
+        import time
+
+        def slow(*a, **k):
+            time.sleep(0.2)
+            return reply("too late"), ["m"]
+
+        before = Transaction.objects.count()
+        w0 = wallet_for(self.user)
+        with patch("apps.economy.sentencez.generate_content", side_effect=slow):
+            r = self.c.post(URL, {"kind": "post", "topic": "x"}, format="json")
+        self.assertEqual(r.status_code, 504, r.content)
+        d = r.json()
+        self.assertTrue(d["timed_out"])
+        self.assertIn("Nothing was charged", d["detail"])
+        self.assertEqual(Transaction.objects.count(), before)
+        self.assertFalse(SentenceWork.objects.exists())
+        w1 = wallet_for(self.user)
+        self.assertEqual((w1.money_cents, w1.promptz, w1.prompts_used_today or 0),
+                         (w0.money_cents, w0.promptz, w0.prompts_used_today or 0))
+
+    @patch("apps.economy.sentencez._key", return_value="k")
+    def test_an_answer_inside_the_budget_is_billed_as_before(self, _):
+        with patch("apps.economy.sentencez.generate_content", return_value=(reply("fine"), ["m"])):
+            r = self.c.post(URL, {"kind": "post", "topic": "x"}, format="json")
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(SentenceWork.objects.count(), 1)
+
+
+@override_settings(OWNER_USERNAMES=["koth"], OWNER_EMAILS=[])
+class EssayVoiceIsTheOwnersTests(TestCase):
+    """The essay prompt told EVERY member's essay to open each heading and
+    paragraph with an emoji and to use "Music ConnectZ, the author's own music
+    platform" as a recurring example. That is the owner's personal academic
+    register; a student's essay on streaming payouts is not about this app."""
+
+    EMOJI = "emoji"
+    PLATFORM = "Music ConnectZ"
+
+    def setUp(self):
+        User = get_user_model()
+        self.owner = User.objects.create_user("koth", "o@e.com", "pw-Long-enough-1")
+        self.user = User.objects.create_user("student", "s@e.com", "pw-Long-enough-1")
+
+    def sent_prompt(self, user):
+        c = APIClient(); c.force_authenticate(user)
+        with patch("apps.economy.sentencez._key", return_value="k"), \
+                patch("apps.economy.sentencez.generate_content", return_value=(reply("An essay"), ["m"])) as gen:
+            r = c.post(URL, {"kind": "essay", "topic": "streaming payouts. Sources: Smith (2020), Pay."},
+                       format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        return gen.call_args.args[1]["contents"][0]["parts"][0]["text"]
+
+    def test_a_members_essay_carries_neither_personal_instruction(self):
+        p = self.sent_prompt(self.user)
+        self.assertNotIn(self.EMOJI, p.lower())
+        self.assertNotIn(self.PLATFORM, p)
+        self.assertNotIn("author's own", p)
+        self.assertNotIn("contractions", p)
+
+    def test_a_members_essay_keeps_apa_and_the_no_invented_sources_rule(self):
+        p = self.sent_prompt(self.user)
+        self.assertIn("APA 7", p)
+        self.assertIn("cite ONLY sources listed in the brief", p)
+        self.assertIn("never invent a source", p)
+        self.assertIn("[CITATION NEEDED]", p)
+
+    def test_the_owners_essay_still_has_their_register(self):
+        p = self.sent_prompt(self.owner)
+        self.assertIn("Open every heading and every paragraph with an emoji", p)
+        self.assertIn("Music ConnectZ, the author's own music platform", p)
+        self.assertIn("APA 7", p)
+        self.assertIn("never invent a source", p)
+
+    def test_the_owners_prompt_is_the_one_it_always_was(self):
+        self.assertEqual(sentencez.prompt_for("essay", "t", owner=True).split("VOICE: ")[1].split("\n")[0],
+                         sentencez.ACADEMIC_VOICE)
+
+    def test_prompt_for_defaults_to_the_member_version(self):
+        p = sentencez.prompt_for("essay", "streaming payouts")
+        self.assertNotIn(self.PLATFORM, p)
+        self.assertNotIn(self.EMOJI, p.lower())
+
+    def test_the_owner_voice_applies_to_essays_only(self):
+        for kind in ("lyrics", "caption", "post", "resume", "poem", "contract"):
+            self.assertEqual(sentencez.prompt_for(kind, "t", owner=True), sentencez.prompt_for(kind, "t"), kind)
+
+    def test_the_essay_kind_says_what_the_prompt_actually_does(self):
+        mine = {k["key"]: k for k in sentencez.kinds_for(self.user)}["essay"]
+        theirs = {k["key"]: k for k in sentencez.kinds_for(self.owner)}["essay"]
+        self.assertIn("APA 7", mine["voice_note"])
+        self.assertIn("only the sources you list", mine["voice_note"])
+        self.assertNotIn(self.PLATFORM, mine["voice_note"])
+        self.assertIn(self.PLATFORM, theirs["voice_note"])
+        self.assertIn("emoji", theirs["voice_note"])
+        self.assertNotEqual(mine["voice_note"], theirs["voice_note"])
+
+    def test_every_kind_carries_the_key_and_only_the_essay_has_words_in_it(self):
+        for k in sentencez.kinds_for(self.user):
+            self.assertIn("voice_note", k)
+            self.assertEqual(bool(k["voice_note"]), k["key"] == "essay", k["key"])
+
+    def test_the_served_note_matches_the_served_voice(self):
+        c = APIClient(); c.force_authenticate(self.user)
+        with patch("apps.economy.sentencez._key", return_value="k"):
+            kinds = {k["key"]: k for k in c.get(URL).json()["kinds"]}
+        self.assertEqual(kinds["essay"]["voice"], "academic")
+        self.assertTrue(kinds["essay"]["voice_note"])

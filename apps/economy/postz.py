@@ -16,6 +16,7 @@ from django.db.models import Case, Count, IntegerField, Sum, When
 from django.utils import timezone
 
 from .catalog import edit_window_for
+from .coachshare import clean_visibility, coach_read_for, for_new_post, legacy_score
 from .crosspost import coach_cap, coach_price, destinations_for, take_state_for
 from .gates import clean_gates, failing_gate, member_metrics, refusal
 from .models import (
@@ -158,6 +159,10 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
     take_missing = bool((take_state or {}).get("missing"))
     n_collabs = p.collab_deals.count() if collabs is None else collabs
     flagged = down >= HIDE_FLAG_MIN_DOWN and down >= up * HIDE_FLAG_RATIO
+    # What THIS viewer may see of the coach's read. Decided in one place
+    # (coachshare.coach_read_for), costs no query, and is the only thing that
+    # may put read content into this dict — `score` below is derived from it.
+    coach = coach_read_for(p, request.user)
     return {
         "id": p.id,
         "author": p.author.username,
@@ -186,7 +191,11 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
         # player and leaves the ones that still work alone.
         "take_kind": (take_state or {}).get("kind", "") if take_missing else "",
         "slots": list(MEDIA_SLOTS),
-        "score": p.score or {},
+        # The legacy key: the whole stored read, but only when `coach` says it
+        # is shown. A viewer the read was refused gets nothing in either place.
+        "score": legacy_score(p, coach),
+        # {state: none|locked|shown, read?, reason?, visibility? (author only)}
+        "coach": coach,
         "genre": p.genre,
         # A flag beside the genre, never instead of it — a freestyle Trap verse
         # is still Trap, and ChartZ must still be able to slice it as Trap.
@@ -414,6 +423,13 @@ def create_post(user, d):
     title = str(d.get("title", "")).strip()[:160]
     if not title:
         return None, {}, ({"detail": "title required"}, status.HTTP_400_BAD_REQUEST)
+    # A coach read posted WITH the song, and who may see it. Checked before
+    # anything below is charged: a token that is not the member's own refuses
+    # the whole post and costs nothing, and the read itself costs nothing extra
+    # (it was paid for when the coach gave it).
+    coach_score, score_vis, coach_err = for_new_post(user, d)
+    if coach_err:
+        return None, {}, (coach_err, status.HTTP_400_BAD_REQUEST)
     vis = str(d.get("visibility", "public")).lower()
     if vis not in {"public", "restricted", "private"}:
         vis = "public"
@@ -425,6 +441,8 @@ def create_post(user, d):
     media_url = str(d.get("media_url", "")).strip()[:500]
     media_type = str(d.get("media_type", "")).strip()[:24]
     score = d.get("score") if isinstance(d.get("score"), dict) else {}
+    if coach_score:
+        score = coach_score        # the server's copy of the read, never a body's
     items = clean_items(d.get("items"))
     # An album is asked for, never inferred from the count. Otherwise a track
     # posted with its cover art became "an album" of two.
@@ -463,7 +481,7 @@ def create_post(user, d):
         description=str(d.get("description", ""))[:4000],
         links=d.get("links") or [], media_type=media_type, media_url=media_url,
         is_album=is_album, items=items,
-        score=score, visibility=vis, skill_cost_cents=cost,
+        score=score, score_visibility=score_vis, visibility=vis, skill_cost_cents=cost,
         genre=str(d.get("genre", ""))[:40],
         freestyle=freestyle,
         skills_used=skills,
@@ -630,6 +648,13 @@ class PostsView(APIView):
 
     def post(self, request):
         d = request.data
+        # A body never supplies the coach's read. `score` is what a post shows as
+        # "the coach gave this 9/10", so a number typed into a request would be
+        # a forged one — a read is attached from the member's own ScoreShare by
+        # `coach_token` (create_post) or postz/<id>/coach/. Server-built callers
+        # of create_post (OCC's provenance) still pass their own `score`.
+        if "score" in d:
+            d = {k: v for k, v in d.items() if k != "score"}
         # Edit an existing post (author only, within the tier's edit window).
         edit_id = d.get("edit_id")
         if edit_id is not None:
@@ -665,6 +690,25 @@ class PostsView(APIView):
         if not p:
             return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
         mine = p.author_id == request.user.id
+        if "score_visibility" in d:
+            # Who may see the coach's read: a setting about a score, held to no
+            # edit window. The AUTHOR's alone — the platform owner may fix a
+            # broken media link on anyone's post, but who gets to see somebody's
+            # score is their privacy, not a repair.
+            if not mine:
+                return Response({"detail": "Only the member who published this can change who "
+                                           "sees its coach read."},
+                                status=status.HTTP_403_FORBIDDEN)
+            new_cv, bad = clean_visibility(d["score_visibility"])
+            if bad or new_cv is None:
+                return Response({"detail": bad or "Choose who sees the coach's read."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            p.score_visibility = new_cv
+            p.save(update_fields=["score_visibility"])
+            # Handled; what is left of the request is judged as if it were not there.
+            d = {k: v for k, v in d.items() if k != "score_visibility"}
+            if len(d) <= 1:            # edit_id alone
+                return Response(_post_dict(p, request))
         # Playlist consent is a SETTING, not content, so it is not held to the
         # tier's edit window. Locking an author out of withdrawing their work
         # four minutes after posting would make the switch useless.
