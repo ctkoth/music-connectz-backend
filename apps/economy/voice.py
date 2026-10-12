@@ -132,7 +132,7 @@ def prefs_dict(user):
     return {"style": p.style, "emoji": p.emoji, "depth": p.depth, "slang": p.slang}
 
 
-def voice_prompt(user=None, *, override=None, paradigm=True):
+def voice_prompt(user=None, *, override=None, paradigm=True, surface=None, register=None):
     """The preamble every surface where a model writes to a member prepends.
 
     `override` is a per-request dial — OCC lets a member switch to terse
@@ -140,6 +140,12 @@ def voice_prompt(user=None, *, override=None, paradigm=True):
     Stored prefs are the default; the override is the exception, which is the
     right way round: a member should not have to re-choose their voice on every
     screen.
+
+    `surface` ("coach", "writer" or "occ") names which of the member's per-surface
+    voices applies, and `register` (corey_voice.REGISTER_WORKING / _ACADEMIC) which
+    of the founder's two registers a Corey-voiced reply is in. Both are accepted
+    now so callers can pass them; resolving a member's chosen voice for a surface
+    is VoiceZ's job and, until it lands, every surface follows `style`.
     """
     from .occ import AAVE_STYLE, VOICE_STYLE  # local: occ imports models heavily
 
@@ -222,7 +228,7 @@ class VoiceZView(APIView):
         return Response({"voice": prefs_dict(request.user)})
 
 
-def prose_voice(user=None):
+def prose_voice(user=None, *, surface=None):
     """A SHORT voice line for a surface whose output is parsed, not read raw.
 
     The coach and DirectZ ask a model for JSON and read fields out of it. The

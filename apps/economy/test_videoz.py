@@ -96,7 +96,9 @@ class VideoTests(TestCase):
         self.start()
         VideoWork.objects.update(created_at=timezone.now() - timedelta(minutes=25))
         v = VideoWork.objects.get()
-        self.assertEqual(self.c.get(f"{URL}{v.id}/").json()["status"], "failed")
+        # Asked first, and still not done: only then is it refunded.
+        with patch("apps.economy.videoz.requests.get", return_value=resp(json={"done": False})):
+            self.assertEqual(self.c.get(f"{URL}{v.id}/").json()["status"], "failed")
         self.assertEqual(wallet_for(self.u).money_cents, 1000)
 
     def test_only_your_own_face(self, _):
@@ -181,9 +183,50 @@ class RefundRunsOnceTests(TestCase):
         self.start()
         VideoWork.objects.update(created_at=timezone.now() - timedelta(minutes=25))
         a, b = VideoWork.objects.get(), VideoWork.objects.get()
-        poll(a); poll(b)
+        # Still not done when asked — only THEN is it refunded, and once.
+        with patch("apps.economy.videoz.requests.get", return_value=resp(json={"done": False})):
+            poll(a); poll(b)
         w = wallet_for(self.u)
         self.assertEqual((w.promptz, w.money_cents), (150, 1000))
+
+    def test_a_render_that_finished_while_the_member_was_away_is_delivered_not_refunded(self, _):
+        """GIVE_UP_AFTER used to refund on the clock BEFORE asking the provider, so
+        twenty-one minutes away lost a finished video: the member paid back for a
+        render that existed, the owner unpaid, the file gone."""
+        from apps.economy.videoz import poll
+        self.start()
+        VideoWork.objects.update(created_at=timezone.now() - timedelta(minutes=45))
+        with patch("apps.economy.videoz.requests.get",
+                   side_effect=[resp(json=DONE_JSON), resp(content=b"\x00\x00\x00 ftypmp4")]):
+            poll(VideoWork.objects.get())
+        self.assertEqual(VideoWork.objects.get().status, "done")
+        w = wallet_for(self.u)
+        self.assertEqual((w.promptz, w.money_cents), (0, 750))              # still spent: it was delivered
+        self.assertEqual(wallet_for(self.owner).money_cents, 400)            # and paid for, once
+
+    def test_an_unanswered_status_check_waits_instead_of_reading_as_failure(self, _):
+        import requests as rq
+        from apps.economy import videoz
+        self.start()
+        VideoWork.objects.update(created_at=timezone.now() - timedelta(minutes=45))
+        with patch("apps.economy.videoz.requests.get", side_effect=rq.ConnectionError("down")):
+            videoz.poll(VideoWork.objects.get())
+        self.assertEqual(VideoWork.objects.get().status, "pending")          # an outage is not "never finished"
+        VideoWork.objects.update(created_at=timezone.now() - videoz.HARD_GIVE_UP_AFTER - timedelta(minutes=1))
+        with patch("apps.economy.videoz.requests.get", side_effect=rq.ConnectionError("down")):
+            videoz.poll(VideoWork.objects.get())
+        self.assertEqual(VideoWork.objects.get().status, "failed")           # but not forever
+        w = wallet_for(self.u)
+        self.assertEqual((w.promptz, w.money_cents), (150, 1000))
+
+    def test_a_webp_face_is_sent_as_webp_not_jpeg(self, _):
+        face = Face.objects.create(owner=self.u, image=SimpleUploadedFile(
+            "f.webp", b"RIFF\x00\x00\x00\x00WEBPVP8 ", content_type="image/webp"))
+        with patch("apps.economy.videoz.requests.post", return_value=resp(json={"name": "operations/abc"})) as post:
+            r = self.c.post(URL, {"kind": "music", "prompt": "neon", "aspect": "9:16", "face_id": face.id}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        sent = post.call_args.kwargs["json"]["instances"][0]["image"]
+        self.assertEqual(sent["mimeType"], "image/webp")
 
     def test_a_refund_cannot_follow_a_delivered_video(self, _):
         """The stale copy still says pending after the video landed and was paid

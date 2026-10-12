@@ -47,6 +47,12 @@ logger = logging.getLogger(__name__)
 
 ROYALTY_PCT = 10
 GIVE_UP_AFTER = timedelta(minutes=20)
+# The photo's type from its extension. FaceZ accepts WebP, and labelling those bytes
+# image/jpeg made Google reject the start and the member was told to reword.
+_IMAGE_MIME = {".png": "image/png", ".webp": "image/webp", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+# How long an UNANSWERED status check may keep a render open. Google keeps a finished
+# video for days, so an outage on our side or theirs is no reason to refund early.
+HARD_GIVE_UP_AFTER = timedelta(hours=6)
 # Veo 3 renders one fixed-length clip per request. Quoted from the provider's
 # documentation and NOT checked against a live render (CI has no key), so if a
 # real clip comes back a different length this is the one number to change —
@@ -303,7 +309,7 @@ class VideoView(APIView):
                 face.image.close()
                 ext = os.path.splitext(face.image.name)[1].lower()
                 instance["image"] = {"bytesBase64Encoded": base64.b64encode(raw).decode("ascii"),
-                                     "mimeType": "image/png" if ext == ".png" else "image/jpeg"}
+                                     "mimeType": _IMAGE_MIME.get(ext, "image/jpeg")}
             except Exception:
                 refund(work, "your FaceZ photo couldn't be read")
                 return Response({"detail": "Your FaceZ photo couldn't be read. Nothing was charged."},
@@ -351,17 +357,29 @@ class VideoDetailView(APIView):
 
 
 def poll(work):
-    if timezone.now() - work.created_at > GIVE_UP_AFTER:
-        refund(work, "it never finished")
-        return
+    # GIVE_UP_AFTER is when we stop expecting it, not when we stop LOOKING. It used
+    # to refund on the clock before asking the provider anything, so a member who
+    # closed the tab for twenty-one minutes lost a render Google had finished and
+    # got their money back for something that existed — the owner unpaid, the
+    # video gone. The provider is asked first, every time. Only a render that is
+    # still not done past the limit is refunded, and an unanswered question waits
+    # (up to HARD_GIVE_UP_AFTER) rather than being read as "it never finished".
+    age = timezone.now() - work.created_at
+    expired = age > GIVE_UP_AFTER
     key = _key()
     if not key or not work.operation:
+        if age > HARD_GIVE_UP_AFTER:
+            refund(work, "it never finished")
         return
     try:
         data = requests.get(f"{BASE}/{work.operation}", headers=_auth(key), timeout=20).json()
     except (requests.RequestException, ValueError):
+        if age > HARD_GIVE_UP_AFTER:
+            refund(work, "it never finished")
         return  # transient — the next poll asks again
     if not data.get("done"):
+        if expired:
+            refund(work, "it never finished")
         return
     if data.get("error"):
         refund(work, str((data["error"] or {}).get("message", "the render failed"))[:120])
