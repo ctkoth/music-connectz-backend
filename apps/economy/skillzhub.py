@@ -71,10 +71,9 @@ def _plain(label):
 
 def _desc(key):
     p = INSTRUMENTS[key]
-    names = [_plain(v) for v in p["scores"].values()]
-    return (f"A {p['coach']} for your {p['performer']} takes: scored on "
-            f"{', '.join(n.lower() for n in names[:-1])} and {names[-1].lower()}, "
-            "with what worked, what to fix and a drill.")
+    names = [_plain(v).lower() for v in p["scores"].values()]
+    return (f"{p['coach'].capitalize()}: send a take and get it scored on "
+            f"{', '.join(names[:-1])} and {names[-1]} — plus what worked, what to fix and a drill.")
 
 
 def _price(daily_left):
