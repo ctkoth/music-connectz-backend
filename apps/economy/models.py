@@ -983,6 +983,11 @@ class Profile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="mcz_profile")
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)  # profile picture
     display_name = models.CharField(max_length=80, blank=True, default="")
+    # Which marketplaces the coach's gear advice links to, a StatZ choice:
+    # [{"store": "amazon"|"ebay", "domain": "amazon.co.uk"}]. Empty means the
+    # default (Amazon US, then eBay US). The stores and domains are a closed list
+    # (coach_upgrades.MARKETS) — a member chooses WHICH of ours, never types a URL.
+    upgrade_markets = models.JSONField(default=list, blank=True)
     # TextField, not CharField(500): the tier char limit runs to 1,500 for
     # Premium and is unlimited for StatZ, so no column width can express it.
     # The cap belongs to the tier and is applied on write, not to the storage.
@@ -1547,6 +1552,16 @@ class Post(models.Model):
     embeds = models.JSONField(default=list, blank=True)
     # Optional scored-take payload (e.g. RapZ/SingZ lab result) for context on the post.
     score = models.JSONField(default=dict, blank=True)
+    # Who may see the coach's read on this post, separately from who may see the
+    # post. "" is what every existing post has and means "whoever can see the
+    # post can see the read" — exactly the behaviour before this column existed,
+    # so adding it moved nothing. "members" is signed-in members only (a public
+    # post whose song anybody can play and whose coach card says "members only"
+    # to everyone else). "private" is the author alone. The read can never be
+    # WIDER than the post: a private post's read is private whatever this says,
+    # which is enforced where the post is served (postz.coach_read_for), not here.
+    SCORE_VIS_CHOICES = [("", "Same as the post"), ("members", "Members only"), ("private", "Only me")]
+    score_visibility = models.CharField(max_length=12, choices=SCORE_VIS_CHOICES, blank=True, default="")
     visibility = models.CharField(max_length=12, choices=VIS_CHOICES, default="public")
     # The composer has always shown a genre picker and the value was discarded
     # on the way in, so every post in the app is genreless and ChartZ has
@@ -2227,10 +2242,42 @@ class VoicePrefs(models.Model):
     emoji = models.CharField(max_length=8, default="heavy")
     depth = models.CharField(max_length=8, default="normal")
     slang = models.BooleanField(default=False)
+    # Which voice each surface writes in, when the member has chosen one:
+    # {"coach": "custom:12", "writer": "preset:corey", "occ": "preset:technical"}.
+    # A missing surface follows `style` above, so everything that existed before
+    # this column keeps its voice. The ids are validated where they are read
+    # (voice.resolve), never trusted from here.
+    surface_voices = models.JSONField(default=dict, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"VoicePrefs<{self.user}: {self.style}/{self.emoji}>"
+
+
+class CustomVoice(models.Model):
+    """A voice a StatZ member wrote for themselves, or for a character.
+
+    Everything that shapes the voice is MEMBER-AUTHORED TEXT, so it is handed to
+    a model as data describing a tone and never as instructions (voice.py wraps
+    it and says so). `spec` carries the dials as a JSON map so adding a dial is
+    a code change and not a migration; `personality` is the four-slot PersonalitieZ
+    code, read positionally (personalityz.clean_code). A voice changes how
+    something is WORDED. It never changes a score, a price or a rule, and the
+    four-rule paradigm is appended after it in every prompt.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="custom_voices")
+    name = models.CharField(max_length=60)
+    bio = models.TextField(blank=True, default="")
+    personality = models.CharField(max_length=4, blank=True, default="")
+    spec = models.JSONField(default=dict, blank=True)
+    sample = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
 
 
 def voice_prefs_for(user):
@@ -6618,6 +6665,11 @@ class TakeScore(models.Model):
     # recommendation is made of. Stored rather than derived so "what has been
     # weakest lately" is a group-by instead of a scan.
     weakest = models.CharField(max_length=24, blank=True, default="", db_index=True)
+    # The gear and settings advice a member paid for on this take, kept so
+    # re-opening it costs nothing: {markets, items[], references[], summary,
+    # model, cost_cents, at}. Empty until they ask for it — it is opt-in and
+    # priced, and a take that never asked has nothing here.
+    upgrades = models.JSONField(default=dict, blank=True)
 
     # What the take was scored AGAINST, so a score is comparable to another.
     # An Elite take at 6 and a Rookie take at 6 are not the same take.
@@ -7348,6 +7400,34 @@ class InstrumentalWork(models.Model):
         ordering = ["-created_at"]
 
 
+class MasterWork(models.Model):
+    """One master Mix ConnectZ made and the member chose to keep.
+
+    The mastering ran on the member's own device, so this is a RECORD, not a
+    job: what was used (`settings`) and what was measured before and after
+    (`before` / `after` — loudness, true peak, width, the band spectrum). The
+    WAV itself is an ordinary `Upload`, sent through the uploads endpoint first
+    so the tier's upload and storage limits apply to it like any other file.
+
+    Both files are SET_NULL: a file deleted from the uploads screen leaves the
+    record saying what the master was, and the screen says the file is gone
+    rather than offering a player that 404s.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="master_works")
+    title = models.CharField(max_length=120)
+    upload = models.ForeignKey("Upload", on_delete=models.SET_NULL, null=True, related_name="+")
+    source_upload = models.ForeignKey("Upload", on_delete=models.SET_NULL, null=True, blank=True,
+                                      related_name="+")
+    settings = models.JSONField(default=dict)
+    before = models.JSONField(default=dict)
+    after = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
 class StatzTrial(models.Model):
     """One timed StatZ sample per member, ever. The end time is the server's,
     so the countdown on screen cannot be reset by a reload."""
@@ -7440,7 +7520,28 @@ class ScoreShare(models.Model):
     # code the card's "get yours" link uses. A trial take has nobody to name.
     user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
                              on_delete=models.CASCADE, related_name="score_shares")
+    # The whole read — scores, verdict, strengths, fixes, drill, caveat — exactly
+    # as the coach produced it, kept so that attaching it to a post can PROVE the
+    # server wrote it. A post's coach read is taken from here by token and never
+    # from what a client sends, for the reason this model's docstring gives.
+    payload = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+def _share_payload(payload):
+    """What of a coach result is kept on its share row: JSON-safe, and bounded so a
+    runaway reply cannot make a row the size of a document. Per-field caps already
+    apply where the coach whitelists its reply; this is the backstop."""
+    import json
+    try:
+        data = json.loads(json.dumps(payload, default=str))
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    for k in ("share_url", "cost_cents", "claim_token", "claim_hint", "remind", "trial"):
+        data.pop(k, None)   # per-request plumbing, not part of the read
+    return data if len(json.dumps(data)) <= 40_000 else {}
 
 
 def mint_score_share(app_key, payload, user=None, genre=""):
@@ -7455,7 +7556,8 @@ def mint_score_share(app_key, payload, user=None, genre=""):
             token=secrets.token_urlsafe(12)[:16], app_key=str(app_key)[:32],
             score=int(score), verdict=str(payload.get("verdict") or "")[:400],
             genre=str(genre or "")[:60],
-            user=user if getattr(user, "is_authenticated", False) else None)
+            user=user if getattr(user, "is_authenticated", False) else None,
+            payload=_share_payload(payload))
         return row.token
     except Exception:
         return ""

@@ -302,6 +302,56 @@ def over_writer_brief(text, tier):
     return None if len(text or "") <= cap else cap
 
 
+# Mix ConnectZ — how much compression a master may use, per tier.
+#
+# The mastering itself runs on the member's own device (a JS engine measures
+# BS.1770 loudness, true peak and the spectrum, then EQs, compresses, limits and
+# dithers), so a master costs the platform nothing and a tier cannot be paying
+# for compute here. What the ladder sells is HOW MUCH of the heavy end a member
+# reaches — Corey's call: compression for Premium, the heaviest for StatZ — and
+# never WHETHER: Free still gets automatic glue compression at low and medium,
+# because a "master" with no dynamics control is not a master, and a free tier
+# that could not finish a song would be a door out rather than a step on a ladder.
+#
+# * `intensities` — the presets the member may pick, lightest first. `max` is the
+#   heaviest compression on offer (fastest attack, steepest ratio, the most
+#   limiting) and is labelled "Heaviest" on screen (MASTERING_INTENSITY_LABELS);
+#   it is a sound some genres want and most masters should not have.
+# * `manual_glue` — whether the member may set the glue compressor's amount by
+#   hand rather than taking the intensity's own.
+# * `glue_db_max` — the most gain reduction, in dB, the glue compressor may apply:
+#   automatically on Free, by hand above it.
+#
+# A recommendation like every number here, and Corey's to move. The engine
+# masters at whatever intensity it is handed, so the client reads this ladder
+# from the server (/api/economy/mixz/) and never decides it.
+MASTERING = {
+    TIER_FREE: {"intensities": ["low", "medium"], "manual_glue": False, "glue_db_max": 2},
+    TIER_PREMIUM: {"intensities": ["low", "medium", "high"], "manual_glue": True, "glue_db_max": 4},
+    TIER_STATZ: {"intensities": ["low", "medium", "high", "max"], "manual_glue": True, "glue_db_max": 8},
+    TIER_DEBUG: {"intensities": ["low", "medium", "high", "max"], "manual_glue": True, "glue_db_max": 8},
+}
+
+# The screen's words for each intensity, served so no client retypes them.
+MASTERING_INTENSITY_LABELS = {"low": "Low", "medium": "Medium", "high": "High", "max": "Heaviest"}
+
+
+def mastering_for(tier):
+    """{intensities, manual_glue, glue_db_max} for this tier — a copy, so a
+    caller editing it cannot move the ladder."""
+    row = MASTERING.get(tier, MASTERING[TIER_FREE])
+    return {"intensities": list(row["intensities"]), "manual_glue": row["manual_glue"],
+            "glue_db_max": row["glue_db_max"]}
+
+
+def mastering_ladder():
+    """Every public tier's mastering row, lightest first, so a screen can say what
+    a tier up would add without typing it."""
+    from .models import TIER_CHOICES
+    labels = dict(TIER_CHOICES)
+    return [{"tier": t, "label": labels.get(t, t), **mastering_for(t)} for t in PUBLIC_TIERS]
+
+
 def chars_unlimited(tier):
     """True when this tier writes without a character cap."""
     return limits_for(tier)["char_limit"] >= UNLIMITED_CHARS

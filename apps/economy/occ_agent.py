@@ -36,6 +36,7 @@ hour. That is not a shape the runner's per-turn hook fits.
 """
 import json
 import logging
+import os
 
 from .catalog import (
     ai_model_for,
@@ -51,6 +52,7 @@ from .models import (
     profile_for,
 )
 from .occ_tools import CHANGES_FILES, TOOLS, run_tool
+from .resources import PROMPTZ
 
 log = logging.getLogger(__name__)
 
@@ -89,7 +91,16 @@ cleanly and say what remains rather than stopping mid-edit."""
 
 
 def _client():
-    """The Anthropic client, or None when the key isn't configured."""
+    """The Anthropic client, or None when the key isn't configured.
+
+    The key is checked HERE, explicitly. The SDK builds a client without one and
+    only complains at the first request, so the old check ("did the constructor
+    raise?") never fired: an unconfigured server got as far as creating the
+    TaskZ row, failing the first model call, and answering 201 with a failed
+    task and "couldn't be reached" — a missing key reported as an outage.
+    """
+    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+        return None
     try:
         import anthropic
     except ImportError:                                      # pragma: no cover
@@ -150,14 +161,14 @@ def run_agent(user, prompt, *, project="main", model_key=None,
     client = _client()
     if client is None:
         return {"ok": False, "stopped": "unavailable",
-                "detail": "OCC's model backend isn't configured on the server yet."}
+                "detail": "OCC's agent isn't switched on yet — the model backend isn't configured."}
 
     # The task row exists from the start: a run that dies halfway should still
     # leave a record of what was asked, not vanish.
     task = OccTask.objects.create(
         user=user, title=str(prompt).strip().splitlines()[0][:200] or "OCC task",
         kind=OccTask.KIND_EDIT, status=OccTask.STATUS_RUNNING,
-        detail=f"{spec['emoji']} {spec['name']} · up to {max_cents} 🏷️",
+        detail=f"{spec['emoji']} {spec['name']} · up to {max_cents} {PROMPTZ}",
     )
 
     messages = [{"role": "user", "content": str(prompt)}]
@@ -258,7 +269,12 @@ def run_agent(user, prompt, *, project="main", model_key=None,
     # `price` is what the member pays for it. The member is charged the price;
     # the cost is kept so a run can be audited against the real bill later.
     cost = ai_run_cost_cents(model_key, total)
-    price = ai_run_charge_cents(model_key, total)
+    # Clamped to the ceiling the member was shown. The gate checks the spend
+    # BEFORE each call, so the last call completes and can carry the run past the
+    # ceiling — and the screen promised "up to {max_cents}", not "about". What
+    # the platform absorbs above it is `served_cents` against `cost_cents`, and
+    # is the price of a ceiling that means what it says.
+    price = min(ai_run_charge_cents(model_key, total), max_cents)
     charged = 0
     if price:
         remaining = charge_ai_usage(
@@ -271,7 +287,7 @@ def run_agent(user, prompt, *, project="main", model_key=None,
 
     task.status = OccTask.STATUS_DONE if stopped in ("end_turn", "budget") else OccTask.STATUS_FAILED
     task.progress = 100 if stopped == "end_turn" else task.progress
-    task.detail = (f"{turns} turns · {len(changed)} file(s) · −{charged} 🏷️"
+    task.detail = (f"{turns} turns · {len(changed)} file(s) · −{charged} {PROMPTZ}"
                    + ("" if stopped == "end_turn" else f" · stopped: {stopped}"))
     task.save(update_fields=["status", "progress", "detail", "updated_at"])
 
@@ -295,5 +311,8 @@ def run_agent(user, prompt, *, project="main", model_key=None,
         "task_id": task.id,
         "writes_allowed": writes_allowed,
         # A result you can't take anywhere is a dead end with a scrollbar.
-        "open_in": "occ", "target": "occ:filez",
+        # TaskZ, where the run's row is. `occ:filez` named an anchor that exists
+        # nowhere — OCC has no files screen, so the jump landed at the top of
+        # the page.
+        "open_in": "occ", "target": "occ-taskz",
     }

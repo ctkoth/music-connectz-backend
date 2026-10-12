@@ -225,6 +225,13 @@ def _bill(user, note, count_daily=False):
     return cost
 
 
+# What Image ConnectZ tells a member when Gemini fails. Fixed sentences: the
+# exception text and Google's error body stay in the log.
+IMAGE_DOWN = "The image service didn't answer — nothing was charged."
+IMAGE_EMPTY = ("The image service didn't return a picture for that. Nothing was charged — "
+               "try different wording, or try again in a little while.")
+
+
 class GeminiImageView(APIView):
     """POST { prompt } → a generated image as a data URI. Synchronous."""
 
@@ -252,8 +259,13 @@ class GeminiImageView(APIView):
             ref_mime = header.split(";")[0].split(":")[-1] or "image/jpeg"
             parts.insert(0, {"inlineData": {"mimeType": ref_mime, "data": b64}})
         try:
+            # The key rides in a header, not the query string. `requests` names
+            # the full URL in every connection error it raises, and this view
+            # used to hand `str(exc)` to the member — so a dropped connection
+            # printed part of GEMINI_API_KEY on their screen.
             r = requests.post(
-                f"{BASE}/models/{model}:generateContent?key={key}",
+                f"{BASE}/models/{model}:generateContent",
+                headers={"x-goog-api-key": key},
                 json={"contents": [{"parts": parts}],
                       "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}},
                 timeout=90,
@@ -266,10 +278,14 @@ class GeminiImageView(APIView):
                     img = inline["data"]; mime = inline.get("mimeType") or inline.get("mime_type") or mime
                     break
             if not img:
-                detail = (data.get("error") or {}).get("message") or "No image returned."
-                return Response({"detail": f"Gemini: {detail}"[:200], "image": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        except Exception as exc:
-            return Response({"detail": f"Gemini error: {exc}"[:200], "image": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                # Google's own words are for the log, not the screen: they are a
+                # third party's text and can carry a project number or quota name.
+                logger.error("Image ConnectZ: no image — Gemini %s: %s", r.status_code,
+                             str((data.get("error") or {}).get("message") or "no error message")[:300])
+                return Response({"detail": IMAGE_EMPTY, "image": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except Exception:
+            logger.exception("Image ConnectZ: the Gemini call failed")
+            return Response({"detail": IMAGE_DOWN, "image": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         cost = _bill(request.user, f"Image ConnectZ (Gemini)")
         return Response({"image": f"data:{mime};base64,{img}", "cost_cents": cost, "money": round(wallet_for(request.user).money_cents / 100, 2)})

@@ -123,6 +123,40 @@ LOGICZ_TABS = [
          _app("Settings", "⚙️", "AutomationZ and SuggestionZ live here.", True),
          _app("GitZ", "🔀", "Branches, commits and pushes — each one a task.", False),
      ]},
+    # The hub for the apps that write, compose, master and render FOR you. Each
+    # of them was a tab of its own with no front door, so nothing said in one
+    # place which exist, which are switched on or what each costs. `tab` points at
+    # the app's own tab: sentenceconnectz, instrumentalconnectz, mixconnectz,
+    # videoconnectz and facez are mounted by the frontend alongside this tab in the
+    # same release. Image ConnectZ has no screen, so it says so and links nowhere.
+    {"key": "intelligencez", "name": "IntelligenceZ", "emoji": "🧠", "icon": "intelligencez.png",
+     "desc": "The apps that make things for you — written, composed, mastered, "
+             "rendered. The price is on each one before you open it.",
+     "apps": [
+         _app("Sentence ConnectZ", "✍️",
+              "Resumes, cover letters, lyrics, poems, bios, posts and essays, "
+              "written from what you tell it.", True, tab="sentenceconnectz"),
+         # OCC has a tab of its own further down this list and lives here too:
+         # it is one of the apps the hub holds, and a row that said otherwise
+         # would be the hub and LogicZ disagreeing about what exists.
+         _app("OCC", "👁️", "Chat with Claude about what you're building — code, plans, copy.",
+              True, tab="occ"),
+         _app("Instrumental ConnectZ", "🎹",
+              "AI-composed MIDI loops by genre, instruments, BPM and key.",
+              True, tab="instrumentalconnectz"),
+         # Runs entirely on the member's device, so it is free at every tier;
+         # the tier buys how heavy the compression may go, never whether.
+         _app("Mix ConnectZ", "🎚️",
+              "Master a finished song on your device — loudness, tone, width and "
+              "peaks, measured. Free; the tier sets how heavy the compression goes.",
+              True, tab="mixconnectz"),
+         _app("Video ConnectZ", "🎬",
+              "Short AI video clips from a prompt, with an optional photo as the "
+              "first frame.", True, tab="videoconnectz"),
+         _app("FaceZ", "🙂", "The photos Video ConnectZ can start from.",
+              True, tab="facez"),
+         _app("Image ConnectZ", "🖼️", "Not built yet.", False),
+     ]},
     {"key": "keyconnectz", "name": "KeyConnectZ", "emoji": "⌨️", "icon": "keyconnectz.png",
      "desc": "The keyboard. Premium buys the wallpaper; everybody gets to be understood.",
      "apps": [_app("Translate", "🗺️", "Any language to any other, as you type.", True)]},

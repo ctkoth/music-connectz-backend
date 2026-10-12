@@ -25,6 +25,7 @@ for a thing that cannot run.
 import base64
 import logging
 import os
+import time
 from datetime import timedelta
 
 import requests
@@ -46,6 +47,24 @@ logger = logging.getLogger(__name__)
 
 ROYALTY_PCT = 10
 GIVE_UP_AFTER = timedelta(minutes=20)
+# Veo 3 renders one fixed-length clip per request. Quoted from the provider's
+# documentation and NOT checked against a live render (CI has no key), so if a
+# real clip comes back a different length this is the one number to change —
+# the screen reads it from GET rather than typing it.
+CLIP_SECONDS = 8
+# What the price buys, stated before the button. The sound is the model's own:
+# the member's music is never mixed in (lipsync is not offered — see above).
+WHAT_YOU_GET = (f"One clip of about {CLIP_SECONDS} seconds, with sound the model generates alongside the "
+                "picture — it is not your track, and your music is not added. A render that fails or "
+                "never arrives is refunded in full.")
+# While one request is downloading a finished video it writes this + the epoch
+# into `VideoWork.error` (empty on every pending row otherwise), so an
+# overlapping poll sees the claim and does not fetch the same bytes. It lives in
+# that column because the model is not ours to change from here; `_work_dict`
+# never shows it. A claim older than CLAIM_STALE_SECONDS belongs to a request
+# that died, and is taken over — the download itself times out at 120s.
+FETCH_CLAIM = "fetching:"
+CLAIM_STALE_SECONDS = 180
 ASPECTS = ("16:9", "9:16")
 MODELS = ("veo-3.0-fast-generate-001", "veo-3.0-generate-001", "veo-3.0-generate-preview")
 KINDS = {
@@ -63,6 +82,10 @@ def price_cents():
         return max(1, int(os.environ.get("VIDEO_CONNECTZ_CENTS", "400")))
     except ValueError:
         return 400
+
+
+def _auth(key):
+    return {"x-goog-api-key": key}
 
 
 def _models():
@@ -88,23 +111,130 @@ def hold(user, cost):
 
 @transaction.atomic
 def refund(work, why):
-    if work.status != VideoWork.STATUS_PENDING:
+    """Hand a held price back — once.
+
+    The guard used to be `work.status` on the CALLER'S instance. Every GET reads
+    the row fresh and then polls it, so two requests could each hold a copy that
+    still said "pending", and each refunded: cash minted by polling. The row is
+    locked and re-read here, so the answer to "is this still pending?" comes from
+    the database at the moment of the refund. Lock order is the work row and then
+    the wallet, the same as the success path in `poll`.
+    """
+    row = VideoWork.objects.select_for_update().filter(pk=work.pk).first()
+    if row is None or row.status != VideoWork.STATUS_PENDING:
+        # Somebody else already refunded it, or the video landed and was paid
+        # for. Say so on the caller's copy too, so it doesn't go on believing.
+        if row is not None:
+            work.status, work.error = row.status, row.error
         return
-    w = type(wallet_for(work.user)).objects.select_for_update().get(pk=wallet_for(work.user).pk)
-    w.promptz = (w.promptz or 0) + work.held_promptz
-    w.money_cents += work.held_cash
+    w = type(wallet_for(row.user)).objects.select_for_update().get(pk=wallet_for(row.user).pk)
+    w.promptz = (w.promptz or 0) + row.held_promptz
+    w.money_cents += row.held_cash
     w.save(update_fields=["promptz", "money_cents", "updated_at"])
-    Transaction.objects.create(user=work.user, kind=Transaction.KIND_REWARD, amount_cents=work.held_cash,
+    Transaction.objects.create(user=row.user, kind=Transaction.KIND_REWARD, amount_cents=row.held_cash,
                                dev_tax_cents=0,
                                note=(f"Video ConnectZ refund — {why}" +
-                                     (f" · {work.held_promptz}🏷️" if work.held_promptz else ""))[:200])
-    work.status, work.error = VideoWork.STATUS_FAILED, why[:200]
-    work.save(update_fields=["status", "error"])
+                                     (f" · {row.held_promptz}🏷️" if row.held_promptz else ""))[:200])
+    row.status, row.error = VideoWork.STATUS_FAILED, why[:200]
+    row.save(update_fields=["status", "error"])
+    work.status, work.error = row.status, row.error
+
+
+def _claim_download(work):
+    """Claim the right to fetch this render's bytes. The marker, or None.
+
+    One conditional UPDATE, so of any number of overlapping polls exactly one
+    gets a row count of 1. A claim old enough to belong to a dead request is
+    taken over with a second conditional UPDATE on the exact stale value.
+    """
+    now = int(time.time())
+    marker = f"{FETCH_CLAIM}{now}"
+    pending = VideoWork.objects.filter(pk=work.pk, status=VideoWork.STATUS_PENDING)
+    if pending.filter(error="").update(error=marker):
+        return marker
+    current = pending.values_list("error", flat=True).first() or ""
+    if current.startswith(FETCH_CLAIM):
+        try:
+            age = now - int(current[len(FETCH_CLAIM):])
+        except ValueError:
+            age = CLAIM_STALE_SECONDS + 1
+        if age > CLAIM_STALE_SECONDS and pending.filter(error=current).update(error=marker):
+            return marker
+    return None
+
+
+def _release_download(work, marker):
+    """Give the claim back — only if it is still ours and the render still pending."""
+    VideoWork.objects.filter(pk=work.pk, status=VideoWork.STATUS_PENDING, error=marker).update(error="")
+
+
+def _upstream_message(resp):
+    """The provider's own words for why it refused, lower-cased, for READING only.
+
+    It is never forwarded to the member: it is a third party's text and can carry
+    a project number or a quota name. We read it to decide whose fault this was.
+    """
+    if resp is None:
+        return ""
+    try:
+        msg = ((resp.json() or {}).get("error") or {}).get("message") or ""
+    except Exception:
+        msg = ""
+    return str(msg or getattr(resp, "text", "") or "").lower()
+
+
+# Words that mean the PROVIDER refused the content, as against refusing us.
+_WORDING_WORDS = ("safety", "responsible ai", "violat", "sensitive", "prohibited", "policy", "blocked",
+                  "not allowed", "inappropriate", "celebrit", "copyright")
+_OUR_END_WORDS = ("api key", "api_key", "quota", "billing", "permission", "credential", "not enabled",
+                  "unauthenticated", "rate limit")
+
+
+def start_failure(resp):
+    """(reason, sentence for the screen, short text stored on the failed work).
+
+    Every failed start used to answer "try rewording it" — including when OUR key
+    or quota was the problem, which sends a member off to rewrite a good
+    description. Whose fault it was is a fact about the status code first:
+
+      429 / 401 / 403 / 404 / 5xx / no answer at all — ours (key, quota, outage,
+          a model name that has gone). Nothing the member can fix.
+      400 — it depends what it says: the content (reword), the photo, or an
+          invalid key that Google reports as a 400.
+    """
+    code = getattr(resp, "status_code", 0)
+    msg = _upstream_message(resp)
+    kept = "Nothing was charged — your PromptZ/balance is back."
+    ours = ("unavailable",
+            f"The video service is unavailable at our end right now. {kept} Try again in a little while.",
+            "the video service is unavailable")
+    if code in (0, 401, 403, 404, 429) or code >= 500 or code == 200:
+        return ours
+    if code == 400:
+        if any(w in msg for w in _OUR_END_WORDS):
+            return ours
+        if any(w in msg for w in _WORDING_WORDS):
+            return ("wording",
+                    f"The video service wouldn't make that one. {kept} Try rewording the description.",
+                    "the description was refused")
+        if "image" in msg or "photo" in msg:
+            return ("photo",
+                    f"The video service couldn't use that photo. {kept} Try a different FaceZ photo, "
+                    "or make the video without one.",
+                    "the photo wasn't accepted")
+    return ("unknown",
+            f"The video service didn't accept that request. {kept} Try again, and if it keeps happening "
+            "change the description.",
+            "the video service refused the request")
 
 
 def _work_dict(w, request):
     return {"id": w.id, "kind": w.kind, "label": KINDS.get(w.kind, {}).get("label", w.kind), "prompt": w.prompt,
-            "aspect": w.aspect, "status": w.status, "error": w.error, "face_id": w.face_id,
+            "aspect": w.aspect, "status": w.status,
+            # A pending row's `error` is the download claim (see FETCH_CLAIM),
+            # never something to show; a reason exists only once it has failed.
+            "error": w.error if w.status == VideoWork.STATUS_FAILED else "",
+            "face_id": w.face_id,
             "video_url": stable_media_url(w.upload, request) if w.upload_id else None,
             "price_cents": w.held_promptz + w.held_cash, "created_at": w.created_at.isoformat(),
             "royalty_pct": ROYALTY_PCT}
@@ -123,6 +253,8 @@ class VideoView(APIView):
             "kinds": [{"key": k, "label": v["label"], "emoji": v["emoji"]} for k, v in KINDS.items()],
             "aspects": list(ASPECTS),
             "price_cents": cost,
+            # What the price buys, for the line beside the button — before it is pressed.
+            "what_you_get": WHAT_YOU_GET, "clip_seconds": CLIP_SECONDS,
             "promptz": w.promptz or 0, "money_cents": w.money_cents,
             "can_afford": (w.promptz or 0) + w.money_cents >= cost,
             "faces": [{"id": f.id, "url": request.build_absolute_uri(f.image.url)}
@@ -180,19 +312,24 @@ class VideoView(APIView):
         op, last = "", None
         try:
             for model in _models():
-                last = requests.post(f"{BASE}/models/{model}:predictLongRunning", params={"key": key},
-                                     json=body, timeout=60)
+                # The key rides in a header, never the query string: `requests`
+                # puts the URL in every connection error it raises, and
+                # `logger.exception` below writes those to the log.
+                last = requests.post(f"{BASE}/models/{model}:predictLongRunning",
+                                     headers=_auth(key), json=body, timeout=60)
                 if last.status_code != 404:
                     op = (last.json() or {}).get("name", "") if last.status_code == 200 else ""
                     break
         except requests.RequestException:
             logger.exception("Video ConnectZ: could not reach Veo")
+            last = None
         if not op:
             logger.error("Video ConnectZ: start failed %s — %s", getattr(last, "status_code", 0),
                          getattr(last, "text", "")[:300])
-            refund(work, "the video service refused the request")
-            return Response({"detail": "The video service didn't take that one. Your PromptZ/balance is back — "
-                                       "try rewording it."}, status=status.HTTP_502_BAD_GATEWAY)
+            reason, sentence, stored = start_failure(last)
+            refund(work, stored)
+            return Response({"detail": sentence, "reason": reason, "refunded": True},
+                            status=status.HTTP_502_BAD_GATEWAY)
         work.operation = op
         work.save(update_fields=["operation"])
         return Response(_work_dict(work, request), status=status.HTTP_201_CREATED)
@@ -221,7 +358,7 @@ def poll(work):
     if not key or not work.operation:
         return
     try:
-        data = requests.get(f"{BASE}/{work.operation}", params={"key": key}, timeout=20).json()
+        data = requests.get(f"{BASE}/{work.operation}", headers=_auth(key), timeout=20).json()
     except (requests.RequestException, ValueError):
         return  # transient — the next poll asks again
     if not data.get("done"):
@@ -236,19 +373,28 @@ def poll(work):
     if not uri:
         refund(work, "no video came back (it may have been filtered)")
         return
+    # Claim the download BEFORE making it. The member's screen polls and so can
+    # a second tab; each used to see "done" and each fetched the whole video,
+    # keeping one. Only the request that wins the claim goes for the bytes.
+    marker = _claim_download(work)
+    if not marker:
+        return  # another request is already fetching this one
     try:
-        r = requests.get(uri, params={"key": key}, timeout=120)
-        r.raise_for_status()
-    except requests.RequestException:
-        return  # try the download again on the next poll
-    with transaction.atomic():
-        work = VideoWork.objects.select_for_update().get(pk=work.pk)
-        if work.status != VideoWork.STATUS_PENDING:
-            return
-        up = Upload(user=work.user, name=f"video-connectz-{work.id}.mp4", size_bytes=len(r.content),
-                    content_type="video/mp4")
-        up.file.save(up.name, ContentFile(r.content), save=False)
-        up.save()
-        work.upload, work.status = up, VideoWork.STATUS_DONE
-        work.save(update_fields=["upload", "status"])
+        try:
+            r = requests.get(uri, headers=_auth(key), timeout=120)
+            r.raise_for_status()
+        except requests.RequestException:
+            return  # the claim is released below, so the next poll tries again
+        with transaction.atomic():
+            work = VideoWork.objects.select_for_update().get(pk=work.pk)
+            if work.status != VideoWork.STATUS_PENDING:
+                return
+            up = Upload(user=work.user, name=f"video-connectz-{work.id}.mp4", size_bytes=len(r.content),
+                        content_type="video/mp4")
+            up.file.save(up.name, ContentFile(r.content), save=False)
+            up.save()
+            work.upload, work.status, work.error = up, VideoWork.STATUS_DONE, ""
+            work.save(update_fields=["upload", "status", "error"])
+    finally:
+        _release_download(work, marker)
     credit_owner(work.user, work.held_promptz + work.held_cash, f"Video ConnectZ — {work.kind} video")
