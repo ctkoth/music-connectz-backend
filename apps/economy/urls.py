@@ -28,6 +28,7 @@ from .lilith_taskz import (LilithBoardView, LilithRoutineDetailView,
 from .karmaz import KarmaRewardsView
 from .signbonus import SignBonusView
 from .voice import VoiceZView
+from .voicez import VoiceDetailView, VoicePreviewView, VoicesView
 from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView, DupeZVerifyView,
                     DupeZReviewView, DupeZView)
 from .callz import CallDetailView, CallRateView, CallsView
@@ -40,6 +41,7 @@ from .coachvoice import CoachVoiceView, CoachSpeakView
 from .dawz import DawZView
 from .attractivenessz_view import AttractivenessZView
 from .soundcloud_engagement import SoundCloudEngagementView
+from .appversion import AppVersionView
 from .soundcloud_import import SoundCloudImportView
 from .coachz import CoachStudioView, RateStudentTakeView, AddStudentView
 from .distributez import TranscodeView, LyricsView
@@ -544,6 +546,10 @@ urlpatterns = [
          name="economy-funnel-catalog"),
     # One voice, set once and followed by every surface a model writes through.
     path("voicez/", VoiceZView.as_view(), name="economy-voicez"),
+    path("version/", AppVersionView.as_view(), name="economy-version"),
+    path("voicez/voices/", VoicesView.as_view(), name="economy-voicez-voices"),
+    path("voicez/voices/<int:pk>/", VoiceDetailView.as_view(), name="economy-voicez-voice"),
+    path("voicez/preview/", VoicePreviewView.as_view(), name="economy-voicez-preview"),
     # DupeZ — one person, one account. Groups, the member's claim on their own
     # other account, the owner's review queue, and the owner override.
     path("dupez/", DupeZView.as_view(), name="economy-dupez"),
