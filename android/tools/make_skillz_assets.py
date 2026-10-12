@@ -167,7 +167,11 @@ def monochrome(path, size=432):
 def splash(path, size=352):
     # The TWA splash image: the whole sign, which carries the name; the splash
     # layer-list supplies the background colour.
-    _fit(_art(), size - 12).convert("RGBA").save(path, "PNG", optimize=True)
+    from PIL import Image
+    canvas = Image.new("RGB", (size, size), INK)
+    fitted = _fit(_art(), size - 12)
+    canvas.paste(fitted, ((size - fitted.width) // 2, (size - fitted.height) // 2))
+    canvas.convert("RGBA").save(path, "PNG", optimize=True)
 
 
 def _disc(art2000, spec, diameter):
