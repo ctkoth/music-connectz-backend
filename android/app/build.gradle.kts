@@ -20,6 +20,12 @@ val bodiezUrl: String = (project.findProperty("bodiezUrl") as String?) ?: "https
 // purchase flow, and a listing that says "write, chat, compose and master".
 //   ./gradlew bundleIntelligencezRelease -PintelligencezUrl=https://intelligencez.example.net
 val intelligencezUrl: String = (project.findProperty("intelligencezUrl") as String?) ?: "https://intelligencez.musicconnectz.net"
+// SkillZ is its own site as well: the SkillZ-only build in the frontend repo
+// (`npm run build:skillz`, hosted on its own origin) holds sign-in, the SkillZ hub
+// and the instrument coaches and nothing else — no profile, posting, distribution
+// or membership screens, and nothing it sells.
+//   ./gradlew bundleSkillzRelease -PskillzUrl=https://skillz.example.net
+val skillzUrl: String = (project.findProperty("skillzUrl") as String?) ?: "https://skillz.musicconnectz.net"
 fun hostOf(url: String): String = url.removePrefix("https://").removePrefix("http://").trimEnd('/')
 
 android {
@@ -39,7 +45,7 @@ android {
         // links it may capture) are per flavor, below.
     }
 
-    // Three apps from one project, one Play listing each. They share the Kotlin
+    // Four apps from one project, one Play listing each. They share the Kotlin
     // and differ in what a member sees before they open it — name, icon, splash —
     // and in WHICH SITE they open.
     //
@@ -62,6 +68,13 @@ android {
     //                            what Play's billing rules require of an app that is
     //                            not using Play Billing (frontend:
     //                            play/intelligencez/README.md).
+    //
+    //   skillz  SkillZ         — the SkillZ-only build on its own origin: sign-in, the
+    //                            hub, and the seven instrument coaches (SingZ, RapZ,
+    //                            GuitarZ, BassZ, KeyZ, DrumZ, ViolinZ). The coaches record
+    //                            from the microphone and camera and send the take to an
+    //                            AI to be scored; nothing in it sells anything (frontend:
+    //                            play/skillz/README.md).
     //
     // Commands become assembleMczDebug / bundleBodiezRelease and so on; plain
     // `bundleRelease` still builds all three.
@@ -90,6 +103,14 @@ android {
             manifestPlaceholders["launchUrl"] = intelligencezUrl.trimEnd('/') + "/"
             manifestPlaceholders["siteHost"] = hostOf(intelligencezUrl)
             // The IntelligenceZ shell has no OmviardZ tour to open.
+            buildConfigField("boolean", "FIRST_LAUNCH_TOUR", "false")
+        }
+        create("skillz") {
+            dimension = "app"
+            applicationId = "net.musicconnectz.skillz"
+            manifestPlaceholders["launchUrl"] = skillzUrl.trimEnd('/') + "/"
+            manifestPlaceholders["siteHost"] = hostOf(skillzUrl)
+            // The SkillZ shell has no OmviardZ tour to open.
             buildConfigField("boolean", "FIRST_LAUNCH_TOUR", "false")
         }
     }
@@ -140,17 +161,19 @@ android {
 // Android can't nest string resources, so the URL is duplicated there — this
 // fails the build the moment the two drift, instead of shipping an app that
 // quietly shows a URL bar. Per flavor, because they open different sites: the
-// bodiez and intelligencez source sets override main's string with their own.
+// bodiez, intelligencez and skillz source sets override main's string with their own.
 val checkAssetStatements by tasks.registering {
     val checks = mapOf(
         "src/main/res/values/strings.xml" to siteUrl,
         "src/bodiez/res/values/strings.xml" to bodiezUrl.trimEnd('/'),
         "src/intelligencez/res/values/strings.xml" to intelligencezUrl.trimEnd('/'),
+        "src/skillz/res/values/strings.xml" to skillzUrl.trimEnd('/'),
     )
     checks.keys.forEach { inputs.file(file(it)) }
     inputs.property("siteUrl", siteUrl)
     inputs.property("bodiezUrl", bodiezUrl)
     inputs.property("intelligencezUrl", intelligencezUrl)
+    inputs.property("skillzUrl", skillzUrl)
     outputs.upToDateWhen { true }
     doLast {
         checks.forEach { (path, url) ->
@@ -158,7 +181,7 @@ val checkAssetStatements by tasks.registering {
                 throw GradleException(
                     "asset_statements in $path does not mention $url. " +
                         "Update the <string name=\"asset_statements\"> site value to match, " +
-                        "or build with -PsiteUrl / -PbodiezUrl / -PintelligencezUrl set to the url that string names."
+                        "or build with -PsiteUrl / -PbodiezUrl / -PintelligencezUrl / -PskillzUrl set to the url that string names."
                 )
             }
         }

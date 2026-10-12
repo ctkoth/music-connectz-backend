@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The shell's own near-black (INK in android/tools/make_skillz_assets.py, and the
+     theme-color in the web manifest), so the status bar and splash meet the app with
+     no seam. Overrides main's brand_ink for this flavor only. -->
+<resources>
+    <color name="brand_ink">#07060D</color>
+</resources>
