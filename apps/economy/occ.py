@@ -315,7 +315,7 @@ class OccChatView(APIView):
             override["style"] = _STYLE_BACK[voice_asked]
         if slang_asked:
             override["slang"] = bool(data.get("slang"))
-        fixed = voice_prompt(request.user, override=override or None) + f"\n\n{COURSES}"
+        fixed = voice_prompt(request.user, override=override or None, surface="occ") + f"\n\n{COURSES}"
         # Which voice actually spoke — the dial if there was one, otherwise the
         # member's stored style — for the ledger note and the reply.
         model_voice = voice_asked or STYLES.get(prefs_dict(request.user)["style"], "corey-gpt")

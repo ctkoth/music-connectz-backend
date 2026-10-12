@@ -46,6 +46,11 @@ try:
 except Exception:  # pragma: no cover - never take the deploy down
     SingZCoachView = None
 
+try:
+    from apps.economy.coach_upgrades import CoachUpgradesView
+except Exception:  # pragma: no cover - never take the deploy down
+    CoachUpgradesView = None
+
 # The history behind that take. Its own try/except rather than the coach's,
 # because a coach that scores and cannot remember is still a working coach —
 # folding them together would mean an import error in the new module takes the
@@ -191,6 +196,10 @@ urlpatterns = [
     path(f"api/{key}/coach/", SingZCoachView.as_view(app_key=key), name=f"{key}-coach")
     for key in INSTRUMENT_APP_KEYS
 ] if SingZCoachView else []) + ([
+    path(f"api/{key}/coach/upgrades/", CoachUpgradesView.as_view(app_key=key),
+         name=f"{key}-coach-upgrades")
+    for key in INSTRUMENT_APP_KEYS
+] if CoachUpgradesView else []) + ([
     # The coach's memory. Bound per instrument beside the coach itself so a new
     # instrument gets its history screen without a second list to keep in step
     # — the gap `test_instrument_routes` exists to catch.

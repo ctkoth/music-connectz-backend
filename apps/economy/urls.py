@@ -38,6 +38,7 @@ from .coachshare import PostCoachView, post_coach_card
 from .weeklybattle import WeeklyBattleView
 from .soundz import SoundZView
 from .coachvoice import CoachVoiceView, CoachSpeakView
+from .coach_upgrades import CoachMarketsView
 from .dawz import DawZView
 from .attractivenessz_view import AttractivenessZView
 from .soundcloud_engagement import SoundCloudEngagementView
@@ -66,6 +67,7 @@ from .metricz import HoroscopeView, MetricZView, SubstanceScaleView
 from .videoz import VideoDetailView, VideoView
 from .instrumentalz import InstrumentalMidiView, InstrumentalMoodView, InstrumentalView
 from .intelligencez import IntelligenceHubView
+from .skillzhub import SkillZHubView
 from .mixz import MixDetailView, MixView
 from .intelligence_royalty import IntelligenceTargetsView, IntelligenceUseDetailView, IntelligenceUsesView
 from .keyconnectz import (KeyboardView, KeySpeakView, KeyTranscribeView,
@@ -235,6 +237,9 @@ urlpatterns = [
     path("mixz/", MixView.as_view(), name="economy-mixz"),
     path("mixz/<int:pk>/", MixDetailView.as_view(), name="economy-mixz-detail"),
     path("intelligencez/", IntelligenceHubView.as_view(), name="economy-intelligencez"),
+    # SkillZ — the front door of the seven instrument coaches (and the Home of the
+    # standalone SkillZ app): the price of a take before any coach is opened.
+    path("skillz/", SkillZHubView.as_view(), name="economy-skillz"),
     path("intelligence/targets/", IntelligenceTargetsView.as_view(), name="economy-intelligence-targets"),
     path("intelligence/uses/", IntelligenceUsesView.as_view(), name="economy-intelligence-uses"),
     path("intelligence/uses/<int:pk>/", IntelligenceUseDetailView.as_view(), name="economy-intelligence-use"),
@@ -307,6 +312,7 @@ urlpatterns = [
     path("posts/<int:pk>/coach/", PostCoachView.as_view(), name="economy-posts-coach"),
     path("postz/<int:pk>/coach-card.png", post_coach_card, name="economy-postz-coach-card"),
     path("soundz/", SoundZView.as_view(), name="economy-soundz"),
+    path("coach/markets/", CoachMarketsView.as_view(), name="economy-coach-markets"),
     path("coachvoice/", CoachVoiceView.as_view(), name="economy-coachvoice"),
     path("coachvoice/speak/", CoachSpeakView.as_view(), name="economy-coachvoice-speak"),
     path("dawz/", DawZView.as_view(), name="economy-dawz"),

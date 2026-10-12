@@ -34,7 +34,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import ai_cost
-from .deadline import COACH_BUDGET_SECONDS, Deadline, Expired
+from .deadline import (COACH_BUDGET_SECONDS, COACH_THINK_RESERVE_SECONDS, Deadline,
+                       Expired)
 from .instruments import (DIFFICULTIES, LYRIC_SCORE, MIX_SCORE, profile_for_app,
                           prompt_for, rates_lyrics, rates_mix, scores_for)
 from .gemini import _bill, _key, generate_content
@@ -297,6 +298,19 @@ def clean_heard(raw, dims):
     return out
 
 
+def post_for_upload(upload, user):
+    """The member's OWN post that carries this stored upload, if any. Lets the
+    journal door show real listener ratings for a song that was also posted."""
+    try:
+        name = os.path.basename(str(upload.file.name))
+        if not name:
+            return None
+        from .models import Post
+        return Post.objects.filter(author=user, media_url__endswith=name).first()
+    except Exception:
+        return None
+
+
 def listeners_for(post, author_excluded=True):
     """{median, count} from real ItemRating rows on this post, else None.
 
@@ -314,7 +328,8 @@ def listeners_for(post, author_excluded=True):
 
 
 def score_take(app_key, f, content_type, *, genre, target, difficulty, style=None,
-               user=None, lyrics=False, mix=False, deadline=None, listeners=None):
+               user=None, lyrics=False, mix=False, deadline=None, listeners=None,
+               think=True):
     """Send one take to the model. Returns (payload, error) — exactly one is None.
 
     Shared by the member coach and the no-account trial, deliberately: a trial
@@ -383,6 +398,9 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     # number they actually experience.
     if deadline is None:
         deadline = Deadline(COACH_BUDGET_SECONDS)
+    # Pass 2 (coach_think) is promised the last seconds of the SAME clock; the
+    # listener's legs get a view with that held back.
+    whole, deadline = deadline, deadline.holding_back(COACH_THINK_RESERVE_SECONDS)
 
     # How the take travels: inline for small ones, uploaded-and-referenced for
     # anything the inline request can't carry. Deciding it HERE means the trial
@@ -506,6 +524,9 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
             "scores": {},
             "rated_lyrics": lyrics,
             "rated_mix": mix,
+            "heard": [],
+            "think": {"used": False, "model": "",
+                      "reason": "Nothing was scored, so there was nothing to check."},
         }, None
 
     if not parsed or _clamp(parsed.get("score")) is None:
@@ -523,7 +544,7 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     if abs(overall - model_score) >= 2:
         logger.info("%s coach: model overall %s vs weighted %s", app_key, model_score, overall)
     listy = lambda v: [str(x)[:300] for x in v][:6] if isinstance(v, list) else []
-    return {
+    result = {
         "score": overall,
         "model_score": model_score,
         "score_rule": SCORE_RULE,
@@ -562,7 +583,13 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         "strengths": listy(parsed.get("strengths")),
         "fixes": listy(parsed.get("fixes")),
         "next_drill": str(parsed.get("next_drill", ""))[:300],
-    }, None
+    }
+    if think:
+        from . import coach_think
+        coach_think.apply(
+            app_key, result, user=user, genre=genre, target=target,
+            difficulty=difficulty, style=style, deadline=whole, trial=user is None)
+    return result, None
 
 
 def record_coaching_observations(user, payload, song_key=None, song_bpm=None):
@@ -795,6 +822,12 @@ class SingZCoachView(APIView):
             "rates_mix": rates_mix(self.app_key),
             "mix_scores": MIX_SCORE if rates_mix(self.app_key) else {},
             "caveat": profile["caveat"],
+            # The second pass and the opt-in gear advice, priced BEFORE either
+            # is pressed. The logic check is inside the take's price.
+            "think": {"model": __import__("apps.economy.coach_think", fromlist=["x"]).COACH_THINK_MODEL,
+                      "configured": __import__("apps.economy.coach_think", fromlist=["x"]).has_key(),
+                      "in_price": True},
+            "upgrades": __import__("apps.economy.coach_upgrades", fromlist=["x"]).quote(request.user),
         })
 
     def post(self, request):
@@ -925,7 +958,9 @@ class SingZCoachView(APIView):
                 # Only the voice the prose comes back in. The rubric is the
                 # same one the logged-out trial is scored on.
                 user=request.user,
-                listeners=listeners_for(post),
+                listeners=listeners_for(post) or listeners_for(
+                    post_for_upload(getattr(f, "instance", None), request.user)),
+                deadline=Deadline(COACH_BUDGET_SECONDS),
             )
         except Exception:
             # Almost always a recording that is no longer in storage. Say that,
@@ -985,7 +1020,7 @@ class SingZCoachView(APIView):
         # mapping, the heatmap, every weekly plan — had no material to work
         # with. Best-effort inside `record`: a bookkeeping failure must never
         # turn a take the member paid for into an error.
-        takescorez.record(
+        _row = takescorez.record(
             request.user, self.app_key, payload,
             difficulty=data.get("difficulty"), genre=genre, target=target,
             style=data.get("style"), upload=getattr(f, "instance", None),
@@ -993,8 +1028,11 @@ class SingZCoachView(APIView):
                     "journal" if stored is not None else "upload"),
             ref=(f"post:{post.id}" if post is not None else
                  str((stored or {}).get("id") or "")),
+            context={"heard": payload.get("heard") or [], "verdict": payload.get("verdict", ""),
+                     "genre": genre, "target": target},
         )
-        out = {**payload, "cost_cents": charged}
+        out = {**payload, "cost_cents": charged,
+               "take_score_id": getattr(_row, "pk", None)}
         # A shareable card for this take, minted from the coach's own answer.
         from .models import mint_score_share
         _share = mint_score_share(self.app_key, payload, user=request.user, genre=genre)
