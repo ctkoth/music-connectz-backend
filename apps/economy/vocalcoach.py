@@ -502,8 +502,15 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         # The upstream body is deliberately NOT forwarded: it is a third party's
         # error text, and it is not ours to put in front of a member. The status
         # plus our own reading of it is the useful part.
+        # A 400 is the take's fault ONLY when Google says it is. A rotated or
+        # mistyped key also answers 400 ("API key not valid"), and blaming the
+        # member's file for it sends them off re-exporting a take that was fine.
+        key_refused = resp.status_code == 400 and (
+            "API_KEY_INVALID" in resp.text or "API key not valid" in resp.text
+            or "API key expired" in resp.text)
         why = {
-            400: "that take's format wasn't accepted",
+            400: ("the coach's API key was refused" if key_refused
+                  else "that take's format wasn't accepted"),
             403: "the coach's API key was refused",
             404: "the coach can't reach a model right now — we're on it",
             429: "the coach has hit its limit for now — try again shortly",

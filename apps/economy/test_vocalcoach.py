@@ -629,6 +629,20 @@ class TheFailureSaysWhichFailureItWasTests(TestCase):
                 self.assertEqual(resp.status_code, 502)
                 self.assertIn(phrase, resp.data["detail"].lower())
 
+    def test_a_bad_key_that_answers_400_does_not_blame_the_take(self):
+        # Found by running the app with a fake key: Google answers 400 "API key
+        # not valid", and the screen told the member their take's format was
+        # wrong. A key problem is ours, and the take was fine.
+        bad = fake_gemini(status_code=400)
+        bad.text = '{"error": {"code": 400, "message": "API key not valid. Please pass a valid API key.", "status": "INVALID_ARGUMENT"}}'
+        with patch("apps.economy.vocalcoach._key", return_value="k"), \
+             patch("apps.economy.gemini.requests.get", return_value=fake_list_models([])), \
+             patch("apps.economy.gemini.requests.post", return_value=bad):
+            resp = self.client.post(URL, {"take": take()}, format="multipart")
+        self.assertEqual(resp.status_code, 502)
+        self.assertIn("key", resp.data["detail"].lower())
+        self.assertNotIn("format", resp.data["detail"].lower())
+
     def test_the_status_and_what_we_sent_come_back_for_diagnosis(self):
         resp = self.send(429)
         self.assertEqual(resp.data["upstream_status"], 429)
