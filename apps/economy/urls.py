@@ -6,6 +6,7 @@ from .media import MediaFileView
 from .questz import QuestBoardView, QuestClaimView
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
+from .embedplays import EmbedPlayView
 from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView, PostProgressionView, DiscoveryFeedView, PostSaleView)
 from .publicz import PublicPostView, PublicProfileView
@@ -424,6 +425,7 @@ urlpatterns = [
     path("public/members/<str:username>/", PublicProfileView.as_view(), name="economy-public-member"),
     # Nothing is a dead end: every app this post can open in, and the price of
     # each before it is spent.
+    path("postz/<int:pk>/embed-play/", EmbedPlayView.as_view(), name="economy-postz-embed-play"),
     path("postz/<int:pk>/open/", PostOpenView.as_view(), name="economy-postz-open"),
     path("postz/<int:pk>/join/", PostJoinView.as_view(), name="economy-postz-join"),
     path("postz/<int:pk>/playlists/", PostPlaylistAppearancesView.as_view(), name="economy-postz-playlists"),

@@ -554,3 +554,65 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "fixes": ["<the moment it goes wrong, and the fix — the two that matter most, worst first>", "..."],
   "next_drill": "<one drill to run before the next take: what to do, how many reps>"{weak_notes_field}
 }}"""
+
+
+def reference_prompt_for(app_key, genre, style=None):
+    """The prompt for a REFERENCE LISTEN: somebody else's recording.
+
+    A different question from `prompt_for`, not a reworded one. The take
+    prompt judges a developing artist's practice performance and hands them
+    fixes; here nobody is being judged. The same keyed dimensions come back
+    (this module is the one source of them, so the screen's labels and the
+    server's whitelist cannot disagree), read as "how strongly does this
+    track show it", and the notes say what the track does and what a
+    performer could learn from it. There is deliberately no "fixes": a fix is
+    advice to the person who played it, and that person is not the listener.
+    Lyrics, mix and listener ratings are not offered either - the first two
+    are opt-ins about the member's own take, the last is evidence about a
+    member's own post.
+    """
+    p = profile_for_app(app_key)
+    keys = list(scores_for(app_key))
+    shape = ", ".join(f'"{k}": <1-10>' for k in keys)
+    style_line = (f"\n- {p['style_label']}: {style}"
+                  if p.get("style_label") and style else "")
+    return f"""You are the Music ConnectZ {p['coach']}, doing a REFERENCE LISTEN.
+
+This is ANOTHER ARTIST'S RECORDING that a member chose to listen through, in \
+{p['label']} terms. It is NOT the listener's own performance. Nobody is being \
+graded and nothing here is a score of the member. Do not address the \
+listener's playing, do not tell them what to fix, and never assume who made it.
+
+Context:
+- Genre: {genre}{style_line}
+
+Describe what you actually hear, dimension by dimension, and give the same \
+1-10 reading you would for any recording: how strongly this track shows that \
+quality. 1-2 = barely holds together, 3-4 = often comes apart, 5-7 = solid and \
+ordinary, 8-9 = strong, 10 = exceptional. Read the recording as it is; do not \
+inflate a famous-sounding track or mark an unpolished one down for its room. \
+Never invent detail you cannot hear.
+
+IS THERE A PERFORMANCE AT ALL? Silence, room noise, talking, or plainly the \
+wrong file: set "unscorable" to a short sentence saying what you heard, set \
+"score" and every entry in "scores" to null, and stop.
+
+Frame every note as what THIS TRACK does well and what a performer could \
+learn or borrow from it. Plain, specific and warm, with a fitting emoji or \
+two. Contractions are fine. Name the moment, not the category.
+
+Return ONLY valid JSON, no markdown fence, in exactly this shape:
+{{
+  "unscorable": <null, or a short sentence: what you heard, and what to send instead>,
+  "score": <overall 1-10 integer, or null if unscorable>,
+  "scores": {{{shape}}},
+  "now": "<what this track is, in {p['label']}'s own terms>",
+  "goal": "<what the track is going for and how it gets there>",
+  "style_fit": "<how it sits against {genre}: what that genre asks for and what this track does with it>",
+  "song_score": <1-10 as a listener reacts to the song itself, or null if there is no song>,
+  "song_why": "<one sentence: what makes it land or not>",
+  "heard": [{{"t": "<m:ss, or empty if unsure>", "what": "<one plain sentence: what is audible>", "dim": "<one score key above, or other>", "confidence": <1-3>}}, ...],
+  "verdict": "<one sentence: what this track is>",
+  "strengths": ["<what this track does well, specifically - at least one>", "..."],
+  "borrow": "<one thing a performer could try or borrow from this track, concrete>"
+}}"""

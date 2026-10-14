@@ -2250,3 +2250,16 @@ Corey's to move**.
 - `POST /api/economy/profile/` is the only writer of a profile's links. **Nothing mounted in
   the frontend could call it** until `PortfolioLinks.jsx` — the feature had a reader on three
   screens (card, public profile, widget board) and no way to make a link.
+
+## Plays on Music ConnectZ from the embedded SoundCloud player
+
+`apps/economy/embedplays.py`, `EmbedPlay` (migration 0195, additive). A play is a
+member who listened 30 s (`EMBED_PLAY_MIN_SECONDS`) through heartbeats clamped to
+the wall clock (as `record_listen`), once per member per post per day; the author,
+a second account in the same browser (`anon_id`), more than 5 counted plays on a
+post from one address a day, and non-SoundCloud embed indexes do not count. Pays
+nothing. Served as `mcz_plays` on a post, batched in one query and skipped when no
+post in the batch frames SoundCloud. **No rebuild command**: the count is derived
+from `counted` rows, not a stored counter, so it cannot drift. Labelled "on Music
+ConnectZ" and never mixed with SoundCloud's own number. Never run against a real
+SoundCloud widget (no access from CI).

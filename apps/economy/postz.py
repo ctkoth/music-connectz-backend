@@ -52,6 +52,7 @@ from .models import (
     post_is_battle_eligible,
     post_is_collab_eligible,
 )
+from .embedplays import play_count, plays_for
 from .personaz import personas_of
 from .views import credit_owner
 
@@ -148,7 +149,8 @@ def clean_post_price(value):
 
 
 def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_UNSET,
-               cap=None, shares=None, joins=None, rating=_UNSET, bought=_UNSET):
+               cap=None, shares=None, joins=None, rating=_UNSET, bought=_UNSET,
+               plays=None):
     vibe = up - down
     media = media_slots(p)
     if take_state is _UNSET:
@@ -179,6 +181,9 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
         "is_album": p.is_album,
         "items": p.items or [],
         "embeds": p.embeds or [],
+        # Listens counted on Music ConnectZ from the embedded SoundCloud player
+        # (embedplays.py) — never SoundCloud's own number. 0 = say nothing.
+        "mcz_plays": play_count(p) if plays is None else plays,
         # One of each, resolved for the client so it renders every attachment
         # rather than only the primary one.
         "media": media,
@@ -683,13 +688,15 @@ class PostsView(APIView):
                      .values_list("post_id").annotate(n=Count("id")))
         ratings = item_rating_medians([f"post:{i}" for i in ids])
         bought = _bought_ids(request, ids)
+        plays = plays_for(visible)
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
                             collabs=deals.get(p.id, 0), price=price, cap=cap,
                             take_state=sizes.get(p.id),
                             shares=shares.get(p.id, 0),
                             joins=joins.get(p.id, 0) if p.visibility == "restricted" else 0,
                             rating=ratings.get(f"post:{p.id}"),
-                            bought=p.id in bought)
+                            bought=p.id in bought,
+                            plays=plays.get(p.id, 0))
                  for p in visible]
 
         now = timezone.now()
@@ -1177,6 +1184,7 @@ class DiscoveryFeedView(APIView):
                      .values_list("post_id").annotate(n=Count("id")))
         ratings = item_rating_medians([f"post:{i}" for i in ids])
         bought = _bought_ids(request, ids)
+        plays = plays_for(recommendations)
 
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
                             collabs=deals.get(p.id, 0), price=price, cap=cap,
@@ -1184,7 +1192,8 @@ class DiscoveryFeedView(APIView):
                             shares=shares.get(p.id, 0),
                             joins=joins.get(p.id, 0) if p.visibility == "restricted" else 0,
                             rating=ratings.get(f"post:{p.id}"),
-                            bought=p.id in bought)
+                            bought=p.id in bought,
+                            plays=plays.get(p.id, 0))
                  for p in recommendations]
 
         return Response({

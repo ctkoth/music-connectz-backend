@@ -1643,6 +1643,29 @@ class PostShare(models.Model):
         unique_together = ("post", "user")
 
 
+class EmbedPlay(models.Model):
+    """One member's listening to one post's embedded player, on one day.
+
+    The count shown as "N plays on Music ConnectZ" is the number of rows with
+    `counted` set. A row exists per (post, member, day) and `seconds` is
+    accumulated from heartbeats clamped to the wall clock (same method as
+    ListenProgress); it counts once `seconds` reaches EMBED_PLAY_MIN_SECONDS.
+    See apps/economy/embedplays.py. `anon_id` is the browser's id, kept only to
+    stop one browser counting twice through two accounts."""
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="embed_plays")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="embed_plays")
+    day = models.DateField()
+    seconds = models.PositiveIntegerField(default=0)
+    counted = models.BooleanField(default=False)
+    anon_id = models.CharField(max_length=40, blank=True, default="")
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("post", "user", "day")
+        indexes = [models.Index(fields=["post", "counted"], name="embedplay_post_counted")]
+
+
 class PostSale(models.Model):
     """A fan paying to support/access a post."""
     post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="sales")

@@ -37,7 +37,8 @@ from .catalog import ai_cost
 from .deadline import (COACH_BUDGET_SECONDS, COACH_THINK_RESERVE_SECONDS, Deadline,
                        Expired)
 from .instruments import (DIFFICULTIES, LYRIC_SCORE, MIX_SCORE, profile_for_app,
-                          prompt_for, rates_lyrics, rates_mix, scores_for)
+                          prompt_for, reference_prompt_for, rates_lyrics, rates_mix,
+                          scores_for)
 from .gemini import _bill, _key, generate_content
 from .models import (
     PROMPT_ALLOWANCE,
@@ -256,6 +257,9 @@ def _clamp(v, lo=1, hi=10):
 SCORE_RULE = ("Overall leans on your strongest parts — your best dimensions count "
               "most, your weakest counts least.")
 MIN_LISTENERS = 3
+REFERENCE_NOTICE = ("Use music you have the right to analyse. This is a private listen — "
+                    "it isn't posted, saved to your profile or counted toward your skills. "
+                    "The file is used for this analysis only and isn't kept.")
 
 
 def strength_weighted(scores):
@@ -329,8 +333,13 @@ def listeners_for(post, author_excluded=True):
 
 def score_take(app_key, f, content_type, *, genre, target, difficulty, style=None,
                user=None, lyrics=False, mix=False, deadline=None, listeners=None,
-               think=True):
+               think=True, reference=False):
     """Send one take to the model. Returns (payload, error) — exactly one is None.
+
+    `reference=True` is a REFERENCE LISTEN: somebody else's recording, read
+    with `reference_prompt_for`. No fixes, no second pass, no lyric/mix/
+    listener inputs, no house voice - and `payload["reference"]` is True so
+    nothing downstream can mistake it for the member's own take.
 
     Shared by the member coach and the no-account trial, deliberately: a trial
     that grades on an easier rubric is a lie about the product, and the first
@@ -352,15 +361,21 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     # well as in `prompt_for` because this value also decides what the whitelist
     # below will accept: a drum take asked for a writing score must not end up
     # with a column for one.
-    lyrics = bool(lyrics) and rates_lyrics(app_key)
+    reference = bool(reference)
+    lyrics = bool(lyrics) and rates_lyrics(app_key) and not reference
     # Same shape as lyrics, and opt-in for the same reason: the mix is a
     # different skill from the one the five dimensions measure, and most takes
     # here are a phone in a bedroom. Scoring production by default would mark
     # somebody down for their room — a number they could raise by buying an
     # interface rather than by getting better, which is the substance rule
     # inverted.
-    mix = bool(mix) and rates_mix(app_key)
-    prompt = prompt_for(
+    mix = bool(mix) and rates_mix(app_key) and not reference
+    if reference:
+        think = False
+        listeners = None
+    prompt = reference_prompt_for(
+        app_key, str(genre or "unspecified")[:60], style=str(style or "")[:60] or None,
+    ) if reference else prompt_for(
         app_key,
         genre=str(genre or "unspecified")[:60],
         target=str(target or "unspecified")[:60],
@@ -376,7 +391,8 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     # answer; a voice note that displaced it would risk a take that scored fine
     # coming back unparseable.
     from .voice import prose_voice
-    prompt = f"{prose_voice(user, surface='coach')}\n\n{prompt}"
+    if not reference:
+        prompt = f"{prose_voice(user, surface='coach')}\n\n{prompt}"
     # Normalise BEFORE the call. An unsupported container is a refusal we can
     # give instantly and explain, rather than a round trip that comes back as a
     # generic failure the member reads as "my take was bad".
@@ -524,6 +540,7 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
             "scores": {},
             "rated_lyrics": lyrics,
             "rated_mix": mix,
+            "reference": reference,
             "heard": [],
             "think": {"used": False, "model": "",
                       "reason": "Nothing was scored, so there was nothing to check."},
@@ -584,6 +601,14 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         "fixes": listy(parsed.get("fixes")),
         "next_drill": str(parsed.get("next_drill", ""))[:300],
     }
+    if reference:
+        # Somebody else's recording: nothing here is advice to the listener.
+        result.update({
+            "reference": True, "fixes": [], "next_drill": "",
+            "borrow": str(parsed.get("borrow", ""))[:400],
+            "think": {"used": False, "model": "",
+                      "reason": "A reference listen has no fixes pass."},
+        })
     if think:
         from . import coach_think
         coach_think.apply(
@@ -827,6 +852,12 @@ class SingZCoachView(APIView):
             "think": {"model": __import__("apps.economy.coach_think", fromlist=["x"]).COACH_THINK_MODEL,
                       "configured": __import__("apps.economy.coach_think", fromlist=["x"]).has_key(),
                       "in_price": True},
+            "reference": {
+                "available": True, "label": "Reference listen",
+                "cost_cents": cost, "free_today": daily_left > 0,
+                "charged_on_failure": False, "saved": False,
+                "notice": REFERENCE_NOTICE,
+            },
             "upgrades": __import__("apps.economy.coach_upgrades", fromlist=["x"]).quote(request.user),
         })
 
@@ -864,6 +895,12 @@ class SingZCoachView(APIView):
         # from storage. `post` stays set only for the post door, because the
         # things that are genuinely post-shaped — writing the score back onto
         # the post, offering the way back to it — are its alone.
+        reference = str(request.data.get("reference", "")).lower() in ("1", "true", "yes", "on")
+        if reference and (request.data.get("post_id") not in (None, "")
+                          or request.data.get("journal_id") not in (None, "")):
+            return Response({"detail": "A reference listen is an upload of somebody else's "
+                                       "track. Your own posts and journal go through My take."},
+                            status=status.HTTP_400_BAD_REQUEST)
         post = stored = None
         f = request.FILES.get("take")
         if f:
@@ -929,8 +966,10 @@ class SingZCoachView(APIView):
         # and no tier lifts it. It never refuses the take, only the hard
         # setting: somebody told they may not sing today sings anyway,
         # somewhere that is not counting.
-        blocked = takescorez.recovery_block(request.user, self.app_key,
-                                            data.get("difficulty"))
+        # A reference listen is not the member performing, so the recovery
+        # gate (which is about their voice and body today) has no say in it.
+        blocked = None if reference else takescorez.recovery_block(
+            request.user, self.app_key, data.get("difficulty"))
         if blocked:
             return Response({"detail": blocked["why"], "recovery": blocked},
                             status=status.HTTP_409_CONFLICT)
@@ -940,9 +979,11 @@ class SingZCoachView(APIView):
         # afterwards is measured against it without anybody re-picking it from
         # a dropdown, which is the Auto-Goal Bridge's basis.
         target = data.get("range")
-        if not target:
+        if not target and not reference:
             _decl = takescorez.profile_row(request.user, self.app_key)
             target = (_decl.goal_range or _decl.confirmed_range) if _decl else None
+        if reference:
+            return self._reference(request, f, content_type, genre)
         try:
             if stored is not None:
                 # Opened here rather than in the lookup, so a take refused on
@@ -1087,6 +1128,36 @@ class SingZCoachView(APIView):
             logger.exception("Failed to award XP for coached take for user %s", request.user.id)
 
         return Response(out)
+
+    def _reference(self, request, f, content_type, genre):
+        """A reference listen: somebody else's track, analysed and forgotten.
+
+        Everything a take does AFTER scoring is deliberately absent: no
+        TakeScore, no share card, no coaching observations, no SkillZ XP, no
+        post write-back. The only things written are the billing and ledger
+        lines, because the member spent a prompt. The uploaded file is the
+        request's own temporary upload - never an Upload row, so it is not in
+        their storage quota and is never served back - and any Files API copy
+        is deleted by score_take's cleanup.
+        """
+        data = request.data
+        try:
+            payload, err = score_take(
+                self.app_key, f, content_type, genre=genre, target=None,
+                difficulty=None, style=data.get("style"), user=request.user,
+                deadline=Deadline(COACH_BUDGET_SECONDS), reference=True)
+        except Exception:
+            logger.exception("%s reference listen: file could not be read", self.app_key)
+            return Response({"detail": "The coach couldn't read that file. Nothing was charged.",
+                             "reference": True}, status=status.HTTP_400_BAD_REQUEST)
+        if err:
+            body, code = err
+            return Response({**body, "reference": True}, status=code)
+        charged = _bill(request.user,
+                        note=f"{profile_for_app(self.app_key)['label']} Reference listen — AI",
+                        count_daily=True)
+        return Response({**payload, "cost_cents": charged, "reference": True,
+                         "saved": False, "take_score_id": None, "share_url": ""})
 
     def _take_from_post(self, request):
         """(post, file, content_type, error_response) for a post-sourced take.

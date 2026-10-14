@@ -176,6 +176,14 @@ class TrialCoachView(APIView):
         })
 
     def post(self, request):
+        if str(request.data.get("reference", "")).lower() in ("1", "true", "yes", "on"):
+            # The one free take is a stranger's own performance. Spending it on
+            # somebody else's song would use up the only thing they came for.
+            return Response(
+                {"detail": "Listening to someone else's track needs an account — the free take "
+                           "here is for your own performance. Make an account and try both.",
+                 "reference_needs_account": True},
+                status=status.HTTP_403_FORBIDDEN)
         ip = client_ip(request)
         anon_id = client_anon_id(request)
         today, mine, ip_over = trial_state(ip, anon_id)
