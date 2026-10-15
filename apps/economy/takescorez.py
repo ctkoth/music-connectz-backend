@@ -206,6 +206,50 @@ def detected(user, app_key):
             "at": row.created_at.isoformat(), "why": ""}
 
 
+# How many of the member's most recent takes on this app the coach's defaults
+# are read from. Thirty is enough to say "usually R&B" and short enough that an
+# old habit cannot outvote the last month.
+DEFAULTS_WINDOW = 30
+
+
+def _most_used(values):
+    """The most frequent non-blank value, ties going to the most recent one.
+
+    `values` is newest-first, so the first value that reaches the top count is
+    the one the member used most recently among the tied ones.
+    """
+    counts = {}
+    for v in values:
+        if v:
+            counts[v] = counts.get(v, 0) + 1
+    if not counts:
+        return None
+    top = max(counts.values())
+    return next(v for v in values if v and counts[v] == top)
+
+
+def coach_defaults(user, app_key):
+    """What the coach pre-fills from this member's OWN history, for this app.
+
+    Genre and difficulty are the most-used values across their last
+    DEFAULTS_WINDOW takes (one query). Range is the latest one the coach heard,
+    via `detected()`, which is the same reading the progress screen shows — a
+    second, flat query, deliberately not a copy of its logic.
+
+    Genre is never inferred from a file or file name: Style Match is measured
+    against it, so it has to be a choice the member made. Every field is None
+    for a member with no history, and the client keeps its built-in defaults.
+    """
+    rows = list(TakeScore.objects.filter(user=user, app_key=app_key)
+                .order_by("-created_at")
+                .values("genre", "difficulty")[:DEFAULTS_WINDOW])
+    return {
+        "genre": _most_used([r["genre"] for r in rows]),
+        "difficulty": _most_used([r["difficulty"] for r in rows]),
+        "range": detected(user, app_key)["range"] or None,
+    }
+
+
 def strain(user, app_key):
     """How hard this member has been pushing, from their last few days of takes.
 

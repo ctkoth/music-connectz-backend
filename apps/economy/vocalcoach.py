@@ -835,6 +835,11 @@ class SingZCoachView(APIView):
             "style_label": profile.get("style_label"),
             "styles": [{"key": k, "label": l} for k, l in profile.get("styles", [])],
             "difficulties": DIFFICULTIES,
+            # What the form pre-fills from THIS member's own recent takes on
+            # this app — null per field for a new member, so the screen keeps
+            # its built-in choice. The client labels where each value came from.
+            "defaults": __import__("apps.economy.takescorez", fromlist=["x"]).coach_defaults(
+                request.user, self.app_key),
             # Whether this coach can judge writing at all. Served rather than
             # guessed by the client, because a toggle offered on a drum take is
             # the switch-that-changes-nothing this codebase already has a note
