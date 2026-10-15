@@ -40,6 +40,7 @@ class CoachDefaultsTests(TestCase):
         take(self.me, genre="R&B", difficulty="performer", range_class="bass")
         take(self.me, genre="Soul", difficulty="builder")
         take(self.me, genre="Soul", difficulty="builder", range_class="tenor")
+        take(self.me, genre="Soul", difficulty="builder")
         take(self.me, genre="R&B", difficulty="builder")
         d = coach_defaults(self.me, "singz")
         self.assertEqual(d["genre"], "Soul")
