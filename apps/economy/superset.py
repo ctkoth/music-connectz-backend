@@ -351,7 +351,8 @@ def pair_both(rows, library, *, add=True, equipment=(), is_accessible=lambda ex:
             for i in p["exercise_ids"]:
                 if i not in lost_ids:
                     lost_ids.append(i)
-        lost_ids.sort(key=lambda i: next(k for k, r in enumerate(rows) if r.get("exercise_id") == i))
+        where = {r["exercise_id"]: k for k, r in enumerate(proposals["push_pull"]["exercises"])}
+        lost_ids.sort(key=lambda i: where[i])
         n_ci = len(proposals["compound_isolation"]["pairs"])
         n_pp = len(proposals["push_pull"]["pairs"])
         offer = "push_pull" if n_pp > n_ci else "compound_isolation"
