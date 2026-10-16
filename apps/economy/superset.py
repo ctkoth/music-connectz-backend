@@ -285,6 +285,98 @@ def pair_rows(rows, library, mode, *, add=True, equipment=(), is_accessible=lamb
     }
 
 
+PAIR_MODES = ("compound_isolation", "push_pull")
+BOTH = "both"
+
+# Served with the two single modes so a member can choose all of them in one go.
+# It is not a third pairing rule: it is the two rules, run in order, with a lift
+# allowed in one pair only.
+BOTH_MODE = {
+    "key": BOTH,
+    "label": "Both",
+    "what": "Both pairings in one go: compound + isolation first, then push + pull on the lifts still single. A lift is in one pair at most; where the two want the same lift, compound + isolation keeps it and the Coach says so.",
+    "example": "Bench press with dumbbell fly, then the lifts left over, push against pull",
+}
+
+CONFLICT_SENTENCE = ("Push + pull's pairs for {names} cannot all be kept alongside compound + isolation, "
+                     "because a lift can be in one pair only. Both keeps the compound + isolation pairs. "
+                     "{offer} on its own pairs more of this routine ({n} pairs against {m}).")
+
+
+def _label(mode):
+    return MODES[mode]["label"]
+
+
+def pair_both(rows, library, *, add=True, equipment=(), is_accessible=lambda ex: True):
+    """Both pairings for one routine: two standalone proposals and one merged plan.
+
+    `proposals` are each exactly what that single mode returns on the original rows,
+    so each is a valid pairing on its own. The merged plan runs compound + isolation
+    first, then push + pull over the rows that are still single; pass one's pairs are
+    locked for pass two, so no lift is ever in two pairs. Where a push + pull pair of
+    the standalone proposal cannot be kept in the merged plan, that is reported as a
+    conflict with the sentence and the proposal that pairs more — never dropped quietly.
+    """
+    kw = dict(add=add, equipment=equipment, is_accessible=is_accessible)
+    proposals = {m: pair_rows(rows, library, m, **kw) for m in PAIR_MODES}
+    first = proposals["compound_isolation"]
+    merged = pair_rows(first["exercises"], library, "push_pull", **kw)
+
+    by_id = {ex.id: ex for ex in library}
+    why = {}
+    for mode, res in (("compound_isolation", first), ("push_pull", merged)):
+        for p in res["pairs"]:
+            why[frozenset(p["exercise_ids"])] = (mode, p["why"])
+
+    final = merged["exercises"]
+    members = {}
+    for r in final:
+        if r.get("group"):
+            members.setdefault(r["group"], []).append(r["exercise_id"])
+    pairs = []
+    for g, ids_ in members.items():
+        key = frozenset(ids_)
+        if key not in why:            # a pair the member made by hand, not one the Coach made
+            continue
+        mode, reason = why[key]
+        pairs.append({"group": g, "mode": mode, "why": reason, "exercise_ids": ids_})
+
+    kept = {frozenset(q["exercise_ids"]) for q in pairs}
+    lost_pp = [p for p in proposals["push_pull"]["pairs"] if frozenset(p["exercise_ids"]) not in kept]
+
+    conflict = None
+    if lost_pp:
+        lost_ids = []
+        for p in lost_pp:
+            for i in p["exercise_ids"]:
+                if i not in lost_ids:
+                    lost_ids.append(i)
+        lost_ids.sort(key=lambda i: next(k for k, r in enumerate(rows) if r.get("exercise_id") == i))
+        n_ci = len(proposals["compound_isolation"]["pairs"])
+        n_pp = len(proposals["push_pull"]["pairs"])
+        offer = "push_pull" if n_pp > n_ci else "compound_isolation"
+        names = [by_id[i].name for i in lost_ids]
+        conflict = {
+            "exercise_ids": lost_ids,
+            "names": names,
+            "offer": offer,
+            "sentence": CONFLICT_SENTENCE.format(
+                names=", ".join(names), offer=_label(offer),
+                n=max(n_ci, n_pp), m=min(n_ci, n_pp)),
+        }
+
+    return {
+        "exercises": final,
+        "pairs": pairs,
+        "added": first["added"] + merged["added"],
+        "left_single": merged["left_single"],
+        "proposals": {m: {k: proposals[m][k] for k in ("exercises", "pairs", "added", "left_single")}
+                      for m in PAIR_MODES},
+        "coexist": conflict is None,
+        "conflict": conflict,
+    }
+
+
 def _why(mode, ex):
     if mode == "compound_isolation":
         return f"Same muscle ({ex.muscle_group.replace('_', ' ')}): a compound lift and an isolation lift."
@@ -318,7 +410,7 @@ class BodieZPairView(APIView):
     def get(self, request):
         from .statz_trial import UPGRADE, has_statz, state
         return Response({
-            "modes": [{"key": k, **v} for k, v in MODES.items()],
+            "modes": [{"key": k, **v} for k, v in MODES.items()] + [BOTH_MODE],
             "allowed": has_statz(request.user),
             "feature": FEATURE,
             "sample": state(request.user),
@@ -339,8 +431,8 @@ class BodieZPairView(APIView):
 
         d = request.data or {}
         mode = d.get("mode")
-        if mode not in MODES:
-            return Response({"detail": f"mode must be one of {sorted(MODES)}."},
+        if mode not in MODES and mode != BOTH:
+            return Response({"detail": f"mode must be one of {sorted(MODES) + [BOTH]}."},
                             status=http.HTTP_400_BAD_REQUEST)
         rows = d.get("exercises")
         if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
@@ -359,10 +451,22 @@ class BodieZPairView(APIView):
         if not isinstance(equipment, list):
             equipment = []
         access = BodieZAccess.objects.filter(user=request.user).first()
-        result = pair_rows(rows, library, mode, add=bool(d.get("add", True)),
-                           equipment=[str(e) for e in equipment],
-                           is_accessible=lambda ex: accessible(ex, access))
+        kw = dict(add=bool(d.get("add", True)),
+                  equipment=[str(e) for e in equipment],
+                  is_accessible=lambda ex: accessible(ex, access))
         names = {e.id: e.name for e in library}
-        for p in result["pairs"]:
-            p["names"] = [names[i] for i in p["exercise_ids"]]
-        return Response(result)
+
+        def name(res):
+            for p in res["pairs"]:
+                p["names"] = [names[i] for i in p["exercise_ids"]]
+            return res
+
+        if mode == BOTH:
+            result = pair_both(rows, library, **kw)
+            name(result)
+            for res in result["proposals"].values():
+                name(res)
+            return Response(result)
+
+        # Single modes: the response shape is unchanged from before "both" existed.
+        return Response(name(pair_rows(rows, library, mode, **kw)))

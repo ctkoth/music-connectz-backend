@@ -16,7 +16,7 @@ from rest_framework.test import APIClient
 
 from apps.economy import statz_trial, superset
 from apps.economy.models import BodieZAccess, BodieZExercise, StatzTrial, membership_for
-from apps.economy.superset import ANTAGONISTS, MODES, TABLE, pair_rows, valid_groups
+from apps.economy.superset import ANTAGONISTS, MODES, TABLE, pair_both, pair_rows, valid_groups
 from apps.economy.superset_table import TABLE as TABLE_FILE
 
 User = get_user_model()
@@ -276,7 +276,9 @@ class EndpointTests(TestCase):
     def test_the_offer_is_readable_by_every_tier_before_anything_is_pressed(self):
         r = self.c.get(URL).json()
         self.assertFalse(r["allowed"])
-        self.assertEqual({m["key"] for m in r["modes"]}, set(MODES))
+        self.assertEqual({m["key"] for m in r["modes"]}, set(MODES) | {"both"})
+        both = next(m for m in r["modes"] if m["key"] == "both")
+        self.assertTrue(both["label"] and both["what"] and both["example"])
         self.assertTrue(r["sample"]["available"])
         self.assertIn("by hand", r["manual"])
 
@@ -321,3 +323,115 @@ class EndpointTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["pairs"], [])
         self.assertNotIn(mine.id, r.json()["added"])
+
+
+class BothTests(SimpleTestCase):
+    """Both pairings at once: two proposals on their own, one merged plan, no lift twice."""
+
+    def both(self, rows, **kw):
+        return pair_both(rows, LIB, **kw)
+
+    def test_two_pairs_side_by_side_with_no_lift_in_both(self):
+        out = self.both([row(1), row(2), row(5), row(4)], add=False)   # bench, fly, pushdown, curl
+        self.assertEqual(ids(out["exercises"]), [1, 2, 5, 4])
+        self.assertEqual([r["group"] for r in out["exercises"]], ["A", "A", "B", "B"])
+        self.assertEqual([p["exercise_ids"] for p in out["pairs"]], [[1, 2], [5, 4]])
+        self.assertEqual([p["mode"] for p in out["pairs"]], ["compound_isolation", "push_pull"])
+        self.assertTrue(out["coexist"])
+        self.assertIsNone(out["conflict"])
+        self.assertEqual(out["added"], [])
+        self.assertEqual(valid_groups(out["exercises"]), out["exercises"])
+
+    def test_each_proposal_is_exactly_its_single_mode_on_the_original_rows(self):
+        rows = [row(1), row(2), row(5), row(4)]
+        out = self.both(rows, add=False)
+        self.assertEqual(out["proposals"]["compound_isolation"],
+                         pair_rows(rows, LIB, "compound_isolation", add=False))
+        self.assertEqual(out["proposals"]["push_pull"], pair_rows(rows, LIB, "push_pull", add=False))
+
+    def test_a_lift_both_pairings_want_is_kept_by_compound_isolation_and_said_so(self):
+        out = self.both([row(1), row(2), row(3), row(4)], add=False)   # bench, fly, row, curl
+        self.assertFalse(out["coexist"])
+        c = out["conflict"]
+        self.assertEqual(c["exercise_ids"], [1, 3])
+        self.assertEqual(c["names"], ["Bench Press", "Barbell Row"])
+        self.assertIn("Bench Press, Barbell Row", c["sentence"])
+        self.assertEqual(c["offer"], "compound_isolation")
+        self.assertEqual([p["exercise_ids"] for p in out["pairs"]], [[1, 2]])
+        self.assertEqual([p["exercise_ids"] for p in out["proposals"]["push_pull"]["pairs"]], [[1, 3]])
+
+    def test_the_offer_is_the_proposal_that_pairs_more(self):
+        # bench + fly, then a push-pull pair with a lift the compound pass left alone
+        out = self.both([row(3), row(1), row(9), row(2), row(5), row(4)], add=False)
+        self.assertEqual(out["conflict"]["offer"], "push_pull")
+
+    def test_no_routine_ever_puts_a_lift_in_two_pairs_and_nothing_drops_quietly(self):
+        import itertools
+        pool = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 13]
+        for combo in itertools.combinations(pool, 4):
+            for seq in (combo, tuple(reversed(combo))):
+                for add in (False, True):
+                    rows = [row(i) for i in seq]
+                    out = self.both(rows, add=add)
+                    seen = [i for p in out["pairs"] for i in p["exercise_ids"]]
+                    self.assertEqual(len(seen), len(set(seen)), (seq, add))
+                    self.assertEqual(valid_groups(out["exercises"]), out["exercises"], (seq, add))
+                    kept = {frozenset(p["exercise_ids"]) for p in out["pairs"]}
+                    for p in out["proposals"]["compound_isolation"]["pairs"]:
+                        self.assertIn(frozenset(p["exercise_ids"]), kept, (seq, add))
+                    for p in out["proposals"]["push_pull"]["pairs"]:
+                        if frozenset(p["exercise_ids"]) not in kept:
+                            self.assertIsNotNone(out["conflict"], (seq, add))
+
+    def test_pairs_it_makes_by_hand_are_left_alone_and_not_reported_as_new(self):
+        mine = [row(1, group="A"), row(2, group="A"), row(5), row(4)]
+        out = self.both(mine, add=False)
+        self.assertEqual([p["exercise_ids"] for p in out["pairs"]], [[5, 4]])
+        self.assertEqual([r.get("group") for r in out["exercises"]][:2], ["A", "A"])
+
+
+class BothEndpointTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user("both", "b@x.test", "pw-Long-enough-1")
+        self.c = APIClient()
+        self.c.force_authenticate(self.user)
+        self.ids = {n: BodieZExercise.objects.get(name=n, created_by__isnull=True).id
+                    for n in ("Bench Press", "Barbell Row", "Dumbbell Fly")}
+        m = membership_for(self.user)
+        m.tier = "statz"
+        m.save()
+
+    def _rows(self, *names):
+        return [{"exercise_id": self.ids[n], "sets": 3, "reps": 10} for n in names]
+
+    def test_both_answers_with_the_proposals_names_and_the_conflict_sentence(self):
+        r = self.c.post(URL, {"mode": "both", "add": False,
+                              "exercises": self._rows("Bench Press", "Dumbbell Fly", "Barbell Row")},
+                        format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        for key in ("exercises", "pairs", "added", "left_single", "proposals", "coexist", "conflict"):
+            self.assertIn(key, body)
+        self.assertEqual([p["names"] for p in body["pairs"]], [["Bench Press", "Dumbbell Fly"]])
+        self.assertFalse(body["coexist"])
+        self.assertEqual(body["conflict"]["names"], ["Bench Press", "Barbell Row"])
+        for res in body["proposals"].values():
+            for p in res["pairs"]:
+                self.assertEqual(len(p["names"]), 2)
+
+    def test_a_single_mode_answers_with_the_same_keys_it_always_did(self):
+        r = self.c.post(URL, {"mode": "push_pull", "exercises": self._rows("Bench Press")}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(set(r.json()), {"exercises", "pairs", "added", "left_single"})
+
+    def test_both_is_refused_without_statz_like_the_single_modes(self):
+        m = membership_for(self.user)
+        m.tier = "free"
+        m.save()
+        r = self.c.post(URL, {"mode": "both", "exercises": self._rows("Bench Press")}, format="json")
+        self.assertEqual(r.status_code, 403)
+
+    def test_an_unknown_mode_still_names_the_choices(self):
+        r = self.c.post(URL, {"mode": "nope", "exercises": self._rows("Bench Press")}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("both", r.json()["detail"])
