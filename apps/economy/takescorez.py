@@ -560,6 +560,50 @@ def fixer_doors(take, *, price=None):
     return out
 
 
+PROMO_NOTE = ("Makes the public share link (free), then writes a post about this score — your words "
+              "stay yours: it uses only what the coach said, never an invented number — in a box "
+              "you can copy. A failed run is not charged. If you keep it and use it in a release, "
+              "battle or deal, K-Oth's royalty applies to the part you keep.")
+
+
+def promo_door(take, *, price=None):
+    """The one-press way from a past take to a post a member can paste anywhere:
+    the share link, plus a Sentence ConnectZ post built from it. Priced on the
+    control before it is pressed — it is a paid run, and the member already
+    spent a credit on the take itself."""
+    if take.overall is None:
+        return None
+    return {"key": "promopost", "label": "Write a promo post", "kind": "promo", "tab": take.app_key,
+            "target": f"{take.app_key}-promo", "carry": {}, "id": take.pk,
+            "cost": ({"resource": "promptz", "amount": price["amount"],
+                      "free_today": price["free_today"]} if price else None),
+            "note": PROMO_NOTE}
+
+
+def promo_topic(take, label, url, human=False):
+    """The brief the writer is given for a take's promo post — assembled HERE, from
+    what the server stored when the coach answered, never from anything a client
+    sends (a promo for "10/10" on a take that scored 4 is the card's own failure
+    case with copy on top). `url` is the public share page, to be included as is."""
+    r = take.read or {}
+    shown = r.get("exact", take.overall)
+    facts = [f"Instrument: {label}",
+             f"Score the AI coach gave this take: {shown}/10"]
+    if take.genre or take.style:
+        facts.append("Genre / style: " + " · ".join(x for x in (take.genre, take.style) if x))
+    if r.get("verdict"):
+        facts.append(f"The coach's own verdict: {r['verdict']}")
+    for x in (r.get("strengths") or [])[:2]:
+        facts.append(f"What worked: {x}")
+    facts.append(f"Link to the card (include it exactly once, unchanged): {url}")
+    rules = ["Write a post the performer will publish about THIS result, in the first person.",
+             "Use only the facts above. Do not invent plays, followers, awards, quotes or any other number.",
+             "Name the AI coach as the source of the score; never imply the AI performed or wrote the take."]
+    rules.append("Say the performance is human-made, AI-scored." if human else
+                 "Do not say whether the performance is human-made.")
+    return "\n".join(["Facts:", *[f"- {f}" for f in facts], "", "Rules:", *[f"- {x}" for x in rules]])
+
+
 def exports_for(take, label, *, price=None):
     """Where a recent take can go next — the one list, with what each costs.
 
@@ -593,6 +637,9 @@ def exports_for(take, label, *, price=None):
                    "note": ("A public link and card with the score and the coach's own one-line verdict, "
                             "made from what the coach actually said. Free — and anyone who joins from it "
                             "earns you the referral reward.")})
+    promo = promo_door(take, price=price)
+    if promo:
+        out.insert(1, promo)
     breath = (take.scores or {}).get("breath")
     if isinstance(breath, int) and breath <= PUNCHLINE_LOW:
         out.append(BREATH_DOOR)
@@ -874,6 +921,54 @@ class ShareTakeView(APIView):
             return Response({"detail": "That take has no score to share."}, status=status.HTTP_409_CONFLICT)
         return Response({"share_url": f"/s/{token}", "score": take.overall,
                          "exact": (take.read or {}).get("exact")})
+
+
+class TakePromoView(APIView):
+    """/api/<key>/take/<id>/promo/ — a promo post for one of YOUR past takes.
+
+    GET says what it costs and whether it can run, before anything is spent. POST
+    mints the share link (free, idempotent), writes the post through Sentence
+    ConnectZ's own writer — so the price, the daily allowance, "a failed run is
+    not charged" and the saved piece are exactly the writer's — and answers the
+    text with the link in it, for a box with a Copy button. Whether the card says
+    human-made is the member's own declaration on that share, never ours to add."""
+    permission_classes = [IsAuthenticated]
+    app_key = "singz"
+
+    def _take(self, request, pk):
+        return TakeScore.objects.filter(pk=pk, user=request.user, app_key=self.app_key).first()
+
+    def get(self, request, pk):
+        take = self._take(request, pk)
+        if not take or take.overall is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        from .crosspost import coach_price
+        price = coach_price(request.user)
+        return Response({"cost": {"resource": "promptz", "amount": price["amount"],
+                                  "free_today": price["free_today"]}, "note": PROMO_NOTE,
+                         "share_url": f"/s/{take.share_token}" if take.share_token else ""})
+
+    def post(self, request, pk):
+        from django.conf import settings
+        from .models import ScoreShare
+        from .sentencez import write_piece
+        take = self._take(request, pk)
+        if not take:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        token = share_take(take)
+        if not token:
+            return Response({"detail": "That take has no score to promote."}, status=status.HTTP_409_CONFLICT)
+        row = ScoreShare.objects.filter(token=token).first()
+        human = bool((row.payload or {}).get("human")) if row else False
+        base = (getattr(settings, "FRONTEND_URL", "") or "https://musicconnectz.net").rstrip("/")
+        url = f"{base}/s/{token}"
+        label = profile_for_app(self.app_key)["label"]
+        resp = write_piece(request.user, "post", promo_topic(take, label, url, human),
+                           genre=take.genre or "", spend_note=f"Promo post — {label} take",
+                           extra_inputs={"promo_take": take.pk})
+        if resp.status_code == status.HTTP_201_CREATED:
+            resp.data = {**resp.data, "share_url": f"/s/{token}", "link": url}
+        return resp
 
 
 class ShareWinView(APIView):

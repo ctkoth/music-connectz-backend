@@ -2332,3 +2332,26 @@ promises and what storage costs — the owner's decision, not a default.
   per coach for everybody — and a shared card carries the week only when the take answered
   it. **Listener reasons** (`ItemRating.reason`) reach only the performer
   (`listener_reasons`), kept apart from `listeners_for`, which feeds the coach's prompt.
+
+## A SpinaZ is worth one cent, and what a visit pays follows from that
+
+Corey's valuation: **1 🍥 = 1¢.** Every minting constant reads as cash from that, which is
+the only way "limit the earn so it doesn't inflate" has a number to check. A members-only
+(restricted) post paid its author **300 🍥 per engaged member** — $3.00 for somebody staying
+five seconds, and at `JOIN_REWARD_DAILY_CAP_PER_AUTHOR` (500) that is up to $1,500 a day
+from one account. `RESTRICTED_JOIN_REWARD_SPINAZ` is **150** now (Corey's two options were
+300 and 150; this is the recommendation, reversible in one line). **Not changed, and the
+bigger exposure:** `JOIN_MIN_ACTIVE_SECONDS` is 5 and the per-author cap is 500, so the
+worst case is still $750 a day per author. A recommendation, Corey's to move: a per-author
+cap near 40 and a longer minimum stay.
+
+## A past take writes its own promo post, and the brief is the server's
+
+`takescorez.TakePromoView` (`/api/<key>/take/<id>/promo/`; GET = price, POST = run) mints the
+take's public share link, then runs the SAME writer Sentence ConnectZ uses (`sentencez.write_piece`,
+extracted from `SentenceView.post` so there is one run, one price, one "a failed run is not
+charged") with a brief built by `promo_topic` from what the coach stored — score as shown,
+verdict, two strengths, the link. Nothing in the request reaches the brief. The writer is told
+to use only those facts and to say "human-made, AI-scored" only when the member declared it on
+the share. The door (`promopost`, second after share) carries its price like every paid door;
+standalone shells never offer it (no writer in their listing or data-safety answers).

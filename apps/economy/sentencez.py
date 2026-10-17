@@ -505,6 +505,94 @@ def _work_dict(w, user=None):
             **extra}
 
 
+def write_piece(user, kind, topic, genre="", majority=None, minority=None, *, spend_note=None, extra_inputs=None):
+    """Write ONE piece for `user` and bill it, or answer why not — the whole of what
+    pressing Write does, so that every door into the writer (the screen, a past take's
+    promo post) is the same run with the same price, the same "a failed run is not
+    charged" and the same saved SentenceWork. `kind` and `topic` are already validated
+    by the caller; everything else is checked here."""
+    deadline = Deadline(BUDGET_SECONDS)
+    need = KINDS[kind].get("personas")
+    if need and not (persona_keys(user) & set(need)):
+        return Response({"detail": f"{KINDS[kind]['label']}s are written for members with the "
+                                   "Manager or A&R Scout PersonaZ. Add one in ProfileZ.",
+                         "needs": ["Manager", "A&R Scout"]}, status=status.HTTP_403_FORBIDDEN)
+    cap = over_writer_brief(topic, membership_for(user).tier)
+    if cap:
+        return Response({"detail": f"Your tier takes up to {cap:,} characters of brief here — upgrade in MembershipZ for more.", "char_limit": cap},
+                        status=status.HTTP_400_BAD_REQUEST)
+    key = _key()
+    if not key:
+        return Response({"detail": "Sentence ConnectZ isn't switched on — the backend is missing GEMINI_API_KEY."},
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    cost = ai_cost("standard")
+    _, _, daily_left = daily_prompt_state(user)
+    free = daily_left > 0 and daily_prompt_covers(cost)
+    if cost and not free and not can_afford_ai(user, cost):
+        return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
+                        status=status.HTTP_402_PAYMENT_REQUIRED)
+
+    body = {"contents": [{"parts": [{"text": prompt_for(kind, topic, genre, majority, minority,
+                                                        owner=bool(is_owner_candidate(user)),
+                                                        voice=resolve(user, "writer"))}]}],
+            "generationConfig": {"temperature": 0.9}}
+    try:
+        deadline.check("the request was still being prepared when the time ran out")
+        resp, tried = generate_content("text", body, key=key, timeout=deadline.remaining(cap=60),
+                                       label="Sentence ConnectZ")
+        # `generate_content` walks a chain of models with ONE timeout each, so
+        # a call can overrun the budget by more than it was given. An answer
+        # that lands after the member's wait is over is not billed: the screen
+        # was told it was still running, and nothing here is theirs yet.
+        deadline.check("the writer was still going when the time ran out")
+    except Expired as e:
+        logger.warning("Sentence ConnectZ: over budget after %.0fs — %s", deadline.spent(), e.message)
+        return Response({"detail": f"The writer is taking longer than it should — {e.message}. "
+                                   "Nothing was charged. Try a shorter brief, or the same one again "
+                                   "in a minute.",
+                         "timed_out": True, "waited_seconds": int(deadline.spent())},
+                        status=status.HTTP_504_GATEWAY_TIMEOUT)
+    except requests.RequestException:
+        logger.exception("Sentence ConnectZ: could not reach Gemini")
+        return Response({"detail": "Couldn't reach the writer. Nothing was charged — try again."},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    text = _text_of(resp) if resp is not None and resp.status_code == 200 else ""
+    if not text:
+        logger.error("Sentence ConnectZ: Gemini %s model=%s — %s", getattr(resp, "status_code", 0),
+                     ", ".join(tried), getattr(resp, "text", "")[:300])
+        return Response({"detail": "The writer came back empty. Nothing was charged — try again."},
+                        status=status.HTTP_502_BAD_GATEWAY)
+
+    items = []
+    if kind in FIXERS:
+        items = parse_fixes(kind, text)
+        if not items:
+            # Nothing usable in the reply is an empty answer: not charged, not saved.
+            logger.error("Sentence ConnectZ: %s reply had no usable items — %s", kind, text[:300])
+            return Response({"detail": "The writer came back with nothing usable. Nothing was charged — try again."},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        # What is stored, and so what the royalty is measured against, is the
+        # lines alone: the member uses a line, not the writer's commentary on it.
+        text = "\n".join(it["line"] for it in items)
+
+    from django.utils import timezone as _tz
+    _t0 = _tz.now()
+    _note = spend_note or f"Sentence ConnectZ — {KINDS[kind]['label']}"
+    charged = _bill(user, _note, count_daily=True)
+    if charged is None:
+        return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
+                        status=status.HTTP_402_PAYMENT_REQUIRED)
+    work = SentenceWork.objects.create(
+        user=user, kind=kind, topic=topic, text=text,
+        inputs={"genre": genre, "majority": majority, "minority": minority,
+                **({"items": items} if kind in FIXERS else {}), **(extra_inputs or {})},
+    )
+    from .models import link_spend
+    link_spend(user, f"sentence:{work.id}", _t0, _note)
+    return Response({**_work_dict(work, user), "charged_cents": charged},
+                    status=status.HTTP_201_CREATED)
+
+
 class SentenceView(APIView):
     """GET: the kinds, which are open to you, and the price — before anything
     is written. POST {kind, topic, genre?, majority?, minority?}: write it."""
@@ -545,97 +633,17 @@ class SentenceView(APIView):
         })
 
     def post(self, request):
-        deadline = Deadline(BUDGET_SECONDS)
         d = request.data or {}
         kind = str(d.get("kind", "")).strip()
         if kind not in KINDS:
             return Response({"detail": "Pick what to write."}, status=status.HTTP_400_BAD_REQUEST)
-        need = KINDS[kind].get("personas")
-        if need and not (persona_keys(request.user) & set(need)):
-            return Response({"detail": f"{KINDS[kind]['label']}s are written for members with the "
-                                       "Manager or A&R Scout PersonaZ. Add one in ProfileZ.",
-                             "needs": ["Manager", "A&R Scout"]}, status=status.HTTP_403_FORBIDDEN)
         topic = str(d.get("topic", "")).strip()
         if not topic:
             return Response({"detail": "Say what it's about."}, status=status.HTTP_400_BAD_REQUEST)
-        cap = over_writer_brief(topic, membership_for(request.user).tier)
-        if cap:
-            return Response({"detail": f"Your tier takes up to {cap:,} characters of brief here — upgrade in MembershipZ for more.", "char_limit": cap},
-                            status=status.HTTP_400_BAD_REQUEST)
         genre = str(d.get("genre", "")).strip()[:60]
         majority = _int(d.get("majority"), 0, 4) if kind == "lyrics" else None
         minority = _int(d.get("minority"), 0, 4) if kind == "lyrics" else None
-
-        key = _key()
-        if not key:
-            return Response({"detail": "Sentence ConnectZ isn't switched on — the backend is missing GEMINI_API_KEY."},
-                            status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        cost = ai_cost("standard")
-        _, _, daily_left = daily_prompt_state(request.user)
-        free = daily_left > 0 and daily_prompt_covers(cost)
-        if cost and not free and not can_afford_ai(request.user, cost):
-            return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
-                            status=status.HTTP_402_PAYMENT_REQUIRED)
-
-        body = {"contents": [{"parts": [{"text": prompt_for(kind, topic, genre, majority, minority,
-                                                            owner=bool(is_owner_candidate(request.user)),
-                                                            voice=resolve(request.user, "writer"))}]}],
-                "generationConfig": {"temperature": 0.9}}
-        try:
-            deadline.check("the request was still being prepared when the time ran out")
-            resp, tried = generate_content("text", body, key=key, timeout=deadline.remaining(cap=60),
-                                           label="Sentence ConnectZ")
-            # `generate_content` walks a chain of models with ONE timeout each, so
-            # a call can overrun the budget by more than it was given. An answer
-            # that lands after the member's wait is over is not billed: the screen
-            # was told it was still running, and nothing here is theirs yet.
-            deadline.check("the writer was still going when the time ran out")
-        except Expired as e:
-            logger.warning("Sentence ConnectZ: over budget after %.0fs — %s", deadline.spent(), e.message)
-            return Response({"detail": f"The writer is taking longer than it should — {e.message}. "
-                                       "Nothing was charged. Try a shorter brief, or the same one again "
-                                       "in a minute.",
-                             "timed_out": True, "waited_seconds": int(deadline.spent())},
-                            status=status.HTTP_504_GATEWAY_TIMEOUT)
-        except requests.RequestException:
-            logger.exception("Sentence ConnectZ: could not reach Gemini")
-            return Response({"detail": "Couldn't reach the writer. Nothing was charged — try again."},
-                            status=status.HTTP_502_BAD_GATEWAY)
-        text = _text_of(resp) if resp is not None and resp.status_code == 200 else ""
-        if not text:
-            logger.error("Sentence ConnectZ: Gemini %s model=%s — %s", getattr(resp, "status_code", 0),
-                         ", ".join(tried), getattr(resp, "text", "")[:300])
-            return Response({"detail": "The writer came back empty. Nothing was charged — try again."},
-                            status=status.HTTP_502_BAD_GATEWAY)
-
-        items = []
-        if kind in FIXERS:
-            items = parse_fixes(kind, text)
-            if not items:
-                # Nothing usable in the reply is an empty answer: not charged, not saved.
-                logger.error("Sentence ConnectZ: %s reply had no usable items — %s", kind, text[:300])
-                return Response({"detail": "The writer came back with nothing usable. Nothing was charged — try again."},
-                                status=status.HTTP_502_BAD_GATEWAY)
-            # What is stored, and so what the royalty is measured against, is the
-            # lines alone: the member uses a line, not the writer's commentary on it.
-            text = "\n".join(it["line"] for it in items)
-
-        from django.utils import timezone as _tz
-        _t0 = _tz.now()
-        _note = f"Sentence ConnectZ — {KINDS[kind]['label']}"
-        charged = _bill(request.user, _note, count_daily=True)
-        if charged is None:
-            return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
-                            status=status.HTTP_402_PAYMENT_REQUIRED)
-        work = SentenceWork.objects.create(
-            user=request.user, kind=kind, topic=topic, text=text,
-            inputs={"genre": genre, "majority": majority, "minority": minority,
-                    **({"items": items} if kind in FIXERS else {})},
-        )
-        from .models import link_spend
-        link_spend(request.user, f"sentence:{work.id}", _t0, _note)
-        return Response({**_work_dict(work, request.user), "charged_cents": charged},
-                        status=status.HTTP_201_CREATED)
+        return write_piece(request.user, kind, topic, genre, majority, minority)
 
 
 class SentenceRoyaltyView(APIView):

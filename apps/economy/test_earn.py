@@ -111,7 +111,8 @@ class EarnListTests(TestCase):
         ways = self.ways()
         self.assertEqual(ways["rating"]["gain"], RATING_REWARD_ENERGY)
         self.assertEqual(ways["referral"]["gain"], 300)
-        self.assertEqual(ways["restricted"]["gain"], 300)
+        from apps.economy.models import RESTRICTED_JOIN_REWARD_SPINAZ
+        self.assertEqual(ways["restricted"]["gain"], RESTRICTED_JOIN_REWARD_SPINAZ)
 
     @override_settings(ADMOB_APP_ID="", ADMOB_REWARDED_UNIT_ID="")
     def test_an_unconfigured_adz_is_marked_unavailable_with_a_reason(self):

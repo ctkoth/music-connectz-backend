@@ -1420,7 +1420,12 @@ def haversine_km(lat1, lng1, lat2, lng2):
 
 
 # ---- PostZ (cross-user posts with visibility + restricted-join rewards) ----
-RESTRICTED_JOIN_REWARD_SPINAZ = 300
+# What one engaged, distinct member joining a members-only post pays its author.
+# Corey values a SpinaZ at one cent, so this is the price of a visit in cash terms:
+# 300 was $3.00 minted per person for staying five seconds, and at the per-author
+# daily cap that is $1,500 a day from one account. 150 is $1.50 a head — still the
+# most any single engagement pays, because a member-only room is the scarce thing.
+RESTRICTED_JOIN_REWARD_SPINAZ = 150
 
 # --- Rating-based CollabZ splits.
 #

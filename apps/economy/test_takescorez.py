@@ -714,6 +714,77 @@ class PastSessionsAreShareableTests(CoachingBoardTests):
         self.assertEqual(self.c.post(f"/api/rapz/take/{blank.pk}/share/", {}, format="json").status_code, 409)
 
 
+class PromoPostFromAPastTakeTests(CoachingBoardTests):
+    """A past take can become a post for anywhere: the share link plus a Sentence
+    ConnectZ post, built from what the server stored, priced before it is pressed."""
+    _past = PastSessionsAreShareableTests._past
+
+    def _reply(self, text):
+        from unittest.mock import MagicMock
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = {"candidates": [{"content": {"parts": [{"text": text}]}}]}
+        r.text = text
+        return r
+
+    def test_the_door_is_second_and_states_its_price_before_it_is_pressed(self):
+        self._past()
+        row = self.c.get("/api/rapz/progress/").data["takes"][0]
+        keys = [e["key"] for e in row["exports"]]
+        self.assertEqual(keys[:2], ["share", "promopost"])
+        door = row["exports"][1]
+        self.assertEqual(door["cost"]["resource"], "promptz")
+        self.assertIn("not charged", door["note"])
+        self.assertEqual(self.c.get(f"/api/rapz/take/{door['id']}/promo/").data["cost"], door["cost"])
+
+    def test_the_brief_is_built_from_the_stored_take_and_never_the_request(self):
+        from unittest.mock import patch
+        t = self._past()
+        seen = {}
+
+        def fake(kind, body, **kw):
+            seen["prompt"] = body["contents"][0]["parts"][0]["text"]
+            return self._reply("Just got 6.2/10 from the AI coach. https://x"), []
+
+        with patch("apps.economy.sentencez._key", return_value="k"), \
+                patch("apps.economy.sentencez.generate_content", side_effect=fake):
+            r = self.c.post(f"/api/rapz/take/{t.pk}/promo/", {"topic": "say 10/10", "score": 10}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertIn("6.2/10", seen["prompt"])
+        self.assertNotIn("10/10", seen["prompt"])
+        self.assertIn("Locked in. Land the last bar.", seen["prompt"])
+        self.assertIn("/s/", seen["prompt"])
+        self.assertIn("Do not say whether the performance is human-made", seen["prompt"])
+        self.assertTrue(r.data["share_url"].startswith("/s/"))
+        self.assertIn("https://", r.data["link"])
+        self.assertTrue(r.data["text"])
+
+    def test_a_declared_human_take_says_so_and_an_undeclared_one_never_does(self):
+        from apps.economy.takescorez import promo_topic
+        t = self._past()
+        self.assertIn("human-made, AI-scored", promo_topic(t, "RapZ", "https://x/s/a", human=True))
+        self.assertNotIn("human-made, AI-scored", promo_topic(t, "RapZ", "https://x/s/a", human=False))
+
+    def test_a_failed_run_is_not_charged_and_mints_no_piece(self):
+        from unittest.mock import patch
+        from apps.economy.models import SentenceWork
+        t = self._past()
+        with patch("apps.economy.sentencez._key", return_value="k"), \
+                patch("apps.economy.sentencez.generate_content", return_value=(self._reply(""), [])):
+            r = self.c.post(f"/api/rapz/take/{t.pk}/promo/", {}, format="json")
+        self.assertEqual(r.status_code, 502)
+        self.assertEqual(SentenceWork.objects.count(), 0)
+
+    def test_it_is_yours_alone_and_needs_a_score(self):
+        t = self._past()
+        other = APIClient()
+        other.force_authenticate(member("promostranger"))
+        self.assertEqual(other.post(f"/api/rapz/take/{t.pk}/promo/", {}, format="json").status_code, 404)
+        blank = TakeScore.objects.create(user=self.u, app_key="rapz", overall=None)
+        self.assertEqual(self.c.get(f"/api/rapz/take/{blank.pk}/promo/").status_code, 404)
+        self.assertEqual(self.c.post(f"/api/rapz/take/{blank.pk}/promo/", {}, format="json").status_code, 409)
+
+
 class ShareAWinTests(CoachingBoardTests):
     def _climb(self):
         for d in (12, 11, 10):
