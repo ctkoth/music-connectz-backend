@@ -960,6 +960,8 @@ class SingZCoachView(APIView):
             "style_label": profile.get("style_label"),
             "styles": [{"key": k, "label": l} for k, l in profile.get("styles", [])],
             "difficulties": DIFFICULTIES,
+            # This week's shared prompt, the same for everyone (challengez.py).
+            "challenge": __import__("apps.economy.challengez", fromlist=["x"]).challenge_for(self.app_key),
             # Their own last settings, so the pickers open on them.
             "usual": usual_settings(request.user, self.app_key),
             "usual_top": usual_top(request.user, self.app_key),
@@ -1211,7 +1213,10 @@ class SingZCoachView(APIView):
                "take_score_id": getattr(_row, "pk", None)}
         # A shareable card for this take, minted from the coach's own answer.
         from .models import mint_score_share
-        _share = mint_score_share(self.app_key, payload, user=request.user, genre=genre)
+        from .challengez import challenge_tag
+        _tag = challenge_tag(self.app_key, genre, data.get("difficulty"))
+        _share = mint_score_share(self.app_key, {**payload, **({"challenge": _tag} if _tag else {})},
+                                  user=request.user, genre=genre)
         out["share_url"] = f"/s/{_share}" if _share else ""
         if _share and _row is not None:
             # Remember the link ON the take, so sharing it later from the history

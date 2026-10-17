@@ -61,6 +61,7 @@ from .battlez import (BattlesView, BattleChallengeView, BattleDetailView,
                       BattleWagerView, MoneyBattleVoteView)
 from .opportunitiez import OpportunitieZView
 from .breathz import BreathZView
+from .challengez import ChallengeView
 from .whyz import WhyZView
 from .credit_outcomes import CreditOutcomesView
 from .sentencez import PunchlineRateView, SentenceRoyaltyView, SentenceView
@@ -225,6 +226,7 @@ urlpatterns = [
     path("creditz/", CreditOutcomesView.as_view(), name="economy-creditz"),
     path("breathz/", BreathZView.as_view(), name="economy-breathz"),
     path("whyz/", WhyZView.as_view(), name="economy-whyz"),
+    path("challenge/<str:app_key>/", ChallengeView.as_view(), name="economy-challenge"),
     path("statz-trial/", StatzTrialView.as_view(), name="economy-statz-trial"),
     path("views/start/", ViewStartView.as_view(), name="economy-views-start"),
     path("views/beat/", ViewBeatView.as_view(), name="economy-views-beat"),

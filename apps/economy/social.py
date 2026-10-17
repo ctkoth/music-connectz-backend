@@ -1355,6 +1355,12 @@ class MembersView(APIView):
 
         results = []
         qs = list(Profile.objects.exclude(user=request.user).exclude(user_id__in=blocked_user_ids(request.user)).select_related("user", "user__membership")[:500])
+        # Discovery stays inside the age group. This search is how members find each
+        # other (VybeZ is built on it) and it mixed every age: an adult could browse
+        # fifteen-year-olds and the reverse. A known minor sees only known minors; an
+        # adult sees no known minors. Unknown ages count as adults, as everywhere.
+        viewer_minor = profile_is_minor(profile_for(request.user))
+        qs = [p for p in qs if profile_is_minor(p) == viewer_minor]
         # Every card wears its badges, so load them for the whole page in one
         # query. Per-card would be five hundred of them behind one search.
         worn = worn_badges_by_user(p.user_id for p in qs)

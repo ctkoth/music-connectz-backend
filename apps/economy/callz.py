@@ -247,6 +247,10 @@ class CallRateView(APIView):
         if other.id in blocked_user_ids(request.user):
             return Response({"detail": "You can't call this member."},
                             status=status.HTTP_403_FORBIDDEN)
+        from .models import NO_CROSS_AGE_CONTACT, may_contact
+        if not may_contact(request.user, other):
+            return Response({"detail": NO_CROSS_AGE_CONTACT, "age_group": True},
+                            status=status.HTTP_403_FORBIDDEN)
         rate = rate_per_min_cents(other)
         w = wallet_for(request.user)
         tier = membership_for(request.user).tier
@@ -320,6 +324,10 @@ class CallsView(APIView):
                             status=status.HTTP_404_NOT_FOUND)
         if other.id in blocked_user_ids(request.user):
             return Response({"detail": "You can't call this member."},
+                            status=status.HTTP_403_FORBIDDEN)
+        from .models import NO_CROSS_AGE_CONTACT, may_contact
+        if not may_contact(request.user, other):
+            return Response({"detail": NO_CROSS_AGE_CONTACT, "age_group": True},
                             status=status.HTTP_403_FORBIDDEN)
         from .gates import reach_block
         blocked = reach_block(request.user, other)

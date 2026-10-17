@@ -764,3 +764,35 @@ class PersonalBestTests(CoachingBoardTests):
         self.assertEqual(by[7].count(True), 1)                          # the first 7 holds it, the repeat doesn't
         self.assertNotIn(True, by[6])
         self.assertNotIn(True, by[4])
+
+
+class MonthlyRecapTests(CoachingBoardTests):
+    def test_no_recap_below_three_takes_and_then_it_says_only_what_the_data_says(self):
+        self._take(2, flow=6)
+        self.assertIsNone(self.c.get("/api/rapz/progress/").data["recap"])
+        self.assertEqual(self.c.post("/api/rapz/recap/share/", {}, format="json").status_code, 409)
+        for d in (25, 24, 23):
+            self._take(d, flow=4, timing=8)
+        for d in (6, 5, 4):
+            self._take(d, flow=7, timing=8)
+        r = self.c.get("/api/rapz/progress/").data["recap"]
+        self.assertEqual(r["takes"], 7)
+        self.assertEqual(r["strongest"]["key"], "timing")
+        # The second half holds the 6 from two days ago as well as the three 7s: 6.75.
+        self.assertEqual((r["climb"]["key"], r["climb"]["was"], r["climb"]["now"]), ("flow", 4.0, 6.8))
+        self.assertEqual(r["days_shown_up"], 7)
+
+    def test_sharing_the_month_is_one_card_a_day_built_from_the_takes(self):
+        from apps.economy.models import ScoreShare
+        from apps.economy.scoreshare import render_card, share_dict
+        for d in (25, 24, 23, 6, 5, 4):
+            self._take(d, flow=4 if d > 10 else 7)
+        a = self.c.post("/api/rapz/recap/share/", {"best": 10}, format="json")
+        b = self.c.post("/api/rapz/recap/share/", {}, format="json")
+        self.assertEqual(a.status_code, 200)
+        self.assertEqual(a.data["share_url"], b.data["share_url"])
+        self.assertEqual(ScoreShare.objects.count(), 1)
+        card = share_dict(ScoreShare.objects.get())
+        self.assertEqual(card["score"], 6)                               # the stored best, not the request's
+        self.assertIn("6 takes in 30 days", card["verdict"])
+        self.assertTrue(render_card(card, story=True).startswith(b"\x89PNG"))

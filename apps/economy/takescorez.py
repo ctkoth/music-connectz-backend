@@ -334,13 +334,13 @@ def weakest(user, app_key):
             "takes": len(takes), "why": ""}
 
 
-def trend(user, app_key):
+def trend(user, app_key, days=RECENT_DAYS):
     """Per-dimension movement: the first half of the window against the second.
 
     Both halves carry their own count, for the reason FunnelZ's headline does:
     a dimension that moved from one take to one take has not moved.
     """
-    takes = sorted(_recent(user, app_key, days=RECENT_DAYS), key=lambda t: t.created_at)
+    takes = sorted(_recent(user, app_key, days=days), key=lambda t: t.created_at)
     dims = scores_for(app_key, lyrics=True)
     if len(takes) < MIN_TAKES * 2:
         return {"rows": [], "why": f"{len(takes)} of {MIN_TAKES * 2} takes. A trend "
@@ -620,12 +620,18 @@ def share_payload(take):
     A share card that took its number from a request is "10/10 from the AI coach"
     for a take that scored 4, with our name on it."""
     r = take.read or {}
+    from .challengez import challenge_tag
     out = {"score": take.overall, "scores": take.scores or {}, "verdict": r.get("verdict", ""),
            "strengths": r.get("strengths", []), "fixes": r.get("fixes", []),
            "practice": r.get("practice", []), "genre": take.genre, "style": take.style}
     for key, field in (("exact", "score_exact"), ("hook", "hook_score"), ("feelz", "feelz_score")):
         if key in r:
             out[field] = r[key]
+    # The week's challenge, when THIS take answers it — judged by when it was made,
+    # not when it was shared, so a take from Tuesday shared on Friday still counts.
+    tag = challenge_tag(take.app_key, take.genre, take.difficulty, take.created_at)
+    if tag:
+        out["challenge"] = tag
     return out
 
 
@@ -671,6 +677,42 @@ def take_row(take, label, price=None, best=None):
                         else {"tab": "journalz", "target": "journalz-entries"}
                         if take.source == "journal" else None),
             "exports": exports_for(take, label, price=price)}
+
+
+RECAP_DAYS = 30
+
+
+def recap(user, app_key):
+    """A month of takes, as the member would tell it: how many, the best, what climbed,
+    what is strongest, how many days they showed up.
+
+    Built from the stored takes alone — the same ones the history shows — and absent
+    (None) below three takes: a "month" of one take is not a recap, it is a score.
+    Spotify's Wrapped works because it is the person's own data in a shareable shape;
+    this is that, and it only ever says what is in the data."""
+    takes = _recent(user, app_key, days=RECAP_DAYS, limit=500)
+    if len(takes) < MIN_TAKES:
+        return None
+    dims = scores_for(app_key, lyrics=True)
+    overalls = [t.overall for t in takes if t.overall is not None]
+    sums = {}
+    for t in takes:
+        for k, v in (t.scores or {}).items():
+            if k in dims and isinstance(v, int):
+                sums.setdefault(k, []).append(v)
+    strongest = None
+    if sums:
+        k = max(sums, key=lambda x: sum(sums[x]) / len(sums[x]))
+        strongest = {"key": k, "label": dims[k], "average": round(sum(sums[k]) / len(sums[k]), 1)}
+    climb = None
+    for r in trend(user, app_key, days=RECAP_DAYS).get("rows", []):
+        if r["change"] > 0 and r["was_n"] >= 2 and r["now_n"] >= 2 and (climb is None or r["change"] > climb["change"]):
+            climb = {"key": r["key"], "label": r["label"], "was": r["was"], "now": r["now"], "change": r["change"]}
+    exacts = [t.read.get("exact") for t in takes if isinstance((t.read or {}).get("exact"), (int, float))]
+    return {"days": RECAP_DAYS, "takes": len(takes), "best": max(overalls) if overalls else None,
+            "best_exact": max(exacts) if exacts else None,
+            "days_shown_up": len({t.created_at.date() for t in takes}),
+            "strongest": strongest, "climb": climb}
 
 
 WIN_AT = 0.5          # a dimension up by this much, on enough takes, is worth saying so
@@ -787,6 +829,7 @@ def progress(user, app_key):
         },
         "takes": [take_row(t, prof["label"], price, best) for t in takes],
         "coaching": coaching(user, app_key, price),
+        "recap": recap(user, app_key),
         "total_takes": TakeScore.objects.filter(user=user, app_key=app_key).count(),
     }
 
@@ -863,6 +906,40 @@ class ShareWinView(APIView):
             verdict=f"{win['label']} went from {win['was']} to {win['now']} in {RECENT_DAYS} days.",
             genre="", user=request.user,
             payload={"progress": progress, "score_exact": win["now"]})
+        return Response({"share_url": f"/s/{row.token}"})
+
+
+class ShareRecapView(APIView):
+    """POST /api/<key>/recap/share/ — a card for the member's month.
+
+    Minted from the stored takes (never from the request), once per day: pressing it
+    twice is the same card. Needs three takes in the window — below that there is no
+    month to show."""
+    permission_classes = [IsAuthenticated]
+    app_key = "singz"
+
+    def post(self, request):
+        from .models import ScoreShare
+        import secrets
+        r = recap(request.user, self.app_key)
+        if not r or r["best"] is None:
+            return Response({"detail": "A month needs at least three scored takes to show."},
+                            status=status.HTTP_409_CONFLICT)
+        today = timezone.localdate().isoformat()
+        for row in ScoreShare.objects.filter(user=request.user, app_key=self.app_key,
+                                             created_at__gte=timezone.now() - timedelta(days=1))[:30]:
+            if ((row.payload or {}).get("recap") or {}).get("on") == today:
+                return Response({"share_url": f"/s/{row.token}"})
+        bits = [f"{r['takes']} takes in {r['days']} days", f"best {r['best_exact'] or r['best']}"]
+        if r["climb"]:
+            bits.append(f"{r['climb']['label']} {r['climb']['was']} → {r['climb']['now']}")
+        if r["strongest"]:
+            bits.append(f"strongest: {r['strongest']['label']}")
+        row = ScoreShare.objects.create(
+            token=secrets.token_urlsafe(12)[:16], app_key=self.app_key, score=r["best"],
+            verdict=". ".join(bits) + ".", genre="", user=request.user,
+            payload={"recap": {**r, "on": today},
+                     **({"score_exact": r["best_exact"]} if r["best_exact"] else {})})
         return Response({"share_url": f"/s/{row.token}"})
 
 

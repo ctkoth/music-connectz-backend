@@ -77,6 +77,8 @@ def share_dict(row):
         # is AI-generated — so the card says "declared by", and a false one is
         # reportable like anything else on the platform.
         "human": bool(payload.get("human")),
+        "recap": payload.get("recap") or None,
+        "challenge": payload.get("challenge") or "",
         "why": _why(payload),
         "listeners": payload.get("listeners") if isinstance(payload.get("listeners"), dict) else None,
         "token": row.token,
@@ -186,7 +188,10 @@ def render_card(d, story=False):
     g.rounded_rectangle((24, 24, W - 24, H - 24), radius=36, outline=(255, 85, 0), width=6)
     g.rounded_rectangle((36, 36, W - 36, H - 36), radius=30, outline=(56, 227, 255), width=2)
     who = f"@{d['username']}  ·  " if d["username"] else ""
-    coach_line = (f"{d['label']} · glow-up" if d.get("progress") else f"{d['label']} coach") \
+    coach_line = (f"{d['label']} · glow-up" if d.get("progress")
+                  else f"{d['label']} · my month" if d.get("recap")
+                  else f"{d['label']} · {d['challenge']} challenge" if d.get("challenge")
+                  else f"{d['label']} coach") \
         + (f" · {d['genre']}" if d["genre"] else "")
     quote = f"“{d['verdict']}”" if d["verdict"] else ""
     score = str(d.get("shown") or d["score"])

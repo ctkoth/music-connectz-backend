@@ -1288,6 +1288,24 @@ def third_party_ads_allowed(user):
     return not is_minor(user)
 
 
+NO_CROSS_AGE_CONTACT = ("Messages and calls stay between members in the same age group — under 18s with "
+                        "under 18s, adults with adults. Everything else on Music ConnectZ is still open.")
+
+
+def may_contact(a, b):
+    """Whether two members may open a one-to-one channel (a message, a call).
+
+    Not when exactly one of them is a KNOWN minor. This is the platform's ScoutZ rule —
+    no adult-to-minor contact — which the LessonZ code already states and the DM and
+    call paths did not enforce: a stranger of any age could write to a fifteen-year-old
+    by username. It is symmetric on purpose (a minor may not open a channel to an adult
+    either: the harm runs in both directions and a teen is no more able to judge an
+    adult stranger than the reverse), and unknown ages count as adults, matching
+    `is_minor`, which is the one line to tighten if the exposure ever needs to shrink.
+    """
+    return is_minor(a) == is_minor(b)
+
+
 def adult_only_reason(user):
     """Why this surface is closed to them, in words, or "" when it's open."""
     if not is_minor(user):
