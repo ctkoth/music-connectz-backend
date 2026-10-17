@@ -262,6 +262,25 @@ REFERENCE_NOTICE = ("Use music you have the right to analyse. This is a private 
                     "The file is used for this analysis only and isn't kept.")
 
 
+def clean_practice(raw):
+    """[{what, why, how}] — at most three, each field capped, `what` required."""
+    out = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw[:10]:
+        if len(out) == 3:
+            break
+        if not isinstance(item, dict):
+            continue
+        what = str(item.get("what", "")).strip()[:200]
+        if not what:
+            continue
+        out.append({"what": what,
+                    "why": str(item.get("why", "")).strip()[:300],
+                    "how": str(item.get("how", "")).strip()[:400]})
+    return out
+
+
 def strength_weighted_exact(scores):
     """The overall to one decimal, from PERFORMANCE dimensions only, leaning hard
     on strengths.
@@ -619,6 +638,10 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         "strengths": listy(parsed.get("strengths")),
         "fixes": listy(parsed.get("fixes")),
         "next_drill": str(parsed.get("next_drill", ""))[:300],
+        # What / why / how, per fix. Whitelisted field by field so a key the
+        # model invents never reaches the screen; an item with no `what` is
+        # dropped, and the screen falls back to `next_drill` when none survive.
+        "practice": clean_practice(parsed.get("practice")),
     }
     if reference:
         # Somebody else's recording: nothing here is advice to the listener.

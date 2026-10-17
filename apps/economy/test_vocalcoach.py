@@ -1743,3 +1743,17 @@ class HabitBeatsOneOffTests(TestCase):
             TakeScore.objects.create(user=u, app_key="rapz", genre="Drill")
         TakeScore.objects.create(user=u, app_key="rapz", genre="Trap")   # most recent
         self.assertEqual(usual_settings(u, "rapz")["genre"], "Drill")
+
+
+class PracticeWhatWhyHowTests(TestCase):
+    def test_clean_practice_whitelists_and_caps(self):
+        from apps.economy.vocalcoach import clean_practice
+        self.assertEqual(clean_practice(None), [])
+        got = clean_practice([{"what": "Slow scales", "why": "pitch", "how": "10 min", "x": 1},
+                              {"why": "no what"}, "junk", {"what": "B"}, {"what": "C"}, {"what": "D"}])
+        self.assertEqual(got[0], {"what": "Slow scales", "why": "pitch", "how": "10 min"})
+        self.assertEqual(len(got), 3)
+
+    def test_prompt_asks_for_practice(self):
+        from apps.economy.instruments import prompt_for
+        self.assertIn('"practice"', prompt_for("rapz", "Trap", None, "builder"))

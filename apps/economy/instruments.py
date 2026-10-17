@@ -538,6 +538,8 @@ number and not coaching:
 - "goal": what they are aiming at from here, pitched at "{difficulty}" and at \
 {aim}. Concrete enough to know when they have hit it.{range_ask}{style_ask}{style_scale}{lyric_ask}{mix_ask}{weak_notes_section}
 
+"practice" is up to three exercises, one for each of your fixes, worst first: what to do, why it fixes THAT problem in THIS take, and how to run it. Specific to what you heard - never generic advice.
+
 Return ONLY valid JSON, no markdown fence, in exactly this shape:
 {{
   "unscorable": <null, or a short sentence: what you heard, and what to send instead>,
@@ -552,7 +554,8 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "verdict": "<one sentence in that voice, what this take actually is>",
   "strengths": ["<what genuinely worked, named specifically - AT LEAST ONE, always>", "..."],
   "fixes": ["<the moment it goes wrong, and the fix — the two that matter most, worst first>", "..."],
-  "next_drill": "<one drill to run before the next take: what to do, how many reps>"{weak_notes_field}
+  "next_drill": "<one drill to run before the next take: what to do, how many reps>",
+  "practice": [{{"what": "<the drill, concretely - one exercise>", "why": "<which problem in THIS take it fixes, and why this exercise fixes it>", "how": "<the steps: tempo or setting, reps or minutes, and how they will know it worked>"}}, ...]{weak_notes_field}
 }}"""
 
 
