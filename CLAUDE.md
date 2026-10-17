@@ -2355,3 +2355,19 @@ verdict, two strengths, the link. Nothing in the request reaches the brief. The 
 to use only those facts and to say "human-made, AI-scored" only when the member declared it on
 the share. The door (`promopost`, second after share) carries its price like every paid door;
 standalone shells never offer it (no writer in their listing or data-safety answers).
+
+## ViewZ results, and the audit of everything StatZ is the difference for
+
+`viewz.post_results` / `ViewPostResultsView` (`/views/post/<id>/`), `ViewMineView` (`/views/mine/`):
+numbers for everybody (views, people, stayed %, came-back %, live now, what visitors did), by-day
+history, and — only `has_statz` — each viewer as a track with one clip per visit (start, end,
+seconds). `stayed` = visits of at least `MIN_VIEW_SECONDS`; `came back` = people with more than one
+separate stretch; neither is video retention and none is blended into a score. Share-link opens are
+`ScoreShare.views`; who opened is not recorded, so none is claimed. A promo post's LogZ row carries
+`results` (opens, read at request time).
+
+**`statz_trial.DRIVERS` is the audit**: every StatZ difference, `sampled` or not, with `why_not` for the
+ones the free hour cannot honestly switch off (a saved voice, a cloned voice, a code sandbox, a
+visibility setting other members see, tier limits). `test_statz_drivers` walks the source: a module that
+calls `has_statz`/`feature_tier` and is not named fails, and the sampled rows must be exactly `FEATURES`.
+The state also publishes `also_in_statz` and `warn_at_seconds` (600, 60) for the screen.
