@@ -1731,3 +1731,15 @@ class UsualTopTests(TestCase):
         for g in ["Trap"] * 4:
             TakeScore.objects.create(user=u, app_key="rapz", genre=g)
         self.assertNotIn("genre", usual_top(u, "rapz"))       # 5 of 10 = 50%
+
+
+class HabitBeatsOneOffTests(TestCase):
+    def test_a_habit_is_the_default_over_a_one_off_last_take(self):
+        from django.contrib.auth import get_user_model
+        from apps.economy.models import TakeScore
+        from apps.economy.vocalcoach import usual_settings
+        u = get_user_model().objects.create_user("habitx", password="pw-12345-xyz")
+        for _ in range(9):
+            TakeScore.objects.create(user=u, app_key="rapz", genre="Drill")
+        TakeScore.objects.create(user=u, app_key="rapz", genre="Trap")   # most recent
+        self.assertEqual(usual_settings(u, "rapz")["genre"], "Drill")

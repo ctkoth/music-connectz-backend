@@ -805,6 +805,10 @@ def usual_settings(user, app_key, window=40):
                 if v:
                     out[field] = v
                     break
+        # A habit beats a one-off: nine Drill takes and one Trap, Trap last,
+        # opens on Drill. Below the 65%-of-5 bar the latest take wins.
+        for field, top in usual_top(user, app_key).items():
+            out[field] = top["value"]
         return out
     except Exception:
         return {}
