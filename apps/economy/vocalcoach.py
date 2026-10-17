@@ -262,22 +262,29 @@ REFERENCE_NOTICE = ("Use music you have the right to analyse. This is a private 
                     "The file is used for this analysis only and isn't kept.")
 
 
-def strength_weighted(scores):
-    """The overall, from PERFORMANCE dimensions only, leaning on strengths.
+def strength_weighted_exact(scores):
+    """The overall to one decimal, from PERFORMANCE dimensions only, leaning hard
+    on strengths.
 
-    Sort descending and weight by rank: n, n-1, ... 1 (best counts most, weakest
-    least). Round half up, clamp 1-10. Never below the plain mean (weights are
-    monotone, so it is >= the mean), never above the best dimension. Style Match
-    and Song are separate numbers by design and must not be passed in.
+    Sort descending and weight by squared rank: n^2, (n-1)^2, ... 1, so the best
+    dimensions drive the number and the weakest barely move it. Monotone weights,
+    so it is never below the plain mean and never above the best dimension. Style
+    Match and Song are separate numbers by design and must not be passed in.
     Returns None when there are no usable scores.
     """
-    vals = sorted((v for v in (scores or {}).values() if isinstance(v, int)), reverse=True)
+    vals = sorted((v for v in (scores or {}).values() if isinstance(v, (int, float))), reverse=True)
     if not vals:
         return None
     n = len(vals)
-    num = sum(v * (n - i) for i, v in enumerate(vals))
-    den = n * (n + 1) / 2
-    return max(1, min(10, int(num / den + 0.5)))
+    num = sum(v * (n - i) ** 2 for i, v in enumerate(vals))
+    den = sum((n - i) ** 2 for i in range(n))
+    return max(1.0, min(10.0, round(num / den, 1)))
+
+
+def strength_weighted(scores):
+    """The whole-number overall (what is stored); see strength_weighted_exact."""
+    x = strength_weighted_exact(scores)
+    return None if x is None else max(1, min(10, int(x + 0.5)))
 
 
 def clean_heard(raw, dims):
@@ -562,7 +569,9 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
             for k in scores_for(app_key, lyrics=lyrics, mix=mix)}
     model_score = _clamp(parsed.get("score"))
     # Performance dimensions only: style_match is closeness, not quality.
-    overall = strength_weighted({k: v for k, v in perf.items() if k != "style_match"})
+    perf_only = {k: v for k, v in perf.items() if k != "style_match"}
+    overall = strength_weighted(perf_only)
+    overall_exact = strength_weighted_exact(perf_only)
     if overall is None:
         overall = model_score
     if abs(overall - model_score) >= 2:
@@ -570,6 +579,9 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     listy = lambda v: [str(x)[:300] for x in v][:6] if isinstance(v, list) else []
     result = {
         "score": overall,
+        # The same number to one decimal, for the screen: 6.2 and 6.0 are both "6"
+        # as a whole number, and a member watching a take improve needs the 0.2.
+        "score_exact": overall_exact if overall_exact is not None else float(overall),
         "model_score": model_score,
         "score_rule": SCORE_RULE,
         "listeners": listeners,
@@ -746,6 +758,31 @@ def coach_rate_limit_check(user):
     return None
 
 
+def usual_settings(user, app_key, window=40):
+    """What this member usually aims a take at, read from the takes they sent.
+
+    Per field, the value on their most recent take that named one; a field they
+    have never filled in is simply absent. Read from history rather than from a
+    stored preference on purpose: a preference is a second copy that drifts, and
+    the takes are the truth about what they actually choose. The picker still
+    checks each value against the options it is offered, so a retired genre
+    cannot be restored into a select that no longer has it.
+    """
+    try:
+        from .models import TakeScore
+        rows = TakeScore.objects.filter(user=user, app_key=app_key).order_by("-created_at")[:window]
+        out = {}
+        for field in ("genre", "target", "style", "difficulty"):
+            for t in rows:
+                v = (getattr(t, field, "") or "").strip()
+                if v:
+                    out[field] = v
+                    break
+        return out
+    except Exception:
+        return {}
+
+
 class SingZCoachView(APIView):
     """The Boss Take coach for any InstrumentZ app.
 
@@ -842,6 +879,8 @@ class SingZCoachView(APIView):
             "style_label": profile.get("style_label"),
             "styles": [{"key": k, "label": l} for k, l in profile.get("styles", [])],
             "difficulties": DIFFICULTIES,
+            # Their own last settings, so the pickers open on them.
+            "usual": usual_settings(request.user, self.app_key),
             # Whether this coach can judge writing at all. Served rather than
             # guessed by the client, because a toggle offered on a drum take is
             # the switch-that-changes-nothing this codebase already has a note

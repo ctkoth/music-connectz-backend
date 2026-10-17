@@ -1687,3 +1687,29 @@ class StrengthWeightedOverallTests(TestCase):
         ItemRating.objects.create(user=u, item_id=f"post:{post.id}", score=10)
         self.assertEqual(listeners_for(post)["count"], 3)
         self.assertIsNone(listeners_for(None))
+
+
+class UsualSettingsAndExactScoreTests(TestCase):
+    def test_exact_score_leans_on_strengths_and_stays_between_mean_and_best(self):
+        from apps.economy.vocalcoach import strength_weighted_exact as ex
+        vals = {"a": 7, "b": 6, "c": 6, "d": 5, "e": 4}
+        x = ex(vals)
+        self.assertGreaterEqual(x, sum(vals.values()) / 5)
+        self.assertLessEqual(x, 7)
+        self.assertEqual(round(x, 1), x)
+        self.assertIsNone(ex({}))
+
+    def test_usual_is_the_latest_take_that_named_each_field(self):
+        from django.contrib.auth import get_user_model
+        from apps.economy.models import TakeScore
+        from apps.economy.vocalcoach import usual_settings
+        u = get_user_model().objects.create_user("usualx", password="pw-12345-xyz")
+        self.assertEqual(usual_settings(u, "rapz"), {})
+        TakeScore.objects.create(user=u, app_key="rapz", genre="Drill", style="Lyrical",
+                                 target="tenor", difficulty="starter")
+        TakeScore.objects.create(user=u, app_key="rapz", genre="R&B", style="",
+                                 target="baritone", difficulty="builder")
+        got = usual_settings(u, "rapz")
+        self.assertEqual(got, {"genre": "R&B", "target": "baritone",
+                               "style": "Lyrical", "difficulty": "builder"})
+        self.assertEqual(usual_settings(u, "singz"), {})
