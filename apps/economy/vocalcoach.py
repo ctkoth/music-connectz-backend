@@ -629,6 +629,11 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         # rule's exact failure case.
         "song_score": _clamp(parsed.get("song_score")),
         "song_why": str(parsed.get("song_why", ""))[:400],
+        # HookZ: the hook rated on its own, beside the song and never inside the
+        # overall. Legitimately None — a warm-up has no hook, and a number made
+        # up for one is the substance rule's failure case.
+        "hook_score": _clamp(parsed.get("hook_score")),
+        "hook_why": str(parsed.get("hook_why", ""))[:400],
         # Only present when it was asked for. Whitelisted like everything else,
         # so a model that volunteers a lyric review on a drum take is ignored.
         **({"lyrics_read": str(parsed.get("lyrics_read", ""))[:1200],

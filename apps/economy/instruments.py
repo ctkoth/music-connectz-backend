@@ -538,6 +538,8 @@ number and not coaching:
 - "goal": what they are aiming at from here, pitched at "{difficulty}" and at \
 {aim}. Concrete enough to know when they have hit it.{range_ask}{style_ask}{style_scale}{lyric_ask}{mix_ask}{weak_notes_section}
 
+"hook_score" rates the HOOK on its own - in this app a chorus IS a hook (as is any refrain or repeated tag line), so rate the chorus, not the verses: a take can have a strong hook inside a rough performance and the reverse, so it is NOT part of the overall score and must not be averaged into it. Null when there is no hook - a scale, a warm-up or an exercise has none.
+
 "practice" is up to three exercises, one for each of your fixes, worst first: what to do, why it fixes THAT problem in THIS take, and how to run it. Specific to what you heard - never generic advice.
 
 Return ONLY valid JSON, no markdown fence, in exactly this shape:
@@ -549,7 +551,9 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "goal": "<what they're aiming at next, and how they'll know they got there>",{range_field}
   "style_fit": "<how it sits against the style or genre they picked>",
   "song_score": <1-10, or null if there's no actual song here to judge>,
-  "song_why": "<one sentence, as a listener: what makes it land or not>",{lyric_fields}{mix_fields}
+  "song_why": "<one sentence, as a listener: what makes it land or not>",
+  "hook_score": <1-10 for the HOOK alone - the chorus first, else any refrain or most repeatable moment - or null if the take has no chorus or hook to judge>,
+  "hook_why": "<one sentence: what makes the hook stick or not - the melody, the rhythm of the words, the repetition>",{lyric_fields}{mix_fields}
   "heard": [{{"t": "<m:ss, or empty if unsure>", "what": "<one plain sentence: what is audible>", "dim": "<one score key above, or other>", "confidence": <1-3>}}, ...],
   "verdict": "<one sentence in that voice, what this take actually is>",
   "strengths": ["<what genuinely worked, named specifically - AT LEAST ONE, always>", "..."],

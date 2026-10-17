@@ -1757,3 +1757,22 @@ class PracticeWhatWhyHowTests(TestCase):
     def test_prompt_asks_for_practice(self):
         from apps.economy.instruments import prompt_for
         self.assertIn('"practice"', prompt_for("rapz", "Trap", None, "builder"))
+
+
+class HookIsRatedApartTests(StrengthWeightedOverallTests):
+    """Same harness as the overall tests: a stubbed Gemini reply."""
+
+    def test_hook_is_served_but_never_moves_the_overall(self):
+        base = {"score": 6, "scores": {"flow": 6, "timing": 6, "breath": 6, "clarity": 6,
+                                        "delivery": 6, "style_match": 6},
+                "song_score": 7, "song_why": "ok", "verdict": "v", "strengths": ["s"],
+                "fixes": ["f"], "next_drill": "d"}
+        a, _ = self._run({**base, "hook_score": 9, "hook_why": "sticks"})
+        b, _ = self._run({**base, "hook_score": 2, "hook_why": "flat"})
+        self.assertEqual((a["hook_score"], a["hook_why"]), (9, "sticks"))
+        self.assertEqual(a["score"], b["score"])            # the hook is not in the overall
+
+    def test_no_hook_is_none_not_zero(self):
+        out, _ = self._run({"score": 6, "scores": {"flow": 6}, "verdict": "v",
+                            "strengths": ["s"], "fixes": ["f"], "next_drill": "d"})
+        self.assertIsNone(out["hook_score"])
