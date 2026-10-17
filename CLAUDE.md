@@ -2263,3 +2263,55 @@ post in the batch frames SoundCloud. **No rebuild command**: the count is derive
 from `counted` rows, not a stored counter, so it cannot drift. Labelled "on Music
 ConnectZ" and never mixed with SoundCloud's own number. Never run against a real
 SoundCloud widget (no access from CI).
+
+
+## Credits buy outcomes, and the list is enforced (Corey's rule)
+
+**Every credit spent buys something tangible, shareable, understandable, lucrative,
+braggable or learnable.** `apps/economy/credit_outcomes.py` declares, per spending
+module: the resource, what it buys in one sentence, which of the six outcomes it
+delivers, where the thing can be USED (`lands_in`), and either a `free_way` or an
+honest `no_free_way`. `test_credit_outcomes` walks the source, finds every module that
+calls a spend primitive (`charge_ai_usage`, `_bill`, `spend_spinaz`,
+`charge_skill_energy`, `_spend_energy_up_to`, or an energy decrement) and fails if one
+is undeclared — its first run found `collab.py` spending Energy on starting a deal and
+saying nothing — and fails when a declaration outlives the code. `GET
+/api/economy/creditz/` publishes the list.
+
+A spend also points at what it bought: `Transaction.ref` ("take:12", "sentence:4"),
+set with `link_spend` AFTER the thing exists (nothing is charged for an empty answer,
+so the ledger row is written first). `logz_outcomes.outcomes_for` resolves a page of
+rows to the rating, the report and the file in two queries, filtered by owner so a
+forged ref reads as nothing. Only the coach and Sentence ConnectZ link so far; the
+other spenders are declared but their rows carry no `ref` yet.
+
+**The file is not always kept, and the ledger says so.** A take recorded in the coach is
+scored and not stored; the recording exists only when it came from a post or journal
+entry, or the member posted it. Keeping every take would change what the privacy policy
+promises and what storage costs — the owner's decision, not a default.
+
+## Coach history is where the member's work becomes shareable
+
+- `TakeScore.read` keeps the coach's read (verdict, strengths, fixes, practice, exact
+  score, HookZ, FeelZ) — never the lyrics it transcribed. `overall` is the number the
+  member was SHOWN; it used to be the plain mean of the dimensions, so the history
+  disagreed with the score they had just been given.
+- `takescorez.exports_for` is the one list of doors out of a past take: share, post,
+  message, journal, drills, breath, the lyric writers, a battle — each with what it does
+  and what it costs before it is pressed. `coaching()` is the board: wins, strengths,
+  alerts and problem areas, worded by the server, each problem with its free way and,
+  for a lyric dimension, the paid writer.
+- **Lyric fixers** (`sentencez.FIXERS`): punchlines, hooks, rhymes, imagery, story beats,
+  fresh angles — five suggestions per run, each with technique and why, ranked by what
+  members rate highest only once a technique has `MIN_RATINGS_TO_RANK` ratings (else in
+  the writer's order, and it says so). Every one is a saved `SentenceWork`, so the
+  existing K-Oth royalty applies to the part a member keeps. HookZ and FeelZ count in
+  the overall, strength-weighted; both are absent, never 0, when a take has none.
+- **Shares are minted server-side from stored data** (`share_take`, `ShareWinView`) and
+  never from a request; the card shows the number the member saw (`score_exact`), says
+  who made it only if they DECLARED it (`ScoreShareHumanView`), and gives the reasons
+  behind the score. `ScoreShare.views` counts opens of the public page.
+- `breathz.py` is free breath training: patterns, minimums and the daily XP cap are the
+  server's; sessions earn XP for turning up and never move a rating (a timer cannot
+  measure a breath — the coach's Breath score is the measure, read back beside it).
+- `whyz.py` says why a member is here with THEIR proof, and never a number it cannot back.

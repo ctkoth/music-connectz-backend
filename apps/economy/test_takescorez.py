@@ -748,3 +748,19 @@ class ShareAWinTests(CoachingBoardTests):
         self.assertEqual(d["shown"], "6.2")
         self.assertTrue(render_card(d).startswith(b"\x89PNG"))
         self.assertTrue(render_card(d, story=True).startswith(b"\x89PNG"))
+
+
+class PersonalBestTests(CoachingBoardTests):
+    def test_only_the_take_that_first_tops_the_rest_holds_the_record_and_not_before_three_takes(self):
+        t = TakeScore.objects.create(user=self.u, app_key="rapz", overall=5)
+        self.assertFalse(self.c.get("/api/rapz/progress/").data["takes"][0]["pb"])      # one take is no record
+        for days, overall in ((4, 6), (3, 7), (2, 7), (1, 4)):
+            x = TakeScore.objects.create(user=self.u, app_key="rapz", overall=overall)
+            TakeScore.objects.filter(pk=x.pk).update(created_at=timezone.now() - timedelta(days=days))
+        rows = self.c.get("/api/rapz/progress/").data["takes"]
+        by = {}
+        for r in rows:
+            by.setdefault(r["overall"], []).append(r["pb"])
+        self.assertEqual(by[7].count(True), 1)                          # the first 7 holds it, the repeat doesn't
+        self.assertNotIn(True, by[6])
+        self.assertNotIn(True, by[4])

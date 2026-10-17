@@ -642,9 +642,26 @@ def share_take(take):
     return token
 
 
-def take_row(take, label, price=None):
+def personal_best(user, app_key):
+    """The member's highest overall on this instrument, and how many takes there are.
+
+    A personal best is the most shareable thing a score can be that is not a high
+    score: it is about THEM, it needs no comparison with anybody, and a beginner can
+    have one on their third take. It is only claimed once there is something to be
+    best against (three takes), and only for the take that first tops the rest."""
+    from django.db.models import Count, Max
+    agg = TakeScore.objects.filter(user=user, app_key=app_key, overall__isnull=False) \
+        .aggregate(best=Max("overall"), n=Count("id"))
+    return agg["best"], agg["n"]
+
+
+def take_row(take, label, price=None, best=None):
     r = take.read or {}
-    return {"share_url": f"/s/{take.share_token}" if take.share_token else "",
+    top, n = best if best else (None, 0)
+    is_pb = bool(top is not None and n >= MIN_TAKES and take.overall == top
+                 and not TakeScore.objects.filter(user_id=take.user_id, app_key=take.app_key, overall=top,
+                                                  created_at__lt=take.created_at).exists())
+    return {"pb": is_pb, "share_url": f"/s/{take.share_token}" if take.share_token else "",
             "id": take.pk, "overall": take.overall, "exact": r.get("exact"), "scores": take.scores,
             "weakest": take.weakest, "difficulty": take.difficulty, "genre": take.genre,
             "style": take.style, "target": take.target, "range_class": take.range_class,
@@ -737,6 +754,7 @@ def progress(user, app_key):
     takes = TakeScore.objects.filter(user=user, app_key=app_key)[:10]
     from .crosspost import coach_price
     price = coach_price(user)          # read once, not once per row
+    best = personal_best(user, app_key)
     return {
         "app_key": app_key, "label": prof["label"],
         "dimensions": [{"key": k, "label": v} for k, v in prof["scores"].items()],
@@ -767,7 +785,7 @@ def progress(user, app_key):
             "voice_health": voice_health(user, app_key),
             "goal_match": goal_match(user, app_key),
         },
-        "takes": [take_row(t, prof["label"], price) for t in takes],
+        "takes": [take_row(t, prof["label"], price, best) for t in takes],
         "coaching": coaching(user, app_key, price),
         "total_takes": TakeScore.objects.filter(user=user, app_key=app_key).count(),
     }
