@@ -577,6 +577,14 @@ def exports_for(take, label, *, price=None):
          "carry": {"title": title, "description": body}, "cost": None,
          "note": "Today's entry, private until you share it."},
     ]
+    # First among the doors that go OUT of the app: the member already paid for
+    # this session, and a score they are proud of is the cheapest promotion this
+    # platform has. The link and card say only what the coach said.
+    out.insert(0, {"key": "share", "label": "Share this score", "kind": "share", "tab": take.app_key,
+                   "target": "", "carry": {}, "cost": None,
+                   "note": ("A public link and card with the score and the coach's own one-line verdict, "
+                            "made from what the coach actually said. Free — and anyone who joins from it "
+                            "earns you the referral reward.")})
     if take.weakest:
         out.append({"key": "drills", "label": "Practise the weak spot", "tab": take.app_key,
                     "target": f"{take.app_key}-drills", "carry": {}, "cost": None,
@@ -595,9 +603,38 @@ def exports_for(take, label, *, price=None):
     return out
 
 
+def share_payload(take):
+    """The take as the coach gave it, in the shape a share row keeps — built from
+    what the SERVER stored when it answered, never from anything a client sends.
+    A share card that took its number from a request is "10/10 from the AI coach"
+    for a take that scored 4, with our name on it."""
+    r = take.read or {}
+    out = {"score": take.overall, "scores": take.scores or {}, "verdict": r.get("verdict", ""),
+           "strengths": r.get("strengths", []), "fixes": r.get("fixes", []),
+           "practice": r.get("practice", []), "genre": take.genre, "style": take.style}
+    for key, field in (("exact", "score_exact"), ("hook", "hook_score"), ("feelz", "feelz_score")):
+        if key in r:
+            out[field] = r[key]
+    return out
+
+
+def share_take(take):
+    """The public share token for a take, minted once and then reused. "" when
+    there is no score to share (a take with nothing scored has no card)."""
+    from .models import ScoreShare, mint_score_share
+    if take.share_token and ScoreShare.objects.filter(token=take.share_token).exists():
+        return take.share_token
+    token = mint_score_share(take.app_key, share_payload(take), user=take.user, genre=take.genre)
+    if token:
+        TakeScore.objects.filter(pk=take.pk).update(share_token=token)
+        take.share_token = token
+    return token
+
+
 def take_row(take, label, price=None):
     r = take.read or {}
-    return {"id": take.pk, "overall": take.overall, "exact": r.get("exact"), "scores": take.scores,
+    return {"share_url": f"/s/{take.share_token}" if take.share_token else "",
+            "id": take.pk, "overall": take.overall, "exact": r.get("exact"), "scores": take.scores,
             "weakest": take.weakest, "difficulty": take.difficulty, "genre": take.genre,
             "style": take.style, "target": take.target, "range_class": take.range_class,
             "low": take.low_note, "high": take.high_note, "at": take.created_at.isoformat(),
@@ -743,6 +780,59 @@ class ProgressView(APIView):
 
     def get(self, request):
         return Response(progress(request.user, self.app_key))
+
+
+class ShareTakeView(APIView):
+    """POST /api/<key>/take/<id>/share/ — the public link for one of YOUR past takes.
+
+    Idempotent: the same take gives the same link. The card is read off what the
+    server stored when the coach answered; nothing in the request can change it."""
+    permission_classes = [IsAuthenticated]
+    app_key = "singz"
+
+    def post(self, request, pk):
+        take = TakeScore.objects.filter(pk=pk, user=request.user, app_key=self.app_key).first()
+        if not take:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        token = share_take(take)
+        if not token:
+            return Response({"detail": "That take has no score to share."}, status=status.HTTP_409_CONFLICT)
+        return Response({"share_url": f"/s/{token}", "score": take.overall,
+                         "exact": (take.read or {}).get("exact")})
+
+
+class ShareWinView(APIView):
+    """POST /api/<key>/win/<dimension>/share/ — a card for a measured improvement.
+
+    A good score is the obvious thing to show people; a climb from a bad one is the
+    better story, and the one a beginner can tell. The numbers come from the same
+    trend the coaching board shows (computed here, from the stored takes — nothing in
+    the request), so nobody can mint "Flow 2 → 9" for a dimension that did not move."""
+    permission_classes = [IsAuthenticated]
+    app_key = "singz"
+
+    def post(self, request, dim):
+        from .models import ScoreShare
+        import secrets
+        win = next((w for w in coaching(request.user, self.app_key).get("wins", []) if w["key"] == dim), None)
+        if not win:
+            return Response({"detail": "That one hasn't moved enough yet to show."},
+                            status=status.HTTP_409_CONFLICT)
+        # One card per win per day: pressing share twice is the same card.
+        for row in ScoreShare.objects.filter(user=request.user, app_key=self.app_key,
+                                             created_at__gte=timezone.now() - timedelta(days=1))[:30]:
+            p = (row.payload or {}).get("progress") or {}
+            if p.get("key") == dim and p.get("now") == win["now"]:
+                return Response({"share_url": f"/s/{row.token}"})
+        progress = {"key": dim, "label": win["label"], "was": win["was"], "now": win["now"],
+                    "days": RECENT_DAYS}
+        row = ScoreShare.objects.create(
+            token=secrets.token_urlsafe(12)[:16], app_key=self.app_key,
+            score=max(1, min(10, int(round(win["now"])))),
+            verdict=f"{win['label']} went from {win['was']} to {win['now']} in {RECENT_DAYS} days.",
+            genre="", user=request.user,
+            payload={"progress": progress, "score_exact": win["now"]})
+        return Response({"share_url": f"/s/{row.token}"})
 
 
 class AgreeView(APIView):

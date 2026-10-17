@@ -229,6 +229,12 @@ class Transaction(models.Model):
     # only inferred applies to navigation as much as to errors.
     app_key = models.CharField(max_length=24, blank=True, default="")
     target = models.CharField(max_length=60, blank=True, default="")
+    # What this spend BOUGHT, as "<kind>:<id>" ("take:123", "sentence:45"). A
+    # credit that leaves and buys nothing the ledger can point at is a fee; with
+    # this, a row opens onto the rating, the report and the file it paid for
+    # (logz_outcomes.py). Like app_key/target it is only ever set by the code
+    # that knows, never inferred from the note.
+    ref = models.CharField(max_length=40, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -820,6 +826,26 @@ def charge_ai_usage(user, cost_cents, note="AI usage", count_daily=False):
         dev_tax_cents=0, note=(note + tag)[:200],
     )
     return w.money_cents
+
+
+def link_spend(user, ref, since, note_prefix):
+    """Point the spend a request just made at what it bought.
+
+    Billing happens before the thing it pays for exists (nothing is charged for an
+    empty answer), so the ledger row is written first and the reference is added
+    once the take or the piece has an id. Best-effort and narrow: the newest
+    unreferenced spend by this member since `since` whose note starts the same
+    way — a ledger link must never be the reason a paid result fails."""
+    try:
+        t = (Transaction.objects.filter(user=user, kind=Transaction.KIND_SPEND, ref="",
+                                        created_at__gte=since, note__startswith=str(note_prefix)[:40])
+             .order_by("-created_at").first())
+        if t:
+            t.ref = str(ref)[:40]
+            t.save(update_fields=["ref"])
+        return bool(t)
+    except Exception:                                       # pragma: no cover
+        return False
 
 
 # ---- VenueZ ----
@@ -6717,6 +6743,10 @@ class TakeScore(models.Model):
     # Prose and numbers the coach produced — never the lyrics it transcribed, which
     # are the member's words and were only ever used to score.
     read = models.JSONField(default=dict, blank=True)
+    # The public share link's token, once one exists. Kept ON the take so sharing
+    # a past session returns the same link every time instead of minting a new
+    # card per press, and so the history can show which takes are already out there.
+    share_token = models.CharField(max_length=32, blank=True, default="")
 
     # What the take was scored AGAINST, so a score is comparable to another.
     # An Elite take at 6 and a Rookie take at 6 are not the same take.

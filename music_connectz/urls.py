@@ -56,9 +56,9 @@ except Exception:  # pragma: no cover - never take the deploy down
 # folding them together would mean an import error in the new module takes the
 # old feature off the platform.
 try:
-    from apps.economy.takescorez import AgreeView, GameProfileView, GoalView, ProgressView
+    from apps.economy.takescorez import AgreeView, ShareTakeView, ShareWinView, GameProfileView, GoalView, ProgressView
 except Exception:  # pragma: no cover - never take the deploy down
-    AgreeView = GameProfileView = GoalView = ProgressView = None
+    AgreeView = ShareTakeView = ShareWinView = GameProfileView = GoalView = ProgressView = None
 
 # GroupZ. Mounted at /api/groupz/ rather than under /api/economy/, because that
 # is where `GroupZ.jsx` has been calling since it was written — the tab has sat
@@ -212,6 +212,12 @@ urlpatterns = [
     path(f"api/{key}/agree/", AgreeView.as_view(app_key=key), name=f"{key}-agree")
     for key in INSTRUMENT_APP_KEYS
 ] if AgreeView else []) + ([
+    path(f"api/{key}/take/<int:pk>/share/", ShareTakeView.as_view(app_key=key), name=f"{key}-take-share")
+    for key in INSTRUMENT_APP_KEYS
+] if ShareTakeView else []) + ([
+    path(f"api/{key}/win/<str:dim>/share/", ShareWinView.as_view(app_key=key), name=f"{key}-win-share")
+    for key in INSTRUMENT_APP_KEYS
+] if ShareWinView else []) + ([
     # The game profile the RapZ and SingZ panels have been calling since they
     # were written. Mounted for every instrument beside the coach, like the
     # rest — a drummer has a BPM comfort range and a boss unlock too.

@@ -60,6 +60,7 @@ from .battlez import (BattlesView, BattleChallengeView, BattleDetailView,
                       BattleEnterView, BattleRespondView, BattleSettleView,
                       BattleWagerView, MoneyBattleVoteView)
 from .opportunitiez import OpportunitieZView
+from .credit_outcomes import CreditOutcomesView
 from .sentencez import PunchlineRateView, SentenceRoyaltyView, SentenceView
 from .statz_trial import StatzTrialView
 from .superset import BodieZPairView
@@ -219,6 +220,7 @@ urlpatterns = [
     path("battlez/<int:pk>/enter/", BattleEnterView.as_view(), name="economy-battle-enter"),
     # KeyConnectZ — the keyboard. Wallpaper is Premium; translate is free.
     path("sentencez/", SentenceView.as_view(), name="economy-sentencez"),
+    path("creditz/", CreditOutcomesView.as_view(), name="economy-creditz"),
     path("statz-trial/", StatzTrialView.as_view(), name="economy-statz-trial"),
     path("views/start/", ViewStartView.as_view(), name="economy-views-start"),
     path("views/beat/", ViewBeatView.as_view(), name="economy-views-beat"),

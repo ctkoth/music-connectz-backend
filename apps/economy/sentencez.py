@@ -620,7 +620,10 @@ class SentenceView(APIView):
             # lines alone: the member uses a line, not the writer's commentary on it.
             text = "\n".join(it["line"] for it in items)
 
-        charged = _bill(request.user, f"Sentence ConnectZ — {KINDS[kind]['label']}", count_daily=True)
+        from django.utils import timezone as _tz
+        _t0 = _tz.now()
+        _note = f"Sentence ConnectZ — {KINDS[kind]['label']}"
+        charged = _bill(request.user, _note, count_daily=True)
         if charged is None:
             return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
                             status=status.HTTP_402_PAYMENT_REQUIRED)
@@ -629,6 +632,8 @@ class SentenceView(APIView):
             inputs={"genre": genre, "majority": majority, "minority": minority,
                     **({"items": items} if kind in FIXERS else {})},
         )
+        from .models import link_spend
+        link_spend(request.user, f"sentence:{work.id}", _t0, _note)
         return Response({**_work_dict(work, request.user), "charged_cents": charged},
                         status=status.HTTP_201_CREATED)
 

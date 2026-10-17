@@ -1182,6 +1182,8 @@ class SingZCoachView(APIView):
         note = f"{profile_for_app(self.app_key)['label']} Boss Take — AI Coach"
         if stored is not None:
             note += f" — {stored['kind']} #{stored['id']}"
+        from django.utils import timezone as _tz
+        _t0 = _tz.now()
         charged = _bill(request.user, note=note, count_daily=True)
         # Keep it. Until this line every score this app has ever produced was
         # handed to the browser and dropped, which is why the blueprint's
@@ -1200,12 +1202,25 @@ class SingZCoachView(APIView):
             context={"heard": payload.get("heard") or [], "verdict": payload.get("verdict", ""),
                      "genre": genre, "target": target},
         )
+        if _row is not None:
+            # Point the ledger row for this spend at the take it bought, so LogZ
+            # opens onto the rating, the report and the file.
+            from .models import link_spend
+            link_spend(request.user, f"take:{_row.pk}", _t0, note)
         out = {**payload, "cost_cents": charged,
                "take_score_id": getattr(_row, "pk", None)}
         # A shareable card for this take, minted from the coach's own answer.
         from .models import mint_score_share
         _share = mint_score_share(self.app_key, payload, user=request.user, genre=genre)
         out["share_url"] = f"/s/{_share}" if _share else ""
+        if _share and _row is not None:
+            # Remember the link ON the take, so sharing it later from the history
+            # hands back this same card instead of minting a second one.
+            try:
+                _row.share_token = _share
+                _row.save(update_fields=["share_token"])
+            except Exception:                                # pragma: no cover
+                pass
         if stored is not None and post is None:
             # A scored take is never a dead end either: the score offers the way
             # back to the day it came from.

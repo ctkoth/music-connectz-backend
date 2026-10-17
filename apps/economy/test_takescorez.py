@@ -675,3 +675,76 @@ class StrengthsAndAgreementTests(CoachingBoardTests):
     def test_an_invented_area_or_a_non_answer_is_refused(self):
         self.assertEqual(self.c.post("/api/rapz/agree/", {"area": "swagger", "agree": True}, format="json").status_code, 400)
         self.assertEqual(self.c.post("/api/rapz/agree/", {"area": "flow", "agree": "yes"}, format="json").status_code, 400)
+
+
+class PastSessionsAreShareableTests(CoachingBoardTests):
+    def _past(self):
+        return TakeScore.objects.create(
+            user=self.u, app_key="rapz", overall=6, genre="Trap", scores={"flow": 6},
+            read={"verdict": "Locked in. Land the last bar.", "strengths": ["Cadence"],
+                  "fixes": ["Last bar"], "exact": 6.2})
+
+    def test_every_past_take_offers_share_first_and_it_is_free(self):
+        self._past()
+        row = self.c.get("/api/rapz/progress/").data["takes"][0]
+        self.assertEqual(row["exports"][0]["key"], "share")
+        self.assertIsNone(row["exports"][0]["cost"])
+        self.assertEqual(row["share_url"], "")                          # not out there yet
+
+    def test_sharing_mints_once_from_what_the_coach_said_and_is_idempotent(self):
+        from apps.economy.models import ScoreShare
+        t = self._past()
+        a = self.c.post(f"/api/rapz/take/{t.pk}/share/", {"score": 10, "verdict": "perfect"}, format="json")
+        b = self.c.post(f"/api/rapz/take/{t.pk}/share/", {}, format="json")
+        self.assertEqual(a.status_code, 200)
+        self.assertEqual(a.data["share_url"], b.data["share_url"])      # the same link every time
+        self.assertEqual(ScoreShare.objects.count(), 1)
+        card = ScoreShare.objects.get()
+        self.assertEqual((card.score, card.verdict), (6, "Locked in. Land the last bar."))  # not the request's
+        self.assertEqual(card.user, self.u)                              # their handle is the referral code
+        row = self.c.get("/api/rapz/progress/").data["takes"][0]
+        self.assertEqual(row["share_url"], a.data["share_url"])
+
+    def test_you_cannot_share_somebody_elses_take_or_one_with_no_score(self):
+        t = self._past()
+        other = APIClient()
+        other.force_authenticate(member("sharestranger"))
+        self.assertEqual(other.post(f"/api/rapz/take/{t.pk}/share/", {}, format="json").status_code, 404)
+        blank = TakeScore.objects.create(user=self.u, app_key="rapz", overall=None)
+        self.assertEqual(self.c.post(f"/api/rapz/take/{blank.pk}/share/", {}, format="json").status_code, 409)
+
+
+class ShareAWinTests(CoachingBoardTests):
+    def _climb(self):
+        for d in (12, 11, 10):
+            self._take(d, flow=4)
+        for d in (3, 2, 1):
+            self._take(d, flow=7)
+
+    def test_a_real_climb_makes_a_card_from_the_trend_and_pressing_twice_is_one_card(self):
+        from apps.economy.models import ScoreShare
+        from apps.economy.scoreshare import share_dict
+        self._climb()
+        a = self.c.post("/api/rapz/win/flow/share/", {"was": 1, "now": 10}, format="json")
+        b = self.c.post("/api/rapz/win/flow/share/", {}, format="json")
+        self.assertEqual(a.status_code, 200)
+        self.assertEqual(a.data["share_url"], b.data["share_url"])
+        self.assertEqual(ScoreShare.objects.count(), 1)
+        card = share_dict(ScoreShare.objects.get())
+        self.assertEqual(card["shown"], "7.0")                       # the trend's number, not the request's
+        self.assertIn("from 4.0 to 7.0", card["verdict"])
+        self.assertEqual(card["progress"]["was"], 4.0)
+
+    def test_a_dimension_that_did_not_move_has_no_card(self):
+        self._climb()
+        self.assertEqual(self.c.post("/api/rapz/win/timing/share/", {}, format="json").status_code, 409)
+
+    def test_the_card_shows_the_number_the_member_saw_and_draws(self):
+        from apps.economy.models import ScoreShare
+        from apps.economy.scoreshare import render_card, share_dict
+        row = ScoreShare.objects.create(token="t" * 12, app_key="rapz", score=6, verdict="Locked in.",
+                                        payload={"score_exact": 6.2})
+        d = share_dict(row)
+        self.assertEqual(d["shown"], "6.2")
+        self.assertTrue(render_card(d).startswith(b"\x89PNG"))
+        self.assertTrue(render_card(d, story=True).startswith(b"\x89PNG"))

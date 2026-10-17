@@ -39,8 +39,21 @@ def short_verdict(text, n=160):
     return (cut[: cut.rfind(" ")] if " " in cut else cut).rstrip(",;: ") + "…"
 
 
+def _shown(row):
+    """The number as the member saw it: one decimal when the coach gave one (6.2),
+    the whole number otherwise. A card that said 6 under a screen that said 6.2
+    is a small disagreement a member notices in front of their followers."""
+    exact = (row.payload or {}).get("score_exact")
+    if isinstance(exact, (int, float)) and 1 <= exact <= 10:
+        return f"{float(exact):.1f}"
+    return str(row.score)
+
+
 def share_dict(row):
+    progress = (row.payload or {}).get("progress") or None
     return {
+        "shown": _shown(row),
+        "progress": progress,
         "token": row.token,
         "app_key": row.app_key,
         "label": _label(row.app_key),
@@ -121,14 +134,15 @@ def render_card(d, story=False):
     g.rounded_rectangle((24, 24, W - 24, H - 24), radius=36, outline=(255, 85, 0), width=6)
     g.rounded_rectangle((36, 36, W - 36, H - 36), radius=30, outline=(56, 227, 255), width=2)
     who = f"@{d['username']}  ·  " if d["username"] else ""
-    coach_line = f"{d['label']} coach" + (f" · {d['genre']}" if d["genre"] else "")
+    coach_line = (f"{d['label']} · glow-up" if d.get("progress") else f"{d['label']} coach") \
+        + (f" · {d['genre']}" if d["genre"] else "")
     quote = f"“{d['verdict']}”" if d["verdict"] else ""
-    score = f"{d['score']}"
+    score = str(d.get("shown") or d["score"])
 
     if not story:
         g.text((80, 70), "MUSIC CONNECTZ", font=_font(34), fill=(56, 227, 255))
         g.text((80, 120), coach_line, font=_font(40), fill=(255, 255, 255))
-        big = _font(220)
+        big = _font(220 if len(score) <= 2 else 190)
         g.text((80, 150), score, font=big, fill=(255, 85, 0))
         sw = g.textlength(score, font=big)
         g.text((80 + sw + 16, 310), "/10", font=_font(90), fill=(255, 255, 255))
@@ -145,7 +159,7 @@ def render_card(d, story=False):
         g.text((90, 190), "MUSIC CONNECTZ", font=_font(48), fill=(56, 227, 255))
         for i, line in enumerate(_wrap(g, coach_line, _font(60), W - 180, max_lines=2)):
             g.text((90, 270 + i * 74), line, font=_font(60), fill=(255, 255, 255))
-        big = _font(520)
+        big = _font(520 if len(score) <= 2 else 400)
         g.text((90, 470), score, font=big, fill=(255, 85, 0))
         sw = g.textlength(score, font=big)
         g.text((90 + sw + 20, 800), "/10", font=_font(150), fill=(255, 255, 255))
