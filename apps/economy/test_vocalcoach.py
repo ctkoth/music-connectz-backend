@@ -1762,15 +1762,20 @@ class PracticeWhatWhyHowTests(TestCase):
 class HookIsRatedApartTests(StrengthWeightedOverallTests):
     """Same harness as the overall tests: a stubbed Gemini reply."""
 
-    def test_hook_is_served_but_never_moves_the_overall(self):
+    def test_hook_is_served_and_counted_in_the_overall(self):
         base = {"score": 6, "scores": {"flow": 6, "timing": 6, "breath": 6, "clarity": 6,
                                         "delivery": 6, "style_match": 6},
                 "song_score": 7, "song_why": "ok", "verdict": "v", "strengths": ["s"],
                 "fixes": ["f"], "next_drill": "d"}
-        a, _ = self._run({**base, "hook_score": 9, "hook_why": "sticks"})
-        b, _ = self._run({**base, "hook_score": 2, "hook_why": "flat"})
-        self.assertEqual((a["hook_score"], a["hook_why"]), (9, "sticks"))
-        self.assertEqual(a["score"], b["score"])            # the hook is not in the overall
+        hi, _ = self._run({**base, "hook_score": 10, "hook_why": "sticks"})
+        lo, _ = self._run({**base, "hook_score": 2, "hook_why": "flat"})
+        none, _ = self._run(base)
+        self.assertEqual((hi["hook_score"], hi["hook_why"]), (10, "sticks"))
+        self.assertTrue(hi["hook_counted"])
+        self.assertFalse(none["hook_counted"])
+        self.assertGreater(hi["score_exact"], lo["score_exact"])   # it moves the number
+        self.assertGreater(hi["score_exact"], none["score_exact"])  # a great chorus lifts it
+        self.assertLessEqual(lo["score_exact"], none["score_exact"])  # a weak one never lifts it
 
     def test_no_hook_is_none_not_zero(self):
         out, _ = self._run({"score": 6, "scores": {"flow": 6}, "verdict": "v",

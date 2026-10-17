@@ -538,7 +538,7 @@ number and not coaching:
 - "goal": what they are aiming at from here, pitched at "{difficulty}" and at \
 {aim}. Concrete enough to know when they have hit it.{range_ask}{style_ask}{style_scale}{lyric_ask}{mix_ask}{weak_notes_section}
 
-"hook_score" rates the HOOK on its own - in this app a chorus IS a hook (as is any refrain or repeated tag line), so rate the chorus, not the verses: a take can have a strong hook inside a rough performance and the reverse, so it is NOT part of the overall score and must not be averaged into it. Null when there is no hook - a scale, a warm-up or an exercise has none.
+"hook_score" rates the HOOK on its own - in this app a chorus IS a hook (as is any refrain or repeated tag line), so rate the chorus, not the verses: a take can have a strong hook inside a rough performance and the reverse, so judge it by itself - do not let the verses colour it. The server counts it as one part of the overall, so do not fold it into your own overall either. Null when there is no hook - a scale, a warm-up or an exercise has none.
 
 "practice" is up to three exercises, one for each of your fixes, worst first: what to do, why it fixes THAT problem in THIS take, and how to run it. Specific to what you heard - never generic advice.
 

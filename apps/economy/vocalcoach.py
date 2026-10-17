@@ -255,7 +255,8 @@ def _clamp(v, lo=1, hi=10):
 
 
 SCORE_RULE = ("Overall leans on your strongest parts — your best dimensions count "
-              "most, your weakest counts least.")
+              "most, your weakest counts least. HookZ (your chorus) is one of them "
+              "when the take has one.")
 MIN_LISTENERS = 3
 REFERENCE_NOTICE = ("Use music you have the right to analyse. This is a private listen — "
                     "it isn't posted, saved to your profile or counted toward your skills. "
@@ -589,6 +590,13 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     model_score = _clamp(parsed.get("score"))
     # Performance dimensions only: style_match is closeness, not quality.
     perf_only = {k: v for k, v in perf.items() if k != "style_match"}
+    # HookZ counts as one more strength-weighted part of the overall (Corey's
+    # call): a chorus that lands is part of a take that works. It joins only when
+    # the model found a chorus to judge — a missing hook is absent, never a 0.
+    hook = _clamp(parsed.get("hook_score"))
+    hook_counted = hook is not None
+    if hook_counted:
+        perf_only = {**perf_only, "hookz": hook}
     overall = strength_weighted(perf_only)
     overall_exact = strength_weighted_exact(perf_only)
     if overall is None:
@@ -603,6 +611,8 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         "score_exact": overall_exact if overall_exact is not None else float(overall),
         "model_score": model_score,
         "score_rule": SCORE_RULE,
+        # Whether the hook is inside `score`, so the screen can say so beside it.
+        "hook_counted": hook_counted,
         "listeners": listeners,
         # One source for the dimension list, so the prompt cannot ask for six
         # and the whitelist keep five.
