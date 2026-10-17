@@ -63,8 +63,8 @@ MAX_FAILURES = 3
 SCHEDULE = (f"Your score and drill now, a reminder to send another take on day {DAY3} "
             f"and day {DAY7}, then nothing. Every email has a one-click stop.")
 
-_LABELS = {"singz": "SingZ", "rapz": "RapZ", "guitarz": "GuitarZ", "bassz": "BassZ",
-           "keyz": "KeyZ", "drumz": "DrumZ", "violinz": "ViolinZ"}
+from .instruments import INSTRUMENTS as _INSTRUMENTS
+_LABELS = {k: v["label"] for k, v in _INSTRUMENTS.items()}   # derived: one list of coaches
 
 
 def ready():

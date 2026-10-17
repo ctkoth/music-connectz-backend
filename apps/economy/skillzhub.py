@@ -55,6 +55,10 @@ COACHES = [
     ("bassz", "🎸", "bassz.png"),
     ("keyz", "🎹", "keyz.png"),
     ("violinz", "🎻", "violinz.png"),
+    ("flutez", "🪈", "flutez.png"),
+    ("saxz", "🎷", "saxz.png"),
+    ("clarinetz", "🎼", "clarinetz.png"),
+    ("trumpetz", "🎺", "trumpetz.png"),
     ("drumz", "🥁", "drumz.png"),
 ]
 

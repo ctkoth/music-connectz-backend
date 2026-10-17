@@ -24,7 +24,7 @@ from apps.skillz.models import TrainingProfile
 User = get_user_model()
 URL = "/api/economy/skillz/"
 PW = "pw12345!"
-ORDER = ["singz", "rapz", "guitarz", "bassz", "keyz", "violinz", "drumz"]
+ORDER = ["singz", "rapz", "guitarz", "bassz", "keyz", "violinz", "flutez", "saxz", "clarinetz", "trumpetz", "drumz"]
 
 
 class HubBase(TestCase):

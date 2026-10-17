@@ -29,7 +29,7 @@ PW = "pw12345!"
 # The five that had a profile and nowhere to send it. Named explicitly,
 # rather than "all but singz/rapz", so this fails loudly if one is ever
 # dropped back off the list instead of quietly passing on a smaller set.
-NEWLY_MOUNTED = ("guitarz", "bassz", "keyz", "drumz", "violinz")
+NEWLY_MOUNTED = ("guitarz", "bassz", "keyz", "drumz", "violinz", "flutez", "saxz", "clarinetz", "trumpetz")
 
 
 class TheProfileAndTheRouteNowAgreeTests(TestCase):

@@ -48,6 +48,12 @@ _DRUMS = {"timing": "Timing ⏱️", "groove": "Groove 🕺", "dynamics": "Dynam
           "consistency": "Consistency 📐", "fills": "Fills 🥁"}
 _BOWED = {"intonation": "Intonation 🎯", "tone": "Tone 🌈", "bowing": "Bowing 🏹",
           "timing": "Timing ⏱️", "vibrato": "Vibrato 〰️"}
+# Winds and brass. Breath is a dimension here because it is what the instrument IS:
+# unlike a drummer, a flute player's air is the thing being played. That also makes
+# the recovery-first rule (takescorez.STRAIN_DIMENSIONS) apply to them, and BreathZ
+# is the free practice beside it.
+_WINDS = {"intonation": "Intonation 🎯", "tone": "Tone 🌈", "breath": "Breath 🫁",
+          "articulation": "Articulation 🗣️", "timing": "Timing ⏱️"}
 
 # What a single take genuinely cannot show, said out loud rather than scored.
 #
@@ -123,6 +129,13 @@ INSTRUMENTS = {
         "scores": _BOWED, "range_label": None, "ranges": [], "style_label": None, "styles": [],
         "caveat": "Intonation, tone, bowing, timing and vibrato are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
     },
+    **{key: {
+        "label": label, "performer": performer, "coach": f"{noun} coach",
+        "scores": _WINDS, "range_label": None, "ranges": [], "style_label": None, "styles": [],
+        "caveat": "Intonation, tone, breath, articulation and timing are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
+    } for key, label, performer, noun in (
+        ("flutez", "FluteZ", "flautist", "flute"), ("saxz", "SaxZ", "saxophonist", "saxophone"),
+        ("clarinetz", "ClarinetZ", "clarinetist", "clarinet"), ("trumpetz", "TrumpetZ", "trumpeter", "trumpet"))},
 }
 
 # Anything mounted without its own entry still gets a coach rather than a 404,

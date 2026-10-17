@@ -185,6 +185,11 @@ LOGICZ_TABS = [
     {"key": "violinz", "name": "ViolinZ", "emoji": "🎻", "icon": "violinz.png",
      "desc": "Intonation, tone, bowing, timing and vibrato, scored.",
      "apps": [_app("Coach", "🤖", "What to practise next, and why.", True)]},
+    *[{"key": k, "name": n, "emoji": e, "icon": f"{k}.png",
+       "desc": "Intonation, tone, breath, articulation and timing, scored.",
+       "apps": [_app("Coach", "🤖", "What to practise next, and why.", True)]}
+      for k, n, e in (("flutez", "FluteZ", "🪈"), ("saxz", "SaxZ", "🎷"),
+                      ("clarinetz", "ClarinetZ", "🎼"), ("trumpetz", "TrumpetZ", "🎺"))],
     {"key": "drumz", "name": "DrumZ", "emoji": "🥁", "icon": "drumz.png",
      "desc": "Timing, groove, dynamics, consistency and fills, scored — plus a "
              "beat-sequencer practice pad.",

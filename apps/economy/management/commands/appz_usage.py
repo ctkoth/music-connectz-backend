@@ -66,7 +66,8 @@ APPS = {
 # app_key), so they get their own pass rather than a queryset each — a drummer
 # and a singer write the same table, split by the column that already tells
 # them apart.
-INSTRUMENT_KEYS = ["singz", "rapz", "guitarz", "bassz", "keyz", "violinz", "drumz"]
+from apps.economy.instruments import INSTRUMENTS as _INSTRUMENTS
+INSTRUMENT_KEYS = list(_INSTRUMENTS)   # derived: one list of coaches
 
 NOT_MEASURABLE = {
     "onboardz": "steps live on Profile/Post/Habit, already counted there",

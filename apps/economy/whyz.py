@@ -16,9 +16,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .instruments import INSTRUMENTS
 from .models import Referral, ScoreShare, SentenceWork, TakeScore, Transaction
 
-INSTRUMENT_KEYS = ("singz", "rapz", "guitarz", "bassz", "keyz", "drumz", "violinz")
+INSTRUMENT_KEYS = tuple(INSTRUMENTS)   # derived: a coach added there is counted here
 
 
 def _best_climb(user):

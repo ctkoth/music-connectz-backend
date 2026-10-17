@@ -27,6 +27,8 @@ from rest_framework.views import APIView
 APP_KEY = "breathz"
 # XP is for turning up, so it is for turning up a few times a day, not a hundred.
 COUNTED_PER_DAY = 5
+# The wind and brass coaches: for them breath is the instrument, so every pattern is for them.
+WINDS = ["flutez", "saxz", "clarinetz", "trumpetz"]
 
 # Each step is (phase, beats). A "beat" is one second unless the pattern is
 # `bpm_based`, where it is one beat at the member's own tempo — rap breathes on the
@@ -36,12 +38,12 @@ PATTERNS = [
      "steps": [("in", 4), ("hold", 4), ("out", 4), ("hold", 4)],
      "what": "Breathe in for 4, hold 4, out 4, hold 4.",
      "why": "Evens out a racing breath before a take, so the first line is not the breathless one.",
-     "for": ["singz", "rapz", "guitarz", "bassz", "keyz", "drumz", "violinz"]},
+     "for": ["singz", "rapz", "guitarz", "bassz", "keyz", "drumz", "violinz", *WINDS]},
     {"key": "long_exhale", "label": "Long exhale", "xp": 25, "rounds": 8, "min_seconds": 90,
      "steps": [("in", 4), ("out", 8)],
      "what": "In for 4, out slowly for 8.",
      "why": "The exhale is the part you perform on. Stretching it is how phrases stop ending in a gasp.",
-     "for": ["singz", "rapz", "violinz"]},
+     "for": ["singz", "rapz", "violinz", *WINDS]},
     {"key": "support_hiss", "label": "Support hiss", "xp": 25, "rounds": 6, "min_seconds": 100,
      "steps": [("in", 4), ("out", 16)],
      "what": "In for 4, then let the air out on a steady 'sss' for 16.",
@@ -62,7 +64,7 @@ PATTERNS = [
      "steps": [("in", 4), ("hold", 7), ("out", 8)],
      "what": "In for 4, hold 7, out 8.",
      "why": "For after a hard session or before sleep — it brings the heart rate down, which is when practice settles.",
-     "for": ["singz", "rapz", "guitarz", "bassz", "keyz", "drumz", "violinz"]},
+     "for": ["singz", "rapz", "guitarz", "bassz", "keyz", "drumz", "violinz", *WINDS]},
 ]
 BY_KEY = {p["key"]: p for p in PATTERNS}
 
