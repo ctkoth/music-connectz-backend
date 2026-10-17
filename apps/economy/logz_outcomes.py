@@ -16,20 +16,25 @@ from .media import stable_media_url
 from .instruments import scores_for
 from .models import SentenceWork, TakeScore
 
-NOT_KEPT = ("This take was scored, not kept — the coach listens and the recording isn't stored. "
-            "A take that came from a post or a journal entry keeps its file there.")
+NOT_KEPT = ("This take was scored, not kept — the coach listens and the recording isn't stored unless you "
+            "tick \"Keep this take\" when you send it. A take that came from a post or a journal entry keeps "
+            "its file there.")
+
+
+def file_of(t, request=None):
+    """Where a take's recording is: kept (with its address), lost, or never kept."""
+    up = t.upload
+    if up and not up.missing_since:
+        return {"kept": True, "name": up.name, "content_type": up.content_type,
+                "url": stable_media_url(up, request) or None}
+    if up and up.missing_since:
+        return {"kept": False, "why": "The recording was lost from storage; the score and report are kept."}
+    return {"kept": False, "why": NOT_KEPT}
 
 
 def _take(t, request):
     r = t.read or {}
-    up = t.upload
-    if up and not up.missing_since:
-        file = {"kept": True, "name": up.name, "content_type": up.content_type,
-                "url": stable_media_url(up, request) or None}
-    elif up and up.missing_since:
-        file = {"kept": False, "why": "The recording was lost from storage; the score and report are kept."}
-    else:
-        file = {"kept": False, "why": NOT_KEPT}
+    file = file_of(t, request)
     # Each number paired with what the coach heard behind it: the strongest
     # observation it filed under that dimension. A number with nothing beside it
     # is the "score with no description" this app does not ship.

@@ -80,7 +80,10 @@ def share_dict(row):
         "recap": payload.get("recap") or None,
         "challenge": payload.get("challenge") or "",
         "why": _why(payload),
-        "listeners": payload.get("listeners") if isinstance(payload.get("listeners"), dict) else None,
+        # Whitelisted to the two numbers: this is a PUBLIC page and a listener's
+        # reason is a stranger's text about somebody's work, shown to its author only.
+        "listeners": ({"median": payload["listeners"].get("median"), "count": payload["listeners"].get("count")}
+                      if isinstance(payload.get("listeners"), dict) else None),
         "token": row.token,
         "app_key": row.app_key,
         "label": _label(row.app_key),

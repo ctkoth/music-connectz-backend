@@ -2990,6 +2990,11 @@ class ItemRating(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="item_ratings")
     item_id = models.CharField(max_length=160, db_index=True)
     score = models.PositiveSmallIntegerField()  # 1-10
+    # Why, in a listener's own words — optional, one line. A human reason beside the
+    # AI's is what makes a rating trusted (Genius is "the reason behind it, written by
+    # people"). Shown ONLY to the person it is about, never to other members and never
+    # on a public card, because it is a stranger's text about somebody's work.
+    reason = models.CharField(max_length=200, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True, null=True)  # window anchor
     updated_at = models.DateTimeField(auto_now=True)
     edited_at = models.DateTimeField(null=True, blank=True)

@@ -952,6 +952,7 @@ class SocialView(APIView):
             except (TypeError, ValueError):
                 score = 0
                 visibility = "restricted"
+            reason = " ".join(str((request.data or {}).get("reason", "") or "").split())[:200]
             if score == 0:
                 ItemRating.objects.filter(user=request.user, item_id=item).delete()
             elif 1 <= score <= 10:
@@ -960,7 +961,7 @@ class SocialView(APIView):
                     return Response(blocked, status=status.HTTP_403_FORBIDDEN)
                 existing = ItemRating.objects.filter(user=request.user, item_id=item).first()
                 if existing is None:
-                    ItemRating.objects.create(user=request.user, item_id=item, score=score)
+                    ItemRating.objects.create(user=request.user, item_id=item, score=score, reason=reason)
                     # Apply collaboration bonus if rating a post with multiple contributors
                     collab_mult = 1.0
                     post_author = None
@@ -1001,8 +1002,14 @@ class SocialView(APIView):
                     if existing.score != score:
                         existing.edit_history = (existing.edit_history or []) + [{"score": existing.score, "at": timezone.now().isoformat()}]
                         existing.score = score
+                        if reason:
+                            existing.reason = reason
                         existing.edited_at = timezone.now()
-                        existing.save(update_fields=["score", "edit_history", "edited_at"])
+                        existing.save(update_fields=["score", "reason", "edit_history", "edited_at"])
+                    elif reason and reason != existing.reason:
+                        # Same score, a reason added or reworded — inside the same window.
+                        existing.reason = reason
+                        existing.save(update_fields=["reason"])
                         # Changing your mind has to move the skill ratings it
                         # fed too, or the two disagree from then on.
                         self._rate_skills(item, request.user, score)

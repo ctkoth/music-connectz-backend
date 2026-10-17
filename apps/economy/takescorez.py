@@ -667,7 +667,8 @@ def take_row(take, label, price=None, best=None):
     is_pb = bool(top is not None and n >= MIN_TAKES and take.overall == top
                  and not TakeScore.objects.filter(user_id=take.user_id, app_key=take.app_key, overall=top,
                                                   created_at__lt=take.created_at).exists())
-    return {"pb": is_pb, "share_url": f"/s/{take.share_token}" if take.share_token else "",
+    from .logz_outcomes import file_of
+    return {"pb": is_pb, "file": file_of(take), "share_url": f"/s/{take.share_token}" if take.share_token else "",
             "id": take.pk, "overall": take.overall, "exact": r.get("exact"), "scores": take.scores,
             "weakest": take.weakest, "difficulty": take.difficulty, "genre": take.genre,
             "style": take.style, "target": take.target, "range_class": take.range_class,
@@ -793,7 +794,7 @@ def progress(user, app_key):
     prof = profile_for_app(app_key)
     row = profile_row(user, app_key)
     rule = strain_rule(prof)
-    takes = TakeScore.objects.filter(user=user, app_key=app_key)[:10]
+    takes = TakeScore.objects.filter(user=user, app_key=app_key).select_related("upload")[:10]
     from .crosspost import coach_price
     price = coach_price(user)          # read once, not once per row
     best = personal_best(user, app_key)

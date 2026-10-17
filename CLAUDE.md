@@ -2315,3 +2315,20 @@ promises and what storage costs — the owner's decision, not a default.
   server's; sessions earn XP for turning up and never move a rating (a timer cannot
   measure a breath — the coach's Breath score is the measure, read back beside it).
 - `whyz.py` says why a member is here with THEIR proof, and never a number it cannot back.
+
+## Age groups, keeping takes, challenges and listener reasons
+
+- **No adult-to-minor contact** (`models.may_contact`, symmetric): DMs, calls and member
+  search stay within an age group. The LessonZ comments already stated this as "the ScoutZ
+  rule" and nothing enforced it for DMs or search until now. Unknown ages count as adults
+  (matching `is_minor`). **Collabs and battles across ages are still open** — the stated
+  policy in `adult_only_reason` ("posting, collabs, BattleZ… stay open") — and that, plus
+  any romantic or "dating" surface for under-18s, is the owner's call; the recommendation is
+  that InfernoZ (listed as "projects & dating", not built) and VybeZ's dating filters are 18+.
+- **Keep this take** (`takekeep.py`): opt-in per take (`keep=1`), stored as an ordinary
+  Upload under the existing quota, never charged, and a take that does not fit is still
+  scored with `kept_note` saying why. The privacy policy changed with it.
+- **The weekly challenge** (`challengez.py`) is derived from the ISO week alone — one prompt
+  per coach for everybody — and a shared card carries the week only when the take answered
+  it. **Listener reasons** (`ItemRating.reason`) reach only the performer
+  (`listener_reasons`), kept apart from `listeners_for`, which feeds the coach's prompt.

@@ -1803,3 +1803,48 @@ class FeelzCountsInOverallTests(StrengthWeightedOverallTests):
         x = ex({"a": 6, "b": 6, "c": 6, "d": 6, "e": 6, "hookz": 10, "feelz": 10})
         self.assertGreater(x, 6)
         self.assertLess(x, 10)
+
+
+class KeepThisTakeTests(SingZCoachTests):
+    """Opt-in, per take: the recording is kept only when the member says so."""
+
+    def _send(self, **extra):
+        return self.client.post(URL, {"take": take(), "genre": "R&B", "range": "tenor",
+                                      "difficulty": "builder", **extra}, format="multipart")
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
+    def test_by_default_the_recording_is_not_stored(self, _post, _k):
+        from apps.economy.models import Upload
+        r = self._send()
+        self.assertFalse(r.data["kept"])
+        self.assertEqual(Upload.objects.filter(user=self.user).count(), 0)
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
+    def test_ticking_keep_stores_it_as_a_normal_upload_the_history_can_open(self, _post, _k):
+        from apps.economy.models import TakeScore, Upload
+        r = self._send(keep="1")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.data["kept"])
+        up = Upload.objects.get(user=self.user)
+        self.assertEqual(up.size_bytes, 1000)                       # counts against their storage
+        self.assertEqual(up.file.read(), b"0" * 1000)               # the whole take, from the start
+        row = TakeScore.objects.get(user=self.user)
+        self.assertEqual(row.upload_id, up.id)
+        hist = self.client.get("/api/singz/progress/").data["takes"][0]
+        self.assertTrue(hist["file"]["kept"])
+        self.assertTrue(hist["file"]["url"])
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
+    def test_a_take_that_does_not_fit_is_still_scored_and_the_member_is_told_why(self, _post, _k):
+        from apps.economy.models import Upload
+        self._tier("free")
+        with patch("apps.economy.takekeep.storage_used_bytes", return_value=10 ** 12):
+            r = self._send(keep="1")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["score"], 7)                         # the coaching is unaffected
+        self.assertFalse(r.data["kept"])
+        self.assertIn("still scored", r.data["kept_note"])
+        self.assertEqual(Upload.objects.filter(user=self.user).count(), 0)

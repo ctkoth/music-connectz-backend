@@ -358,6 +358,20 @@ def listeners_for(post, author_excluded=True):
     return {"median": _median(scores), "count": len(scores)}
 
 
+def listener_reasons(post, limit=5):
+    """What real listeners said about this song, in their words — for its AUTHOR only.
+
+    [{score, text}], newest first, no names. Kept apart from `listeners_for` on purpose:
+    that dict is fed into the coach's PROMPT, and a stranger's free text must never be
+    an input to a model; this is only ever shown to the person it is about."""
+    if post is None:
+        return []
+    from .models import ItemRating
+    rows = (ItemRating.objects.filter(item_id=f"post:{post.id}").exclude(user_id=post.author_id)
+            .exclude(reason="").order_by("-updated_at")[:limit])
+    return [{"score": r.score, "text": r.reason} for r in rows]
+
+
 def score_take(app_key, f, content_type, *, genre, target, difficulty, style=None,
                user=None, lyrics=False, mix=False, deadline=None, listeners=None,
                think=True, reference=False):
@@ -1193,10 +1207,16 @@ class SingZCoachView(APIView):
         # mapping, the heatmap, every weekly plan — had no material to work
         # with. Best-effort inside `record`: a bookkeeping failure must never
         # turn a take the member paid for into an error.
+        # Keep this take — opt-in, for THIS take only, and only for a fresh recording
+        # (one that came from a post or a journal entry is already stored there).
+        from . import takekeep
+        _kept, _kept_note = (takekeep.keep_take(request.user, f)
+                             if takekeep.wants_keep(data.get("keep")) and stored is None and not getattr(f, "instance", None)
+                             else (None, ""))
         _row = takescorez.record(
             request.user, self.app_key, payload,
             difficulty=data.get("difficulty"), genre=genre, target=target,
-            style=data.get("style"), upload=getattr(f, "instance", None),
+            style=data.get("style"), upload=getattr(f, "instance", None) or _kept,
             source=("post" if post is not None else
                     "journal" if stored is not None else "upload"),
             ref=(f"post:{post.id}" if post is not None else
@@ -1210,7 +1230,9 @@ class SingZCoachView(APIView):
             from .models import link_spend
             link_spend(request.user, f"take:{_row.pk}", _t0, note)
         out = {**payload, "cost_cents": charged,
-               "take_score_id": getattr(_row, "pk", None)}
+               "take_score_id": getattr(_row, "pk", None),
+               "listener_reasons": listener_reasons(post),
+               "kept": bool(_kept), "kept_note": _kept_note}
         # A shareable card for this take, minted from the coach's own answer.
         from .models import mint_score_share
         from .challengez import challenge_tag
