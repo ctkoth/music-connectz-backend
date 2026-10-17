@@ -255,8 +255,8 @@ def _clamp(v, lo=1, hi=10):
 
 
 SCORE_RULE = ("Overall leans on your strongest parts — your best dimensions count "
-              "most, your weakest counts least. HookZ (your chorus) is one of them "
-              "when the take has one.")
+              "most, your weakest counts least. HookZ (your chorus) and FeelZ (how it moves a listener) are "
+              "two of them when the take has them.")
 MIN_LISTENERS = 3
 REFERENCE_NOTICE = ("Use music you have the right to analyse. This is a private listen — "
                     "it isn't posted, saved to your profile or counted toward your skills. "
@@ -597,6 +597,14 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     hook_counted = hook is not None
     if hook_counted:
         perf_only = {**perf_only, "hookz": hook}
+    # FeelZ: how strongly it moves a listener, counted the same way and for the
+    # same reason. Low-polish songs become people's favourites on exactly this,
+    # and an overall that cannot see it keeps telling a member their best-loved
+    # song was ordinary. Absent, never 0, for an exercise with nothing to feel.
+    feelz = _clamp(parsed.get("feelz_score"))
+    feelz_counted = feelz is not None
+    if feelz_counted:
+        perf_only = {**perf_only, "feelz": feelz}
     overall = strength_weighted(perf_only)
     overall_exact = strength_weighted_exact(perf_only)
     if overall is None:
@@ -613,6 +621,10 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         "score_rule": SCORE_RULE,
         # Whether the hook is inside `score`, so the screen can say so beside it.
         "hook_counted": hook_counted,
+        "feelz_score": feelz,
+        "feelz_emotion": str(parsed.get("feelz_emotion", "")).strip()[:60],
+        "feelz_why": str(parsed.get("feelz_why", ""))[:400],
+        "feelz_counted": feelz_counted,
         "listeners": listeners,
         # One source for the dimension list, so the prompt cannot ask for six
         # and the whitelist keep five.

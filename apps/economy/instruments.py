@@ -540,6 +540,8 @@ number and not coaching:
 
 "hook_score" rates the HOOK on its own - in this app a chorus IS a hook (as is any refrain or repeated tag line), so rate the chorus, not the verses: a take can have a strong hook inside a rough performance and the reverse, so judge it by itself - do not let the verses colour it. The server counts it as one part of the overall, so do not fold it into your own overall either. Null when there is no hook - a scale, a warm-up or an exercise has none.
 
+"feelz_score" rates the FEEL, apart from the polish: how strongly an honest listener would be moved, whatever the emotion - a raw sad verse that lands is a 9, a clean take with nothing behind it is a 4. Do not reward happiness or punish roughness, and say plainly in feelz_why that this is your read as a listener, not a prediction of how any particular person will feel. The server counts it as one part of the overall, so do not fold it into your own overall either. Null for a scale, warm-up or exercise.
+
 "practice" is up to three exercises, one for each of your fixes, worst first: what to do, why it fixes THAT problem in THIS take, and how to run it. Specific to what you heard - never generic advice.
 
 Return ONLY valid JSON, no markdown fence, in exactly this shape:
@@ -553,7 +555,10 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "song_score": <1-10, or null if there's no actual song here to judge>,
   "song_why": "<one sentence, as a listener: what makes it land or not>",
   "hook_score": <1-10 for the HOOK alone - the chorus first, else any refrain or most repeatable moment - or null if the take has no chorus or hook to judge>,
-  "hook_why": "<one sentence: what makes the hook stick or not - the melody, the rhythm of the words, the repetition>",{lyric_fields}{mix_fields}
+  "hook_why": "<one sentence: what makes the hook stick or not - the melody, the rhythm of the words, the repetition>",
+  "feelz_score": <1-10 for FEELZ - how strongly the take carries a real emotion across to a listener - or null if it is an exercise with no emotion to judge>,
+  "feelz_emotion": "<the emotion or emotions you hear, in one to three plain words, e.g. 'grief', 'defiant joy', 'longing'>",
+  "feelz_why": "<one sentence: what makes it move you or not - the voice, the pacing, the honesty, the space it leaves>",{lyric_fields}{mix_fields}
   "heard": [{{"t": "<m:ss, or empty if unsure>", "what": "<one plain sentence: what is audible>", "dim": "<one score key above, or other>", "confidence": <1-3>}}, ...],
   "verdict": "<one sentence in that voice, what this take actually is>",
   "strengths": ["<what genuinely worked, named specifically - AT LEAST ONE, always>", "..."],

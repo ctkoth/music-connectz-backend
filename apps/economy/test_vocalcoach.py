@@ -1781,3 +1781,25 @@ class HookIsRatedApartTests(StrengthWeightedOverallTests):
         out, _ = self._run({"score": 6, "scores": {"flow": 6}, "verdict": "v",
                             "strengths": ["s"], "fixes": ["f"], "next_drill": "d"})
         self.assertIsNone(out["hook_score"])
+
+
+class FeelzCountsInOverallTests(StrengthWeightedOverallTests):
+    BASE = {"score": 6, "scores": {"flow": 6, "timing": 6, "breath": 6, "clarity": 6,
+                                    "delivery": 6, "style_match": 6},
+            "verdict": "v", "strengths": ["s"], "fixes": ["f"], "next_drill": "d"}
+
+    def test_feelz_is_served_counted_and_moves_the_overall(self):
+        hi, _ = self._run({**self.BASE, "feelz_score": 10, "feelz_emotion": "grief",
+                           "feelz_why": "raw"})
+        none, _ = self._run(self.BASE)
+        self.assertEqual((hi["feelz_score"], hi["feelz_emotion"]), (10, "grief"))
+        self.assertTrue(hi["feelz_counted"])
+        self.assertFalse(none["feelz_counted"])
+        self.assertIsNone(none["feelz_score"])
+        self.assertGreater(hi["score_exact"], none["score_exact"])
+
+    def test_a_ten_over_sixes_lands_between_the_mean_and_the_ten(self):
+        from apps.economy.vocalcoach import strength_weighted_exact as ex
+        x = ex({"a": 6, "b": 6, "c": 6, "d": 6, "e": 6, "hookz": 10, "feelz": 10})
+        self.assertGreater(x, 6)
+        self.assertLess(x, 10)
