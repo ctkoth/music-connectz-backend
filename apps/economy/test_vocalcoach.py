@@ -1713,3 +1713,21 @@ class UsualSettingsAndExactScoreTests(TestCase):
         self.assertEqual(got, {"genre": "R&B", "target": "baritone",
                                "style": "Lyrical", "difficulty": "builder"})
         self.assertEqual(usual_settings(u, "singz"), {})
+
+
+class UsualTopTests(TestCase):
+    def test_a_habit_needs_65_percent_and_five_takes(self):
+        from django.contrib.auth import get_user_model
+        from apps.economy.models import TakeScore
+        from apps.economy.vocalcoach import usual_top
+        u = get_user_model().objects.create_user("topx", password="pw-12345-xyz")
+        for g in ["Drill"] * 4:
+            TakeScore.objects.create(user=u, app_key="rapz", genre=g)
+        self.assertEqual(usual_top(u, "rapz"), {})            # only 4 takes
+        TakeScore.objects.create(user=u, app_key="rapz", genre="Drill")
+        TakeScore.objects.create(user=u, app_key="rapz", genre="Trap")
+        top = usual_top(u, "rapz")["genre"]                   # 5 of 6 = 83%
+        self.assertEqual((top["value"], top["n"]), ("Drill", 6))
+        for g in ["Trap"] * 4:
+            TakeScore.objects.create(user=u, app_key="rapz", genre=g)
+        self.assertNotIn("genre", usual_top(u, "rapz"))       # 5 of 10 = 50%

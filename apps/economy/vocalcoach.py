@@ -758,6 +758,33 @@ def coach_rate_limit_check(user):
     return None
 
 
+def usual_top(user, app_key, window=60, min_uses=5):
+    """The value a member picks MOST for each setting, when it is a habit.
+
+    {field: {value, share, n}} — only where one value carries at least 65% of
+    at least `min_uses` takes. The default is still their LAST choice
+    (`usual_settings`); this is what the screen offers as a suggestion when the
+    two differ. Below the bar nothing is said: a 3-of-5 is not a habit.
+    """
+    try:
+        from collections import Counter
+        from .models import TakeScore
+        rows = list(TakeScore.objects.filter(user=user, app_key=app_key)
+                    .order_by("-created_at")[:window])
+        out = {}
+        for field in ("genre", "target", "style", "difficulty"):
+            vals = [(getattr(t, field, "") or "").strip() for t in rows]
+            vals = [v for v in vals if v]
+            if len(vals) < min_uses:
+                continue
+            value, n = Counter(vals).most_common(1)[0]
+            if n / len(vals) >= 0.65:
+                out[field] = {"value": value, "share": round(n / len(vals), 2), "n": len(vals)}
+        return out
+    except Exception:
+        return {}
+
+
 def usual_settings(user, app_key, window=40):
     """What this member usually aims a take at, read from the takes they sent.
 
@@ -881,6 +908,7 @@ class SingZCoachView(APIView):
             "difficulties": DIFFICULTIES,
             # Their own last settings, so the pickers open on them.
             "usual": usual_settings(request.user, self.app_key),
+            "usual_top": usual_top(request.user, self.app_key),
             # Whether this coach can judge writing at all. Served rather than
             # guessed by the client, because a toggle offered on a drum take is
             # the switch-that-changes-nothing this codebase already has a note
