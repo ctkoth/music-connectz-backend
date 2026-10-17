@@ -628,7 +628,7 @@ PROMPTZ_BONUS = 1.25
 # pass-through pricing a loss: sell at 0.8c, owe Anthropic 1c.
 PROMPTZ_CENTS_PER_UNIT = 1 / PROMPTZ_BONUS
 
-# SpinaZ buy PromptZ, at ten to one.
+# SpinaZ buy PromptZ, at a thousand to one (Corey's call, as an inflation sink).
 #
 # Before this, PromptZ could be bought with CASH and nothing else — so every
 # free way to earn on this platform (rating, referring, AdZ, OfferZ, finishing
@@ -643,7 +643,17 @@ PROMPTZ_CENTS_PER_UNIT = 1 / PROMPTZ_BONUS
 # OnboardZ is 15 🏷️, about seven Haiku runs, a genuine welcome and not a
 # living. Cash stays the fast lane and the subscription stays the shortcut.
 # What changes is that a member without either is no longer stuck.
-SPINAZ_PER_PROMPTZ = 10
+#
+# THEN MOVED to 1000:1, on purpose, by Corey: "cost prompts 1000 spinaz, make it
+# expensive, that's economics". 🍥 is minted by ratings, referrals, ads and the
+# zodiac bonuses and has no other sink, so a cheap conversion lets supply pile up
+# unspent; a dear one makes prompts a long-run sink that soaks it back up. The
+# cost, stated plainly so it can be reversed: at 1000 the door is shut for
+# anyone who just arrived (150 🍥 from OnboardZ is 0.15 of a prompt), so the
+# daily FREE allowance, the subscription and cash are now the real ways to AI
+# and this is the long-game one. A tier still says how much, never whether —
+# the free allowance is what keeps that true.
+SPINAZ_PER_PROMPTZ = 1000
 
 # What an agent run is CHARGED, as a multiple of what it COST to serve.
 #

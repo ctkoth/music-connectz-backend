@@ -76,7 +76,7 @@ CLEAN_SWEEP_XP = 30
 #
 # Energy cannot be cashed out and cannot leave the platform — it is spent
 # HERE, so paying it funds more activity instead of inflating anything. 🍥
-# converts to PromptZ at 10:1 (catalog.SPINAZ_PER_PROMPTZ), which is real
+# converts to PromptZ at the catalog.SPINAZ_PER_PROMPTZ rate, which is real
 # model spend, so every coin has a cost to us. The rule that falls out:
 # **pay ⚡ generously, pay 🍥 carefully.**
 #

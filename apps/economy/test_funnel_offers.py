@@ -12,6 +12,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from .catalog import SPINAZ_PER_PROMPTZ
 from . import offerz_engine as fz
 from .models import OfferDismissal, membership_for, profile_for, wallet_for
 
@@ -91,7 +92,7 @@ class TheOfferList(TestCase):
         w = wallet_for(u)
         w.prompt_day = timezone.now().strftime("%Y-%m-%d")
         w.prompts_used_today = 99
-        w.spinaz = 500
+        w.spinaz = SPINAZ_PER_PROMPTZ + 500
         w.save(update_fields=["prompt_day", "prompts_used_today", "spinaz", "updated_at"])
         return u
 

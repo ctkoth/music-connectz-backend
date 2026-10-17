@@ -245,8 +245,16 @@ class RegisterSerializer(serializers.Serializer):
             from apps.economy.views import platform_owner
             owner = platform_owner()
             if owner and owner.id != user.id:
-                award_spinaz(owner, SIGNUP_WELCOME_SPINAZ, f"new member join ({user.username})",
-                             app_key="profilez", target="signup")
+                from datetime import timedelta
+                from django.utils import timezone
+                from apps.economy.models import OWNER_JOIN_BONUS_DAILY_CAP, Transaction
+                paid_today = Transaction.objects.filter(
+                    user=owner, app_key="profilez", target="signup",
+                    note__startswith="new member join",
+                    created_at__gte=timezone.now() - timedelta(hours=24)).count()
+                if paid_today < OWNER_JOIN_BONUS_DAILY_CAP:
+                    award_spinaz(owner, SIGNUP_WELCOME_SPINAZ, f"new member join ({user.username})",
+                                 app_key="profilez", target="signup")
             # Store the birthday on the searchable economy profile if provided.
             birthday = (validated.get("birthday") or "").strip()
             if birthday:

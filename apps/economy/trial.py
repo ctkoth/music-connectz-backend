@@ -384,7 +384,7 @@ class PublicTiersView(APIView):
         from .models import (ENERGY_FLOOR_PER_HOUR, PROMPT_ALLOWANCE,
                              REFERRAL_REWARD_JOINEE_SPINAZ,
                              REFERRAL_REWARD_REFERRER_SPINAZ,
-                             SIGNUP_WELCOME_SPINAZ, founding_status)
+                             SIGNUP_WELCOME_SPINAZ, REFERRAL_REWARD_MONTHLY_CAP, founding_status)
 
         ladder = tier_ladder()
         founding = founding_status()
@@ -450,5 +450,9 @@ class PublicTiersView(APIView):
                 "welcome_spinaz": SIGNUP_WELCOME_SPINAZ,
                 "referrer_spinaz": REFERRAL_REWARD_REFERRER_SPINAZ,
                 "joinee_spinaz": REFERRAL_REWARD_JOINEE_SPINAZ,
+                # The ceiling on that reward, stated with it: 300 for every invite
+                # is not what is on offer, and a gain found out to be capped after
+                # the fact is the price-found-by-paying-it failure in reverse.
+                "referrer_monthly_cap": REFERRAL_REWARD_MONTHLY_CAP,
             },
         })

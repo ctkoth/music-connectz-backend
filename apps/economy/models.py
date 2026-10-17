@@ -1912,9 +1912,18 @@ def log_resource(user, resource, amount, note="", *, app_key="", target="", visi
 # bonus. A member can only ever be referred once, and never by themselves.
 REFERRAL_REWARD_REFERRER_SPINAZ = 300
 REFERRAL_REWARD_JOINEE_SPINAZ = 100
+# The referrer's 300 is the biggest uncapped way to MINT SpinAZ here, and
+# registering is free: an unlimited reward per sign-up is a faucet for anyone
+# willing to make accounts, and every coin it prints dilutes everybody else's.
+# So the referrer is paid for this many referrals in any rolling 30 days; the
+# rest are still recorded, and the invite still works, but earn nothing more.
+REFERRAL_REWARD_MONTHLY_CAP = 10
 
 # Signup welcome bonus — awarded to every new user, on top of any referral bonus
 SIGNUP_WELCOME_SPINAZ = 15
+# The platform owner's own per-join bonus is a mint too, and anybody can
+# trigger it by registering, so it has a daily ceiling.
+OWNER_JOIN_BONUS_DAILY_CAP = 20
 
 
 class Referral(models.Model):
@@ -1937,12 +1946,22 @@ def record_referral(referrer, joinee):
     if Referral.objects.filter(joinee=joinee).exists():
         return None
     ref = Referral.objects.create(referrer=referrer, joinee=joinee)
-    award_spinaz(referrer, REFERRAL_REWARD_REFERRER_SPINAZ, "referral (referrer)",
-                 app_key="profilez", target="referral-code")
+    # Counted AFTER creating this one, so the cap is exactly "N paid per 30 days".
+    recent = Referral.objects.filter(
+        referrer=referrer, created_at__gte=timezone.now() - timedelta(days=30)).count()
+    paid = recent <= REFERRAL_REWARD_MONTHLY_CAP
+    if paid:
+        award_spinaz(referrer, REFERRAL_REWARD_REFERRER_SPINAZ, "referral (referrer)",
+                     app_key="profilez", target="referral-code")
+    # The joinee is welcomed either way: they did nothing wrong, and it is one
+    # payment per account that can only ever be referred once.
     award_spinaz(joinee, REFERRAL_REWARD_JOINEE_SPINAZ, "referral (welcome)",
                  app_key="profilez", target="referral-code")
     notify(referrer, "referral",
-           f"@{joinee.username} joined via your invite. +{REFERRAL_REWARD_REFERRER_SPINAZ} 🍥 in your balance.",
+           (f"@{joinee.username} joined via your invite. +{REFERRAL_REWARD_REFERRER_SPINAZ} 🍥 in your balance."
+            if paid else
+            f"@{joinee.username} joined via your invite. You've reached {REFERRAL_REWARD_MONTHLY_CAP} paid "
+            f"referrals in 30 days, so there is no 🍥 for this one — the next window opens as the oldest one ages out."),
            actor=joinee, item_id="referral-code")
 
     # ZodiacZ — Cancer brings people home. Fired on the REFERRER, who is the
