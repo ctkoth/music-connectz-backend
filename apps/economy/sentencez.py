@@ -138,6 +138,75 @@ NO_INVENTION = ("Use ONLY the facts stated in the request. Never invent an emplo
                 "something out that this document normally carries, write a [BRACKETED PLACEHOLDER] "
                 "for it; do not guess and do not explain the gap outside the brackets.")
 
+# The lyric problem areas the coach can score, and the writer that fixes each.
+#
+# Every one of these is the same product: five suggestions for ONE weak
+# dimension, each with the technique it uses and why it lands, ranked by what
+# members rate highest — and every one is a saved SentenceWork, so a line a
+# member takes into a release, battle or deal carries K-Oth's royalty on the
+# part they keep, exactly as any other piece does. `techniques` is a closed list
+# PER KIND: the ratings are grouped by it, so a technique the model invents
+# would be a group of one that can never be ranked.
+FIXERS = {
+    "punchlines": {
+        "dim": "punchlines", "label": "Punchlines", "emoji": "🥊", "noun": "punchlines", "one": "punchline",
+        "techniques": {"wordplay": "Wordplay", "double_meaning": "Double meaning", "metaphor": "Metaphor",
+                       "simile": "Simile", "callback": "Callback", "reversal": "Reversal",
+                       "multisyllabic": "Multisyllabic", "other": "Other"},
+        "core": "A punchline lands on a turn: a setup, then a payoff the listener did not see coming.",
+        "hint": ("Paste the bars you want better punchlines for (or the whole verse). You get five, each "
+                 "with why it lands, ranked by what members rate highest.")},
+    "hooks": {
+        "dim": "hook", "label": "Hooks (HookZ)", "emoji": "🪝", "noun": "hooks", "one": "hook",
+        "techniques": {"repeat": "Repeated phrase", "call_response": "Call and response", "chant": "Chant",
+                       "melodic": "Melodic line", "contrast": "Contrast", "question": "Question",
+                       "one_word": "One-word hook", "other": "Other"},
+        "core": "A hook is the chorus or refrain a listener can sing back after one hearing.",
+        "hint": ("Paste your chorus (or the verse it follows). You get five hooks, each with why it "
+                 "sticks, ranked by what members rate highest.")},
+    "rhymes": {
+        "dim": "rhyme", "label": "Rhymes", "emoji": "🔗", "noun": "rhyme rewrites", "one": "rewrite",
+        "techniques": {"multisyllabic": "Multisyllabic", "internal": "Internal rhyme", "chain": "Chain rhyme",
+                       "slant": "Slant rhyme", "stacked": "Stacked rhymes", "other": "Other"},
+        "core": "Rewrite weak lines so the rhymes land on the stressed syllables and the meaning survives.",
+        "hint": "Paste the bars whose rhymes feel weak. You get five rewrites, each with why it rhymes better."},
+    "imagery": {
+        "dim": "imagery", "label": "Imagery", "emoji": "🖼️", "noun": "imagery lines", "one": "line",
+        "techniques": {"sensory": "Sensory detail", "concrete": "Concrete detail", "metaphor": "Metaphor",
+                       "motion": "Motion", "contrast": "Contrast", "other": "Other"},
+        "core": "Imagery shows the listener a thing instead of naming a feeling.",
+        "hint": "Paste the bars that tell more than they show. You get five lines, each with why it paints."},
+    "storybeats": {
+        "dim": "story", "label": "Story beats", "emoji": "📖", "noun": "story beats", "one": "beat",
+        "techniques": {"setup_payoff": "Setup and payoff", "turn": "Turn", "stakes": "Stakes",
+                       "callback": "Callback", "time_jump": "Time jump", "other": "Other"},
+        "core": "A story beat moves the verse from where it is to somewhere the listener wants to follow.",
+        "hint": "Paste the verse that wanders. You get five beats, each with why it moves the story."},
+    "freshangles": {
+        "dim": "freshness", "label": "Fresh angles", "emoji": "💡", "noun": "fresh angles", "one": "angle",
+        "techniques": {"pov": "Unexpected point of view", "specific": "Specific detail", "reversal": "Reversal",
+                       "personal": "Personal truth", "wordplay": "Wordplay", "other": "Other"},
+        "core": "A fresh angle says a familiar thing in a way the listener has not heard it.",
+        "hint": "Paste the bars that sound like everyone else. You get five angles, each with why it is fresh."},
+}
+FIX_COUNT = 5
+MIN_RATINGS_TO_RANK = 5   # below this a technique's average is a coincidence, not a preference
+# What the coach's dimension keys map to, so a weak score finds its writer.
+FIXER_FOR_DIM = {f["dim"]: k for k, f in FIXERS.items()}
+
+KINDS.update({
+    k: {"label": f["label"], "emoji": f["emoji"], "json": True, "fixer": True,
+        "ask": (f"exactly five {f['noun']} this rapper could use in the bars below, to lift a weak "
+                f"{f['dim']} score. {f['core']} Each must fit the genre, be original (never a famous "
+                f"line) and be something THIS rapper could say. Reply as JSON: "
+                '{"items":[{"line":"<the ' + f["one"] + ', one or two bars>",'
+                '"technique":"<one of: ' + ", ".join(t for t in f["techniques"] if t != "other") + '>",'
+                '"why":"<one or two sentences: why it works, and why it fixes the weakness in THESE bars>",'
+                '"where":"<which line or section of their bars it would replace or follow, or empty>"}]}'),
+        "hint": f["hint"], "style_label": "Genre / style (optional)"}
+    for k, f in FIXERS.items()
+})
+
 KINDS.update({
     "resume": {"label": "Resume", "emoji": "📄", "plain": True, "no_invention": True,
                "ask": ("a resume in plain text: a header with name and contact placeholders, a two-line "
@@ -181,7 +250,7 @@ for _k, _h in _HINTS.items():
 # The order a screen lists them in: what most people came to write first, the
 # persona-gated agreements last so a member without the persona is not shown
 # two locked doors before anything they can use.
-_ORDER = ("resume", "cover_letter", "lyrics", "poem", "bio", "caption", "post", "essay", "contract", "royalties")
+_ORDER = ("resume", "cover_letter", "lyrics", *FIXERS, "poem", "bio", "caption", "post", "essay", "contract", "royalties")
 assert set(_ORDER) == set(KINDS), "a kind was added without being placed in _ORDER"
 KINDS = {k: KINDS[k] for k in _ORDER}
 
@@ -201,7 +270,7 @@ FILL_NOTE = ("Written from only what you gave it. Fill every [BRACKETED] blank w
 # bio), follows a standard (essay, APA) or is a legal draft, and a voice must
 # never change what is true. A poem is plain by default (no house register) but
 # makes no claim about anybody, so a custom voice may write it.
-CREATIVE_KINDS = ("lyrics", "poem", "caption", "post")
+CREATIVE_KINDS = ("lyrics", *FIXERS, "poem", "caption", "post")
 
 
 def voice_of(kind):
@@ -261,6 +330,9 @@ def kinds_for(user):
                     "voice": voice_of(key),
                     "voice_note": voice_note(key, owner, writer),
                     "takes_voice": key in CREATIVE_KINDS,
+                    # A fixer exists to repair a score the coach gave: it belongs to the
+                    # music platform and is not part of the writer-only standalone.
+                    "fixer": bool(k.get("fixer")),
                     "invents_nothing": bool(k.get("no_invention")),
                     "hint": k.get("hint", ""),
                     "style_label": k.get("style_label", "Genre / style (optional)")})
@@ -310,15 +382,18 @@ def prompt_for(kind, topic, genre="", majority=None, minority=None, owner=False,
         # gives the safe version, never somebody else's voice.
         lines.append("VOICE: " + (ACADEMIC_VOICE if owner else ACADEMIC_PLAIN))
     elif register == "koth":
-        lines.append("VOICE: " + PERSONAL_VOICE + (" " + LYRIC_STYLE if kind == "lyrics" else ""))
+        lines.append("VOICE: " + PERSONAL_VOICE + (" " + LYRIC_STYLE if kind == "lyrics" or kind in FIXERS else ""))
     if k.get("no_invention"):
         lines.append(NO_INVENTION)
-    if kind in ("lyrics", "caption", "post") and not custom and not plainer:
+    if kind in ("lyrics", *FIXERS, "caption", "post") and not custom and not plainer:
         samples = voice_samples()
         if samples:
             lines.append("Match the voice of these samples — vocabulary, rhythm, wordplay, attitude — "
                          "but never reuse their lines or their subjects:\n" + "\n---\n".join(samples))
-    lines.append("Reply with the finished piece only: no preamble, no notes about what you wrote.")
+    if k.get("json"):
+        lines.append("Reply with ONLY the JSON object: no markdown fence, no preamble, no notes.")
+    else:
+        lines.append("Reply with the finished piece only: no preamble, no notes about what you wrote.")
     return "\n\n".join(lines)
 
 
@@ -344,12 +419,90 @@ def _text_of(resp):
     return "".join(str(p.get("text", "")) for p in parts if isinstance(p, dict)).strip()
 
 
-def _work_dict(w):
+def parse_fixes(kind, text):
+    """[{line, technique, why, where}] from the model's JSON, cleaned and capped.
+
+    Tolerant of a markdown fence or a sentence around the object; strict about
+    what survives: a line with no text is dropped, a technique outside THIS
+    kind's closed list becomes 'other', and every field is length-capped. Empty
+    list when nothing usable came back, which the caller treats as an empty
+    answer (not charged, not saved).
+    """
+    import json
+    techniques = FIXERS[kind]["techniques"]
+    m = re.search(r"\{.*\}", text or "", re.S)
+    if not m:
+        return []
+    try:
+        raw = json.loads(m.group(0)).get("items")
+    except (ValueError, AttributeError):
+        return []
+    out = []
+    for it in (raw if isinstance(raw, list) else [])[:FIX_COUNT]:
+        if not isinstance(it, dict):
+            continue
+        line = str(it.get("line", "")).strip()[:300]
+        if not line:
+            continue
+        tech = str(it.get("technique", "")).strip().lower().replace(" ", "_")
+        out.append({"line": line, "technique": tech if tech in techniques else "other",
+                    "why": str(it.get("why", "")).strip()[:400],
+                    "where": str(it.get("where", "")).strip()[:160]})
+    return out
+
+
+def technique_stats(kind):
+    """{technique: {avg, n}} — what members rate each technique of ONE kind of
+    fix, from the ratings alone. A technique nobody has rated is absent, never 0.
+    Grouped per kind: a 'reversal' that works as a punchline says nothing about
+    a 'reversal' as a fresh angle."""
+    from django.db.models import Avg, Count
+    from .models import PunchlineRating
+    rows = (PunchlineRating.objects.filter(work__kind=kind)
+            .values("technique").annotate(avg=Avg("stars"), n=Count("id")))
+    return {r["technique"]: {"avg": round(float(r["avg"]), 2), "n": r["n"]} for r in rows}
+
+
+def fixer_items(work, user=None):
+    """The work's suggestions, ranked by what members rate highest.
+
+    Ranked only where there is evidence: a technique with at least
+    MIN_RATINGS_TO_RANK ratings sorts by its members' average; the rest keep the
+    writer's own order after them, and say so (`community` is None) instead of
+    wearing a made-up number. `my_stars` is this member's own rating of the line.
+    """
+    from .models import PunchlineRating
+    items = (work.inputs or {}).get("items") or []
+    techniques = FIXERS.get(work.kind, {}).get("techniques", {})
+    stats = technique_stats(work.kind)
+    mine = {}
+    if user is not None:
+        mine = dict(PunchlineRating.objects.filter(work=work, user=user).values_list("idx", "stars"))
+    rows = []
+    for i, it in enumerate(items):
+        st = stats.get(it.get("technique"))
+        community = st if st and st["n"] >= MIN_RATINGS_TO_RANK else None
+        rows.append({"idx": i, "line": it.get("line", ""), "why": it.get("why", ""),
+                     "where": it.get("where", ""), "technique": it.get("technique", "other"),
+                     "technique_label": techniques.get(it.get("technique"), "Other"),
+                     "community": community, "my_stars": mine.get(i)})
+    rows.sort(key=lambda r: (0, -r["community"]["avg"], r["idx"]) if r["community"] else (1, 0, r["idx"]))
+    return rows
+
+
+def _work_dict(w, user=None):
+    extra = {}
+    if w.kind in FIXERS:
+        extra = {"items": fixer_items(w, user),
+                 "rank_note": ("Ranked by what members rate highest, once a technique has "
+                               f"{MIN_RATINGS_TO_RANK} ratings. Until then they are in the writer's order "
+                               "and say so.")}
     return {"id": w.id, "kind": w.kind, "label": KINDS.get(w.kind, {}).get("label", w.kind),
             "topic": w.topic, "text": w.text, "inputs": w.inputs,
             "created_at": w.created_at.isoformat(),
             "legal_note": LEGAL_NOTE if w.kind in LEGAL_KINDS else "",
-            "note": FILL_NOTE if KINDS.get(w.kind, {}).get("no_invention") else ""}
+            "note": FILL_NOTE if KINDS.get(w.kind, {}).get("no_invention") else "",
+            **extra}
 
 
 class SentenceView(APIView):
@@ -385,8 +538,10 @@ class SentenceView(APIView):
                              f"{KOTH_ROYALTY_PCT}% of it, scaled by how much of the original you kept — "
                              f"keep half and it's {KOTH_ROYALTY_PCT / 2:g}%."),
             "legal_note": LEGAL_NOTE,
+            "fix_min_ratings": MIN_RATINGS_TO_RANK,
+            "fixers": {k: {"dim": f["dim"], "label": f["label"]} for k, f in FIXERS.items()},
             "rhyme_max": 4,
-            "works": [_work_dict(w) for w in works],
+            "works": [_work_dict(w, request.user) for w in works],
         })
 
     def post(self, request):
@@ -453,15 +608,29 @@ class SentenceView(APIView):
             return Response({"detail": "The writer came back empty. Nothing was charged — try again."},
                             status=status.HTTP_502_BAD_GATEWAY)
 
+        items = []
+        if kind in FIXERS:
+            items = parse_fixes(kind, text)
+            if not items:
+                # Nothing usable in the reply is an empty answer: not charged, not saved.
+                logger.error("Sentence ConnectZ: %s reply had no usable items — %s", kind, text[:300])
+                return Response({"detail": "The writer came back with nothing usable. Nothing was charged — try again."},
+                                status=status.HTTP_502_BAD_GATEWAY)
+            # What is stored, and so what the royalty is measured against, is the
+            # lines alone: the member uses a line, not the writer's commentary on it.
+            text = "\n".join(it["line"] for it in items)
+
         charged = _bill(request.user, f"Sentence ConnectZ — {KINDS[kind]['label']}", count_daily=True)
         if charged is None:
             return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
                             status=status.HTTP_402_PAYMENT_REQUIRED)
         work = SentenceWork.objects.create(
             user=request.user, kind=kind, topic=topic, text=text,
-            inputs={"genre": genre, "majority": majority, "minority": minority},
+            inputs={"genre": genre, "majority": majority, "minority": minority,
+                    **({"items": items} if kind in FIXERS else {})},
         )
-        return Response({**_work_dict(work), "charged_cents": charged}, status=status.HTTP_201_CREATED)
+        return Response({**_work_dict(work, request.user), "charged_cents": charged},
+                        status=status.HTTP_201_CREATED)
 
 
 class SentenceRoyaltyView(APIView):
@@ -476,3 +645,28 @@ class SentenceRoyaltyView(APIView):
         edited = str((request.data or {}).get("text", ""))
         return Response({"kept_share": kept_share(work.text, edited),
                          "royalty_pct": royalty_pct(work.text, edited)})
+
+
+class PunchlineRateView(APIView):
+    """POST {stars: 1-5}: rate one suggested line from any fixer writer. Only the member it was
+    written for can rate it, once per line (a second rating replaces the first)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk, idx):
+        from .models import PunchlineRating
+        work = SentenceWork.objects.filter(pk=pk, user=request.user, kind__in=list(FIXERS)).first()
+        items = (work.inputs or {}).get("items") if work else None
+        if not work or not isinstance(items, list) or not (0 <= idx < len(items)):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            stars = int((request.data or {}).get("stars"))
+        except (TypeError, ValueError):
+            stars = None
+        # Out of range is refused, not clamped: a 9 is not a 5, it is a mistake.
+        if stars is None or not 1 <= stars <= 5:
+            return Response({"detail": "Rate it from 1 to 5."}, status=status.HTTP_400_BAD_REQUEST)
+        PunchlineRating.objects.update_or_create(
+            work=work, user=request.user, idx=idx,
+            defaults={"stars": stars, "technique": str(items[idx].get("technique") or "other")[:24]})
+        return Response({"items": fixer_items(work, request.user)})

@@ -91,9 +91,16 @@ class RecordTests(TestCase):
     def test_it_keeps_the_scores_the_overall_and_the_weakest(self):
         row = T.record(self.u, "singz", self._payload(pitch=8, tone=7, breath=4,
                                                       range=6, agility=5))
-        self.assertEqual(row.overall, 6)
+        # The overall is the number the member was SHOWN (the payload's 7), not the
+        # plain mean of the dimensions (6) — the history must not disagree with the
+        # score they were just given.
+        self.assertEqual(row.overall, 7)
         self.assertEqual(row.weakest, "breath")
         self.assertEqual(row.range_class, "tenor")
+
+    def test_with_no_shown_score_the_mean_is_the_fallback(self):
+        row = T.record(self.u, "singz", {"scores": {"pitch": 8, "tone": 4}})
+        self.assertEqual(row.overall, 6)
 
     def test_a_dimension_this_instrument_does_not_have_is_dropped(self):
         """A key the model invents must not reach a column, the same guard the
@@ -358,6 +365,57 @@ class ApiTests(TestCase):
         row = self.c.get("/api/singz/progress/").data["takes"][0]
         self.assertEqual(row["open_in"], {"tab": "postz", "target": "post:12"})
 
+    def _keys(self, row):
+        return {e["key"]: e for e in row["exports"]}
+
+    def test_every_recent_take_can_go_to_postz_messagez_and_journalz(self):
+        TakeScore.objects.create(user=self.u, app_key="rapz", overall=6, genre="Trap",
+                                 scores={"flow": 6, "punchlines": 4}, weakest="punchlines",
+                                 read={"verdict": "Locked in on the beat.", "strengths": ["Cadence"],
+                                       "fixes": ["Land the last bar"], "exact": 6.2})
+        row = self.c.get("/api/rapz/progress/").data["takes"][0]
+        ex = self._keys(row)
+        for k in ("postz", "messagez", "journalz", "drills"):
+            self.assertIn(k, ex)
+        self.assertEqual(ex["postz"]["tab"], "postz")
+        body = ex["postz"]["carry"]["description"]
+        self.assertIn("Locked in on the beat.", body)
+        self.assertIn("Land the last bar", body)
+        self.assertIn("6.2/10", ex["postz"]["carry"]["title"])        # the number they were shown
+        self.assertEqual(ex["messagez"]["carry"], ex["postz"]["carry"])  # one wording, every door
+        self.assertEqual(row["exact"], 6.2)
+
+    def test_the_punchline_writer_is_offered_only_where_punchlines_are_low_and_says_its_price(self):
+        TakeScore.objects.create(user=self.u, app_key="rapz", overall=6, scores={"punchlines": 4})
+        TakeScore.objects.create(user=self.u, app_key="rapz", overall=6, scores={"punchlines": 8})
+        rows = self.c.get("/api/rapz/progress/").data["takes"]
+        low = [r for r in rows if r["scores"]["punchlines"] == 4][0]
+        high = [r for r in rows if r["scores"]["punchlines"] == 8][0]
+        self.assertNotIn("punchlines", self._keys(high))
+        pl = self._keys(low)["punchlines"]
+        self.assertEqual(pl["carry"]["kind"], "punchlines")
+        self.assertEqual(pl["cost"]["resource"], "promptz")            # price before the press
+        self.assertIn("royalty", pl["note"])
+        self.assertIn("not charged", pl["note"])
+
+    def test_a_battle_door_exists_only_for_a_take_that_came_from_a_post(self):
+        TakeScore.objects.create(user=self.u, app_key="singz", overall=7, source="post", ref="post:12")
+        TakeScore.objects.create(user=self.u, app_key="singz", overall=7, source="upload")
+        a, b = self.c.get("/api/singz/progress/").data["takes"]
+        by_ref = {r["open_in"] is not None: r for r in (a, b)}
+        self.assertEqual(self._keys(by_ref[True])["battlez"]["carry"], {"kind": "post", "post_id": 12})
+        self.assertNotIn("battlez", self._keys(by_ref[False]))
+
+    def test_the_history_shows_the_score_the_member_was_given_not_the_mean(self):
+        payload = {"score": 7, "score_exact": 7.4, "scores": {"flow": 5, "timing": 5, "hookz_unused": 9},
+                   "verdict": "v", "strengths": ["s"], "fixes": ["f"],
+                   "lyrics_read": "THE MEMBER'S OWN WORDS", "hook_score": 10}
+        row = T.record(self.u, "rapz", payload)
+        self.assertEqual(row.overall, 7)                               # not the mean (5)
+        self.assertEqual(row.read["exact"], 7.4)
+        self.assertEqual(row.read["hook"], 10)
+        self.assertNotIn("THE MEMBER'S OWN WORDS", str(row.read))      # the words are not kept
+
     def test_reading_progress_does_not_create_a_row(self):
         """get_or_create on a GET is a write on a read, and a table with an
         empty row for everybody who opened a coach is a table of nothing."""
@@ -538,3 +596,82 @@ class GameProfileTests(TestCase):
 
     def test_it_needs_an_account(self):
         self.assertEqual(APIClient().get("/api/singz/profile/").status_code, 401)
+
+
+class CoachingBoardTests(TestCase):
+    def setUp(self):
+        self.u = member("boardx")
+        self.c = APIClient()
+        self.c.force_authenticate(self.u)
+
+    def _take(self, days_ago, **scores):
+        t = TakeScore.objects.create(user=self.u, app_key="rapz", overall=6, scores=scores,
+                                     genre="Trap", weakest=min(scores, key=scores.get))
+        TakeScore.objects.filter(pk=t.pk).update(created_at=timezone.now() - timedelta(days=days_ago))
+
+    def test_a_real_improvement_is_congratulated_with_both_numbers_and_a_decline_is_flagged(self):
+        for d in (12, 11, 10):
+            self._take(d, flow=4, timing=8, punchlines=4)
+        for d in (3, 2, 1):
+            self._take(d, flow=7, timing=5, punchlines=4)
+        board = self.c.get("/api/rapz/progress/").data["coaching"]
+        win = [w for w in board["wins"] if w["key"] == "flow"][0]
+        self.assertEqual((win["was"], win["now"]), (4.0, 7.0))
+        self.assertIn("4.0 → 7.0", win["text"])
+        self.assertEqual([a["key"] for a in board["alerts"]], ["timing"])
+
+    def test_too_few_takes_means_no_congratulations(self):
+        self._take(2, flow=2)
+        self._take(1, flow=9)
+        board = self.c.get("/api/rapz/progress/").data["coaching"]
+        self.assertEqual(board["wins"], [])                       # a line through two dots
+
+    def test_a_problem_area_carries_a_free_drill_and_a_priced_writer_with_the_royalty(self):
+        for d in (3, 2, 1):
+            self._take(d, flow=8, punchlines=3)
+        board = self.c.get("/api/rapz/progress/").data["coaching"]
+        prob = [p for p in board["problems"] if p["key"] == "punchlines"][0]
+        keys = {h["key"]: h for h in prob["help"]}
+        self.assertIsNone(keys["drills"]["cost"])                 # free
+        w = keys["punchlines"]
+        self.assertEqual(w["cost"]["resource"], "promptz")        # the price, before the press
+        self.assertIn("royalty", w["note"])
+        self.assertEqual(w["carry"]["kind"], "punchlines")
+        self.assertNotIn("flow", [p["key"] for p in board["problems"]])   # 8 is not a problem
+
+    def test_every_lyric_dimension_has_a_writer_and_every_writer_a_real_dimension(self):
+        from apps.economy.instruments import LYRIC_SCORE
+        from apps.economy.sentencez import FIXER_FOR_DIM, FIXERS
+        for dim in LYRIC_SCORE:
+            self.assertIn(dim, FIXER_FOR_DIM, f"{dim} is scored but no writer fixes it")
+        for kind, f in FIXERS.items():
+            self.assertTrue(f["dim"] in LYRIC_SCORE or f["dim"] == "hook", kind)
+            self.assertIn("other", f["techniques"])
+            self.assertLessEqual(len(kind), 16)                   # SentenceWork.kind is varchar(16)
+
+
+class StrengthsAndAgreementTests(CoachingBoardTests):
+    def test_strengths_are_said_as_plainly_as_problems(self):
+        for d in (3, 2, 1):
+            self._take(d, flow=8, punchlines=3)
+        board = self.c.get("/api/rapz/progress/").data["coaching"]
+        self.assertEqual([s["key"] for s in board["strengths"]], ["flow"])
+        self.assertEqual(board["strengths"][0]["average"], 8.0)
+        self.assertNotIn("punchlines", [s["key"] for s in board["strengths"]])
+
+    def test_a_member_can_say_they_agree_and_it_is_shown_back_and_replaced(self):
+        for d in (3, 2, 1):
+            self._take(d, flow=8, punchlines=3)
+        r = self.c.post("/api/rapz/agree/", {"area": "punchlines", "agree": True}, format="json")
+        self.assertEqual(r.status_code, 200)
+        board = self.c.get("/api/rapz/progress/").data["coaching"]
+        self.assertTrue([p for p in board["problems"] if p["key"] == "punchlines"][0]["agreed"])
+        self.assertIsNone(board["strengths"][0]["agreed"])            # not asked, not answered
+        self.c.post("/api/rapz/agree/", {"area": "punchlines", "agree": False}, format="json")
+        from apps.economy.models import CoachAgreement
+        self.assertEqual(CoachAgreement.objects.filter(user=self.u).count(), 1)
+        self.assertFalse(CoachAgreement.objects.get(user=self.u).agree)
+
+    def test_an_invented_area_or_a_non_answer_is_refused(self):
+        self.assertEqual(self.c.post("/api/rapz/agree/", {"area": "swagger", "agree": True}, format="json").status_code, 400)
+        self.assertEqual(self.c.post("/api/rapz/agree/", {"area": "flow", "agree": "yes"}, format="json").status_code, 400)

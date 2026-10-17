@@ -41,7 +41,7 @@ from datetime import timedelta
 from django.utils import timezone
 
 from .instruments import profile_for_app, scores_for
-from .models import InstrumentProfile, TakeScore
+from .models import CoachAgreement, InstrumentProfile, TakeScore
 
 # A dimension at or under this, out of the coach's 1-10, is a low. Not a
 # failure — a low. Four out of ten on breath is a real reading and one of them
@@ -131,6 +131,30 @@ def parse_range(text, ranges):
     return cls, low, high
 
 
+def read_of(payload):
+    """The coach's read, trimmed to what the history shows and exports.
+
+    Whitelisted field by field: it is stored for good and shown to the member
+    later, so nothing the model volunteers rides in, and the transcribed lyrics
+    (`lyrics_read`) are deliberately NOT kept.
+    """
+    def lines(v, n=6):
+        return [str(x)[:300] for x in v][:n] if isinstance(v, list) else []
+    practice = [{"what": str(p.get("what", ""))[:200], "why": str(p.get("why", ""))[:300],
+                 "how": str(p.get("how", ""))[:400]}
+                for p in (payload.get("practice") or []) if isinstance(p, dict) and p.get("what")][:3]
+    out = {"verdict": str(payload.get("verdict", ""))[:400],
+           "strengths": lines(payload.get("strengths")), "fixes": lines(payload.get("fixes")),
+           "practice": practice}
+    for key, field in (("exact", "score_exact"), ("hook", "hook_score"), ("feelz", "feelz_score")):
+        v = payload.get(field)
+        if isinstance(v, (int, float)):
+            out[key] = v
+    if payload.get("feelz_emotion"):
+        out["feelz_emotion"] = str(payload["feelz_emotion"])[:60]
+    return {k: v for k, v in out.items() if v not in ("", [], None)}
+
+
 def record(user, app_key, payload, *, difficulty="", genre="", target="",
            style="", upload=None, source="", ref="", context=None):
     """Keep one coached take. Best-effort — a score must reach the member
@@ -156,7 +180,14 @@ def record(user, app_key, payload, *, difficulty="", genre="", target="",
         # itself already passes through in `score_take`.
         scores = {k: v for k, v in (payload.get("scores") or {}).items()
                   if k in dims and isinstance(v, int)}
-        overall = round(sum(scores.values()) / len(scores)) if scores else None
+        # The number the member was SHOWN. This used to be the plain mean of the
+        # dimensions, which is not what the coach reports (it leans on strengths,
+        # and counts HookZ and FeelZ), so the history disagreed with the score a
+        # member had just been given. Falls back to the mean for a payload that
+        # carries no overall.
+        shown = payload.get("score")
+        overall = (shown if isinstance(shown, int) and 1 <= shown <= 10
+                   else round(sum(scores.values()) / len(scores)) if scores else None)
         weakest = min(scores, key=lambda k: scores[k]) if scores else ""
         cls, low, high = parse_range(payload.get("range_profile"), prof["ranges"])
         return TakeScore.objects.create(
@@ -169,6 +200,7 @@ def record(user, app_key, payload, *, difficulty="", genre="", target="",
             # What the coach heard, kept so a later gear-advice run can tie its
             # reasons to THIS take. Not a purchase: upgrades.items is the paid part.
             upgrades=({"context": context} if context else {}),
+            read=read_of(payload),
         )
     except Exception:                                       # pragma: no cover
         return None
@@ -456,12 +488,205 @@ def strain_rule(prof):
     }
 
 
+# ----------------------------------------------------------------- exports
+
+PUNCHLINE_LOW = 5   # at or under this, the punchlines are what the writer is offered for
+
+
+def _score_text(take, label):
+    r = take.read or {}
+    shown = r.get("exact", take.overall)
+    return f"{label} take · {shown}/10" if shown is not None else f"{label} take"
+
+
+def _read_text(take, label):
+    """The take as a draft another app can open: the score, the coach's one-line
+    verdict, what worked and what to fix. Built here, once, so every destination
+    carries the same words and no screen composes a second version."""
+    r = take.read or {}
+    # No title line here: PostZ, MessageZ and JournalZ each show the title
+    # separately and join it to this, so repeating it would print it twice.
+    lines = []
+    if take.genre or take.style:
+        lines.append(" · ".join(x for x in (take.genre, take.style) if x))
+    if r.get("verdict"):
+        lines += ["", r["verdict"]] if lines else [r["verdict"]]
+    if r.get("strengths"):
+        lines += ["", "What worked:"] + [f"· {x}" for x in r["strengths"]]
+    if r.get("fixes"):
+        lines += ["", "Fix this:"] + [f"· {x}" for x in r["fixes"]]
+    return "\n".join(lines)[:4000]
+
+
+def fixer_door(app_key, dim, *, genre="", style="", price=None):
+    """The paid writer for ONE weak lyric dimension, with its price and its
+    royalty said before it is pressed. None when no writer covers `dim`."""
+    from .sentencez import FIXER_FOR_DIM, FIXERS
+    kind = FIXER_FOR_DIM.get(dim)
+    if not kind:
+        return None
+    f = FIXERS[kind]
+    return {"key": kind, "label": f"Write better {f['noun']}", "tab": "sentenceconnectz",
+            "target": "sentencez-write",
+            "carry": {"kind": kind, "genre": genre, "style": style},
+            "cost": ({"resource": "promptz", "amount": price["amount"],
+                      "free_today": price["free_today"]} if price else None),
+            "note": (f"Five {f['noun']} with why each works, ranked by what members rate highest. "
+                     "If you use one in a release, battle or deal, K-Oth's royalty applies to the "
+                     "part you keep. A failed run is not charged.")}
+
+
+def fixer_doors(take, *, price=None):
+    """{dimension: door} for every lyric dimension this take scored low."""
+    out = {}
+    for dim, v in (take.scores or {}).items():
+        if isinstance(v, int) and v <= PUNCHLINE_LOW:
+            d = fixer_door(take.app_key, dim, genre=take.genre, style=take.style, price=price)
+            if d:
+                out[dim] = d
+    hook = (take.read or {}).get("hook")
+    if isinstance(hook, (int, float)) and hook <= PUNCHLINE_LOW:
+        d = fixer_door(take.app_key, "hook", genre=take.genre, style=take.style, price=price)
+        if d:
+            out["hook"] = d
+    return out
+
+
+def exports_for(take, label, *, price=None):
+    """Where a recent take can go next — the one list, with what each costs.
+
+    A take is a score and a read sitting still, and until this list the history
+    was a dead end: a number with a date. Each destination carries `carry`, the
+    take in the shape that app fills its form from, and `note`, which says what
+    pressing it does AND what it costs before it is pressed.
+
+    Honest about what is kept: the recording is only here when the take came from
+    a post or a journal entry (`open_in`); a take recorded in the coach was
+    scored and not stored, so what travels is the score and the coach's read,
+    never audio, and nothing here pretends otherwise.
+    """
+    title, body = _score_text(take, label), _read_text(take, label)
+    out = [
+        {"key": "postz", "label": "Draft a post", "tab": "postz", "target": "composer",
+         "carry": {"title": title, "description": body}, "cost": None,
+         "note": "The score and the coach's read as a draft. PostZ states its price on the Post button; nothing is posted until you press it."},
+        {"key": "messagez", "label": "Message it", "tab": "messagez", "target": "messagez-compose",
+         "carry": {"title": title, "description": body}, "cost": None,
+         "note": "Opens a message with the read in it. Free to draft; a first message to someone costs Energy, stated in MessageZ before you send."},
+        {"key": "journalz", "label": "Add to journal", "tab": "journalz", "target": "journalz-composer",
+         "carry": {"title": title, "description": body}, "cost": None,
+         "note": "Today's entry, private until you share it."},
+    ]
+    if take.weakest:
+        out.append({"key": "drills", "label": "Practise the weak spot", "tab": take.app_key,
+                    "target": f"{take.app_key}-drills", "carry": {}, "cost": None,
+                    "note": "Free — the drills for what scored lowest."})
+    for dim, door in fixer_doors(take, price=price).items():
+        out.append(door)
+    if take.source == "post" and take.ref.startswith("post:"):
+        try:
+            pid = int(take.ref.split(":", 1)[1])
+        except ValueError:
+            pid = None
+        if pid:
+            out.append({"key": "battlez", "label": "Enter it in a battle", "tab": "battlez",
+                        "target": "battlez:main", "carry": {"kind": "post", "post_id": pid},
+                        "cost": None, "note": "Its post goes in as the entry; BattleZ states any stake before you confirm."})
+    return out
+
+
+def take_row(take, label, price=None):
+    r = take.read or {}
+    return {"id": take.pk, "overall": take.overall, "exact": r.get("exact"), "scores": take.scores,
+            "weakest": take.weakest, "difficulty": take.difficulty, "genre": take.genre,
+            "style": take.style, "target": take.target, "range_class": take.range_class,
+            "low": take.low_note, "high": take.high_note, "at": take.created_at.isoformat(),
+            "read": r,
+            "open_in": ({"tab": "postz", "target": take.ref} if take.source == "post"
+                        else {"tab": "journalz", "target": "journalz-entries"}
+                        if take.source == "journal" else None),
+            "exports": exports_for(take, label, price=price)}
+
+
+WIN_AT = 0.5          # a dimension up by this much, on enough takes, is worth saying so
+PROBLEM_AT = 5.5      # average at or under this across the window is a problem area
+STRENGTH_AT = 6.5     # average at or over this is a strength worth saying so
+
+
+def coaching(user, app_key, price=None):
+    """What to celebrate, what to watch, and what to work on — in one place.
+
+    Wins and alerts come from the same two-halves trend the history already
+    shows, with its same refusal to draw a line through two dots; a problem area
+    is a dimension whose average over the window is low, and each one carries the
+    free way to work on it (the drills) and, where a writer exists, the paid one
+    with its price and its royalty stated up front. The sentences are the
+    server's: a screen that worded its own congratulations would be one more
+    place the numbers could be rounded kindly.
+    """
+    prof = profile_for_app(app_key)
+    tr = trend(user, app_key)
+    wins, alerts = [], []
+    for r in tr.get("rows", []):
+        if r["was_n"] < 2 or r["now_n"] < 2:
+            continue
+        move = f"{r['label']} {r['was']} → {r['now']}"
+        if r["change"] >= WIN_AT:
+            wins.append({**r, "text": f"{move}. That is the work showing — keep going."})
+        elif r["change"] <= -WIN_AT:
+            alerts.append({**r, "text": f"{move}. Down over the same stretch — a bad week or something that "
+                                        "changed? The drill below is the quick way back."})
+    takes = _recent(user, app_key, days=RECENT_DAYS)
+    dims = scores_for(app_key, lyrics=True)
+    sums = {}
+    for t in takes:
+        for k, v in (t.scores or {}).items():
+            if k in dims and isinstance(v, int):
+                sums.setdefault(k, []).append(v)
+        hook = (t.read or {}).get("hook")
+        if isinstance(hook, (int, float)):
+            sums.setdefault("hook", []).append(hook)
+    last = takes[0] if takes else None
+    problems = []
+    for k, vals in sums.items():
+        if len(vals) < MIN_TAKES:
+            continue
+        avg = sum(vals) / len(vals)
+        if avg > PROBLEM_AT:
+            continue
+        helps = [{"key": "drills", "label": "Drill it", "tab": app_key, "target": f"{app_key}-drills",
+                  "carry": {}, "cost": None, "note": "Free — the drills for this."}]
+        fix = fixer_door(app_key, k, genre=getattr(last, "genre", ""), style=getattr(last, "style", ""), price=price)
+        if fix:
+            helps.append(fix)
+        problems.append({"key": k, "label": dims.get(k, "HookZ 🪝" if k == "hook" else k),
+                         "average": round(avg, 1), "takes": len(vals), "help": helps})
+    problems.sort(key=lambda p: p["average"])
+    # What they are good at, said as plainly as what they are not. A screen that
+    # only ever names the weak spot reads as a telling-off; "you're strong at
+    # this" is as true, as measured, and the half people stay for.
+    strengths = []
+    for k, vals in sums.items():
+        if len(vals) >= MIN_TAKES and sum(vals) / len(vals) >= STRENGTH_AT:
+            strengths.append({"key": k, "label": dims.get(k, "HookZ 🪝" if k == "hook" else k),
+                              "average": round(sum(vals) / len(vals), 1), "takes": len(vals)})
+    strengths.sort(key=lambda x: -x["average"])
+    agreed = dict(CoachAgreement.objects.filter(user=user, app_key=app_key).values_list("area", "agree"))
+    for row in (*problems, *strengths):
+        row["agreed"] = agreed.get(row["key"])
+    return {"wins": wins, "alerts": alerts, "problems": problems[:4], "strengths": strengths[:3],
+            "from_last_take": ((last.read or {}).get("fixes") or [])[:3] if last else [],
+            "worked_last_take": ((last.read or {}).get("strengths") or [])[:3] if last else []}
+
+
 def progress(user, app_key):
     """Everything the history knows, in one call. It renders as a screen."""
     prof = profile_for_app(app_key)
     row = profile_row(user, app_key)
     rule = strain_rule(prof)
     takes = TakeScore.objects.filter(user=user, app_key=app_key)[:10]
+    from .crosspost import coach_price
+    price = coach_price(user)          # read once, not once per row
     return {
         "app_key": app_key, "label": prof["label"],
         "dimensions": [{"key": k, "label": v} for k, v in prof["scores"].items()],
@@ -492,14 +717,8 @@ def progress(user, app_key):
             "voice_health": voice_health(user, app_key),
             "goal_match": goal_match(user, app_key),
         },
-        "takes": [{"id": t.pk, "overall": t.overall, "scores": t.scores,
-                   "weakest": t.weakest, "difficulty": t.difficulty,
-                   "range_class": t.range_class, "low": t.low_note, "high": t.high_note,
-                   "at": t.created_at.isoformat(),
-                   "open_in": ({"tab": "postz", "target": t.ref} if t.source == "post"
-                               else {"tab": "journalz", "target": "journalz-entries"}
-                               if t.source == "journal" else None)}
-                  for t in takes],
+        "takes": [take_row(t, prof["label"], price) for t in takes],
+        "coaching": coaching(user, app_key, price),
         "total_takes": TakeScore.objects.filter(user=user, app_key=app_key).count(),
     }
 
@@ -524,6 +743,23 @@ class ProgressView(APIView):
 
     def get(self, request):
         return Response(progress(request.user, self.app_key))
+
+
+class AgreeView(APIView):
+    """POST /api/<key>/agree/ {area, agree} — "yes, that is what to work on" /
+    "no, that's wrong". The member's own answer about one area, replacing the last."""
+    permission_classes = [IsAuthenticated]
+    app_key = "singz"
+
+    def post(self, request):
+        d = request.data or {}
+        area = str(d.get("area", "")).strip()
+        valid = set(scores_for(self.app_key, lyrics=True)) | {"hook"}
+        if area not in valid or not isinstance(d.get("agree"), bool):
+            return Response({"detail": "Say which area, and yes or no."}, status=status.HTTP_400_BAD_REQUEST)
+        CoachAgreement.objects.update_or_create(
+            user=request.user, app_key=self.app_key, area=area, defaults={"agree": d["agree"]})
+        return Response({"area": area, "agree": d["agree"]})
 
 
 class GameProfileView(APIView):

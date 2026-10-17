@@ -6712,6 +6712,11 @@ class TakeScore(models.Model):
     # model, cost_cents, at}. Empty until they ask for it — it is opt-in and
     # priced, and a take that never asked has nothing here.
     upgrades = models.JSONField(default=dict, blank=True)
+    # The coach's read of this take, kept so the history can SHOW it and carry it
+    # into another app: {verdict, strengths, fixes, practice, exact, hook, feelz}.
+    # Prose and numbers the coach produced — never the lyrics it transcribed, which
+    # are the member's words and were only ever used to score.
+    read = models.JSONField(default=dict, blank=True)
 
     # What the take was scored AGAINST, so a score is comparable to another.
     # An Elite take at 6 and a Rookie take at 6 are not the same take.
@@ -7386,6 +7391,47 @@ class SentenceWork(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class PunchlineRating(models.Model):
+    """One member's 1-5 rating of one punchline Sentence ConnectZ suggested to them.
+
+    The technique rides on the row so "which KINDS of punchline do members rate
+    highest" is one aggregate, not a join through JSON. The ranking the writer
+    shows is built from these and from nothing else: with too few ratings it
+    says there are none rather than inventing a preference.
+    """
+
+    work = models.ForeignKey(SentenceWork, on_delete=models.CASCADE, related_name="punchline_ratings")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="punchline_ratings")
+    idx = models.PositiveSmallIntegerField()
+    technique = models.CharField(max_length=24, db_index=True)
+    stars = models.PositiveSmallIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("work", "idx", "user")
+
+
+class CoachAgreement(models.Model):
+    """Whether a member agrees with what a coach says about one area of theirs.
+
+    One row per member, instrument and area (a dimension key, or "hook"): "yes,
+    that is the thing to work on" or "no, that's not right". It is the member's
+    own say, kept so the screen can show it back and so how often people agree
+    with a coach's read is something that can be MEASURED rather than assumed —
+    an unscored number is an opinion, and this is the cheapest check on one.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="coach_agreements")
+    app_key = models.CharField(max_length=32)
+    area = models.CharField(max_length=24)
+    agree = models.BooleanField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "app_key", "area")
 
 
 class IntelligenceUse(models.Model):

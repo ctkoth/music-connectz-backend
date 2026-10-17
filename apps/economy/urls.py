@@ -60,7 +60,7 @@ from .battlez import (BattlesView, BattleChallengeView, BattleDetailView,
                       BattleEnterView, BattleRespondView, BattleSettleView,
                       BattleWagerView, MoneyBattleVoteView)
 from .opportunitiez import OpportunitieZView
-from .sentencez import SentenceRoyaltyView, SentenceView
+from .sentencez import PunchlineRateView, SentenceRoyaltyView, SentenceView
 from .statz_trial import StatzTrialView
 from .superset import BodieZPairView
 from .viewz import ViewBeatView, ViewCountsView, ViewStartView, ViewTimelineView
@@ -245,6 +245,7 @@ urlpatterns = [
     path("intelligence/uses/", IntelligenceUsesView.as_view(), name="economy-intelligence-uses"),
     path("intelligence/uses/<int:pk>/", IntelligenceUseDetailView.as_view(), name="economy-intelligence-use"),
     path("sentencez/<int:pk>/royalty/", SentenceRoyaltyView.as_view(), name="economy-sentencez-royalty"),
+    path("sentencez/<int:pk>/punchline/<int:idx>/rate/", PunchlineRateView.as_view(), name="economy-sentencez-punchline-rate"),
     path("keyz/", KeyboardView.as_view(), name="economy-keyz"),
     path("keyz/translate/", KeyTranslateView.as_view(), name="economy-keyz-translate"),
     # Voice, both directions. Neither is gated by tier — the allowance is, and
