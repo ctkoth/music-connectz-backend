@@ -12,6 +12,7 @@ number on a card.
 import io
 import re
 
+from django.db.models import F
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework.permissions import AllowAny
@@ -49,11 +50,35 @@ def _shown(row):
     return str(row.score)
 
 
+HUMAN_LINE = "Human-made — declared by @{who}. The AI coach scored it."
+AI_ONLY_LINE = "Scored by the AI coach."
+
+
+def _why(payload):
+    """Up to two reasons behind the score, in the coach's own words: what worked,
+    then what to fix. The robot's number is only as good as the reasons you can
+    read next to it, and these are the same sentences the member got."""
+    out = []
+    for key in ("strengths", "fixes"):
+        v = (payload or {}).get(key)
+        if isinstance(v, list) and v and str(v[0]).strip():
+            out.append({"kind": key, "text": str(v[0]).strip()[:200]})
+    return out
+
+
 def share_dict(row):
     progress = (row.payload or {}).get("progress") or None
+    payload = row.payload or {}
     return {
         "shown": _shown(row),
         "progress": progress,
+        # Whether the member DECLARED this performance human-made when they shared
+        # it. A declaration, not a detection — nothing here can hear whether audio
+        # is AI-generated — so the card says "declared by", and a false one is
+        # reportable like anything else on the platform.
+        "human": bool(payload.get("human")),
+        "why": _why(payload),
+        "listeners": payload.get("listeners") if isinstance(payload.get("listeners"), dict) else None,
         "token": row.token,
         "app_key": row.app_key,
         "label": _label(row.app_key),
@@ -74,7 +99,34 @@ class ScoreShareView(APIView):
 
     def get(self, request, token):
         row = get_object_or_404(ScoreShare.objects.select_related("user"), token=token)
+        # One atomic add, never read-modify-write: two people opening it at once
+        # must both count. Best-effort — a counter must not break the page.
+        try:
+            ScoreShare.objects.filter(pk=row.pk).update(views=F("views") + 1)
+        except Exception:                                   # pragma: no cover
+            pass
         return Response(share_dict(row))
+
+
+class ScoreShareHumanView(APIView):
+    """POST /api/economy/scores/<token>/human/ {declared} — the member's own
+    declaration that this performance is human-made, shown on the card as such.
+
+    Theirs alone to make (a stranger cannot put "human-made" on somebody else's
+    card), reversible, and worded everywhere as a declaration because it is one."""
+    from rest_framework.permissions import IsAuthenticated as _Auth
+    permission_classes = [_Auth]
+
+    def post(self, request, token):
+        row = ScoreShare.objects.filter(token=token, user=request.user).first()
+        if not row:
+            return Response({"detail": "Not found."}, status=404)
+        declared = (request.data or {}).get("declared")
+        if not isinstance(declared, bool):
+            return Response({"detail": "Say yes or no."}, status=400)
+        row.payload = {**(row.payload or {}), "human": declared}
+        row.save(update_fields=["payload"])
+        return Response({"human": declared})
 
 
 def _font(size):
@@ -150,6 +202,8 @@ def render_card(d, story=False):
         for line in _wrap(g, quote, _font(36), W - 160):
             g.text((80, y), line, font=_font(36), fill=(220, 220, 230))
             y += 46
+        g.text((80, H - 140), (HUMAN_LINE.format(who=d["username"]) if d.get("human") and d["username"] else AI_ONLY_LINE),
+               font=_font(26), fill=(255, 255, 255))
         g.text((80, H - 92), f"{who}Get your take scored free → musicconnectz.net",
                font=_font(30), fill=(52, 211, 153))
     else:
@@ -167,7 +221,8 @@ def render_card(d, story=False):
         for line in _wrap(g, quote, _font(58), W - 180, max_lines=6):
             g.text((90, y), line, font=_font(58), fill=(220, 220, 230))
             y += 76
-        foot = ([f"@{d['username']}"] if d["username"] else []) + [
+        foot = ([(HUMAN_LINE.format(who=d["username"]) if d.get("human") and d["username"] else AI_ONLY_LINE)]) + \
+               ([f"@{d['username']}"] if d["username"] else []) + [
             "Get your take scored free", "musicconnectz.net"]
         y = H - 150 - 66 * len(foot)
         for line in foot:

@@ -34,7 +34,7 @@ from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView, DupeZVerify
                     DupeZReviewView, DupeZView)
 from .callz import CallDetailView, CallRateView, CallsView
 from .sharecard import post_card, profile_card
-from .scoreshare import ScoreShareView, score_card_png
+from .scoreshare import ScoreShareHumanView, ScoreShareView, score_card_png
 from .coachshare import PostCoachView, post_coach_card
 from .weeklybattle import WeeklyBattleView
 from .soundz import SoundZView
@@ -60,6 +60,8 @@ from .battlez import (BattlesView, BattleChallengeView, BattleDetailView,
                       BattleEnterView, BattleRespondView, BattleSettleView,
                       BattleWagerView, MoneyBattleVoteView)
 from .opportunitiez import OpportunitieZView
+from .breathz import BreathZView
+from .whyz import WhyZView
 from .credit_outcomes import CreditOutcomesView
 from .sentencez import PunchlineRateView, SentenceRoyaltyView, SentenceView
 from .statz_trial import StatzTrialView
@@ -221,6 +223,8 @@ urlpatterns = [
     # KeyConnectZ — the keyboard. Wallpaper is Premium; translate is free.
     path("sentencez/", SentenceView.as_view(), name="economy-sentencez"),
     path("creditz/", CreditOutcomesView.as_view(), name="economy-creditz"),
+    path("breathz/", BreathZView.as_view(), name="economy-breathz"),
+    path("whyz/", WhyZView.as_view(), name="economy-whyz"),
     path("statz-trial/", StatzTrialView.as_view(), name="economy-statz-trial"),
     path("views/start/", ViewStartView.as_view(), name="economy-views-start"),
     path("views/beat/", ViewBeatView.as_view(), name="economy-views-beat"),
@@ -309,6 +313,7 @@ urlpatterns = [
     # Shareable score cards: JSON for the page + a 1200x630 image for crawlers.
     path("scores/<str:token>/", ScoreShareView.as_view(), name="score-share"),
     path("scores/<str:token>/card.png", score_card_png, name="score-share-card"),
+    path("scores/<str:token>/human/", ScoreShareHumanView.as_view(), name="score-share-human"),
     # The coach's read posted WITH a song, and who may see it (coachshare.py).
     # `posts/<id>/coach/` is the same view under the name the screens were
     # briefed with; `postz/` is where every other PostZ route lives.

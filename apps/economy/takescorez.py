@@ -518,6 +518,14 @@ def _read_text(take, label):
     return "\n".join(lines)[:4000]
 
 
+# Breath is the one weakness that is trained away from the screen, so its door is
+# not a writer: it is a free practice app, and it says so before it is pressed.
+BREATH_DOOR = {"key": "breathz", "label": "Train your breath", "tab": "breathz", "target": "breathz-pacer",
+               "carry": {}, "cost": None,
+               "note": "Free — guided breathing for exactly this. It earns XP for turning up and never "
+                       "changes a score; your next take's Breath score is the measure."}
+
+
 def fixer_door(app_key, dim, *, genre="", style="", price=None):
     """The paid writer for ONE weak lyric dimension, with its price and its
     royalty said before it is pressed. None when no writer covers `dim`."""
@@ -585,6 +593,9 @@ def exports_for(take, label, *, price=None):
                    "note": ("A public link and card with the score and the coach's own one-line verdict, "
                             "made from what the coach actually said. Free — and anyone who joins from it "
                             "earns you the referral reward.")})
+    breath = (take.scores or {}).get("breath")
+    if isinstance(breath, int) and breath <= PUNCHLINE_LOW:
+        out.append(BREATH_DOOR)
     if take.weakest:
         out.append({"key": "drills", "label": "Practise the weak spot", "tab": take.app_key,
                     "target": f"{take.app_key}-drills", "carry": {}, "cost": None,
@@ -693,6 +704,8 @@ def coaching(user, app_key, price=None):
             continue
         helps = [{"key": "drills", "label": "Drill it", "tab": app_key, "target": f"{app_key}-drills",
                   "carry": {}, "cost": None, "note": "Free — the drills for this."}]
+        if k == "breath":
+            helps.insert(0, BREATH_DOOR)
         fix = fixer_door(app_key, k, genre=getattr(last, "genre", ""), style=getattr(last, "style", ""), price=price)
         if fix:
             helps.append(fix)

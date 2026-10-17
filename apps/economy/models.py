@@ -7643,6 +7643,11 @@ class ScoreShare(models.Model):
     # server wrote it. A post's coach read is taken from here by token and never
     # from what a client sends, for the reason this model's docstring gives.
     payload = models.JSONField(default=dict, blank=True)
+    # How many times the public page was opened. Counted on the JSON read the page
+    # makes (a crawler reading the preview image is not an open), so it is "opened",
+    # and the screen says exactly that — it is the number that tells a member their
+    # share is working, which is the reason to share the next one.
+    views = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
 
