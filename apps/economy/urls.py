@@ -67,7 +67,7 @@ from .credit_outcomes import CreditOutcomesView
 from .sentencez import PunchlineRateView, SentenceRoyaltyView, SentenceView
 from .statz_trial import StatzTrialView
 from .superset import BodieZPairView
-from .viewz import ViewBeatView, ViewCountsView, ViewStartView, ViewTimelineView
+from .viewz import ViewBeatView, ViewCountsView, ViewMineView, ViewPostResultsView, ViewStartView, ViewTimelineView
 from .metricz import HoroscopeView, MetricZView, SubstanceScaleView
 from .videoz import VideoDetailView, VideoView
 from .instrumentalz import InstrumentalMidiView, InstrumentalMoodView, InstrumentalView
@@ -232,6 +232,8 @@ urlpatterns = [
     path("views/beat/", ViewBeatView.as_view(), name="economy-views-beat"),
     path("views/counts/", ViewCountsView.as_view(), name="economy-views-counts"),
     path("views/timeline/", ViewTimelineView.as_view(), name="economy-views-timeline"),
+    path("views/mine/", ViewMineView.as_view(), name="economy-views-mine"),
+    path("views/post/<int:pk>/", ViewPostResultsView.as_view(), name="economy-views-post"),
     path("videoz/", VideoView.as_view(), name="economy-videoz"),
     path("videoz/<int:pk>/", VideoDetailView.as_view(), name="economy-videoz-detail"),
     path("substancez/", SubstanceScaleView.as_view(), name="economy-substancez-scale"),

@@ -25,6 +25,8 @@ from .catalog import TIER_DEBUG, TIER_STATZ
 from .models import StatzTrial, membership_for
 
 TRIAL_MINUTES = 60
+# When the screen tells a member how long is left, besides the banner that is always there.
+WARN_AT_SECONDS = [600, 60]
 FEATURES = [
     {"key": "mood_search", "label": "Search keys by mood", "tab": "instrumentalconnectz", "target": "instrumental-mood"},
     {"key": "page_widgets", "label": "Open any scanned site as a widget", "tab": "profilez", "target": "widgets"},
@@ -35,7 +37,42 @@ FEATURES = [
     # by hand was never gated.
     {"key": "coach_pairing", "label": "Coach supersets: compound + isolation, push + pull", "tab": "bodiez", "target": "bodiez-pairing"},
     {"key": "rest_alerts", "label": "Rest alerts and a screen that stays awake", "tab": "bodiez", "target": "bodiez-rest-alerts"},
+    # ViewZ: who viewed a post by name and every visit as a track on a clock, with what
+    # each viewer did. It is a READ of what already happened, so it switches off cleanly.
+    {"key": "viewz_tracks", "label": "Who viewed your posts, as DAW tracks", "tab": "viewz", "target": "viewz-tracks"},
 ]
+
+# THE AUDIT: every place StatZ is the difference, and whether the free hour covers it.
+#
+# A feature belongs in the sample only if it can honestly switch off again when the
+# hour is up (a read, a picker, a control). A STANDING grant wearing a timer — a saved
+# voice, a visibility setting, a limit — is not, and the audit says why for each one
+# rather than leaving the next reader to guess. `test_statz_drivers` walks the source:
+# a module that asks `has_statz` / `feature_tier` and is not named here fails, and the
+# sampled rows must be exactly FEATURES, so the list the screen shows and the list the
+# server gates cannot drift.
+#
+# `modules` is where the gate lives. Limits (characters, uploads, links, prompts) are
+# not features: they are read from the tier and never from the sample.
+DRIVERS = [
+    {"key": "mood_search", "sampled": True, "modules": ["instrumentalz"]},
+    {"key": "page_widgets", "sampled": True, "modules": ["widgetz"]},
+    {"key": "advanced_horoscope", "sampled": True, "modules": ["metricz"]},
+    {"key": "coach_pairing", "sampled": True, "modules": ["superset"]},
+    {"key": "rest_alerts", "sampled": True, "modules": []},
+    {"key": "viewz_tracks", "sampled": True, "modules": ["viewz"]},
+    {"key": "coach_voices", "sampled": False, "modules": ["coachvoice"],
+     "why_not": "Saving a coach voice is a standing preference — a sample that left one behind would be a permanent grant wearing a timer."},
+    {"key": "custom_voices", "sampled": False, "modules": ["voicez"],
+     "why_not": "A cloned voice is a stored asset that costs real compute to make; it does not switch off."},
+    {"key": "code_sandbox", "sampled": False, "modules": ["modal_sandbox"],
+     "why_not": "Every run spends real compute, so a free hour of it is a cost with no sale attached."},
+    {"key": "lesson_visibility", "sampled": False, "modules": ["lessonz"],
+     "why_not": "Setting a lesson StatZ-only changes what OTHER members can see; it must not flip back under them when an hour ends."},
+    {"key": "limits", "sampled": False, "modules": ["catalog"],
+     "why_not": "Characters, uploads, storage, links and prompts are limits read from the tier, never from a sample."},
+]
+FEATURE_MODULES = {m for d in DRIVERS for m in d["modules"]}
 UPGRADE = {"tab": "membershipz", "target": "membershipz-plans", "label": "Upgrade to StatZ"}
 
 
@@ -74,7 +111,11 @@ def state(user):
         "seconds_left": max(0, int((t.ends_at - now).total_seconds())) if active else 0,
         "minutes": TRIAL_MINUTES,
         "features": FEATURES,
+        # What StatZ holds that the free hour does NOT, and why — so the screen can say
+        # "keeping it" and mean the whole of it, not only the hour's list.
+        "also_in_statz": [{"key": d["key"], "why_not": d["why_not"]} for d in DRIVERS if not d["sampled"]],
         "upgrade": UPGRADE,
+        "warn_at_seconds": WARN_AT_SECONDS,
     }
 
 

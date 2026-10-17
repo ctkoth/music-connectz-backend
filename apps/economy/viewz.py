@@ -32,7 +32,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Post, ViewSession
+from .models import ItemRating, Message, Post, Reaction, ScoreShare, SocialComment, ViewSession
 
 User = get_user_model()
 
@@ -206,3 +206,196 @@ class ViewTimelineView(APIView):
             "total_seconds": sum(l["seconds"] for l in ordered),
             "notice": NOTICE,
         })
+
+
+# ----------------------------------------------------------------- results
+#
+# "How did it do?" — for one post, and for the share links a member sent out. Two
+# readers again: everybody gets the NUMBERS about their own post (nothing in a
+# count names anybody), and StatZ also gets who — the same line the timeline
+# already draws. Read live (the screen re-asks every BEAT seconds) and kept: it is
+# derived from the sessions, so the past is exactly as true as now.
+#
+# What the words mean, said on the screen beside the numbers (`DEFINITIONS`),
+# because "retention" with no definition is a number nobody can check:
+#   stayed     — of the visits, how many lasted at least MIN_VIEW_SECONDS
+#   came back  — of the people, how many visited on more than one separate stretch
+# Neither is video-style retention (there is no timeline to drop off from); they
+# are what a post can honestly show, and they are never blended into one score.
+
+DEFINITIONS = {
+    "views": f"Visits that lasted at least {MIN_VIEW_SECONDS} seconds — a page that merely loaded is not a view.",
+    "stayed": f"Of all visits, the share that lasted {MIN_VIEW_SECONDS} seconds or more.",
+    "came_back": "Of the people who visited, the share who came back after a gap of 30 minutes or more.",
+    "actions": "What people who visited did to this post — rated, commented, liked, or messaged you afterwards.",
+}
+
+
+def _secs(r):
+    return max(0, int((r.ended_at - r.started_at).total_seconds()))
+
+
+def _viewer_key(r):
+    return f"u{r.viewer_id}" if r.viewer_id else f"a{r.anon_id}"
+
+
+def aggregate(rows, now=None):
+    """The numbers about a list of ViewSession rows. Absent is None, never 0:
+    a percentage of nobody is an empty measurement."""
+    now = now or timezone.now()
+    total = len(rows)
+    counted = [r for r in rows if _secs(r) >= MIN_VIEW_SECONDS]
+    people = {}
+    for r in rows:
+        people.setdefault(_viewer_key(r), []).append(r)
+    members = sum(1 for k in people if k.startswith("u"))
+    back = sum(1 for v in people.values() if len(v) > 1)
+    return {
+        "views": len(counted),
+        "visits": total,
+        "people": len(people), "members": members, "visitors": len(people) - members,
+        "avg_seconds": round(sum(_secs(r) for r in counted) / len(counted)) if counted else None,
+        "stayed_pct": round(100 * len(counted) / total) if total else None,
+        "came_back_pct": round(100 * back / len(people)) if people else None,
+        "live_now": sum(1 for r in rows if r.ended_at >= now - MAX_BEAT_GAP),
+    }
+
+
+def _actions(post, rows):
+    """What the people who visited did: {viewer_key: {...}} for MEMBERS (a visitor
+    has no account to act with), and the totals."""
+    item = f"post:{post.id}"
+    first = {}
+    for r in rows:
+        if r.viewer_id and (r.viewer_id not in first or r.started_at < first[r.viewer_id]):
+            first[r.viewer_id] = r.started_at
+    ids = list(first)
+    rated = dict(ItemRating.objects.filter(item_id=item, user_id__in=ids).values_list("user_id", "score"))
+    liked = {u for u, v in Reaction.objects.filter(item_id=item, user_id__in=ids).values_list("user_id", "value") if v > 0}
+    comments = {}
+    for u in SocialComment.objects.filter(item_id=item, user_id__in=ids).values_list("user_id", flat=True):
+        comments[u] = comments.get(u, 0) + 1
+    messaged = {}
+    for u, at in Message.objects.filter(sender_id__in=ids, recipient_id=post.author_id).values_list("sender_id", "created_at"):
+        if at >= first[u]:
+            messaged[u] = messaged.get(u, 0) + 1
+    per = {u: {"rated": rated.get(u), "liked": u in liked, "commented": comments.get(u, 0),
+               "messaged": messaged.get(u, 0)} for u in ids}
+    totals = {"rated": len(rated), "liked": len(liked), "commented": sum(comments.values()),
+              "messaged": sum(messaged.values()),
+              "acted": len({u for u, a in per.items() if a["rated"] or a["liked"] or a["commented"] or a["messaged"]})}
+    return per, totals
+
+
+def post_results(post, user, now=None, days=14):
+    from .statz_trial import has_statz
+    now = now or timezone.now()
+    rows = list(ViewSession.objects.filter(target=f"post:{post.id}").select_related("viewer")
+                .order_by("started_at")[:5000])
+    agg = aggregate(rows, now)
+    per, totals = _actions(post, rows)
+    agg["actions"] = totals
+    # By day, newest last — the history. Days with nothing are rows too, so a gap
+    # reads as a gap rather than a line that skips it.
+    since = (now - timedelta(days=days - 1)).date()
+    by_day = {since + timedelta(days=i): {"views": 0, "members": set(), "visitors": set()} for i in range(days)}
+    for r in rows:
+        d = timezone.localtime(r.started_at).date() if timezone.is_aware(r.started_at) else r.started_at.date()
+        if d in by_day and _secs(r) >= MIN_VIEW_SECONDS:
+            by_day[d]["views"] += 1
+            by_day[d]["members" if r.viewer_id else "visitors"].add(_viewer_key(r))
+    out = {"post": {"id": post.id, "title": post.title, "at": post.created_at.isoformat()},
+           **agg, "definitions": DEFINITIONS, "as_of": now.isoformat(), "notice": NOTICE,
+           "by_day": [{"day": d.isoformat(), "views": v["views"], "members": len(v["members"]),
+                       "visitors": len(v["visitors"])} for d, v in sorted(by_day.items())]}
+    if not has_statz(user):
+        out["viewers"] = None
+        out["viewers_locked"] = "Who viewed — by name, with what each did — is a StatZ feature. The numbers above are yours at every tier."
+        return out
+    people = {}
+    visitor_no = {}
+    for r in rows:
+        k = _viewer_key(r)
+        if r.viewer_id:
+            row = people.setdefault(k, {"viewer": r.viewer.username, "member": True, "sessions": 0, "seconds": 0,
+                                        "first_at": r.started_at, "last_at": r.ended_at, "src": r.src, "dev": r.dev,
+                                        "clips": [], **per.get(r.viewer_id, {})})
+        else:
+            n = visitor_no.setdefault(k, len(visitor_no) + 1)
+            row = people.setdefault(k, {"viewer": f"Visitor {n}", "member": False, "sessions": 0, "seconds": 0,
+                                        "first_at": r.started_at, "last_at": r.ended_at, "src": r.src, "dev": r.dev,
+                                        "clips": []})
+        row["sessions"] += 1
+        # One clip per visit — when it started, when it ended and how long it was —
+        # so a screen can lay each viewer out as a track on a clock, like ViewZ's
+        # timeline does for everything. `seconds` is the same figure the totals use.
+        if len(row["clips"]) < 50:
+            row["clips"].append({"start": r.started_at.isoformat(), "end": r.ended_at.isoformat(),
+                                 "seconds": _secs(r)})
+        row["seconds"] += _secs(r)
+        row["last_at"] = max(row["last_at"], r.ended_at)
+        row["src"] = row["src"] or r.src
+        row["dev"] = row["dev"] or r.dev
+    viewers = sorted(people.values(), key=lambda v: -v["seconds"])[:100]
+    for v in viewers:
+        v["first_at"], v["last_at"] = v["first_at"].isoformat(), v["last_at"].isoformat()
+        v["came_back"] = v["sessions"] > 1
+    out["viewers"] = viewers
+    # The clock the tracks are drawn on: from the post going up (or the first visit,
+    # if it came earlier than the history kept) to now.
+    start = min([post.created_at] + [r.started_at for r in rows])
+    out["from"], out["to"] = start.isoformat(), now.isoformat()
+    return out
+
+
+class ViewPostResultsView(APIView):
+    """GET /api/economy/views/post/<id>/ — how one of YOUR posts did, live and over time."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        post = Post.objects.filter(pk=pk, author=request.user).first()
+        if not post:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(post_results(post, request.user))
+
+
+def link_rows(user, limit=30):
+    """The share links this member has sent out and how many times each was opened.
+    `opens` is the public page's own counter (a crawler fetching the preview image
+    is not an open); who opened a link is not recorded, so none is claimed."""
+    out = []
+    for r in ScoreShare.objects.filter(user=user).order_by("-created_at")[:limit]:
+        p = r.payload or {}
+        kind = "recap" if p.get("recap") else "win" if p.get("progress") else "take"
+        out.append({"token": r.token, "url": f"/s/{r.token}", "app_key": r.app_key, "score": r.score,
+                    "kind": kind, "genre": r.genre, "opens": r.views, "human": bool(p.get("human")),
+                    "at": r.created_at.isoformat()})
+    return out
+
+
+class ViewMineView(APIView):
+    """GET /api/economy/views/mine/ — every post of yours with its numbers, and every
+    link you shared with its opens. The list screen; one post's detail is
+    `views/post/<id>/`."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .models import Referral
+        posts = list(Post.objects.filter(author=request.user).order_by("-created_at")[:40])
+        by_target = {}
+        for r in (ViewSession.objects.filter(target__in=[f"post:{p.id}" for p in posts])
+                  .select_related("viewer").order_by("started_at")):
+            by_target.setdefault(r.target, []).append(r)
+        now = timezone.now()
+        rows = []
+        for p in posts:
+            agg = aggregate(by_target.get(f"post:{p.id}", []), now)
+            rows.append({"id": p.id, "title": p.title, "at": p.created_at.isoformat(),
+                         "visibility": p.visibility, **agg})
+        links = link_rows(request.user)
+        return Response({"posts": rows, "links": links,
+                         "links_opens": sum(l["opens"] for l in links),
+                         "joined_from_invites": Referral.objects.filter(referrer=request.user).count(),
+                         "definitions": DEFINITIONS, "as_of": now.isoformat(), "notice": NOTICE})

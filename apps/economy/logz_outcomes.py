@@ -60,9 +60,25 @@ def _take(t, request):
             "open_in": {"tab": t.app_key, "target": f"{t.app_key}:progress"}}
 
 
-def _sentence(w):
+def _promo_results(w, user):
+    """How the link inside a promo post is doing — read NOW, so the same ledger row
+    shows today's opens. None when this piece is not a promo, or its take has no
+    link. `opens` is the public page's counter; nobody is named here."""
+    tid = (w.inputs or {}).get("promo_take")
+    if not tid:
+        return None
+    t = TakeScore.objects.filter(pk=tid, user=user).only("share_token", "app_key").first()
+    if not t or not t.share_token:
+        return None
+    from .models import ScoreShare
+    row = ScoreShare.objects.filter(token=t.share_token).only("views").first()
+    return {"url": f"/s/{t.share_token}", "opens": row.views if row else 0,
+            "open_in": {"tab": "viewz", "target": "viewz-links"}}
+
+
+def _sentence(w, user=None):
     items = (w.inputs or {}).get("items") or []
-    return {"kind": "sentence", "id": w.pk, "label": w.kind, "text": w.text[:1500],
+    return {"kind": "sentence", "results": _promo_results(w, user) if user else None, "id": w.pk, "label": w.kind, "text": w.text[:1500],
             "rating": None, "report": {"items": [{"line": i.get("line", ""), "why": i.get("why", "")} for i in items]},
             "file": {"kept": True, "name": f"{w.kind}.txt", "url": None,
                      "why": "Kept in your Sentence ConnectZ library."},
@@ -81,5 +97,5 @@ def outcomes_for(user, rows, request=None):
             out[f"take:{t.pk}"] = _take(t, request)
     if sent_ids:
         for w in SentenceWork.objects.filter(user=user, pk__in=sent_ids):
-            out[f"sentence:{w.pk}"] = _sentence(w)
+            out[f"sentence:{w.pk}"] = _sentence(w, user)
     return out
