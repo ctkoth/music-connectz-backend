@@ -2412,3 +2412,17 @@ alone; the cooldown is one constant.
 `ViewMineView` also carries ActionZ across all of a member's posts (`action_counts` for everybody,
 `action_log` for StatZ — fetched once for the whole list, tested to cost the same queries for one post
 or many) and `sources`/`devices` over every post.
+
+## Dating is 18+, collabs are open at any age (Corey's calls)
+
+`MembersView` refuses a minor when the request names the VybeZ surface (`?vybez=1`) — 403 with
+`VYBEZ_MINOR_REASON`. The gate is on the SURFACE, not the search, because that endpoint is also how
+CollabZ, BattleZ, VenueZ and MessageZ pick people. Orientation (`attracted_to`, `asexual`) was already
+adult-only both ways. Collabs and battles across ages were an open question and are now decided: open
+(`test_a_minor_and_an_adult_can_make_a_collab_together`). What is NOT opened: a direct message or call
+between an adult and a minor (`may_contact`) — the recommendation was and is that a collab does not need
+one. A close-in-age exception ("teens may date adults within 5 years") was considered and rejected: it is
+a rule about when an act is a crime, not a safety rule for introducing strangers, and ages here are
+self-entered. Teens may still see each other as friends and collaborators; a ±2-year band for minors
+(so a 13 and a 17 cannot reach each other) was recommended and is **not built**. InfernoZ's dating half,
+when it exists, refuses minors the same way.

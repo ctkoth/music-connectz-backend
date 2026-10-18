@@ -69,3 +69,41 @@ class AgeGroupContactTests(TestCase):
         self.assertIn("adulta", names(self.unknown))
         self.assertEqual(names(self.teen) & {"adulta", "nobday"}, set())        # a teen sees no adults
         self.assertIn("teenb", names(self.teen))                                  # …and does see teens
+
+
+class DatingIs18PlusAndCollabsAreOpenTests(TestCase):
+    """Corey's calls: VybeZ (finding someone) is 18+; collabs stay open at any age."""
+
+    def setUp(self):
+        from apps.economy.models import profile_for
+        self.teen = User.objects.create_user("teenmaker", "t@e.com", "pw-Long-enough-1")
+        self.adult = User.objects.create_user("adultmaker", "a@e.com", "pw-Long-enough-1")
+        for u, bd in ((self.teen, "2010-03-01"), (self.adult, "1990-03-01")):
+            p = profile_for(u); p.birthday = bd; p.save()
+
+    def _as(self, u):
+        c = APIClient(); c.force_authenticate(User.objects.get(pk=u.pk)); return c
+
+    def test_vybez_refuses_a_minor_with_the_servers_sentence_and_serves_an_adult(self):
+        r = self._as(self.teen).get("/api/economy/members/?vybez=1")
+        self.assertEqual(r.status_code, 403)
+        self.assertTrue(r.data["adult_only"])
+        self.assertIn("18+", r.data["detail"])
+        self.assertIn("CollabZ", r.data["detail"])                  # the door that stays open
+        self.assertEqual(self._as(self.adult).get("/api/economy/members/?vybez=1").status_code, 200)
+
+    def test_the_plain_member_search_stays_open_to_a_minor_for_picking_collaborators(self):
+        r = self._as(self.teen).get("/api/economy/members/")
+        self.assertEqual(r.status_code, 200)                         # age-grouped, but not refused
+
+    def test_a_minor_and_an_adult_can_make_a_collab_together(self):
+        r = self._as(self.teen).post("/api/economy/collab/", {
+            "title": "Cross-age beat", "currency": "spinaz",
+            "participants": [{"username": "teenmaker", "share": 50}, {"username": "adultmaker", "share": 50}],
+        }, format="json")
+        self.assertIn(r.status_code, (200, 201), getattr(r, "data", None))
+        self.assertNotEqual(r.status_code, 403)
+
+    def test_the_age_rule_still_closes_a_direct_channel_between_them(self):
+        from apps.economy.models import may_contact
+        self.assertFalse(may_contact(self.teen, self.adult))         # collab is open; a DM or call is not

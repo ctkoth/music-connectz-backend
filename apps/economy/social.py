@@ -1272,6 +1272,11 @@ class MemberProfileView(APIView):
         return Response(out)
 
 
+VYBEZ_MINOR_REASON = ("VybeZ is for finding someone, and that part of Music ConnectZ is 18+. "
+                      "Collabs, battles, the coach and posting stay open at any age — and you can still "
+                      "find collaborators your own age in CollabZ.")
+
+
 class MembersView(APIView):
     """Search members by multi-select metrics: regions, genders, signs, sober.
 
@@ -1281,6 +1286,14 @@ class MembersView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        # VybeZ is the "find a person" surface, and dating is 18+ (Corey's call; the reasons
+        # are in CLAUDE.md). It names itself with ?vybez=1 so the gate is on the SURFACE, not on
+        # the search: this same endpoint is what CollabZ, BattleZ and MessageZ pick people with,
+        # and a minor choosing a collaborator their own age is not dating. Unknown ages count as
+        # adults, as everywhere else (`is_minor`).
+        if request.query_params.get("vybez") and is_minor(request.user):
+            return Response({"detail": VYBEZ_MINOR_REASON, "adult_only": True}, status=status.HTTP_403_FORBIDDEN)
+
         def multi(key):
             raw = request.query_params.get(key, "")
             return [x for x in raw.split(",") if x]
