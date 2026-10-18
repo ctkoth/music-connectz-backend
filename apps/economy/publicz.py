@@ -114,6 +114,7 @@ def public_profile_dict(p, request=None):
             "key": persona.get("key", ""),
             "name": persona.get("name", ""),
             "skills": skills,
+            **({"roles": persona["roles"]} if persona.get("roles") else {}),
         })
     # Redacted for the anonymous audience: a member who moved bio or links to
     # "member" must be honoured on the one page a stranger can open, which is

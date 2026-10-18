@@ -6670,6 +6670,12 @@ class LilithTask(models.Model):
     # Where doing it actually happens. goToSpot(app_key, target) on the client.
     app_key = models.CharField(max_length=32, blank=True, default="")
     target = models.CharField(max_length=64, blank=True, default="")
+    # The starter it was made from (lilith_starters.py), "" when the member wrote it.
+    template = models.CharField(max_length=40, blank=True, default="")
+    # A VERIFIED action (lilith_actions.py): Lilith ticks it herself when the platform's own
+    # records show the member did the thing `goal` times since this task was made.
+    action = models.CharField(max_length=24, blank=True, default="")
+    goal = models.PositiveSmallIntegerField(default=1)
     due = models.DateTimeField(null=True, blank=True)
     routine = models.ForeignKey("LilithRoutine", null=True, blank=True,
                                 on_delete=models.SET_NULL, related_name="tasks")
@@ -6694,6 +6700,15 @@ class LilithRoutine(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
                              related_name="lilith_routines")
     title = models.CharField(max_length=140)
+    note = models.TextField(blank=True, default="")
+    # How often it is kept. The streak counts PERIODS in a row (days, ISO weeks, calendar
+    # months), and `last_done` is the date it was last kept within one.
+    CADENCES = (("daily", "Daily"), ("weekly", "Weekly"), ("monthly", "Monthly"))
+    cadence = models.CharField(max_length=8, choices=CADENCES, default="daily")
+    template = models.CharField(max_length=40, blank=True, default="")
+    # A VERIFIED action: kept by Lilith when the records show `goal` of it in the period.
+    action = models.CharField(max_length=24, blank=True, default="")
+    goal = models.PositiveSmallIntegerField(default=1)
     # Which real action closes it, when there is one. A routine pointing at a
     # platform action is worth more than one pointing at nothing, for the
     # same reason a task is.

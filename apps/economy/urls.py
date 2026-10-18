@@ -22,7 +22,7 @@ from .retake import RetakeRemindView, RetakeStopView
 from .bodiez_trial import BodieZTrialView
 from .offerz_engine import (FunnelCatalogView, FunnelOfferRedeemView,
                             FunnelOffersView)
-from .lilith_taskz import (LilithBoardView, LilithRoutineDetailView,
+from .lilith_taskz import (LilithBoardView, LilithStarterAddView, LilithRoutineDetailView,
                            LilithRoutineListView, LilithSponsorView,
                            LilithTaskCompleteView, LilithTaskDetailView,
                            LilithTaskListView)
@@ -516,6 +516,7 @@ urlpatterns = [
     # price is on screen before anything is pressed.
     path("lilith/", LilithBoardView.as_view(), name="economy-lilith"),
     path("lilith/tasks/", LilithTaskListView.as_view(), name="economy-lilith-tasks"),
+    path("lilith/starters/", LilithStarterAddView.as_view(), name="economy-lilith-starters"),
     path("lilith/tasks/<int:task_id>/", LilithTaskDetailView.as_view(),
          name="economy-lilith-task"),
     path("lilith/tasks/<int:task_id>/complete/", LilithTaskCompleteView.as_view(),

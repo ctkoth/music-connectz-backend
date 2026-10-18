@@ -279,8 +279,9 @@ class RewardsTableTests(TestCase):
         for k in ("self_task", "platform_task", "auto_task", "collab_beginner",
                   "sponsor_graduation", "help_graduated"):
             self.assertIn(k, keys)
-        for d in L.ROUTINE_MILESTONES:
-            self.assertIn(f"routine_{d}", keys)
+        for cadence, rungs in L.CADENCE_MILESTONES.items():      # every cadence's every rung is published
+            for d in rungs:
+                self.assertIn(f"routine_{cadence}_{d}", keys)
 
     def test_the_table_states_the_caps(self):
         by = {r["key"]: r for r in L.rewards_table()}

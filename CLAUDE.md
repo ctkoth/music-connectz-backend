@@ -2515,3 +2515,55 @@ profile read, so it lives in the royalty and own-skills paths only).
 Known gap, Corey's to decide: a post with credited contributors and **no** deal is split in equal
 shares, then each share takes its skill haircut — so a weak skill earns less but the money is not moved
 to the stronger one.
+
+## Lilith's call-to-action routines: Lilith ticks them, the member cannot
+
+**A routine or task can name a VERIFIED action** (`action` + `goal`; `lilith_actions.py`). Lilith keeps
+it herself, from rows the platform already writes when the thing really happens — a `TakeScore`, a
+`Post`, a `Message`, an `ItemRating`, a `BodieZSession`, a freestyle `Post`, a `BattleEntry` — and the
+member has no button for it (`409` from the old tick endpoints, with "2 of 3 so far"). A typed tick is
+unverified; a row is a performance that happened. That is what makes the streak the "you cannot backdate
+a habit" claim made literal: only rows created AFTER the routine existed count (`sweep_routine`).
+
+- **The audit** is the catalogue: ~40 actions (every coach's scored takes, drills, practice sessions,
+  breathing, posts, freestyle posts, journal entries, Sentence ConnectZ pieces, instrumentals, videos,
+  mixes, releases, playlists, uploads, messages, ratings, comments, shares, score cards, follows, invites,
+  collabs, battles, freestyle/cypher battles, lesson bookings and offers, workouts). `test_lilith_cta`
+  reads every one against a fresh user, so a renamed field is a red test, not a routine that never ticks.
+  NOT verifiable, on purpose: profile edits (`updated_at` moves for reasons that aren't the member's work),
+  listening/reading (a tab left open), and anything like "was kind" — those stay ordinary self tasks.
+- **Cadence.** `LilithRoutine.cadence` = daily | weekly | monthly; a streak counts PERIODS (days, ISO weeks
+  Mon–Sun, calendar months) and keeping twice in one period is one keep. Rungs per cadence pay the same
+  20 / 50 / 150 🍥 (+⚡): daily 7/30/100, weekly 4/12/26, monthly 3/6/12 — fewer ticks to farm and longer
+  real time to earn, which is the point.
+- **Catch-up.** The sweep walks the periods since the last keep, so a board not opened for a week does
+  not break a run the member actually kept. It runs on the board read (a write on a read: there is no
+  cron, and it is idempotent).
+- **A milestone is once for life per starter/title, not per row.** `keep_routine` checks a stable ledger ref
+  (`ms:<template-or-title-hash>:<cadence>:<rung>`) — before this, deleting and re-making a routine re-earned
+  the rung. Custom routines are keyed by a hash of the title, so renaming is the only way round it (known,
+  small: 20 🍥 per 7 real days per routine, capped by the tier's routine ceiling).
+- **Starters** (`lilith_starters.py`) are names + descriptions + the control they open + the cadence, served
+  in the board and added by `POST /lilith/starters/ {kind, key}`: the content is the SERVER'S, a request
+  cannot set `action` or `app_key` (a task's `source=platform` decides what it pays). Only
+  `INSTRUMENT_AWARE` starters take the coach the member names. One "record a take" task and one daily
+  routine are GENERATED per coach (`take_<app>`, `daily_<app>`), so a rapper's streak is RapZ takes and a
+  SingZ take cannot keep it. Rap pack: Off the Top (freestyle post, weekly), Sixteen on Paper (Sentence
+  ConnectZ, weekly), Cypher Night (freestyle/cypher battle, monthly).
+- **Suggestions** (`lilith_suggest.py`) rank from three honest signals and say WHY in a sentence: the
+  persona (what they declared), the instrument (their scored takes, else their declared skills through the
+  role table), and the records (a habit waiting to be a streak at 3+ in 14 days; a gap — takes but no
+  posts, posts but no ratings, ratings but no messages). It only suggests; nothing is added until tapped.
+  Counts are cached 10 minutes per member.
+
+## Roles next to a persona: what a member's skills say they ARE
+
+`personaz.artist_roles` / `role_pairs`: an Independent Artist is shown as "Independent Artist · 🎤 Rapper,
+🎶 Singer, 🎸 Guitarist"; a Designer as "· 🖌️ Illustrator, 🎯 UI/UX Designer"; the same for videographers,
+producers, mix engineers, ghost writers, developers, actors, dancers, mimes, directors, managers and A&R
+scouts. DECLARED skills only (never inferred from takes or ratings), derived on READ by `personas_of` and
+dropped by `clean_persona` on any write, so a stale copy cannot be stored. A stint is stored under its key or
+its label, so a key matches as a whole run of words and the LONGEST key wins ("bass_guitar" is a Bassist
+although "bass", the voice, is inside it; "trapeze" is not a Rapper). `ROLE_COACH` maps a role to its AI
+coach, which Lilith reads to point a rapper at RapZ. Rated skills are deliberately not used: reading them
+would put a query on every member card, and `personas_of` costs none.
