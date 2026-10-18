@@ -2371,3 +2371,26 @@ ones the free hour cannot honestly switch off (a saved voice, a cloned voice, a 
 visibility setting other members see, tier limits). `test_statz_drivers` walks the source: a module that
 calls `has_statz`/`feature_tier` and is not named fails, and the sampled rows must be exactly `FEATURES`.
 The state also publishes `also_in_statz` and `warn_at_seconds` (600, 60) for the screen.
+
+## Takes leave as files, and a take points at where its results are
+
+`GET /api/<key>/take/<id>/download/?format=txt|json` and `/api/<key>/takes/export/?format=csv|json`
+answer `{filename, content_type, text}` (the screen makes the file, because a plain link cannot
+carry the login header). Own takes only; a take with no stored read says so rather than inventing
+one; an unmeasured dimension is a blank cell, never 0; a CSV cell that starts like a formula
+(`= + - @`) is made a literal because a verdict is model text. `progress(limit=)` lists ten by
+default and `?takes=all` (capped at `ALL_TAKES_CAP`) lists the rest — the history used to stop at
+ten with no sign of the others.
+
+The doors out of a take, audited (`exports_for`): share, promo post, **Instagram caption** (same
+server-built brief, kind `caption`), draft in PostZ, message, journal, drills, breath training, the
+lyric fixers for weak dimensions, enter a battle (post-sourced takes), **see how its link is doing**
+(ViewZ, once a link exists) and **download**. Not offered, on purpose: improving the member's own
+WORDS in Sentence ConnectZ from a take — the coach never stores what it transcribed, so there is
+nothing honest to send; the fixers write new lines for the weak dimension instead.
+
+ViewZ post results also carry `sources` and `devices` (counts for everybody; "direct" is a visit with
+no `?src=`) and **ActionZ** (`action_log`, StatZ): every rating, comment, like, share, members-only
+join and message from the post, newest first, with `via_page` (did they also open the post's page).
+Link opens still have no per-source split — `ScoreShare.views` is one counter, and recording a
+source per open would be a new table.

@@ -566,14 +566,21 @@ PROMO_NOTE = ("Makes the public share link (free), then writes a post about this
               "battle or deal, K-Oth's royalty applies to the part you keep.")
 
 
-def promo_door(take, *, price=None):
-    """The one-press way from a past take to a post a member can paste anywhere:
-    the share link, plus a Sentence ConnectZ post built from it. Priced on the
-    control before it is pressed — it is a paid run, and the member already
-    spent a credit on the take itself."""
-    if take.overall is None:
+PROMO_KINDS = {
+    "post": {"label": "Write a promo post", "door": "promopost"},
+    "caption": {"label": "Write an Instagram caption", "door": "promocaption"},
+}
+
+
+def promo_door(take, *, price=None, kind="post"):
+    """The one-press way from a past take to words a member can paste anywhere:
+    the share link, plus a Sentence ConnectZ piece (a post, or an Instagram caption)
+    built from it. Priced on the control before it is pressed — it is a paid run,
+    and the member already spent a credit on the take itself."""
+    if take.overall is None or kind not in PROMO_KINDS:
         return None
-    return {"key": "promopost", "label": "Write a promo post", "kind": "promo", "tab": take.app_key,
+    return {"key": PROMO_KINDS[kind]["door"], "label": PROMO_KINDS[kind]["label"], "kind": "promo",
+            "promo_kind": kind, "tab": take.app_key,
             "target": f"{take.app_key}-promo", "carry": {}, "id": take.pk,
             "cost": ({"resource": "promptz", "amount": price["amount"],
                       "free_today": price["free_today"]} if price else None),
@@ -637,9 +644,10 @@ def exports_for(take, label, *, price=None):
                    "note": ("A public link and card with the score and the coach's own one-line verdict, "
                             "made from what the coach actually said. Free — and anyone who joins from it "
                             "earns you the referral reward.")})
-    promo = promo_door(take, price=price)
-    if promo:
-        out.insert(1, promo)
+    for i, kind in enumerate(PROMO_KINDS, start=1):
+        promo = promo_door(take, price=price, kind=kind)
+        if promo:
+            out.insert(i, promo)
     breath = (take.scores or {}).get("breath")
     if isinstance(breath, int) and breath <= PUNCHLINE_LOW:
         out.append(BREATH_DOOR)
@@ -658,6 +666,14 @@ def exports_for(take, label, *, price=None):
             out.append({"key": "battlez", "label": "Enter it in a battle", "tab": "battlez",
                         "target": "battlez:main", "carry": {"kind": "post", "post_id": pid},
                         "cost": None, "note": "Its post goes in as the entry; BattleZ states any stake before you confirm."})
+    if take.share_token:
+        out.append({"key": "viewz", "label": "See how its link is doing", "tab": "viewz", "target": "viewz-links",
+                    "carry": {}, "cost": None,
+                    "note": "Free — how often the link was opened. Opens are counted; who opened a link is not recorded."})
+    out.append({"key": "download", "label": "Download this take", "kind": "download", "tab": take.app_key,
+                "target": "", "id": take.pk, "carry": {}, "cost": None,
+                "note": "Free — the score, every dimension and the coach's read as a file "
+                        "(text or JSON). The recording is its own download when it was kept."})
     return out
 
 
@@ -836,12 +852,108 @@ def coaching(user, app_key, price=None):
             "worked_last_take": ((last.read or {}).get("strengths") or [])[:3] if last else []}
 
 
-def progress(user, app_key):
-    """Everything the history knows, in one call. It renders as a screen."""
+# ------------------------------------------------------------ downloads
+#
+# A member's takes are theirs: the score, the coach's read and, where it was kept, the
+# recording. These build the FILE — one take as a readable report, or the whole history
+# as a spreadsheet — from what the server stored, for that member's own takes only. The
+# lyrics the coach transcribed are never in them because they are never stored.
+# The screen turns the text into a download itself, so no download link needs a login
+# header the browser cannot send.
+
+def _labels(app_key):
+    return dict(scores_for(app_key, lyrics=True, mix=True))
+
+
+def take_report_text(take, label, labels=None):
+    """One take as a plain-text report: when, the score, every dimension with its
+    name, then what the coach said. Absent numbers are said to be absent."""
+    labels = labels or _labels(take.app_key)
+    r = take.read or {}
+    shown = r.get("exact", take.overall)
+    lines = [f"{label} take — {timezone.localtime(take.created_at):%Y-%m-%d %H:%M}",
+             f"Overall: {shown}/10" if shown is not None else "Overall: not scored"]
+    ctx = " · ".join(x for x in (take.genre, take.style, take.difficulty, take.range_class) if x)
+    if ctx:
+        lines.append(ctx)
+    if take.scores:
+        lines += ["", "Scores:"] + [f"  {labels.get(k, k)}: {v}/10" for k, v in take.scores.items()]
+    for key, name in (("hook", "HookZ"), ("feelz", "FeelZ")):
+        if isinstance(r.get(key), (int, float)):
+            lines.append(f"  {name}: {r[key]}/10")
+    if r.get("verdict"):
+        lines += ["", "Verdict:", f"  {r['verdict']}"]
+    for key, head in (("strengths", "What worked"), ("fixes", "Fix this")):
+        if r.get(key):
+            lines += ["", f"{head}:"] + [f"  · {x}" for x in r[key]]
+    if r.get("practice"):
+        lines += ["", "Practise this:"] + [
+            "  · " + " — ".join(x for x in (p.get("what"), p.get("why"), p.get("how")) if x)
+            for p in r["practice"] if isinstance(p, dict)]
+    if not r:
+        lines += ["", "(This take was scored before the coach's read was kept, so only the score is here.)"]
+    lines += ["", "Scored by the AI coach on Music ConnectZ. The score is the coach's reading of one take, "
+                  "not a measure of you."]
+    return "\n".join(lines)
+
+
+def history_rows(user, app_key):
+    """Every take, oldest first, as flat dicts — the spreadsheet's rows."""
+    labels = _labels(app_key)
+    dims = list(labels)
+    rows = []
+    for t in TakeScore.objects.filter(user=user, app_key=app_key).order_by("created_at"):
+        r = t.read or {}
+        row = {"date": timezone.localtime(t.created_at).strftime("%Y-%m-%d %H:%M"),
+               "overall": r.get("exact", t.overall), "genre": t.genre, "style": t.style,
+               "difficulty": t.difficulty, "register": t.range_class}
+        for k in dims:
+            v = (t.scores or {}).get(k)
+            row[labels[k]] = v if isinstance(v, int) else ""
+        row["hook"] = r.get("hook", "")
+        row["feelz"] = r.get("feelz", "")
+        row["verdict"] = r.get("verdict", "")
+        row["worked"] = " | ".join(r.get("strengths", []) or [])
+        row["fix"] = " | ".join(r.get("fixes", []) or [])
+        rows.append(row)
+    return rows
+
+
+def _csv_safe(v):
+    """A spreadsheet runs a cell that starts with = + - @ as a formula. A verdict is
+    model text, so a leading one is made a literal instead of an instruction."""
+    v = "" if v is None else str(v)
+    return "'" + v if v[:1] in ("=", "+", "-", "@", "\t", "\r") and not v.lstrip("+-").replace(".", "", 1).isdigit() else v
+
+
+def history_csv(rows):
+    import csv
+    import io
+    if not rows:
+        return ""
+    out = io.StringIO()
+    w = csv.DictWriter(out, fieldnames=list(rows[0]))
+    w.writeheader()
+    for r in rows:
+        w.writerow({k: _csv_safe(v) for k, v in r.items()})
+    return out.getvalue()
+
+
+RECENT_TAKES = 10          # the screen's first page
+ALL_TAKES_CAP = 200        # "show all" — bounded, because every row carries its doors
+
+
+def progress(user, app_key, limit=RECENT_TAKES):
+    """Everything the history knows, in one call. It renders as a screen.
+
+    `limit` is how many past takes are listed (newest first). The screen asks for
+    the first ten and offers "show all N" — it used to stop at ten with no way to
+    reach the rest, so a member with twenty-three takes saw ten and no sign of the
+    other thirteen."""
     prof = profile_for_app(app_key)
     row = profile_row(user, app_key)
     rule = strain_rule(prof)
-    takes = TakeScore.objects.filter(user=user, app_key=app_key).select_related("upload")[:10]
+    takes = TakeScore.objects.filter(user=user, app_key=app_key).select_related("upload")[:limit]
     from .crosspost import coach_price
     price = coach_price(user)          # read once, not once per row
     best = personal_best(user, app_key)
@@ -901,7 +1013,8 @@ class ProgressView(APIView):
     app_key = "singz"
 
     def get(self, request):
-        return Response(progress(request.user, self.app_key))
+        limit = ALL_TAKES_CAP if request.query_params.get("takes") == "all" else RECENT_TAKES
+        return Response(progress(request.user, self.app_key, limit=limit))
 
 
 class ShareTakeView(APIView):
@@ -963,12 +1076,56 @@ class TakePromoView(APIView):
         base = (getattr(settings, "FRONTEND_URL", "") or "https://musicconnectz.net").rstrip("/")
         url = f"{base}/s/{token}"
         label = profile_for_app(self.app_key)["label"]
-        resp = write_piece(request.user, "post", promo_topic(take, label, url, human),
-                           genre=take.genre or "", spend_note=f"Promo post — {label} take",
+        kind = str((request.data or {}).get("kind") or "post")
+        if kind not in PROMO_KINDS:
+            kind = "post"
+        resp = write_piece(request.user, kind, promo_topic(take, label, url, human),
+                           genre=take.genre or "",
+                           spend_note=f"{'Promo post' if kind == 'post' else 'Instagram caption'} — {label} take",
                            extra_inputs={"promo_take": take.pk})
         if resp.status_code == status.HTTP_201_CREATED:
             resp.data = {**resp.data, "share_url": f"/s/{token}", "link": url}
         return resp
+
+
+class TakeDownloadView(APIView):
+    """GET /api/<key>/take/<id>/download/?format=txt|json — one of YOUR takes as a file's contents."""
+    permission_classes = [IsAuthenticated]
+    app_key = "singz"
+
+    def get(self, request, pk):
+        take = TakeScore.objects.filter(pk=pk, user=request.user, app_key=self.app_key).first()
+        if not take:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        label = profile_for_app(self.app_key)["label"]
+        stamp = timezone.localtime(take.created_at).strftime("%Y%m%d-%H%M")
+        if request.query_params.get("format") == "json":
+            import json
+            row = take_row(take, label)
+            body = {k: row[k] for k in ("id", "at", "overall", "exact", "scores", "genre", "style", "difficulty",
+                                        "range_class", "read")}
+            return Response({"filename": f"{self.app_key}-take-{stamp}.json", "content_type": "application/json",
+                             "text": json.dumps(body, indent=2, ensure_ascii=False)})
+        return Response({"filename": f"{self.app_key}-take-{stamp}.txt", "content_type": "text/plain",
+                         "text": take_report_text(take, label)})
+
+
+class TakesExportView(APIView):
+    """GET /api/<key>/takes/export/?format=csv|json — your WHOLE history in this app, as a file's contents."""
+    permission_classes = [IsAuthenticated]
+    app_key = "singz"
+
+    def get(self, request):
+        rows = history_rows(request.user, self.app_key)
+        if not rows:
+            return Response({"detail": "No takes to export yet."}, status=status.HTTP_404_NOT_FOUND)
+        today = timezone.localdate().isoformat()
+        if request.query_params.get("format") == "json":
+            import json
+            return Response({"filename": f"{self.app_key}-takes-{today}.json", "content_type": "application/json",
+                             "count": len(rows), "text": json.dumps(rows, indent=2, ensure_ascii=False)})
+        return Response({"filename": f"{self.app_key}-takes-{today}.csv", "content_type": "text/csv",
+                         "count": len(rows), "text": history_csv(rows)})
 
 
 class ShareWinView(APIView):

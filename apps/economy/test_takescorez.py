@@ -785,6 +785,129 @@ class PromoPostFromAPastTakeTests(CoachingBoardTests):
         self.assertEqual(self.c.post(f"/api/rapz/take/{blank.pk}/promo/", {}, format="json").status_code, 409)
 
 
+class ShowAllTakesTests(CoachingBoardTests):
+    """The history listed ten takes and said nothing about the rest."""
+
+    def test_the_first_page_is_ten_and_the_total_says_how_many_more(self):
+        for i in range(13):
+            TakeScore.objects.create(user=self.u, app_key="rapz", overall=6, scores={"flow": 6})
+        d = self.c.get("/api/rapz/progress/").data
+        self.assertEqual(len(d["takes"]), 10)
+        self.assertEqual(d["total_takes"], 13)
+
+    def test_show_all_returns_every_take_newest_first_and_is_bounded(self):
+        for i in range(13):
+            TakeScore.objects.create(user=self.u, app_key="rapz", overall=i % 9 + 1, scores={"flow": 6})
+        d = self.c.get("/api/rapz/progress/?takes=all").data
+        self.assertEqual(len(d["takes"]), 13)
+        ids = [t["id"] for t in d["takes"]]
+        self.assertEqual(ids, sorted(ids, reverse=True))
+        from apps.economy.takescorez import ALL_TAKES_CAP
+        self.assertLessEqual(ALL_TAKES_CAP, 200)
+
+    def test_another_members_takes_never_appear(self):
+        TakeScore.objects.create(user=self.u, app_key="rapz", overall=6, scores={})
+        other = APIClient(); other.force_authenticate(member("alltakesother"))
+        self.assertEqual(other.get("/api/rapz/progress/?takes=all").data["takes"], [])
+
+
+class DownloadTakesTests(CoachingBoardTests):
+    """Every take, and the whole history, can leave as a file — built from what the
+    server stored, for the member's own takes only."""
+
+    def _mine(self, **kw):
+        base = dict(user=self.u, app_key="rapz", overall=6, genre="Trap", scores={"flow": 7, "breath": 4},
+                    read={"verdict": "Locked in.", "strengths": ["Cadence"], "fixes": ["Last bar"], "exact": 6.4,
+                          "practice": [{"what": "Breath hold", "why": "Run out of air", "how": "4-4-4-4"}]})
+        base.update(kw)
+        return TakeScore.objects.create(**base)
+
+    def test_every_take_offers_a_free_download_door_last(self):
+        self._mine()
+        row = self.c.get("/api/rapz/progress/").data["takes"][0]
+        door = row["exports"][-1]
+        self.assertEqual((door["key"], door["kind"]), ("download", "download"))
+        self.assertIsNone(door["cost"])
+        self.assertEqual(door["id"], row["id"])
+
+    def test_one_take_downloads_as_a_readable_report_with_every_dimension_named(self):
+        t = self._mine()
+        d = self.c.get(f"/api/rapz/take/{t.pk}/download/").data
+        self.assertTrue(d["filename"].endswith(".txt"))
+        for want in ("Overall: 6.4/10", "Locked in.", "Cadence", "Last bar", "Breath hold", "Trap"):
+            self.assertIn(want, d["text"])
+        self.assertIn("Flow", d["text"])        # the label, not the key
+
+    def test_a_take_with_no_read_says_so_rather_than_inventing_one(self):
+        t = self._mine(read={}, scores={})
+        text = self.c.get(f"/api/rapz/take/{t.pk}/download/").data["text"]
+        self.assertIn("scored before the coach's read was kept", text)
+
+    def test_json_download_is_the_stored_data(self):
+        import json
+        t = self._mine()
+        d = self.c.get(f"/api/rapz/take/{t.pk}/download/?format=json").data
+        self.assertEqual(json.loads(d["text"])["scores"], {"flow": 7, "breath": 4})
+
+    def test_the_whole_history_exports_as_csv_with_labelled_columns_and_blanks_not_zeros(self):
+        import csv, io
+        self._mine()
+        self._mine(scores={"flow": 5}, read={"verdict": "ok", "exact": 5.0})
+        d = self.c.get("/api/rapz/takes/export/").data
+        self.assertTrue(d["filename"].endswith(".csv"))
+        self.assertEqual(d["count"], 2)
+        rows = list(csv.DictReader(io.StringIO(d["text"])))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["Flow \U0001F30A"], "7")
+        self.assertEqual(rows[1]["Breath \U0001FAC1"], "")          # not measured is blank, never 0
+
+    def test_a_verdict_that_starts_like_a_formula_is_made_a_literal(self):
+        from apps.economy.takescorez import _csv_safe
+        self.assertEqual(_csv_safe("=HYPERLINK(\"x\")"), "'=HYPERLINK(\"x\")")
+        self.assertEqual(_csv_safe("+1+1"), "'+1+1")
+        self.assertEqual(_csv_safe("-3.5"), "-3.5")             # a number stays a number
+        self.assertEqual(_csv_safe("plain"), "plain")
+
+    def test_only_your_own_takes_and_nothing_when_empty(self):
+        t = self._mine()
+        other = APIClient(); other.force_authenticate(member("dlstranger"))
+        self.assertEqual(other.get(f"/api/rapz/take/{t.pk}/download/").status_code, 404)
+        self.assertEqual(other.get("/api/rapz/takes/export/").status_code, 404)   # nothing of theirs
+
+    def test_every_instrument_has_both_routes(self):
+        from django.urls import reverse
+        from music_connectz.urls import INSTRUMENT_APP_KEYS
+        for key in INSTRUMENT_APP_KEYS:
+            self.assertTrue(reverse(f"{key}-take-download", args=[1]), key)
+            self.assertTrue(reverse(f"{key}-takes-export"), key)
+
+
+class PromoCaptionAndFollowUpDoorsTests(PromoPostFromAPastTakeTests):
+    """A take can write a caption as well as a post, and points at where its link's results are."""
+
+    def test_both_promo_doors_sit_after_share_and_the_viewz_door_follows_a_link(self):
+        t = self._past()
+        row = self.c.get("/api/rapz/progress/").data["takes"][0]
+        self.assertEqual([e["key"] for e in row["exports"]][:3], ["share", "promopost", "promocaption"])
+        self.assertNotIn("viewz", [e["key"] for e in row["exports"]])       # no link yet, nothing to watch
+        self.c.post(f"/api/rapz/take/{t.pk}/share/", {}, format="json")
+        keys = [e["key"] for e in self.c.get("/api/rapz/progress/").data["takes"][0]["exports"]]
+        self.assertIn("viewz", keys)
+        self.assertEqual(keys[-1], "download")
+
+    def test_a_caption_runs_the_caption_writer_and_an_unknown_kind_falls_back_to_a_post(self):
+        from unittest.mock import patch
+        from apps.economy.models import SentenceWork
+        t = self._past()
+        with patch("apps.economy.sentencez._key", return_value="k"), \
+                patch("apps.economy.sentencez.generate_content", return_value=(self._reply("Fire take 🔥 #rap"), [])):
+            r = self.c.post(f"/api/rapz/take/{t.pk}/promo/", {"kind": "caption"}, format="json")
+            self.assertEqual(r.status_code, 201, r.data)
+            r2 = self.c.post(f"/api/rapz/take/{t.pk}/promo/", {"kind": "../etc"}, format="json")
+        self.assertEqual(sorted(SentenceWork.objects.values_list("kind", flat=True)), ["caption", "post"])
+        self.assertEqual(r2.status_code, 201)
+
+
 class ShareAWinTests(CoachingBoardTests):
     def _climb(self):
         for d in (12, 11, 10):

@@ -32,7 +32,8 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import ItemRating, Message, Post, Reaction, ScoreShare, SocialComment, ViewSession
+from .models import (ItemRating, Message, Post, PostJoin, PostShare, Reaction, ScoreShare, SocialComment,
+                     ViewSession)
 
 User = get_user_model()
 
@@ -261,6 +262,21 @@ def aggregate(rows, now=None):
     }
 
 
+def breakdown(rows, field, blank):
+    """Visits and people by `field` (src or dev): where they came from, said in counts.
+    An empty value is `blank` ("direct" / "unknown"), a real bucket rather than a
+    dropped row — most visits arrive with no ?src= and a table that hid them would
+    make the few tagged ones look like all of them."""
+    seen = {}
+    for r in rows:
+        key = getattr(r, field) or blank
+        b = seen.setdefault(key, {"visits": 0, "people": set()})
+        b["visits"] += 1
+        b["people"].add(_viewer_key(r))
+    return sorted(({field: k, "visits": b["visits"], "people": len(b["people"])} for k, b in seen.items()),
+                  key=lambda x: (-x["visits"], x[field]))
+
+
 def _actions(post, rows):
     """What the people who visited did: {viewer_key: {...}} for MEMBERS (a visitor
     has no account to act with), and the totals."""
@@ -287,6 +303,42 @@ def _actions(post, rows):
     return per, totals
 
 
+ACTION_LOG_MAX = 100
+ACTION_LABELS = {"rating": "rated it", "comment": "commented", "like": "liked it", "share": "shared it",
+                 "join": "joined it (members-only)", "message": "messaged you"}
+
+
+def action_log(post, rows):
+    """ActionZ: everything people DID from this post, newest first — a rating, a comment,
+    a like, a share, a members-only join, a message sent after looking. `via_page` says
+    whether that person also has a visit on the post's own page (they came and looked)
+    or acted from the feed. Read from the tables the actions already live in; nothing
+    here is stored twice, so the past is as true as now."""
+    item = f"post:{post.id}"
+    visited = {r.viewer_id: r.started_at for r in rows if r.viewer_id}
+    ev = []
+    for r in ItemRating.objects.filter(item_id=item).select_related("user"):
+        ev.append({"type": "rating", "who": r.user.username, "at": r.created_at or r.updated_at,
+                   "detail": f"{r.score}/10" + (f" — “{r.reason}”" if r.reason else ""), "uid": r.user_id})
+    for c in SocialComment.objects.filter(item_id=item).select_related("user"):
+        ev.append({"type": "comment", "who": c.user.username, "at": c.created_at,
+                   "detail": c.body[:140], "uid": c.user_id})
+    for x in Reaction.objects.filter(item_id=item, value__gt=0).select_related("user"):
+        ev.append({"type": "like", "who": x.user.username, "at": x.updated_at, "detail": "", "uid": x.user_id})
+    for sh in PostShare.objects.filter(post=post).select_related("user"):
+        ev.append({"type": "share", "who": sh.user.username, "at": sh.shared_at, "detail": "", "uid": sh.user_id})
+    for j in PostJoin.objects.filter(post=post, user__isnull=False).select_related("user"):
+        ev.append({"type": "join", "who": j.user.username, "at": j.joined_at,
+                   "detail": f"stayed {j.active_seconds}s", "uid": j.user_id})
+    for m in Message.objects.filter(recipient_id=post.author_id, sender_id__in=list(visited)).select_related("sender"):
+        if m.created_at >= visited[m.sender_id]:
+            ev.append({"type": "message", "who": m.sender.username, "at": m.created_at, "detail": "", "uid": m.sender_id})
+    ev = [e for e in ev if e["uid"] != post.author_id]          # your own taps on your own post are not "people"
+    ev.sort(key=lambda e: e["at"], reverse=True)
+    return [{"type": e["type"], "label": ACTION_LABELS[e["type"]], "who": e["who"], "at": e["at"].isoformat(),
+             "detail": e["detail"], "via_page": e["uid"] in visited} for e in ev[:ACTION_LOG_MAX]]
+
+
 def post_results(post, user, now=None, days=14):
     from .statz_trial import has_statz
     now = now or timezone.now()
@@ -295,6 +347,11 @@ def post_results(post, user, now=None, days=14):
     agg = aggregate(rows, now)
     per, totals = _actions(post, rows)
     agg["actions"] = totals
+    # Where the visits came from and on what — counts, never names, so every tier sees
+    # them. `src` is the share link's ?src= (instagram, tiktok…); "direct" is a visit
+    # that carried none, which is not the same as "unknown" and is said as it is.
+    agg["sources"] = breakdown(rows, "src", "direct")
+    agg["devices"] = breakdown(rows, "dev", "unknown")
     # By day, newest last — the history. Days with nothing are rows too, so a gap
     # reads as a gap rather than a line that skips it.
     since = (now - timedelta(days=days - 1)).date()
@@ -308,6 +365,12 @@ def post_results(post, user, now=None, days=14):
            **agg, "definitions": DEFINITIONS, "as_of": now.isoformat(), "notice": NOTICE,
            "by_day": [{"day": d.isoformat(), "views": v["views"], "members": len(v["members"]),
                        "visitors": len(v["visitors"])} for d, v in sorted(by_day.items())]}
+    if has_statz(user):
+        out["action_log"] = action_log(post, rows)
+    else:
+        out["action_log"] = None
+        out["action_log_locked"] = ("ActionZ — who rated, commented, liked, shared or messaged, by name and when — is a "
+                                    "StatZ feature. The counts above are yours at every tier.")
     if not has_statz(user):
         out["viewers"] = None
         out["viewers_locked"] = "Who viewed — by name, with what each did — is a StatZ feature. The numbers above are yours at every tier."

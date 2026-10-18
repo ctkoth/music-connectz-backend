@@ -212,3 +212,49 @@ class PromoLinkResultsInTheLedgerTests(TestCase):
         ScoreShare.objects.filter(token="tokx").update(views=9)          # later, the same row says more
         self.assertEqual(outcomes_for(u, rows)[f"sentence:{w.pk}"]["results"]["opens"], 9)
         self.assertEqual(outcomes_for(other, rows), {})                   # a forged ref reads as nothing
+
+
+class ActionZTests(ResultsTests):
+    """ActionZ: what people did from a post, by name for StatZ, counts for everybody."""
+
+    def test_statz_gets_a_newest_first_log_of_every_kind_of_action(self):
+        from apps.economy.models import PostShare, Reaction
+        Reaction.objects.create(user=self.fan, item_id=self.t, value=1)
+        PostShare.objects.create(post=self.post, user=self.fan)
+        with patch("apps.economy.statz_trial.has_statz", return_value=True):
+            log = self.o.get(f"{V}post/{self.post.id}/").json()["action_log"]
+        kinds = {e["type"] for e in log}
+        self.assertEqual(kinds, {"rating", "comment", "message", "like", "share"})
+        self.assertTrue(all(e["who"] == "listener" for e in log))
+        self.assertTrue(all(e["via_page"] for e in log))              # the fan also viewed the page
+        times = [e["at"] for e in log]
+        self.assertEqual(times, sorted(times, reverse=True))
+        self.assertTrue(any("8/10" in e["detail"] for e in log if e["type"] == "rating"))
+
+    def test_an_action_from_the_feed_says_so_and_your_own_taps_are_not_people(self):
+        from apps.economy.models import ItemRating, Reaction
+        feedfan = User.objects.create_user("feedfan", "ff@e.com", "pw-Long-enough-1")
+        ItemRating.objects.create(user=feedfan, item_id=self.t, score=9)
+        Reaction.objects.create(user=self.owner, item_id=self.t, value=1)
+        with patch("apps.economy.statz_trial.has_statz", return_value=True):
+            log = self.o.get(f"{V}post/{self.post.id}/").json()["action_log"]
+        mine = [e for e in log if e["who"] == "poster"]
+        self.assertEqual(mine, [])
+        ff = next(e for e in log if e["who"] == "feedfan")
+        self.assertFalse(ff["via_page"])
+
+    def test_everyone_else_gets_counts_and_a_locked_log(self):
+        d = self.o.get(f"{V}post/{self.post.id}/").json()
+        self.assertIsNone(d["action_log"])
+        self.assertIn("StatZ", d["action_log_locked"])
+        self.assertEqual(d["actions"]["rated"], 1)
+
+    def test_sources_and_devices_are_counts_for_everybody_and_direct_is_a_bucket(self):
+        d = self.o.get(f"{V}post/{self.post.id}/").json()
+        by = {s["src"]: s for s in d["sources"]}
+        self.assertEqual(set(by), {"direct", "instagram", "tiktok"})
+        self.assertEqual(by["direct"]["visits"], 2)                    # the two untagged visits
+        self.assertEqual(by["instagram"]["visits"], 1)
+        devs = {x["dev"]: x["visits"] for x in d["devices"]}
+        self.assertEqual(devs["phone"], 2)
+        self.assertNotIn("aaa", str(d["sources"]))
