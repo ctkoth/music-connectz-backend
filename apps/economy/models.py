@@ -7752,6 +7752,30 @@ class VideoWork(models.Model):
         ordering = ["-created_at"]
 
 
+class VideoStitch(models.Model):
+    """A music video made of several Video ConnectZ shots joined, with the
+    member's OWN track laid over them. Each shot is an ordinary `VideoWork`
+    (priced, held and refunded as a single clip); this row is the project that
+    joins whatever landed."""
+
+    STATUS_PENDING, STATUS_DONE, STATUS_FAILED = "pending", "done", "failed"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="video_stitches")
+    track = models.ForeignKey("Upload", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    track_start = models.PositiveIntegerField(default=0)
+    aspect = models.CharField(max_length=8, default="16:9")
+    shots = models.ManyToManyField("VideoWork", related_name="stitches", blank=True)
+    shot_order = models.JSONField(default=list, blank=True)   # VideoWork ids, in the order to join
+    status = models.CharField(max_length=8, default=STATUS_PENDING)
+    upload = models.ForeignKey("Upload", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    error = models.CharField(max_length=200, blank=True, default="")
+    claim = models.CharField(max_length=40, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
 class Horoscope(models.Model):
     """One sign's reading for one day — written once, read by everybody with
     that sign. See metricz.py: a reading, never a measurement."""

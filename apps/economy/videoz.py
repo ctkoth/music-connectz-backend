@@ -290,55 +290,67 @@ class VideoView(APIView):
             face = Face.objects.filter(pk=d.get("face_id"), owner=request.user).first()
             if not face:
                 return Response({"detail": "Only your own FaceZ photos can be used."}, status=status.HTTP_400_BAD_REQUEST)
-        key = _key()
-        if not key:
-            return Response({"detail": "Video ConnectZ isn't switched on — the backend is missing GEMINI_API_KEY."},
-                            status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        cost = price_cents()
-        held = hold(request.user, cost)
-        if held is None:
-            return Response({"detail": "Not enough PromptZ or balance for a video.", "price_cents": cost},
-                            status=status.HTTP_402_PAYMENT_REQUIRED)
-        work = VideoWork.objects.create(user=request.user, kind=kind, prompt=prompt, aspect=aspect, face=face,
-                                        held_promptz=held[0], held_cash=held[1])
-        instance = {"prompt": f"{KINDS[kind]['ask']} {prompt}"}
-        if face:
-            try:
-                face.image.open("rb")
-                raw = face.image.read()
-                face.image.close()
-                ext = os.path.splitext(face.image.name)[1].lower()
-                instance["image"] = {"bytesBase64Encoded": base64.b64encode(raw).decode("ascii"),
-                                     "mimeType": _IMAGE_MIME.get(ext, "image/jpeg")}
-            except Exception:
-                refund(work, "your FaceZ photo couldn't be read")
-                return Response({"detail": "Your FaceZ photo couldn't be read. Nothing was charged."},
-                                status=status.HTTP_400_BAD_REQUEST)
-        body = {"instances": [instance], "parameters": {"aspectRatio": aspect}}
-        op, last = "", None
-        try:
-            for model in _models():
-                # The key rides in a header, never the query string: `requests`
-                # puts the URL in every connection error it raises, and
-                # `logger.exception` below writes those to the log.
-                last = requests.post(f"{BASE}/models/{model}:predictLongRunning",
-                                     headers=_auth(key), json=body, timeout=60)
-                if last.status_code != 404:
-                    op = (last.json() or {}).get("name", "") if last.status_code == 200 else ""
-                    break
-        except requests.RequestException:
-            logger.exception("Video ConnectZ: could not reach Veo")
-            last = None
-        if not op:
-            logger.error("Video ConnectZ: start failed %s — %s", getattr(last, "status_code", 0),
-                         getattr(last, "text", "")[:300])
-            reason, sentence, stored = start_failure(last)
-            refund(work, stored)
-            return Response({"detail": sentence, "reason": reason, "refunded": True},
-                            status=status.HTTP_502_BAD_GATEWAY)
-        work.operation = op
-        work.save(update_fields=["operation"])
+        work, refusal = start_render(request.user, kind, prompt, aspect, face)
+        if refusal is not None:
+            return refusal
         return Response(_work_dict(work, request), status=status.HTTP_201_CREATED)
+
+
+def start_render(user, kind, prompt, aspect, face=None):
+    """Hold the price and start ONE render. Returns (work, None) or (None, Response).
+
+    Shared by the single-clip screen and the stitched music video, so a shot is
+    priced, held, refused and refunded by exactly the same code as a clip.
+    """
+    key = _key()
+    if not key:
+        return None, Response({"detail": "Video ConnectZ isn't switched on — the backend is missing GEMINI_API_KEY."},
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    cost = price_cents()
+    held = hold(user, cost)
+    if held is None:
+        return None, Response({"detail": "Not enough PromptZ or balance for a video.", "price_cents": cost},
+                        status=status.HTTP_402_PAYMENT_REQUIRED)
+    work = VideoWork.objects.create(user=user, kind=kind, prompt=prompt, aspect=aspect, face=face,
+                                    held_promptz=held[0], held_cash=held[1])
+    instance = {"prompt": f"{KINDS[kind]['ask']} {prompt}"}
+    if face:
+        try:
+            face.image.open("rb")
+            raw = face.image.read()
+            face.image.close()
+            ext = os.path.splitext(face.image.name)[1].lower()
+            instance["image"] = {"bytesBase64Encoded": base64.b64encode(raw).decode("ascii"),
+                                 "mimeType": _IMAGE_MIME.get(ext, "image/jpeg")}
+        except Exception:
+            refund(work, "your FaceZ photo couldn't be read")
+            return None, Response({"detail": "Your FaceZ photo couldn't be read. Nothing was charged."},
+                            status=status.HTTP_400_BAD_REQUEST)
+    body = {"instances": [instance], "parameters": {"aspectRatio": aspect}}
+    op, last = "", None
+    try:
+        for model in _models():
+            # The key rides in a header, never the query string: `requests`
+            # puts the URL in every connection error it raises, and
+            # `logger.exception` below writes those to the log.
+            last = requests.post(f"{BASE}/models/{model}:predictLongRunning",
+                                 headers=_auth(key), json=body, timeout=60)
+            if last.status_code != 404:
+                op = (last.json() or {}).get("name", "") if last.status_code == 200 else ""
+                break
+    except requests.RequestException:
+        logger.exception("Video ConnectZ: could not reach Veo")
+        last = None
+    if not op:
+        logger.error("Video ConnectZ: start failed %s — %s", getattr(last, "status_code", 0),
+                     getattr(last, "text", "")[:300])
+        reason, sentence, stored = start_failure(last)
+        refund(work, stored)
+        return None, Response({"detail": sentence, "reason": reason, "refunded": True},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    work.operation = op
+    work.save(update_fields=["operation"])
+    return work, None
 
 
 class VideoDetailView(APIView):
