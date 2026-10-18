@@ -555,6 +555,10 @@ number and not coaching:
 
 "feelz_score" rates the FEEL, apart from the polish: how strongly an honest listener would be moved, whatever the emotion - a raw sad verse that lands is a 9, a clean take with nothing behind it is a 4. Do not reward happiness or punish roughness, and say plainly in feelz_why that this is your read as a listener, not a prediction of how any particular person will feel. The server counts it as one part of the overall, so do not fold it into your own overall either. Null for a scale, warm-up or exercise.
 
+"feelz_tips" is only for a FEELZ of 6 or lower: up to three specific things to try to carry more feeling in THIS take. Each has a "kind" - one of delivery (how it is sung or said: intention, attack, tone), phrasing (where lines start, stretch or land), dynamics (loud and soft, build and release), pacing (rushing, dragging, the space left between lines), intention (what the words are really about and who they are said to), gear (the microphone or chain is making it thin, harsh or distant - say what kind of change, e.g. a large-diaphragm condenser or a dynamic mic closer to the mouth, a pop filter, never a brand), or room (reflections, noise or distance in the recording space) - plus "what" (the specific change, naming the moment or line where it went flat), "why" (how it holds the feeling back) and "how" (the steps to try on the next take). Use gear or room ONLY when the recording itself, not the performance, is what you hear holding the feeling back. Never a general reminder to "feel it more". If FEELZ is 7 or higher, or null, return an empty list.
+
+"mix_tips" is separate, and is about the MIX, not the performance: when the vocal is hard to make out or to feel because of how it sits in the mix - buried under the instrumental, muddy low-mids, harsh or sibilant top, too dry or too washy, uneven level - give up to three: "what" to change in the mix, "why" it hides the words or the feeling, and "how" to do it (a starting EQ region to cut or lift, compression guidance, vocal level against the beat, a de-esser, how much reverb or delay), plus "helps": clarity, feelz or both. Name the moment it is worst. Only what you can actually hear; if the vocal sits well, or there is no instrumental or mix to speak of, return an empty list.
+
 "practice" is up to three exercises, one for each of your fixes, worst first: what to do, why it fixes THAT problem in THIS take, and how to run it. Specific to what you heard - never generic advice.
 
 Return ONLY valid JSON, no markdown fence, in exactly this shape:
@@ -571,7 +575,9 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "hook_why": "<one sentence: what makes the hook stick or not - the melody, the rhythm of the words, the repetition>",
   "feelz_score": <1-10 for FEELZ - how strongly the take carries a real emotion across to a listener - or null if it is an exercise with no emotion to judge>,
   "feelz_emotion": "<the emotion or emotions you hear, in one to three plain words, e.g. 'grief', 'defiant joy', 'longing'>",
-  "feelz_why": "<one sentence: what makes it move you or not - the voice, the pacing, the honesty, the space it leaves>",{lyric_fields}{mix_fields}
+  "feelz_why": "<one sentence: what makes it move you or not - the voice, the pacing, the honesty, the space it leaves>",
+  "feelz_tips": [{{"kind": "<delivery|phrasing|dynamics|pacing|intention|gear|room>", "what": "<only when FEELZ is 6 or lower: the specific moment and change>", "why": "<how it holds the feeling back>", "how": "<steps to try next take>"}}, ...],
+  "mix_tips": [{{"helps": "<clarity|feelz|both>", "what": "<the mix change>", "why": "<what it is hiding>", "how": "<how to do it>"}}, ...],{lyric_fields}{mix_fields}
   "heard": [{{"t": "<m:ss, or empty if unsure>", "what": "<one plain sentence: what is audible>", "dim": "<one score key above, or other>", "confidence": <1-3>}}, ...],
   "verdict": "<one sentence in that voice, what this take actually is>",
   "strengths": ["<what genuinely worked, named specifically - AT LEAST ONE, always>", "..."],

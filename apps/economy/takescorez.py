@@ -159,6 +159,16 @@ def read_of(payload):
     for field in ("hook_counted", "feelz_counted"):
         if isinstance(payload.get(field), bool) and field.split("_")[0] in out:
             out[field] = payload[field]
+    if "feelz" in out and isinstance(payload.get("feelz_tips"), list):
+        from .vocalcoach import _feelz_tips
+        tips = _feelz_tips(payload["feelz_tips"], out["feelz"])          # one shape, one cleaner
+        if tips:
+            out["feelz_tips"] = tips
+    if isinstance(payload.get("mix_tips"), list):
+        from .vocalcoach import _mix_tips
+        mix = _mix_tips(payload["mix_tips"])
+        if mix:
+            out["mix_tips"] = mix
     for key, field in (("hook_why", "hook_why"), ("feelz_why", "feelz_why")):
         if payload.get(field) and key.split("_")[0] in out:
             out[key] = str(payload[field])[:400]
@@ -549,6 +559,16 @@ def _read_text(take, label):
     extras = extras_of(r)
     if extras:
         lines += [""] + [f"{e['label']} {e['value']}/10" + (f" — {e['detail']}" if e["detail"] else "") for e in extras]
+        for e in extras:
+            if e.get("tips"):
+                lines += ["", f"To bring more feeling ({e['label']}):"] + [
+                    f"· {x['label']}: {x['what']}" + (f" Why: {x['why']}" if x.get("why") else "")
+                    + (f" How: {x['how']}" if x.get("how") else "") for x in e["tips"]]
+    mix = mix_tips_of(r)
+    if mix:
+        lines += ["", "Mix suggestions:"] + [
+            f"· {x['what']}" + (f" Why: {x['why']}" if x["why"] else "") + (f" How: {x['how']}" if x["how"] else "")
+            for x in mix]
     return "\n".join(lines)[:4000]
 
 
@@ -814,6 +834,18 @@ EXTRAS_NOTE = ("HookZ is the hook and FeelZ is how much of the feeling comes thr
                "one is absent, never a 0.")
 
 
+def _tips_for_row(r):
+    """Tips as [{kind, label, tip}], from this take's read — tolerant of the plain-string shape an
+    earlier build stored, and empty unless the FeelZ really is low."""
+    from .vocalcoach import _feelz_tips
+    return _feelz_tips(r.get("feelz_tips"), r.get("feelz"))
+
+
+def mix_tips_of(r):
+    from .vocalcoach import _mix_tips
+    return _mix_tips((r or {}).get("mix_tips"))
+
+
 def extras_of(read):
     """HookZ and FeelZ as labelled rows with their reasons — the server's words, absent when the coach
     found nothing to judge (a warm-up has no hook), never a 0."""
@@ -827,7 +859,8 @@ def extras_of(read):
         why = r.get("feelz_why", "")
         out.append({"key": "feelz", "label": FEELZ_LABEL, "value": r["feelz"],
                     "detail": " — ".join(x for x in ((f"Felt: {emo}" if emo else ""), why) if x),
-                    "counted": r.get("feelz_counted")})
+                    "counted": r.get("feelz_counted"), "emotion": emo,
+                    "tips": _tips_for_row(r)})
     return out
 
 
@@ -841,7 +874,7 @@ def take_row(take, label, price=None, best=None, lessons_ctx=None):
             "weakest": take.weakest, "difficulty": take.difficulty, "genre": take.genre,
             "style": take.style, "target": take.target, "range_class": take.range_class,
             "low": take.low_note, "high": take.high_note, "at": take.created_at.isoformat(),
-            "read": r, "extras": extras_of(r), "extras_note": EXTRAS_NOTE,
+            "read": r, "extras": extras_of(r), "extras_note": EXTRAS_NOTE, "mix_tips": mix_tips_of(r),
             "open_in": ({"tab": "postz", "target": take.ref} if take.source == "post"
                         else {"tab": "journalz", "target": "journalz-entries"}
                         if take.source == "journal" else None),

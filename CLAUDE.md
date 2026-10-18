@@ -2615,3 +2615,22 @@ attractiveness number still rode every search card and could be read off by step
 hidden score is "no value" — which an active range treats as out. Do not put an approval queue in front of something
 a member can set for themselves. The AI LookZMaxZ readings are NOT a filterable metric and never will be: nothing
 about them is stored (so there is nothing to filter), and a self-attested photo is not proof enough to rank people on.
+
+## Posting a take, and what a low FeelZ is told to do
+
+`takescorez.TakePostView` (`/api/<key>/take/<id>/post/`) makes a PostZ post from one of the member's own takes through
+`postz.create_post` — one creation path, so the daily submission cap, sanitising and zodiac hooks are the composer's.
+The score and read come from the stored take and the share token (never from a body); the recording is the kept upload by
+its stable address. **Playable by link means kept**: an unkept take posts without media and `GET` says so first. The
+member ticks score / feedback / recording separately; score + feedback together carry the coach's read card, either alone
+goes as plain text because the card cannot show half of itself. Note `VISIBILITIES` is `("", "members", "private")` —
+public is the EMPTY string, and "public" is refused.
+
+**HookZ and FeelZ on the row** (`extras_of`): labelled, with the reason, the emotion, and `counted` — whether each was
+inside the overall the member was shown (stored on the read as `hook_counted` / `feelz_counted`; older takes carry
+neither and say nothing). Both are strength-weighted into the overall like any dimension, never a 0 when unjudged.
+**`feelz_tips`** exist only for a FeelZ under `FEELZ_TIPS_BELOW` (7) whatever the model sent — a 9 with a to-do list is a score
+contradicting itself — each `{kind, label, what, why, how}` with kinds server-owned (`FEELZ_TIP_KINDS`; an invented kind
+becomes delivery). **`mix_tips`** are separate and not score-gated: a vocal can be buried on a take whose overall is fine.
+They are `{helps: clarity|feelz|both, what, why, how}`, about the mix and never the performance, and the prompt says to
+return none when the vocal sits well. Mic/room tips say what kind of change, never a brand.

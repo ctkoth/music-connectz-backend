@@ -282,6 +282,58 @@ def clean_practice(raw):
     return out
 
 
+FEELZ_TIPS_BELOW = 7
+# Server-owned, so a kind the model invents is "delivery" rather than a label nobody wrote.
+FEELZ_TIP_KINDS = {"delivery": "Delivery", "phrasing": "Phrasing", "dynamics": "Dynamics", "pacing": "Pacing",
+                   "intention": "Intention", "gear": "Mic & gear", "room": "Room & recording"}
+
+
+def _wwh(item, default_kind=None):
+    """One tip as {what, why, how}. A plain string (an earlier shape) is a `what`."""
+    if isinstance(item, dict):
+        what = str(item.get("what") or item.get("tip") or "").strip()[:300]
+        why, how = str(item.get("why") or "").strip()[:300], str(item.get("how") or "").strip()[:400]
+    else:
+        what, why, how = str(item or "").strip()[:300], "", ""
+    return what, why, how
+
+
+def _feelz_tips(raw, feelz):
+    """[{kind, label, what, why, how, tip}] — only for a low FeelZ, whatever the model sent, at most
+    three. `tip` repeats `what` for anything that read the earlier shape."""
+    if feelz is None or feelz >= FEELZ_TIPS_BELOW or not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        what, why, how = _wwh(item)
+        if not what:
+            continue
+        kind = str(item.get("kind") if isinstance(item, dict) else "").strip().lower()
+        kind = kind if kind in FEELZ_TIP_KINDS else "delivery"
+        out.append({"kind": kind, "label": FEELZ_TIP_KINDS[kind], "what": what, "why": why, "how": how, "tip": what})
+    return out[:3]
+
+
+MIX_HELPS = {"clarity": "Clarity", "feelz": "FeelZ", "both": "Clarity and FeelZ"}
+
+
+def _mix_tips(raw):
+    """[{helps, helps_label, what, why, how}] — mix changes for a vocal that is hard to make out or feel.
+    Not gated on a score: a mix can hide the words on a take whose overall is fine. The model is told
+    to return none when the vocal sits well, and the server only cleans and caps."""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        what, why, how = _wwh(item)
+        if not what:
+            continue
+        helps = str(item.get("helps") if isinstance(item, dict) else "").strip().lower()
+        helps = helps if helps in MIX_HELPS else "both"
+        out.append({"helps": helps, "helps_label": MIX_HELPS[helps], "what": what, "why": why, "how": how})
+    return out[:3]
+
+
 def strength_weighted_exact(scores):
     """The overall to one decimal, from PERFORMANCE dimensions only, leaning hard
     on strengths.
@@ -639,6 +691,10 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         "feelz_emotion": str(parsed.get("feelz_emotion", "")).strip()[:60],
         "feelz_why": str(parsed.get("feelz_why", ""))[:400],
         "feelz_counted": feelz_counted,
+        # Specific ways to carry more feeling — only for a low FeelZ, whatever the model sent: a 9
+        # with a to-do list is a score contradicting itself.
+        "feelz_tips": _feelz_tips(parsed.get("feelz_tips"), feelz),
+        "mix_tips": _mix_tips(parsed.get("mix_tips")),
         "listeners": listeners,
         # One source for the dimension list, so the prompt cannot ask for six
         # and the whitelist keep five.

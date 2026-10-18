@@ -1325,3 +1325,106 @@ class PostATakeTests(TestCase):
     def test_the_row_offers_the_door(self):
         row = T.take_row(TakeScore.objects.get(pk=self.t.pk), "SingZ")
         self.assertIn("post_take", [e["key"] for e in row["exports"]])
+
+
+class FeelzTipsTests(TestCase):
+    def test_tips_only_for_a_low_feelz_and_capped(self):
+        from .vocalcoach import _feelz_tips
+        raw = ["a", "b", "c", "d"]
+        self.assertEqual([x["tip"] for x in _feelz_tips(raw, 5)], ["a", "b", "c"])
+        self.assertEqual(_feelz_tips(raw, 7), [])
+        self.assertEqual(_feelz_tips(raw, None), [])
+        self.assertEqual(_feelz_tips("nope", 3), [])
+
+    def test_the_prompt_asks_for_them_and_names_the_threshold(self):
+        from .instruments import prompt_for
+        p = prompt_for("singz", "", "", "rookie")
+        self.assertIn("feelz_tips", p)
+        self.assertIn("6 or lower", p)
+        self.assertIn("gear", p)
+        self.assertIn("never a brand", p)
+
+    def test_stored_and_served_on_the_row_and_in_the_draft(self):
+        u = member("ft")
+        t = scored(u, flow=6, timing=6)
+        read = T.read_of({"verdict": "v", "feelz_score": 4, "feelz_emotion": "flat", "feelz_why": "Even.",
+                          "feelz_tips": ["Let the second verse breathe before the last line."]})
+        TakeScore.objects.filter(pk=t.pk).update(read=read)
+        t.refresh_from_db()
+        row = T.take_row(t, "SingZ")
+        feelz = next(e for e in row["extras"] if e["key"] == "feelz")
+        self.assertEqual(feelz["emotion"], "flat")
+        self.assertEqual(feelz["tips"][0]["what"], "Let the second verse breathe before the last line.")
+        self.assertEqual(feelz["tips"][0]["kind"], "delivery")
+        self.assertIn("To bring more feeling", T._read_text(t, "SingZ"))
+
+    def test_a_high_feelz_carries_no_tips_even_if_stored(self):
+        feelz = T.extras_of({"feelz": 9, "feelz_tips": ["x"]})[0]
+        self.assertEqual(feelz["tips"], [])
+
+
+class FeelzTipKindTests(TestCase):
+    def test_kinds_are_the_servers_and_an_invented_one_becomes_delivery(self):
+        from .vocalcoach import FEELZ_TIP_KINDS, _feelz_tips
+        tips = _feelz_tips([{"kind": "gear", "tip": "Your mic sounds thin on the low lines; try a dynamic mic closer in."},
+                            {"kind": "vibes", "tip": "Lean into the last line."},
+                            {"kind": "room", "tip": ""}], 4)
+        self.assertEqual([t["kind"] for t in tips], ["gear", "delivery"])
+        self.assertEqual(tips[0]["label"], FEELZ_TIP_KINDS["gear"])
+        self.assertEqual(tips[0]["label"], "Mic & gear")
+
+    def test_a_mic_tip_reaches_the_draft_with_its_label(self):
+        u = member("mic")
+        t = scored(u, flow=6)
+        TakeScore.objects.filter(pk=t.pk).update(read=T.read_of({
+            "verdict": "v", "feelz_score": 3,
+            "feelz_tips": [{"kind": "gear", "tip": "Thin low end — try a dynamic mic closer to the mouth."}]}))
+        t.refresh_from_db()
+        self.assertIn("Mic & gear: Thin low end", T._read_text(t, "SingZ"))
+
+
+class MixTipsTests(TestCase):
+    def test_a_mix_tip_is_what_why_how_and_capped(self):
+        from .vocalcoach import _mix_tips
+        raw = [{"helps": "clarity", "what": "Cut 250-400 Hz on the vocal.", "why": "Mud under the words.",
+                "how": "A gentle bell, 3 dB, then compare."}] * 4
+        out = _mix_tips(raw)
+        self.assertEqual(len(out), 3)
+        self.assertEqual(out[0]["helps_label"], "Clarity")
+        self.assertEqual(out[0]["how"], "A gentle bell, 3 dB, then compare.")
+
+    def test_an_unknown_helps_is_both_and_an_empty_what_is_dropped(self):
+        from .vocalcoach import _mix_tips
+        out = _mix_tips([{"helps": "vibes", "what": "Bring the vocal up 2 dB."}, {"what": ""}, "Add a de-esser."])
+        self.assertEqual([x["helps"] for x in out], ["both", "both"])
+        self.assertEqual(_mix_tips("nope"), [])
+
+    def test_the_prompt_asks_for_what_why_how_and_for_the_mix_apart_from_the_performance(self):
+        from .instruments import prompt_for
+        p = prompt_for("singz", "", "", "rookie")
+        self.assertIn("mix_tips", p)
+        self.assertIn("about the MIX, not the performance", p)
+        self.assertIn("EQ", p)
+
+    def test_stored_served_and_drafted_with_the_reasons(self):
+        u = member("mixer")
+        t = scored(u, flow=6)
+        TakeScore.objects.filter(pk=t.pk).update(read=T.read_of({
+            "verdict": "v", "feelz_score": 4,
+            "feelz_tips": [{"kind": "gear", "what": "Thin low end.", "why": "The warmth is missing.", "how": "Dynamic mic, closer."}],
+            "mix_tips": [{"helps": "both", "what": "Raise the vocal 2 dB over the beat.", "why": "It is buried.",
+                          "how": "Automate the verse up first."}]}))
+        t.refresh_from_db()
+        row = T.take_row(t, "SingZ")
+        self.assertEqual(row["mix_tips"][0]["why"], "It is buried.")
+        feelz = next(e for e in row["extras"] if e["key"] == "feelz")
+        self.assertEqual(feelz["tips"][0]["how"], "Dynamic mic, closer.")
+        body = T._read_text(t, "SingZ")
+        self.assertIn("Mix suggestions:", body)
+        self.assertIn("Why: It is buried.", body)
+        self.assertIn("How: Dynamic mic, closer.", body)
+
+    def test_a_mix_tip_is_kept_even_when_feelz_is_fine(self):
+        r = T.read_of({"verdict": "v", "feelz_score": 9, "mix_tips": [{"what": "De-ess the chorus.", "why": "Sibilance.", "how": "Narrow 6-8 kHz."}]})
+        self.assertIn("mix_tips", r)
+        self.assertNotIn("feelz_tips", r)
