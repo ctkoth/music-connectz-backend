@@ -161,10 +161,15 @@ def read_of(payload):
             out[field] = payload[field]
     if "feelz" in out and isinstance(payload.get("feelz_tips"), list):
         from .vocalcoach import _feelz_tips
-        tips = _feelz_tips(payload["feelz_tips"], out["feelz"])          # one shape, one cleaner
+        tips = _feelz_tips(payload["feelz_tips"], out["feelz"], payload.get("feelz_cause") or "")   # one shape, one cleaner
         if tips:
             out["feelz_tips"] = tips
-    if isinstance(payload.get("mix_tips"), list):
+    if "feelz" in out:
+        from .vocalcoach import _feelz_cause
+        c = _feelz_cause(payload.get("feelz_cause"), out["feelz"])
+        if c:
+            out["feelz_cause"] = c
+    if isinstance(payload.get("mix_tips"), list) and payload.get("feelz_cause") != "performance":
         from .vocalcoach import _mix_tips
         mix = _mix_tips(payload["mix_tips"])
         if mix:
@@ -698,11 +703,16 @@ def exports_for(take, label, *, price=None):
                    "note": ("A public link and card with the score and the coach's own one-line verdict, "
                             "made from what the coach actually said. Free — and anyone who joins from it "
                             "earns you the referral reward.")})
-    out.insert(1, post_take_door(take))
-    for i, kind in enumerate(PROMO_KINDS, start=2):
+    # The promo doors stay second (and third) after Share — that order is pinned and the screen relies
+    # on it — and "Post it" follows them, so the free way to put a take on PostZ sits right beside
+    # the paid writer's.
+    at = 1
+    for kind in PROMO_KINDS:
         promo = promo_door(take, price=price, kind=kind)
         if promo:
-            out.insert(i, promo)
+            out.insert(at, promo)
+            at += 1
+    out.insert(at, post_take_door(take))
     breath = (take.scores or {}).get("breath")
     if isinstance(breath, int) and breath <= PUNCHLINE_LOW:
         out.append(BREATH_DOOR)
@@ -834,16 +844,23 @@ EXTRAS_NOTE = ("HookZ is the hook and FeelZ is how much of the feeling comes thr
                "one is absent, never a 0.")
 
 
+def _cause_for_row(r):
+    from .vocalcoach import FEELZ_CAUSES, _feelz_cause
+    c = _feelz_cause(r.get("feelz_cause"), r.get("feelz"))
+    return {"key": c, "label": FEELZ_CAUSES[c]} if c else None
+
+
 def _tips_for_row(r):
     """Tips as [{kind, label, tip}], from this take's read — tolerant of the plain-string shape an
     earlier build stored, and empty unless the FeelZ really is low."""
     from .vocalcoach import _feelz_tips
-    return _feelz_tips(r.get("feelz_tips"), r.get("feelz"))
+    return _feelz_tips(r.get("feelz_tips"), r.get("feelz"), r.get("feelz_cause") or "")
 
 
 def mix_tips_of(r):
     from .vocalcoach import _mix_tips
-    return _mix_tips((r or {}).get("mix_tips"))
+    r = r or {}
+    return [] if r.get("feelz_cause") == "performance" else _mix_tips(r.get("mix_tips"))
 
 
 def extras_of(read):
@@ -860,7 +877,7 @@ def extras_of(read):
         out.append({"key": "feelz", "label": FEELZ_LABEL, "value": r["feelz"],
                     "detail": " — ".join(x for x in ((f"Felt: {emo}" if emo else ""), why) if x),
                     "counted": r.get("feelz_counted"), "emotion": emo,
-                    "tips": _tips_for_row(r)})
+                    "tips": _tips_for_row(r), "cause": _cause_for_row(r)})
     return out
 
 

@@ -1369,9 +1369,9 @@ class FeelzTipKindTests(TestCase):
         tips = _feelz_tips([{"kind": "gear", "tip": "Your mic sounds thin on the low lines; try a dynamic mic closer in."},
                             {"kind": "vibes", "tip": "Lean into the last line."},
                             {"kind": "room", "tip": ""}], 4)
-        self.assertEqual([t["kind"] for t in tips], ["gear", "delivery"])
-        self.assertEqual(tips[0]["label"], FEELZ_TIP_KINDS["gear"])
-        self.assertEqual(tips[0]["label"], "Mic & gear")
+        self.assertEqual([t["kind"] for t in tips], ["delivery", "gear"])      # delivery leads, the recording last
+        self.assertEqual(tips[1]["label"], FEELZ_TIP_KINDS["gear"])
+        self.assertEqual(tips[1]["label"], "Mic & gear")
 
     def test_a_mic_tip_reaches_the_draft_with_its_label(self):
         u = member("mic")
@@ -1428,3 +1428,54 @@ class MixTipsTests(TestCase):
         r = T.read_of({"verdict": "v", "feelz_score": 9, "mix_tips": [{"what": "De-ess the chorus.", "why": "Sibilance.", "how": "Narrow 6-8 kHz."}]})
         self.assertIn("mix_tips", r)
         self.assertNotIn("feelz_tips", r)
+
+
+class FeelzCauseTests(TestCase):
+    def test_the_cause_is_the_servers_and_only_for_a_low_feelz(self):
+        from .vocalcoach import _feelz_cause
+        self.assertEqual(_feelz_cause("performance", 4), "performance")
+        self.assertEqual(_feelz_cause("vibes", 4), "")
+        self.assertEqual(_feelz_cause("mix", 9), "")
+        self.assertEqual(_feelz_cause("mix", None), "")
+
+    def test_a_performance_cause_means_no_mix_suggestions_at_all(self):
+        r = T.read_of({"verdict": "v", "feelz_score": 3, "feelz_cause": "performance",
+                       "mix_tips": [{"what": "Raise the vocal.", "why": "w", "how": "h"}]})
+        self.assertEqual(r["feelz_cause"], "performance")
+        self.assertNotIn("mix_tips", r)
+        # …and a row built from an older read that carries both does not serve them
+        self.assertEqual(T.mix_tips_of({"feelz_cause": "performance", "mix_tips": [{"what": "x"}]}), [])
+
+    def test_a_mix_cause_keeps_them_and_the_row_names_the_cause(self):
+        r = T.read_of({"verdict": "v", "feelz_score": 3, "feelz_cause": "mix",
+                       "mix_tips": [{"what": "Raise the vocal.", "why": "w", "how": "h"}]})
+        self.assertIn("mix_tips", r)
+        feelz = T.extras_of({**r, "feelz": 3})[0]
+        self.assertEqual(feelz["cause"]["label"], "The mix")
+
+    def test_diction_and_projection_are_kinds_and_the_prompt_says_unclear_is_often_the_performance(self):
+        from .instruments import prompt_for
+        from .vocalcoach import FEELZ_TIP_KINDS
+        self.assertIn("diction", FEELZ_TIP_KINDS)
+        self.assertIn("projection", FEELZ_TIP_KINDS)
+        p = prompt_for("singz", "", "", "rookie")
+        self.assertIn("feelz_cause", p)
+        self.assertIn("never default to blaming the mix", p)
+        self.assertIn("mumbling", p)
+
+
+class DeliveryLeadsTests(TestCase):
+    RAW = [{"kind": "gear", "what": "g"}, {"kind": "pacing", "what": "p"}, {"kind": "delivery", "what": "d"},
+           {"kind": "room", "what": "r"}]
+
+    def test_delivery_comes_first_and_the_recording_last(self):
+        from .vocalcoach import _feelz_tips
+        self.assertEqual([t["kind"] for t in _feelz_tips(self.RAW, 4)], ["delivery", "pacing", "gear"])
+
+    def test_when_the_recording_is_the_cause_it_leads(self):
+        from .vocalcoach import _feelz_tips
+        self.assertEqual([t["kind"] for t in _feelz_tips(self.RAW, 4, "recording")], ["gear", "room", "delivery"])
+
+    def test_the_prompt_says_delivery_is_the_biggest_lever(self):
+        from .instruments import prompt_for
+        self.assertIn("Delivery is the biggest lever", prompt_for("singz", "", "", "rookie"))

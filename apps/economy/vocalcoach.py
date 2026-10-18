@@ -284,7 +284,8 @@ def clean_practice(raw):
 
 FEELZ_TIPS_BELOW = 7
 # Server-owned, so a kind the model invents is "delivery" rather than a label nobody wrote.
-FEELZ_TIP_KINDS = {"delivery": "Delivery", "phrasing": "Phrasing", "dynamics": "Dynamics", "pacing": "Pacing",
+FEELZ_TIP_KINDS = {"delivery": "Delivery", "diction": "Diction & clarity", "projection": "Projection & mic technique",
+                   "phrasing": "Phrasing", "dynamics": "Dynamics", "pacing": "Pacing",
                    "intention": "Intention", "gear": "Mic & gear", "room": "Room & recording"}
 
 
@@ -298,7 +299,12 @@ def _wwh(item, default_kind=None):
     return what, why, how
 
 
-def _feelz_tips(raw, feelz):
+# Delivery first: it is the biggest lever on feeling, and the one the member controls today. The
+# recording comes last — unless the coach itself says the recording or the mix is the cause.
+_TIP_ORDER = ["delivery", "diction", "projection", "phrasing", "dynamics", "pacing", "intention", "gear", "room"]
+
+
+def _feelz_tips(raw, feelz, cause=""):
     """[{kind, label, what, why, how, tip}] — only for a low FeelZ, whatever the model sent, at most
     three. `tip` repeats `what` for anything that read the earlier shape."""
     if feelz is None or feelz >= FEELZ_TIPS_BELOW or not isinstance(raw, list):
@@ -311,7 +317,21 @@ def _feelz_tips(raw, feelz):
         kind = str(item.get("kind") if isinstance(item, dict) else "").strip().lower()
         kind = kind if kind in FEELZ_TIP_KINDS else "delivery"
         out.append({"kind": kind, "label": FEELZ_TIP_KINDS[kind], "what": what, "why": why, "how": how, "tip": what})
+    order = _TIP_ORDER if cause not in ("recording", "mix") else ["gear", "room"] + _TIP_ORDER[:-2]
+    out.sort(key=lambda t: order.index(t["kind"]))          # stable: the coach's own order within a kind
     return out[:3]
+
+
+FEELZ_CAUSES = {"performance": "The performance", "mix": "The mix", "recording": "The recording",
+                "both": "The performance and the recording"}
+
+
+def _feelz_cause(raw, feelz):
+    """Why the feeling is not coming through — only for a low FeelZ, and only a cause the server names."""
+    if feelz is None or feelz >= FEELZ_TIPS_BELOW:
+        return ""
+    c = str(raw or "").strip().lower()
+    return c if c in FEELZ_CAUSES else ""
 
 
 MIX_HELPS = {"clarity": "Clarity", "feelz": "FeelZ", "both": "Clarity and FeelZ"}
@@ -693,8 +713,13 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         "feelz_counted": feelz_counted,
         # Specific ways to carry more feeling — only for a low FeelZ, whatever the model sent: a 9
         # with a to-do list is a score contradicting itself.
-        "feelz_tips": _feelz_tips(parsed.get("feelz_tips"), feelz),
-        "mix_tips": _mix_tips(parsed.get("mix_tips")),
+        "feelz_tips": _feelz_tips(parsed.get("feelz_tips"), feelz, _feelz_cause(parsed.get("feelz_cause"), feelz)),
+        "feelz_cause": _feelz_cause(parsed.get("feelz_cause"), feelz),
+        "feelz_cause_label": FEELZ_CAUSES.get(_feelz_cause(parsed.get("feelz_cause"), feelz), ""),
+        # When the coach itself says the PERFORMANCE is why it is unclear, mix changes are not offered:
+        # a mix tip on a mumbled vocal sends somebody to fix the wrong thing.
+        "mix_tips": ([] if _feelz_cause(parsed.get("feelz_cause"), feelz) == "performance"
+                     else _mix_tips(parsed.get("mix_tips"))),
         "listeners": listeners,
         # One source for the dimension list, so the prompt cannot ask for six
         # and the whitelist keep five.
