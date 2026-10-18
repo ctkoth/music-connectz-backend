@@ -91,6 +91,7 @@ from .parcel import ParcelCampaignView, ParcelEmailPrefView, ParcelUnsubscribeVi
 from .reach import ReachGatesView
 from .autotopup import AutoTopUpView, AutoTopUpCancelView
 from .identity import IdentityView
+from .royaltyfactor import RoyaltyRatingsView, SkillzCoachView
 from .collab import (
     CollabAcceptView,
     PostCollabsView,
@@ -593,6 +594,8 @@ urlpatterns = [
          name="economy-directz-copyright"),
     # A collab is where the finished master usually lands, so it releases too.
     path("collab/<int:pk>/distribute/", CollabDistributeView.as_view(), name="economy-collab-distribute"),
+    path("royalty/ratings/", RoyaltyRatingsView.as_view(), name="economy-royalty-ratings"),
+    path("skillz-coach/", SkillzCoachView.as_view(), name="economy-skillz-coach"),
     path("collab/<int:pk>/accept/", CollabAcceptView.as_view(), name="economy-collab-accept"),
     # VenueZ — CollabZ when everyone is in the same room. The quote is on the
     # listing, not behind the booking, because the price of turning up has to

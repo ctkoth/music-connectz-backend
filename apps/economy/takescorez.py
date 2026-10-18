@@ -687,6 +687,13 @@ def exports_for(take, label, *, price=None):
             out.append({"key": "battlez", "label": "Enter it in a battle", "tab": "battlez",
                         "target": "battlez:main", "carry": {"kind": "post", "post_id": pid},
                         "cost": None, "note": "Its post goes in as the entry; BattleZ states any stake before you confirm."})
+    if take.overall is not None:
+        from . import takelessons
+        read = take.read or {}
+        exact = read.get("exact") if isinstance(read.get("exact"), (int, float)) else take.overall
+        dim = profile_for_app(take.app_key)["scores"].get(take.weakest or "", "")
+        out.append(takelessons.collab_door(take.app_key, exact, genre=take.genre, weakest_label=dim,
+                                           take_id=take.pk))
     if take.share_token:
         out.append({"key": "viewz", "label": "See how its link is doing", "tab": "viewz", "target": "viewz-links",
                     "carry": {}, "cost": None,
@@ -750,7 +757,23 @@ def personal_best(user, app_key):
     return agg["best"], agg["n"], first
 
 
-def take_row(take, label, price=None, best=None):
+def _lessons_of(take, read, ctx):
+    """The teach / learn call-to-action for a take, from the number the member was SHOWN
+    (the exact score, else the overall). Only where a context was built — the history list
+    builds one for the whole list, so forty low takes cost one teachers query."""
+    if ctx is None:
+        return None
+    from . import takelessons
+    score = read.get("exact")
+    score = score if isinstance(score, (int, float)) else take.overall
+    try:
+        dim = profile_for_app(take.app_key)["scores"].get(take.weakest or "", "")
+        return takelessons.lessons_for(score, ctx, weakest_label=dim)
+    except Exception:                                        # pragma: no cover
+        return None
+
+
+def take_row(take, label, price=None, best=None, lessons_ctx=None):
     r = take.read or {}
     top, n, first = best if best else (None, 0, None)
     is_pb = bool(top is not None and n >= MIN_TAKES and take.overall == top and take.pk == first)
@@ -764,6 +787,7 @@ def take_row(take, label, price=None, best=None):
             "open_in": ({"tab": "postz", "target": take.ref} if take.source == "post"
                         else {"tab": "journalz", "target": "journalz-entries"}
                         if take.source == "journal" else None),
+            "lessons": _lessons_of(take, r, lessons_ctx),
             "exports": exports_for(take, label, price=price)}
 
 
@@ -989,6 +1013,8 @@ def _progress(user, app_key, limit):
     from .crosspost import coach_price
     price = coach_price(user)          # read once, not once per row
     best = personal_best(user, app_key)
+    from . import takelessons
+    lessons_ctx = takelessons.context(user, app_key)
     return {
         "app_key": app_key, "label": prof["label"],
         "dimensions": [{"key": k, "label": v} for k, v in prof["scores"].items()],
@@ -1019,7 +1045,7 @@ def _progress(user, app_key, limit):
             "voice_health": voice_health(user, app_key),
             "goal_match": goal_match(user, app_key),
         },
-        "takes": [take_row(t, prof["label"], price, best) for t in takes],
+        "takes": [take_row(t, prof["label"], price, best, lessons_ctx) for t in takes],
         "coaching": coaching(user, app_key, price),
         "recap": recap(user, app_key),
         "total_takes": TakeScore.objects.filter(user=user, app_key=app_key).count(),

@@ -2475,3 +2475,34 @@ filler tags. **The model is not trusted to count:** `fit_hashtags` trims the TRA
 the first N (the most relevant, by the prompt's own ordering); a tag inside a sentence is part of the
 sentence and stays. Fewer than asked is reported as `hashtags: {asked, got}`, never padded. The caption
 kind's built-in "5-10 hashtags" yields to the number so the prompt never holds two instructions.
+
+## Bad ratings earn less, and the AI coach can count — if the member says so
+
+`royaltyfactor.py`. Corey's two rules:
+
+1. **A track's rating scales what it earns per play** (`accrue_playlist_royalties_for_date`). The
+   median of what people OUTSIDE the credits scored the post: 7 or better earns the full rate (no
+   bonus above it — a royalty that can be bid up by rating is one ring away from printing money),
+   and below that it slides to `FLOOR` (25%) at a 1. **Never to zero** (a play happened, and a floor
+   is what stops a brigade of one-stars erasing income), and **neutral until `MIN_RATERS` (5)**
+   outsiders have rated — an unrated track is not a badly-rated one. Said before the payout:
+   `GET /royalty/ratings/` serves the rule and each post's factor and why; RoyaltieZ shows it.
+2. **Each credited person's share is scaled by their rating in the skill they brought**
+   (`skill_haircut`, from `skills_for_post`), averaged over those skills so bringing five does not
+   multiply one bad one five times. **Never twice:** a post from a deal whose pot was already re-cut by
+   contribution rating (`basis == "rating"`) has had each person's rating applied once already.
+   Neither factor redistributes — a haircut is money not paid, not money moved to someone else.
+
+**The AI coach as a skill voice is OPT-IN** (`Profile.coach_counts_for_skillz`, off by default,
+`POST /skillz-coach/ {enabled}`). On, the median of the member's last `COACH_WINDOW` (10) takes for the
+matching instrument (`COACH_SKILLS` maps persona-skill names to coaches — one list, extend it there)
+joins their listener ratings as `COACH_VOTES` (2) votes, only once there are `MIN_COACH_TAKES` (3) takes
+behind it so one lucky take cannot carry it. **It cuts both ways and the note says so before the toggle
+is pressed** — a weak run lowers the rating as surely as a strong one raises it. Listener ratings stay
+the majority. `ratez.skills_of` shows `coach` detail on a blended rating so a number is never
+unexplained. `skill_rating_median` itself is untouched (it is called per card; the blend costs a
+profile read, so it lives in the royalty and own-skills paths only).
+
+Known gap, Corey's to decide: a post with credited contributors and **no** deal is split in equal
+shares, then each share takes its skill haircut — so a weak skill earns less but the money is not moved
+to the stronger one.

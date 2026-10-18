@@ -1077,3 +1077,112 @@ class HashtagCountTests(PromoPostFromAPastTakeTests):
         _, prompt = self._run("Hook\n\n#a #b", 2, kind="caption")
         self.assertNotIn("5-10 relevant hashtags", prompt)
         self.assertIn("exactly 2 hashtags", prompt)
+
+
+class TeachOrLearnFromTheScoreTests(CoachingBoardTests):
+    _past = PastSessionsAreShareableTests._past
+    """Corey: 6 or above → commend teaching/coaching in LessonZ; below 5 → advice and teachers
+    with the same skill. 5 to under 6 gets neither."""
+
+    def _offer(self, who, skill="rapz", rating=8, **kw):
+        from apps.lessonz.models import LessonOffer
+        t = member(who)
+        return LessonOffer.objects.create(teacher=t, skill=skill, title=f"{who} lessons", rating_snapshot=rating, **kw)
+
+    def _row(self, exact, **dims):
+        t = self._past()
+        TakeScore.objects.filter(pk=t.pk).update(read={**(t.read or {}), "exact": exact}, overall=round(exact))
+        return self.c.get("/api/rapz/progress/").data["takes"][0]
+
+    def test_the_thresholds_are_lessonzs_own_and_five_gets_nothing(self):
+        from apps.economy import takelessons as tl
+        from apps.lessonz.models import MIN_TEACH_RATING
+        self.assertEqual(tl.TEACH_AT, MIN_TEACH_RATING)
+        self.assertEqual([tl.zone(x) for x in (6, 6.0, 7.4, 5.9, 5, 4.9, 1, None)],
+                         ["teach", "teach", "teach", None, None, "learn", "learn", None])
+
+    def test_six_and_up_commends_teaching_and_is_honest_about_the_lessonz_rating(self):
+        lessons = self._row(6.4)["lessons"]
+        self.assertEqual(lessons["zone"], "teach")
+        self.assertEqual(lessons["cta"]["tab"], "lessonz")
+        self.assertEqual(lessons["cta"]["carry"], {"view": "teach", "skill": "rapz"})
+        self.assertFalse(lessons["can_teach"])                      # one take is not a LessonZ rating
+        self.assertIn("single take", lessons["text"])
+        from apps.lessonz.models import TeacherSkillRating
+        TeacherSkillRating.objects.create(user=self.u, skill="rapz", rating=7)
+        lessons = self.c.get("/api/rapz/progress/").data["takes"][0]["lessons"]
+        self.assertTrue(lessons["can_teach"])
+        self.assertEqual(lessons["cta"]["label"], "Teach it on LessonZ")
+
+    def test_below_five_suggests_real_teachers_of_the_same_skill_priced_up_front(self):
+        self._offer("rapteacher", "rapz", 9)
+        self._offer("rapper2", "rap", 7)                            # filed without the Z
+        self._offer("guitarguy", "guitarz", 10)                     # a different skill
+        lessons = self._row(3.2)["lessons"]
+        self.assertEqual(lessons["zone"], "learn")
+        self.assertEqual([t["teacher"] for t in lessons["teachers"]], ["rapteacher", "rapper2"])
+        self.assertTrue(all(t["price"] and t["currency"] and t["mode"] for t in lessons["teachers"]))
+        self.assertEqual(lessons["cta"]["carry"], {"view": "browse", "skill": "rapz"})
+
+    def test_with_nobody_teaching_it_says_so_instead_of_inventing_a_teacher(self):
+        lessons = self._row(2.0)["lessons"]
+        self.assertEqual(lessons["teachers"], [])
+        self.assertIn("Nobody offers", lessons["text"])
+
+    def test_the_middle_of_the_scale_and_unscored_takes_get_neither(self):
+        self.assertIsNone(self._row(5.5)["lessons"])
+
+    def test_a_minor_gets_neither_and_you_never_get_yourself_or_a_blocked_teacher(self):
+        from apps.economy.models import profile_for
+        self._offer("rapteacher", "rapz", 9)
+        from apps.lessonz.models import LessonOffer
+        LessonOffer.objects.create(teacher=self.u, skill="rapz", title="mine", rating_snapshot=10)
+        self.assertEqual([t["teacher"] for t in self._row(3.0)["lessons"]["teachers"]], ["rapteacher"])
+        p = profile_for(self.u); p.birthday = "2011-01-01"; p.save()
+        self.c.force_authenticate(User.objects.get(pk=self.u.pk))     # a fresh request, not a cached profile
+        self.assertIsNone(self.c.get("/api/rapz/progress/").data["takes"][0]["lessons"])
+
+    def test_the_history_costs_the_same_queries_for_any_number_of_low_takes(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        self._offer("rapteacher", "rapz", 9)
+
+        def cost(n):
+            u = member(f"lowq{n}")
+            for _ in range(n):
+                scored(u, flow=2, timing=2)
+            c = APIClient(); c.force_authenticate(u)
+            with CaptureQueriesContext(connection) as q:
+                c.get("/api/rapz/progress/?takes=all")
+            return len(q)
+
+        self.assertEqual(cost(3), cost(30))
+
+
+class SendToCollabzAtAnyScoreTests(CoachingBoardTests):
+    """Corey: a weaker take needs better help and a good one needs what it wants — so the
+    CollabZ door is there at every score and for every age, worded by the number."""
+    _past = PastSessionsAreShareableTests._past
+
+    def _door(self, exact):
+        t = self._past()
+        TakeScore.objects.filter(pk=t.pk).update(read={**(t.read or {}), "exact": exact}, overall=round(exact))
+        row = self.c.get("/api/rapz/progress/").data["takes"][0]
+        return next(e for e in row["exports"] if e["key"] == "collabz")
+
+    def test_it_is_offered_at_every_score_with_wording_by_the_number(self):
+        low, mid, high = self._door(2.5), self._door(5.5), self._door(8.0)
+        self.assertEqual(low["label"], "Find a stronger collaborator")
+        self.assertEqual(mid["label"], "Find a stronger collaborator")        # under 6 still wants better help
+        self.assertEqual(high["label"], "Take it to a collab")
+        self.assertEqual((low["carry"]["seek"], high["carry"]["seek"]), ("help", "partner"))
+        self.assertEqual(high["tab"], "collabz")
+        self.assertIn("⚡", high["note"])                                      # the cost is stated before it is pressed
+        self.assertEqual(high["carry"]["skill"], "rapz")
+
+    def test_a_minor_still_gets_it_because_collabs_are_open_at_any_age(self):
+        from apps.economy.models import profile_for
+        p = profile_for(self.u); p.birthday = "2011-01-01"; p.save()
+        self.c.force_authenticate(User.objects.get(pk=self.u.pk))
+        self.assertEqual(self._door(3.0)["key"], "collabz")
+        self.assertIsNone(self.c.get("/api/rapz/progress/").data["takes"][0]["lessons"])   # but no LessonZ CTA

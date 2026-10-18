@@ -1128,6 +1128,10 @@ class Profile(models.Model):
     # 18+ age verification (Stripe Identity). Set by the identity webhook once a
     # government ID confirms the member is 18 or older — gates money betting +
     # adult content. Never trust a self-reported birthday for this.
+    # Opt-in: the AI coach's scores for an instrument count beside listener ratings in the
+    # matching skill rating (royaltyfactor.blended_skill_rating). Off by default — it can lower
+    # a rating as well as raise it, so nobody gets it without choosing it.
+    coach_counts_for_skillz = models.BooleanField(default=False)
     verified_18plus = models.BooleanField(default=False, db_index=True)
     verified_18plus_at = models.DateTimeField(null=True, blank=True)
     # One-time onboarding reward: set when the member finishes the intro flow so

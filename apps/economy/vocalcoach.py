@@ -1240,6 +1240,19 @@ class SingZCoachView(APIView):
         _share = mint_score_share(self.app_key, {**payload, **({"challenge": _tag} if _tag else {})},
                                   user=request.user, genre=genre)
         out["share_url"] = f"/s/{_share}" if _share else ""
+        # Teach it (6+) or learn it from someone (below 5): from the number the member was shown.
+        from . import takelessons
+        _exact = payload.get("score_exact")
+        out["lessons"] = takelessons.for_take(
+            request.user, self.app_key, _exact if _exact is not None else payload.get("score"),
+            weakest_label=profile_for_app(self.app_key)["scores"].get(getattr(_row, "weakest", "") or "", ""))
+        try:
+            out["collab"] = takelessons.collab_door(
+                self.app_key, _exact if _exact is not None else payload.get("score"), genre=genre,
+                weakest_label=profile_for_app(self.app_key)["scores"].get(getattr(_row, "weakest", "") or "", ""),
+                take_id=getattr(_row, "pk", None))
+        except Exception:                                    # pragma: no cover - never cost a paid take
+            out["collab"] = None
         if _share and _row is not None:
             # Remember the link ON the take, so sharing it later from the history
             # hands back this same card instead of minting a second one.
