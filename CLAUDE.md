@@ -2634,3 +2634,17 @@ contradicting itself — each `{kind, label, what, why, how}` with kinds server-
 becomes delivery). **`mix_tips`** are separate and not score-gated: a vocal can be buried on a take whose overall is fine.
 They are `{helps: clarity|feelz|both, what, why, how}`, about the mix and never the performance, and the prompt says to
 return none when the vocal sits well. Mic/room tips say what kind of change, never a brand.
+
+## A shared rating carries every metric, and a history share is as full as a live one
+
+An audit of what the coach produces against what a share carried found the history thinner than the live result: a take's stored
+read kept the verdict, strengths, fixes and a few numbers, but not where the member is (`now`), what they aim at (`goal`), the style
+read, the song score and its reason, the next drill, or HookZ / FeelZ with their reasons — so a card or post made from the history
+said less than the screen the member had just seen. `read_of` keeps them now, `share_payload` passes them with `extras` (HookZ /
+FeelZ rows, cleaned once by `extras_of`) and `mix_tips`, and `scoreshare.clean_extras` / `clean_mix` re-clean on the way OUT to a
+stranger's page (whitelisted keys, caps) because a stored row is read for years. `coachshare._KEEP` / `read_view` carry the same to a
+post's read card, and `render_card` draws "HookZ 8 · FeelZ 4 · longing" — numbers and emotion only; the tips stay on the page.
+**An older share link is filled in, never replaced** (`share_take`): only keys it lacks are added, so a declaration (`human`), a recap or
+a challenge already on it survives. Cards are cached a day, so a refilled one reaches the picture on the next day's fetch.
+**Not shared, on purpose:** the take's file (only a post can carry a kept recording), the transcribed lyrics (never stored), and the
+member's listener reasons (the performer's alone).

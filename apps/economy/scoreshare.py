@@ -66,6 +66,39 @@ def _why(payload):
     return out
 
 
+def _txt(v, n):
+    return str(v).strip()[:n] if v not in (None, "") else ""
+
+
+def clean_extras(raw):
+    """HookZ / FeelZ rows for a PUBLIC surface: whitelisted keys, capped, tips as what/why/how. Anything
+    else a stored payload carries is dropped, because this is the page a stranger can open."""
+    out = []
+    for x in (raw if isinstance(raw, list) else [])[:4]:
+        if not isinstance(x, dict) or not isinstance(x.get("value"), (int, float)) or not x.get("label"):
+            continue
+        row = {"key": _txt(x.get("key"), 16), "label": _txt(x["label"], 40), "value": x["value"],
+               "detail": _txt(x.get("detail"), 600), "counted": x["counted"] if isinstance(x.get("counted"), bool) else None,
+               "emotion": _txt(x.get("emotion"), 60)}
+        cause = x.get("cause")
+        if isinstance(cause, dict) and cause.get("label"):
+            row["cause"] = {"key": _txt(cause.get("key"), 16), "label": _txt(cause["label"], 60)}
+        row["tips"] = [{"kind": _txt(t.get("kind"), 16), "label": _txt(t.get("label"), 40), "what": _txt(t.get("what"), 300),
+                        "why": _txt(t.get("why"), 300), "how": _txt(t.get("how"), 400)}
+                       for t in (x.get("tips") or []) if isinstance(t, dict) and t.get("what")][:3]
+        out.append(row)
+    return out
+
+
+def clean_mix(raw):
+    out = []
+    for t in (raw if isinstance(raw, list) else [])[:3]:
+        if isinstance(t, dict) and t.get("what"):
+            out.append({"helps": _txt(t.get("helps"), 8), "helps_label": _txt(t.get("helps_label"), 24),
+                        "what": _txt(t["what"], 300), "why": _txt(t.get("why"), 300), "how": _txt(t.get("how"), 400)})
+    return out
+
+
 def share_dict(row):
     progress = (row.payload or {}).get("progress") or None
     payload = row.payload or {}
@@ -80,6 +113,11 @@ def share_dict(row):
         "recap": payload.get("recap") or None,
         "challenge": payload.get("challenge") or "",
         "why": _why(payload),
+        # HookZ and FeelZ with their reasons, the emotion heard, and what / why / how — and the mix
+        # suggestions. Cleaned for a stranger's page; absent when the coach found nothing to judge.
+        "extras": clean_extras(payload.get("extras")),
+        "mix_tips": clean_mix(payload.get("mix_tips")),
+        "now": _txt(payload.get("now"), 600), "goal": _txt(payload.get("goal"), 600),
         # Whitelisted to the two numbers: this is a PUBLIC page and a listener's
         # reason is a stranger's text about somebody's work, shown to its author only.
         "listeners": ({"median": payload["listeners"].get("median"), "count": payload["listeners"].get("count")}
@@ -174,6 +212,18 @@ def wants_story(request):
     return str(request.GET.get("format", "")).lower() == "story"
 
 
+def extras_line(d):
+    """"HookZ 8 · FeelZ 7 · longing" for the picture — the same numbers the page shows, nothing more.
+    The tips stay on the page: a card is a result, and fixes are for the person who made it."""
+    bits = []
+    for x in (d.get("extras") or []):
+        if isinstance(x, dict) and isinstance(x.get("value"), (int, float)):
+            bits.append(f"{str(x.get('label', '')).split(' ')[0]} {x['value']:g}")
+            if x.get("key") == "feelz" and x.get("emotion"):
+                bits.append(str(x["emotion"]))
+    return "  ·  ".join(bits)
+
+
 def render_card(d, story=False):
     """The score card as PNG bytes, drawn from a plain dict.
 
@@ -206,7 +256,10 @@ def render_card(d, story=False):
         g.text((80, 150), score, font=big, fill=(255, 85, 0))
         sw = g.textlength(score, font=big)
         g.text((80 + sw + 16, 310), "/10", font=_font(90), fill=(255, 255, 255))
-        y = 420
+        ex_line = extras_line(d)
+        if ex_line:
+            g.text((80, 372), ex_line, font=_font(32), fill=(244, 114, 182))
+        y = 430 if ex_line else 420
         for line in _wrap(g, quote, _font(36), W - 160):
             g.text((80, y), line, font=_font(36), fill=(220, 220, 230))
             y += 46
@@ -225,7 +278,10 @@ def render_card(d, story=False):
         g.text((90, 470), score, font=big, fill=(255, 85, 0))
         sw = g.textlength(score, font=big)
         g.text((90 + sw + 20, 800), "/10", font=_font(150), fill=(255, 255, 255))
-        y = 1130
+        ex_line = extras_line(d)
+        if ex_line:
+            g.text((90, 1050), ex_line, font=_font(54), fill=(244, 114, 182))
+        y = 1150 if ex_line else 1130
         for line in _wrap(g, quote, _font(58), W - 180, max_lines=6):
             g.text((90, y), line, font=_font(58), fill=(220, 220, 230))
             y += 76

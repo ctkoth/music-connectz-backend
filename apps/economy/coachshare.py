@@ -77,7 +77,12 @@ _TEXT = ("verdict", "now", "goal", "range_profile", "style_fit", "song_why",
          "lyrics_read", "lyrics_note", "mix_note", "next_drill")
 _LISTS = ("strengths", "fixes")
 _FLAGS = ("rated_lyrics", "rated_mix")
-_KEEP = _NUMBERS + _TEXT + _LISTS + _FLAGS + ("scores",)
+_TEXT = _TEXT + ("hook_why", "feelz_why", "feelz_emotion")
+_NUMBERS = _NUMBERS + ("hook_score", "feelz_score", "score_exact")
+# Lists of server-cleaned dicts (HookZ / FeelZ rows with their tips, and mix suggestions). Copied from the
+# share row, which the server built; re-cleaned on the way OUT as well, because a stored read is read for years.
+_ROWS = ("extras", "mix_tips")
+_KEEP = _NUMBERS + _TEXT + _LISTS + _FLAGS + ("scores",) + _ROWS
 
 
 def clean_visibility(value):
@@ -177,6 +182,14 @@ def read_view(stored):
     if _is_int(stored.get("song_score")):
         out["song_score"] = stored["song_score"]
         out["labels"]["song_score"] = SONG_SCORE["song_score"]
+    if isinstance(stored.get("score_exact"), (int, float)):
+        out["score_exact"] = stored["score_exact"]
+    from .scoreshare import clean_extras, clean_mix
+    ex, mix = clean_extras(stored.get("extras")), clean_mix(stored.get("mix_tips"))
+    if ex:
+        out["extras"] = ex
+    if mix:
+        out["mix_tips"] = mix
     return out
 
 
@@ -264,6 +277,7 @@ def card_dict(post, read):
     from .scoreshare import short_verdict
     return {"label": read["label"], "genre": post.genre or "", "score": read["score"],
             "verdict": short_verdict(read.get("verdict", "")),
+            "extras": read.get("extras") or [],
             "username": post.author.username}
 
 

@@ -150,6 +150,15 @@ def read_of(payload):
         v = payload.get(field)
         if isinstance(v, (int, float)):
             out[key] = v
+    # The rest of what the coach said about the take, so a share or post made from the HISTORY is as
+    # complete as one made from the live result — an audit found it thinner: no where-they-are / aiming
+    # at, no song score, no style read, no next drill, and none of it on the card.
+    for k, n in (("now", 600), ("goal", 600), ("style_fit", 600), ("range_profile", 600),
+                 ("next_drill", 300), ("song_why", 400)):
+        if payload.get(k):
+            out[k] = str(payload[k])[:n]
+    if isinstance(payload.get("song_score"), (int, float)):
+        out["song_score"] = payload["song_score"]
     if payload.get("feelz_emotion"):
         out["feelz_emotion"] = str(payload["feelz_emotion"])[:60]
     # The reasons travel with the numbers: a HookZ or FeelZ with no sentence beside it is the
@@ -779,9 +788,17 @@ def share_payload(take):
     for key, field in (("exact", "score_exact"), ("hook", "hook_score"), ("feelz", "feelz_score")):
         if key in r:
             out[field] = r[key]
-    for k in ("hook_why", "feelz_why", "feelz_emotion"):
-        if r.get(k):
+    for k in ("hook_why", "feelz_why", "feelz_emotion", "now", "goal", "style_fit", "range_profile",
+              "next_drill", "song_why", "song_score"):
+        if r.get(k) not in (None, ""):
             out[k] = r[k]
+    # HookZ, FeelZ and what / why / how, already cleaned by the one cleaner — what a card or a post
+    # shows beside the score. A share does not recompute them and nothing a client sends reaches them.
+    ex, mix = extras_of(r), mix_tips_of(r)
+    if ex:
+        out["extras"] = ex
+    if mix:
+        out["mix_tips"] = mix
     # The week's challenge, when THIS take answers it — judged by when it was made,
     # not when it was shared, so a take from Tuesday shared on Friday still counts.
     tag = challenge_tag(take.app_key, take.genre, take.difficulty, take.created_at)
@@ -794,7 +811,16 @@ def share_take(take):
     """The public share token for a take, minted once and then reused. "" when
     there is no score to share (a take with nothing scored has no card)."""
     from .models import ScoreShare, mint_score_share
-    if take.share_token and ScoreShare.objects.filter(token=take.share_token).exists():
+    row = ScoreShare.objects.filter(token=take.share_token).first() if take.share_token else None
+    if row:
+        # A link minted before HookZ / FeelZ / what-why-how existed is filled in, never replaced: only
+        # keys it does not have are added, so a declaration or a recap already on it is untouched.
+        fresh = share_payload(take)
+        have = row.payload or {}
+        add = {k: v for k, v in fresh.items() if k not in have}
+        if add:
+            row.payload = {**have, **add}
+            row.save(update_fields=["payload"])
         return take.share_token
     token = mint_score_share(take.app_key, share_payload(take), user=take.user, genre=take.genre)
     if token:
