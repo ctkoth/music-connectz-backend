@@ -6635,6 +6635,7 @@ BUCKETS = (
     ("anytime", "Anytime 👐🏼"),
     ("someday", "Someday ❓"),
     ("logbook", "Logbook 🧾"),
+   ("trash", "Trash 🗑️"),
 )
 
 # WHERE a task came from, which is the whole basis of what it may pay.
@@ -6672,6 +6673,8 @@ class LilithTask(models.Model):
     target = models.CharField(max_length=64, blank=True, default="")
     # The starter it was made from (lilith_starters.py), "" when the member wrote it.
     template = models.CharField(max_length=40, blank=True, default="")
+    # When it went to the Trash (bucket == "trash"); emptied for good after TRASH_DAYS. Null otherwise.
+    trashed_at = models.DateTimeField(null=True, blank=True)
     # A VERIFIED action (lilith_actions.py): Lilith ticks it herself when the platform's own
     # records show the member did the thing `goal` times since this task was made.
     action = models.CharField(max_length=24, blank=True, default="")
@@ -6706,6 +6709,8 @@ class LilithRoutine(models.Model):
     CADENCES = (("daily", "Daily"), ("weekly", "Weekly"), ("monthly", "Monthly"))
     cadence = models.CharField(max_length=8, choices=CADENCES, default="daily")
     template = models.CharField(max_length=40, blank=True, default="")
+    # A routine in the Trash is out of the ceiling, the sweep and the board, and restorable.
+    trashed_at = models.DateTimeField(null=True, blank=True)
     # A VERIFIED action: kept by Lilith when the records show `goal` of it in the period.
     action = models.CharField(max_length=24, blank=True, default="")
     goal = models.PositiveSmallIntegerField(default=1)

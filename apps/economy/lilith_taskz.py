@@ -364,6 +364,28 @@ def keep_routine(routine, on=None):
             "milestone": paid, "said": VOICE["streak_kept"].format(days=_count(routine.streak, cadence))}
 
 
+# --------------------------------------------------------------- the trash
+
+TRASH_DAYS = 30
+
+
+def open_tasks(user):
+    """Tasks that are still to do: not done, and not in the Trash. Every ceiling, sweep and count
+    reads this one definition, so a trashed task cannot fill a tier's quota or tick itself."""
+    return LilithTask.objects.filter(user=user, done_at__isnull=True).exclude(bucket="trash")
+
+
+def live_routines(user):
+    return LilithRoutine.objects.filter(user=user, trashed_at__isnull=True)
+
+
+def purge_trash(user):
+    """Empty what has sat in the Trash for TRASH_DAYS. Run on a board read (no cron; idempotent)."""
+    cutoff = timezone.now() - timedelta(days=TRASH_DAYS)
+    LilithTask.objects.filter(user=user, bucket="trash", trashed_at__lt=cutoff).delete()
+    LilithRoutine.objects.filter(user=user, trashed_at__lt=cutoff).delete()
+
+
 # ------------------------------------------- call-to-action: Lilith keeps them
 
 def _progress_label(n, goal, cadence=None):
@@ -415,12 +437,12 @@ def sweep(user):
     and where each stands. Idempotent, and it never raises — the board must open."""
     swept, progress = [], {}
     try:
-        for t in LilithTask.objects.filter(user=user, done_at__isnull=True).exclude(action=""):
+        for t in open_tasks(user).exclude(action=""):
             res, prog = sweep_task(t)
             progress[("task", t.pk)] = prog
             if res:
                 swept.append({"kind": "task", "id": t.pk, "title": t.title, **res})
-        for r in LilithRoutine.objects.filter(user=user).exclude(action=""):
+        for r in live_routines(user).exclude(action=""):
             kept, prog = sweep_routine(r)
             progress[("routine", r.pk)] = prog
             for k in kept:
@@ -747,7 +769,9 @@ def _suggested(user, routines):
     """Routines Lilith thinks this member should have, with the reason. Never raises."""
     try:
         from .lilith_suggest import suggest
-        return suggest(user, on_board_routines={r.template for r in routines if r.template})
+        tasks = LilithTask.objects.filter(user=user, done_at__isnull=True).exclude(template="").exclude(bucket="trash")
+        return suggest(user, on_board_routines={r.template for r in routines if r.template},
+                       on_board_tasks=set(tasks.values_list("template", flat=True)))
     except Exception:                                        # pragma: no cover
         return []
 
@@ -790,28 +814,32 @@ def board(user):
     # Lilith closes what the member has already DONE before drawing the board, so the board is
     # never behind the records. (A write on a read, deliberately: there is no cron to do it, and
     # every call is idempotent.)
+    purge_trash(user)
     swept, progress = sweep(user)
 
     tasks = list(LilithTask.objects.filter(user=user).select_related()[:500])
-    open_tasks = [t for t in tasks if not t.done_at]
+    open_list = [t for t in tasks if not t.done_at and t.bucket != "trash"]
     buckets = {key: [] for key, _ in BUCKETS}
     for t in tasks:
         buckets.setdefault(t.bucket, []).append(_task_dict(t, progress))
 
-    routines = list(LilithRoutine.objects.filter(user=user))
+    routines = list(live_routines(user))
+    trashed_routines = list(LilithRoutine.objects.filter(user=user, trashed_at__isnull=False))
     since = timezone.now() - timedelta(hours=24)
     return {
-        "said": _greeting() if open_tasks else VOICE["empty"],
+        "said": _greeting() if open_list else VOICE["empty"],
         "tier": tier,
         "limits": limits,
         "buckets": buckets,
         "kinds": [{"key": k, "label": v, "xp": XP_FOR.get(k, 10)} for k, v in KINDS],
         "bucket_labels": [{"key": k, "label": v} for k, v in BUCKETS],
         "routines": [_routine_dict(r, progress) for r in routines],
+        "trash_routines": [{**_routine_dict(r), "trashed_at": r.trashed_at.isoformat()} for r in trashed_routines],
+        "trash_days": TRASH_DAYS,
         "swept": swept,
         "actions": A.catalogue(),
         "suggested": _suggested(user, routines),
-        "starters": starters_for(user, tasks, routines),
+        "starters": starters_for(user, [t for t in tasks if t.bucket != "trash"], routines),
         "rewards": rewards_table(),
         # The caps, as counters rather than rules, so a member can see how
         # much of today's allowance is left before they spend the effort.
@@ -821,7 +849,7 @@ def board(user):
             "done": LilithTask.objects.filter(user=user, done_at__gte=since).count(),
             "combo_at": 3,
         },
-        "at_task_limit": len(open_tasks) >= limits["active_tasks"],
+        "at_task_limit": len(open_list) >= limits["active_tasks"],
         "at_routine_limit": len(routines) >= limits["routines"],
     }
 
@@ -873,7 +901,7 @@ class LilithTaskListView(APIView):
             return Response({"detail": "A task needs a title."}, status=400)
 
         limits = tier_limits(membership_for(request.user).tier)
-        open_now = LilithTask.objects.filter(user=request.user, done_at__isnull=True).count()
+        open_now = open_tasks(request.user).count()
         if open_now >= limits["active_tasks"]:
             # A ladder that says HOW MANY, never whether — and it says what
             # the next rung buys rather than only refusing.
@@ -929,6 +957,8 @@ class LilithTaskDetailView(APIView):
             fields.append("note")
         if d.get("bucket") in _BUCKET_KEYS:
             t.bucket = d["bucket"]
+            t.trashed_at = timezone.now() if d["bucket"] == "trash" else None
+            fields.append("trashed_at")
             fields.append("bucket")
         if d.get("kind") in _KIND_KEYS:
             t.kind = d["kind"]
@@ -962,6 +992,8 @@ class LilithTaskCompleteView(APIView):
         t = LilithTask.objects.filter(pk=task_id, user=request.user).first()
         if not t:
             return Response({"detail": "No such task."}, status=404)
+        if t.bucket == "trash":
+            return Response({"detail": "It's in the Trash. Move it back first."}, status=400)
         if t.action and not t.done_at:
             # Verified: Lilith ticks it herself from the records. A member's own tick would turn a
             # checked claim into a typed one.
@@ -984,7 +1016,7 @@ class LilithRoutineListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        rows = LilithRoutine.objects.filter(user=request.user)
+        rows = live_routines(request.user)
         return Response({"routines": [_routine_dict(r) for r in rows],
                          "milestones": [{"days": d, "spinaz": ROUTINE_MILESTONES[d],
                                          "energy": ROUTINE_MILESTONE_ENERGY[d]}
@@ -1001,7 +1033,7 @@ class LilithRoutineListView(APIView):
         if not title:
             return Response({"detail": "A routine needs a title."}, status=400)
         limits = tier_limits(membership_for(request.user).tier)
-        if LilithRoutine.objects.filter(user=request.user).count() >= limits["routines"]:
+        if live_routines(request.user).count() >= limits["routines"]:
             return Response({
                 "detail": f"{limits['routines']} routines is this tier's ceiling. "
                           "A tier up raises it.",
@@ -1030,6 +1062,8 @@ class LilithRoutineDetailView(APIView):
         r = LilithRoutine.objects.filter(pk=routine_id, user=request.user).first()
         if not r:
             return Response({"detail": "No such routine."}, status=404)
+        if r.trashed_at:
+            return Response({"detail": "It's in the Trash. Move it back first."}, status=400)
         if r.action:
             kept, prog = sweep_routine(r)
             if not kept and not kept_this_period(r):
@@ -1111,9 +1145,14 @@ class LilithStarterAddView(APIView):
             spec = ST.task_by_key(key)
             if not spec:
                 return Response({"detail": "No such starter."}, status=404)
-            if LilithTask.objects.filter(user=request.user, template=key, done_at__isnull=True).exists():
+            if open_tasks(request.user).filter(template=key).exists():
                 return Response({"detail": "That one is already on your board.", "already": True}, status=200)
-            if LilithTask.objects.filter(user=request.user, done_at__isnull=True).count() >= limits["active_tasks"]:
+            back = LilithTask.objects.filter(user=request.user, template=key, bucket="trash").first()
+            if back:                                  # it is in the Trash: bring it back, don't make a second copy
+                back.bucket, back.trashed_at = spec["bucket"], None
+                back.save(update_fields=["bucket", "trashed_at"])
+                return Response({**_task_dict(back), "restored": True}, status=200)
+            if open_tasks(request.user).count() >= limits["active_tasks"]:
                 return Response({"detail": f"{limits['active_tasks']} open tasks is this tier's ceiling. "
                                            "Finish or archive one, or a tier up raises it.",
                                  "at_limit": True}, status=status.HTTP_402_PAYMENT_REQUIRED)
@@ -1128,9 +1167,14 @@ class LilithStarterAddView(APIView):
             spec = ST.routine_by_key(key)
             if not spec:
                 return Response({"detail": "No such starter."}, status=404)
-            if LilithRoutine.objects.filter(user=request.user, template=key).exists():
+            if live_routines(request.user).filter(template=key).exists():
                 return Response({"detail": "That one is already on your board.", "already": True}, status=200)
-            if LilithRoutine.objects.filter(user=request.user).count() >= limits["routines"]:
+            back = LilithRoutine.objects.filter(user=request.user, template=key, trashed_at__isnull=False).first()
+            if back:
+                back.trashed_at = None
+                back.save(update_fields=["trashed_at"])
+                return Response({**_routine_dict(back), "restored": True}, status=200)
+            if live_routines(request.user).count() >= limits["routines"]:
                 return Response({"detail": f"{limits['routines']} routines is this tier's ceiling. "
                                            "A tier up raises it.", "at_limit": True},
                                 status=status.HTTP_402_PAYMENT_REQUIRED)
@@ -1141,3 +1185,117 @@ class LilithStarterAddView(APIView):
             return Response(_routine_dict(r), status=status.HTTP_201_CREATED)
 
         return Response({"detail": "Say whether it is a task or a routine."}, status=400)
+
+
+class LilithMoveView(APIView):
+    """POST /api/economy/lilith/move/ {kind: "task"|"routine", id, to, bucket?} — move any entry anywhere.
+
+    * a task → any bucket (not the Logbook, which is where DONE things go and only ticking puts them there)
+    * a task → a routine: `to` is "daily" | "weekly" | "monthly"
+    * a routine → a task: `to` is "task" (lands in `bucket`, default Today) — the streak goes with it
+    * a routine → another cadence: `to` is "daily" | "weekly" | "monthly"
+
+    The entry keeps what it points at (`app_key`, `target`) and, if it is a verified call-to-action, its
+    `action` and `goal` — so a verified task becomes a verified routine and back. What does NOT carry is
+    anything that was earned: a finished task cannot be moved (it is history), a routine moved to another
+    cadence restarts its run (a streak of weeks is not a streak of days), and a routine turned into a task
+    loses its streak — the response says so, and the screen asks first. Nothing here pays, and no loop
+    through it pays twice: milestone rungs are once-for-life by their ledger ref, and a task's XP is paid
+    on completion, once per task.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from .models import membership_for
+        d = request.data
+        kind, to = str(d.get("kind") or ""), str(d.get("to") or "")
+        try:
+            pk = int(d.get("id"))
+        except (TypeError, ValueError):
+            return Response({"detail": "Say which entry."}, status=400)
+        limits = tier_limits(membership_for(request.user).tier)
+
+        if kind == "task":
+            t = LilithTask.objects.filter(pk=pk, user=request.user).first()
+            if not t:
+                return Response({"detail": "No such task."}, status=404)
+            if t.done_at:
+                return Response({"detail": "A finished task is history — it stays in the Logbook."}, status=400)
+            if to in _BUCKET_KEYS and to != "logbook":
+                if to != "trash" and t.bucket == "trash" and open_tasks(request.user).count() >= limits["active_tasks"]:
+                    return Response({"detail": f"{limits['active_tasks']} open tasks is this tier's ceiling — "
+                                               "there's no room to bring it back.", "at_limit": True},
+                                    status=status.HTTP_402_PAYMENT_REQUIRED)
+                t.bucket = to
+                t.trashed_at = timezone.now() if to == "trash" else None
+                t.save(update_fields=["bucket", "trashed_at"])
+                return Response({"moved": "trash" if to == "trash" else "bucket", "task": _task_dict(t)})
+            if to in CADENCES:
+                if live_routines(request.user).count() >= limits["routines"]:
+                    return Response({"detail": f"{limits['routines']} routines is this tier's ceiling. "
+                                               "A tier up raises it.", "at_limit": True},
+                                    status=status.HTTP_402_PAYMENT_REQUIRED)
+                r = LilithRoutine.objects.create(
+                    user=request.user, title=t.title, note=(t.note or "")[:500], cadence=to,
+                    app_key=t.app_key, target=t.target, action=t.action, goal=t.goal or 1)
+                t.delete()
+                return Response({"moved": "routine", "routine": _routine_dict(r)}, status=status.HTTP_201_CREATED)
+            return Response({"detail": "Move it to a bucket or to a routine cadence."}, status=400)
+
+        if kind == "routine":
+            r = LilithRoutine.objects.filter(pk=pk, user=request.user).first()
+            if not r:
+                return Response({"detail": "No such routine."}, status=404)
+            if to == "trash":
+                r.trashed_at = timezone.now()
+                r.save(update_fields=["trashed_at"])
+                return Response({"moved": "trash", "routine": _routine_dict(r)})
+            if r.trashed_at and to in CADENCES + ("task",) \
+                    and live_routines(request.user).count() >= limits["routines"] and to != "task":
+                return Response({"detail": f"{limits['routines']} routines is this tier's ceiling — "
+                                           "there's no room to bring it back.", "at_limit": True},
+                                status=status.HTTP_402_PAYMENT_REQUIRED)
+            if to in CADENCES:
+                if to == r.cadence and not r.trashed_at:
+                    return Response({"moved": "same", "routine": _routine_dict(r)})
+                lost = r.streak
+                restored = bool(r.trashed_at)
+                # Same cadence out of the Trash is a plain restore — the run is whatever time made it.
+                reset = to != r.cadence
+                if reset:
+                    r.cadence, r.streak, r.last_done = to, 0, None
+                r.trashed_at = None
+                r.save(update_fields=["cadence", "streak", "last_done", "trashed_at"])
+                return Response({"moved": "restored" if restored and not reset else "cadence",
+                                "streak_reset": reset and bool(lost), "lost_streak": lost if reset else 0,
+                                "routine": _routine_dict(r)})
+            if to == "task":
+                if open_tasks(request.user).count() >= limits["active_tasks"]:
+                    return Response({"detail": f"{limits['active_tasks']} open tasks is this tier's ceiling. "
+                                               "Finish or delete one first.", "at_limit": True},
+                                    status=status.HTTP_402_PAYMENT_REQUIRED)
+                bucket = d.get("bucket") if d.get("bucket") in _BUCKET_KEYS and d.get("bucket") != "logbook" else "today"
+                lost = r.streak
+                t = LilithTask.objects.create(
+                    user=request.user, title=r.title, note=r.note or "", kind="standard", bucket=bucket,
+                    source="platform" if r.app_key else "self", app_key=r.app_key, target=r.target,
+                    action=r.action, goal=r.goal or 1)
+                r.delete()
+                return Response({"moved": "task", "lost_streak": lost, "task": _task_dict(t)},
+                                status=status.HTTP_201_CREATED)
+            return Response({"detail": "Move it to another cadence, or to a task."}, status=400)
+
+        return Response({"detail": "Say whether it is a task or a routine."}, status=400)
+
+
+class LilithTrashView(APIView):
+    """DELETE /api/economy/lilith/trash/ — empty the Trash for good (tasks and routines).
+
+    Anything older than TRASH_DAYS goes on its own; this is the member doing it sooner. Irreversible,
+    so the screen asks first and the response says how many went."""
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        t, _ = LilithTask.objects.filter(user=request.user, bucket="trash").delete()
+        r, _ = LilithRoutine.objects.filter(user=request.user, trashed_at__isnull=False).delete()
+        return Response({"deleted": {"tasks": t, "routines": r}})

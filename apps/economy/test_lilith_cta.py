@@ -340,3 +340,199 @@ class ArtistRoleTests(TestCase):
         c = api(member("viewer"))
         card = c.get("/api/economy/profile/cardroles/") if False else None
         self.assertEqual(personas_of(p)[0]["roles"], ["🎶 Singer"])
+
+
+class MoveAnythingAnywhereTests(TestCase):
+    def setUp(self):
+        self.u = member("mover")
+        self.c = api(self.u)
+
+    def _move(self, **body):
+        return self.c.post("/api/economy/lilith/move/", body, format="json")
+
+    def test_a_task_moves_between_buckets_but_never_into_the_logbook(self):
+        t = LilithTask.objects.create(user=self.u, title="a", bucket="inbox")
+        self.assertEqual(self._move(kind="task", id=t.pk, to="someday").status_code, 200)
+        t.refresh_from_db()
+        self.assertEqual(t.bucket, "someday")
+        self.assertEqual(self._move(kind="task", id=t.pk, to="logbook").status_code, 400)
+
+    def test_a_task_becomes_a_routine_keeping_its_control_and_its_verified_action(self):
+        t = LilithTask.objects.create(user=self.u, title="Post weekly", source="platform", app_key="postz",
+                                      target="post-compose", action="post_made", goal=2, bucket="inbox")
+        r = self._move(kind="task", id=t.pk, to="weekly")
+        self.assertEqual(r.status_code, 201)
+        row = LilithRoutine.objects.get()
+        self.assertEqual((row.cadence, row.app_key, row.action, row.goal), ("weekly", "postz", "post_made", 2))
+        self.assertFalse(LilithTask.objects.filter(pk=t.pk).exists())
+
+    def test_a_finished_task_is_history_and_cannot_be_moved(self):
+        t = LilithTask.objects.create(user=self.u, title="done", done_at=timezone.now(), bucket="logbook")
+        self.assertEqual(self._move(kind="task", id=t.pk, to="daily").status_code, 400)
+
+    def test_a_routine_changes_cadence_and_its_run_restarts_and_says_so(self):
+        r = routine(self.u, cadence="daily", streak=9, last_done=timezone.localdate())
+        out = self._move(kind="routine", id=r.pk, to="weekly").json()
+        self.assertTrue(out["streak_reset"])
+        self.assertEqual(out["lost_streak"], 9)
+        r.refresh_from_db()
+        self.assertEqual((r.cadence, r.streak, r.last_done), ("weekly", 0, None))
+
+    def test_a_routine_becomes_a_task_and_the_streak_goes_with_the_routine(self):
+        r = routine(self.u, title="Breathe", app_key="breathz", action="breath_session", streak=5)
+        out = self._move(kind="routine", id=r.pk, to="task", bucket="upcoming").json()
+        self.assertEqual(out["lost_streak"], 5)
+        t = LilithTask.objects.get()
+        self.assertEqual((t.bucket, t.action, t.source), ("upcoming", "breath_session", "platform"))
+        self.assertFalse(LilithRoutine.objects.exists())
+
+    def test_moving_back_and_forth_pays_nothing_and_cannot_re_earn_a_rung(self):
+        before = wallet_for(self.u).spinaz
+        t = LilithTask.objects.create(user=self.u, title="x", bucket="inbox")
+        for to in ("daily", "task", "weekly", "task", "monthly"):
+            if LilithTask.objects.filter(user=self.u).exists():
+                tk = LilithTask.objects.get(user=self.u)
+                self._move(kind="task", id=tk.pk, to=to)
+            else:
+                rr = LilithRoutine.objects.get(user=self.u)
+                self._move(kind="routine", id=rr.pk, to=to)
+        self.assertEqual(wallet_for(self.u).spinaz, before)
+
+    def test_it_respects_the_tier_ceilings_and_other_peoples_entries(self):
+        for i in range(3):
+            routine(self.u, title=f"r{i}")
+        t = LilithTask.objects.create(user=self.u, title="t", bucket="inbox")
+        self.assertEqual(self._move(kind="task", id=t.pk, to="daily").status_code, 402)     # free = 3 routines
+        other = member("other2")
+        theirs = LilithTask.objects.create(user=other, title="mine", bucket="inbox")
+        self.assertEqual(self._move(kind="task", id=theirs.pk, to="today").status_code, 404)
+
+
+class TrashTests(TestCase):
+    def setUp(self):
+        self.u = member("trasher")
+        self.c = api(self.u)
+
+    def _move(self, **b):
+        return self.c.post("/api/economy/lilith/move/", b, format="json")
+
+    def test_an_entry_can_go_someday_today_someday_routine_and_trash_and_back(self):
+        t = LilithTask.objects.create(user=self.u, title="idea", bucket="someday")
+        for to in ("today", "someday", "inbox", "upcoming", "anytime", "trash", "today"):
+            self.assertEqual(self._move(kind="task", id=t.pk, to=to).status_code, 200, to)
+        t.refresh_from_db()
+        self.assertEqual((t.bucket, t.trashed_at), ("today", None))
+        r = self._move(kind="task", id=t.pk, to="weekly")
+        self.assertEqual(r.status_code, 201)
+        rid = LilithRoutine.objects.get().pk
+        self.assertEqual(self._move(kind="routine", id=rid, to="trash").status_code, 200)
+        self.assertTrue(LilithRoutine.objects.get().trashed_at)
+        self.assertEqual(self._move(kind="routine", id=rid, to="weekly").json()["moved"], "restored")
+        self.assertIsNone(LilithRoutine.objects.get().trashed_at)
+
+    def test_a_trashed_entry_is_out_of_the_ceiling_the_sweep_and_the_ticks(self):
+        for i in range(3):
+            routine(self.u, title=f"r{i}")
+        extra = routine(self.u, title="r3x", action="message_sent")
+        # ceiling is 3 for free, so the 4th above only exists because we bypassed the API; trash one and it counts as room
+        self._move(kind="routine", id=extra.pk, to="trash")
+        self.assertEqual(L.live_routines(self.u).count(), 3)
+        Message.objects.create(sender=self.u, recipient=member("rcv"), body="x")
+        L.sweep(self.u)
+        extra.refresh_from_db()
+        self.assertEqual(extra.streak, 0)                              # a trashed routine is not kept
+        t = LilithTask.objects.create(user=self.u, title="t", bucket="inbox")
+        self._move(kind="task", id=t.pk, to="trash")
+        self.assertEqual(self.c.post(f"/api/economy/lilith/tasks/{t.pk}/complete/").status_code, 400)
+
+    def test_the_board_serves_the_trash_and_empties_it_after_thirty_days(self):
+        old = LilithTask.objects.create(user=self.u, title="old", bucket="trash", trashed_at=timezone.now() - timedelta(days=31))
+        new = LilithTask.objects.create(user=self.u, title="new", bucket="trash", trashed_at=timezone.now())
+        data = self.c.get("/api/economy/lilith/").json()
+        self.assertEqual([t["title"] for t in data["buckets"]["trash"]], ["new"])
+        self.assertFalse(LilithTask.objects.filter(pk=old.pk).exists())
+        self.assertEqual(data["trash_days"], 30)
+        self.assertTrue(any(b["key"] == "trash" for b in data["bucket_labels"]))
+
+    def test_restoring_needs_room_and_emptying_is_for_good(self):
+        t = LilithTask.objects.create(user=self.u, title="back", bucket="trash", trashed_at=timezone.now())
+        out = self.c.delete("/api/economy/lilith/trash/").json()
+        self.assertEqual(out["deleted"]["tasks"], 1)
+        self.assertFalse(LilithTask.objects.filter(pk=t.pk).exists())
+
+    def test_adding_a_starter_that_is_in_the_trash_restores_it_rather_than_copying(self):
+        self.c.post("/api/economy/lilith/starters/", {"kind": "routine", "key": "ship_one"}, format="json")
+        rid = LilithRoutine.objects.get().pk
+        self._move(kind="routine", id=rid, to="trash")
+        r = self.c.post("/api/economy/lilith/starters/", {"kind": "routine", "key": "ship_one"}, format="json")
+        self.assertTrue(r.json()["restored"])
+        self.assertEqual(LilithRoutine.objects.count(), 1)
+
+    def test_trashing_and_restoring_pays_nothing(self):
+        before = wallet_for(self.u).spinaz
+        t = LilithTask.objects.create(user=self.u, title="x", bucket="inbox")
+        for to in ("trash", "today", "trash", "inbox"):
+            self._move(kind="task", id=t.pk, to=to)
+        self.assertEqual(wallet_for(self.u).spinaz, before)
+
+
+class RecommendedFromProfileAndActivityTests(TestCase):
+    def _tasks(self, u):
+        from django.core.cache import cache
+        cache.clear()
+        return {s["key"]: s for s in SG.suggest(u) if s["kind"] == "task"}
+
+    def test_an_empty_profile_is_told_what_is_missing_in_words(self):
+        u = member("bare")
+        got = self._tasks(u)
+        self.assertIn("pick_persona", got)
+        self.assertIn("finish_profile", got)
+        self.assertIn("portfolio_links", got)
+        self.assertIn("verify_18", got)
+        self.assertEqual(got["finish_profile"]["because"], "profile")
+        self.assertIn("bio is empty", got["finish_profile"]["why"])
+
+    def test_a_filled_in_profile_is_not_nagged(self):
+        u = member("full")
+        p = profile_for(u)
+        p.bio = "I make beats."
+        p.links = [{"url": "https://example.com", "label": "site"}]
+        p.personas = [{"key": "producer", "name": "Producer", "skills": []}]
+        p.verified_18plus = True
+        p.save()
+        got = self._tasks(u)
+        for k in ("pick_persona", "finish_profile", "portfolio_links", "verify_18"):
+            self.assertNotIn(k, got)
+
+    def test_a_low_last_take_recommends_the_drill_and_names_the_score(self):
+        u = member("low")
+        p = profile_for(u)
+        p.bio, p.links, p.verified_18plus = "bars", [{"url": "https://e.com", "label": "x"}], True
+        p.personas = [{"key": "indieartist", "name": "Independent Artist", "skills": [{"name": "any_rapping"}]}]
+        p.save()                                                          # profile in order: only the activity speaks
+        TakeScore.objects.create(user=u, app_key="rapz", scores={"flow": 3}, overall=3)
+        got = self._tasks(u)
+        self.assertEqual(list(got)[0], "fix_weakest")
+        self.assertIn("scored 3", got["fix_weakest"]["why"])
+        self.assertIn("take_rapz", got)                                  # and today's take, in the coach they use
+        self.assertIn("post_finished", got)                              # scored, never posted
+
+    def test_a_collab_waiting_on_you_comes_first(self):
+        from .models import CollabDeal
+        a, b = member("starter"), member("waiting")
+        deal = CollabDeal.objects.create(initiator=a, title="d", currency="spinaz", status="draft",
+                                         participants=[{"username": "starter", "accepted_at": "2026-01-01T00:00:00Z"},
+                                                       {"username": "waiting"}])
+        got = self._tasks(b)
+        self.assertEqual(list(got)[0], "answer_collab")
+        self.assertIn("1 collab is waiting", got["answer_collab"]["why"])
+
+    def test_what_is_already_on_the_board_is_not_recommended_and_the_board_carries_both_kinds(self):
+        u = member("onboard")
+        c = api(u)
+        data = c.get("/api/economy/lilith/").json()
+        kinds = {s["kind"] for s in data["suggested"]}
+        self.assertEqual(kinds, {"routine", "task"})
+        c.post("/api/economy/lilith/starters/", {"kind": "task", "key": "pick_persona"}, format="json")
+        again = {s["key"] for s in c.get("/api/economy/lilith/").json()["suggested"] if s["kind"] == "task"}
+        self.assertNotIn("pick_persona", again)

@@ -30,6 +30,7 @@ from . import lilith_starters as ST
 WINDOW_DAYS = 14
 HABIT_AT = 3           # this many in the window and it is a habit waiting to be a streak
 MAX_SUGGESTIONS = 5
+MAX_TASK_SUGGESTIONS = 4
 CACHE_SECONDS = 600
 
 # persona key (letters only, lower-case — `sentencez.persona_keys` form) → starter routines, in
@@ -79,6 +80,45 @@ def recent_counts(user):
     since = timezone.now() - timedelta(days=WINDOW_DAYS)
     needed = {r["action"] for r in ST.ROUTINES if r.get("action")} | {g[0] for g in GAPS} | {g[1] for g in GAPS}
     out = {a: len(A.events(user, a, since)) for a in needed}
+    cache.set(key, out, CACHE_SECONDS)
+    return out
+
+
+def signals(user):
+    """Profile and activity FACTS the suggestions read, in one cached dict (ten minutes).
+
+    Profile: is there a bio, links, a persona, an ID check. Activity: has this member ever posted,
+    shared a card, started a collab, invited anyone; how many collabs are waiting on THEIR answer; how
+    their last take scored. Facts, not scores — each is a yes/no or a count a member can verify against
+    their own profile, and each becomes a sentence in a reason."""
+    key = f"lilith:sig:{user.pk}"
+    got = cache.get(key)
+    if got is not None:
+        return got
+    from . import models as M
+    from .models import is_minor, profile_for
+    from .personaz import links_of, personas_of
+    p = profile_for(user)
+    last = M.TakeScore.objects.filter(user=user, overall__isnull=False).order_by("-created_at").first()
+    waiting = 0
+    for cp in M.CollabParticipant.objects.filter(user=user).select_related("deal")[:50]:
+        d = cp.deal
+        if d.status not in M._DEAL_OVER and d.initiator_id != user.id and not M._deal_accepted(d, user):
+            waiting += 1
+    out = {
+        "bio": bool((p.bio or "").strip()),
+        "links": len(links_of(p)),
+        "personas": len(personas_of(p)),
+        "adult": not is_minor(user),
+        "verified_18": bool(p.verified_18plus),
+        "ever_posted": M.Post.objects.filter(author=user).exists(),
+        "ever_shared_card": M.ScoreShare.objects.filter(user=user).exists(),
+        "ever_collab": M.CollabDeal.objects.filter(initiator=user).exists(),
+        "ever_invited": M.Referral.objects.filter(referrer=user).exists(),
+        "collabs_waiting": waiting,
+        "last_take": float(last.overall) if last and last.overall is not None else None,
+        "last_take_app": last.app_key if last else "",
+    }
     cache.set(key, out, CACHE_SECONDS)
     return out
 
@@ -166,6 +206,43 @@ def suggest(user, on_board_routines=(), on_board_tasks=()):
         if n >= 1 and counts.get(lack_a, 0) == 0:
             offer(rk, 3 + min(n, 10) / 5, "gap", sentence.format(n=n, s="" if n == 1 else "s"))
 
+    # 4. one-off tasks — from the profile (what is missing) and from what just happened
+    sig = signals(user)
+    have_t = set(on_board_tasks)
+    tasks = {}
+
+    def offer_task(key, score, kind, why):
+        if key in have_t or not ST.task_by_key(key):
+            return
+        if key not in tasks or score > tasks[key][0]:
+            tasks[key] = (score, kind, why)
+
+    if sig["collabs_waiting"]:
+        n = sig["collabs_waiting"]
+        offer_task("answer_collab", 9, "activity",
+                   f"{n} collab{' is' if n == 1 else 's are'} waiting for your answer.")
+    if not sig["personas"]:
+        offer_task("pick_persona", 7, "profile", "You haven't said what you are yet — no persona on your profile.")
+    if not sig["bio"]:
+        offer_task("finish_profile", 6, "profile", "Your bio is empty. It's the first thing a collaborator reads.")
+    if not sig["links"]:
+        offer_task("portfolio_links", 5.5, "profile", "You have no links on your profile for people to open.")
+    if sig["adult"] and not sig["verified_18"]:
+        offer_task("verify_18", 4, "profile", "You haven't verified 18+, which unlocks money battles.")
+    if sig["last_take"] is not None and sig["last_take"] < 5:
+        offer_task("fix_weakest", 8, "activity", f"Your last take scored {sig['last_take']:g}. One drill on the lowest dimension moves it fastest.")
+    if sig["last_take"] is not None and not sig["ever_shared_card"]:
+        offer_task("share_card", 4.5, "activity", "You've been scored but never shared a card. Anyone who joins from it is a referral.")
+    if sig["ever_posted"] is False and sig["last_take"] is not None:
+        offer_task("post_finished", 5, "activity", "You've been scored but haven't posted anything yet.")
+    if sig["ever_posted"] and not sig["ever_collab"]:
+        offer_task("start_collab", 4.5, "activity", "You post on your own. A collab puts a second pair of ears on the work.")
+    if not sig["ever_invited"] and sig["ever_posted"]:
+        offer_task("invite_musician", 3, "activity", "You haven't invited anyone. Your handle is the code and you're both paid.")
+    for app, how, n in instruments_of(user)[:1]:
+        if f"take_{app}" in ST.TASK_KEYS and how == "takes":
+            offer_task(f"take_{app}", 5, "instrument", f"You work in {ST._label(app)} — record today's take.")
+
     ranked = sorted(scored.items(), key=lambda kv: -kv[1][0])[:MAX_SUGGESTIONS]
     if not ranked:                                   # a brand-new member with no signal at all
         ranked = [(k, (1, "start", "A small place to begin.")) for k in DEFAULTS if k not in have][:MAX_SUGGESTIONS]
@@ -180,4 +257,10 @@ def suggest(user, on_board_routines=(), on_board_tasks=()):
                     "cadence": r["cadence"], "app_key": app_key, "target": r["target"],
                     "action": r.get("action", ""), "goal": r.get("goal", 1),
                     "why": why, "because": kind})
+    for key, (score, kind, why) in sorted(tasks.items(), key=lambda kv: -kv[1][0])[:MAX_TASK_SUGGESTIONS]:
+        t = ST.task_by_key(key)
+        app_key = main if (main and key in ST.INSTRUMENT_AWARE) else t["app_key"]
+        out.append({"kind": "task", "key": key, "title": t["title"], "note": t["note"], "cadence": "",
+                    "app_key": app_key, "target": t["target"], "action": t.get("action", ""),
+                    "goal": t.get("goal", 1), "why": why, "because": kind})
     return out
