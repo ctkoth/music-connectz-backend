@@ -24,12 +24,49 @@ class StatzTrialTests(TestCase):
         self.assertFalse(statz_trial.has_statz(self.user))
         s = self.c.post(URL).json()
         self.assertTrue(s["active"]); self.assertFalse(s["available"])
-        self.assertGreater(s["seconds_left"], 59 * 60)
+        self.assertGreater(s["seconds_left"], 59 * 60)          # the FIRST sample ever is the full hour
+        self.assertLessEqual(s["seconds_left"], 60 * 60)
+        self.assertEqual((s["last_minutes"], s["minutes"]), (60, 15))   # what was used, and what comes next
         self.assertTrue(statz_trial.has_statz(self.user))
 
-    def test_once_ever(self):
+    def test_once_a_day_not_once_ever(self):
         self.c.post(URL)
-        self.assertEqual(self.c.post(URL).status_code, 409)
+        StatzTrial.objects.filter(user=self.user).update(ends_at=timezone.now() - timedelta(seconds=1))
+        self.assertEqual(self.c.post(URL).status_code, 409)               # same day: spent
+        s = self.c.get(URL).json()
+        self.assertTrue(s["used"]); self.assertFalse(s["available"])
+        self.assertTrue(s["next_at"]); self.assertGreater(s["seconds_until_next"], 23 * 3600)
+
+    def test_it_comes_back_a_day_after_the_last_one_started(self):
+        self.c.post(URL)
+        ago = timezone.now() - timedelta(hours=23, minutes=59)
+        StatzTrial.objects.filter(user=self.user).update(started_at=ago, ends_at=ago + timedelta(minutes=15))
+        self.assertFalse(self.c.get(URL).json()["available"])               # 23h59m: not yet
+        StatzTrial.objects.filter(user=self.user).update(started_at=ago - timedelta(minutes=2))
+        s = self.c.get(URL).json()
+        self.assertTrue(s["available"]); self.assertFalse(s["used"])
+        r = self.c.post(URL)
+        self.assertEqual(r.status_code, 201)
+        self.assertTrue(r.json()["active"])
+        self.assertEqual(StatzTrial.objects.filter(user=self.user).count(), 1)   # the one row, re-armed
+
+    def test_the_offer_says_an_hour_the_first_time_and_fifteen_after(self):
+        first = self.c.get(URL).json()
+        self.assertTrue(first["first"]); self.assertEqual(first["minutes"], 60)
+        self.c.post(URL)
+        ago = timezone.now() - timedelta(hours=25)
+        StatzTrial.objects.filter(user=self.user).update(started_at=ago, ends_at=ago + timedelta(minutes=60))
+        again = self.c.get(URL).json()
+        self.assertTrue(again["available"]); self.assertFalse(again["first"]); self.assertEqual(again["minutes"], 15)
+        s = self.c.post(URL).json()
+        self.assertLessEqual(s["seconds_left"], 15 * 60)                 # the second window is fifteen
+        self.assertEqual(s["last_minutes"], 15)
+
+    def test_pressing_it_while_running_is_not_a_second_window(self):
+        first = self.c.post(URL).json()["ends_at"]
+        again = self.c.post(URL)
+        self.assertEqual(again.status_code, 200)
+        self.assertEqual(again.json()["ends_at"], first)
 
     def test_it_really_ends(self):
         self.c.post(URL)

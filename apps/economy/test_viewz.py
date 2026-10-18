@@ -258,3 +258,39 @@ class ActionZTests(ResultsTests):
         devs = {x["dev"]: x["visits"] for x in d["devices"]}
         self.assertEqual(devs["phone"], 2)
         self.assertNotIn("aaa", str(d["sources"]))
+
+
+class ActionZAcrossPostsTests(ResultsTests):
+    """ViewZ's own ActionZ: what happened across ALL your posts, in one fetch."""
+
+    def test_counts_for_everybody_and_a_named_log_for_statz_across_posts(self):
+        from apps.economy.models import ItemRating, Reaction
+        second = Post.objects.create(author=self.owner, title="Hook two")
+        Reaction.objects.create(user=self.fan, item_id=f"post:{second.id}", value=1)
+        d = self.o.get(f"{V}mine/").json()
+        self.assertEqual(d["action_counts"], {"rating": 1, "comment": 1, "like": 1})
+        self.assertIsNone(d["action_log"])
+        self.assertIn("StatZ", d["action_log_locked"])
+        with patch("apps.economy.statz_trial.has_statz", return_value=True):
+            d = self.o.get(f"{V}mine/").json()
+        titles = {e["post_title"] for e in d["action_log"]}
+        self.assertEqual(titles, {"Hook one", "Hook two"})
+        self.assertTrue(all(e["who"] == "listener" for e in d["action_log"]))
+
+    def test_the_list_carries_sources_across_every_post(self):
+        d = self.o.get(f"{V}mine/").json()
+        by = {s["src"]: s["visits"] for s in d["sources"]}
+        self.assertEqual(by["direct"], 2)
+        self.assertEqual(by["instagram"], 1)
+
+    def test_it_costs_the_same_queries_for_one_post_or_many(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        self.o.get(f"{V}mine/")                      # warm the one-off lookups (membership, content types)
+        with CaptureQueriesContext(connection) as few:
+            self.o.get(f"{V}mine/")
+        for i in range(6):
+            Post.objects.create(author=self.owner, title=f"more {i}")
+        with CaptureQueriesContext(connection) as many:
+            self.o.get(f"{V}mine/")
+        self.assertEqual(len(few), len(many))

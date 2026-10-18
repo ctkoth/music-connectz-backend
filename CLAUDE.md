@@ -2394,3 +2394,21 @@ no `?src=`) and **ActionZ** (`action_log`, StatZ): every rating, comment, like, 
 join and message from the post, newest first, with `via_page` (did they also open the post's page).
 Link opens still have no per-source split — `ScoreShare.views` is one counter, and recording a
 source per open would be a new table.
+
+## The StatZ sample: a first hour, then fifteen minutes every 24 hours
+
+The one-time hour was the whole of what a member could learn about StatZ, and it could burn before
+there was anything to look at (ViewZ is worth checking again after a post is promoted). The FIRST
+sample ever is `FIRST_TRIAL_MINUTES` (60); every later one is `TRIAL_MINUTES` (15), once every
+`TRIAL_COOLDOWN_HOURS` (24) measured from the last window's START (the clock is UTC, and a calendar day
+would hand a New York member a fresh window at 7pm). No schema change: the one `StatzTrial` row is
+re-armed with a conditional update so two presses at once cannot open two windows. A press while a
+window runs returns that window (200, not a second one). `state()` publishes `minutes`,
+`last_minutes`, `first`, `next_at` and `seconds_until_next`. Nothing the sample unlocks changes: it
+only widens `has_statz`/`feature_tier` while a window runs, and the `DRIVERS` audit's reasons for what
+it does not cover still hold. **A recommendation, Corey's to move:** hour-then-15 rather than either
+alone; the cooldown is one constant.
+
+`ViewMineView` also carries ActionZ across all of a member's posts (`action_counts` for everybody,
+`action_log` for StatZ — fetched once for the whole list, tested to cost the same queries for one post
+or many) and `sources`/`devices` over every post.

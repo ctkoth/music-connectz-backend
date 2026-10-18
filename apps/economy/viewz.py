@@ -339,6 +339,41 @@ def action_log(post, rows):
              "detail": e["detail"], "via_page": e["uid"] in visited} for e in ev[:ACTION_LOG_MAX]]
 
 
+def account_action_log(posts, author, limit=ACTION_LOG_MAX):
+    """ActionZ across ALL of one member's posts: the newest actions, each naming the post it
+    was on. The same sources `action_log` reads, fetched once for the whole list (one query
+    per kind, not per post) — a member with forty posts must not cost two hundred queries on
+    a screen that re-asks every fifteen seconds. Messages are not here: a message is about a
+    person, not a post, and is only attributed to a post when it follows a visit to it."""
+    ids = {p.id: p for p in posts}
+    items = {f"post:{pid}": pid for pid in ids}
+    ev = []
+    for r in ItemRating.objects.filter(item_id__in=items).select_related("user"):
+        ev.append({"type": "rating", "who": r.user.username, "uid": r.user_id, "at": r.created_at or r.updated_at,
+                   "post": items[r.item_id], "detail": f"{r.score}/10" + (f" — “{r.reason}”" if r.reason else "")})
+    for c in SocialComment.objects.filter(item_id__in=items).select_related("user"):
+        ev.append({"type": "comment", "who": c.user.username, "uid": c.user_id, "at": c.created_at,
+                   "post": items[c.item_id], "detail": c.body[:140]})
+    for x in Reaction.objects.filter(item_id__in=items, value__gt=0).select_related("user"):
+        ev.append({"type": "like", "who": x.user.username, "uid": x.user_id, "at": x.updated_at,
+                   "post": items[x.item_id], "detail": ""})
+    for sh in PostShare.objects.filter(post_id__in=ids).select_related("user"):
+        ev.append({"type": "share", "who": sh.user.username, "uid": sh.user_id, "at": sh.shared_at,
+                   "post": sh.post_id, "detail": ""})
+    for j in PostJoin.objects.filter(post_id__in=ids, user__isnull=False).select_related("user"):
+        ev.append({"type": "join", "who": j.user.username, "uid": j.user_id, "at": j.joined_at,
+                   "post": j.post_id, "detail": f"stayed {j.active_seconds}s"})
+    ev = [e for e in ev if e["uid"] != author.id]
+    counts = {}
+    for e in ev:
+        counts[e["type"]] = counts.get(e["type"], 0) + 1
+    ev.sort(key=lambda e: e["at"], reverse=True)
+    log = [{"type": e["type"], "label": ACTION_LABELS[e["type"]], "who": e["who"], "at": e["at"].isoformat(),
+            "detail": e["detail"], "post": e["post"], "post_title": ids[e["post"]].title or f"Post #{e['post']}"}
+           for e in ev[:limit]]
+    return log, counts
+
+
 def post_results(post, user, now=None, days=14):
     from .statz_trial import has_statz
     now = now or timezone.now()
@@ -458,7 +493,19 @@ class ViewMineView(APIView):
             rows.append({"id": p.id, "title": p.title, "at": p.created_at.isoformat(),
                          "visibility": p.visibility, **agg})
         links = link_rows(request.user)
+        from .statz_trial import has_statz
+        log, counts = account_action_log(posts, request.user)
+        every = [r for rs in by_target.values() for r in rs]
+        named = has_statz(request.user)
         return Response({"posts": rows, "links": links,
+                         # ActionZ across every post: counts for everybody, the named log for StatZ.
+                         "action_counts": counts,
+                         "action_log": log if named else None,
+                         "action_log_locked": None if named else (
+                             "ActionZ — who rated, commented, liked or shared, by name and when — is a StatZ feature. "
+                             "The counts are yours at every tier."),
+                         "sources": breakdown(every, "src", "direct"),
+                         "devices": breakdown(every, "dev", "unknown"),
                          "links_opens": sum(l["opens"] for l in links),
                          "joined_from_invites": Referral.objects.filter(referrer=request.user).count(),
                          "definitions": DEFINITIONS, "as_of": now.isoformat(), "notice": NOTICE})

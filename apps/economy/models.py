@@ -7575,8 +7575,10 @@ class MasterWork(models.Model):
 
 
 class StatzTrial(models.Model):
-    """One timed StatZ sample per member, ever. The end time is the server's,
-    so the countdown on screen cannot be reset by a reload."""
+    """One timed StatZ sample window per member, re-armed once every 24 hours. The row is
+    the member's LAST window (`started_at`, `ends_at`); the end time is the server's, so the
+    countdown on screen cannot be reset by a reload, and the next window opens a day after
+    the last one started."""
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="statz_trial")
     started_at = models.DateTimeField(auto_now_add=True)
