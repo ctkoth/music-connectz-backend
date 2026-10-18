@@ -68,7 +68,8 @@ class ListingTests(Base):
         self.assertIsNone(d["import"]["ladder"]["statz"])
         self.assertEqual(d["import"]["ladder"]["free"], 5)
         self.assertIn("restricted", d["explain"])
-        self.assertIn("300", d["explain"]["restricted"])
+        from apps.economy.models import RESTRICTED_JOIN_REWARD_SPINAZ
+        self.assertIn(str(RESTRICTED_JOIN_REWARD_SPINAZ), d["explain"]["restricted"])
 
     def test_queries_flat(self):
         for n in range(3):

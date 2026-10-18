@@ -1010,9 +1010,12 @@ class SocialView(APIView):
                         # Same score, a reason added or reworded — inside the same window.
                         existing.reason = reason
                         existing.save(update_fields=["reason"])
-                        # Changing your mind has to move the skill ratings it
-                        # fed too, or the two disagree from then on.
-                        self._rate_skills(item, request.user, score)
+                    # Changing your mind has to move the skill ratings it fed too, or
+                    # the two disagree from then on. This sat inside the branch above
+                    # (reason-only edits) when the reason field arrived, so a changed
+                    # SCORE stopped reaching the skills; it is idempotent, so it runs
+                    # for every edit rather than being remembered per branch.
+                    self._rate_skills(item, request.user, score)
             else:
                 return Response({"detail": "score must be 1-10 (or 0 to clear)"}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self._payload(item, request))
