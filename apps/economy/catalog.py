@@ -655,6 +655,11 @@ PROMPTZ_CENTS_PER_UNIT = 1 / PROMPTZ_BONUS
 # the free allowance is what keeps that true.
 SPINAZ_PER_PROMPTZ = 1000
 
+# ⚡ to open a conversation with someone you have no history with. A tier never
+# changes it (how MUCH, never whether): free regeneration is at least
+# ENERGY_FLOOR_PER_HOUR, so a first message is always reachable.
+DM_COLD_ENERGY = 2
+
 # What an agent run is CHARGED, as a multiple of what it COST to serve.
 #
 # This exists because pass-through pricing loses money here, and it took the

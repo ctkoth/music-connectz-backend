@@ -40,7 +40,7 @@ OUTCOMES = {
 
 # The primitives that move a credit OUT. A module calling any of these is a spend.
 SPEND_PRIMITIVES = ("charge_ai_usage", "_bill", "spend_spinaz", "charge_skill_energy",
-                    "_spend_energy_up_to")
+                    "_spend_energy_up_to", "spend_energy")
 
 COACH_FREE = {"label": "A daily free allowance covers a coached take before any credit is touched, "
                        "and the drills and breath training are free.", "tab": "breathz"}
@@ -158,6 +158,13 @@ CREDIT_OUTCOMES = {
         "outcomes": ["tangible", "shareable", "braggable"],
         "lands_in": ["gamez", "postz"],
         "free_way": {"label": "Energy regenerates hourly.", "tab": "gamez"}},
+    "messages_view": {
+        "resource": "energy", "label": "Starting a conversation",
+        "buys": "A first message to someone you have no history with, delivered to their inbox and by email.",
+        "outcomes": ["shareable", "lucrative"],
+        "lands_in": ["messagez", "collabz"],
+        "free_way": {"label": "Replies, follow-ups, people who follow you and collab partners are always free; "
+                              "Energy regenerates hourly.", "tab": "messagez"}},
     "occ_run": {
         "resource": "energy", "label": "OCC run",
         "buys": "A finished run saved as a work.",

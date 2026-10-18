@@ -1981,6 +1981,27 @@ def spend_spinaz(user, amount, note="", *, app_key="", target=""):
     return Wallet.objects.values_list("spinaz", flat=True).filter(user=user).first()
 
 
+def spend_energy(user, amount, note="", *, app_key="", target=""):
+    """Take `amount` ⚡ off a member, or refuse. Returns the new balance, or None
+    if they could not afford it — `spend_spinaz`'s shape for Energy, for the same
+    reason: one conditional statement the database serialises, so two sends racing
+    on one balance cannot both pass, and the balance cannot go under zero. A
+    refused spend writes no ledger row."""
+    from django.db.models import F
+
+    amount = int(amount)
+    if amount <= 0:
+        return None
+    wallet_for(user)
+    moved = Wallet.objects.filter(user=user, energy__gte=amount).update(
+        energy=F("energy") - amount, updated_at=timezone.now())
+    if not moved:
+        return None
+    log_resource(user, Transaction.RES_ENERGY, -amount, note or "Energy",
+                 app_key=app_key, target=target)
+    return Wallet.objects.values_list("energy", flat=True).filter(user=user).first()
+
+
 def award_spinaz(user, amount, note="", *, app_key="", target=""):
     """Credit SpinAZ to a user's wallet and record it.
 
