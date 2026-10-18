@@ -363,6 +363,39 @@ def post_cost_cents(user, skills_used):
     return total, lines
 
 
+HABIT_SHARE = 0.65      # the remembered-choices bar: a skill is a habit at 65% of posts
+HABIT_MIN_POSTS = 5
+
+
+def suggest_skills(user):
+    """(skills, source) a new post of this member's would most likely list.
+
+    Same rule as every remembered field: if at least HABIT_MIN_POSTS recent
+    posts exist, a skill used in HABIT_SHARE of them is a habit and they are all
+    suggested — so a producer / mix engineer / artist who does everything alone
+    gets the whole stack, because every one of their posts lists it. Below that
+    bar the LAST post's skills win. With no history at all, their declared
+    (priced) skills are the default. It only suggests: the member edits the list
+    before publishing, and the price follows the list.
+    """
+    recent = [list(sk) for sk in
+              Post.objects.filter(author=user).order_by("-created_at")
+              .values_list("skills_used", flat=True)[:30]
+              if isinstance(sk, list) and sk]
+    if len(recent) >= HABIT_MIN_POSTS:
+        counts = {}
+        for sk in recent:
+            for name in set(str(x).strip()[:80] for x in sk if str(x).strip()):
+                counts[name] = counts.get(name, 0) + 1
+        habit = [n for n, c in counts.items() if c / len(recent) >= HABIT_SHARE]
+        if habit:
+            order = {str(x).strip()[:80]: i for i, x in enumerate(recent[0])}
+            return sorted(habit, key=lambda n: order.get(n, 999))[:40], "habit"
+    if recent:
+        return [str(x).strip()[:80] for x in recent[0] if str(x).strip()][:40], "last"
+    return list(skill_prices(user))[:40], "declared"
+
+
 def skills_from(d, key="skills"):
     """The skill names off a submission payload, bounded the way posts are."""
     return [str(s).strip()[:80] for s in (d.get(key) or []) if str(s).strip()][:40]
@@ -481,6 +514,9 @@ def create_post(user, d):
     if charged:
         w.energy -= charged
         w.save(update_fields=["energy", "updated_at"])
+        from .models import Transaction, log_resource
+        log_resource(user, Transaction.RES_ENERGY, -charged, f"Post: {title[:60]}",
+                     app_key="postz", target="postz:compose")
     p = Post.objects.create(
         author=user, title=title,
         description=str(d.get("description", ""))[:4000],

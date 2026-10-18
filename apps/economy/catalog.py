@@ -660,6 +660,13 @@ SPINAZ_PER_PROMPTZ = 1000
 # ENERGY_FLOOR_PER_HOUR, so a first message is always reachable.
 DM_COLD_ENERGY = 2
 
+# ⚡ to call someone out to a 1v1 (refunded if they decline), and the comment
+# allowance: a few a day are free, then each comment on someone else's post
+# costs one. Replying on your own post is always free.
+BATTLE_CALLOUT_ENERGY = 2
+COMMENT_FREE_PER_DAY = 3
+COMMENT_ENERGY = 1
+
 # What an agent run is CHARGED, as a multiple of what it COST to serve.
 #
 # This exists because pass-through pricing loses money here, and it took the

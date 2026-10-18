@@ -165,6 +165,13 @@ CREDIT_OUTCOMES = {
         "lands_in": ["messagez", "collabz"],
         "free_way": {"label": "Replies, follow-ups, people who follow you and collab partners are always free; "
                               "Energy regenerates hourly.", "tab": "messagez"}},
+    "social": {
+        "resource": "energy", "label": "Commenting",
+        "buys": "A comment on someone's post, delivered to them, past your free daily comments.",
+        "outcomes": ["shareable", "braggable"],
+        "lands_in": ["postz", "messagez"],
+        "free_way": {"label": "Your first comments each day, and any comment on your own post, are free; "
+                              "Energy regenerates hourly.", "tab": "postz"}},
     "occ_run": {
         "resource": "energy", "label": "OCC run",
         "buys": "A finished run saved as a work.",

@@ -48,6 +48,7 @@ from .models import (
     relationship,
     energy_rate_per_hour,
     notify,
+    spend_energy,
     post_interaction_block,
     reward_for_rating,
     Post,
@@ -790,6 +791,27 @@ class SocialView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    def _comment_quote(self, item, user):
+        """What commenting costs THIS member on THIS item, before they press it.
+
+        Your own post is always free (answering your commenters), and so are the
+        first COMMENT_FREE_PER_DAY comments of the day anywhere; after that each
+        costs COMMENT_ENERGY. Edits are never charged."""
+        from datetime import timedelta
+        from django.utils import timezone
+        from .catalog import COMMENT_ENERGY, COMMENT_FREE_PER_DAY
+        own = False
+        if item.startswith("post:"):
+            try:
+                own = Post.objects.filter(pk=int(item.split(":", 1)[1]), author_id=user.id).exists()
+            except ValueError:
+                pass
+        today = timezone.now() - timedelta(hours=24)
+        used = SocialComment.objects.filter(user=user, created_at__gte=today).count()
+        free_left = max(0, COMMENT_FREE_PER_DAY - used)
+        return {"comment_cost_energy": 0 if (own or free_left) else COMMENT_ENERGY,
+                "comment_free_left": free_left, "comment_free_per_day": COMMENT_FREE_PER_DAY}
+
     def _payload(self, item, request):
         ups = Reaction.objects.filter(item_id=item, value=1).count()
         downs = Reaction.objects.filter(item_id=item, value=-1).count()
@@ -838,6 +860,7 @@ class SocialView(APIView):
             "listened_sec": heard.seconds if heard else 0,
             "listen_finished": bool(heard and heard.finished),
             "listen_required_sec": LISTEN_REQUIRED_SEC,
+            **self._comment_quote(item, request.user),
         }
 
     def get(self, request):
@@ -944,7 +967,17 @@ class SocialView(APIView):
             blocked = post_interaction_block(item, request.user, "comment")
             if blocked:
                 return Response(blocked, status=status.HTTP_403_FORBIDDEN)
-            SocialComment.objects.create(user=request.user, item_id=item, body=body)
+            cost = self._comment_quote(item, request.user)["comment_cost_energy"]
+            with transaction.atomic():
+                if cost and spend_energy(request.user, cost, "Comment", app_key="postz",
+                                         target=item) is None:
+                    return Response({
+                        "detail": f"Your free comments for today are used; another costs {cost} ⚡ and you "
+                                  "are out. Nothing was posted or charged. Commenting on your own post is free.",
+                        "insufficient": True, "resource": "energy",
+                        "cost": {"resource": "energy", "amount": cost},
+                    }, status=status.HTTP_402_PAYMENT_REQUIRED)
+                SocialComment.objects.create(user=request.user, item_id=item, body=body)
             self._notify_target(item, "comment", f"@{request.user.username} commented on your post 💬", request.user)
         elif action == "rate":
             try:

@@ -24,7 +24,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import over_char_limit
+from .catalog import BATTLE_CALLOUT_ENERGY, over_char_limit
 from .gates import clean_gates, describe, failing_gate, member_metrics, refusal
 from .models import (
     BATTLE_MIN_RATINGS,
@@ -33,7 +33,9 @@ from .models import (
     BattleEntry,
     BattleWager,
     MoneyBattleVote,
+    award_energy,
     award_spinaz,
+    spend_energy,
     spend_spinaz,
     blocked_user_ids,
     item_rating_median,
@@ -157,7 +159,8 @@ class BattlesView(APIView):
             "mine": set(BattleEntry.objects.filter(battle_id__in=ids, user=request.user)
                         .values_list("battle_id", flat=True)),
         }
-        return Response({"battles": [battle_dict(b, request, with_entries=False,
+        return Response({"challenge_cost_energy": BATTLE_CALLOUT_ENERGY,
+                         "battles": [battle_dict(b, request, with_entries=False,
                                                  batched=batched) for b in qs]})
 
     def post(self, request):
@@ -531,15 +534,29 @@ class BattleChallengeView(APIView):
                 return Response(body, status=status.HTTP_403_FORBIDDEN)
 
         kind = str(d.get("kind", "1v1")).lower()
-        b = Battle.objects.create(
-            host=request.user, opponent=opponent,
-            title=(title or f"@{request.user.username} vs @{opponent.username}")[:160],
-            description=str(d.get("description", "") or ""),
-            genre=str(d.get("genre", "") or "")[:40],
-            mode=Battle.MODE_1V1,
-            kind=kind if kind in ("1v1", "freestyle", "cypher") else "1v1",
-            gates=gates, status=Battle.STATUS_PENDING, **_media(d),
-        )
+        # Charged with the create in one unit, so a failed call-out is free.
+        with transaction.atomic():
+            if spend_energy(request.user, BATTLE_CALLOUT_ENERGY,
+                            f"Challenge to @{opponent.username}",
+                            app_key="battlez", target="battlez:challenge") is None:
+                have = max(0, wallet_for(request.user).energy or 0)
+                return Response({
+                    "detail": f"Calling someone out costs {BATTLE_CALLOUT_ENERGY} ⚡ and you have {have}. "
+                              "Nothing was sent or charged. It is refunded if they decline.",
+                    "insufficient": True, "resource": "energy",
+                    "cost": {"resource": "energy", "amount": BATTLE_CALLOUT_ENERGY},
+                    "energy_needed": BATTLE_CALLOUT_ENERGY, "energy_available": have,
+                    "energy_short": BATTLE_CALLOUT_ENERGY - have,
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+            b = Battle.objects.create(
+                host=request.user, opponent=opponent,
+                title=(title or f"@{request.user.username} vs @{opponent.username}")[:160],
+                description=str(d.get("description", "") or ""),
+                genre=str(d.get("genre", "") or "")[:40],
+                mode=Battle.MODE_1V1,
+                kind=kind if kind in ("1v1", "freestyle", "cypher") else "1v1",
+                gates=gates, status=Battle.STATUS_PENDING, **_media(d),
+            )
         notify(opponent, "system",
                f"@{request.user.username} challenged you to '{b.title}' ⚔️",
                actor=request.user, item_id=b.item_key)
@@ -565,6 +582,9 @@ class BattleRespondView(APIView):
         if not bool((request.data or {}).get("accept", True)):
             b.status = Battle.STATUS_DECLINED
             b.save(update_fields=["status", "updated_at"])
+            if b.mode == Battle.MODE_1V1:
+                award_energy(b.host, BATTLE_CALLOUT_ENERGY, f"Refund: @{request.user.username} declined",
+                             app_key="battlez", target="battlez:challenge")
             notify(b.host, "system", f"@{request.user.username} declined '{b.title}'.",
                    actor=request.user, item_id=b.item_key)
             return Response(battle_dict(b, request))

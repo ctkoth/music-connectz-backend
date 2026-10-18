@@ -327,6 +327,8 @@ class SoundCloudImportView(APIView):
         fresh = [w for w in wanted if not here(w)]
         already = len(wanted) - len(fresh)
         now_iso = datetime.now(dt_tz.utc).isoformat()
+        from .postz import post_cost_cents, suggest_skills
+        skills, skills_from_where = suggest_skills(request.user)
         with transaction.atomic():
             made = [
                 Post.objects.create(
@@ -344,13 +346,19 @@ class SoundCloudImportView(APIView):
                              **({"permalink": w["permalink"]} if w["permalink"] else {}),
                              **({"private_on_sc": True} if w["private"] else {})}],
                     visibility="private",
+                    skills_used=skills,
                 )
                 for w in fresh
             ]
         private_in = sum(1 for w in fresh if w["private"])
+        cost, _lines = post_cost_cents(request.user, skills)
 
         parts = [f"{len(made)} track{'' if len(made) == 1 else 's'} imported as drafts. "
                  "They're private until you publish them."]
+        if made and skills:
+            parts.append(f"Skills pre-filled from your {'usual' if skills_from_where == 'habit' else 'last post' if skills_from_where == 'last' else 'declared'} "
+                         f"({', '.join(skills[:6])}{'…' if len(skills) > 6 else ''}) — change them before publishing. "
+                         f"Publishing each costs {cost} ⚡; nothing is charged until you do.")
         if already:
             parts.append(f"{already} were already here.")
         if private_in:
@@ -388,6 +396,9 @@ class SoundCloudImportView(APIView):
             # Said out loud because it is the whole reason this is safe to use:
             # the member handed over an authorisation and gets to see that
             # nothing was kept from it.
+            "suggested_skills": skills,
+            "suggested_from": skills_from_where,
+            "publish_cost_energy": cost,
             "token_kept": False,
             "detail": " ".join(parts),
         }, status=status.HTTP_201_CREATED)
