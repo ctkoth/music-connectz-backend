@@ -160,7 +160,7 @@ LOGICZ_TABS = [
               True, tab="facez"),
          # 18+ verified, presentation only (never bone structure or body shape), and
          # nothing about the photo or the score is kept. Body is read from BodieZ.
-         _app("LookmaxZ", "✨",
+         _app("LookZMaxZ", "✨",
               "What you can change about how you present — face, skin, teeth, styling, "
               "body — by sector, with where to shop for it. 18+, nothing stored.",
               True, tab="lookmaxz"),

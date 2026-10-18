@@ -279,3 +279,25 @@ class TheImageMimeTests(TestCase):
             self.assertTrue(a.gemini_image_mime(ct), ct)
         self.assertIsNone(a.gemini_image_mime("audio/mp3"))
         self.assertIsNone(a.gemini_image_mime("image/svg+xml"))
+
+
+class TheFactorDescriptionTests(Base):
+    def test_every_factor_says_what_why_and_how_and_nothing_extra_is_declared(self):
+        declared = {(k, f) for k, s in lm.SECTORS.items() for f in s["factors"]}
+        self.assertEqual(set(lm.FACTORS), declared)
+        for key, info in lm.FACTORS.items():
+            for part in ("what", "why", "how"):
+                self.assertTrue(info[part].strip(), f"{key}.{part}")
+
+    def test_the_screen_gets_them_before_any_photo_and_the_prompt_uses_the_same_words(self):
+        self.verify()
+        d = self.c.get(URL).json()
+        info = d["sectors"]["skin"]["factor_info"]["hydration"]
+        self.assertEqual(info["what"], lm.FACTORS[("skin", "hydration")]["what"])
+        self.assertIn(info["what"], lm.build_prompt(["skin"]))
+        self.assertTrue(d["scale"] and d["rating_rule"])
+
+    def test_unverified_still_gets_the_explanations_but_no_data(self):
+        d = self.c.get(URL).json()
+        self.assertIn("factor_info", d["sectors"]["face"])
+        self.assertNotIn("body", d)

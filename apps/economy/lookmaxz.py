@@ -110,6 +110,83 @@ SECTORS = {
 }
 PHOTO_SECTORS = [k for k, v in SECTORS.items() if v["source"] == "photo"]
 
+
+# What each factor looks at, why it matters, how to move it. ONE place: the model's prompt
+# is built from `what`, the screen shows all three BEFORE a photo is sent, and a test fails
+# if a factor has no entry — a number with no description is a broken feature.
+FACTORS = {
+    ("face", "hair"): {
+        "what": "How the hair you have is kept and shaped: clean, even, a cut that suits how you wear it.",
+        "why": "Hair frames everything in a photo, and it is the quickest thing to change — a cut is an afternoon.",
+        "how": "A fresh cut every 4-6 weeks, wash to suit your scalp, a little product for shape."},
+    ("face", "facial_hair"): {
+        "what": "Whether facial hair, or its absence, looks deliberate: edges, neckline, even length, no stray patches.",
+        "why": "Unkempt reads as careless; kept reads as chosen, whichever style you picked.",
+        "how": "Trim the neckline and cheek line weekly, keep one length, or shave clean and moisturise."},
+    ("face", "brows"): {
+        "what": "Tidiness of the brows: strays, gaps in grooming, length. Never their shape or position.",
+        "why": "Brows are the first thing a camera reads on a face, and stray hair is an easy fix.",
+        "how": "Remove strays below and between, trim long hairs; leave your natural line."},
+    ("skin", "texture"): {
+        "what": "How smooth or rough the skin surface looks: flaking, bumps, visible pores in the light.",
+        "why": "Texture is what light catches, so it shows even in a flattering photo.",
+        "how": "Gentle cleanser, a mild exfoliant a couple of times a week, and patience — weeks, not days."},
+    ("skin", "hydration"): {
+        "what": "Whether skin looks plump and even or dry, tight or dull.",
+        "why": "Dry skin shows lines and flaking more and photographs flat.",
+        "how": "Moisturise morning and night, drink water, and wash with something gentler."},
+    ("skin", "blemishes"): {
+        "what": "Visible spots, redness from breakouts and marks. Not scars you cannot change.",
+        "why": "Active breakouts are the most noticed thing in a close photo, and are treatable.",
+        "how": "Gentle cleansing, an over-the-counter spot treatment, hands off. Severe or painful acne: a dermatologist."},
+    ("skin", "sun_care"): {
+        "what": "Visible sun damage: uneven darkening, sunburn, leathery or spotted areas.",
+        "why": "Sun is the biggest controllable cause of skin ageing, and the damage is cumulative.",
+        "how": "Broad-spectrum SPF 30+ every day, hat and shade. Any mole that changes: a doctor."},
+    ("skin", "evenness"): {
+        "what": "How even the colour is across the face: patches, redness, dark marks.",
+        "why": "Even tone reads as healthy skin more than any single feature does.",
+        "how": "Sunscreen first (it stops marks deepening), then patience with a vitamin C serum."},
+    ("teeth", "staining"): {
+        "what": "How much the teeth you can see are stained or yellowed. Natural shade is not a fault.",
+        "why": "Surface stain from coffee, tea, wine and smoking is common and lifts.",
+        "how": "Rinse after dark drinks, a dentist clean, enamel-safe whitening. Stop if teeth get sensitive."},
+    ("teeth", "cleanliness"): {
+        "what": "Whether the visible teeth look clean: plaque, residue, film.",
+        "why": "It is the same habit that protects them, and it shows.",
+        "how": "Brush two minutes twice a day, clean between the teeth daily, dentist twice a year."},
+    ("teeth", "gums"): {
+        "what": "How the visible gums look: even pink, or red and swollen. Looks only — it cannot diagnose.",
+        "why": "Red, puffy gums can mean something a dentist should see.",
+        "how": "Brush gently along the gumline and floss daily; if they stay red or bleed, see a dentist."},
+    ("styling", "fit"): {
+        "what": "Whether what you are wearing sits well on you: shoulders, length, neither tight nor swamping.",
+        "why": "Fit changes how any outfit looks, at any price.",
+        "how": "Buy for your shoulders, then tailor sleeves and hems — it is cheap."},
+    ("styling", "colour"): {
+        "what": "How the colours you are wearing sit together and against your skin and hair.",
+        "why": "The right colour makes skin look healthier; the wrong one drains it.",
+        "how": "Build on two or three neutrals and one colour you get complimented in."},
+    ("styling", "condition"): {
+        "what": "The state of what you are wearing: creases, pilling, stains, fraying.",
+        "why": "Close up, wear shows first and reads as effort not spent.",
+        "how": "Steam or iron, remove pilling, retire what is worn out."},
+    ("body", "strength_progress"): {
+        "what": "Whether your logged lifts went up against YOUR OWN earlier best in BodieZ. Not what you look like.",
+        "why": "Getting stronger is the one body change that is measured rather than judged — and it is yours.",
+        "how": "Log your sessions, add a little weight or a rep when it feels easy, rest between sessions."},
+}
+
+SCALE = [
+    {"band": "1-3", "means": "A real problem to fix first."},
+    {"band": "4-6", "means": "Ordinary, with clear room to improve."},
+    {"band": "7-8", "means": "Well kept."},
+    {"band": "9-10", "means": "Excellent — little to change."},
+]
+RATING_RULE = ("Each factor is scored 1-10 from what the photo shows; a factor it does not show is left "
+               "blank, never guessed. A sector is the average of its factors, the overall is the average "
+               "of the sectors you asked for. Photo quality is shown on its own and is not in the average.")
+
 # Server-owned, by (sector, factor). `query` is what is searched on a marketplace;
 # `caution` is shown beside the product. Categories, never brands — a brand is an
 # endorsement we have no way to test.
@@ -315,7 +392,7 @@ def build_prompt(sectors):
     lines = []
     for k in sectors:
         s = SECTORS[k]
-        facs = ", ".join(f'"{f}" ({lab})' for f, lab in s["factors"].items())
+        facs = "; ".join(f'"{f}" ({lab}: {FACTORS[(k, f)]["what"]})' for f, lab in s["factors"].items())
         lines.append(f'- "{k}" — {s["means"]} Factors: {facs}.')
     shape = ", ".join(
         f'"{k}": {{"factors": {{{", ".join(chr(34) + f + chr(34) + ": <1-10 or null>" for f in SECTORS[k]["factors"])}}}, '
@@ -326,7 +403,7 @@ judge. Look at this ONE photo and give honest, specific, ACTIONABLE feedback \
 on presentation only, for these sectors:
 {chr(10).join(lines)}
 
-Score each factor 1-10, where 5-7 is ordinary and well kept, and use null for \
+Score each factor 1-10 (1-3 a real problem, 4-6 ordinary with room to improve, 7-8 well kept, 9-10 excellent), and judge it exactly as its description says, and use null for \
 any factor the photo does not actually show (a mouth that is closed has no \
 "staining" to read). Never guess a factor you cannot see.
 

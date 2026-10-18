@@ -2567,3 +2567,39 @@ its label, so a key matches as a whole run of words and the LONGEST key wins ("b
 although "bass", the voice, is inside it; "trapeze" is not a Rapper). `ROLE_COACH` maps a role to its AI
 coach, which Lilith reads to point a rapper at RapZ. Rated skills are deliberately not used: reading them
 would put a query on every member card, and `personas_of` costs none.
+
+## LookZMaxZ: sectors for adults, server arithmetic, and a shop no model can write into
+
+`apps/economy/lookmaxz.py` + `lookmaxz_view.py` (`/api/economy/lookmaxz/`, `.../shop/`, `.../markets/`) extend
+AttractivenessZ and inherit all of its lines: **18+ verified (Stripe Identity), self-attested photo, presentation never
+identity, nothing stored.** The adult wall covers the free parts too (shop, body, markets) — the framing is the risk, not
+the price.
+
+- **Sectors:** face (hair, facial hair, brows — what a barber can change, never face shape), skin, teeth (never alignment),
+  styling, and **body, which is read from BodieZ progress and never from a photo.** A body shape is the clearest trait no
+  one can change by Tuesday; scoring one from a picture is how a looks app becomes an eating-disorder app.
+- **The model scores factors; the server does the arithmetic.** Sector = mean of scored factors, overall = mean of the
+  asked-for photo sectors, photo quality shown apart. A factor the photo does not show is None, never guessed. Undeclared
+  sectors/factors from the model are dropped (`clean_reply`).
+- **`FACTORS` is what/why/how per factor, one place.** The prompt is built from `what`, the screen shows all three before a
+  photo, and `test_lookmaxz` fails if a declared factor has no entry or an entry has no factor.
+- **Nothing a model wrote reaches a link.** `PRODUCTS` is the server's catalogue, chosen by which factor scored under
+  `WORK_BELOW`; categories not brands; every sector states when to see a professional. No affiliate tag, said on screen.
+- **The tier buys WHERE you shop, never whether.** Everybody: Amazon, eBay, Walmart, in that order. StatZ (real tier, not
+  the sample — `statz_trial.DRIVERS` `shop_markets`, `sampled: False`) saves their own list in `LookmaxPrefs`, the only
+  thing stored. Templates: https, exactly one `{q}`, public host (no IP literal, localhost, credentials), capped at 8,
+  repaired on read, query percent-encoded. A lapse keeps the saved list and serves the defaults.
+- **Billing:** one price per reading, billed only after a readable result; unreadable or nothing-scorable is free.
+- **Found on the way:** `vocalcoach.gemini_mime` is the audio/video list and has never held an image, so AttractivenessZ
+  answered "can't read image/jpeg" to every real photo — its tests mock the rating, which is why nothing noticed.
+  `attractivenessz.gemini_image_mime` is the fix; both modules use it. Like the coach and TTS transports, **the photo path
+  has never run against Google** (CI has no key).
+
+## Lilith: moving, Trash and recommendations
+
+`POST /lilith/move/` moves a task between buckets or into/out of daily/weekly/monthly routines, or to Trash and back.
+Finished tasks are immovable and a moved entry never mints (task XP once per task, milestone rungs once per starter via the
+stable `ms:` ref); a routine changing cadence restarts its run and the response says so. Trash is `trashed_at`, excluded from
+ceilings, sweeps and ticks, and purged after 30 days on a board read. Recommendations come from `lilith_suggest.signals`
+(profile completeness, personas, ever-posted/shared/collabbed, collabs waiting, last take) — computed from the member's own
+state at request time, cached ten minutes, each with a `because` so none is unexplained.

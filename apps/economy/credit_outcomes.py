@@ -116,7 +116,7 @@ CREDIT_OUTCOMES = {
         "lands_in": ["profilez", "facez"],
         "no_free_way": "It reads one photo with a model; the daily free allowance is the free way in."},
     "lookmaxz_view": {
-        "resource": "promptz", "label": "LookmaxZ reading",
+        "resource": "promptz", "label": "LookZMaxZ reading",
         "buys": "A sector-by-sector read of how a photo presents (face, skin, teeth, styling) with what to change and where to shop for it.",
         "outcomes": ["understandable", "learnable", "tangible"],
         "lands_in": ["lookmaxz", "bodiez"],

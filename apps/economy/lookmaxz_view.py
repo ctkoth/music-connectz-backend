@@ -24,7 +24,8 @@ UPGRADE = {"tab": "membershipz", "target": "membershipz-plans", "label": "Upgrad
 
 def _catalogue():
     return {k: {"label": s["label"], "emoji": s["emoji"], "source": s["source"],
-                "means": s["means"], "factors": s["factors"], "see_pro": s["see_pro"]}
+                "means": s["means"], "factors": s["factors"], "see_pro": s["see_pro"],
+                "factor_info": {f: {"label": lab, **lm.FACTORS[(k, f)]} for f, lab in s["factors"].items()}}
             for k, s in lm.SECTORS.items()}
 
 
@@ -37,6 +38,7 @@ def _state(user):
         "sectors": _catalogue(),
         "photo_sectors": lm.PHOTO_SECTORS,
         "caveat": lm.CAVEAT, "care_note": lm.CARE_NOTE,
+        "scale": lm.SCALE, "rating_rule": lm.RATING_RULE,
         # Said before the upload: the price is for the RUN, not per sector, so asking for
         # more sectors costs nothing extra; the free parts are named so nobody thinks
         # they are paying for the shop.
