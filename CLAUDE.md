@@ -2465,3 +2465,13 @@ DOB that could not be read back were all silent.
   badge never appears, check the endpoint is subscribed to `identity.verification_session.*`.
 - A final result is never overwritten by a late event, and a session only applies to the row's own
   member (`metadata.user_id` must match the row).
+
+## Hashtags in the writer: asked for, ordered, and held to
+
+`sentencez.clean_hashtags` reads the member's number (None = did not say, 0..`HASHTAG_MAX` 30; junk is
+"did not say", never a refusal) for the `post` and `caption` kinds, on the screen's POST and on a take's
+promo POST. The prompt asks for exactly N, together on the last line, most to least relevant, and no
+filler tags. **The model is not trusted to count:** `fit_hashtags` trims the TRAILING all-hashtag block to
+the first N (the most relevant, by the prompt's own ordering); a tag inside a sentence is part of the
+sentence and stays. Fewer than asked is reported as `hashtags: {asked, got}`, never padded. The caption
+kind's built-in "5-10 hashtags" yields to the number so the prompt never holds two instructions.

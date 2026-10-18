@@ -1015,3 +1015,65 @@ class ProgressCostsTheSameForAnyNumberOfTakesTests(TestCase):
         pbs = [t for t in data["takes"] if t["pb"]]
         self.assertEqual(len(pbs), 1)
         self.assertEqual(pbs[0]["id"], min(t["id"] for t in data["takes"]))
+
+
+class HashtagCountTests(PromoPostFromAPastTakeTests):
+    """The member says how many hashtags they want; the server asks for that many, most relevant
+    first, and holds the model to it — and says asked vs got rather than pretending."""
+    # Only the new tests: the inherited ones are covered by their own class.
+    def test_the_inherited_ones_are_not_rerun_here(self):
+        pass
+
+    def _run(self, reply, n, kind="post"):
+        from unittest.mock import patch
+        t = self._past()
+        seen = {}
+
+        def fake(k, body, **kw):
+            seen["prompt"] = body["contents"][0]["parts"][0]["text"]
+            return self._reply(reply), []
+
+        with patch("apps.economy.sentencez._key", return_value="k"), \
+                patch("apps.economy.sentencez.generate_content", side_effect=fake):
+            body = {"kind": kind} if n is None else {"kind": kind, "hashtags": n}
+            r = self.c.post(f"/api/rapz/take/{t.pk}/promo/", body, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        return r, seen["prompt"]
+
+    def test_the_prompt_asks_for_exactly_n_most_relevant_first(self):
+        _, prompt = self._run("Just got 6.2/10. https://x\n\n#a #b #c", 3)
+        self.assertIn("exactly 3 hashtags", prompt)
+        self.assertIn("MOST to LEAST relevant", prompt)
+
+    def test_extra_tags_in_the_trailing_block_are_trimmed_to_the_first_n(self):
+        r, _ = self._run("Locked in. https://x\n\n#one #two #three #four #five", 2)
+        self.assertTrue(r.data["text"].endswith("#one #two"))
+        self.assertNotIn("#three", r.data["text"])
+        self.assertEqual(r.data["hashtags"], {"asked": 2, "got": 2})
+
+    def test_zero_means_none_and_a_tag_inside_a_sentence_is_left_alone(self):
+        r, prompt = self._run("Big night for #hiphop. https://x\n\n#one #two", 0)
+        self.assertIn("no hashtags at all", prompt)
+        self.assertNotIn("#one", r.data["text"])
+        self.assertIn("#hiphop", r.data["text"])
+
+    def test_fewer_than_asked_is_reported_not_padded(self):
+        r, _ = self._run("Take. https://x\n\n#one", 5)
+        self.assertEqual(r.data["hashtags"], {"asked": 5, "got": 1})
+
+    def test_not_saying_changes_nothing_and_junk_is_not_a_refusal(self):
+        r, prompt = self._run("Take. https://x\n\n#one #two #three", None)
+        self.assertNotIn("HASHTAGS:", prompt)
+        self.assertNotIn("hashtags", r.data)
+        r, _ = self._run("Take. https://x\n\n#one", "lots")
+        self.assertNotIn("hashtags", r.data)
+
+    def test_it_is_capped(self):
+        from apps.economy.sentencez import HASHTAG_MAX, clean_hashtags
+        self.assertEqual(clean_hashtags(999), HASHTAG_MAX)
+        self.assertEqual(clean_hashtags(-4), 0)
+
+    def test_the_caption_default_of_five_to_ten_gives_way_to_the_number(self):
+        _, prompt = self._run("Hook\n\n#a #b", 2, kind="caption")
+        self.assertNotIn("5-10 relevant hashtags", prompt)
+        self.assertIn("exactly 2 hashtags", prompt)

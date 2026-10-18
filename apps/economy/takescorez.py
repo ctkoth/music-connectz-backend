@@ -1111,7 +1111,9 @@ class TakePromoView(APIView):
         kind = str((request.data or {}).get("kind") or "post")
         if kind not in PROMO_KINDS:
             kind = "post"
+        from .sentencez import clean_hashtags
         resp = write_piece(request.user, kind, promo_topic(take, label, url, human),
+                           hashtags=clean_hashtags((request.data or {}).get("hashtags")),
                            genre=take.genre or "",
                            spend_note=f"{'Promo post' if kind == 'post' else 'Instagram caption'} — {label} take",
                            extra_inputs={"promo_take": take.pk})

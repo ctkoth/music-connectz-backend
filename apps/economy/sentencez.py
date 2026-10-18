@@ -334,6 +334,7 @@ def kinds_for(user):
                     # music platform and is not part of the writer-only standalone.
                     "fixer": bool(k.get("fixer")),
                     "invents_nothing": bool(k.get("no_invention")),
+                    "hashtags": key in HASHTAG_KINDS,
                     "hint": k.get("hint", ""),
                     "style_label": k.get("style_label", "Genre / style (optional)")})
     return out
@@ -350,9 +351,62 @@ def _int(v, lo, hi):
         return None
 
 
-def prompt_for(kind, topic, genre="", majority=None, minority=None, owner=False, voice=None):
+HASHTAG_KINDS = ("post", "caption")
+HASHTAG_MAX = 30
+_TAG = re.compile(r"#\w+", re.UNICODE)
+
+
+def clean_hashtags(value):
+    """How many hashtags the member asked for: None when they did not say (the kind's own
+    default applies), else a whole number from 0 to HASHTAG_MAX. Junk is "did not say", never
+    a refusal — a stray character must not cost anybody a run."""
+    if value is None or isinstance(value, bool) or str(value).strip() == "":
+        return None
+    try:
+        n = int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return None
+    return max(0, min(HASHTAG_MAX, n))
+
+
+def count_hashtags(text):
+    return len(_TAG.findall(text or ""))
+
+
+def fit_hashtags(text, n):
+    """Hold the model to the number asked for. Only the TRAILING block of hashtags is touched
+    (the last lines made of nothing else): a model that miscounts is trimmed to the first `n`
+    — which are the most relevant, because the prompt asks for relevance order — and a tag in
+    the middle of a sentence is part of the sentence and stays. Fewer than asked is left as it
+    came; the screen reports asked vs got rather than padding with tags nobody chose."""
+    if n is None:
+        return text
+    lines = text.rstrip().split("\n")
+    tail = []
+    while lines and lines[-1].strip() and not _TAG.sub("", lines[-1]).strip():
+        tail.append(lines.pop())
+    tags = [t for ln in reversed(tail) for t in _TAG.findall(ln)]
+    kept = tags[:n]
+    out = "\n".join(lines).rstrip()
+    if kept:
+        out += ("\n\n" if out else "") + " ".join(kept)
+    return out
+
+
+def hashtag_line(n):
+    if n == 0:
+        return "HASHTAGS: use no hashtags at all."
+    return (f"HASHTAGS: finish with exactly {n} hashtag{'s' if n != 1 else ''}, together on the last line and "
+            "nowhere else, ordered from MOST to LEAST relevant to this subject and genre. Each must say "
+            "something specific about it — no filler tags (#love, #viral, #fyp) unless they truly fit.")
+
+
+def prompt_for(kind, topic, genre="", majority=None, minority=None, owner=False, voice=None, hashtags=None):
     k = KINDS[kind]
-    lines = [f"Write {k['ask']}.", f"Subject: {topic}"]
+    ask = k["ask"]
+    if hashtags is not None and kind == "caption":
+        ask = ask.replace("5-10 relevant hashtags", "the hashtags below")        # one instruction, not two
+    lines = [f"Write {ask}.", f"Subject: {topic}"]
     if genre:
         lines.append(f"Genre / style: {genre}")
     if kind == "lyrics" and (majority or minority):
@@ -385,6 +439,8 @@ def prompt_for(kind, topic, genre="", majority=None, minority=None, owner=False,
         lines.append("VOICE: " + PERSONAL_VOICE + (" " + LYRIC_STYLE if kind == "lyrics" or kind in FIXERS else ""))
     if k.get("no_invention"):
         lines.append(NO_INVENTION)
+    if hashtags is not None and kind in HASHTAG_KINDS:
+        lines.append(hashtag_line(hashtags))
     if kind in ("lyrics", *FIXERS, "caption", "post") and not custom and not plainer:
         samples = voice_samples()
         if samples:
@@ -505,7 +561,8 @@ def _work_dict(w, user=None):
             **extra}
 
 
-def write_piece(user, kind, topic, genre="", majority=None, minority=None, *, spend_note=None, extra_inputs=None):
+def write_piece(user, kind, topic, genre="", majority=None, minority=None, *, spend_note=None, extra_inputs=None,
+                hashtags=None):
     """Write ONE piece for `user` and bill it, or answer why not — the whole of what
     pressing Write does, so that every door into the writer (the screen, a past take's
     promo post) is the same run with the same price, the same "a failed run is not
@@ -534,7 +591,8 @@ def write_piece(user, kind, topic, genre="", majority=None, minority=None, *, sp
 
     body = {"contents": [{"parts": [{"text": prompt_for(kind, topic, genre, majority, minority,
                                                         owner=bool(is_owner_candidate(user)),
-                                                        voice=resolve(user, "writer"))}]}],
+                                                        voice=resolve(user, "writer"),
+                                                        hashtags=hashtags if kind in HASHTAG_KINDS else None)}]}],
             "generationConfig": {"temperature": 0.9}}
     try:
         deadline.check("the request was still being prepared when the time ran out")
@@ -563,6 +621,9 @@ def write_piece(user, kind, topic, genre="", majority=None, minority=None, *, sp
         return Response({"detail": "The writer came back empty. Nothing was charged — try again."},
                         status=status.HTTP_502_BAD_GATEWAY)
 
+    asked = hashtags if kind in HASHTAG_KINDS else None
+    if asked is not None:
+        text = fit_hashtags(text, asked)
     items = []
     if kind in FIXERS:
         items = parse_fixes(kind, text)
@@ -585,11 +646,16 @@ def write_piece(user, kind, topic, genre="", majority=None, minority=None, *, sp
     work = SentenceWork.objects.create(
         user=user, kind=kind, topic=topic, text=text,
         inputs={"genre": genre, "majority": majority, "minority": minority,
+                **({"hashtags": asked} if asked is not None else {}),
                 **({"items": items} if kind in FIXERS else {}), **(extra_inputs or {})},
     )
     from .models import link_spend
     link_spend(user, f"sentence:{work.id}", _t0, _note)
-    return Response({**_work_dict(work, user), "charged_cents": charged},
+    extra = {}
+    if asked is not None:
+        # Asked vs got, so the screen never claims a number the text does not have.
+        extra["hashtags"] = {"asked": asked, "got": count_hashtags(text)}
+    return Response({**_work_dict(work, user), "charged_cents": charged, **extra},
                     status=status.HTTP_201_CREATED)
 
 
@@ -629,6 +695,7 @@ class SentenceView(APIView):
             "fix_min_ratings": MIN_RATINGS_TO_RANK,
             "fixers": {k: {"dim": f["dim"], "label": f["label"]} for k, f in FIXERS.items()},
             "rhyme_max": 4,
+            "hashtag_max": HASHTAG_MAX,
             "works": [_work_dict(w, request.user) for w in works],
         })
 
@@ -643,7 +710,8 @@ class SentenceView(APIView):
         genre = str(d.get("genre", "")).strip()[:60]
         majority = _int(d.get("majority"), 0, 4) if kind == "lyrics" else None
         minority = _int(d.get("minority"), 0, 4) if kind == "lyrics" else None
-        return write_piece(request.user, kind, topic, genre, majority, minority)
+        return write_piece(request.user, kind, topic, genre, majority, minority,
+                           hashtags=clean_hashtags(d.get("hashtags")) if kind in HASHTAG_KINDS else None)
 
 
 class SentenceRoyaltyView(APIView):
