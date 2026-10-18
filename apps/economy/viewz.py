@@ -118,7 +118,12 @@ class ViewBeatView(APIView):
 
     def post(self, request):
         d = request.data or {}
-        ids = [int(i) for i in (d.get("ids") or [])[:MAX_IDS_PER_BEAT] if str(i).isdigit()]
+        raw_ids = d.get("ids")
+        # Anything but a list is junk, and `isdigit` accepts digits `int` refuses ("²"): both
+        # were a 500 on an endpoint anybody, signed in or not, can call.
+        raw_ids = raw_ids[:MAX_IDS_PER_BEAT] if isinstance(raw_ids, list) else []
+        ids = [i for i in raw_ids if isinstance(i, int) and not isinstance(i, bool) and 0 < i < 2**31]
+        ids += [int(i) for i in raw_ids if isinstance(i, str) and i.isascii() and i.isdigit() and int(i) < 2**31]
         viewer = _viewer(request)
         qs = ViewSession.objects.filter(pk__in=ids)
         qs = qs.filter(viewer=viewer) if viewer else qs.filter(viewer__isnull=True,

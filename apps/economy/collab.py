@@ -564,6 +564,9 @@ class CollabDealsView(APIView):
         for entry in settled:
             entry["funded"] = False
             entry["stake_paid"] = 0
+            # Starting a deal is saying yes to it; everybody else has to say so themselves.
+            if entry.get("username") == request.user.username:
+                entry["accepted_at"] = timezone.now().isoformat()
 
         # Starting the deal costs ⚡ equal to the combined price of the skills
         # the starter says they are bringing, from their own rates.
@@ -798,3 +801,39 @@ class PostCollabsView(APIView):
             "post_id": post.id,
             "deals": [deal_dict(d, me, days) for d in visible],
         })
+
+
+class CollabAcceptView(APIView):
+    """POST /api/economy/collab/<id>/accept/ {accept: true|false} — say yes (or take it back)
+    to being on a deal somebody else put you on.
+
+    Naming a member on a deal needs nobody's consent, so on its own it proves nothing. This is
+    the consent. It is what lets a collab carry messages between an adult and a minor
+    (`models.collab_link`): both have to have accepted, and either can withdraw at any time to
+    close the channel. The person who started the deal has accepted by starting it and cannot
+    withdraw from their own deal here (that is cancelling it)."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        accept = request.data.get("accept", True)
+        accept = accept not in (False, "false", "0", 0, "no")
+        # Locked read-modify-write: fund/deliver/release rewrite this same JSON column, and an
+        # unlocked save here could put back a stale copy and un-fund somebody's stake.
+        with transaction.atomic():
+            deal = CollabDeal.objects.select_for_update().filter(pk=pk).first()
+            if not deal:
+                return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+            if deal.initiator_id == request.user.id:
+                return Response({"detail": "You started this deal, so you are already on it."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            parts = list(deal.participants or [])
+            mine = next((p for p in parts if str(p.get("username", "")).lower() == request.user.username.lower()), None)
+            if not mine:
+                return Response({"detail": "You are not on this deal."}, status=status.HTTP_403_FORBIDDEN)
+            if accept:
+                mine["accepted_at"] = mine.get("accepted_at") or timezone.now().isoformat()
+            else:
+                mine.pop("accepted_at", None)
+            deal.participants = parts
+            deal.save(update_fields=["participants", "updated_at"])
+        return Response({"accepted": bool(mine.get("accepted_at")), "deal": deal_dict(deal, request.user)})

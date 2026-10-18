@@ -1306,6 +1306,59 @@ def may_contact(a, b):
     return is_minor(a) == is_minor(b)
 
 
+NO_CROSS_AGE_MESSAGE = ("Messages stay between members in the same age group — except inside a collab you have "
+                        "BOTH accepted. Everything else on Music ConnectZ is still open.")
+NO_CROSS_AGE_CALL = ("Calls stay between members in the same age group — except inside a collab you have both "
+                     "accepted, and then only when the adult is on StatZ. Messages inside the collab are still open.")
+_DEAL_OVER = ("released", "refunded", "cancelled")
+
+
+def _deal_accepted(deal, user):
+    """Whether `user` has said yes to being on this deal. The person who started it has by
+    starting it; everybody else has when they pressed accept (`accepted_at` on their entry).
+    Being NAMED on a deal is not consent — the initiator names whoever they like."""
+    if deal.initiator_id == user.id:
+        return True
+    for p in deal.participants or []:
+        if str(p.get("username", "")).lower() == user.username.lower():
+            return bool(p.get("accepted_at"))
+    return False
+
+
+def collab_link(a, b):
+    """A live collab both members are on AND have accepted. The one door through which an
+    adult and a minor may write to each other (Corey's call: collabs are open at any age).
+
+    The acceptance is what makes it safe to open: without it an adult could create a deal
+    naming a minor and be able to message them the same minute. A finished, refunded or
+    cancelled deal is not a link — the channel closes with the work. Either side can close
+    it sooner by withdrawing their acceptance, or by blocking (blocks are checked first)."""
+    ids = set(CollabParticipant.objects.filter(user=a).values_list("deal_id", flat=True)) & \
+        set(CollabParticipant.objects.filter(user=b).values_list("deal_id", flat=True))
+    if not ids:
+        return False
+    for deal in CollabDeal.objects.filter(pk__in=ids).exclude(status__in=_DEAL_OVER):
+        if _deal_accepted(deal, a) and _deal_accepted(deal, b):
+            return True
+    return False
+
+
+def may_message(a, b):
+    """may_contact, plus an accepted shared collab."""
+    return may_contact(a, b) or collab_link(a, b)
+
+
+def may_call(a, b):
+    """may_contact, plus an accepted shared collab when the ADULT on the call is on paid
+    StatZ. A paid account is an accountable one — a card on file is not a throwaway — and
+    the party who has to be accountable is the adult. The free StatZ sample does not count:
+    it is an hour anybody can start."""
+    if may_contact(a, b):
+        return True
+    adult = b if is_minor(a) else a
+    return membership_for(adult).tier in (TIER_STATZ, TIER_DEBUG) and collab_link(a, b)
+
+
 def adult_only_reason(user):
     """Why this surface is closed to them, in words, or "" when it's open."""
     if not is_minor(user):
@@ -7714,3 +7767,27 @@ def mint_score_share(app_key, payload, user=None, genre=""):
         return row.token
     except Exception:
         return ""
+
+
+class IdentityCheck(models.Model):
+    """One Stripe Identity session and how it ENDED, in words.
+
+    The age check used to leave no trace but a boolean: a pass set it, and every other ending
+    (a blurry photo, an expired licence, a selfie that did not match, a real ID that proved
+    under 18, a DOB that could not be read back) changed nothing and told nobody — so a member
+    who had done it three times could not tell whether it was working. A row per session keeps
+    the outcome and the reason, so the screen can state both and the server can refuse a fourth
+    scan instead of starting (and paying Stripe for) another."""
+    STARTED, PROCESSING, VERIFIED, FAILED, UNDER_18, UNREADABLE, CANCELED = (
+        "started", "processing", "verified", "failed", "under_18", "unreadable", "canceled")
+    OPEN = (STARTED, PROCESSING)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="identity_checks")
+    session_id = models.CharField(max_length=100, unique=True)
+    status = models.CharField(max_length=12, default=STARTED)
+    reason = models.CharField(max_length=60, blank=True, default="")      # Stripe's code, or ours
+    url = models.CharField(max_length=500, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]

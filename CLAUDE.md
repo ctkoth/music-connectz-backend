@@ -2426,3 +2426,41 @@ a rule about when an act is a crime, not a safety rule for introducing strangers
 self-entered. Teens may still see each other as friends and collaborators; a ±2-year band for minors
 (so a 13 and a 17 cannot reach each other) was recommended and is **not built**. InfernoZ's dating half,
 when it exists, refuses minors the same way.
+
+## Cross-age messages inside a collab: consent is the acceptance, not the naming
+
+Corey: adults and minors may message each other inside a collab, and call when the adult is on
+StatZ. `models.may_message` / `may_call` are `may_contact` plus `collab_link(a, b)`: a shared deal
+that is not released/refunded/cancelled and that **both have accepted**.
+
+- **Being named on a deal is not consent.** `CollabDealsView.post` lets the starter name any member,
+  so "both are on a collab" would let an adult open a channel to a minor by creating a deal. The
+  starter has accepted by starting (`accepted_at` stamped on their entry); everyone else presses
+  accept (`POST /collab/<id>/accept/ {accept}`), and may withdraw at any time. The participant list
+  is rebuilt from a whitelist on create, so a request cannot carry someone else's `accepted_at`
+  (`test_a_starter_cannot_forge_somebody_elses_acceptance`). The accept view locks the row: fund,
+  deliver and release rewrite the same JSON column and a stale save would un-fund a stake.
+- **Blocks still win**, checked before the age rule. The channel closes with the work.
+- **"Calls if StatZ" is read as: the ADULT is on paid StatZ** (tier statz/debug — the free hour does
+  not count, anybody can start it). Reversible in `may_call`; Corey's to move.
+- Everything else stays age-grouped: member search, direct messages with no shared collab, calls.
+  VybeZ (finding a date) is 18+ regardless.
+
+## 18+ ID checks end in a stated success or failure
+
+`IdentityCheck` is one row per Stripe Identity session: status (`verified`, `failed`, `under_18`,
+`unreadable`, `canceled`, or open) and the reason (Stripe's code, worded by `identity.REASONS`).
+The old flow set a boolean on a pass and did NOTHING on any other ending, so a member who scanned
+three times could not tell whether it worked — a failed scan, a genuine ID that proved under 18 and a
+DOB that could not be read back were all silent.
+
+- `GET /identity/` serves `last` as `{result: success|failure|pending, detail, reason}`, plus
+  `attempts_left_today` and `can_start`. Success is never worded as pending, failure always names why.
+- **After success a new scan is refused** (`already: true`, no Stripe session created — a check is
+  paid for). After `MAX_FAILED_PER_DAY` (3) non-passes in 24h it is refused with the last reason.
+  An open session is reused for 30 minutes rather than duplicated.
+- **The webhook is not the only route**: GET and POST first retrieve any open session from Stripe
+  (`refresh`), so a deploy without the identity events subscribed still reports. If members say the
+  badge never appears, check the endpoint is subscribed to `identity.verification_session.*`.
+- A final result is never overwritten by a late event, and a session only applies to the row's own
+  member (`metadata.user_id` must match the row).

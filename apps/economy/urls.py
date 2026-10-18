@@ -92,6 +92,7 @@ from .reach import ReachGatesView
 from .autotopup import AutoTopUpView, AutoTopUpCancelView
 from .identity import IdentityView
 from .collab import (
+    CollabAcceptView,
     PostCollabsView,
     CollabDealsView,
     CollabDetailView,
@@ -592,6 +593,7 @@ urlpatterns = [
          name="economy-directz-copyright"),
     # A collab is where the finished master usually lands, so it releases too.
     path("collab/<int:pk>/distribute/", CollabDistributeView.as_view(), name="economy-collab-distribute"),
+    path("collab/<int:pk>/accept/", CollabAcceptView.as_view(), name="economy-collab-accept"),
     # VenueZ — CollabZ when everyone is in the same room. The quote is on the
     # listing, not behind the booking, because the price of turning up has to
     # be readable before anybody agrees to turn up.

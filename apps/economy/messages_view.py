@@ -179,9 +179,9 @@ class MessagesView(APIView):
             return Response({"detail": "can't message yourself"}, status=status.HTTP_400_BAD_REQUEST)
         if other.id in blocked_user_ids(me):
             return Response({"detail": "You've blocked this user (or they blocked you)."}, status=status.HTTP_403_FORBIDDEN)
-        from .models import NO_CROSS_AGE_CONTACT, may_contact
-        if not may_contact(me, other):
-            return Response({"detail": NO_CROSS_AGE_CONTACT, "age_group": True}, status=status.HTTP_403_FORBIDDEN)
+        from .models import NO_CROSS_AGE_MESSAGE, may_message
+        if not may_message(me, other):
+            return Response({"detail": NO_CROSS_AGE_MESSAGE, "age_group": True}, status=status.HTTP_403_FORBIDDEN)
         from .gates import reach_block
         blocked = reach_block(me, other)
         if blocked:
