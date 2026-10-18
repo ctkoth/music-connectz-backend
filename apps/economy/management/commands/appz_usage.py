@@ -72,6 +72,7 @@ INSTRUMENT_KEYS = list(_INSTRUMENTS)   # derived: one list of coaches
 NOT_MEASURABLE = {
     "onboardz": "steps live on Profile/Post/Habit, already counted there",
     "vybez": "live search, no rows of its own",
+    "lookmaxz": "stateless by design — no photo, score or history is kept; only a StatZ shopping preference",
     "coachz": "hub screen over the instrument coaches below",
     "profilez": "every member has one; edits aren't logged as events",
     "statsz": "read-only dashboard over other apps' data",

@@ -121,7 +121,7 @@ class StatzDriversAuditTests(TestCase):
             if re.search(r"\b(has_statz|feature_tier)\(", f.read_text(encoding="utf-8")):
                 callers.add(f.stem)
         self.assertEqual(callers - FEATURE_MODULES, set(), "a StatZ gate is not on the audit list")
-        self.assertEqual({m for m in FEATURE_MODULES if (root / f"{m}.py").exists()} - callers - {"coachvoice", "voicez", "modal_sandbox", "lessonz", "catalog"}, set(),
+        self.assertEqual({m for m in FEATURE_MODULES if (root / f"{m}.py").exists()} - callers - {"coachvoice", "voicez", "modal_sandbox", "lessonz", "catalog", "lookmaxz"}, set(),
                          "the audit names a module that no longer gates anything")
 
     def test_the_state_publishes_what_the_hour_leaves_out_and_when_it_warns(self):

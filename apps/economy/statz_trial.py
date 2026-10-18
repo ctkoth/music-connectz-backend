@@ -76,6 +76,8 @@ DRIVERS = [
      "why_not": "Saving a coach voice is a standing preference — a sample that left one behind would be a permanent grant wearing a timer."},
     {"key": "custom_voices", "sampled": False, "modules": ["voicez"],
      "why_not": "A cloned voice is a stored asset that costs real compute to make; it does not switch off."},
+    {"key": "shop_markets", "sampled": False, "modules": ["lookmaxz"],
+     "why_not": "Your own marketplace list is a saved preference — a sample that left one behind would be a permanent grant wearing a timer."},
     {"key": "code_sandbox", "sampled": False, "modules": ["modal_sandbox"],
      "why_not": "Every run spends real compute, so a free sample of it every day is a cost with no sale attached."},
     {"key": "lesson_visibility", "sampled": False, "modules": ["lessonz"],

@@ -115,6 +115,12 @@ CREDIT_OUTCOMES = {
         "outcomes": ["understandable", "learnable"],
         "lands_in": ["profilez", "facez"],
         "no_free_way": "It reads one photo with a model; the daily free allowance is the free way in."},
+    "lookmaxz_view": {
+        "resource": "promptz", "label": "LookmaxZ reading",
+        "buys": "A sector-by-sector read of how a photo presents (face, skin, teeth, styling) with what to change and where to shop for it.",
+        "outcomes": ["understandable", "learnable", "tangible"],
+        "lands_in": ["lookmaxz", "bodiez"],
+        "free_way": {"label": "Body, the shop and your marketplaces are free; a daily free prompt covers a reading.", "tab": "lookmaxz"}},
     "views": {
         "resource": "promptz", "label": "AI usage charge",
         "buys": "The model run another screen asked for, billed once and logged with its reason.",

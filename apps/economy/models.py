@@ -7818,3 +7818,18 @@ class IdentityCheck(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class LookmaxPrefs(models.Model):
+    """Where a StatZ member shops for LookmaxZ — their own marketplaces, in their order.
+
+    The ONLY thing LookmaxZ stores. No photo, no score and no history is kept, for
+    the reason `attractivenessz.py` gives; this is a preference about links, held
+    as JSON because it is read whole and never queried. `lookmaxz.clean_markets`
+    is the one shape, applied on write AND on read, so a row can never serve a
+    template the writer would have refused.
+    """
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name="lookmax_prefs")
+    markets = models.JSONField(default=list, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)

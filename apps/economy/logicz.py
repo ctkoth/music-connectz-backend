@@ -158,6 +158,12 @@ LOGICZ_TABS = [
               "first frame.", True, tab="videoconnectz"),
          _app("FaceZ", "🙂", "The photos Video ConnectZ can start from.",
               True, tab="facez"),
+         # 18+ verified, presentation only (never bone structure or body shape), and
+         # nothing about the photo or the score is kept. Body is read from BodieZ.
+         _app("LookmaxZ", "✨",
+              "What you can change about how you present — face, skin, teeth, styling, "
+              "body — by sector, with where to shop for it. 18+, nothing stored.",
+              True, tab="lookmaxz"),
          _app("Image ConnectZ", "🖼️", "Not built yet.", False),
      ]},
     {"key": "keyconnectz", "name": "KeyConnectZ", "emoji": "⌨️", "icon": "keyconnectz.png",

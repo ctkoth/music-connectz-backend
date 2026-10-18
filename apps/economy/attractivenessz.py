@@ -105,6 +105,19 @@ Reply with ONLY a JSON object, no prose around it:
 }}"""
 
 
+# Gemini reads these image types inline. `vocalcoach.gemini_mime` is the AUDIO and VIDEO
+# list and has never held an image, so this module answered "can't read image/jpeg" to
+# every real photo — its tests mock the rating, which is why nothing noticed.
+_GEMINI_IMAGE = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
+_IMAGE_RELABEL = {"image/jpg": "image/jpeg", "image/pjpeg": "image/jpeg"}
+
+
+def gemini_image_mime(content_type):
+    base = (content_type or "").split(";")[0].strip().lower()
+    base = _IMAGE_RELABEL.get(base, base)
+    return base if base in _GEMINI_IMAGE else None
+
+
 def _parse(text):
     if not text:
         return None
@@ -135,7 +148,7 @@ def rate_presentation(fileobj, content_type):
     if not key:
         return None, "the coach isn't configured (GEMINI_API_KEY)"
 
-    mime = gemini_mime(content_type)
+    mime = gemini_image_mime(content_type)
     if not mime:
         return None, f"can't read {content_type or 'that format'}"
 
