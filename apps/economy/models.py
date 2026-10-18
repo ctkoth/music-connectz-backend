@@ -1309,7 +1309,7 @@ def may_contact(a, b):
 NO_CROSS_AGE_MESSAGE = ("Messages stay between members in the same age group — except inside a collab you have "
                         "BOTH accepted. Everything else on Music ConnectZ is still open.")
 NO_CROSS_AGE_CALL = ("Calls stay between members in the same age group — except inside a collab you have both "
-                     "accepted, and then only when the adult is on StatZ. Messages inside the collab are still open.")
+                     "accepted, and then only when you are both on StatZ. Messages inside the collab are still open.")
 _DEAL_OVER = ("released", "refunded", "cancelled")
 
 
@@ -1348,15 +1348,18 @@ def may_message(a, b):
     return may_contact(a, b) or collab_link(a, b)
 
 
+def _paid_statz(user):
+    return membership_for(user).tier in (TIER_STATZ, TIER_DEBUG)
+
+
 def may_call(a, b):
-    """may_contact, plus an accepted shared collab when the ADULT on the call is on paid
-    StatZ. A paid account is an accountable one — a card on file is not a throwaway — and
-    the party who has to be accountable is the adult. The free StatZ sample does not count:
-    it is an hour anybody can start."""
+    """may_contact, plus an accepted shared collab when BOTH members are on paid StatZ
+    (Corey's call). A paid account is an accountable one — a card on file is not a throwaway —
+    and a call is the more intimate channel, so both sides carry that, not just the adult. The
+    free StatZ sample does not count: it is a window anybody can start."""
     if may_contact(a, b):
         return True
-    adult = b if is_minor(a) else a
-    return membership_for(adult).tier in (TIER_STATZ, TIER_DEBUG) and collab_link(a, b)
+    return _paid_statz(a) and _paid_statz(b) and collab_link(a, b)
 
 
 def adult_only_reason(user):

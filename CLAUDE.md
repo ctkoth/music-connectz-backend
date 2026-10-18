@@ -2441,8 +2441,9 @@ that is not released/refunded/cancelled and that **both have accepted**.
   (`test_a_starter_cannot_forge_somebody_elses_acceptance`). The accept view locks the row: fund,
   deliver and release rewrite the same JSON column and a stale save would un-fund a stake.
 - **Blocks still win**, checked before the age rule. The channel closes with the work.
-- **"Calls if StatZ" is read as: the ADULT is on paid StatZ** (tier statz/debug — the free hour does
-  not count, anybody can start it). Reversible in `may_call`; Corey's to move.
+- **Calls need BOTH members on paid StatZ** (tier statz/debug — the free hour does not count,
+  anybody can start it), on top of the accepted collab. Corey's call; first read as "the adult on
+  StatZ", corrected to both. Reversible in `may_call`. A lapse closes the call door again.
 - Everything else stays age-grouped: member search, direct messages with no shared collab, calls.
   VybeZ (finding a date) is 18+ regardless.
 

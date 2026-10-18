@@ -184,14 +184,23 @@ class CrossAgeMessagingInsideACollabTests(TestCase):
         mine = [p for p in CollabDeal.objects.get(pk=pk).participants if p["username"] == "xteen"][0]
         self.assertNotIn("accepted_at", mine)
 
-    def test_calls_need_the_accepted_collab_and_an_adult_on_paid_statz(self):
+    def test_calls_need_the_accepted_collab_and_both_on_paid_statz(self):
         from apps.economy.models import membership_for, may_call
         pk = self._deal(self.adult)
         self.assertFalse(may_call(self.adult, self.teen))
         self._as(self.teen).post(f"/api/economy/collab/{pk}/accept/", {"accept": True}, format="json")
-        self.assertFalse(may_call(self.adult, self.teen))            # accepted, but the adult is free
-        m = membership_for(self.adult); m.tier = "statz"; m.save()
-        self.assertTrue(may_call(self.adult, self.teen))
-        self.assertTrue(may_call(self.teen, self.adult))             # symmetric
-        m.tier = "premium"; m.save()
+        self.assertFalse(may_call(self.adult, self.teen))            # accepted, but neither is on StatZ
+
+        def tier(u, t):
+            m = membership_for(u); m.tier = t; m.save()
+
+        tier(self.adult, "statz")
+        self.assertFalse(may_call(self.adult, self.teen))            # the adult alone is not enough
+        self.assertFalse(may_call(self.teen, self.adult))
+        tier(self.teen, "premium")
         self.assertFalse(may_call(self.adult, self.teen))            # premium is not StatZ
+        tier(self.teen, "statz")
+        self.assertTrue(may_call(self.adult, self.teen))             # both paid, both accepted
+        self.assertTrue(may_call(self.teen, self.adult))             # symmetric
+        tier(self.adult, "free")
+        self.assertFalse(may_call(self.adult, self.teen))            # lapses with the subscription
