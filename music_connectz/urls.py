@@ -57,9 +57,9 @@ except Exception:  # pragma: no cover - never take the deploy down
 # folding them together would mean an import error in the new module takes the
 # old feature off the platform.
 try:
-    from apps.economy.takescorez import AgreeView, ShareRecapView, ShareTakeView, ShareWinView, TakePromoView, TakeDownloadView, TakesExportView, GameProfileView, GoalView, ProgressView
+    from apps.economy.takescorez import AgreeView, ShareRecapView, ShareTakeView, ShareWinView, TakePromoView, TakePostView, TakeDownloadView, TakesExportView, GameProfileView, GoalView, ProgressView
 except Exception:  # pragma: no cover - never take the deploy down
-    AgreeView = ShareRecapView = ShareTakeView = ShareWinView = TakePromoView = TakeDownloadView = TakesExportView = GameProfileView = GoalView = ProgressView = None
+    AgreeView = ShareRecapView = ShareTakeView = ShareWinView = TakePromoView = TakePostView = TakeDownloadView = TakesExportView = GameProfileView = GoalView = ProgressView = None
 
 # GroupZ. Mounted at /api/groupz/ rather than under /api/economy/, because that
 # is where `GroupZ.jsx` has been calling since it was written — the tab has sat
@@ -219,6 +219,9 @@ urlpatterns = [
     path(f"api/{key}/take/<int:pk>/promo/", TakePromoView.as_view(app_key=key), name=f"{key}-take-promo")
     for key in INSTRUMENT_APP_KEYS
 ] if TakePromoView else []) + ([
+    path(f"api/{key}/take/<int:pk>/post/", TakePostView.as_view(app_key=key), name=f"{key}-take-post")
+    for key in INSTRUMENT_APP_KEYS
+] if TakePostView else []) + ([
     path(f"api/{key}/take/<int:pk>/download/", TakeDownloadView.as_view(app_key=key), name=f"{key}-take-download")
     for key in INSTRUMENT_APP_KEYS
 ] if TakeDownloadView else []) + ([

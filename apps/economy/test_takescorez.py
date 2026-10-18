@@ -1186,3 +1186,142 @@ class SendToCollabzAtAnyScoreTests(CoachingBoardTests):
         self.c.force_authenticate(User.objects.get(pk=self.u.pk))
         self.assertEqual(self._door(3.0)["key"], "collabz")
         self.assertIsNone(self.c.get("/api/rapz/progress/").data["takes"][0]["lessons"])   # but no LessonZ CTA
+
+
+class HookAndFeelzOnTheRowTests(TestCase):
+    """HookZ and FeelZ are rated beside the dimensions, with their reasons, and are never a 0."""
+
+    def setUp(self):
+        self.u = member("hf")
+        self.c = APIClient()
+        self.c.force_authenticate(self.u)
+
+    def take(self, read):
+        t = scored(self.u, flow=7, timing=7)
+        TakeScore.objects.filter(pk=t.pk).update(read=read)
+        t.refresh_from_db()
+        return t
+
+    def test_read_keeps_the_reasons_only_with_their_number(self):
+        r = T.read_of({"verdict": "v", "hook_score": 8, "hook_why": "The chorus repeats the title.",
+                       "feelz_score": 7, "feelz_emotion": "longing", "feelz_why": "The voice cracks on the ask.",
+                       "hook_why_orphan": "x"})
+        self.assertEqual(r["hook_why"], "The chorus repeats the title.")
+        self.assertEqual(r["feelz_emotion"], "longing")
+        self.assertEqual(T.read_of({"verdict": "v", "hook_why": "no number"}).get("hook_why"), None)
+
+    def test_extras_are_labelled_and_absent_when_unscored(self):
+        rows = T.extras_of({"hook": 8, "hook_why": "Sticky.", "feelz": 6, "feelz_emotion": "joy", "feelz_why": "Bright."})
+        self.assertEqual([x["key"] for x in rows], ["hook", "feelz"])
+        self.assertEqual(rows[0]["label"], "HookZ 🪝")
+        self.assertIn("Felt: joy", rows[1]["detail"])
+        self.assertEqual(T.extras_of({"verdict": "v"}), [])
+        self.assertEqual(T.extras_of({"hook": 0 if False else None}), [])
+
+    def test_the_row_says_whether_each_is_inside_the_overall_it_was_shown(self):
+        r = T.read_of({"verdict": "v", "hook_score": 8, "hook_counted": True, "feelz_score": 6, "feelz_counted": False})
+        rows = {e["key"]: e for e in T.extras_of(r)}
+        self.assertIs(rows["hook"]["counted"], True)
+        self.assertIs(rows["feelz"]["counted"], False)
+        self.assertIsNone(T.extras_of({"hook": 5})[0]["counted"])       # an older take says nothing
+
+    def test_the_rule_is_stated_with_the_row(self):
+        t = self.take({"verdict": "v", "feelz": 7})
+        self.assertIn("overall", T.take_row(t, "SingZ")["extras_note"])
+
+    def test_the_row_serves_them(self):
+        t = self.take({"verdict": "v", "hook": 9, "hook_why": "Memorable.", "feelz": 5})
+        row = T.take_row(t, "SingZ")
+        self.assertEqual({e["key"] for e in row["extras"]}, {"hook", "feelz"})
+
+    def test_a_post_or_message_draft_carries_them_with_the_score(self):
+        t = self.take({"verdict": "v", "hook": 9, "hook_why": "Memorable.", "feelz": 5, "feelz_emotion": "calm"})
+        body = T._read_text(t, "SingZ")
+        self.assertIn("HookZ 🪝 9/10 — Memorable.", body)
+        self.assertIn("FeelZ 💗 5/10 — Felt: calm", body)
+
+    def test_the_share_card_payload_carries_the_reasons(self):
+        t = self.take({"verdict": "v", "hook": 9, "hook_why": "Memorable.", "feelz": 5, "feelz_emotion": "calm",
+                       "feelz_why": "Quiet."})
+        p = T.share_payload(t)
+        self.assertEqual(p["hook_why"], "Memorable.")
+        self.assertEqual(p["feelz_emotion"], "calm")
+
+
+class PostATakeTests(TestCase):
+    """A take as a PostZ post: what the member ticks is what goes, built from what the server stored."""
+
+    def setUp(self):
+        from .models import Upload
+        self.u = member("poster")
+        self.c = APIClient()
+        self.c.force_authenticate(self.u)
+        self.t = scored(self.u, flow=7, timing=7)
+        TakeScore.objects.filter(pk=self.t.pk).update(read={"verdict": "Solid.", "strengths": ["flow"], "hook": 8})
+        self.url = f"/api/singz/take/{self.t.pk}/post/"
+
+    def keep(self):
+        from django.core.files.base import ContentFile
+        from .models import Upload
+        up = Upload.objects.create(user=self.u, name="take.webm", size_bytes=10, content_type="audio/webm")
+        up.file.save("take.webm", ContentFile(b"x" * 10))
+        TakeScore.objects.filter(pk=self.t.pk).update(upload=up)
+
+    def test_get_says_whether_there_is_a_recording_before_anything_is_made(self):
+        d = self.c.get(self.url).json()
+        self.assertFalse(d["file"]["kept"])
+        self.assertIn("wasn't kept", d["note"])
+        self.assertIsNone(d["cost"])
+        self.assertIn("cap", d["submissions"])
+
+    def test_an_unkept_take_posts_score_and_feedback_without_media(self):
+        r = self.c.post(self.url, {"score": True, "feedback": True, "recording": True}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        d = r.json()
+        self.assertFalse(d["playable"])
+        from .models import Post
+        p = Post.objects.get(pk=d["post_id"])
+        self.assertEqual(p.media_url, "")
+        self.assertIn("7/10", p.title)
+        self.assertIn("Solid.", p.description + str(p.score))
+
+    def test_a_kept_take_posts_a_playable_recording(self):
+        self.keep()
+        d = self.c.post(self.url, {"recording": True}, format="json").json()
+        self.assertTrue(d["playable"])
+        from .models import Post
+        p = Post.objects.get(pk=d["post_id"])
+        self.assertTrue(p.media_url)
+        self.assertEqual(p.media_type, "audio")
+
+    def test_unticked_parts_are_not_included(self):
+        self.keep()
+        d = self.c.post(self.url, {"score": False, "feedback": False, "recording": False}, format="json").json()
+        from .models import Post
+        p = Post.objects.get(pk=d["post_id"])
+        self.assertNotIn("7/10", p.title)
+        self.assertEqual(p.media_url, "")
+        self.assertFalse(p.score)
+
+    def test_score_and_feedback_together_carry_the_coach_card_from_the_server(self):
+        d = self.c.post(self.url, {"score": True, "feedback": True, "recording": False}, format="json").json()
+        self.assertTrue(d["included"]["card"])
+        from .models import Post
+        self.assertTrue(Post.objects.get(pk=d["post_id"]).score)
+
+    def test_it_is_only_ever_your_own_take(self):
+        other = member("other")
+        c = APIClient()
+        c.force_authenticate(other)
+        self.assertEqual(c.get(self.url).status_code, 404)
+        self.assertEqual(c.post(self.url, {}, format="json").status_code, 404)
+
+    def test_the_post_counts_against_the_daily_submission_cap(self):
+        from .models import submission_cap_for
+        for _ in range(submission_cap_for(self.u)):
+            self.c.post(self.url, {}, format="json")
+        self.assertEqual(self.c.post(self.url, {}, format="json").status_code, 429)
+
+    def test_the_row_offers_the_door(self):
+        row = T.take_row(TakeScore.objects.get(pk=self.t.pk), "SingZ")
+        self.assertIn("post_take", [e["key"] for e in row["exports"]])

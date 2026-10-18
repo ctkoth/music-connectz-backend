@@ -152,6 +152,16 @@ def read_of(payload):
             out[key] = v
     if payload.get("feelz_emotion"):
         out["feelz_emotion"] = str(payload["feelz_emotion"])[:60]
+    # The reasons travel with the numbers: a HookZ or FeelZ with no sentence beside it is the
+    # "score with no description" this app does not ship. Only kept when the number is.
+    # Whether each one is INSIDE the overall the member was shown, so a row can say "counts" or
+    # "beside" truthfully instead of assuming. Old takes carry neither flag and say nothing.
+    for field in ("hook_counted", "feelz_counted"):
+        if isinstance(payload.get(field), bool) and field.split("_")[0] in out:
+            out[field] = payload[field]
+    for key, field in (("hook_why", "hook_why"), ("feelz_why", "feelz_why")):
+        if payload.get(field) and key.split("_")[0] in out:
+            out[key] = str(payload[field])[:400]
     return {k: v for k, v in out.items() if v not in ("", [], None)}
 
 
@@ -536,6 +546,9 @@ def _read_text(take, label):
         lines += ["", "What worked:"] + [f"· {x}" for x in r["strengths"]]
     if r.get("fixes"):
         lines += ["", "Fix this:"] + [f"· {x}" for x in r["fixes"]]
+    extras = extras_of(r)
+    if extras:
+        lines += [""] + [f"{e['label']} {e['value']}/10" + (f" — {e['detail']}" if e["detail"] else "") for e in extras]
     return "\n".join(lines)[:4000]
 
 
@@ -665,7 +678,8 @@ def exports_for(take, label, *, price=None):
                    "note": ("A public link and card with the score and the coach's own one-line verdict, "
                             "made from what the coach actually said. Free — and anyone who joins from it "
                             "earns you the referral reward.")})
-    for i, kind in enumerate(PROMO_KINDS, start=1):
+    out.insert(1, post_take_door(take))
+    for i, kind in enumerate(PROMO_KINDS, start=2):
         promo = promo_door(take, price=price, kind=kind)
         if promo:
             out.insert(i, promo)
@@ -705,6 +719,23 @@ def exports_for(take, label, *, price=None):
     return out
 
 
+def post_take_door(take):
+    """"Post it": the take as a PostZ post that plays, with its score and the coach's feedback.
+
+    The note says before the press whether the recording goes with it — a take is scored and not
+    stored unless the member ticked Keep this take, so most are not playable, and a door that
+    implied otherwise would be a promise the post then breaks. Free; it counts as one of the
+    day's submissions, which the panel states with the real numbers."""
+    kept = bool(take.upload_id) and not (take.upload and take.upload.missing_since)
+    return {"key": "post_take", "label": "Post it — score & feedback", "kind": "post_take",
+            "tab": "postz", "target": "", "id": take.pk, "carry": {}, "cost": None,
+            "note": ("A PostZ post with the score and the coach's feedback" +
+                     (", and the recording — so anyone with the link can play it. " if kept else
+                      ". This take wasn't kept, so there is no recording to play; tick Keep this take "
+                      "before you record next time to make a take playable by link. ") +
+                     "Free. You choose what goes in, and it counts as one of today's submissions.")}
+
+
 def share_payload(take):
     """The take as the coach gave it, in the shape a share row keeps — built from
     what the SERVER stored when it answered, never from anything a client sends.
@@ -718,6 +749,9 @@ def share_payload(take):
     for key, field in (("exact", "score_exact"), ("hook", "hook_score"), ("feelz", "feelz_score")):
         if key in r:
             out[field] = r[key]
+    for k in ("hook_why", "feelz_why", "feelz_emotion"):
+        if r.get(k):
+            out[k] = r[k]
     # The week's challenge, when THIS take answers it — judged by when it was made,
     # not when it was shared, so a take from Tuesday shared on Friday still counts.
     tag = challenge_tag(take.app_key, take.genre, take.difficulty, take.created_at)
@@ -773,6 +807,30 @@ def _lessons_of(take, read, ctx):
         return None
 
 
+HOOK_LABEL, FEELZ_LABEL = "HookZ 🪝", "FeelZ 💗"
+EXTRAS_NOTE = ("HookZ is the hook and FeelZ is how much of the feeling comes through. Each counts in your "
+               "overall like any other dimension — the strongest parts weigh most, so a take that moves people "
+               "is not held down by one rough spot — and only when the coach found one to judge; a missing "
+               "one is absent, never a 0.")
+
+
+def extras_of(read):
+    """HookZ and FeelZ as labelled rows with their reasons — the server's words, absent when the coach
+    found nothing to judge (a warm-up has no hook), never a 0."""
+    r = read or {}
+    out = []
+    if isinstance(r.get("hook"), (int, float)):
+        out.append({"key": "hook", "label": HOOK_LABEL, "value": r["hook"], "detail": r.get("hook_why", ""),
+                    "counted": r.get("hook_counted")})
+    if isinstance(r.get("feelz"), (int, float)):
+        emo = r.get("feelz_emotion", "")
+        why = r.get("feelz_why", "")
+        out.append({"key": "feelz", "label": FEELZ_LABEL, "value": r["feelz"],
+                    "detail": " — ".join(x for x in ((f"Felt: {emo}" if emo else ""), why) if x),
+                    "counted": r.get("feelz_counted")})
+    return out
+
+
 def take_row(take, label, price=None, best=None, lessons_ctx=None):
     r = take.read or {}
     top, n, first = best if best else (None, 0, None)
@@ -783,7 +841,7 @@ def take_row(take, label, price=None, best=None, lessons_ctx=None):
             "weakest": take.weakest, "difficulty": take.difficulty, "genre": take.genre,
             "style": take.style, "target": take.target, "range_class": take.range_class,
             "low": take.low_note, "high": take.high_note, "at": take.created_at.isoformat(),
-            "read": r,
+            "read": r, "extras": extras_of(r), "extras_note": EXTRAS_NOTE,
             "open_in": ({"tab": "postz", "target": take.ref} if take.source == "post"
                         else {"tab": "journalz", "target": "journalz-entries"}
                         if take.source == "journal" else None),
@@ -1146,6 +1204,83 @@ class TakePromoView(APIView):
         if resp.status_code == status.HTTP_201_CREATED:
             resp.data = {**resp.data, "share_url": f"/s/{token}", "link": url}
         return resp
+
+
+class TakePostView(APIView):
+    """/api/<key>/take/<id>/post/ — one of YOUR takes as a PostZ post.
+
+    GET says what is available and what it counts against, before anything is made. POST makes
+    the post through `postz.create_post` — the same daily cap, sanitising and zodiac hooks as the
+    composer, never a second path — from what the SERVER stored: the score and the coach's read
+    come from the share row by token (so a client cannot post a number the coach did not give),
+    and the recording is the member's own kept upload, by stable address. The member chooses
+    score, feedback and recording separately; nothing is included they did not tick.
+
+    When BOTH score and feedback go, the post carries the coach's own read card (`coach_token`),
+    which is the labelled, structured version; either alone goes as plain text, because the card
+    cannot show half of itself."""
+    permission_classes = [IsAuthenticated]
+    app_key = "singz"
+
+    def _take(self, request, pk):
+        return (TakeScore.objects.filter(pk=pk, user=request.user, app_key=self.app_key)
+                .select_related("upload").first())
+
+    def get(self, request, pk):
+        from .logz_outcomes import file_of
+        from .models import submission_cap_for, submissions_used_today
+        take = self._take(request, pk)
+        if not take or take.overall is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        label = profile_for_app(self.app_key)["label"]
+        f = file_of(take, request)
+        return Response({
+            "title": _score_text(take, label), "feedback": _read_text(take, label),
+            "file": f, "cost": None,
+            "submissions": {"used": submissions_used_today(request.user), "cap": submission_cap_for(request.user)},
+            "note": post_take_door(take)["note"],
+        })
+
+    def post(self, request, pk):
+        from django.conf import settings
+        from .postz import create_post
+        take = self._take(request, pk)
+        if not take or take.overall is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        d = request.data or {}
+        on = lambda k, default=True: str(d.get(k, default)).strip().lower() in ("1", "true", "yes", "on")
+        inc_score, inc_feedback, inc_recording = on("score"), on("feedback"), on("recording")
+        label = profile_for_app(self.app_key)["label"]
+        vis = str(d.get("visibility") or "public").lower()
+        if vis not in ("public", "restricted"):
+            vis = "public"
+        payload = {"title": _score_text(take, label) if inc_score else f"{label} take",
+                   "description": _read_text(take, label) if inc_feedback else
+                   " · ".join(x for x in (take.genre, take.style) if x),
+                   "genre": take.genre or "", "visibility": vis}
+        carded = inc_score and inc_feedback
+        if carded:
+            token = share_take(take)
+            if token:
+                payload["coach_token"] = token
+                payload["score_visibility"] = "" if vis == "public" else "members"   # "" is the widest setting: public
+        recorded = False
+        if inc_recording:
+            from .logz_outcomes import file_of
+            f = file_of(take, request)
+            if f.get("kept") and f.get("url"):
+                payload["media_url"] = f["url"]
+                payload["media_type"] = "video" if str(f.get("content_type", "")).startswith("video") else "audio"
+                recorded = True
+        post, _info, err = create_post(request.user, payload)
+        if err:
+            body, code = err
+            return Response(body, status=code)
+        base = (getattr(settings, "FRONTEND_URL", "") or "https://musicconnectz.net").rstrip("/")
+        return Response({"post_id": post.pk, "url": f"/p/{post.pk}", "link": f"{base}/p/{post.pk}",
+                         "included": {"score": inc_score, "feedback": inc_feedback, "card": carded and bool(post.score),
+                                      "recording": recorded},
+                         "playable": recorded}, status=status.HTTP_201_CREATED)
 
 
 class TakeDownloadView(APIView):
