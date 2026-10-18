@@ -1,41 +1,44 @@
-"""Bad ratings earn less — and the AI coach can count, if the member says so.
+"""Ratings move royalties: (median − 5) × 10%.
 
-Corey's two rules, as one module:
+Corey's formula, one line: royalties change by the median rating minus 5, times 10% — each point
+above 5 adds 10% and each point below takes 10% off. A median of 5 pays the base rate; 10 pays
+150%; 1 pays 60%. It is never zero (a play happened and someone listened), and it is neutral
+until `MIN_RATERS` people outside the credits have rated — "nobody has rated it yet" is an empty
+measurement, and an empty measurement must not cost or pay anybody (the substance rule).
 
-1. **A well-rated track earns its full per-play rate; a badly-rated one earns less.**
-   `post_factor(post)` reads the median of what people OUTSIDE the credits scored the
-   post. Seven and up earns the full rate (there is no bonus above it — a royalty that
-   can be bid up by rating is one rating ring away from printing money); below seven it
-   slides down to `FLOOR` at a 1. Never to zero: a play happened, somebody listened, and
-   a floor is what stops a brigade of one-star ratings erasing a creator's income.
-2. **The skills used on the track are rated too, and they move the share of the person who
-   used them.** `skill_haircut(post, user)` is the same curve on that contributor's
-   rating in the skill(s) they brought, so a great mix on a weak song and a weak mix on a
-   great song are paid differently — the point of rating skills at all.
+1. **The track:** `post_factor(post)` applies the formula to the median of what people OUTSIDE
+   the credits scored the post, to what the post earns per play.
+2. **The skills:** `skill_haircut(post, user)` applies the same formula to each credited person's
+   rating in the skill they brought, to their share — a great mix on a weak song and a weak mix on
+   a great song are paid differently, which is the point of rating skills at all. (The name is
+   older than the formula: it is a haircut below 5 and a bonus above it.)
 
-What this deliberately does not do:
+Because the formula pays a bonus, rating becomes worth gaming, and the guards are the point:
+only OUTSIDE raters count, the median not the mean (one rater cannot move it), five of them
+before it moves anything, and a rating needs the listen the rating endpoint already requires.
+The most it can add is +50% and the most it can take off is 40%; both are constants below.
 
-* **Unrated is neutral, never a penalty.** Below `MIN_RATERS` outside raters the factor is
-  1.0: "nobody has rated it yet" is an empty measurement, and an empty measurement must not
-  cost anybody money (the substance rule: absent is not zero).
+What it deliberately does not do:
+
 * **It never doubles up on a rated collab split.** A post from a deal whose pot was already
   re-cut by contribution rating (`basis == "rating"`) has had each person's rating applied
-  once; applying a skill haircut on top would charge a bad rating twice.
+  once; applying a skill factor on top would charge (or pay) a rating twice.
 * **The AI coach is opt-in and one voice among several.** With
   `Profile.coach_counts_for_skillz` on, a member's coach scores for the matching instrument
   join their listener ratings in `blended_skill_rating` as `COACH_VOTES` votes (the median of
   their recent takes, at least `MIN_COACH_TAKES` of them, so one lucky take cannot carry
   it). It cuts both ways and the opt-in says so before it is pressed. Humans stay the
-  majority: with no listener ratings at all the coach alone stands only once those takes
-  exist.
+  majority.
 """
 from collections import defaultdict
 
 from .models import ItemRating, SkillRating
 
 MIN_RATERS = 5                 # outside raters before a post's rating moves its royalty
-FULL_AT = 7                    # a median at or above this earns the full rate
-FLOOR = 0.25                   # the lowest the factor goes (a median of 1)
+PIVOT = 5                      # the median that pays the base rate
+STEP = 0.10                    # each point above/below the pivot adds/takes this much (Corey: 10%)
+LOWEST = round(1 + (1 - PIVOT) * STEP, 4)      # a median of 1  → 0.6
+HIGHEST = round(1 + (10 - PIVOT) * STEP, 4)    # a median of 10 → 1.5
 
 COACH_VOTES = 2                # how many listener votes one coach reading is worth
 MIN_COACH_TAKES = 3            # takes the coach median needs behind it
@@ -54,19 +57,18 @@ COACH_SKILLS = {
     "violinz": ("violin", "fiddle", "strings"),
 }
 
-RULE = (f"A track rated {FULL_AT}/10 or better earns the full per-play rate. Below that it earns less, "
-        f"down to {int(FLOOR * 100)}% at a 1. Until {MIN_RATERS} people outside the credits have rated it, "
-        "nothing changes — an unrated track is not a badly-rated one.")
+RULE = (f"What a track earns per play moves by its median rating minus {PIVOT}, times {int(STEP * 100)}%: a "
+        f"{PIVOT} pays the base rate, a 10 pays {round(HIGHEST * 100)}% and a 1 pays {round(LOWEST * 100)}%. "
+        f"Until {MIN_RATERS} people outside the credits have rated it, nothing changes — an unrated track "
+        "is not a badly-rated one.")
 
 
 def curve(median):
-    """The factor for a median rating. Pure; None → neutral."""
+    """(median − PIVOT) × STEP added to 1. Pure; None → neutral."""
     if median is None:
         return 1.0
-    if median >= FULL_AT:
-        return 1.0
-    m = max(1.0, float(median))
-    return round(FLOOR + (1.0 - FLOOR) * (m - 1.0) / (FULL_AT - 1.0), 4)
+    m = min(10.0, max(1.0, float(median)))
+    return round(1 + (m - PIVOT) * STEP, 4)
 
 
 def _median(values):
@@ -208,6 +210,6 @@ class RoyaltyRatingsView(APIView):
                         "raters": pf["raters"], "factor": pf["factor"], "applied": pf["applied"],
                         "pct": round(pf["factor"] * 100),
                         "why": (f"{pf['raters']} outside ratings, median {pf['median']:g}/10." if pf["applied"] else
-                                f"{pf['raters']} of {MIN_RATERS} outside ratings so far — full rate until then.")})
-        return Response({"rule": RULE, "min_raters": MIN_RATERS, "full_at": FULL_AT,
-                         "floor_pct": int(FLOOR * 100), "posts": out})
+                                f"{pf['raters']} of {MIN_RATERS} outside ratings so far — the base rate until then.")})
+        return Response({"rule": RULE, "min_raters": MIN_RATERS,                          "pivot": PIVOT, "step_pct": int(STEP * 100),
+                         "lowest_pct": round(LOWEST * 100), "highest_pct": round(HIGHEST * 100), "posts": out})

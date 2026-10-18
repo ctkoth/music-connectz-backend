@@ -18,16 +18,23 @@ def mk(name):
 
 
 class CurveTests(TestCase):
-    def test_full_at_seven_floor_at_one_and_unrated_is_neutral(self):
-        self.assertEqual(rf.curve(10), 1.0)
-        self.assertEqual(rf.curve(7), 1.0)
-        self.assertEqual(rf.curve(1), rf.FLOOR)
-        self.assertEqual(rf.curve(None), 1.0)
-        self.assertTrue(rf.FLOOR < rf.curve(3) < rf.curve(5) < 1.0)          # worse earns less, monotonically
-        self.assertGreater(rf.FLOOR, 0)                                       # never to zero
+    def test_it_is_the_median_minus_five_times_ten_percent(self):
+        self.assertEqual(rf.curve(5), 1.0)
+        self.assertEqual(rf.curve(10), 1.5)
+        self.assertEqual(rf.curve(1), 0.6)
+        self.assertEqual(rf.curve(7), 1.2)
+        self.assertEqual(rf.curve(3), 0.8)
+        self.assertEqual(rf.curve(None), 1.0)                                 # unrated is neutral
+        self.assertEqual((rf.LOWEST, rf.HIGHEST), (0.6, 1.5))
 
-    def test_no_bonus_above_the_full_rate(self):
-        self.assertEqual(rf.curve(10), rf.curve(7))
+    def test_it_is_monotonic_and_never_zero(self):
+        vals = [rf.curve(m) for m in range(1, 11)]
+        self.assertEqual(vals, sorted(vals))
+        self.assertGreater(min(vals), 0)
+
+    def test_out_of_range_input_is_clamped_not_extrapolated(self):
+        self.assertEqual(rf.curve(99), rf.HIGHEST)
+        self.assertEqual(rf.curve(-3), rf.LOWEST)
 
 
 class BadRatingsEarnLessTests(TestCase):
@@ -56,12 +63,16 @@ class BadRatingsEarnLessTests(TestCase):
             self._track(a, title, rating, n)
         accrue_playlist_royalties_for_date(timezone.now().date())
 
-    def test_a_badly_rated_track_earns_less_than_a_good_or_unrated_one(self):
-        good, bad, none = mk("good"), mk("bad"), mk("none")
-        self._run((good, "g", 9, 6), (bad, "b", 2, 6), (none, "n", None, 0))
-        self.assertEqual(self._earned(good), self._earned(none))              # good = full rate = unrated
-        self.assertLess(self._earned(bad), self._earned(good))
+    def test_better_rated_earns_more_and_worse_rated_earns_less_than_unrated(self):
+        good, bad, none, mid = mk("good"), mk("bad"), mk("none"), mk("mid")
+        self._run((good, "g", 9, 6), (bad, "b", 2, 6), (none, "n", None, 0), (mid, "m", 5, 6))
+        self.assertEqual(self._earned(mid), self._earned(none))               # a 5 is the base rate
+        self.assertGreater(self._earned(good), self._earned(none))
+        self.assertLess(self._earned(bad), self._earned(none))
         self.assertGreater(self._earned(bad), 0)                              # never zero
+        base = self._earned(none)
+        self.assertAlmostEqual(self._earned(good) / base, rf.curve(9), delta=0.08)
+        self.assertAlmostEqual(self._earned(bad) / base, rf.curve(2), delta=0.08)
 
     def test_too_few_raters_changes_nothing(self):
         few, none = mk("few"), mk("none2")
@@ -84,7 +95,8 @@ class BadRatingsEarnLessTests(TestCase):
         row = next(p for p in d["posts"] if p["post_id"] == post.id)
         self.assertTrue(row["applied"])
         self.assertEqual(row["factor"], rf.curve(2))
-        self.assertIn(str(rf.FULL_AT), d["rule"])
+        self.assertIn("minus 5", d["rule"])
+        self.assertEqual((d["lowest_pct"], d["highest_pct"]), (60, 150))
 
 
 class CoachCountsForSkillzTests(TestCase):

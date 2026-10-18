@@ -2476,22 +2476,31 @@ the first N (the most relevant, by the prompt's own ordering); a tag inside a se
 sentence and stays. Fewer than asked is reported as `hashtags: {asked, got}`, never padded. The caption
 kind's built-in "5-10 hashtags" yields to the number so the prompt never holds two instructions.
 
-## Bad ratings earn less, and the AI coach can count — if the member says so
+## Ratings move royalties by (median − 5) × 10%, and the AI coach can count — if the member says so
 
-`royaltyfactor.py`. Corey's two rules:
+`royaltyfactor.py`. Corey's formula: royalties change by the median rating minus 5, times 10% — each
+point above 5 adds 10%, each below takes 10% off. **5 pays the base rate, 10 pays 150%, 1 pays 60%**
+(`PIVOT`, `STEP`; written as ".10%" in the instruction and read as 10% per point, because 0.10% would
+move a payout by half a percent at most and could not make "bad ratings get less" true — reversible in
+one constant). Never zero, and neutral until `MIN_RATERS` (5) people OUTSIDE the credits have rated: an
+unrated track is not a badly-rated one.
 
-1. **A track's rating scales what it earns per play** (`accrue_playlist_royalties_for_date`). The
-   median of what people OUTSIDE the credits scored the post: 7 or better earns the full rate (no
-   bonus above it — a royalty that can be bid up by rating is one ring away from printing money),
-   and below that it slides to `FLOOR` (25%) at a 1. **Never to zero** (a play happened, and a floor
-   is what stops a brigade of one-stars erasing income), and **neutral until `MIN_RATERS` (5)**
-   outsiders have rated — an unrated track is not a badly-rated one. Said before the payout:
-   `GET /royalty/ratings/` serves the rule and each post's factor and why; RoyaltieZ shows it.
-2. **Each credited person's share is scaled by their rating in the skill they brought**
-   (`skill_haircut`, from `skills_for_post`), averaged over those skills so bringing five does not
-   multiply one bad one five times. **Never twice:** a post from a deal whose pot was already re-cut by
-   contribution rating (`basis == "rating"`) has had each person's rating applied once already.
-   Neither factor redistributes — a haircut is money not paid, not money moved to someone else.
+1. **The track:** the median of outside ratings scales what the post earns per play
+   (`accrue_playlist_royalties_for_date`). Said before the payout: `GET /royalty/ratings/` serves the rule
+   and each post's factor and why; RoyaltieZ shows it.
+2. **The skills:** each credited person's share is scaled by the same formula applied to their rating in
+   the skill they brought (`skill_haircut`, from `skills_for_post`; the name predates the formula — it is a
+   bonus above 5), averaged over those skills so bringing five does not multiply one bad one five times.
+   **Never twice:** a post from a deal whose pot was already re-cut by contribution rating
+   (`basis == "rating"`) has had each person's rating applied once already. Nothing is redistributed — a
+   factor below 1 is money not paid, not money moved to someone else.
+
+**This formula pays a bonus, so rating is now worth gaming.** The guards are the design: only outside
+raters count, the median (one rater cannot move it), five of them before it moves anything, and a rating
+needs the listen the rating endpoint already requires. Worst case is +50% on a track whose five-plus
+outside raters all gave it a 10 — which is exactly the ring a rating-for-rating exchange would build, so
+watch `rating_adjusted_posts` in the accrual summary. An earlier draft had no bonus above 7 for that reason;
+Corey's formula has one and this is the cost of it.
 
 **The AI coach as a skill voice is OPT-IN** (`Profile.coach_counts_for_skillz`, off by default,
 `POST /skillz-coach/ {enabled}`). On, the median of the member's last `COACH_WINDOW` (10) takes for the
