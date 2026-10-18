@@ -294,3 +294,22 @@ class ActionZAcrossPostsTests(ResultsTests):
         with CaptureQueriesContext(connection) as many:
             self.o.get(f"{V}mine/")
         self.assertEqual(len(few), len(many))
+
+
+class ActionCountsAreNotTheCappedLogTests(TestCase):
+    """The log shows the newest ACTION_LOG_MAX; the counts must still be the true totals."""
+
+    def test_counts_exceed_the_log_cap_honestly(self):
+        from apps.economy import viewz
+        from apps.economy.models import ItemRating
+        owner = User.objects.create_user("capown", "co@e.com", "pw-Long-enough-1")
+        post = Post.objects.create(author=owner, title="Busy")
+        n = viewz.ACTION_LOG_MAX + 7
+        for i in range(n):
+            v = User.objects.create_user(f"capv{i}", f"capv{i}@e.com", "pw-Long-enough-1")
+            ItemRating.objects.create(user=v, item_id=f"post:{post.id}", score=6)
+        ItemRating.objects.create(user=owner, item_id=f"post:{post.id}", score=10)   # your own tap is not a person
+        log, counts = viewz.account_action_log([post], owner)
+        self.assertEqual(counts["rating"], n)
+        self.assertEqual(len(log), viewz.ACTION_LOG_MAX)
+        self.assertTrue(all(e["who"] != "capown" for e in log))

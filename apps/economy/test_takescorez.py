@@ -990,3 +990,28 @@ class MonthlyRecapTests(CoachingBoardTests):
         self.assertEqual(card["score"], 6)                               # the stored best, not the request's
         self.assertIn("6 takes in 30 days", card["verdict"])
         self.assertTrue(render_card(card, story=True).startswith(b"\x89PNG"))
+
+
+class ProgressCostsTheSameForAnyNumberOfTakesTests(TestCase):
+    """The history screen is opened often; its cost must not grow with the history. It once ran a
+    query per take that tied the personal best, and re-read the same tables a dozen times."""
+
+    def _cost(self, n):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        u = member(f"cost{n}")
+        for _ in range(n):
+            scored(u, flow=7, timing=7)                      # every take ties the best: the worst case
+        c = APIClient(); c.force_authenticate(u)
+        with CaptureQueriesContext(connection) as q:
+            r = c.get("/api/singz/progress/?takes=all")
+        self.assertEqual(r.status_code, 200)
+        return len(q), r.data
+
+    def test_query_count_is_flat_and_only_the_first_best_is_a_personal_best(self):
+        few, _ = self._cost(4)
+        many, data = self._cost(40)
+        self.assertEqual(few, many)
+        pbs = [t for t in data["takes"] if t["pb"]]
+        self.assertEqual(len(pbs), 1)
+        self.assertEqual(pbs[0]["id"], min(t["id"] for t in data["takes"]))

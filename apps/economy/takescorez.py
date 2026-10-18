@@ -208,17 +208,38 @@ def record(user, app_key, payload, *, difficulty="", genre="", target="",
 
 # --------------------------------------------------------------- reading
 
+# One screen (`progress`) asks the same two questions of the same tables a dozen times — the
+# declarations five times, and "the last 14 days of takes" three. `_memo` is set for the length of
+# that one call only and is None everywhere else, so no other caller (and no write path) can read a
+# stale answer. The lists it hands back are only ever iterated or copied, never mutated in place.
+import contextvars                                                    # noqa: E402
+_memo = contextvars.ContextVar("takescorez_memo", default=None)
+
+
 def profile_row(user, app_key):
     """The member's declarations for this instrument. Never auto-created on a
     read — an empty row for every member who ever opened a coach is a table of
     nothing, and `get_or_create` on a GET is a write on a read."""
-    return InstrumentProfile.objects.filter(user=user, app_key=app_key).first()
+    memo = _memo.get()
+    key = ("row", user.pk, app_key)
+    if memo is not None and key in memo:
+        return memo[key]
+    row = InstrumentProfile.objects.filter(user=user, app_key=app_key).first()
+    if memo is not None:
+        memo[key] = row
+    return row
 
 
 def _recent(user, app_key, *, hours=None, days=None, limit=200):
+    memo = _memo.get()
+    key = ("recent", user.pk, app_key, hours, days, limit)
+    if memo is not None and key in memo:
+        return memo[key]
     since = timezone.now() - (timedelta(hours=hours) if hours else timedelta(days=days))
-    return list(TakeScore.objects.filter(user=user, app_key=app_key,
-                                         created_at__gte=since)[:limit])
+    out = list(TakeScore.objects.filter(user=user, app_key=app_key, created_at__gte=since)[:limit])
+    if memo is not None:
+        memo[key] = out
+    return out
 
 
 def detected(user, app_key):
@@ -719,17 +740,20 @@ def personal_best(user, app_key):
     have one on their third take. It is only claimed once there is something to be
     best against (three takes), and only for the take that first tops the rest."""
     from django.db.models import Count, Max
-    agg = TakeScore.objects.filter(user=user, app_key=app_key, overall__isnull=False) \
-        .aggregate(best=Max("overall"), n=Count("id"))
-    return agg["best"], agg["n"]
+    rated = TakeScore.objects.filter(user=user, app_key=app_key, overall__isnull=False)
+    agg = rated.aggregate(best=Max("overall"), n=Count("id"))
+    # The take that FIRST reached the best, found once here. take_row used to ask "was there an
+    # earlier take with this score?" per row, which is one query per take for every take that
+    # ties the best — and members tie their best often, on a list that can show 200.
+    first = (rated.filter(overall=agg["best"]).order_by("created_at", "id").values_list("pk", flat=True).first()
+             if agg["best"] is not None else None)
+    return agg["best"], agg["n"], first
 
 
 def take_row(take, label, price=None, best=None):
     r = take.read or {}
-    top, n = best if best else (None, 0)
-    is_pb = bool(top is not None and n >= MIN_TAKES and take.overall == top
-                 and not TakeScore.objects.filter(user_id=take.user_id, app_key=take.app_key, overall=top,
-                                                  created_at__lt=take.created_at).exists())
+    top, n, first = best if best else (None, 0, None)
+    is_pb = bool(top is not None and n >= MIN_TAKES and take.overall == top and take.pk == first)
     from .logz_outcomes import file_of
     return {"pb": is_pb, "file": file_of(take), "share_url": f"/s/{take.share_token}" if take.share_token else "",
             "id": take.pk, "overall": take.overall, "exact": r.get("exact"), "scores": take.scores,
@@ -950,6 +974,14 @@ def progress(user, app_key, limit=RECENT_TAKES):
     the first ten and offers "show all N" — it used to stop at ten with no way to
     reach the rest, so a member with twenty-three takes saw ten and no sign of the
     other thirteen."""
+    token = _memo.set({})
+    try:
+        return _progress(user, app_key, limit)
+    finally:
+        _memo.reset(token)
+
+
+def _progress(user, app_key, limit):
     prof = profile_for_app(app_key)
     row = profile_row(user, app_key)
     rule = strain_rule(prof)

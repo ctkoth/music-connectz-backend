@@ -322,20 +322,20 @@ def action_log(post, rows):
     item = f"post:{post.id}"
     visited = {r.viewer_id: r.started_at for r in rows if r.viewer_id}
     ev = []
-    for r in ItemRating.objects.filter(item_id=item).select_related("user"):
+    for r in ItemRating.objects.filter(item_id=item).select_related("user").order_by("-id")[:ACTION_LOG_MAX]:
         ev.append({"type": "rating", "who": r.user.username, "at": r.created_at or r.updated_at,
                    "detail": f"{r.score}/10" + (f" — “{r.reason}”" if r.reason else ""), "uid": r.user_id})
-    for c in SocialComment.objects.filter(item_id=item).select_related("user"):
+    for c in SocialComment.objects.filter(item_id=item).select_related("user").order_by("-id")[:ACTION_LOG_MAX]:
         ev.append({"type": "comment", "who": c.user.username, "at": c.created_at,
                    "detail": c.body[:140], "uid": c.user_id})
-    for x in Reaction.objects.filter(item_id=item, value__gt=0).select_related("user"):
+    for x in Reaction.objects.filter(item_id=item, value__gt=0).select_related("user").order_by("-id")[:ACTION_LOG_MAX]:
         ev.append({"type": "like", "who": x.user.username, "at": x.updated_at, "detail": "", "uid": x.user_id})
-    for sh in PostShare.objects.filter(post=post).select_related("user"):
+    for sh in PostShare.objects.filter(post=post).select_related("user").order_by("-id")[:ACTION_LOG_MAX]:
         ev.append({"type": "share", "who": sh.user.username, "at": sh.shared_at, "detail": "", "uid": sh.user_id})
-    for j in PostJoin.objects.filter(post=post, user__isnull=False).select_related("user"):
+    for j in PostJoin.objects.filter(post=post, user__isnull=False).select_related("user").order_by("-id")[:ACTION_LOG_MAX]:
         ev.append({"type": "join", "who": j.user.username, "at": j.joined_at,
                    "detail": f"stayed {j.active_seconds}s", "uid": j.user_id})
-    for m in Message.objects.filter(recipient_id=post.author_id, sender_id__in=list(visited)).select_related("sender"):
+    for m in Message.objects.filter(recipient_id=post.author_id, sender_id__in=list(visited)).select_related("sender").order_by("-id")[:ACTION_LOG_MAX]:
         if m.created_at >= visited[m.sender_id]:
             ev.append({"type": "message", "who": m.sender.username, "at": m.created_at, "detail": "", "uid": m.sender_id})
     ev = [e for e in ev if e["uid"] != post.author_id]          # your own taps on your own post are not "people"
@@ -346,32 +346,47 @@ def action_log(post, rows):
 
 def account_action_log(posts, author, limit=ACTION_LOG_MAX):
     """ActionZ across ALL of one member's posts: the newest actions, each naming the post it
-    was on. The same sources `action_log` reads, fetched once for the whole list (one query
-    per kind, not per post) — a member with forty posts must not cost two hundred queries on
-    a screen that re-asks every fifteen seconds. Messages are not here: a message is about a
-    person, not a post, and is only attributed to a post when it follows a visit to it."""
+    was on. One query per kind for the whole list (not per post): a member with forty posts must
+    not cost two hundred queries on a screen that re-asks every fifteen seconds.
+
+    Each kind is read newest-first and capped at `limit` — the log can only show that many, and
+    loading every rating a popular post ever got to throw most away is the cost this avoids. The
+    COUNTS are separate `count()` queries, never the length of the capped list: a total that
+    silently stopped at 100 would be a made-up number. Your own taps on your own posts are not
+    people and are excluded in the query. Messages are not here: a message is about a person, not
+    a post."""
     ids = {p.id: p for p in posts}
     items = {f"post:{pid}": pid for pid in ids}
+    sources = {
+        "rating": ItemRating.objects.filter(item_id__in=items).exclude(user_id=author.id),
+        "comment": SocialComment.objects.filter(item_id__in=items).exclude(user_id=author.id),
+        "like": Reaction.objects.filter(item_id__in=items, value__gt=0).exclude(user_id=author.id),
+        "share": PostShare.objects.filter(post_id__in=ids).exclude(user_id=author.id),
+        "join": PostJoin.objects.filter(post_id__in=ids, user__isnull=False).exclude(user_id=author.id),
+    }
+    counts = {k: qs.count() for k, qs in sources.items()}
+    counts = {k: v for k, v in counts.items() if v}
     ev = []
-    for r in ItemRating.objects.filter(item_id__in=items).select_related("user"):
-        ev.append({"type": "rating", "who": r.user.username, "uid": r.user_id, "at": r.created_at or r.updated_at,
-                   "post": items[r.item_id], "detail": f"{r.score}/10" + (f" — “{r.reason}”" if r.reason else "")})
-    for c in SocialComment.objects.filter(item_id__in=items).select_related("user"):
-        ev.append({"type": "comment", "who": c.user.username, "uid": c.user_id, "at": c.created_at,
-                   "post": items[c.item_id], "detail": c.body[:140]})
-    for x in Reaction.objects.filter(item_id__in=items, value__gt=0).select_related("user"):
-        ev.append({"type": "like", "who": x.user.username, "uid": x.user_id, "at": x.updated_at,
-                   "post": items[x.item_id], "detail": ""})
-    for sh in PostShare.objects.filter(post_id__in=ids).select_related("user"):
-        ev.append({"type": "share", "who": sh.user.username, "uid": sh.user_id, "at": sh.shared_at,
-                   "post": sh.post_id, "detail": ""})
-    for j in PostJoin.objects.filter(post_id__in=ids, user__isnull=False).select_related("user"):
-        ev.append({"type": "join", "who": j.user.username, "uid": j.user_id, "at": j.joined_at,
-                   "post": j.post_id, "detail": f"stayed {j.active_seconds}s"})
-    ev = [e for e in ev if e["uid"] != author.id]
-    counts = {}
-    for e in ev:
-        counts[e["type"]] = counts.get(e["type"], 0) + 1
+    if counts.get("rating"):
+        for r in sources["rating"].select_related("user").order_by("-id")[:limit]:
+            ev.append({"type": "rating", "who": r.user.username, "at": r.created_at or r.updated_at,
+                       "post": items[r.item_id], "detail": f"{r.score}/10" + (f" — “{r.reason}”" if r.reason else "")})
+    if counts.get("comment"):
+        for c in sources["comment"].select_related("user").order_by("-id")[:limit]:
+            ev.append({"type": "comment", "who": c.user.username, "at": c.created_at,
+                       "post": items[c.item_id], "detail": c.body[:140]})
+    if counts.get("like"):
+        for x in sources["like"].select_related("user").order_by("-id")[:limit]:
+            ev.append({"type": "like", "who": x.user.username, "at": x.updated_at,
+                       "post": items[x.item_id], "detail": ""})
+    if counts.get("share"):
+        for sh in sources["share"].select_related("user").order_by("-id")[:limit]:
+            ev.append({"type": "share", "who": sh.user.username, "at": sh.shared_at,
+                       "post": sh.post_id, "detail": ""})
+    if counts.get("join"):
+        for j in sources["join"].select_related("user").order_by("-id")[:limit]:
+            ev.append({"type": "join", "who": j.user.username, "at": j.joined_at,
+                       "post": j.post_id, "detail": f"stayed {j.active_seconds}s"})
     ev.sort(key=lambda e: e["at"], reverse=True)
     log = [{"type": e["type"], "label": ACTION_LABELS[e["type"]], "who": e["who"], "at": e["at"].isoformat(),
             "detail": e["detail"], "post": e["post"], "post_title": ids[e["post"]].title or f"Post #{e['post']}"}
@@ -488,8 +503,11 @@ class ViewMineView(APIView):
         from .models import Referral
         posts = list(Post.objects.filter(author=request.user).order_by("-created_at")[:40])
         by_target = {}
+        # Only the columns `aggregate` and `breakdown` read, and no join to the viewer: this list
+        # re-asks every 15 seconds and a popular account has tens of thousands of sessions.
         for r in (ViewSession.objects.filter(target__in=[f"post:{p.id}" for p in posts])
-                  .select_related("viewer").order_by("started_at")):
+                  .only("target", "viewer_id", "anon_id", "started_at", "ended_at", "src", "dev")
+                  .order_by("started_at")):
             by_target.setdefault(r.target, []).append(r)
         now = timezone.now()
         rows = []
