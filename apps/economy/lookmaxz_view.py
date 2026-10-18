@@ -37,6 +37,11 @@ def _state(user):
         "requires_18plus_verification": True,
         "sectors": _catalogue(),
         "photo_sectors": lm.PHOTO_SECTORS,
+        "default_sectors": lm.DEFAULT_SECTORS,
+        "opt_in_sectors": lm.OPT_IN_SECTORS,
+        "proportions_disclaimer": lm.PROPORTIONS_DISCLAIMER,
+        "physique_disclaimer": lm.PHYSIQUE_DISCLAIMER,
+        "proportions_rule": lm.PROPORTIONS_RULE,
         "caveat": lm.CAVEAT, "care_note": lm.CARE_NOTE,
         "scale": lm.SCALE, "rating_rule": lm.RATING_RULE,
         # Said before the upload: the price is for the RUN, not per sector, so asking for
@@ -77,7 +82,15 @@ class LookmaxZView(APIView):
                             status=status.HTTP_400_BAD_REQUEST)
         raw = request.data.get("sectors") or ""
         wanted = [s for s in str(raw).replace(" ", "").split(",") if s in lm.PHOTO_SECTORS]
-        sectors = [s for s in lm.PHOTO_SECTORS if s in wanted] or list(lm.PHOTO_SECTORS)
+        sectors = [s for s in lm.PHOTO_SECTORS if s in wanted] or list(lm.DEFAULT_SECTORS)
+        # An opt-in sector is only read when the member said, in so many words, that they
+        # understand what it is. Asking for it without that is refused, not quietly dropped.
+        for k in sectors:
+            if lm.SECTORS[k].get("opt_in") and str(request.data.get(f"{k}_ack", "")).strip().lower() \
+                    not in ("true", "1", "yes"):
+                return Response({**state, "detail": f"{lm.SECTORS[k]['label']} needs you to confirm you "
+                                                    "have read what it is and isn't — tick the box under it."},
+                                status=status.HTTP_400_BAD_REQUEST)
         if not price["affordable"]:
             return Response({**state, "detail": f"A reading costs {price['cost_cents']} 🏷️ "
                                                 "and today's free prompts are spent."},

@@ -2603,3 +2603,15 @@ stable `ms:` ref); a routine changing cadence restarts its run and the response 
 ceilings, sweeps and ticks, and purged after 30 days on a board read. Recommendations come from `lilith_suggest.signals`
 (profile completeness, personas, ever-posted/shared/collabbed, collabs waiting, last take) — computed from the member's own
 state at request time, cached ten minutes, each with a `because` so none is unexplained.
+
+## Inclusive principles, exclusive standards — set by the member (Corey's principle)
+
+Freedom of choice, discourage bureaucracy: the platform is inclusive, the bar is the member's. Every metric that can
+be a range already is (`gates.py`: rating, price, attractiveness, age, km) and the member search, gated deals,
+battles, lessons, venues and message reach all evaluate them from one spec. **A range is exclusive, and a member's
+own switch beats it**: `Membership.attractiveness_public` was honoured by the rating endpoint only, so the community
+attractiveness number still rode every search card and could be read off by stepping a range one band at a time.
+`models.attractiveness_shown_medians` is the one reader the gate, the card and the rating response use now, and a
+hidden score is "no value" — which an active range treats as out. Do not put an approval queue in front of something
+a member can set for themselves. The AI LookZMaxZ readings are NOT a filterable metric and never will be: nothing
+about them is stored (so there is nothing to filter), and a self-attested photo is not proof enough to rank people on.

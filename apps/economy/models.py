@@ -945,6 +945,21 @@ def attractiveness_median(user):
     return _median(scores)
 
 
+def attractiveness_shown_medians(user_ids):
+    """`attractiveness_medians`, minus anyone who chose not to show theirs.
+
+    `Membership.attractiveness_public` has been a member's switch since RateZ shipped and only
+    the rating endpoint honoured it, so the number still rode every search card and could be
+    filtered on — a hidden score read back by stepping a range one band at a time. A member who
+    hides it has no value here, which an active range treats as "out", and nothing leaks.
+    """
+    ids = list(user_ids)
+    medians = attractiveness_medians(ids)
+    hidden = set(Membership.objects.filter(user_id__in=ids, attractiveness_public=False)
+                 .values_list("user_id", flat=True))
+    return {k: v for k, v in medians.items() if k not in hidden}
+
+
 def attractiveness_medians(user_ids):
     """{user_id: median} for many members, in TWO queries rather than 2N.
 

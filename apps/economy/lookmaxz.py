@@ -16,7 +16,24 @@ The sectors, and why each one is allowed to exist:
 * **Teeth 🦷** — staining, visible cleanliness, how the gums look. Never
   alignment or shape: that is a dentist's call, not a photo's.
 * **Styling 👔** — fit, colour, condition of what you are wearing.
-* **Body 💪** — and this one is **not read from a photo at all.** A body shape
+* **Proportions 📐 — opt-in, and the one sector that is not about change.** Added at
+  Corey's request: the classical thirds, fifths and width-to-height ratios, and left-right
+  balance. It is held apart on purpose (see `PROPORTIONS_DISCLAIMER`): behind an explicit
+  "I understand", never in the default selection, never in the overall, never with a shop,
+  and **its numbers are the server's arithmetic on rough measurements the model reports**,
+  not a model's opinion of a face. A ratio is checkable; "a 6 for your jaw" is not. The
+  prompt never mentions race or ethnicity and never calls a ratio "ideal" — it is closeness
+  to a reference from art and design, which no study has shown predicts how people are seen.
+* **Body photo 🏋️ — opt-in, and it reads TRAINING, never the body.** Added at Corey's request
+  ("body pics refer to BodieZ to improve"). It is posture and the visible training balance
+  of upper body, core and lower body — what a lifting plan can change — and every low result
+  is a door into BodieZ's muscle builder for exactly those muscles. It is behind its own
+  acknowledgement, never in the default selection, never in the overall, takes only clothed
+  photos, and the prompt forbids weight, body fat, leanness, "ideal", comparison and any health
+  claim. The honest cost: a model judging a physique from one photo is rough (clothes, pump,
+  light and angle all move it) — which is why the BodieZ progress card below it stays the
+  measured number and this stays labelled as a look.
+* **Body 💪** — the measured one: **not read from a photo at all.** A body shape
   is the clearest "trait nobody can change by Tuesday", and scoring one is how
   a looks app becomes an eating-disorder app. Body is BodieZ's own measured
   progress: did your lifts go up against YOUR earlier best. A member who trains
@@ -100,6 +117,26 @@ SECTORS = {
         "factors": {"fit": "Fit", "colour": "Colour", "condition": "Condition"},
         "see_pro": "A tailor fixes fit for a few dollars; a product cannot.",
     },
+    "proportions": {
+        "label": "Proportions", "emoji": "📐", "source": "photo", "opt_in": True,
+        "means": ("How close the ratios in THIS photo sit to the classical references from art and "
+                  "design: thirds, fifths, width to height, and left-right balance. A measurement "
+                  "of the picture, not of your worth or your looks."),
+        "factors": {"thirds": "Vertical thirds", "fifths": "Eye spacing", "width_height": "Width to height",
+                    "symmetry": "Left-right balance"},
+        "see_pro": ("None of this needs fixing and no product changes it. If how your face looks is "
+                    "weighing on you, a doctor or counsellor is who to talk to — not a ratio."),
+    },
+    "physique": {
+        "label": "Body photo", "emoji": "🏋️", "source": "photo", "opt_in": True,
+        "means": ("Posture, and how balanced your visible training looks across upper body, core and "
+                  "lower body in this one photo. Never weight, body fat or how you compare to anyone."),
+        "factors": {"posture": "Posture", "upper_body": "Upper body", "core": "Core",
+                    "lower_body": "Lower body"},
+        "see_pro": ("A doctor before a big change in training, food or weight; and if how your body "
+                    "looks is taking over your days, a doctor or counsellor — no number here is a reason "
+                    "to feel worse."),
+    },
     "body": {
         "label": "Body", "emoji": "💪", "source": "bodiez",
         "means": ("Read from your BodieZ training, never from a photo: whether your lifts went "
@@ -109,6 +146,43 @@ SECTORS = {
     },
 }
 PHOTO_SECTORS = [k for k, v in SECTORS.items() if v["source"] == "photo"]
+# What a reading asks for unless the member asks for more. Opt-in sectors are never in it,
+# and never in the overall.
+DEFAULT_SECTORS = [k for k in PHOTO_SECTORS if not SECTORS[k].get("opt_in")]
+OPT_IN_SECTORS = [k for k in PHOTO_SECTORS if SECTORS[k].get("opt_in")]
+
+PHYSIQUE_DISCLAIMER = (
+    "This reads posture and how balanced your training looks across upper body, core and lower body "
+    "from ONE clothed photo. It is not a measure of weight, body fat, health or worth, and nothing "
+    "here is an ideal to match. Clothes, a pump, light, lens and angle all change what a photo shows, "
+    "and a model judging a body by eye is rough — the BodieZ progress card, which compares your lifts "
+    "with your own earlier best, is the number to trust. A low result is a muscle group to train, and "
+    "each one opens BodieZ's builder for it. It never enters your overall, and nothing about the photo "
+    "or the result is kept.")
+
+# Where a low physique factor goes: the BodieZ muscle groups that train it.
+BODIEZ_MUSCLES = {
+    "posture": ["back", "shoulders", "abs"],
+    "upper_body": ["chest", "back", "shoulders", "biceps", "triceps"],
+    "core": ["abs"],
+    "lower_body": ["upper_legs", "glutes", "lower_legs"],
+}
+
+PROPORTIONS_DISCLAIMER = (
+    "These ratios are classical reference points from art and design — thirds, fifths, width to "
+    "height — not a validated measure of attractiveness, and not a measure of you. People are seen "
+    "and loved for reasons no ratio captures, and what is admired differs between cultures and "
+    "eras. One phone photo shifts every number: lens distortion, camera distance, head tilt and "
+    "expression all move them, and the model only estimates by eye. You cannot change your "
+    "proportions and nothing needs changing, so there is no shop here and this never enters your "
+    "overall. Nothing about the photo or the result is kept.")
+PROPORTIONS_RULE = (
+    "Each measure is estimated from the photo, then the server scores how near it sits to its reference: "
+    "thirds — about 1/3 each for hairline-to-brow, brow-to-nose-base and nose-base-to-chin (each 3 "
+    "percentage points of drift costs a point); eye spacing — the gap between the eyes about one eye "
+    "width apart; width to height — about two-thirds; left-right balance — a 0-1 estimate, the least "
+    "reliable of the four because pose and light change it. A face not square on to the camera is not "
+    "measured at all.")
 
 
 # What each factor looks at, why it matters, how to move it. ONE place: the model's prompt
@@ -171,6 +245,38 @@ FACTORS = {
         "what": "The state of what you are wearing: creases, pilling, stains, fraying.",
         "why": "Close up, wear shows first and reads as effort not spent.",
         "how": "Steam or iron, remove pilling, retire what is worn out."},
+    ("proportions", "thirds"): {
+        "what": "Whether the three vertical sections of the face — hairline to brow, brow to the base of the nose, nose base to chin — are close to equal in this photo.",
+        "why": "A classical drawing guideline; many faces are not equal thirds and are not lesser for it.",
+        "how": "Nothing to change. Hair and brow styling change how the sections read in a photo; that is styling, not a fix."},
+    ("proportions", "fifths"): {
+        "what": "Whether the space between the eyes is about one eye-width, as the classical 'fifths' guideline has it.",
+        "why": "Another art-school reference. Wide-set and close-set eyes are both ordinary.",
+        "how": "Nothing to change. Brow grooming and glasses frames change how eye spacing reads."},
+    ("proportions", "width_height"): {
+        "what": "The width of the face compared with its height, against a reference of about two-thirds.",
+        "why": "Face shape varies widely and healthily; this is a reference, not a target.",
+        "how": "Nothing to change. A haircut or facial hair frames the face differently."},
+    ("proportions", "symmetry"): {
+        "what": "A rough estimate of how mirror-like the left and right halves look in this photo.",
+        "why": "Every face is slightly asymmetric; head turn, light and expression move this one most of all, so it is the least reliable.",
+        "how": "Nothing to change. Face the camera square on, in even light, if you want a steadier reading."},
+    ("physique", "posture"): {
+        "what": "How upright you stand in the photo: head over shoulders, shoulders level and not rolled forward.",
+        "why": "Posture changes how everything you wear sits, and it is trainable — back, shoulder and core strength hold it.",
+        "how": "Rows and rear-shoulder work, core bracing, and moving through the day. Pain is a doctor's question."},
+    ("physique", "upper_body"): {
+        "what": "How evenly the chest, back, shoulders and arms look trained against the rest of you. Not size, and not leanness.",
+        "why": "An area that lags the rest is the one place a plan pays back fastest.",
+        "how": "Add sets for the lagging group in BodieZ, progress the weight against your own best, rest between sessions."},
+    ("physique", "core"): {
+        "what": "How trained the trunk looks relative to the rest of the body in this photo. Never body fat.",
+        "why": "A strong core carries every other lift and holds posture.",
+        "how": "Carries, planks and rotation work in BodieZ's abs builder; consistency beats volume."},
+    ("physique", "lower_body"): {
+        "what": "How evenly the legs and glutes look trained against the upper body.",
+        "why": "Legs are the biggest muscles you have and the ones most often skipped.",
+        "how": "Squat, hinge and single-leg work in BodieZ, built up gradually."},
     ("body", "strength_progress"): {
         "what": "Whether your logged lifts went up against YOUR OWN earlier best in BodieZ. Not what you look like.",
         "why": "Getting stronger is the one body change that is measured rather than judged — and it is yours.",
@@ -389,45 +495,124 @@ def shop_for_sector(sector, markets, scores=None):
 # ----------------------------------------------------------------------- rating
 
 def build_prompt(sectors):
+    styled = [k for k in sectors if k not in ("proportions", "physique")]
+    prop = "proportions" in sectors
+    phys = "physique" in sectors
     lines = []
-    for k in sectors:
+    for k in styled:
         s = SECTORS[k]
         facs = "; ".join(f'"{f}" ({lab}: {FACTORS[(k, f)]["what"]})' for f, lab in s["factors"].items())
         lines.append(f'- "{k}" — {s["means"]} Factors: {facs}.')
     shape = ", ".join(
         f'"{k}": {{"factors": {{{", ".join(chr(34) + f + chr(34) + ": <1-10 or null>" for f in SECTORS[k]["factors"])}}}, '
         f'"advice": ["<specific, actionable steps>"]}}'
-        for k in sectors)
-    return f"""You are a grooming and presentation consultant, not a beauty \
-judge. Look at this ONE photo and give honest, specific, ACTIONABLE feedback \
-on presentation only, for these sectors:
+        for k in styled)
+    if prop:
+        shape += (", " if shape else "") + (
+            '"proportions": {"measures": {"upper": <fraction of face height, hairline to brow, or null>, '
+            '"middle": <brow to base of nose, or null>, "lower": <base of nose to chin, or null>, '
+            '"eye_gap_over_eye_width": <number or null>, "width_over_height": <number or null>, '
+            '"symmetry": <0 to 1 or null>}, "advice": []}')
+    if phys:
+        shape += (", " if shape else "") + (
+            '"physique": {"factors": {"posture": <1-10 or null>, "upper_body": <1-10 or null>, '
+            '"core": <1-10 or null>, "lower_body": <1-10 or null>}, "advice": ["<training-focused steps>"]}')
+    base = f"""You are a grooming and presentation consultant, not a beauty \
+judge. Look at this ONE photo and give honest, specific, ACTIONABLE feedback."""
+    if styled:
+        base += f"""
+For these sectors, on presentation only:
 {chr(10).join(lines)}
 
 Score each factor 1-10 (1-3 a real problem, 4-6 ordinary with room to improve, 7-8 well kept, 9-10 excellent), and judge it exactly as its description says, and use null for \
 any factor the photo does not actually show (a mouth that is closed has no \
 "staining" to read). Never guess a factor you cannot see.
 
-Score and advise ONLY on things a person can change. Do NOT score, mention, \
-or imply anything about bone structure, facial proportions, body shape or \
-size, race, ethnicity, age, disability, or any other trait nobody can change. \
-If the photo shows something in that category, ignore it entirely.
-
+For these sectors score and advise ONLY on things a person can change. Do NOT \
+score, mention, or imply anything about bone structure, body shape or size, \
+race, ethnicity, age, disability, or any other trait nobody can change. \
 Be constructive: name what is working before what to change. Talk TO the \
 person, the way an honest friend who knows skincare and grooming would. Do \
-not recommend specific brands or products — only what to do.
+not recommend specific brands or products — only what to do."""
+    if prop:
+        base += """
 
-If the photo does not clearly show one person's face (too dark, too blurry, \
-not a person, or multiple people), set "unreadable" to a short sentence saying \
+For the "proportions" sector only, report ROUGH MEASUREMENTS of this photo as \
+numbers, never a judgement or a score: upper, middle and lower are the three \
+vertical sections of the face as fractions of the face's height (they should \
+sum to about 1); eye_gap_over_eye_width is the distance between the inner \
+eye corners divided by the width of one eye; width_over_height is the width \
+of the face at the cheekbones divided by its height; symmetry is a 0-1 \
+estimate of how mirror-like the two halves look. These are estimates by eye \
+and may be rough. If the face is not looking square at the camera (turned, \
+tilted or cropped), set every measure to null — do not guess. Do not say \
+anything is ideal, attractive, better or worse, and never mention race, \
+ethnicity, age or any comparison to other people. Leave "advice" empty for \
+this sector."""
+    if phys:
+        base += """
+
+For the "physique" sector only, you are a strength coach reading ONE photo: \
+score posture, and how evenly trained the upper body, core and lower body \
+look relative to each other, 1-10 (a higher number means that area looks as \
+developed as the rest of the person; a lower number means it lags the rest). \
+Use null for any area clothing, framing or angle hides — never guess. Do NOT \
+mention or estimate weight, body fat, leanness, BMI, health, age, \
+race, or ethnicity; never call a body ideal, attractive, good or bad; never \
+compare the person to anyone. Advice must be training only (which muscle \
+groups to train, how), never diet or weight. If the photo shows nudity, set \
+"unreadable" to ask for a clothed photo, and stop."""
+    base += f"""
+
+If the photo does not clearly show one person — their face for the grooming \
+sectors, their body for the body photo — (too dark, too blurry, not a person, \
+or multiple people), set "unreadable" to a short sentence saying \
 what you saw, and stop.
 
 Reply with ONLY a JSON object, no prose around it:
 {{
   "unreadable": <null, or a short sentence>,
   "photo_quality": <1-10: how well this photo shows the person; not a score of them>,
-  "verdict": "<one or two sentences, direct and kind>",
+  "verdict": "<one or two sentences, direct and kind, about presentation only>",
   "working": ["<what is already working, specific to this photo>"],
   "sectors": {{{shape}}}
 }}"""
+    return base
+
+
+def _frac(v):
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    return v if 0 < v < 3 else None
+
+
+def score_proportions(measures):
+    """Rough measurements in → (scores, cleaned measures). All arithmetic is here, none is the model's.
+
+    A measure that is missing or implausible is None and scores None: a face not square on to the
+    camera is not measured, so nothing is guessed to fill the slot.
+    """
+    m = measures if isinstance(measures, dict) else {}
+    clean = {k: _frac(m.get(k)) for k in ("upper", "middle", "lower", "eye_gap_over_eye_width",
+                                           "width_over_height")}
+    sym = _frac(m.get("symmetry"))
+    clean["symmetry"] = sym if sym is not None and sym <= 1 else None
+    thirds = [clean["upper"], clean["middle"], clean["lower"]]
+    scores = {"thirds": None, "fifths": None, "width_height": None, "symmetry": None}
+    if all(t is not None for t in thirds):
+        total = sum(thirds)
+        if 0.85 <= total <= 1.15:                       # sections that do not add up are not a face
+            dev = max(abs(t / total - 1 / 3) for t in thirds)
+            scores["thirds"] = max(1, min(10, round(10 - 100 * dev)))
+    if clean["eye_gap_over_eye_width"] is not None:
+        scores["fifths"] = max(1, min(10, round(10 - 10 * abs(clean["eye_gap_over_eye_width"] - 1.0))))
+    if clean["width_over_height"] is not None:
+        scores["width_height"] = max(1, min(10, round(10 - 25 * abs(clean["width_over_height"] - 2 / 3))))
+    if clean["symmetry"] is not None:
+        scores["symmetry"] = max(1, min(10, round(1 + 9 * clean["symmetry"])))
+    return scores, clean
 
 
 def _mean(values):
@@ -442,10 +627,36 @@ def clean_reply(parsed, sectors):
     out = {}
     for k in sectors:
         raw = got.get(k) if isinstance(got.get(k), dict) else {}
+        if k == "proportions":
+            scores, measures = score_proportions(raw.get("measures"))
+            out[k] = {"scores": scores, "score": _mean(scores.values()), "advice": [],
+                      "measures": measures, "disclaimer": PROPORTIONS_DISCLAIMER}
+            continue
         rf = raw.get("factors") if isinstance(raw.get("factors"), dict) else {}
         scores = {f: _clamp(rf.get(f)) for f in SECTORS[k]["factors"]}
         out[k] = {"scores": scores, "score": _mean(scores.values()), "advice": listy(raw.get("advice"))}
+        if k == "physique":
+            out[k]["disclaimer"] = PHYSIQUE_DISCLAIMER
+            out[k]["doors"] = bodiez_doors(scores)
     return out
+
+
+def bodiez_doors(scores):
+    """The way into BodieZ for every physique factor under WORK_BELOW, lowest first.
+
+    Server-owned: which muscle groups train which factor is `BODIEZ_MUSCLES`, never the model's
+    say-so, and the client lands on BodieZ's muscle builder with the first one pre-selected."""
+    low = sorted((s, f) for f, s in scores.items() if s is not None and s < WORK_BELOW)
+    return [{"factor": f, "label": SECTORS["physique"]["factors"][f], "score": s,
+             "muscles": BODIEZ_MUSCLES[f],
+             "open_in": {"tab": "bodiez", "muscle": BODIEZ_MUSCLES[f][0],
+                         "label": f"Build a {SECTORS['physique']['factors'][f].lower()} day in BodieZ"}}
+            for s, f in low]
+
+
+def overall_of(cleaned):
+    """The overall is the mean of the sectors asked for — never an opt-in one."""
+    return _mean(s["score"] for k, s in cleaned.items() if not SECTORS[k].get("opt_in"))
 
 
 def rate_looks(fileobj, content_type, sectors):
@@ -493,8 +704,8 @@ def rate_looks(fileobj, content_type, sectors):
         return {**empty, "unreadable": str(parsed["unreadable"])[:300]}, None
 
     cleaned = clean_reply(parsed, sectors)
-    overall = _mean(s["score"] for s in cleaned.values())
-    if overall is None:
+    overall = overall_of(cleaned)
+    if overall is None and not any(s["score"] is not None for s in cleaned.values()):
         # Nothing scorable came back: not a result, and not charged.
         return {**empty, "unreadable": "The photo didn't show enough of those sectors to read any of them."}, None
     return {

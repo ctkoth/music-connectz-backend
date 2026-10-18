@@ -34,6 +34,7 @@ from .models import (
     VenueAttendance,
     attractiveness_median,
     attractiveness_medians,
+    attractiveness_shown_medians,
     overall_median,
     overall_medians,
     face_median,
@@ -646,7 +647,7 @@ def _profile_card(p, request=None, badges=None, audience=None, batched=None):
     # not worth a batching call site.
     b = batched or {}
     _attractiveness = (b["attract"].get(p.user_id) if "attract" in b
-                       else attractiveness_median(p.user))
+                       else attractiveness_shown_medians([p.user_id]).get(p.user_id))
     return redact({
         "username": p.user.username,
         "display_name": p.display_name or p.user.username,
@@ -1184,7 +1185,7 @@ class ProfileRateView(APIView):
             "target": target.username,
             "dimension": dimension,
             "overall": overall_median(target),
-            "attractiveness": attractiveness_median(target),
+            "attractiveness": attractiveness_shown_medians([target.id]).get(target.id),
         })
 
 
@@ -1399,7 +1400,7 @@ class MembersView(APIView):
         # queries and VybeZ fires this search from three text inputs.
         card_ids = [p.user_id for p in qs]
         batched = {
-            "attract": attractiveness_medians(card_ids),
+            "attract": attractiveness_shown_medians(card_ids),
             "overall": overall_medians(card_ids),
             "edges": follow_edges_for(card_ids),
         }

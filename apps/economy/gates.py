@@ -71,7 +71,7 @@ class MemberMetrics:
     __getitem__ = get
 
     def _compute(self, key):
-        from .models import (attractiveness_median, haversine_km,
+        from .models import (attractiveness_shown_medians, haversine_km,
                              overall_median, profile_age)
         from .social import profile_max_experience, profile_skill_rate
         p = self.profile
@@ -80,7 +80,8 @@ class MemberMetrics:
         if key == "price":
             return profile_skill_rate(p)
         if key == "attract":
-            return attractiveness_median(p.user)
+            # One member's number, with the member's own switch honoured.
+            return attractiveness_shown_medians([p.user_id]).get(p.user_id)
         if key == "age":
             return profile_age(p)
         if key == "exp":

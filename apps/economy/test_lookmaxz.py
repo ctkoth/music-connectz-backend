@@ -98,7 +98,7 @@ class TheReadingTests(Base):
 
     def test_overall_is_the_mean_of_photo_sectors_and_body_is_not_in_it(self):
         d = self.post().json()
-        photo_scores = [d["sectors"][k]["score"] for k in lm.PHOTO_SECTORS]
+        photo_scores = [d["sectors"][k]["score"] for k in lm.DEFAULT_SECTORS]
         self.assertEqual(d["overall"], round(sum(photo_scores) / len(photo_scores), 1))
 
     def test_an_undeclared_sector_or_factor_from_the_model_is_dropped(self):
@@ -137,7 +137,7 @@ class TheReadingTests(Base):
         self.assertTrue(d["unreadable"])
 
     def test_the_prompt_forbids_immutable_traits_and_brands(self):
-        p = lm.build_prompt(lm.PHOTO_SECTORS)
+        p = lm.build_prompt(lm.DEFAULT_SECTORS)
         for word in ("bone structure", "body shape", "race", "null", "brands"):
             self.assertIn(word, p)
 
@@ -180,6 +180,8 @@ class TheShopTests(Base):
 
     def test_every_factor_has_something_to_buy_or_says_nothing_to_sell(self):
         for sector, s in lm.SECTORS.items():
+            if s.get("opt_in"):
+                continue                     # proportions has no shop, deliberately — see below
             for f in s["factors"]:
                 self.assertTrue(lm.PRODUCTS.get((sector, f)), f"{sector}.{f}")
 
@@ -301,3 +303,132 @@ class TheFactorDescriptionTests(Base):
         d = self.c.get(URL).json()
         self.assertIn("factor_info", d["sectors"]["face"])
         self.assertNotIn("body", d)
+
+
+class ProportionsTests(Base):
+    def setUp(self):
+        super().setUp()
+        self.verify()
+
+    MEASURES = {"upper": 0.33, "middle": 0.34, "lower": 0.33, "eye_gap_over_eye_width": 1.0,
+                "width_over_height": 0.67, "symmetry": 0.9}
+
+    def reply_with(self, measures):
+        r = reply()
+        r["sectors"]["proportions"] = {"measures": measures, "advice": ["you are ideal"]}
+        return r
+
+    def test_it_is_off_by_default_and_never_in_the_default_selection(self):
+        self.assertNotIn("proportions", lm.DEFAULT_SECTORS)
+        d = self.post().json()
+        self.assertNotIn("proportions", d["sectors"])
+        self.assertNotIn("proportions", lm.build_prompt(lm.DEFAULT_SECTORS))
+
+    def test_asking_without_the_acknowledgement_is_refused(self):
+        r = self.post(self.reply_with(self.MEASURES), sectors="skin,proportions")
+        self.assertEqual(r.status_code, 400)
+
+    def test_with_the_acknowledgement_it_is_read_and_carries_its_disclaimer(self):
+        d = self.post(self.reply_with(self.MEASURES), sectors="skin,proportions", proportions_ack="true").json()
+        p = d["sectors"]["proportions"]
+        self.assertEqual(p["disclaimer"], lm.PROPORTIONS_DISCLAIMER)
+        self.assertEqual(p["scores"]["thirds"], 9)      # 0.34 vs 1/3 is a point of drift
+        self.assertEqual(p["scores"]["fifths"], 10)
+
+    def test_the_model_never_scores_it_the_server_does_the_arithmetic(self):
+        scores, _ = lm.score_proportions({"upper": 0.40, "middle": 0.30, "lower": 0.30,
+                                          "eye_gap_over_eye_width": 1.5, "width_over_height": 0.9, "symmetry": 0.5})
+        self.assertEqual(scores["thirds"], 3)         # 0.067 drift → 10 - 6.7
+        self.assertEqual(scores["fifths"], 5)
+        self.assertEqual(scores["symmetry"], 6)       # 1 + 9*0.5 = 5.5 → 6
+        self.assertLess(scores["width_height"], 6)
+
+    def test_a_face_not_square_on_is_not_measured_and_nothing_is_guessed(self):
+        scores, clean = lm.score_proportions({k: None for k in self.MEASURES})
+        self.assertTrue(all(v is None for v in scores.values()))
+        scores, _ = lm.score_proportions({"upper": 0.9, "middle": 0.9, "lower": 0.9})
+        self.assertIsNone(scores["thirds"])           # sections that sum to 2.7 are not a face
+
+    def test_it_is_not_in_the_overall_and_has_no_shop_and_no_advice_passes_through(self):
+        a = self.post(self.reply_with(self.MEASURES), sectors="skin,proportions", proportions_ack="true").json()
+        b = self.post(self.reply_with({k: None for k in self.MEASURES}), sectors="skin,proportions",
+                      proportions_ack="true").json()
+        self.assertEqual(a["overall"], b["overall"])
+        self.assertEqual(a["shop"]["proportions"], [])
+        self.assertEqual(a["sectors"]["proportions"]["advice"], [])
+
+    def test_the_prompt_for_it_forbids_ideal_and_ethnicity_and_demands_null_when_not_frontal(self):
+        p = lm.build_prompt(["proportions"])
+        for phrase in ("never a judgement", "ethnicity", "null", "ideal"):
+            self.assertIn(phrase, p)
+
+    def test_every_proportions_factor_is_described(self):
+        for f in lm.SECTORS["proportions"]["factors"]:
+            self.assertIn(("proportions", f), lm.FACTORS)
+
+    def test_the_disclaimer_says_what_it_must(self):
+        d = lm.PROPORTIONS_DISCLAIMER
+        for phrase in ("not a validated measure", "no shop", "overall", "kept"):
+            self.assertIn(phrase, d)
+
+
+class PhysiqueTests(Base):
+    def setUp(self):
+        super().setUp()
+        self.verify()
+
+    def reply_with(self, **factors):
+        r = reply()
+        r["sectors"]["physique"] = {"factors": {"posture": 8, "upper_body": 4, "core": 3, "lower_body": 8, **factors},
+                                    "advice": ["Train your core twice a week."]}
+        return r
+
+    def test_it_is_opt_in_and_needs_its_own_acknowledgement(self):
+        self.assertNotIn("physique", lm.DEFAULT_SECTORS)
+        self.assertEqual(self.post(self.reply_with(), sectors="physique").status_code, 400)
+        self.assertEqual(self.post(self.reply_with(), sectors="physique", proportions_ack="true").status_code, 400)
+
+    def test_low_factors_open_bodiez_lowest_first_with_server_owned_muscles(self):
+        d = self.post(self.reply_with(), sectors="physique", physique_ack="true").json()
+        doors = d["sectors"]["physique"]["doors"]
+        self.assertEqual([x["factor"] for x in doors], ["core", "upper_body"])
+        self.assertEqual(doors[0]["muscles"], ["abs"])
+        self.assertEqual(doors[0]["open_in"]["tab"], "bodiez")
+        self.assertEqual(doors[0]["open_in"]["muscle"], "abs")
+        self.assertEqual(doors[1]["muscles"], lm.BODIEZ_MUSCLES["upper_body"])
+
+    def test_nothing_the_model_says_chooses_the_muscles(self):
+        r = self.reply_with()
+        r["sectors"]["physique"]["doors"] = [{"muscles": ["evil"]}]
+        d = self.post(r, sectors="physique", physique_ack="true").json()
+        for door in d["sectors"]["physique"]["doors"]:
+            self.assertNotIn("evil", door["muscles"])
+
+    def test_it_never_enters_the_overall_and_has_no_shop(self):
+        a = self.post(self.reply_with(), sectors="skin,physique", physique_ack="true").json()
+        b = self.post(self.reply_with(core=10, upper_body=10), sectors="skin,physique", physique_ack="true").json()
+        self.assertEqual(a["overall"], b["overall"])
+        self.assertEqual(a["shop"]["physique"], [])
+
+    def test_hidden_areas_are_none_and_carry_the_disclaimer(self):
+        d = self.post(self.reply_with(core=None), sectors="physique", physique_ack="true").json()
+        p = d["sectors"]["physique"]
+        self.assertIsNone(p["scores"]["core"])
+        self.assertEqual(p["disclaimer"], lm.PHYSIQUE_DISCLAIMER)
+
+    def test_the_prompt_forbids_weight_fat_ideals_and_nudity(self):
+        p = lm.build_prompt(["physique"])
+        for phrase in ("body fat", "leanness", "ideal", "nudity", "never guess", "clothed photo"):
+            self.assertIn(phrase, p)
+        self.assertIn("training only", p)
+
+    def test_every_muscle_group_it_names_is_a_real_bodiez_one(self):
+        from apps.economy.models import BodieZExercise
+        real = {k for k, _ in BodieZExercise.MUSCLE_CHOICES}
+        for muscles in lm.BODIEZ_MUSCLES.values():
+            self.assertTrue(set(muscles) <= real)
+        self.assertEqual(set(lm.BODIEZ_MUSCLES), set(lm.SECTORS["physique"]["factors"]))
+
+    def test_every_factor_is_described(self):
+        for f in lm.SECTORS["physique"]["factors"]:
+            self.assertIn(("physique", f), lm.FACTORS)
