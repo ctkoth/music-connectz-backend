@@ -1228,12 +1228,29 @@ class FollowView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    @staticmethod
+    def _follow_quote(me, target):
+        """What following `target` costs `me` right now — quoted on GET so the
+        button can say it. Free: following back, and the first FOLLOW_FREE_PER_DAY
+        new follows in 24 hours."""
+        from datetime import timedelta
+        from django.utils import timezone
+        from .catalog import FOLLOW_ENERGY, FOLLOW_FREE_PER_DAY
+        if Follow.objects.filter(follower=me, following=target).exists():
+            return {"follow_cost_energy": 0, "follow_free_left": None}
+        used = Follow.objects.filter(follower=me, created_at__gte=timezone.now() - timedelta(hours=24)).count()
+        left = max(0, FOLLOW_FREE_PER_DAY - used)
+        back = Follow.objects.filter(follower=target, following=me).exists()
+        return {"follow_cost_energy": 0 if (back or left) else FOLLOW_ENERGY, "follow_free_left": left}
+
     def get(self, request):
         username = (request.query_params.get("username") or "").strip()
         target = User.objects.filter(username=username).first()
         if not target:
             return Response({"detail": "unknown user"}, status=status.HTTP_404_NOT_FOUND)
-        return Response({"username": target.username, **follow_counts(target), "relationship": relationship(request.user, target)})
+        return Response({"username": target.username, **follow_counts(target),
+                         "relationship": relationship(request.user, target),
+                         **self._follow_quote(request.user, target)})
 
     def post(self, request):
         username = str((request.data or {}).get("username", "")).strip()
@@ -1248,7 +1265,17 @@ class FollowView(APIView):
         else:
             if target.id in blocked_user_ids(request.user):
                 return Response({"detail": "You've blocked this user (or they blocked you)."}, status=status.HTTP_403_FORBIDDEN)
-            _, created = Follow.objects.get_or_create(follower=request.user, following=target)
+            cost = self._follow_quote(request.user, target)["follow_cost_energy"]
+            with transaction.atomic():
+                if cost and spend_energy(request.user, cost, f"Follow @{target.username}",
+                                         app_key="social", target=f"profile:{target.username}") is None:
+                    return Response({
+                        "detail": f"Your free follows for today are used; another costs {cost} ⚡ and you are out. "
+                                  "Nothing was charged. Following back someone who follows you is free.",
+                        "insufficient": True, "resource": "energy",
+                        "cost": {"resource": "energy", "amount": cost},
+                    }, status=status.HTTP_402_PAYMENT_REQUIRED)
+                _, created = Follow.objects.get_or_create(follower=request.user, following=target)
             if created:
                 mutual = Follow.objects.filter(follower=target, following=request.user).exists()
                 notify(target, "follow",

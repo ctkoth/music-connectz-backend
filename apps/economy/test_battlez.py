@@ -39,6 +39,8 @@ class HostingTests(TestCase):
         self.client = APIClient()
         self.host = User.objects.create_user("host", "h@e.com", PW)
         self.client.force_authenticate(self.host)
+        from apps.economy.models import Wallet
+        Wallet.objects.update_or_create(user=self.host, defaults={"energy": 10})
 
     def create(self, **over):
         return self.client.post("/api/economy/battlez/", {"title": "16 bars", **over},
@@ -203,6 +205,8 @@ class BattleGateTests(TestCase):
 
     def test_the_gates_a_host_posts_come_back_normalised(self):
         self.client.force_authenticate(self.host)
+        from apps.economy.models import Wallet
+        Wallet.objects.update_or_create(user=self.host, defaults={"energy": 10})
         resp = self.client.post("/api/economy/battlez/",
                                 {"title": "Local only", "gates": {"km": 25}}, format="json")
         self.assertEqual(resp.data["gates"], {"km": [None, 25.0]})

@@ -75,3 +75,35 @@ class SuggestSkillsTests(TestCase):
     def test_no_history_falls_back_to_declared(self):
         from apps.economy.postz import suggest_skills
         self.assertEqual(suggest_skills(self.u)[1], "declared")
+
+
+class FollowAndHostCostTests(TestCase):
+    def setUp(self):
+        from apps.economy.catalog import FOLLOW_FREE_PER_DAY
+        self.free = FOLLOW_FREE_PER_DAY
+        self.c = APIClient()
+        self.me = User.objects.create_user("me", "me@x.com", "pw12345678")
+        self.c.force_authenticate(self.me)
+        Wallet.objects.update_or_create(user=self.me, defaults={"energy": 5})
+        self.others = [User.objects.create_user(f"u{i}", f"u{i}@x.com", "pw12345678") for i in range(self.free + 3)]
+
+    def test_follows_are_free_then_cost_and_follow_back_is_free(self):
+        for u in self.others[:self.free]:
+            self.assertEqual(self.c.post("/api/economy/follow/", {"username": u.username}, format="json").status_code, 200)
+        self.assertEqual(wallet_for(self.me).energy, 5)
+        nxt = self.others[self.free]
+        self.assertEqual(self.c.get("/api/economy/follow/", {"username": nxt.username}).data["follow_cost_energy"], 1)
+        self.c.post("/api/economy/follow/", {"username": nxt.username}, format="json")
+        self.assertEqual(wallet_for(self.me).energy, 4)
+        from apps.economy.models import Follow
+        fan = self.others[self.free + 1]
+        Follow.objects.create(follower=fan, following=self.me)
+        self.c.post("/api/economy/follow/", {"username": fan.username}, format="json")
+        self.assertEqual(wallet_for(self.me).energy, 4)
+
+    def test_hosting_costs_and_refuses_when_broke(self):
+        r = self.c.post("/api/economy/battlez/", {"title": "open"}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(wallet_for(self.me).energy, 4)
+        Wallet.objects.filter(user=self.me).update(energy=0)
+        self.assertEqual(self.c.post("/api/economy/battlez/", {"title": "x"}, format="json").status_code, 402)

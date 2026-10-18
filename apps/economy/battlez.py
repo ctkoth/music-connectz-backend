@@ -24,7 +24,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import BATTLE_CALLOUT_ENERGY, over_char_limit
+from .catalog import BATTLE_CALLOUT_ENERGY, BATTLE_HOST_ENERGY, over_char_limit
 from .gates import clean_gates, describe, failing_gate, member_metrics, refusal
 from .models import (
     BATTLE_MIN_RATINGS,
@@ -159,7 +159,7 @@ class BattlesView(APIView):
             "mine": set(BattleEntry.objects.filter(battle_id__in=ids, user=request.user)
                         .values_list("battle_id", flat=True)),
         }
-        return Response({"challenge_cost_energy": BATTLE_CALLOUT_ENERGY,
+        return Response({"challenge_cost_energy": BATTLE_CALLOUT_ENERGY, "host_cost_energy": BATTLE_HOST_ENERGY,
                          "battles": [battle_dict(b, request, with_entries=False,
                                                  batched=batched) for b in qs]})
 
@@ -181,12 +181,22 @@ class BattlesView(APIView):
             entry_spinaz = max(0, int(d.get("entry_spinaz") or 0))
         except (TypeError, ValueError):
             entry_spinaz = 0
-        b = Battle.objects.create(
-            host=request.user, title=title[:160], description=description,
-            genre=str(d.get("genre", "") or "")[:40],
-            gates=clean_gates(d.get("gates")), entry_spinaz=entry_spinaz,
-            **_media(d),
-        )
+        with transaction.atomic():
+            if spend_energy(request.user, BATTLE_HOST_ENERGY, f"Host battle: {title[:60]}",
+                            app_key="battlez", target="battlez:host") is None:
+                have = max(0, wallet_for(request.user).energy or 0)
+                return Response({
+                    "detail": f"Hosting an open battle costs {BATTLE_HOST_ENERGY} ⚡ and you have {have}. "
+                              "Nothing was posted or charged.",
+                    "insufficient": True, "resource": "energy",
+                    "cost": {"resource": "energy", "amount": BATTLE_HOST_ENERGY},
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+            b = Battle.objects.create(
+                host=request.user, title=title[:160], description=description,
+                genre=str(d.get("genre", "") or "")[:40],
+                gates=clean_gates(d.get("gates")), entry_spinaz=entry_spinaz,
+                **_media(d),
+            )
         return Response(battle_dict(b, request), status=status.HTTP_201_CREATED)
 
 

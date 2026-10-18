@@ -667,6 +667,15 @@ BATTLE_CALLOUT_ENERGY = 2
 COMMENT_FREE_PER_DAY = 3
 COMMENT_ENERGY = 1
 
+# Following notifies the person followed, so mass-following is a spam route:
+# FOLLOW_FREE_PER_DAY a day are free, then each new follow costs FOLLOW_ENERGY.
+# Following back someone who already follows you is always free.
+FOLLOW_FREE_PER_DAY = 10
+FOLLOW_ENERGY = 1
+
+# Hosting an open battle puts a listing in everyone's BattleZ.
+BATTLE_HOST_ENERGY = 1
+
 # What an agent run is CHARGED, as a multiple of what it COST to serve.
 #
 # This exists because pass-through pricing loses money here, and it took the

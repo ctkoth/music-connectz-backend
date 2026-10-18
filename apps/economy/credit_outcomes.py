@@ -167,10 +167,10 @@ CREDIT_OUTCOMES = {
                               "Energy regenerates hourly.", "tab": "messagez"}},
     "social": {
         "resource": "energy", "label": "Commenting",
-        "buys": "A comment on someone's post, delivered to them, past your free daily comments.",
+        "buys": "A comment or a follow that reaches someone, past your free daily allowance of each.",
         "outcomes": ["shareable", "braggable"],
         "lands_in": ["postz", "messagez"],
-        "free_way": {"label": "Your first comments each day, and any comment on your own post, are free; "
+        "free_way": {"label": "Your first comments and follows each day, comments on your own post, and following back are free; "
                               "Energy regenerates hourly.", "tab": "postz"}},
     "occ_run": {
         "resource": "energy", "label": "OCC run",
