@@ -600,7 +600,7 @@ AI_MODELS = {
     },
     "opus": {
         "id": "claude-opus-5", "name": "Opus", "emoji": "🎹",
-        "tier": TIER_PREMIUM, "cost_cents": AI_TASK_PROMPTZ,
+        "tier": TIER_STATZ, "cost_cents": AI_TASK_PROMPTZ,
         "in_cents_mtok": 500, "out_cents_mtok": 2500,      # $5 / $25
         "effort": True, "task_budget": True,
         "blurb": "Flagship. Long-horizon work, code, and anything that has to be right.",
