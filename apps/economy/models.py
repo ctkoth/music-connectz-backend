@@ -2081,6 +2081,10 @@ REFERRAL_REWARD_MONTHLY_CAP = 10
 
 # Signup welcome bonus — awarded to every new user, on top of any referral bonus
 SIGNUP_WELCOME_SPINAZ = 15
+# ⚡ a new member starts with, so their first messages and comments to strangers
+# are not locked until the first hourly regeneration. Small on purpose: Energy
+# is not convertible to cash or PromptZ, so there is little to farm with it.
+SIGNUP_WELCOME_ENERGY = 10
 # The platform owner's own per-join bonus is a mint too, and anybody can
 # trigger it by registering, so it has a daily ceiling.
 OWNER_JOIN_BONUS_DAILY_CAP = 20

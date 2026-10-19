@@ -682,6 +682,15 @@ FOLLOW_ENERGY = 1
 # Hosting an open battle puts a listing in everyone's BattleZ.
 BATTLE_HOST_ENERGY = 1
 
+# ⚡ to coach a POST from PostZ (the post door; a freshly recorded take stays
+# PromptZ-only). Corey: ten times the prompt cost, by tier. The base is 10 x
+# AI_TASK_PROMPTZ and each tier multiplies it by how much more it regenerates
+# (ENERGY_FLOOR_PER_HOUR 2 / 6 / 20 an hour = x1 / x3 / x10), so it is felt at every
+# tier and never a wall: the tier buys how MUCH regenerates, not whether it runs.
+COACH_POST_ENERGY_BASE = 10 * AI_TASK_PROMPTZ
+COACH_POST_ENERGY = {"free": COACH_POST_ENERGY_BASE, "premium": COACH_POST_ENERGY_BASE * 3,
+                     "statz": COACH_POST_ENERGY_BASE * 10, "debug": COACH_POST_ENERGY_BASE * 10}
+
 # What an agent run is CHARGED, as a multiple of what it COST to serve.
 #
 # This exists because pass-through pricing loses money here, and it took the

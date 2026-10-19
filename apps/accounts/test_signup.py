@@ -10,7 +10,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from apps.economy.models import (PROMPT_ALLOWANCE, SIGNUP_WELCOME_SPINAZ,
+from apps.economy.models import (PROMPT_ALLOWANCE, SIGNUP_WELCOME_ENERGY, SIGNUP_WELCOME_SPINAZ,
                                  TrialTake)
 
 from .usernames import RESERVED, USERNAME_RE
@@ -28,6 +28,13 @@ class WhatAUsernameMayBeTests(TestCase):
         return self.c.post("/api/auth/register/", {
             "username": username, "email": email or f"{username!r}@x.test".replace("'", ""),
             "password": password}, format="json")
+
+    def test_a_new_member_starts_with_welcome_energy_and_the_ledger_says_why(self):
+        from apps.economy.models import Transaction, wallet_for
+        self.assertEqual(self.reg("newbie").status_code, 201)
+        u = User.objects.get(username="newbie")
+        self.assertEqual(wallet_for(u).energy, SIGNUP_WELCOME_ENERGY)
+        self.assertTrue(Transaction.objects.filter(user=u, resource="energy", note__icontains="welcome").exists())
 
     def test_a_handle_that_breaks_its_own_url_is_refused(self):
         """"a/b" registered, and their public profile 404'd — an account no
@@ -164,6 +171,7 @@ class TheJoinNumbersAreServedNotTypedTests(TestCase):
     def test_what_joining_pays_is_published(self):
         join = self.r.data["join"]
         self.assertEqual(join["welcome_spinaz"], SIGNUP_WELCOME_SPINAZ)
+        self.assertEqual(join["welcome_energy"], SIGNUP_WELCOME_ENERGY)
         self.assertTrue(join["referrer_spinaz"])
         self.assertTrue(join["joinee_spinaz"])
 

@@ -238,8 +238,11 @@ class RegisterSerializer(serializers.Serializer):
                 user=user, defaults={"phone": validated.get("phone", "")}
             )
             # Welcome bonus for signing up — kickstart their balance
-            from apps.economy.models import award_spinaz, SIGNUP_WELCOME_SPINAZ
+            from apps.economy.models import (award_energy, award_spinaz, SIGNUP_WELCOME_ENERGY,
+                                             SIGNUP_WELCOME_SPINAZ)
             award_spinaz(user, SIGNUP_WELCOME_SPINAZ, "signup welcome bonus",
+                         app_key="profilez", target="signup")
+            award_energy(user, SIGNUP_WELCOME_ENERGY, "signup welcome energy",
                          app_key="profilez", target="signup")
             # Platform owner bonus for each new join — incentivizes growth focus
             from apps.economy.views import platform_owner

@@ -33,7 +33,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import ai_cost
+from .catalog import COACH_POST_ENERGY, ai_cost
 from .deadline import (COACH_BUDGET_SECONDS, COACH_THINK_RESERVE_SECONDS, Deadline,
                        Expired)
 from .instruments import (DIFFICULTIES, LYRIC_SCORE, MIX_SCORE, profile_for_app,
@@ -51,6 +51,7 @@ from .models import (
     mark_upload_missing,
     membership_for,
     record_observation,
+    spend_energy,
     wallet_for,
 )
 from apps.skillz.models import TrainingProfile, TrainingEvent
@@ -959,6 +960,12 @@ def usual_settings(user, app_key, window=40):
         return {}
 
 
+def coach_post_energy(user):
+    """⚡ to coach a post, by the member's tier; the figure the screen quotes."""
+    from .models import membership_for
+    return COACH_POST_ENERGY.get(membership_for(user).tier, COACH_POST_ENERGY["free"])
+
+
 class SingZCoachView(APIView):
     """The Boss Take coach for any InstrumentZ app.
 
@@ -1022,6 +1029,8 @@ class SingZCoachView(APIView):
             # A take the coach can't read is never billed — _bill runs only
             # after a usable result parses. Worth saying, not just doing.
             "charged_on_failure": False,
+            # What coaching a POST also costs in ⚡ (a fresh recording costs none).
+            "post_energy_cost": coach_post_energy(request.user),
             # THIS member's ceiling, and whose it is — the coach's judgement or
             # their tier's own upload limit, whichever binds them first. This
             # flag was a hardcoded False, which was safe only while the coach's
@@ -1142,6 +1151,20 @@ class SingZCoachView(APIView):
             stored = {"kind": "post", "title": post.title, "id": post.id}
         if not f:
             return Response({"detail": "Record or attach a take first."}, status=status.HTTP_400_BAD_REQUEST)
+        # Coaching a POST also costs ⚡, checked BEFORE the model runs so nobody
+        # waits on a scoring they cannot pay for. Charged after a usable result.
+        energy_cost = coach_post_energy(request.user) if post is not None else 0
+        if energy_cost:
+            have = max(0, wallet_for(request.user).energy or 0)
+            if have < energy_cost:
+                return Response({
+                    "detail": f"Coaching a post costs {energy_cost} ⚡ and you have {have}. "
+                              "Nothing was run or charged. A freshly recorded take costs no ⚡.",
+                    "insufficient": True, "resource": "energy",
+                    "cost": {"resource": "energy", "amount": energy_cost},
+                    "energy_needed": energy_cost, "energy_available": have,
+                    "energy_short": energy_cost - have,
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
         # Video has always been accepted here — the model watches the take as
         # well as hearing it, which is worth real marks on delivery and breath.
         # The refusal copy said "isn't audio" and contradicted the check, which
@@ -1282,6 +1305,9 @@ class SingZCoachView(APIView):
         from django.utils import timezone as _tz
         _t0 = _tz.now()
         charged = _bill(request.user, note=note, count_daily=True)
+        if energy_cost:
+            spend_energy(request.user, energy_cost, f"Coach a post — {post.title[:50]}",
+                         app_key=self.app_key, target=f"post:{post.id}")
         # Keep it. Until this line every score this app has ever produced was
         # handed to the browser and dropped, which is why the blueprint's
         # whole intelligence layer — goal bridge, difficulty adjustment, range
@@ -1310,7 +1336,7 @@ class SingZCoachView(APIView):
             # opens onto the rating, the report and the file.
             from .models import link_spend
             link_spend(request.user, f"take:{_row.pk}", _t0, note)
-        out = {**payload, "cost_cents": charged,
+        out = {**payload, "cost_cents": charged, "energy_cost": energy_cost,
                "take_score_id": getattr(_row, "pk", None),
                "listener_reasons": listener_reasons(post),
                "kept": bool(_kept), "kept_note": _kept_note}

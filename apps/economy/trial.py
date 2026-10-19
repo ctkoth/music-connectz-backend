@@ -384,7 +384,7 @@ class PublicTiersView(APIView):
         from .models import (ENERGY_FLOOR_PER_HOUR, PROMPT_ALLOWANCE,
                              REFERRAL_REWARD_JOINEE_SPINAZ,
                              REFERRAL_REWARD_REFERRER_SPINAZ,
-                             SIGNUP_WELCOME_SPINAZ, REFERRAL_REWARD_MONTHLY_CAP, founding_status)
+                             SIGNUP_WELCOME_ENERGY, SIGNUP_WELCOME_SPINAZ, REFERRAL_REWARD_MONTHLY_CAP, founding_status)
 
         ladder = tier_ladder()
         founding = founding_status()
@@ -448,6 +448,7 @@ class PublicTiersView(APIView):
             # rule's other half, and the half that gets forgotten.
             "join": {
                 "welcome_spinaz": SIGNUP_WELCOME_SPINAZ,
+                "welcome_energy": SIGNUP_WELCOME_ENERGY,
                 "referrer_spinaz": REFERRAL_REWARD_REFERRER_SPINAZ,
                 "joinee_spinaz": REFERRAL_REWARD_JOINEE_SPINAZ,
                 # The ceiling on that reward, stated with it: 300 for every invite
