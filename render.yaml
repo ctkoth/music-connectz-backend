@@ -35,6 +35,14 @@ services:
         value: "0"
       - key: DATABASE_URL
         sync: false
+      # Push notifications (apps/economy/push.py). Generate once with
+      # `npx web-push generate-vapid-keys`; push stays off until both are set.
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
       - key: GOOGLE_OAUTH_CLIENT_ID
         sync: false
       - key: GITHUB_OAUTH_CLIENT_ID
@@ -42,6 +50,73 @@ services:
       - key: GITHUB_OAUTH_CLIENT_SECRET
         sync: false
       - key: APPLE_OAUTH_CLIENT_ID
+        sync: false
+      # The five OAUTH2_PROVIDERS in apps/accounts/oauth.py (spotify,
+      # microsoft, facebook, soundcloud, twitter) never had a placeholder
+      # here, so this file — the one place every other credential this app
+      # needs is listed — understated what OAuth actually needs by five
+      # providers. Each needs BOTH vars; provider_status() in oauth.py keeps
+      # a button hidden rather than live-but-failing on only one being set.
+      - key: SPOTIFY_OAUTH_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: FACEBOOK_OAUTH_CLIENT_ID
+        sync: false
+      - key: FACEBOOK_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: SOUNDCLOUD_OAUTH_CLIENT_ID
+        sync: false
+      - key: SOUNDCLOUD_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: TWITTER_OAUTH_CLIENT_ID
+        sync: false
+      - key: TWITTER_OAUTH_CLIENT_SECRET
+        sync: false
+      # Discord and Reddit have their own placeholders in
+      # claude/oauth-discord-reddit (#127) — not duplicated here to avoid
+      # two branches fighting over the same four keys when both land.
+      # ---- SCANNING MEMBER LINKS ----------------------------------------
+      # WidgetZ will not frame an outside page until one of these has CLEARED
+      # its URL, and the +5⚡ link reward is never paid on a flagged link. With
+      # neither set, every link is unscanned: it still opens, in a new tab,
+      # and no page widget is offered to anybody.
+      #
+      # Set WEB_RISK_API_KEY. Google's terms put Safe Browsing v4 at
+      # "non-commercial use only — not for sale or revenue generating
+      # purposes", and this platform sells subscriptions, so v4 is the wrong
+      # product here however well it works; it is deprecated besides. Web Risk
+      # is the commercial successor: enable the Web Risk API on a Cloud project
+      # with billing on, make an API key, restrict it to that one API. Free to
+      # 100k lookups a month, then $0.50 per 1,000.
+      #
+      # SAFE_BROWSING_API_KEY still works for a non-commercial deployment of
+      # this code. Web Risk wins when both are set.
+      # ---- COPYRIGHT DETECTION ON DIRECTZ UPLOADS -----------------------
+      # Recognition is a fingerprint database, not something a model can be
+      # asked to guess at. Without these a DirectZ work stays `unscanned`,
+      # which is its own state and never reads as "clear" — the member is told
+      # the check didn't run rather than being handed a pass they'd publish on.
+      # Sign up at acrcloud.com, make an Audio & Video Recognition project, and
+      # take the access key/secret from it. ACRCLOUD_HOST is the region's
+      # identify host (default identify-eu-west-1.acrcloud.com).
+      #
+      # The check also needs ffmpeg on the host to cut a 15s audio sample out
+      # of a video — the same dependency DistributeZ's transcode needs, and it
+      # says separately when that is what is missing.
+      - key: ACRCLOUD_ACCESS_KEY
+        sync: false
+      - key: ACRCLOUD_ACCESS_SECRET
+        sync: false
+      - key: ACRCLOUD_HOST
+        sync: false
+      - key: WEB_RISK_API_KEY
+        sync: false
+      - key: SAFE_BROWSING_API_KEY
         sync: false
       # ---- KEEPING MEMBERS' UPLOADS -------------------------------------
       # This container's disk is rebuilt on every deploy. With neither of the
@@ -70,6 +145,9 @@ services:
         value: /var/mcz-media
       - key: MEDIA_DURABLE
         value: "1"
+      # Object storage for user uploads (S3 / Cloudflare R2). Set these to
+      # persist FileZ uploads across deploys; leave unset to use the local
+      # (ephemeral) filesystem. For R2 also set S3_ENDPOINT_URL.
       - key: S3_BUCKET_NAME
         sync: false
       - key: S3_ACCESS_KEY_ID
@@ -107,3 +185,46 @@ services:
         sync: false
       - key: MODAL_TOKEN_SECRET
         sync: false
+
+  # Habit reminders. This used to be a top-level `crons:` block, which is not
+  # Render blueprint syntax — a cron job is a SERVICE with `type: cron` — so
+  # the reminder job was never created and no reminder ever ran. Hourly now:
+  # the command reminds each member at 6pm in their own timezone, and push.py
+  # turns each reminder into a push for whoever allowed one. It reads the
+  # SAME database and keys as the web service rather than having its own.
+  - type: cron
+    name: music-connectz-habit-reminders
+    runtime: python
+    branch: main
+    rootDir: .
+    schedule: "0 * * * *"
+    buildCommand: "pip install -r requirements.txt"
+    # Retake reminders ride the same hourly job rather than a second paid
+    # cron service. `;` not `&&`: one failing must not stop the other.
+    startCommand: "python manage.py check_habits_and_notify; python manage.py send_retake_reminders"
+    envVars:
+      - key: DATABASE_URL
+        fromService: {type: web, name: music-connectz-backend, envVarKey: DATABASE_URL}
+      - key: SECRET_KEY
+        fromService: {type: web, name: music-connectz-backend, envVarKey: SECRET_KEY}
+      - key: DEBUG
+        value: "0"
+      - key: VAPID_PUBLIC_KEY
+        fromService: {type: web, name: music-connectz-backend, envVarKey: VAPID_PUBLIC_KEY}
+      - key: VAPID_PRIVATE_KEY
+        fromService: {type: web, name: music-connectz-backend, envVarKey: VAPID_PRIVATE_KEY}
+      - key: VAPID_SUBJECT
+        fromService: {type: web, name: music-connectz-backend, envVarKey: VAPID_SUBJECT}
+      # The retake reminders send mail, so the cron needs the web service's SMTP.
+      - key: EMAIL_HOST
+        fromService: {type: web, name: music-connectz-backend, envVarKey: EMAIL_HOST}
+      - key: EMAIL_PORT
+        fromService: {type: web, name: music-connectz-backend, envVarKey: EMAIL_PORT}
+      - key: EMAIL_HOST_USER
+        fromService: {type: web, name: music-connectz-backend, envVarKey: EMAIL_HOST_USER}
+      - key: EMAIL_HOST_PASSWORD
+        fromService: {type: web, name: music-connectz-backend, envVarKey: EMAIL_HOST_PASSWORD}
+      - key: DEFAULT_FROM_EMAIL
+        fromService: {type: web, name: music-connectz-backend, envVarKey: DEFAULT_FROM_EMAIL}
+      - key: FRONTEND_URL
+        fromService: {type: web, name: music-connectz-backend, envVarKey: FRONTEND_URL}

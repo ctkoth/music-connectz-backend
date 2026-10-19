@@ -1,36 +1,77 @@
-# Music ConnectZ — Android app
+# Music ConnectZ + BodieZ + IntelligenceZ + SkillZ — Android apps
 
-A **Trusted Web Activity**: it opens `https://musicconnectz.net` full-screen in
-Chrome with no URL bar, so the mobile web app *is* the Android app. That's
+Four apps from one project (Gradle product flavors), one Play listing each:
+
+| Flavor | App | Package | Opens | Icon |
+|---|---|---|---|---|
+| `mcz` | Music ConnectZ | `net.musicconnectz.app` | `https://musicconnectz.net` | the equalizer mark |
+| `bodiez` | BodieZ | `net.musicconnectz.bodiez` | `https://bodiez.musicconnectz.net` — the BodieZ-only web build, its own host | the neon athletes, same art as the in-app tab |
+| `intelligencez` | IntelligenceZ | `net.musicconnectz.intelligencez` | `https://intelligencez.musicconnectz.net` — the IntelligenceZ-only web build, its own host | the IntelligenceZ sign (neon brain), same art as the in-app tab |
+| `skillz` | SkillZ | `net.musicconnectz.skillz` | `https://skillz.musicconnectz.net` — the SkillZ-only web build, its own host | the SkillZ sign (the ring of performers round the wave mark), as supplied |
+
+Each is a **Trusted Web Activity**: it opens its site full-screen in Chrome with
+no URL bar, so the mobile web app *is* the Android app. That's
 Google's sanctioned route for shipping a web app — a plain WebView wrapper gets
 rejected under the minimum-functionality policy.
 
-The whole app is one Kotlin file. Everything else is icons, splash, and link
-verification.
+All four share one Kotlin file. Everything else is icons, splash, and link
+verification — and the differences between the apps are all in
+`app/build.gradle.kts` (the flavors) and `app/src/bodiez/res/`,
+`app/src/intelligencez/res/`, `app/src/skillz/res/` (name, icon, splash, colour).
 
 ## Get an APK
 
 No Android Studio needed — GitHub → **Actions** → **Android APK** → **Run
-workflow**, then download the `music-connectz-apk` artifact.
+workflow**, then download `music-connectz-apk`, `bodiez-apk`, `intelligencez-apk` or `skillz-apk`.
+The Play bundles are `music-connectz-playstore-bundle`, `bodiez-playstore-bundle`
+`intelligencez-playstore-bundle` and `skillz-playstore-bundle`.
 
 Locally (needs the [Android SDK](https://developer.android.com/studio)):
 
 ```bash
-./gradlew assembleDebug     # app/build/outputs/apk/debug/app-debug.apk
-./gradlew bundleRelease     # app/build/outputs/bundle/release/app-release.aab  (Play wants this)
-./gradlew assembleDebug -PsiteUrl=https://staging.musicconnectz.net
+./gradlew assembleBodiezDebug   # app/build/outputs/apk/bodiez/debug/app-bodiez-debug.apk
+./gradlew bundleBodiezRelease   # app/build/outputs/bundle/bodiezRelease/app-bodiez-release.aab  (Play wants this)
+./gradlew assembleMczDebug      # the Music ConnectZ equivalents
+./gradlew bundleMczRelease
+./gradlew assembleIntelligencezDebug   # app/build/outputs/apk/intelligencez/debug/app-intelligencez-debug.apk
+./gradlew bundleIntelligencezRelease   # app/build/outputs/bundle/intelligencezRelease/app-intelligencez-release.aab
+./gradlew assembleMczDebug -PsiteUrl=https://staging.musicconnectz.net
+./gradlew bundleBodiezRelease -PbodiezUrl=https://bodiez.example.net   # a different host for BodieZ
+./gradlew bundleIntelligencezRelease -PintelligencezUrl=https://intelligencez.example.net
 ```
+
+**BodieZ opens its own site, not a path on the main one.** That site is the
+BodieZ-only build in the frontend repo (`npm run build:bodiez`, folder
+`dist-bodiez/`) and has to be hosted on the host named by `-PbodiezUrl`
+(default `bodiez.musicconnectz.net`) before the app does anything. The reason is
+policy as much as design: the main site's profile, orientation, substance and
+attractiveness-rating screens, and its Premium purchase flow, are what make the
+main app a Data safety and Play Billing question, and the BodieZ-only shell
+contains none of them. See `play/bodiez/README.md` in the frontend repo.
+
+**IntelligenceZ opens its own site for the same reason.** That site is the
+IntelligenceZ-only build in the frontend repo (`npm run build:intelligencez`,
+folder `dist-intelligencez/`), hosted on the host named by `-PintelligencezUrl`
+(default `intelligencez.musicconnectz.net`): sign-in, a hub, and the four
+IntelligenceZ screens that stand alone — Write, Chat, Compose, Master. Nothing in
+it sells anything, because Play's billing rules do not allow selling from an app
+that is not using Play Billing; Video ConnectZ (a fixed price, no free tier) and
+FaceZ are on the main site only. See `play/intelligencez/README.md` in the
+frontend repo.
 
 ## What's in it
 
 | File | Does |
 |---|---|
-| `app/src/main/java/net/musicconnectz/app/MainActivity.kt` | The TWA launcher. Adds `?omviardz=1` on first launch so a new install opens the guided tour. |
+| `app/src/main/java/net/musicconnectz/app/MainActivity.kt` | The TWA launcher. In the `mcz` flavor it adds `?omviardz=1` on first launch so a new install opens the guided tour; BodieZ does not. |
 | `app/src/main/AndroidManifest.xml` | Default URL, splash, deep-link filter, Chrome delegation service. Declares **no permissions**. |
 | `app/src/main/res/values/strings.xml` | `asset_statements` — the app's half of link verification. |
 | `app/src/main/res/drawable/ic_launcher_*.xml` | The wordless mark, generated. |
 | `app/src/main/res/mipmap-anydpi-v26/` | Adaptive icon (+ monochrome for Android 13 themed icons). |
-| `app/build.gradle.kts` | `siteUrl` property, release signing from env, asset-statement sync check. |
+| `app/build.gradle.kts` | The four flavors, `siteUrl` / `bodiezUrl` / `intelligencezUrl` / `skillzUrl` properties, release signing from env, asset-statement sync check. |
+| `app/src/bodiez/res/` | BodieZ's name, adaptive icon, splash and ink colour. Overrides `main` for that flavor only. |
+| `app/src/intelligencez/res/` | IntelligenceZ's name, adaptive icon, splash and ink colour. Overrides `main` for that flavor only. |
+| `app/src/skillz/res/` | SkillZ's name, adaptive icon, splash and ink colour. Overrides `main` for that flavor only. |
 
 **The icons are generated — don't hand-edit them.** Change a colour or a bar in
 [`tools/make_brand_assets.py`](../tools/make_brand_assets.py) and re-run it; the
@@ -40,6 +81,49 @@ same geometry feeds the SVG master, the Android vectors, and the Play Store PNGs
 python tools/make_brand_assets.py
 ```
 
+**BodieZ's icon is the artwork members already see on the BodieZ tab**, not a
+redrawn mark — a launcher icon that differs from the in-app one is two
+identities for one app. It is generated from `brand/bodiez/source-384.png`:
+
+```bash
+python tools/make_bodiez_assets.py
+```
+
+That source is 384px, so the 512px Play icon and the 432px adaptive layers are
+upscales. A larger master dropped in as `brand/bodiez/source-*.png` (and
+`SOURCE` changed) sharpens everything with no other edit.
+
+**IntelligenceZ's icon is the IntelligenceZ sign**, the same artwork as the
+IntelligenceZ tab. Its source is the 2000px original scaled once to 1024px
+(`tools/intelligencez-source-1024.png`), so nothing is an upscale:
+
+```bash
+python android/tools/make_intelligencez_assets.py --play-out <dir>   # --preview masks.png for a mask contact sheet
+```
+
+The adaptive layer holds the sign at 222px of 432, not full-bleed: the sign's
+name sits near its top edge and a circular launcher mask would take the ends of
+"IntelligenceZ" otherwise (`test_android_kit` pins the arithmetic). The Play
+feature graphic is built from the brain alone, not the whole sign — the sign
+shows image and video panels, and the app has neither. The generator lives under
+`android/` so a change to it triggers the Android workflow.
+
+**SkillZ's icon is the SkillZ sign as supplied**: a ring of ten performers round the
+wave mark, with the name along the bottom. Source `tools/skillz-source-1024.png` is the
+supplied 2000px art scaled once, with its four white corners filled with the colour
+beside them (the original is a rounded square on white, and a white notch inside a
+launcher mask is the one flaw a member sees at once):
+
+```bash
+python android/tools/make_skillz_assets.py --play-out <dir>   # --preview masks.png for a mask contact sheet
+```
+
+The adaptive layer holds the sign at 268px of 432 because the name sits near the BOTTOM
+edge; the monochrome (themed-icon) layer is the wave mark alone, since ten painted
+portraits tint to a smudge; and the feature graphic is built from the five portraits of
+coaches the app has (singer, rapper, guitarist, drummer, pianist) — the sign also shows a
+DJ, producer, A&R, illustrator and videographer, and none of those is built.
+
 ## Signing
 
 Release signing reads four env vars, so no keystore is ever committed:
@@ -48,14 +132,16 @@ Release signing reads four env vars, so no keystore is ever committed:
 ANDROID_KEYSTORE_PATH  ANDROID_KEYSTORE_PASSWORD  ANDROID_KEY_ALIAS  ANDROID_KEY_PASSWORD
 ```
 
-Unset → the release build stays unsigned, which Play can still sign on upload.
-In CI the same values come from repository secrets (`ANDROID_KEYSTORE_BASE64`
-holds the keystore).
+Unset → the release build is unsigned, and **Play Console refuses an unsigned
+bundle**. Fine for a build you only want to look at; not for one you upload. In CI
+the same values come from repository secrets (`ANDROID_KEYSTORE_BASE64` holds the
+keystore), and one upload key signs both apps.
 
 ## The one thing that will look broken
 
-If `https://musicconnectz.net/.well-known/assetlinks.json` doesn't list this
-app's signing fingerprint, the app opens **with a URL bar** — and that's what
+If the host an app opens doesn't list its signing fingerprint in
+`/.well-known/assetlinks.json` — **each app has its own host and its own file**:
+`musicconnectz.net` for Music ConnectZ, the BodieZ host for BodieZ — the app opens **with a URL bar** — and that's what
 makes a Play reviewer call it a repackaged website. Setup and verification:
 [GOOGLE_PLAY.md §5](../GOOGLE_PLAY.md#5-prove-the-app-owns-the-site-do-this-or-the-app-looks-broken)
 and [`config_snippets/assetlinks_frontend.md`](../config_snippets/assetlinks_frontend.md).

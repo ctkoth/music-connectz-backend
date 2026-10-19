@@ -257,6 +257,35 @@ APPLE_OAUTH_CLIENT_ID = os.environ.get("APPLE_OAUTH_CLIENT_ID", "").strip()
 # Set GEMINI_API_KEY on Render; endpoints 503 cleanly until then.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
+# Malware / phishing scanning for member links (economy/links.py). WidgetZ will
+# not frame an outside page until one of these has CLEARED its URL, and the
+# +5⚡ link reward is never paid on a flagged link.
+#
+# Set WEB_RISK_API_KEY. Google's terms put Safe Browsing v4 at "non-commercial
+# use only — not for sale or revenue generating purposes" and this platform
+# sells subscriptions, so v4 is the wrong product here whatever it costs; it is
+# deprecated besides. Web Risk is its commercial successor and is free to
+# 100k lookups a month on a Cloud project with billing enabled.
+#
+# SAFE_BROWSING_API_KEY still works for a non-commercial deployment of this
+# code. Web Risk wins when both are set.
+#
+# **Both of these were read with a getattr default and never defined here**, so
+# the lookup returned "" on every deploy regardless of what the dashboard said
+# and no link was ever scanned. Adding a key to Render did nothing until this
+# line existed.
+# Copyright recognition for DirectZ uploads (economy/copyrightz.py). Without
+# these a work stays `unscanned` — its own state, which never reads as "clear".
+# A language model's opinion about whether audio is copyrighted is the
+# number-with-nothing-behind-it the substance rule forbids, attached to a legal
+# question; recognition is a fingerprint database or it is nothing.
+ACRCLOUD_ACCESS_KEY = os.environ.get("ACRCLOUD_ACCESS_KEY", "").strip()
+ACRCLOUD_ACCESS_SECRET = os.environ.get("ACRCLOUD_ACCESS_SECRET", "").strip()
+ACRCLOUD_HOST = os.environ.get("ACRCLOUD_HOST", "identify-eu-west-1.acrcloud.com").strip()
+
+WEB_RISK_API_KEY = os.environ.get("WEB_RISK_API_KEY", "").strip()
+SAFE_BROWSING_API_KEY = os.environ.get("SAFE_BROWSING_API_KEY", "").strip()
+
 # Modal — the sandbox OCC runs code in. This is the one thing OCC could never
 # do: execute a member's code. It needs a container per run, which is real
 # infrastructure with a real bill, so it stays off until BOTH tokens are set.
@@ -272,6 +301,9 @@ MODAL_APP_NAME = os.environ.get("MODAL_APP_NAME", "music-connectz-occ")
 # otherwise the checkout endpoints report it as unavailable and the client hides
 # the button. Where the frontend lives, for building return URLs.
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://musicconnectz.net").rstrip("/")
+# Where THIS API is reachable from outside — for links in email sent by a
+# cron job, which has no request to build an absolute URL from.
+API_PUBLIC_URL = os.environ.get("API_PUBLIC_URL", "https://admin.musicconnectz.net").rstrip("/")
 
 # Platform owner(s) by email — these accounts are auto-promoted to
 # staff/superuser + StatZ on first sign-in. Comma-separated; override via env.
@@ -296,6 +328,13 @@ EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = _env_bool("EMAIL_USE_TLS", "1")
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "Music ConnectZ <no-reply@musicconnectz.net>")
+
+# Push notifications (apps/economy/push.py). Off until BOTH keys are set.
+# Generate the pair once with `npx web-push generate-vapid-keys` and paste
+# them into Render; the private key never goes in the repo or the client.
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "").strip()
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "").strip()
+VAPID_SUBJECT = os.environ.get("VAPID_SUBJECT", "mailto:ctkoth@gmail.com").strip()
 # Send our own loggers to stdout so they land in the Render log stream. Without
 # this, a logger outside the "django" namespace falls back to Python's
 # last-resort handler: WARNING and above only, no timestamp, no logger name —

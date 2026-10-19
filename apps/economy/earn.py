@@ -19,7 +19,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import karmaz
 from .models import (
+    AD_REWARD_DAILY_CAP_PER_USER,
     LINK_CLICK_REWARD_ENERGY,
     ONBOARD_REWARD_ENERGY,
     ONBOARD_REWARD_SPINAZ,
@@ -54,6 +56,36 @@ def _way(key, label, gain, resource, *, tab, target="", available=True,
     }
 
 
+def _raise_rate(user, rate):
+    """The upgrade offer, priced in the thing being asked for: ⚡ per hour.
+
+    "Upgrade for more Energy" is a slogan; "12 ⚡/hr → 24 ⚡/hr" is a number the
+    member can check against the rate the app already shows them, and it is
+    computed from their OWN reach and badges rather than a headline figure that
+    would be someone else's. A tier that would not actually pay them more is
+    left out — an offer whose gain is zero is a nag.
+    """
+    from .models import TIER_FREE, TIER_PREMIUM, TIER_STATZ, energy_rate_per_hour, membership_for
+
+    ladder = [TIER_FREE, TIER_PREMIUM, TIER_STATZ]
+    mine = membership_for(user).tier
+    if mine not in ladder:          # debug/owner — nothing above them to sell
+        return {"tier": mine, "per_hour": rate, "options": []}
+
+    options = []
+    for tier in ladder[ladder.index(mine) + 1:]:
+        would = energy_rate_per_hour(user, tier=tier)
+        if would > rate:
+            options.append({
+                "tier": tier,
+                "per_hour": would,
+                "gain_per_hour": would - rate,
+                "tab": "membershipz",
+                "target": "",
+            })
+    return {"tier": mine, "per_hour": rate, "options": options}
+
+
 class EarnView(APIView):
     """GET /api/economy/earn/ — every way this member can earn, right now."""
 
@@ -75,6 +107,32 @@ class EarnView(APIView):
             _way("referral", "Refer someone", REFERRAL_REWARD_REFERRER_SPINAZ, "spinaz",
                  tab="profilez", target="referral-code",
                  note=f"They start with {REFERRAL_REWARD_JOINEE_SPINAZ} too."),
+            # The three that arrived with karmaz and were missing from the one
+            # list whose entire job is answering "how do I get more ⚡". A
+            # member on zero was being shown five ways and not the three
+            # newest, which is this file's own founding complaint.
+            #
+            # Read from `karmaz` rather than retyped: two places stating what a
+            # vote pays is the "20 free prompts in nine places" failure with a
+            # currency attached.
+            _way("vote", "Vote a comment up or down", karmaz.VOTE_ENERGY, "energy",
+                 tab="postz", target="social-feed",
+                 cap=f"{karmaz.VOTE_DAILY_CAP} a day",
+                 note="Up and down pay the same — otherwise the app is buying "
+                      "its own praise."),
+            _way("comment_karma", "Write a comment people vote up",
+                 karmaz.KARMA_ENERGY_PER_NET, "energy",
+                 tab="postz", target="social-feed",
+                 cap=f"up to {karmaz.KARMA_ENERGY_MAX} per comment",
+                 note=f"Paid per net upvote, {karmaz.KARMA_SETTLE_HOURS}h after you "
+                      f"post it, on somebody else's post. Needs "
+                      f"{karmaz.KARMA_MIN_NET}+ net."),
+            _way("cold_reply", "Reply to somebody who has never messaged you",
+                 karmaz.COLD_REPLY_ENERGY, "energy",
+                 tab="messagez", target="messagez-compose",
+                 cap=f"{karmaz.COLD_DAILY_CAP} a day, once per person",
+                 note=f"They get {karmaz.COLD_SENT_ENERGY} too, for being answered. "
+                      "Sending pays nothing on its own."),
             _way("share", "Share another member's post", SHARE_REWARD_ENERGY, "energy",
                  tab="social", target="social-feed",
                  note="Once per post, after you've actually watched it."),
@@ -83,19 +141,22 @@ class EarnView(APIView):
             _way("restricted", "Someone joins your restricted post",
                  RESTRICTED_JOIN_REWARD_SPINAZ, "spinaz",
                  tab="social", target="social-compose"),
+            # Always available now: ENERGY_FLOOR_PER_HOUR means the rate is
+            # never 0, so this stopped being a locked row a new member reads as
+            # "not for you" and became a number that grows when they verify.
             _way("passive", "Passive Energy, hourly", rate, "energy",
                  tab="profilez", target="profile-reach",
-                 available=rate > 0,
-                 reason="" if rate > 0 else "Verify a social account to build reach.",
-                 note="Paid by the hour from your median reach, tier-scaled."),
+                 note="Paid by the hour, tier-scaled. Verify a social account "
+                      "and your median reach raises it above the floor."),
             _way("onboard", "Finish OnboardZ", ONBOARD_REWARD_SPINAZ, "spinaz",
                  tab="onboardz", target="",
                  available=not onboarded,
                  reason="Already claimed." if onboarded else "",
                  note=f"Plus {ONBOARD_REWARD_ENERGY} Energy, once."),
-            _way("adz", "Watch a rewarded ad", 0, "spinaz",
+            _way("adz", "Watch a rewarded ad", 1, "spinaz",
                  tab="adz", target="", available=admob_on,
-                 reason="" if admob_on else "Rewarded ads aren't switched on yet."),
+                 reason="" if admob_on else "Rewarded ads aren't switched on yet.",
+                 note=f"Typical reward. Each ad pays 1+ SpinAZ. Up to {AD_REWARD_DAILY_CAP_PER_USER} rewarded ads per day."),
             _way("offerz", "Complete an offer", 0, "spinaz",
                  tab="offerz", target="", available=offerz_on,
                  reason="" if offerz_on else "The offerwall isn't switched on yet."),
@@ -107,9 +168,24 @@ class EarnView(APIView):
             rows = Transaction.objects.filter(user=request.user, resource=res, amount__gt=0)
             earned[res] = sum(rows.values_list("amount", flat=True))
 
+        # What the 🍥 in that list is FOR. A screen that shows somebody five
+        # ways to earn a currency and no door out of it is a read-only surface
+        # wearing an earn screen's clothes — and until PromptZ could be bought
+        # with SpinaZ there genuinely wasn't one.
+        from .catalog import SPINAZ_PER_PROMPTZ
+
         return Response({
             "ways": ways,
             "available": [w for w in ways if w["available"]],
             "earned_total": earned,
             "energy_per_hour": rate,
+            "raise_rate": _raise_rate(request.user, rate),
+            "spend": [{
+                "key": "promptz",
+                "label": "Turn SpinaZ into PromptZ",
+                "cost": {"resource": "spinaz", "amount": SPINAZ_PER_PROMPTZ},
+                "gain": {"resource": "promptz", "amount": 1},
+                "tab": "walletz", "target": "promptz-convert",
+                "note": "AI credits, earned rather than bought. No card needed.",
+            }],
         })

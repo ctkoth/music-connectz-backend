@@ -17,6 +17,7 @@ Nothing here moves a member resource — a visitor has no wallet, so there is no
 ⚡/🍥/🏷️ to state. The cost is ours; the gain is theirs, and the response says
 so before asking them to sign up.
 """
+import os
 import secrets
 
 from django.utils import timezone
@@ -26,11 +27,20 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .clientip import client_ip
+from .deadline import COACH_BUDGET_SECONDS
 from .gemini import _key
 from .instruments import DIFFICULTIES, profile_for_app
+from .instruments import (LYRIC_SCORE, MIX_SCORE, rates_lyrics, rates_mix,
+                          scores_for)
 from .models import (
+    DEV_TAX,
+    ENERGY_TOPUP_MULT,
+    SUBMISSION_DAILY_CAP,
     TRIAL_CLAIM_DAYS,
     TRIAL_MAX_MB,
+    TRIAL_PER_BROWSER,
+    TRIAL_PER_IP,
     TRIAL_PER_IP_HOURS,
     TrialTake,
     trial_daily_cap,
@@ -38,22 +48,57 @@ from .models import (
 from .vocalcoach import score_take
 
 
-def client_ip(request):
-    fwd = request.META.get("HTTP_X_FORWARDED_FOR", "")
-    if fwd:
-        return (fwd.split(",")[0].strip() or "")[:64]
-    return (request.META.get("REMOTE_ADDR") or "")[:64]
+def client_anon_id(request):
+    """The browser's own funnel UUID, if it sent one.
+
+    Blank is normal and must never be treated as a match: private-mode
+    browsers throw on localStorage and `track.js` returns "" there, so a
+    blank id is "we don't know", not "everyone who didn't say".
+    """
+    raw = (request.data.get("anon_id") if hasattr(request, "data") else None) \
+        or request.query_params.get("anon_id", "")
+    return str(raw or "").strip()[:64]
 
 
-def trial_state(ip):
-    """(taken_today_globally, this_address_already_had_one)."""
+def _trial_ip_exempted(ip):
+    """Check if this IP is exempt from per-IP trial rate limits."""
+    import os
+    exempted = os.environ.get("TRIAL_EXEMPT_IPS", "").strip()
+    if not exempted or not ip:
+        return False
+    exempt_list = [i.strip() for i in exempted.split(",") if i.strip()]
+    return ip in exempt_list
+
+
+def trial_state(ip, anon_id=""):
+    """(taken_today_globally, this_browser_is_done, this_address_is_over).
+
+    Three numbers because there are three genuinely different "no"s and they
+    need three different sentences. Telling somebody they have had their free
+    take when what actually happened is that their phone carrier's shared
+    address is busy is a false accusation on the one screen a stranger sees.
+
+    A blank `anon_id` never matches anything — a browser that cannot reach
+    localStorage has not identified itself, and counting all of them as one
+    visitor would shut the door on every private-mode window at once.
+    """
     from datetime import timedelta
     now = timezone.now()
+    window = now - timedelta(hours=TRIAL_PER_IP_HOURS)
     today = TrialTake.objects.filter(created_at__gte=now - timedelta(hours=24)).count()
-    mine = bool(ip) and TrialTake.objects.filter(
-        ip=ip, created_at__gte=now - timedelta(hours=TRIAL_PER_IP_HOURS)
-    ).exists()
-    return today, mine
+
+    if _trial_ip_exempted(ip):
+        return today, False, False
+
+    # SCORED takes only. An unscorable one cost them a performance and paid
+    # them nothing, so it is not the take they came for — see TrialTake.scored.
+    browser_done = bool(anon_id) and TrialTake.objects.filter(
+        anon_id=anon_id, scored=True, created_at__gte=window
+    ).count() >= TRIAL_PER_BROWSER
+    ip_over = bool(ip) and TrialTake.objects.filter(
+        ip=ip, created_at__gte=window
+    ).count() >= TRIAL_PER_IP
+    return today, browser_done, ip_over
 
 
 class TrialCoachView(APIView):
@@ -69,7 +114,8 @@ class TrialCoachView(APIView):
 
     def get(self, request):
         profile = profile_for_app(self.app_key)
-        today, mine = trial_state(client_ip(request))
+        today, mine, ip_over = trial_state(client_ip(request),
+                                           client_anon_id(request))
         cap = trial_daily_cap()
         return Response({
             "app_key": self.app_key,
@@ -78,25 +124,84 @@ class TrialCoachView(APIView):
             # Free to them, and it costs them nothing they own — say so plainly
             # rather than letting them wonder what they're about to spend.
             "free": True,
-            "available": bool(_key()) and not mine and today < cap,
+            "available": bool(_key()) and not mine and not ip_over and today < cap,
             "already_used": mine,
-            "per_address": f"one free take every {TRIAL_PER_IP_HOURS} hours",
+            # A FOURTH "no", and the one that used to masquerade as the first.
+            # The address is busy — a shared carrier address, an office, a
+            # campus — and the person reading this has not used anything. It
+            # gets its own flag so the screen can say so instead of accusing
+            # them of spending a take they never had.
+            "address_busy": ip_over,
+            # Which "no" it is. `available: false` covers three completely
+            # different situations — the visitor spent today's take, the
+            # platform spent today's takes, or nobody set GEMINI_API_KEY — and
+            # a client that cannot tell them apart has to guess, which is how
+            # a screen ends up telling somebody the coach is down when their
+            # own allowance is simply used up.
+            "cap_reached": today >= cap,
+            # RapZ has a style picker and this door never sent the list, so
+            # the control did not render at all — the trial was quietly a less
+            # capable coach than the member one, on the screen whose whole job
+            # is showing strangers the product. Same shape as `ranges` above.
+            "style_label": profile["style_label"],
+            "styles": [{"key": k, "label": l} for k, l in profile["styles"]],
+            "per_address": (f"one free take per browser every {TRIAL_PER_IP_HOURS} hours "
+                            f"({TRIAL_PER_IP} per network address)"),
             "max_mb": TRIAL_MAX_MB,
+            # The longest a take may now run before the server gives up and
+            # says so. On screen BEFORE the button, because a wait with a
+            # stated end is one somebody sits through and an open-ended one
+            # is one they abandon — which is what 853 seconds of spinner was.
+            "coach_budget_seconds": COACH_BUDGET_SECONDS,
             "claim_days": TRIAL_CLAIM_DAYS,
-            "scores": profile["scores"],
+            # `scores_for`, not `profile["scores"]`: every take is scored
+            # against the style or genre it was aimed at, so Style Match is
+            # always in the set. Publishing the profile's five while the
+            # response carries six is how a chip row ends up one short of
+            # the answer.
+            "scores": scores_for(self.app_key),
             "range_label": profile["range_label"],
             "ranges": [{"key": k, "label": l} for k, l in profile["ranges"]],
             "difficulties": DIFFICULTIES,
+            # Published here too, or the trial recorder cannot render the
+            # toggle and the door offers less than the product again — which
+            # is the gap the style picker comment above is about.
+            "rates_lyrics": rates_lyrics(self.app_key),
+            "lyric_scores": LYRIC_SCORE if rates_lyrics(self.app_key) else {},
+            # The mix toggle, published the same way and for the same reason:
+            # the screen must not keep its own copy of which dimensions exist.
+            "rates_mix": rates_mix(self.app_key),
+            "mix_scores": MIX_SCORE if rates_mix(self.app_key) else {},
             "caveat": profile["caveat"],
         })
 
     def post(self, request):
+        if str(request.data.get("reference", "")).lower() in ("1", "true", "yes", "on"):
+            # The one free take is a stranger's own performance. Spending it on
+            # somebody else's song would use up the only thing they came for.
+            return Response(
+                {"detail": "Listening to someone else's track needs an account — the free take "
+                           "here is for your own performance. Make an account and try both.",
+                 "reference_needs_account": True},
+                status=status.HTTP_403_FORBIDDEN)
         ip = client_ip(request)
-        today, mine = trial_state(ip)
+        anon_id = client_anon_id(request)
+        today, mine, ip_over = trial_state(ip, anon_id)
         if mine:
             return Response(
                 {"detail": "You've had your free take for today. Make an account and the coach is yours whenever you want it.",
                  "already_used": True},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+        if ip_over:
+            # Never "you've had yours" — they have not. This fires when the
+            # ADDRESS is busy, which on a mobile carrier means somebody they
+            # have never met is behind the same CGNAT. Blaming the visitor for
+            # it is a lie, and an account genuinely is the fix, so say both.
+            return Response(
+                {"detail": "This network has used up today's free takes — that's the connection "
+                           "you're on, not you. An account gets you the coach on any connection.",
+                 "address_busy": True},
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
         if today >= trial_daily_cap():
@@ -124,6 +229,20 @@ class TrialCoachView(APIView):
             self.app_key, f, content_type,
             genre=data.get("genre"), target=data.get("range"),
             difficulty=data.get("difficulty"),
+            # The other half of the same gap: even once the picker renders,
+            # this door was not forwarding the answer. A trial that grades on
+            # a different input than the product is the same lie as one that
+            # grades on an easier rubric, which is why score_take is shared.
+            style=data.get("style"),
+            # And the same for the lyrics toggle, for the same reason the
+            # comment above gives: a trial graded on different inputs than the
+            # product is a lie about the product. It is the visitor's take —
+            # if they wrote words and want them read, that is the take they
+            # came to have scored.
+            lyrics=str(data.get("rate_lyrics", "")).lower() in ("1", "true", "yes", "on"),
+            # Same reason as lyrics above: the trial is the product, so a
+            # visitor who wants the mix read gets the mix read.
+            mix=str(data.get("rate_mix", "")).lower() in ("1", "true", "yes", "on"),
         )
         if err:
             # A take the coach couldn't read doesn't burn the visitor's one
@@ -131,18 +250,34 @@ class TrialCoachView(APIView):
             body, code = err
             return Response(body, status=code)
 
+        # Every call we paid for is written down — the address ceiling and the
+        # global cap both count these rows, and a model call that left no row
+        # would be money spent off the books. `scored` is what decides whether
+        # it also used up the visitor's own free take.
         take = TrialTake.objects.create(
-            token=secrets.token_urlsafe(24), app_key=self.app_key, ip=ip, result=payload,
+            token=secrets.token_urlsafe(24), app_key=self.app_key, ip=ip,
+            anon_id=anon_id, result=payload,
+            scored=payload.get("score") is not None,
         )
+        from .retake import offer as remind_offer, rearm_for
+        rearm_for(take)
+        from .models import mint_score_share
+        share = mint_score_share(self.app_key, payload, genre=data.get("genre", ""))
         return Response({
             **payload,
             "trial": True,
             "cost_cents": 0,
             "claim_token": take.token,
+            # The card a visitor can post: the score the coach gave, minted
+            # here so nothing the browser sends can change it.
+            "share_url": f"/s/{share}" if share else "",
             # Not a dead end: the take they just made opens inside the app once
             # they join, rather than vanishing with the tab.
             "open_in": f"{self.app_key}:coach",
             "claim_hint": f"Sign up within {TRIAL_CLAIM_DAYS} days and this take is saved to your account.",
+            # The way back, for somebody not ready to make an account: email
+            # the score and a retake reminder. `ready: false` renders nothing.
+            "remind": remind_offer() if payload.get("score") is not None else None,
         }, status=status.HTTP_201_CREATED)
 
 
@@ -167,4 +302,157 @@ class TrialTakeDetailView(APIView):
             "claimed": bool(take.claimed_by_id),
             "open_in": f"{take.app_key}:coach",
             "created_at": take.created_at.isoformat(),
+        })
+
+
+class TrialPublicStatsView(APIView):
+    """GET /api/economy/trial/public/stats/ — honest social proof for the door.
+
+    This shipped querying `visitor_id`, which is not a field on FunnelEvent
+    (it is `anon_id`), in four places — so every request was a FieldError and
+    a 500, and it has never once answered. The client made it worse by asking
+    for `/api/trial/public/stats/`, which is not where it is mounted, so the
+    call 404'd before it could even reach the 500. Both ends broken, and
+    invisible because the caller swallows the failure.
+
+    What it served was the second problem, and the one worth more than the
+    fix. It published the JOIN FUNNEL'S conversion rates to the very people in
+    it — "Tried → Scored: 1 of 18". That is a measurement of how well OUR door
+    works, not of whether the product is any good, and handing it to a
+    stranger at the moment they are deciding whether to try argues against
+    trying. The three rates belong in FunnelZ, where the owner reads them, and
+    FunnelZ already has them.
+
+    So this serves COUNTS of things that actually happened: takes scored, and
+    how many instruments have a door. Both are true, neither is a percentage
+    somebody can be on the wrong side of, and both go UP as the platform works
+    rather than down.
+
+    And it stays silent below `MIN_TO_SHOW`. "3 takes scored" is worse than no
+    panel at all — the same rule the funnel's own `pct: None` follows, because
+    an empty measurement and a bad one need opposite answers.
+    """
+
+    permission_classes = [AllowAny]
+
+    # Below this, the honest thing to render is nothing.
+    MIN_TO_SHOW = 25
+
+    def get(self, request):
+        from datetime import timedelta
+
+        from .trialdoorz import door_keys
+
+        try:
+            days = max(1, min(365, int(request.query_params.get("days", "30"))))
+        except (TypeError, ValueError):
+            days = 30
+        start = timezone.now() - timedelta(days=days)
+
+        scored_window = TrialTake.objects.filter(created_at__gte=start).count()
+        scored_total = TrialTake.objects.count()
+        doors = len(door_keys())
+
+        return Response({
+            "days": days,
+            # The client renders nothing when this is false. It is the
+            # server's call because the server is the only end that knows the
+            # number, and a threshold in a screen would be the second place it
+            # lives.
+            "enough": scored_total >= self.MIN_TO_SHOW,
+            "takes_scored": scored_total,
+            "takes_scored_window": scored_window,
+            "doors": doors,
+            # No rates, deliberately. See the docstring: a conversion
+            # percentage is a fact about our funnel, not about the coach, and
+            # the owner already reads those in FunnelZ.
+        })
+
+
+class PublicTiersView(APIView):
+    """GET /api/economy/tiers/ — public membership tier options for trial door.
+
+    Non-authenticated endpoint showing all public tiers (Free, Premium, StatZ)
+    with their key features so visitors see membership options before creating
+    an account. Includes founding StatZ pricing and seat availability.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from .catalog import tier_ladder, TIER_FREE, TIER_PREMIUM, TIER_STATZ
+        from .models import (ENERGY_FLOOR_PER_HOUR, PROMPT_ALLOWANCE,
+                             REFERRAL_REWARD_JOINEE_SPINAZ,
+                             REFERRAL_REWARD_REFERRER_SPINAZ,
+                             SIGNUP_WELCOME_SPINAZ, REFERRAL_REWARD_MONTHLY_CAP, founding_status)
+
+        ladder = tier_ladder()
+        founding = founding_status()
+
+        tiers = []
+        for tier_key in [TIER_FREE, TIER_PREMIUM, TIER_STATZ]:
+            limits = ladder[tier_key]
+            price = limits.pop("month_cents", 0)
+            tier_data = {
+                "key": tier_key,
+                "label": {"free": "Free", "premium": "Premium", "statz": "StatZ"}.get(tier_key, tier_key),
+                "price_cents": price,
+                # Both intervals, so MembershipZ and every upgrade panel quote
+                # the server's price and never type "$90/yr".
+                "month_cents": price,
+                "year_cents": limits.pop("year_cents", 0),
+                "upload_mb": limits["upload_mb"],
+                "storage_mb": limits["storage_mb"],
+                "char_limit": limits["char_limit"],
+                "embeds_per_post": limits["embeds_per_post"],
+                # The number every join screen sells on, and the one this
+                # endpoint did NOT serve — which is exactly why Register.jsx
+                # had "3 scored takes/day" and "5 scored takes/day" typed into
+                # it, becoming the tenth place a tier number lived. It is the
+                # AI allowance, so it covers the coach, OCC, DirectZ and every
+                # Gemini surface together, not takes alone.
+                "daily_prompts": PROMPT_ALLOWANCE.get(tier_key, 0),
+                # Energy per hour at the FLOOR, which is the rate that applies
+                # to somebody reading a signup page: the reach-derived rate is
+                # reach ÷ divisor, and reach is 0 until an external account is
+                # verified. Register.jsx claimed Premium was "2x faster"; the
+                # floors are 2 and 6, so for its own audience it is 3x, and
+                # the copy was understating the thing it was selling.
+                "energy_per_hour": ENERGY_FLOOR_PER_HOUR.get(tier_key, 0),
+                # MembershipZ's comparison table typed these three in, along
+                # with "Free: 1 daily prompt" (it is 3) and "SpecZ marketplace:
+                # StatZ only" (every tier can buy one). Served, so the table
+                # can stop being a second copy of the ladder.
+                "platform_fee_pct": round(DEV_TAX.get(tier_key, 0) * 100, 2),
+                "energy_per_dollar": ENERGY_TOPUP_MULT.get(tier_key, 1),
+                "scored_per_day": SUBMISSION_DAILY_CAP.get(tier_key, 0),
+            }
+
+            # Add founding info for StatZ
+            if tier_key == TIER_STATZ:
+                tier_data["founding"] = {
+                    "lifetime_cents": founding["price_cents"],
+                    "year_cents": founding["year_cents"],
+                    "month_cents": founding["month_cents"],
+                    "remaining": founding["remaining"],
+                    "sold_out": founding["sold_out"],
+                }
+
+            tiers.append(tier_data)
+
+        return Response({
+            "tiers": tiers,
+            # What joining itself pays, so the signup form can state the gain
+            # before the button rather than after it. The welcome bonus was
+            # paid on every registration and named on no screen — the cost/gain
+            # rule's other half, and the half that gets forgotten.
+            "join": {
+                "welcome_spinaz": SIGNUP_WELCOME_SPINAZ,
+                "referrer_spinaz": REFERRAL_REWARD_REFERRER_SPINAZ,
+                "joinee_spinaz": REFERRAL_REWARD_JOINEE_SPINAZ,
+                # The ceiling on that reward, stated with it: 300 for every invite
+                # is not what is on offer, and a gain found out to be capped after
+                # the fact is the price-found-by-paying-it failure in reverse.
+                "referrer_monthly_cap": REFERRAL_REWARD_MONTHLY_CAP,
+            },
         })

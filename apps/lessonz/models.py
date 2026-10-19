@@ -115,6 +115,8 @@ class LessonOffer(models.Model):
     longitude = models.FloatField(null=True, blank=True)
     remote_ok = models.BooleanField(default=True)
     in_person_ok = models.BooleanField(default=True)
+    # Who may book: the same five exclusive range gates as CollabZ/BattleZ.
+    gates = models.JSONField(default=dict, blank=True)
     callz_ok = models.BooleanField(
         default=False,
         help_text="Deliver over CallZ video. StatZ-exclusive on both sides.",

@@ -3,7 +3,12 @@
 Respects blocks, enforces the sender's tier character limit, and notifies the
 recipient. GET lists conversations (or a thread with ?with=username).
 """
+import logging
+
+from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.mail import send_mail
+from django.db import transaction
 from django.db.models import Q
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -14,10 +19,13 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from .catalog import limits_for, edit_window_for
-from .models import Message, blocked_user_ids, membership_for, notify
+from .catalog import DM_COLD_ENERGY, limits_for, edit_window_for
+from .models import (
+    Message, Notification, blocked_user_ids, membership_for, notify, spend_energy, wallet_for,
+)
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 def _msg(m, me):
@@ -36,11 +44,96 @@ def _msg(m, me):
     }
 
 
+def _email_new_message(recipient, sender, body):
+    """Tell them by email as well as in-app — once, and never at the message's
+    expense.
+
+    `notify()` writes a Notification row and stops there, which is only any use
+    to somebody who happens to open the app. A direct message is the one thing
+    here that is *waiting on a person*, so it is worth reaching them where they
+    are.
+
+    Three refusals, in the order they actually come up:
+
+      * **No address.** Every account made through a provider that hands one
+        over has `''` — Twitter gives none at all. Nothing to send to.
+      * **Opted out.** A member who turned notifications off meant it.
+      * **Already told and not read.** Ten messages in a row is ONE email. A
+        second is worth nothing to somebody who has not opened the first, and
+        it is exactly how a product teaches people to filter it to spam.
+
+    Wrapped whole and never re-raised: the message is already saved and the
+    notification already written. A mail server having a bad day must not turn
+    a delivered message into a 500.
+    """
+    to = (getattr(recipient, "email", "") or "").strip()
+    if not to:
+        return False
+    try:
+        prefs = getattr(recipient, "onboarding_preferences", None)
+        if prefs is not None and not prefs.notifications_enabled:
+            return False
+        # Counted BEFORE this message's own notification is written, so the row
+        # we just made can never be the one that suppresses its own email.
+        if Notification.objects.filter(
+            user=recipient, actor=sender, kind="message", read=False
+        ).exists():
+            return False
+
+        preview = (body or "").strip().replace("\r", "")
+        if len(preview) > 300:
+            preview = preview[:297] + "..."
+
+        send_mail(
+            subject=f"@{sender.username} messaged you on Music ConnectZ",
+            message=(
+                f"Hi {recipient.username},\n\n"
+                f"@{sender.username} sent you a message:\n\n"
+                f"{preview}\n\n"
+                f"Reply here: {getattr(settings, 'FRONTEND_URL', '').rstrip('/')}/message\n\n"
+                "You're getting this because someone messaged you directly. "
+                "Turn these off in your preferences any time.\n\n"
+                "— Music ConnectZ"
+            ),
+            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+            recipient_list=[to],
+            fail_silently=False,
+        )
+        return True
+    except Exception:
+        logger.exception("Could not email @%s about a message", recipient.username)
+        return False
+
+
+def is_cold(me, other):
+    """True when `me` writing to `other` opens a conversation with nobody's say-so.
+
+    Free: any earlier message in either direction (a reply, a follow-up), someone
+    who follows `me` (they asked to hear from them), and a live accepted collab.
+    What is left is a stranger, which is the only case spam needs a price for.
+    Read BEFORE the message exists — afterwards every conversation has history.
+    """
+    from .models import Follow, collab_link
+    if Message.objects.filter(Q(sender=me, recipient=other) | Q(sender=other, recipient=me)).exists():
+        return False
+    if Follow.objects.filter(follower=other, following=me).exists():
+        return False
+    return not collab_link(me, other)
+
+
 class MessagesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         me = request.user
+        quote = (request.query_params.get("cost_for") or "").strip()
+        if quote:
+            # The price for THIS recipient, asked for before the button is pressed.
+            other = User.objects.filter(username=quote).first()
+            cold = bool(other and other.id != me.id and is_cold(me, other))
+            return Response({"to": quote, "cold": cold,
+                             "cost_energy": DM_COLD_ENERGY if cold else 0,
+                             "energy": max(0, wallet_for(me).energy or 0)})
         peer = (request.query_params.get("with") or "").strip()
         if peer:
             other = User.objects.filter(username=peer).first()
@@ -73,9 +166,9 @@ class MessagesView(APIView):
             "conversations": list(convos.values()),
             "inbox": inbox,
             "sent": sent,
-            # DMs cost nothing here today. Reported so the client states the
-            # real price instead of assuming one.
-            "dm_cost_energy": 0,
+            # What opening a conversation with a stranger costs; replies and
+            # follow-ups are free. `?cost_for=<username>` quotes one recipient.
+            "dm_cost_energy": DM_COLD_ENERGY,
         })
 
     def post(self, request):
@@ -111,9 +204,58 @@ class MessagesView(APIView):
             return Response({"detail": "can't message yourself"}, status=status.HTTP_400_BAD_REQUEST)
         if other.id in blocked_user_ids(me):
             return Response({"detail": "You've blocked this user (or they blocked you)."}, status=status.HTTP_403_FORBIDDEN)
+        from .models import NO_CROSS_AGE_MESSAGE, may_message
+        if not may_message(me, other):
+            return Response({"detail": NO_CROSS_AGE_MESSAGE, "age_group": True}, status=status.HTTP_403_FORBIDDEN)
+        from .gates import reach_block
+        blocked = reach_block(me, other)
+        if blocked:
+            return Response(blocked, status=status.HTTP_403_FORBIDDEN)
         cap = limits_for(membership_for(me).tier)["char_limit"]
         if len(body) > cap:
             return Response({"detail": f"Message exceeds your {cap}-character limit — upgrade for more."}, status=status.HTTP_400_BAD_REQUEST)
-        m = Message.objects.create(sender=me, recipient=other, body=body, media_url=media_url, media_type=media_type)
+        # ZodiacZ — the Rooster speaks first. Both facts have to be read
+        # BEFORE the row exists: afterwards this conversation is never new and
+        # the distinct-recipient count is always one higher than the truth.
+        first_to_them = not Message.objects.filter(sender=me, recipient=other).exists()
+        spoken_to = (Message.objects.filter(sender=me)
+                     .values_list("recipient_id", flat=True).distinct().count())
+
+        # Answering somebody who messaged you first, when you never have.
+        # Read BEFORE the row exists, like `first_to_them` above and for the
+        # same reason: afterwards we have always spoken to them and the shape
+        # that pays is unrecognisable.
+        from . import karmaz
+        cold = karmaz.cold_reply(me, other) if first_to_them else None
+
+        # The charge and the message are one unit: a send that fails after the
+        # spend rolls the spend back, so a failed attempt is never charged.
+        price = DM_COLD_ENERGY if is_cold(me, other) else 0
+        with transaction.atomic():
+            if price and spend_energy(me, price, f"Message to @{other.username}",
+                                      app_key="messagez", target="messagez:compose") is None:
+                have = max(0, wallet_for(me).energy or 0)
+                return Response({
+                    "detail": f"Starting a conversation with someone new costs {price} ⚡ and you have {have}. "
+                              "Nothing was sent or charged. Replies are free.",
+                    "insufficient": True, "resource": "energy",
+                    "cost": {"resource": "energy", "amount": price},
+                    "energy_needed": price, "energy_available": have, "energy_short": price - have,
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+            m = Message.objects.create(sender=me, recipient=other, body=body, media_url=media_url, media_type=media_type)
+        if first_to_them:
+            from .signbonus import try_award
+            try_award(me, "first_message", stretch=spoken_to + 1 >= 3)
+        # Email BEFORE the notification is written: the "already told them"
+        # check reads unread notifications, and this message's own row would
+        # otherwise suppress its own email.
+        _email_new_message(other, me, body)
         notify(other, "message", f"@{me.username} messaged you 💬", actor=me, item_id=f"dm:{me.username}")
-        return Response(_msg(m, me), status=status.HTTP_201_CREATED)
+        # What it actually paid, on the reply that earned it. The gain half of
+        # the cost/gain rule: a reward the member never sees is a coincidence,
+        # and a coincidence changes nobody's behaviour.
+        body_out = _msg(m, me)
+        body_out["cost_energy"] = price
+        if cold and (cold.get("reply") or cold.get("capped")):
+            body_out["earned"] = cold
+        return Response(body_out, status=status.HTTP_201_CREATED)

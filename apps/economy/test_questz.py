@@ -265,17 +265,20 @@ class TheOnRampTests(Base):
     """What this is FOR: a member with no reach earns 0 ⚡/hour, and Energy is
     what the tools cost."""
 
-    def test_a_member_with_no_reach_earns_nothing_passively(self):
-        from apps.economy.models import energy_rate_per_hour
-        self.assertEqual(energy_rate_per_hour(self.me), 0)
+    def test_a_member_with_no_reach_still_earns_passively(self):
+        # Was `assertEqual(..., 0)`, which is what the app actually did and what
+        # made the hourly rate it published a zero on every new member's screen.
+        # ENERGY_FLOOR_PER_HOUR is the floor; reach is what lifts it.
+        from apps.economy.models import ENERGY_FLOOR_PER_HOUR, TIER_FREE, energy_rate_per_hour
+        self.assertEqual(energy_rate_per_hour(self.me), ENERGY_FLOOR_PER_HOUR[TIER_FREE])
 
     def test_the_milestones_alone_can_fund_a_real_start(self):
         once = [q for q in questz.QUESTS if q["scope"] == questz.ONCE]
         self.assertGreaterEqual(sum(q["energy"] for q in once), 900)
 
     def test_the_biggest_milestone_after_collab_is_the_one_that_ends_quests(self):
-        """Verifying reach switches on hourly Energy — so it is deliberately
-        worth more than any other one-off except a funded collab."""
+        """Verifying reach is what lifts hourly Energy off its floor — so it is
+        deliberately worth more than any other one-off except a funded collab."""
         once = {q["id"]: q["energy"] for q in questz.QUESTS if q["scope"] == questz.ONCE}
         others = [v for k, v in once.items() if k not in ("reach-verified", "first-collab")]
         self.assertGreater(once["reach-verified"], max(others))

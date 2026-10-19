@@ -6,14 +6,33 @@ plugins {
 // Where the app points. Override per build without editing the file:
 //   ./gradlew assembleRelease -PsiteUrl=https://staging.musicconnectz.net
 val siteUrl: String = (project.findProperty("siteUrl") as String?) ?: "https://musicconnectz.net"
-val siteHost: String = siteUrl.removePrefix("https://").removePrefix("http://").trimEnd('/')
+// BodieZ is its OWN site, not a path on the main one: the BodieZ-only build in
+// the frontend repo (`npm run build:bodiez`, hosted on its own origin). Chrome
+// verifies a TWA against the host it opens, so this app proves ownership of THIS
+// host and the main site's assetlinks.json is irrelevant to it.
+//   ./gradlew bundleBodiezRelease -PbodiezUrl=https://bodiez.example.net
+val bodiezUrl: String = (project.findProperty("bodiezUrl") as String?) ?: "https://bodiez.musicconnectz.net"
+// IntelligenceZ is its own site too, for the same reason: the IntelligenceZ-only
+// build in the frontend repo (`npm run build:intelligencez`, hosted on its own
+// origin) holds sign-in and four IntelligenceZ screens and nothing else. Pointing
+// this app at a path on musicconnectz.net would have inherited the profile,
+// orientation, substance and attractiveness-rating screens and the Premium
+// purchase flow, and a listing that says "write, chat, compose and master".
+//   ./gradlew bundleIntelligencezRelease -PintelligencezUrl=https://intelligencez.example.net
+val intelligencezUrl: String = (project.findProperty("intelligencezUrl") as String?) ?: "https://intelligencez.musicconnectz.net"
+// SkillZ is its own site as well: the SkillZ-only build in the frontend repo
+// (`npm run build:skillz`, hosted on its own origin) holds sign-in, the SkillZ hub
+// and the instrument coaches and nothing else — no profile, posting, distribution
+// or membership screens, and nothing it sells.
+//   ./gradlew bundleSkillzRelease -PskillzUrl=https://skillz.example.net
+val skillzUrl: String = (project.findProperty("skillzUrl") as String?) ?: "https://skillz.musicconnectz.net"
+fun hostOf(url: String): String = url.removePrefix("https://").removePrefix("http://").trimEnd('/')
 
 android {
     namespace = "net.musicconnectz.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "net.musicconnectz.app"
         // 26 = Android 8.0. Adaptive icons and Trusted Web Activity both need
         // it, and dropping below would mean shipping legacy icon PNGs to reach
         // a slice of devices that can't run a modern Chrome anyway.
@@ -22,16 +41,84 @@ android {
         versionCode = 1
         versionName = "1.0.0"
 
-        // Read by the manifest: the URL the TWA opens and the host whose links
-        // this app is allowed to capture.
-        manifestPlaceholders["siteUrl"] = siteUrl
-        manifestPlaceholders["siteHost"] = siteHost
+        // The manifest's `launchUrl` (what the TWA opens) and `siteHost` (whose
+        // links it may capture) are per flavor, below.
+    }
+
+    // Four apps from one project, one Play listing each. They share the Kotlin
+    // and differ in what a member sees before they open it — name, icon, splash —
+    // and in WHICH SITE they open.
+    //
+    //   mcz     Music ConnectZ — the whole platform, on musicconnectz.net.
+    //   bodiez  BodieZ         — the BodieZ-only build on its own origin. Same
+    //                            accounts and data, but the shell contains BodieZ
+    //                            and nothing else: not the profile, orientation,
+    //                            substance or attractiveness-rating screens that
+    //                            make the main app a Data safety / Families
+    //                            question, and not the Premium purchase flow that
+    //                            makes it a Play Billing one (frontend:
+    //                            play/bodiez/README.md). Pointing this at
+    //                            /bodie on the main site would have inherited
+    //                            every one of those.
+    //
+    //   intelligencez  IntelligenceZ — the IntelligenceZ-only build on its own
+    //                            origin: sign-in, a hub, and the four IntelligenceZ
+    //                            screens that stand alone (write, chat, compose,
+    //                            master). Nothing in it sells anything, which is
+    //                            what Play's billing rules require of an app that is
+    //                            not using Play Billing (frontend:
+    //                            play/intelligencez/README.md).
+    //
+    //   skillz  SkillZ         — the SkillZ-only build on its own origin: sign-in, the
+    //                            hub, and the seven instrument coaches (SingZ, RapZ,
+    //                            GuitarZ, BassZ, KeyZ, DrumZ, ViolinZ). The coaches record
+    //                            from the microphone and camera and send the take to an
+    //                            AI to be scored; nothing in it sells anything (frontend:
+    //                            play/skillz/README.md).
+    //
+    // Commands become assembleMczDebug / bundleBodiezRelease and so on; plain
+    // `bundleRelease` still builds all three.
+    flavorDimensions += "app"
+    productFlavors {
+        create("mcz") {
+            dimension = "app"
+            applicationId = "net.musicconnectz.app"
+            manifestPlaceholders["launchUrl"] = siteUrl
+            manifestPlaceholders["siteHost"] = hostOf(siteUrl)
+            // A first install of the whole platform opens OmviardZ's guided tour.
+            buildConfigField("boolean", "FIRST_LAUNCH_TOUR", "true")
+        }
+        create("bodiez") {
+            dimension = "app"
+            applicationId = "net.musicconnectz.bodiez"
+            manifestPlaceholders["launchUrl"] = bodiezUrl.trimEnd('/') + "/"
+            manifestPlaceholders["siteHost"] = hostOf(bodiezUrl)
+            // Someone who installed a fitness tracker is not here for a tour of
+            // a music platform, and the BodieZ-only shell has no tour to open.
+            buildConfigField("boolean", "FIRST_LAUNCH_TOUR", "false")
+        }
+        create("intelligencez") {
+            dimension = "app"
+            applicationId = "net.musicconnectz.intelligencez"
+            manifestPlaceholders["launchUrl"] = intelligencezUrl.trimEnd('/') + "/"
+            manifestPlaceholders["siteHost"] = hostOf(intelligencezUrl)
+            // The IntelligenceZ shell has no OmviardZ tour to open.
+            buildConfigField("boolean", "FIRST_LAUNCH_TOUR", "false")
+        }
+        create("skillz") {
+            dimension = "app"
+            applicationId = "net.musicconnectz.skillz"
+            manifestPlaceholders["launchUrl"] = skillzUrl.trimEnd('/') + "/"
+            manifestPlaceholders["siteHost"] = hostOf(skillzUrl)
+            // The SkillZ shell has no OmviardZ tour to open.
+            buildConfigField("boolean", "FIRST_LAUNCH_TOUR", "false")
+        }
     }
 
     signingConfigs {
         // Release signing comes from the environment so no keystore is ever
-        // committed. Unset locally -> the release build stays unsigned and
-        // Play's upload flow (or CI) signs it.
+        // committed. Unset -> the release build is unsigned, which is fine to
+        // look at and which Play Console refuses to accept as an upload.
         create("release") {
             val store = System.getenv("ANDROID_KEYSTORE_PATH")
             if (!store.isNullOrBlank() && file(store).exists()) {
@@ -70,22 +157,33 @@ android {
     }
 }
 
-// The asset_statements string in strings.xml has to name the same site the TWA
-// opens. Android can't nest string resources, so the URL is duplicated there —
-// this fails the build the moment the two drift, instead of shipping an app
-// that quietly shows a URL bar.
+// Each app's asset_statements string has to name the same site that app opens.
+// Android can't nest string resources, so the URL is duplicated there — this
+// fails the build the moment the two drift, instead of shipping an app that
+// quietly shows a URL bar. Per flavor, because they open different sites: the
+// bodiez, intelligencez and skillz source sets override main's string with their own.
 val checkAssetStatements by tasks.registering {
-    val strings = file("src/main/res/values/strings.xml")
-    inputs.file(strings)
+    val checks = mapOf(
+        "src/main/res/values/strings.xml" to siteUrl,
+        "src/bodiez/res/values/strings.xml" to bodiezUrl.trimEnd('/'),
+        "src/intelligencez/res/values/strings.xml" to intelligencezUrl.trimEnd('/'),
+        "src/skillz/res/values/strings.xml" to skillzUrl.trimEnd('/'),
+    )
+    checks.keys.forEach { inputs.file(file(it)) }
     inputs.property("siteUrl", siteUrl)
+    inputs.property("bodiezUrl", bodiezUrl)
+    inputs.property("intelligencezUrl", intelligencezUrl)
+    inputs.property("skillzUrl", skillzUrl)
     outputs.upToDateWhen { true }
     doLast {
-        if (!strings.readText().contains(siteUrl)) {
-            throw GradleException(
-                "asset_statements in ${strings.name} does not mention $siteUrl. " +
-                    "Update the <string name=\"asset_statements\"> site value to match, " +
-                    "or build with -PsiteUrl=<the url that string names>."
-            )
+        checks.forEach { (path, url) ->
+            if (!file(path).readText().contains(url)) {
+                throw GradleException(
+                    "asset_statements in $path does not mention $url. " +
+                        "Update the <string name=\"asset_statements\"> site value to match, " +
+                        "or build with -PsiteUrl / -PbodiezUrl / -PintelligencezUrl / -PskillzUrl set to the url that string names."
+                )
+            }
         }
     }
 }

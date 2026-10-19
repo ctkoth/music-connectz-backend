@@ -36,6 +36,14 @@ class OAuthIdentity(models.Model):
     provider = models.CharField(max_length=20)
     provider_uid = models.CharField(max_length=191)
     email = models.EmailField(blank=True, default="")
+    # Whether the PROVIDER vouched for `email` when this identity was linked or
+    # last signed in. It is the difference between two accounts that share an
+    # address and two accounts that share an inbox: an unconfirmed address is a
+    # string somebody typed into a provider, and DupeZ lets a shared one close an
+    # account (`dupez.has_proof`). False for everything linked before this
+    # column existed, which is the safe answer — "we cannot say" never counts as
+    # proof — and a member's next sign-in with that provider upgrades it.
+    email_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

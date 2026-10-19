@@ -1,5 +1,5 @@
 """
-Server-side OAuth verification for Google, GitHub, and Apple.
+Server-side OAuth verification for Google and GitHub.
 
 Each verifier returns a normalized dict:
     {"provider", "uid", "email", "name", "avatar_url"}
@@ -8,7 +8,10 @@ or raises OAuthError with a user-safe message.
 Env vars expected (set on Render):
     GOOGLE_OAUTH_CLIENT_ID
     GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET
-    APPLE_OAUTH_CLIENT_ID         (the Services ID / audience)
+
+    APPLE_OAUTH_CLIENT_ID  (the Services ID, e.g. net.musicconnectz.signin)
+
+Use OAUTH2_PROVIDERS for Spotify, SoundCloud, etc.
 """
 import os
 
@@ -86,12 +89,29 @@ def exchange_github(code: str, redirect_uri: str = ""):
         )
     except requests.RequestException:
         raise OAuthError("Could not reach GitHub to verify sign-in.")
-    token = token_resp.json().get("access_token")
+    try:
+        body = token_resp.json() or {}
+    except ValueError:
+        body = {}
+    token = body.get("access_token")
     if not token:
-        raise OAuthError("GitHub did not return an access token.")
+        # GitHub answers a refused exchange with 200 and an error_description
+        # ("redirect_uri MUST match...", "code ... incorrect or expired",
+        # "client_id and/or client_secret passed are incorrect"). Say it: the
+        # reason is the whole fix, and a generic line sent this to guesswork.
+        why = (body.get("error_description") or body.get("error") or "").strip()
+        raise OAuthError(
+            f"GitHub did not return an access token: {why}" if why
+            else "GitHub did not return an access token."
+        )
 
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
-    user = requests.get("https://api.github.com/user", headers=headers, timeout=10).json()
+    try:
+        user = requests.get("https://api.github.com/user", headers=headers, timeout=10).json()
+    except (requests.RequestException, ValueError):
+        raise OAuthError("Could not load your GitHub profile.")
+    if not isinstance(user, dict):
+        user = {}
 
     # A malformed/error response would otherwise sail through as uid "None",
     # which every failed sign-in would then share.
@@ -193,7 +213,7 @@ OAUTH2_PROVIDERS = {
                           "name": u.get("displayName") or "", "avatar_url": ""},
     },
     "facebook": {
-        "token_url": "https://graph.facebook.com/v18.0/oauth/access_token",
+        "token_url": "https://graph.facebook.com/v23.0/oauth/access_token",
         "userinfo_url": "https://graph.facebook.com/me?fields=id,name,email,picture.type(large)",
         "map": lambda u: {"uid": str(u.get("id")), "email": (u.get("email") or ""),
                           "name": u.get("name") or "",
@@ -231,8 +251,10 @@ OAUTH2_PROVIDERS = {
 def provider_requirements():
     needs = {
         "google": ("GOOGLE_OAUTH_CLIENT_ID",),          # ID token, verified by audience
-        "apple": ("APPLE_OAUTH_CLIENT_ID",),            # Services ID = the audience
         "github": ("GITHUB_OAUTH_CLIENT_ID", "GITHUB_OAUTH_CLIENT_SECRET"),
+        # Apple JS popup returns an identity token verified against our Services
+        # ID, so the ID is the only setting it needs. Unset = no button.
+        "apple": ("APPLE_OAUTH_CLIENT_ID",),
     }
     for name in OAUTH2_PROVIDERS:
         needs[name] = (f"{name.upper()}_OAUTH_CLIENT_ID",
@@ -265,9 +287,20 @@ def provider_status(value=None):
     return out
 
 
-def exchange_oauth2(provider: str, code: str, redirect_uri: str = "", code_verifier: str = ""):
-    """Swap an authorization `code` for an access token, then load + normalize
-    the member's profile. Used for every standard code-flow provider."""
+def access_token_for(provider: str, code: str, redirect_uri: str = "", code_verifier: str = ""):
+    """Swap an authorization `code` for the provider's raw access token.
+
+    Split out of `exchange_oauth2` so the two things that need a token share
+    one exchange. Sign-in wants the PROFILE behind the token and drops the
+    token; the SoundCloud importer wants the token itself, uses it once and
+    drops it. A second copy of this would be a second place the client secret,
+    the Basic-vs-body auth split and the PKCE verifier all have to stay right.
+
+    The token is RETURNED, never stored. Nothing in this codebase persists a
+    provider access token: holding a live credential that can post and delete
+    on somebody's SoundCloud turns a database breach into somebody else's music
+    being deleted, and no feature here is worth that.
+    """
     cfg = OAUTH2_PROVIDERS.get(provider)
     if not cfg:
         raise OAuthError(f"Unsupported provider '{provider}'.")
@@ -295,23 +328,60 @@ def exchange_oauth2(provider: str, code: str, redirect_uri: str = "", code_verif
 
     try:
         token_resp = requests.post(cfg["token_url"], data=body, headers=headers, auth=auth, timeout=10)
-        token = (token_resp.json() or {}).get("access_token")
+        reply = token_resp.json() or {}
+        token = reply.get("access_token")
     except requests.RequestException:
         raise OAuthError(f"Could not reach {provider.title()} to verify sign-in.")
     except ValueError:
         raise OAuthError(f"{provider.title()} returned an unexpected token response.")
     if not token:
-        raise OAuthError(f"{provider.title()} did not return an access token.")
+        # The provider says why (invalid_client, redirect_uri mismatch, expired
+        # code, an AADSTS code...) and that sentence is the whole fix. First
+        # line only: Microsoft appends trace/correlation IDs on later lines.
+        why = reply.get("error_description") or reply.get("error") or ""
+        if isinstance(why, dict):
+            why = why.get("message") or ""
+        why = str(why).strip().splitlines()[0][:300] if str(why).strip() else ""
+        raise OAuthError(
+            f"{provider.title()} did not return an access token: {why}" if why
+            else f"{provider.title()} did not return an access token."
+        )
+    return token
+
+
+def exchange_oauth2(provider: str, code: str, redirect_uri: str = "", code_verifier: str = ""):
+    """Swap an authorization `code` for the member's normalized profile.
+
+    The token is used to read the profile and then goes out of scope here —
+    sign-in never needs it again.
+    """
+    cfg = OAUTH2_PROVIDERS.get(provider)
+    if not cfg:
+        raise OAuthError(f"Unsupported provider '{provider}'.")
+    token = access_token_for(provider, code, redirect_uri, code_verifier)
 
     try:
-        profile = requests.get(
+        resp = requests.get(
             cfg["userinfo_url"], headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, timeout=10
-        ).json()
+        )
+        profile = resp.json()
     except (requests.RequestException, ValueError):
         raise OAuthError(f"Could not load your {provider.title()} profile.")
+    if resp.status_code != 200 or not isinstance(profile, dict):
+        # Spotify answers 403 here for anybody not on a development-mode app's
+        # allowlist; say so rather than a generic failure.
+        why = ""
+        if isinstance(profile, dict):
+            err = profile.get("error")
+            why = (err.get("message") if isinstance(err, dict) else err) or profile.get("message") or ""
+        raise OAuthError(f"{provider.title()} refused to share your profile"
+                         + (f": {str(why)[:200]}" if why else "."))
 
-    info = cfg["map"](profile or {})
-    if not info.get("uid"):
+    info = cfg["map"](profile)
+    # str(None) is "None" — truthy — so a profile with no id used to become
+    # the identity "None", shared by every sign-in whose profile came back
+    # empty. One person's account handed to the next.
+    if str(info.get("uid") or "").strip() in ("", "None", "null"):
         raise OAuthError(f"{provider.title()} did not return a user id.")
     info["provider"] = provider
     info["email"] = (info.get("email") or "").lower()

@@ -212,7 +212,7 @@ class DestinationListTests(TestCase):
 
     def test_the_free_doors_say_free(self):
         p = self.post_with(media_type="audio", media_url="/media/uploads/1/take.webm")
-        for app in ("collabz", "playlistz", "battlez", "occ", "directz"):
+        for app in ("collabz", "playlistz", "battlez", "occ", "distributez"):
             self.assertEqual(find(self.dests(p), app)["cost"]["amount"], 0)
 
     # ---- doors that are honestly shut ----
@@ -225,7 +225,7 @@ class DestinationListTests(TestCase):
     def test_a_release_is_the_authors_to_start(self):
         p = self.post_with(author=self.them, media_type="audio",
                            media_url="/media/uploads/2/take.webm")
-        d = find(self.dests(p), "directz")
+        d = find(self.dests(p), "distributez")
         self.assertFalse(d["available"])
         self.assertIn("your own post", d["needs"][0])
 
@@ -234,7 +234,7 @@ class DestinationListTests(TestCase):
         p = self.post_with(author=self.them, media_type="audio",
                            media_url="/media/uploads/2/take.webm",
                            contributors=[{"username": "maker", "slot": "audio"}])
-        self.assertTrue(find(self.dests(p), "directz")["available"])
+        self.assertTrue(find(self.dests(p), "distributez")["available"])
 
     # ---- what travels with the post ----
     def test_the_post_travels_with_its_work_so_nothing_is_reattached(self):
@@ -275,9 +275,16 @@ class DestinationListTests(TestCase):
         the same number on all of them — so it is read ONCE for the request.
 
         Counted as the DIFFERENCE between a short feed and a long one rather
-        than as an absolute: the feed has its own per-row queries that predate
-        this, and pinning a total here would make an unrelated change to them
-        look like a regression in the destination list.
+        than as an absolute: pinning a total here would make an unrelated
+        change look like a regression in the destination list.
+
+        That difference used to be TWO per post — the share count and the
+        rating median, which this test called out as predating it. Both are
+        batched now (`test_feed_cost`), so it is ZERO: a feed that costs the
+        same for four posts and for twelve. That is also the only version of
+        this assertion that cannot rot, since the old one would have gone
+        green again the moment somebody added an N+1 of exactly the right
+        size.
         """
         # One warm-up: the day's prompt counter rolls over on first read and
         # writes once, which would otherwise land in whichever measurement
@@ -294,9 +301,9 @@ class DestinationListTests(TestCase):
             return len(ctx)
 
         four, twelve = queries_for(4), queries_for(12)
-        # Two per post already: the share count and the rating median. Anything
-        # more would mean the price is being re-read per card.
-        self.assertEqual(twelve - four, 2 * (12 - 4))
+        self.assertEqual(twelve - four, 0,
+                         "eight more posts must cost nothing — anything here "
+                         "means something is being read per card again")
 
 
 class CoachThePostTests(TestCase):

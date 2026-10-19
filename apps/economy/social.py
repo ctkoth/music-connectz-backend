@@ -12,8 +12,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .audience import Audience
+from .visibility import can_see, redact
 from .models import (
     apply_post_rating,
+    public_name,
     AttractivenessRating,
     adult_only_reason,
     is_minor,
@@ -30,7 +33,10 @@ from .models import (
     Venue,
     VenueAttendance,
     attractiveness_median,
+    attractiveness_medians,
+    attractiveness_shown_medians,
     overall_median,
+    overall_medians,
     face_median,
     membership_for,
     pay_between,
@@ -38,9 +44,11 @@ from .models import (
     haversine_km,
     Follow,
     follow_counts,
+    follow_edges_for,
     relationship,
     energy_rate_per_hour,
     notify,
+    spend_energy,
     post_interaction_block,
     reward_for_rating,
     Post,
@@ -50,11 +58,21 @@ from .models import (
     Badge,
     badge_effects,
     recheck_badges,
+    may_be_explicit,
+    chinese_zodiac_for,
+    zodiac_for,
+    ListenProgress, record_listen, LISTEN_REQUIRED_SEC,
 )
 from .badgez import worn_badges, worn_badges_by_user
-from .catalog import over_char_limit
+from .catalog import AVATAR_MAX_MB, limits_for, over_char_limit
 from .gates import GATE_KEYS, clean_gates, failing_gate, member_metrics, refusal
 from .serializers import WalletSerializer
+from .personaz import clean_link, clean_persona, links_of, personas_of
+from .personalityz import (AXES as PERSONALITY_AXES, as_dict as personality_dict,
+                           clean_code as clean_personality, filter_reason,
+                           matches as personality_matches, wanted_from)
+from .religionz import clean_religion
+from .languagez import clean_languages
 
 User = get_user_model()
 VALID_TYPES = {"party", "openmic", "theater", "show", "custom"}
@@ -249,11 +267,20 @@ class FaceZView(APIView):
 
     def get(self, request):
         mine = [_face_dict(f, request) for f in request.user.faces.all()[:100]]
-        feed = [
+        # The feed is faces to RATE, which is rating people on looks — the
+        # same adult-only surface as AttractivenessRateView. It had no wall:
+        # a minor could rate strangers' faces and a minor's face sat in every
+        # stranger's feed. Both directions are closed now, exactly as there.
+        why = adult_only_reason(request.user)
+        feed = [] if why else [
             _face_dict(f, request)
-            for f in Face.objects.exclude(owner=request.user).select_related("owner").order_by("-created_at")[:60]
-        ]
-        return Response({"mine": mine, "feed": feed})
+            for f in Face.objects.exclude(owner=request.user).select_related("owner", "owner__mcz_profile")
+                                 .order_by("-created_at")[:120]
+            if not is_minor(f.owner)
+        ][:60]
+        from .ratez import rating_reward
+        return Response({"mine": mine, "feed": feed, "feed_locked": why,
+                         "rating_reward": rating_reward(request.user)})
 
     def post(self, request):
         img = request.FILES.get("image")
@@ -292,6 +319,11 @@ class FaceRateView(APIView):
             return Response({"detail": "face not found"}, status=status.HTTP_404_NOT_FOUND)
         if f.owner_id == request.user.id:
             return Response({"detail": "can't rate your own face"}, status=status.HTTP_400_BAD_REQUEST)
+        # Rating a face is rating somebody on looks: adults only, both ends.
+        for who in (request.user, f.owner):
+            reason = adult_only_reason(who)
+            if reason:
+                return Response({"detail": reason, "adult_only": True}, status=status.HTTP_403_FORBIDDEN)
         try:
             score = int(request.data.get("score"))
         except (TypeError, ValueError):
@@ -312,31 +344,11 @@ class FaceRateView(APIView):
 # always read; the UI was sending a bare list of keys, so `subs.get(k)` hit a
 # list and answered AttributeError — a 500 on Social ConnectZ for anyone who
 # had saved SubstanceZ at all.
-STANCES = ("sometimes", "often")
-# Selections made before frequency existed. Kept distinct rather than guessed
-# into a frequency: we know they picked it, we do not know how often.
-STANCE_LEGACY = "yes"
-ACTIVE_STANCES = {"use", "sometimes", "often", STANCE_LEGACY}
-
-
-def clean_substances(value):
-    """Normalize whatever the client sent into {key: stance}.
-
-    Accepts the current dict form and the legacy list form, so an older client
-    keeps working and an already-saved list is repaired on the next write.
-    """
-    if isinstance(value, dict):
-        out = {}
-        for k, v in list(value.items())[:40]:
-            key = str(k)[:40]
-            stance = str(v or "").lower()
-            if not key:
-                continue
-            out[key] = stance if stance in STANCES else STANCE_LEGACY
-        return out
-    if isinstance(value, list):
-        return {str(k)[:40]: STANCE_LEGACY for k in value[:40] if str(k)}
-    return {}
+#
+# The list, the frequency scale and the cleaner live in substancez.py and are
+# re-exported here so the names this module always had keep working.
+from .substancez import (ACTIVE_STANCES, STANCE_LEGACY, STANCES, clean_substances,  # noqa: E402,F401
+                         visible_substances, within as substance_within)
 
 
 # ---- Cross-user profiles ----
@@ -347,7 +359,148 @@ ADULT_ONLY_PROFILE_FIELDS = ("attracted_to", "asexual")
 PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign",
                   "nationalities", "regions", "substances", "sober",
                   "attracted_to", "asexual", "traits", "personas", "links",
-                  "external_followers")
+                  "external_followers", "personality", "religion", "languages",
+                  "pronouns", "headline", "genres", "influences", "gear", "label",
+                  "timezone", "pinned_post_id", "cover_url")
+
+
+# Everything in PROFILE_FIELDS used to be written STRAIGHT off the request
+# body — `setattr(p, f, d[f])`, with `substances` the single exception. That is
+# the writer that produced "{'name': 'Independent Artist', 'emoji': '🎤',
+# 'skills': []}" as the name of somebody's persona: `/api/auth/me/` normalizes
+# a persona and this endpoint did not, so whichever client used this door wrote
+# whatever it happened to be holding, and the profile column kept it.
+#
+# Three other things rode in through the same gap, and each is worse than the
+# one that got noticed:
+#
+#   * `links` is rendered as `<a href>` on the member card AND on the
+#     logged-out public profile. An unvalidated URL there is a stored
+#     `javascript:` waiting for the next person to open somebody's page —
+#     React warns about it and still puts it in the DOM.
+#   * Nothing capped a list, so a profile row could be made arbitrarily large,
+#     and that row is serialized into every member card and search result.
+#   * `birthday` set here skipped the zodiac recompute and the explicit-voice
+#     revocation that the same edit performs on `/api/auth/me/`, so the sign
+#     went stale and a stored `voice_explicit` outlived the birthday that
+#     justified it. (The READ still re-applies the age gate, which is why that
+#     one was contained rather than exploitable — but a second writer that
+#     forgets what the first one does is a bug that only stays contained by
+#     luck.)
+#
+# One cleaner per field, in the one place both writers can reach.
+# Bounds the work one request can ask of the cleaner. Not a tier: see `links_over_cap`.
+LINKS_CEILING = 1000
+
+
+def links_over_cap(user, current, new):
+    """The ceiling `new` breaks for this member, or None if the list fits.
+
+    The ceiling is the tier's `profile_links`, or what the member ALREADY holds if
+    that is more — so a number moving never takes a link away, it only stops more
+    being added. (It was a silent 50 before; somebody may hold 50 on a tier that now
+    says 25.) Editing, reordering and removing are always allowed, because a list
+    that is no longer than the one stored can never be refused.
+    """
+    cap = limits_for(membership_for(user).tier)["profile_links"]
+    allowed = max(cap, len(current or []))
+    return None if len(new) <= allowed else allowed
+
+
+def _links_ceiling(p):
+    """What the owner of this profile is told about their portfolio's ceiling."""
+    tier_cap = limits_for(membership_for(p.user).tier)["profile_links"]
+    return {"links_limit": max(tier_cap, len(links_of(p))), "links_tier_cap": tier_cap}
+
+
+def clean_profile_field(field, value):
+    """The stored form of one PROFILE_FIELDS value, from whatever came in."""
+    if field == "substances":
+        return clean_substances(value)
+    if field == "personas":
+        return [clean_persona(x) for x in value][:50] if isinstance(value, list) else []
+    if field == "links":
+        if not isinstance(value, list):
+            return []
+        # A hard ceiling on what ONE request may make the cleaner chew through,
+        # well above every tier. What a member may actually HOLD is
+        # `links_over_cap`, which knows the tier; this only bounds the work.
+        return [l for l in (clean_link(x) for x in value[:LINKS_CEILING]) if l]
+    if field in ("nationalities", "regions", "traits", "attracted_to"):
+        return [str(x)[:60] for x in value][:30] if isinstance(value, list) else []
+    if field == "personality":
+        # One cleaner, reached by both writers. It takes the code or a
+        # per-axis dict and never refuses a save — an unrecognised letter
+        # becomes "hasn't said" rather than 400ing a profile edit.
+        return clean_personality(value)
+    if field == "religion":
+        # Same rule: an unrecognised key becomes "hasn't said" rather than
+        # 400ing a profile edit. See religionz.py.
+        return clean_religion(value)
+    if field == "languages":
+        # A list rather than one value — a member commonly speaks several.
+        # Unrecognised entries drop rather than refusing the whole save.
+        return clean_languages(value)
+    if field == "asexual":
+        return bool(value)
+    if field == "external_followers":
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+    if field == "birthday":
+        # Recomputed below alongside `sign`, so the two cannot disagree.
+        return str(value or "").strip()[:10] if isinstance(value, str) else ""
+    if field in ("display_name", "location", "gender", "sign"):
+        return str(value or "")[:120]
+    if field in ("pronouns", "headline", "label", "timezone"):
+        cap = {"pronouns": 24, "headline": 100, "label": 100, "timezone": 48}[field]
+        text = " ".join(str(value or "").split())[:cap]
+        if field == "timezone":
+            import re
+            return text if re.fullmatch(r"[A-Za-z_]+(/[A-Za-z0-9_+\-]+){0,2}", text or "-") else ""
+        return text
+    if field in ("genres", "influences", "gear"):
+        cap = {"genres": 8, "influences": 12, "gear": 20}[field]
+        out, seen = [], set()
+        for x in (value if isinstance(value, list) else []):
+            t = " ".join(str(x).split())[:60]
+            if t and t.lower() not in seen:
+                seen.add(t.lower()); out.append(t)
+        return out[:cap]
+    if field == "pinned_post_id":
+        try:
+            return int(value) if value not in (None, "", 0, "0") else None
+        except (TypeError, ValueError):
+            return None
+    if field == "cover_url":
+        # Only one of our own uploads, so a profile can't frame an outside page.
+        # The upload endpoint answers with an ABSOLUTE url (the frontend is on
+        # another origin), so keep only the path and rebuild the host on read.
+        from urllib.parse import urlparse
+        raw = str(value or "").strip()
+        u = urlparse(raw)
+        if u.scheme not in ("", "http", "https"):
+            return ""
+        path = u.path[:300]
+        return path if path.startswith("/api/economy/media/") else ""
+    return value
+
+
+def cover_abs(path, request=None):
+    """A stored cover path, absolute when a request is there to say the host."""
+    if not path:
+        return ""
+    return request.build_absolute_uri(path) if request is not None else path
+
+
+def _pinned(p):
+    """The member's pinned post, only while it is theirs and still public."""
+    if not p.pinned_post_id:
+        return None
+    post = Post.objects.filter(pk=p.pinned_post_id, author_id=p.user_id,
+                               visibility="public").values("id", "title").first()
+    return post
 
 
 def _avatar_url(p, request):
@@ -447,9 +600,7 @@ def profile_skill_rate(p, pick=min):
     honest answer is their cheapest skill, not their dearest.
     """
     rates = []
-    for persona in (p.personas or []):
-        if not isinstance(persona, dict):
-            continue
+    for persona in personas_of(p):
         for s in (persona.get("skills") or []):
             if isinstance(s, dict) and s.get("rate_cents"):
                 try:
@@ -463,14 +614,12 @@ def profile_max_experience(p):
     """A member's greatest skill experience in years — max over every skill's
     summed stints. None when nothing is dated."""
     best = None
-    for persona in (p.personas or []):
-        # A persona is either {"key", "name", "skills": [...]} or, from before
-        # the skill picker existed, a bare key string. The string form carries
-        # no dates and simply doesn't count — but calling .get() on it raised
-        # AttributeError, and this runs inside _profile_card, so viewing ANY
-        # member who had picked a PersonaZ answered 500.
-        if not isinstance(persona, dict):
-            continue
+    # A persona is either {"key", "name", "skills": [...]} or, from before the
+    # skill picker existed, a bare key string; `personas_of` turns both — and
+    # the printed-dict form that a since-fixed writer left behind — into the
+    # one shape. Skipping the non-dicts here instead is what threw this
+    # member's dated skills away, silently, on the metric that measures them.
+    for persona in personas_of(p):
         for skill in (persona.get("skills") or []):
             yrs = _skill_years(skill)
             if yrs is not None and (best is None or yrs > best):
@@ -478,33 +627,75 @@ def profile_max_experience(p):
     return best
 
 
-def _profile_card(p, request=None, badges=None):
+def _profile_card(p, request=None, badges=None, audience=None, batched=None):
     """Compact card for search results.
 
     `badges` lets a listing pass in rows it has already loaded in bulk; left
     alone, the card fetches its own.
     """
     m = getattr(p.user, "membership", None)
-    return {
+    # Built whole, then redacted in one pass — see `visibility.redact`. Doing it
+    # per key here would mean a field added below is exposed until somebody
+    # remembers to guard it, which is how a privacy control rots.
+    viewer = getattr(request, "user", None) if request else None
+    # `batched` is the whole page's numbers, fetched once by MembersView.
+    # Without it each card was six queries of its own — two rating medians,
+    # a FaceZ join, a membership read and two follow counts — and the search
+    # walks up to 500 profiles. Measured at 8.3 queries per member.
+    #
+    # None means "nobody batched for me", which is right for the single-card
+    # callers (a public profile, a member modal): one card's six queries is
+    # not worth a batching call site.
+    b = batched or {}
+    _attractiveness = (b["attract"].get(p.user_id) if "attract" in b
+                       else attractiveness_shown_medians([p.user_id]).get(p.user_id))
+    return redact({
         "username": p.user.username,
         "display_name": p.display_name or p.user.username,
+        "real_name": public_name(p, viewer, audience),
         "avatar": _avatar_url(p, request) if request else None,
         "gender": p.gender,
         "sign": p.sign,
+        # Derived from the birthday on read rather than stored beside it. A
+        # second column would need every writer of `birthday` to remember it —
+        # which is exactly how `sign` itself got out of step once already (see
+        # the two-writers note in CLAUDE.md).
+        "sign_cn": chinese_zodiac_for(p.birthday),
         "regions": p.regions,
         "nationalities": p.nationalities,
-        # Social ConnectZ's directory renders a persona label + city per card,
-        # same as the full profile does — leaving these off the compact card
-        # meant the search list either showed nothing real for either, or had
-        # to fake them (which is how the demo SEED array in the frontend
-        # happened in the first place).
+        # Social ConnectZ's directory renders a persona label + city per
+        # card, same as the full profile does — leaving these off the
+        # compact card meant the search list either showed nothing real for
+        # either, or had to fake them (which is how the demo SEED array in
+        # the frontend happened in the first place). personas_of repairs a
+        # mangled row the same way it does everywhere else personas are read
+        # (see personaz.py and the two-writers note in CLAUDE.md).
         "location": p.location,
-        "personas": p.personas,
+        "personas": personas_of(p),
         "sober": p.sober,
+        # The code AND the per-axis form, because the profile screen renders
+        # four toggles and the card renders one string. Neither should have to
+        # re-derive the other, and a client splitting the letters itself would
+        # be the second place the slot order lives.
+        "personality": p.personality,
+        "personality_axes": personality_dict(p.personality),
+        "religion": p.religion,
+        "languages": p.languages,
+        "pronouns": p.pronouns, "headline": p.headline, "genres": p.genres,
+        "influences": p.influences, "gear": p.gear, "label": p.label,
+        "timezone": p.timezone, "cover_url": cover_abs(p.cover_url, request),
+        # Only on a single card (batched is None) — the member search would
+        # pay one query per row for it.
+        "pinned_post": _pinned(p) if batched is None else None,
         "attracted_to": p.attracted_to,
-        "median": attractiveness_median(p.user),
-        "attractiveness": attractiveness_median(p.user),
-        "overall": overall_median(p.user),
+        # ONE call, two keys. These are the same number under two names —
+        # older clients read `median`, newer ones `attractiveness` — and
+        # computing it twice was a second query per card on a screen that
+        # renders up to five hundred of them.
+        "median": _attractiveness,
+        "attractiveness": _attractiveness,
+        "overall": (b["overall"].get(p.user_id) if "overall" in b
+                    else overall_median(p.user)),
         "age": profile_age(p),
         "shares_location": bool(p.share_location and p.lat is not None and p.lng is not None),
         "tier": m.tier if m else "free",
@@ -517,8 +708,8 @@ def _profile_card(p, request=None, badges=None):
         # profile is the surface that switch exists to control.
         "badge_title": p.badge_title,
         "badges": worn_badges(p.user, badges),
-        **follow_counts(p.user),
-    }
+        **follow_counts(p.user, edges=b["edges"].get(p.user_id) if "edges" in b else None),
+    }, p, viewer, audience)
 
 
 def _profile_full(p, request, recheck=False):
@@ -541,12 +732,17 @@ def _profile_full(p, request, recheck=False):
     card.update({
         "bio": p.bio, "location": p.location, "birthday": p.birthday,
         "substances": p.substances, "asexual": p.asexual, "traits": p.traits,
-        "personas": p.personas, "links": p.links, "mine": mine,
+        "personas": personas_of(p), "links": links_of(p), "mine": mine,
         "my_attractiveness": AttractivenessRating.objects.filter(rater=request.user, target=p.user).values_list("score", flat=True).first(),
         "my_overall": OverallRating.objects.filter(rater=request.user, target=p.user).values_list("score", flat=True).first(),
         "overall_count": OverallRating.objects.filter(target=p.user).count(),
         "relationship": relationship(request.user, p.user),
         "energy_per_hour": energy_rate_per_hour(p.user) if mine else None,
+        # The portfolio's ceiling, stated to its owner before they add anything.
+        # `links_limit` is what they may hold NOW (their tier's, or what they
+        # already have if that is more — see links_over_cap); `links_tier_cap` is
+        # the tier's own number, so the screen can say when somebody is over it.
+        **(_links_ceiling(p) if mine else {}),
         "verified_18plus": p.verified_18plus,
         # What the badges on this card add up to — yours only. An effect total
         # is a read of somebody's economy, not a thing to publish about them.
@@ -559,7 +755,33 @@ def _profile_full(p, request, recheck=False):
         # so the card carries the way there.
         "badges_open_in": "badgez",
     })
+    # The keys added just above (substances, birthday, location) went on AFTER
+    # `_profile_card` ran `redact`, so for anybody who was not the owner they
+    # were served whatever the member's settings said — `substances` is
+    # PRIVATE by default and was readable by every signed-in member, a minor
+    # included, with its frequencies. Redact the finished card again.
+    redact(card, p, request.user)
+    if not mine and "substances" in card:
+        # …and the wall, which can_see does not know about.
+        card["substances"] = visible_substances(p, request.user)
     return card
+
+
+def _post_author_id(item):
+    """Whose post this item is, or None when it is not a post.
+
+    Needed because a comment on your OWN post earns nothing — the blueprint
+    says "on another user's post" and means it, and paying somebody to talk to
+    themselves is the faucet with no disguise. Read once per request rather
+    than once per comment.
+    """
+    if not str(item or "").startswith("post:"):
+        return None
+    try:
+        return (Post.objects.filter(pk=int(str(item).split(":", 1)[1]))
+                .values_list("author_id", flat=True).first())
+    except (ValueError, IndexError):
+        return None
 
 
 class SocialView(APIView):
@@ -572,16 +794,62 @@ class SocialView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    def _comment_quote(self, item, user):
+        """What commenting costs THIS member on THIS item, before they press it.
+
+        Your own post is always free (answering your commenters), and so are the
+        first COMMENT_FREE_PER_DAY comments of the day anywhere; after that each
+        costs COMMENT_ENERGY. Edits are never charged."""
+        from datetime import timedelta
+        from django.utils import timezone
+        from .catalog import COMMENT_ENERGY, COMMENT_FREE_PER_DAY
+        own = False
+        if item.startswith("post:"):
+            try:
+                own = Post.objects.filter(pk=int(item.split(":", 1)[1]), author_id=user.id).exists()
+            except ValueError:
+                pass
+        today = timezone.now() - timedelta(hours=24)
+        used = SocialComment.objects.filter(user=user, created_at__gte=today).count()
+        free_left = max(0, COMMENT_FREE_PER_DAY - used)
+        return {"comment_cost_energy": 0 if (own or free_left) else COMMENT_ENERGY,
+                "comment_free_left": free_left, "comment_free_per_day": COMMENT_FREE_PER_DAY}
+
     def _payload(self, item, request):
         ups = Reaction.objects.filter(item_id=item, value=1).count()
         downs = Reaction.objects.filter(item_id=item, value=-1).count()
         mine = Reaction.objects.filter(item_id=item, user=request.user).first()
+        from . import karmaz
+        rows = list(SocialComment.objects.filter(item_id=item).select_related("user")[:100])
+        ids = [c.id for c in rows]
+        # An hour after a comment lands, the votes on it decide what it paid
+        # its author. Settled here, lazily, on the same read that shows it —
+        # the shape `collab.maybe_auto_release` uses, and for the same reason:
+        # a member must never be left waiting on a cron nobody is watching.
+        # `manage.py settle_comment_karma` is the sweep for comments nobody
+        # happens to open.
+        karmaz.settle_visible(rows, post_author_id=_post_author_id(item))
+        # Two queries for the whole list rather than two per comment. A
+        # hundred comments must not be two hundred lookups on a feed read,
+        # which is the rule the feed's own query-count test already holds.
+        karma = karmaz.karma_map(ids)
+        my_votes = karmaz.my_votes(request.user, ids)
         comments = [
             {"id": c.id, "user": c.user.username, "body": c.body, "at": c.created_at.isoformat(),
-             "edited_at": c.edited_at.isoformat() if c.edited_at else None, "edit_history": c.edit_history or []}
-            for c in SocialComment.objects.filter(item_id=item).select_related("user")[:100]
+             "edited_at": c.edited_at.isoformat() if c.edited_at else None,
+             "edit_history": c.edit_history or [],
+             # Up and down on a comment, and this member's own vote. The same
+             # Reaction table a post's votes live in, keyed "comment:<id>" —
+             # not a second vote model.
+             **karma.get(c.id, {"up": 0, "down": 0, "net": 0}),
+             "my_vote": my_votes.get(c.id, 0),
+             # What it earned, once settled. Zero after settling is a real
+             # answer ("nobody voted it up"); null means not settled yet.
+             "karma_energy": c.karma_energy if c.karma_settled_at else None}
+            for c in rows
         ]
         my_r = ItemRating.objects.filter(user=request.user, item_id=item).first()
+        heard = ListenProgress.objects.filter(user=request.user, item_id=item).first()
         return {
             "item": item, "up": ups, "down": downs, "my": mine.value if mine else 0, "comments": comments,
             "rating": item_rating_median(item), "my_rating": my_r.score if my_r else None,
@@ -589,6 +857,13 @@ class SocialView(APIView):
             "my_rating_at": my_r.created_at.isoformat() if (my_r and my_r.created_at) else None,
             "my_rating_edited_at": my_r.edited_at.isoformat() if (my_r and my_r.edited_at) else None,
             "my_rating_history": (my_r.edit_history or []) if my_r else [],
+            # How far through it this member is, so the control can say "12s
+            # to go" rather than only refusing once pressed. The condition
+            # belongs beside the button, not in the error.
+            "listened_sec": heard.seconds if heard else 0,
+            "listen_finished": bool(heard and heard.finished),
+            "listen_required_sec": LISTEN_REQUIRED_SEC,
+            **self._comment_quote(item, request.user),
         }
 
     def get(self, request):
@@ -625,12 +900,35 @@ class SocialView(APIView):
         item = str((request.data or {}).get("item", "")).strip()[:160]
         if not item:
             return Response({"detail": "item required"}, status=status.HTTP_400_BAD_REQUEST)
+        if action == "listened":
+            # A heartbeat from the player: "I played N more seconds of this".
+            # Credited through record_listen, which clamps the claim to the
+            # wall clock — see ListenProgress. The client is trusted to say it
+            # was playing, and NOT trusted about how long.
+            row = record_listen(request.user, item,
+                                (request.data or {}).get("seconds", 0),
+                                bool((request.data or {}).get("finished")))
+            return Response({"item": item, "listened_sec": row.seconds,
+                             "finished": row.finished,
+                             "listen_required_sec": LISTEN_REQUIRED_SEC})
         if action == "react":
             try:
                 value = int((request.data or {}).get("value", 0))
             except (TypeError, ValueError):
                 value = 0
             value = max(-1, min(1, value))
+            # Voting on a COMMENT rather than the item. Same table, same
+            # up/down, and the one that pays — a comment's karma is what
+            # decides what its author earns an hour later, so it needed a
+            # signal and had none.
+            comment_id = (request.data or {}).get("comment_id")
+            if comment_id is not None:
+                from . import karmaz
+                c = SocialComment.objects.filter(pk=comment_id, item_id=item).select_related("user").first()
+                if not c:
+                    return Response({"detail": "comment not found"}, status=status.HTTP_404_NOT_FOUND)
+                out = karmaz.vote_on_comment(request.user, c, value)
+                return Response({**self._payload(item, request), "voted": out})
             if value == 0:
                 Reaction.objects.filter(user=request.user, item_id=item).delete()
             else:
@@ -672,13 +970,26 @@ class SocialView(APIView):
             blocked = post_interaction_block(item, request.user, "comment")
             if blocked:
                 return Response(blocked, status=status.HTTP_403_FORBIDDEN)
-            SocialComment.objects.create(user=request.user, item_id=item, body=body)
+            cost = self._comment_quote(item, request.user)["comment_cost_energy"]
+            with transaction.atomic():
+                if cost and spend_energy(request.user, cost, "Comment", app_key="postz",
+                                         target=item) is None:
+                    return Response({
+                        "detail": f"Your free comments for today are used; another costs {cost} ⚡ and you "
+                                  "are out. Nothing was posted or charged. Commenting on your own post is free.",
+                        "insufficient": True, "resource": "energy",
+                        "cost": {"resource": "energy", "amount": cost},
+                    }, status=status.HTTP_402_PAYMENT_REQUIRED)
+                SocialComment.objects.create(user=request.user, item_id=item, body=body)
             self._notify_target(item, "comment", f"@{request.user.username} commented on your post 💬", request.user)
         elif action == "rate":
             try:
                 score = int((request.data or {}).get("score", 0))
+                visibility = str((request.data or {}).get("visibility", "restricted"))
             except (TypeError, ValueError):
                 score = 0
+                visibility = "restricted"
+            reason = " ".join(str((request.data or {}).get("reason", "") or "").split())[:200]
             if score == 0:
                 ItemRating.objects.filter(user=request.user, item_id=item).delete()
             elif 1 <= score <= 10:
@@ -687,10 +998,35 @@ class SocialView(APIView):
                     return Response(blocked, status=status.HTTP_403_FORBIDDEN)
                 existing = ItemRating.objects.filter(user=request.user, item_id=item).first()
                 if existing is None:
-                    ItemRating.objects.create(user=request.user, item_id=item, score=score)
-                    reward_for_rating(request.user, item)
+                    ItemRating.objects.create(user=request.user, item_id=item, score=score, reason=reason)
+                    # Apply collaboration bonus if rating a post with multiple contributors
+                    collab_mult = 1.0
+                    post_author = None
+                    if item.startswith("post:"):
+                        try:
+                            # NOT recheck_badges — it is imported at module level
+                            # and used below, outside this branch. Re-importing
+                            # it here makes it local to the whole method, so
+                            # rating anything that is not a post (a face, a
+                            # member, a battle entry) reached line 774 with the
+                            # name unbound and answered 500.
+                            from .models import collaboration_multiplier, check_post_progression
+                            post_id = item.split(":")[1]
+                            post = Post.objects.get(id=post_id)
+                            post_author = post.author
+                            collab_mult = collaboration_multiplier(post)
+                            # Check if this rating unlocks BattleZ or CollabZ
+                            check_post_progression(post)
+                        except Exception:
+                            pass
+                    reward_for_rating(request.user, item, visibility=visibility, collab_multiplier=collab_mult)
                     self._rate_skills(item, request.user, score)
                     self._notify_target(item, "rate", f"@{request.user.username} rated your post {score}/10 ⭐", request.user)
+                    # Check for badge progress: rater gets Rater's Guild and Streak
+                    recheck_badges(request.user)
+                    # Post author gets Battle Starter, Collab Architect, Multi-Craft
+                    if post_author:
+                        recheck_badges(post_author)
                 else:
                     # Changing your rating is an edit — only within the tier's window.
                     from datetime import timedelta
@@ -703,11 +1039,20 @@ class SocialView(APIView):
                     if existing.score != score:
                         existing.edit_history = (existing.edit_history or []) + [{"score": existing.score, "at": timezone.now().isoformat()}]
                         existing.score = score
+                        if reason:
+                            existing.reason = reason
                         existing.edited_at = timezone.now()
-                        existing.save(update_fields=["score", "edit_history", "edited_at"])
-                        # Changing your mind has to move the skill ratings it
-                        # fed too, or the two disagree from then on.
-                        self._rate_skills(item, request.user, score)
+                        existing.save(update_fields=["score", "reason", "edit_history", "edited_at"])
+                    elif reason and reason != existing.reason:
+                        # Same score, a reason added or reworded — inside the same window.
+                        existing.reason = reason
+                        existing.save(update_fields=["reason"])
+                    # Changing your mind has to move the skill ratings it fed too, or
+                    # the two disagree from then on. This sat inside the branch above
+                    # (reason-only edits) when the reason field arrived, so a changed
+                    # SCORE stopped reaching the skills; it is idempotent, so it runs
+                    # for every edit rather than being remembered per branch.
+                    self._rate_skills(item, request.user, score)
             else:
                 return Response({"detail": "score must be 1-10 (or 0 to clear)"}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self._payload(item, request))
@@ -745,9 +1090,32 @@ class ProfileView(APIView):
         # profile as it WILL be saved: judging the stored row let a member set a
         # teen birthday and an orientation in one request and keep both, because
         # at the top of that request their age was still unknown.
+        # The portfolio has a ceiling per tier and it is SAID, not applied by
+        # quietly cutting the list — the flat 50 this replaced dropped everything
+        # past it and answered 200, so somebody who pasted 60 links saw a clean
+        # save and 10 of them gone. Like the bio, it is judged before anything is
+        # written, so one over-long list does not lose the rest of the edit.
+        if "links" in d:
+            incoming = clean_profile_field("links", d["links"])
+            over = links_over_cap(request.user, links_of(p), incoming)
+            if over is not None:
+                tier_cap = limits_for(membership_for(request.user).tier)["profile_links"]
+                return Response(
+                    {"detail": (f"Your profile holds up to {over} links and this list has {len(incoming)}. "
+                                "Remove some, or move up a tier in MembershipZ for more room."),
+                     "links_limit": over, "links_tier_cap": tier_cap, "links_count": len(incoming)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         for f in PROFILE_FIELDS:
             if f in d:
-                setattr(p, f, clean_substances(d[f]) if f == "substances" else d[f])
+                setattr(p, f, clean_profile_field(f, d[f]))
+        if "birthday" in d:
+            # The same two consequences /api/auth/me/ applies to this edit. A
+            # second writer that forgets them leaves the sign stale and an
+            # explicit voice standing on a birthday that no longer earns it.
+            p.sign = zodiac_for(p.birthday)
+            if p.voice_explicit and not may_be_explicit(p):
+                p.voice_explicit = False
         minor = profile_is_minor(p)
         blocked = [f for f in ADULT_ONLY_PROFILE_FIELDS if minor and f in d]
         if minor:
@@ -776,7 +1144,9 @@ class ProfileAvatarView(APIView):
 
     # A profile picture is displayed at 56–80px. Anything past a few MB is a
     # mistake or an abuse, whatever the member's upload tier allows elsewhere.
-    MAX_MB = 8
+    # From catalog, so the screen that checks it before uploading and the view
+    # that refuses it afterwards cannot disagree.
+    MAX_MB = AVATAR_MAX_MB
 
     def post(self, request):
         f = request.FILES.get("avatar")
@@ -851,7 +1221,7 @@ class ProfileRateView(APIView):
             "target": target.username,
             "dimension": dimension,
             "overall": overall_median(target),
-            "attractiveness": attractiveness_median(target),
+            "attractiveness": attractiveness_shown_medians([target.id]).get(target.id),
         })
 
 
@@ -861,12 +1231,29 @@ class FollowView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    @staticmethod
+    def _follow_quote(me, target):
+        """What following `target` costs `me` right now — quoted on GET so the
+        button can say it. Free: following back, and the first FOLLOW_FREE_PER_DAY
+        new follows in 24 hours."""
+        from datetime import timedelta
+        from django.utils import timezone
+        from .catalog import FOLLOW_ENERGY, FOLLOW_FREE_PER_DAY
+        if Follow.objects.filter(follower=me, following=target).exists():
+            return {"follow_cost_energy": 0, "follow_free_left": None}
+        used = Follow.objects.filter(follower=me, created_at__gte=timezone.now() - timedelta(hours=24)).count()
+        left = max(0, FOLLOW_FREE_PER_DAY - used)
+        back = Follow.objects.filter(follower=target, following=me).exists()
+        return {"follow_cost_energy": 0 if (back or left) else FOLLOW_ENERGY, "follow_free_left": left}
+
     def get(self, request):
         username = (request.query_params.get("username") or "").strip()
         target = User.objects.filter(username=username).first()
         if not target:
             return Response({"detail": "unknown user"}, status=status.HTTP_404_NOT_FOUND)
-        return Response({"username": target.username, **follow_counts(target), "relationship": relationship(request.user, target)})
+        return Response({"username": target.username, **follow_counts(target),
+                         "relationship": relationship(request.user, target),
+                         **self._follow_quote(request.user, target)})
 
     def post(self, request):
         username = str((request.data or {}).get("username", "")).strip()
@@ -881,7 +1268,17 @@ class FollowView(APIView):
         else:
             if target.id in blocked_user_ids(request.user):
                 return Response({"detail": "You've blocked this user (or they blocked you)."}, status=status.HTTP_403_FORBIDDEN)
-            _, created = Follow.objects.get_or_create(follower=request.user, following=target)
+            cost = self._follow_quote(request.user, target)["follow_cost_energy"]
+            with transaction.atomic():
+                if cost and spend_energy(request.user, cost, f"Follow @{target.username}",
+                                         app_key="social", target=f"profile:{target.username}") is None:
+                    return Response({
+                        "detail": f"Your free follows for today are used; another costs {cost} ⚡ and you are out. "
+                                  "Nothing was charged. Following back someone who follows you is free.",
+                        "insufficient": True, "resource": "energy",
+                        "cost": {"resource": "energy", "amount": cost},
+                    }, status=status.HTTP_402_PAYMENT_REQUIRED)
+                _, created = Follow.objects.get_or_create(follower=request.user, following=target)
             if created:
                 mutual = Follow.objects.filter(follower=target, following=request.user).exists()
                 notify(target, "follow",
@@ -929,7 +1326,19 @@ class MemberProfileView(APIView):
             return Response({"detail": "profile not found"}, status=status.HTTP_404_NOT_FOUND)
         p = profile_for(user)
         # recheck only bites on your own profile; _profile_full enforces that.
-        return Response(_profile_full(p, request, recheck=True))
+        out = _profile_full(p, request, recheck=True)
+        # Said on the card BEFORE Message/Call is pressed, not as a refusal after.
+        from .gates import reach_block
+        b = None if p.user_id == request.user.id else reach_block(request.user, p.user)
+        out["reach_block"] = b["detail"] if b else None
+        from .ratez import rating_reward
+        out["rating_reward"] = rating_reward(request.user)
+        return Response(out)
+
+
+VYBEZ_MINOR_REASON = ("VybeZ is for finding someone, and that part of Music ConnectZ is 18+. "
+                      "Collabs, battles, the coach and posting stay open at any age — and you can still "
+                      "find collaborators your own age in CollabZ.")
 
 
 class MembersView(APIView):
@@ -941,6 +1350,14 @@ class MembersView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        # VybeZ is the "find a person" surface, and dating is 18+ (Corey's call; the reasons
+        # are in CLAUDE.md). It names itself with ?vybez=1 so the gate is on the SURFACE, not on
+        # the search: this same endpoint is what CollabZ, BattleZ and MessageZ pick people with,
+        # and a minor choosing a collaborator their own age is not dating. Unknown ages count as
+        # adults, as everywhere else (`is_minor`).
+        if request.query_params.get("vybez") and is_minor(request.user):
+            return Response({"detail": VYBEZ_MINOR_REASON, "adult_only": True}, status=status.HTTP_403_FORBIDDEN)
+
         def multi(key):
             raw = request.query_params.get(key, "")
             return [x for x in raw.split(",") if x]
@@ -948,11 +1365,57 @@ class MembersView(APIView):
         regions = multi("regions")
         genders = multi("genders")
         signs = multi("signs")
+        # The other zodiac is a filter too — it is the one people in the
+        # diaspora this app is built for are more likely to search on.
+        signs_cn = multi("signs_cn")
+        # ReligionZ: ?religions=catholic,sunni — same shape as signs/genders,
+        # a declared single value matched against a closed list.
+        religions = multi("religions")
+        # LanguageZ: ?languages=en,es — a member passes if they declared ANY
+        # of the selected languages, same OR-within-a-metric rule `regions`
+        # already follows just below. The FILTER matches on presence, not
+        # level — "can we talk at all" is the search question; the level
+        # itself is for the card to show, not for this to gate on.
+        languages = multi("languages")
         # SubstanceZ multi-select: substance keys the searcher wants sober-friendly.
         # A member passes if, on every selected substance, they are NOT active
         # ("use"/"sometimes"). Undeclared counts as sober-friendly.
         substances = multi("substances")
+        # "Okay with up to": a member who avoids THC but is fine with someone
+        # who rarely has a drink can say so. Unset keeps the old meaning —
+        # anyone active at all is filtered out. See substancez.within for how
+        # a legacy "yes" (frequency unknown) is treated.
+        substance_max = request.query_params.get("substance_max", "")
         sober_only = request.query_params.get("sober") in ("1", "true", "True")
+        # The other direction, for the SubstanceZ and PreferenceZ apps: members
+        # who DECLARE using any of ?uses=, or being attracted to any of
+        # ?attracted=. Adult-only both ways — see metricz.py.
+        from .metricz import matches as metric_matches  # metricz imports this module
+        uses = multi("uses")
+        # ?use_freq=often,daily narrows ?uses= to members who declared it at
+        # one of those frequencies. Ignored without `uses`.
+        use_freq = multi("use_freq")
+        attracted = multi("attracted")
+        # PersonaZ: ?personas=producer,mixengineer — members who hold ANY of
+        # them. The PersonaZ screen's "who else is a Producer" door.
+        persona_keys = set(multi("personas"))
+        adult_wall = bool(adult_only_reason(request.user))
+        if (uses or attracted or substances) and adult_wall:
+            # SubstanceZ and PreferenceZ are adult-only in BOTH directions. The
+            # avoid filter is a SubstanceZ read too: stepping `substance_max`
+            # up one frequency at a time reads a declared frequency off the
+            # results, so it is inside the wall with `uses`.
+            uses = attracted = substances = []
+        # PersonalitieZ: ?ie=I&tf=F, or ?personality=INFP for all four.
+        #
+        # It lands HERE rather than in a dating screen of its own because
+        # MembersView is the one member search on the platform — every surface
+        # that finds a person comes through it, so a filter added once is a
+        # filter CollabZ, BattleZ, VenueZ, MessageZ and VybeZ all get. A
+        # personality field that only worked in the dating app would be the
+        # fourth copy of a profile filter within a year.
+        personality_wanted = wanted_from(request.query_params)
+        personality_undeclared = 0
 
         def num(key):
             try:
@@ -978,10 +1441,32 @@ class MembersView(APIView):
         origin = (me.lat, me.lng) if (me.share_location and me.lat is not None) else (None, None)
 
         results = []
-        qs = list(Profile.objects.exclude(user=request.user).exclude(user_id__in=blocked_user_ids(request.user)).select_related("user")[:500])
+        qs = list(Profile.objects.exclude(user=request.user).exclude(user_id__in=blocked_user_ids(request.user)).select_related("user", "user__membership")[:500])
+        # Discovery stays inside the age group. This search is how members find each
+        # other (VybeZ is built on it) and it mixed every age: an adult could browse
+        # fifteen-year-olds and the reverse. A known minor sees only known minors; an
+        # adult sees no known minors. Unknown ages count as adults, as everywhere.
+        viewer_minor = profile_is_minor(profile_for(request.user))
+        qs = [p for p in qs if profile_is_minor(p) == viewer_minor]
         # Every card wears its badges, so load them for the whole page in one
         # query. Per-card would be five hundred of them behind one search.
         worn = worn_badges_by_user(p.user_id for p in qs)
+        # What this viewer is to every member on the page — friend, fan,
+        # PartnerZ, in one of their groups — resolved ONCE for the whole set.
+        # Asked per card it is four questions five hundred times, on a screen
+        # that is otherwise a handful of queries. Same reason the badges above
+        # are loaded in one go.
+        aud = Audience(request.user, [p.user_id for p in qs])
+        # The six per-card reads, fetched once for the whole page. Same shape
+        # as `worn` and `aud` directly above, which were already batched — the
+        # numbers on the card were not, so a 40-member search cost 322
+        # queries and VybeZ fires this search from three text inputs.
+        card_ids = [p.user_id for p in qs]
+        batched = {
+            "attract": attractiveness_shown_medians(card_ids),
+            "overall": overall_medians(card_ids),
+            "edges": follow_edges_for(card_ids),
+        }
         for p in qs:
             if regions and not (set(regions) & set(p.regions or [])):
                 continue
@@ -989,12 +1474,38 @@ class MembersView(APIView):
                 continue
             if signs and p.sign not in signs:
                 continue
-            if sober_only and not p.sober:
+            if religions and p.religion not in religions:
+                continue
+            if languages and not (set(languages) & set((p.languages or {}).keys())):
+                continue
+            if signs_cn:
+                cn = chinese_zodiac_for(p.birthday)
+                if not cn or cn["animal"] not in signs_cn:
+                    continue
+            if sober_only and not (p.sober and can_see(p, "sober", request.user, aud)):
+                continue
+            if personality_wanted and not personality_matches(p.personality, personality_wanted):
+                # Counted apart from an ordinary miss. An empty grid has two
+                # completely different causes — nobody matches, or nobody has
+                # said — and on a field this new the second is usually the
+                # real one. `filter_reason` is what stops a searcher
+                # concluding there are no Introverts here.
+                if not personality_dict(p.personality).keys() >= personality_wanted.keys():
+                    personality_undeclared += 1
+                continue
+            if persona_keys and not persona_keys & {str(x.get("key") or "") for x in personas_of(p)}:
+                continue
+            if uses and not metric_matches("substancez", p, uses, use_freq, request.user, aud):
+                continue
+            if attracted and not metric_matches("preferencez", p, attracted):
                 continue
             if substances:
-                # Rows saved by the old client hold a list, not a dict.
-                subs = clean_substances(p.substances)
-                if any(subs.get(k) in ACTIVE_STANCES for k in substances):
+                # What THIS viewer may know — a minor's, or one the member has
+                # kept private, reads as undeclared (see visible_substances).
+                subs = visible_substances(p, request.user, aud)
+                if any(subs.get(k) in ACTIVE_STANCES
+                       and not (substance_max and substance_within(subs[k], substance_max))
+                       for k in substances):
                     continue
             metrics = member_metrics(p, origin)
             if gates and failing_gate(metrics, gates):
@@ -1006,8 +1517,16 @@ class MembersView(APIView):
             # The distance GATE lives in the spec above; this is the number
             # shown on the card. Computed once in member_metrics either way.
             dist = metrics.get("km")
-            card = _profile_card(p, request, badges=worn.get(p.user_id, []))
+            card = _profile_card(p, request, badges=worn.get(p.user_id, []),
+                                 audience=aud, batched=batched)
             card["distance_km"] = dist
+            if uses:
+                # How often, for the substances THIS search asked about and no
+                # others — the card of a member found under THC says how often
+                # THC, and discloses nothing else they declared. Already inside
+                # the adult-only wall above.
+                subs = visible_substances(p, request.user, aud)
+                card["use_frequency"] = {k: subs[k] for k in uses if subs.get(k) in ACTIVE_STANCES}
             results.append(card)
         # Nearest first when a distance origin exists. Distance WINS over the
         # Sexy badge's boost on purpose: "who is near me" is a real need, and
@@ -1019,4 +1538,8 @@ class MembersView(APIView):
             boosted = set(Badge.objects.filter(key="sexy", visible=True)
                           .values_list("user__username", flat=True))
             results.sort(key=lambda c: c.get("username") not in boosted)
-        return Response({"members": results[:100], "origin_shared": origin[0] is not None})
+        return Response({
+            "members": results[:100],
+            "origin_shared": origin[0] is not None,
+            "personality_note": filter_reason(personality_wanted, personality_undeclared),
+        })

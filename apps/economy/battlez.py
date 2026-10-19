@@ -17,13 +17,14 @@ from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.db import models, transaction
+from django.db.models import Count
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import over_char_limit
+from .catalog import BATTLE_CALLOUT_ENERGY, BATTLE_HOST_ENERGY, over_char_limit
 from .gates import clean_gates, describe, failing_gate, member_metrics, refusal
 from .models import (
     BATTLE_MIN_RATINGS,
@@ -32,14 +33,19 @@ from .models import (
     BattleEntry,
     BattleWager,
     MoneyBattleVote,
+    award_energy,
     award_spinaz,
+    spend_energy,
+    spend_spinaz,
     blocked_user_ids,
     item_rating_median,
+    item_rating_medians,
     membership_for,
     notify,
     profile_for,
     wallet_for,
 )
+from .postz import charge_skill_energy, skills_from
 
 User = get_user_model()
 
@@ -71,7 +77,7 @@ def entry_dict(e, request=None):
     }
 
 
-def battle_dict(b, request=None, with_entries=True):
+def battle_dict(b, request=None, with_entries=True, batched=None):
     user = getattr(request, "user", None)
     me = bool(user and getattr(user, "is_authenticated", False))
     out = {
@@ -89,14 +95,23 @@ def battle_dict(b, request=None, with_entries=True):
         "entry_spinaz": b.entry_spinaz,
         "status": b.status,
         "item_key": b.item_key,
-        "rating": item_rating_median(b.item_key),
-        "entry_count": b.entries.count(),
+        # `batched` is the whole list's numbers, fetched once by BattlesView.
+        # Without it each card was three queries of its own — the rating
+        # median, the entry count, and the "have I entered" exists() below —
+        # so a 40-battle list cost 123 queries. None falls through to the
+        # per-battle reads, which is right for the detail view: one card's
+        # three queries is not worth a batching call site.
+        "rating": ((batched or {}).get("ratings", {}).get(b.item_key)
+                   if batched else item_rating_median(b.item_key)),
+        "entry_count": ((batched or {}).get("entries", {}).get(b.id, 0)
+                        if batched else b.entries.count()),
         "mode": b.mode,
         "kind": b.kind,
         "opponent": b.opponent.username if b.opponent else "",
         "accepted_at": b.accepted_at.isoformat() if b.accepted_at else None,
         "ends_at": b.ends_at.isoformat() if b.ends_at else None,
         "winner": b.winner.username if b.winner else "",
+        "partnered": b.partnered or [],
         "settled_at": b.settled_at.isoformat() if b.settled_at else None,
         "min_ratings": BATTLE_MIN_RATINGS,
         "created_at": b.created_at.isoformat(),
@@ -112,7 +127,8 @@ def battle_dict(b, request=None, with_entries=True):
                                 "paid_out": mine.paid_out} if mine else None)
             out["i_am_contestant"] = bool(out["my_side"])
     if me:
-        out["entered"] = b.entries.filter(user=user).exists()
+        out["entered"] = (b.id in batched["mine"] if batched
+                          else b.entries.filter(user=user).exists())
     if with_entries:
         entries = list(b.entries.select_related("user"))
         # Best-judged first — a battle with no leaderboard is just a thread.
@@ -130,7 +146,22 @@ class BattlesView(APIView):
         qs = (Battle.objects.select_related("host", "opponent")
               .exclude(host_id__in=blocked_user_ids(request.user))[:200])
         qs = [maybe_auto_settle(b) for b in qs]
-        return Response({"battles": [battle_dict(b, request, with_entries=False) for b in qs]})
+        # The three per-card reads, in three queries for the whole list rather
+        # than three per battle. Measured at 123 queries for 40 battles before
+        # this; the same shape the feed and the member search had.
+        ids = [b.id for b in qs]
+        batched = {
+            "ratings": item_rating_medians([b.item_key for b in qs]),
+            "entries": dict(BattleEntry.objects.filter(battle_id__in=ids)
+                            .values_list("battle_id").annotate(n=Count("id"))),
+            # A set rather than a per-card exists(): "have I entered" is one
+            # question about this member, asked once.
+            "mine": set(BattleEntry.objects.filter(battle_id__in=ids, user=request.user)
+                        .values_list("battle_id", flat=True)),
+        }
+        return Response({"challenge_cost_energy": BATTLE_CALLOUT_ENERGY, "host_cost_energy": BATTLE_HOST_ENERGY,
+                         "battles": [battle_dict(b, request, with_entries=False,
+                                                 batched=batched) for b in qs]})
 
     def post(self, request):
         d = request.data or {}
@@ -150,12 +181,22 @@ class BattlesView(APIView):
             entry_spinaz = max(0, int(d.get("entry_spinaz") or 0))
         except (TypeError, ValueError):
             entry_spinaz = 0
-        b = Battle.objects.create(
-            host=request.user, title=title[:160], description=description,
-            genre=str(d.get("genre", "") or "")[:40],
-            gates=clean_gates(d.get("gates")), entry_spinaz=entry_spinaz,
-            **_media(d),
-        )
+        with transaction.atomic():
+            if BATTLE_HOST_ENERGY and spend_energy(request.user, BATTLE_HOST_ENERGY, f"Host battle: {title[:60]}",
+                            app_key="battlez", target="battlez:host") is None:
+                have = max(0, wallet_for(request.user).energy or 0)
+                return Response({
+                    "detail": f"Hosting an open battle costs {BATTLE_HOST_ENERGY} ⚡ and you have {have}. "
+                              "Nothing was posted or charged.",
+                    "insufficient": True, "resource": "energy",
+                    "cost": {"resource": "energy", "amount": BATTLE_HOST_ENERGY},
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+            b = Battle.objects.create(
+                host=request.user, title=title[:160], description=description,
+                genre=str(d.get("genre", "") or "")[:40],
+                gates=clean_gates(d.get("gates")), entry_spinaz=entry_spinaz,
+                **_media(d),
+            )
         return Response(battle_dict(b, request), status=status.HTTP_201_CREATED)
 
 
@@ -187,6 +228,10 @@ class BattleEnterView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    # Atomic because the ⚡ charge locks the wallet, and a lock outside a
+    # transaction is not one: two entries sent at once would otherwise both
+    # read the same balance and both be allowed to spend it.
+    @transaction.atomic
     def post(self, request, pk):
         b = Battle.objects.select_related("host").filter(pk=pk).first()
         if not b:
@@ -203,7 +248,9 @@ class BattleEnterView(APIView):
             if not side_of(b, request.user):
                 return Response({"detail": "This is a 1v1 — only the two contestants put takes up."},
                                 status=status.HTTP_403_FORBIDDEN)
-        elif b.host_id == request.user.id:
+        elif b.host_id == request.user.id and b.kind != "weekly":
+            # The Weekly Open is hosted by the platform account, which is a
+            # person too — they enter like anybody else.
             return Response({"detail": "You can't enter your own battle."},
                             status=status.HTTP_400_BAD_REQUEST)
 
@@ -232,17 +279,63 @@ class BattleEnterView(APIView):
             )
 
         d = request.data or {}
+        # The take costs ⚡ equal to the combined price of the skills that went
+        # into it, from the entrant's OWN rates — the same rule, and the same
+        # code, that prices a post.
+        # NOT named `refusal` — that is the gates helper imported at module
+        # level and called above, and a local of the same name would shadow it
+        # for the whole method.
+        energy, denied = charge_skill_energy(request.user, skills_from(d))
+        if denied:
+            body, code = denied
+            body["detail"] = f"Entering costs {body['energy_needed']} ⚡ and you have {body['energy_available']}."
+            return Response(body, status=code)
+
+        # ZodiacZ, read BEFORE the entry exists — afterwards there is always
+        # at least one, so "was anyone here already" is unanswerable.
+        others_already = b.entries.exists()
+        was_challenged = bool(b.mode == Battle.MODE_1V1 and b.opponent_id == request.user.id)
+
+        # Lilith, read BEFORE the entry exists for the same reason: entering a
+        # battle is itself a graduation, so afterwards this entrant is no
+        # longer new and the payout for helping them would be silently zero.
+        from .lilith_taskz import beginners_among, settle_together
+        _people = [request.user] + [e.user for e in b.entries.select_related("user")]
+        _was_beginner = beginners_among(_people)
+
         entry = BattleEntry.objects.create(
             battle=b, user=request.user, title=str(d.get("title", "") or "")[:160], **_media(d),
         )
+        from .signbonus import try_award
+        if not others_already:
+            # Aries — first blood. The stretch is the same action done FAST:
+            # first take up inside the hour the battle opened. "First" and
+            # "first while it's empty" would have been the same thing twice,
+            # which is a stretch nobody can miss and therefore not one.
+            within_hour = (timezone.now() - b.created_at) <= timedelta(hours=1)
+            try_award(request.user, "battle_first_in", stretch=within_hour)
+        # Leo — never alone on stage. A named opponent counts as somebody
+        # already there even before they have posted their take: being
+        # challenged by name is exactly the thing.
+        if others_already or was_challenged:
+            try_award(request.user, "battle_joins_others", stretch=was_challenged)
         if b.entry_spinaz:
             # Entry goes to the host. Stated on the button before it's pressed.
-            award_spinaz(request.user, -b.entry_spinaz, f"BattleZ entry: {b.title}")
-            award_spinaz(b.host, b.entry_spinaz, f"BattleZ entry from @{request.user.username}")
-        notify(b.host, "join", f"@{request.user.username} entered '{b.title}' ⚔️",
-               actor=request.user, item_id=b.item_key)
+            # Same reason as the wager below: one statement, so the entry fee
+            # cannot be paid twice out of a balance that only covers it once.
+            if spend_spinaz(request.user, b.entry_spinaz,
+                            f"BattleZ entry: {b.title}", app_key="battlez") is None:
+                return Response(
+                    {"detail": f"That's {b.entry_spinaz} SpinaZ and you don't have it any more.",
+                     "spinaz": (wallet_for(request.user).spinaz or 0)},
+                    status=status.HTTP_402_PAYMENT_REQUIRED)
+            award_spinaz(b.host, b.entry_spinaz, f"BattleZ entry from @{request.user.username}", app_key="battlez")
+        settle_together(_people, _was_beginner)
+        if b.kind != "weekly":      # the weekly host would be told of every entrant
+            notify(b.host, "join", f"@{request.user.username} entered '{b.title}' ⚔️",
+                   actor=request.user, item_id=b.item_key)
         return Response({"entry": entry_dict(entry, request),
-                         "battle": battle_dict(b, request)},
+                         "battle": battle_dict(b, request), **energy},
                         status=status.HTTP_201_CREATED)
 
     def delete(self, request, pk):
@@ -340,7 +433,7 @@ def settle_battle(battle):
     if winner_side is None:
         # Draw, or nobody qualified — hand every stake back untouched.
         for w in wagers:
-            award_spinaz(w.user, w.amount, f"BattleZ refund: {battle.title}")
+            award_spinaz(w.user, w.amount, f"BattleZ refund: {battle.title}", app_key="battlez")
             w.paid_out = w.amount
             w.save(update_fields=["paid_out"])
         battle.winner = None
@@ -349,20 +442,28 @@ def settle_battle(battle):
         pot = sum(w.amount for w in wagers)
         staked = sum(w.amount for w in winners)
         if winners and staked:
+            from .intelligence_royalty import cut_of, pay_owner_spinaz, record_paid
             handed = 0
             # Biggest stake last so the rounding remainder lands there and the
             # pot comes out exactly — nothing evaporates.
             for i, w in enumerate(sorted(winners, key=lambda x: x.amount)):
                 share = pot - handed if i == len(winners) - 1 else int(pot * w.amount / staked)
                 handed += 0 if i == len(winners) - 1 else share
-                award_spinaz(w.user, share, f"BattleZ win: {battle.title}")
-                w.paid_out = share
+                # Only a contestant who attached an IntelligenceZ piece to this
+                # battle owes K-Oth a share, and only of their own winnings.
+                cut, pct = cut_of(w.user, "battle", battle.pk, share)
+                tag = f" · −{pct:g}% IntelligenceZ royalty" if cut else ""
+                award_spinaz(w.user, share - cut, f"BattleZ win: {battle.title}{tag}", app_key="battlez")
+                if cut:
+                    pay_owner_spinaz(cut, f"IntelligenceZ royalty {pct:g}% from @{w.user.username} — BattleZ: {battle.title}")
+                    record_paid(w.user, "battle", battle.pk, cut, "spinaz")
+                w.paid_out = share - cut
                 w.save(update_fields=["paid_out"])
         else:
             # Nobody backed the winner — the losers' stakes go back rather than
             # being pocketed by the house. We didn't earn them.
             for w in wagers:
-                award_spinaz(w.user, w.amount, f"BattleZ refund: {battle.title}")
+                award_spinaz(w.user, w.amount, f"BattleZ refund: {battle.title}", app_key="battlez")
                 w.paid_out = w.amount
                 w.save(update_fields=["paid_out"])
         battle.winner = (battle.host if winner_side == BattleWager.SIDE_HOST
@@ -378,6 +479,21 @@ def settle_battle(battle):
                    (f"'{battle.title}' is settled — 👑 @{battle.winner.username} takes it"
                     if battle.winner else f"'{battle.title}' ended in a draw — every wager refunded"),
                    item_id=battle.item_key)
+
+    # PartnerZ counts a battle the ROOM decided. A winner means at least one
+    # side cleared BATTLE_MIN_RATINGS judges, which two accounts cannot
+    # manufacture between themselves; a draw means nobody rated it, and a
+    # battle nobody watched is not work two people finished together.
+    # Swallowed — the pool has already paid out.
+    if battle.winner_id:
+        try:
+            from .groupz import announce_partners, note_work
+            crossed = note_work(list(battle.entries.values_list("user_id", flat=True)), battles=1)
+            if crossed:
+                battle.partnered = announce_partners(crossed, "battle", battle.title, item_id=battle.item_key)
+                battle.save(update_fields=["partnered"])
+        except Exception:
+            pass
     return battle
 
 
@@ -428,15 +544,29 @@ class BattleChallengeView(APIView):
                 return Response(body, status=status.HTTP_403_FORBIDDEN)
 
         kind = str(d.get("kind", "1v1")).lower()
-        b = Battle.objects.create(
-            host=request.user, opponent=opponent,
-            title=(title or f"@{request.user.username} vs @{opponent.username}")[:160],
-            description=str(d.get("description", "") or ""),
-            genre=str(d.get("genre", "") or "")[:40],
-            mode=Battle.MODE_1V1,
-            kind=kind if kind in ("1v1", "freestyle", "cypher") else "1v1",
-            gates=gates, status=Battle.STATUS_PENDING, **_media(d),
-        )
+        # Charged with the create in one unit, so a failed call-out is free.
+        with transaction.atomic():
+            if BATTLE_CALLOUT_ENERGY and spend_energy(request.user, BATTLE_CALLOUT_ENERGY,
+                            f"Challenge to @{opponent.username}",
+                            app_key="battlez", target="battlez:challenge") is None:
+                have = max(0, wallet_for(request.user).energy or 0)
+                return Response({
+                    "detail": f"Calling someone out costs {BATTLE_CALLOUT_ENERGY} ⚡ and you have {have}. "
+                              "Nothing was sent or charged. It is refunded if they decline.",
+                    "insufficient": True, "resource": "energy",
+                    "cost": {"resource": "energy", "amount": BATTLE_CALLOUT_ENERGY},
+                    "energy_needed": BATTLE_CALLOUT_ENERGY, "energy_available": have,
+                    "energy_short": BATTLE_CALLOUT_ENERGY - have,
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+            b = Battle.objects.create(
+                host=request.user, opponent=opponent,
+                title=(title or f"@{request.user.username} vs @{opponent.username}")[:160],
+                description=str(d.get("description", "") or ""),
+                genre=str(d.get("genre", "") or "")[:40],
+                mode=Battle.MODE_1V1,
+                kind=kind if kind in ("1v1", "freestyle", "cypher") else "1v1",
+                gates=gates, status=Battle.STATUS_PENDING, **_media(d),
+            )
         notify(opponent, "system",
                f"@{request.user.username} challenged you to '{b.title}' ⚔️",
                actor=request.user, item_id=b.item_key)
@@ -462,6 +592,9 @@ class BattleRespondView(APIView):
         if not bool((request.data or {}).get("accept", True)):
             b.status = Battle.STATUS_DECLINED
             b.save(update_fields=["status", "updated_at"])
+            if b.mode == Battle.MODE_1V1:
+                award_energy(b.host, BATTLE_CALLOUT_ENERGY, f"Refund: @{request.user.username} declined",
+                             app_key="battlez", target="battlez:challenge")
             notify(b.host, "system", f"@{request.user.username} declined '{b.title}'.",
                    actor=request.user, item_id=b.item_key)
             return Response(battle_dict(b, request))
@@ -521,10 +654,27 @@ class BattleWagerView(APIView):
         with transaction.atomic():
             # Held by the battle, not spent — a battle that never settles has to
             # be able to give every stake back.
-            award_spinaz(request.user, -amount, f"BattleZ wager: {b.title}")
+            # Conditional: the balance check above is a separate statement, and
+            # a member is not obliged to wait between the two. `spend_spinaz`
+            # does the check and the move in one, so a second wager racing the
+            # first is REFUSED rather than overdrawing — `award_spinaz(-n)` had
+            # no floor at all, and spending 500 from a balance of 10 left -490.
+            if spend_spinaz(request.user, amount,
+                            f"BattleZ wager: {b.title}", app_key="battlez") is None:
+                return Response(
+                    {"detail": f"That's {amount} SpinaZ and you don't have it any more.",
+                     "spinaz": (wallet_for(request.user).spinaz or 0)},
+                    status=status.HTTP_402_PAYMENT_REQUIRED)
             BattleWager.objects.create(battle=b, user=request.user, side=side, amount=amount)
             Battle.objects.filter(pk=b.pk).update(
                 held_wager_spinaz=models.F("held_wager_spinaz") + amount)
+        # ZodiacZ — the Tiger commits. Read off the stake that was actually
+        # held, not what was asked for. Imported here rather than relying on
+        # the one in BattleEnterView.post — a local import is local to its
+        # method, and a NameError on a wager is a member's stake refused.
+        from .signbonus import try_award
+        try_award(request.user, "wager", stretch=amount >= 100)
+
         b.refresh_from_db()
         return Response(battle_dict(b, request), status=status.HTTP_201_CREATED)
 

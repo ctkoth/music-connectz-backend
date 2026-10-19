@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Handed to Chrome as the TWA splash, and used as the pre-Android-12 window
+  background. The BodieZ artwork on its own ink: it carries the name, so unlike
+  Music ConnectZ's wordless mark nothing else is needed.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/brand_ink" />
+    <item
+        android:width="200dp"
+        android:height="200dp"
+        android:drawable="@drawable/ic_bodiez_splash"
+        android:gravity="center" />
+</layer-list>

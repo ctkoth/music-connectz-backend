@@ -178,10 +178,19 @@ class PostSideTests(TestCase):
     def test_the_feed_counts_deals_in_one_query_not_one_per_card(self):
         """The collab count must not scale with the feed.
 
-        Asserted as a DIFFERENCE rather than a magic total: the feed already
-        does two per-card queries (shares, rating median) that predate this
-        change and aren't mine to fix here. What matters is that adding five
-        more posts adds two queries each and not three.
+        Asserted as a DIFFERENCE rather than a magic total, which is the right
+        shape and is why this test survived the thing it half-measured.
+
+        It used to expect TWO extra queries per card, because — in its own
+        words — "the feed already does two per-card queries (shares, rating
+        median) that predate this change and aren't mine to fix here". Both
+        are batched now (`test_feed_cost`), along with `joins`, which hid
+        behind a `restricted` check and so was never in that count at all.
+
+        So the number is ZERO. A feed that costs the same for one post and for
+        a hundred is the only version of this assertion that cannot rot: the
+        old one would have gone green again the moment somebody reintroduced
+        an N+1 of exactly the right size.
         """
         from django.db import connection
         from django.test.utils import CaptureQueriesContext
@@ -202,7 +211,9 @@ class PostSideTests(TestCase):
         with CaptureQueriesContext(connection) as six_cards:
             self.client.get("/api/economy/postz/")
 
-        self.assertEqual(len(six_cards) - len(one_card), 10)   # 5 more cards x 2
+        self.assertEqual(len(six_cards) - len(one_card), 0,
+                         "five more cards must cost nothing — the feed re-polls "
+                         "every 30 seconds from every open tab")
         collab_counts = [q for q in six_cards.captured_queries
                          if "economy_collabdeal" in q["sql"]]
         self.assertEqual(len(collab_counts), 1)

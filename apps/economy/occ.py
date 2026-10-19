@@ -2,9 +2,15 @@
 
 Runs server-side so the Anthropic API key never touches the client. Charges the
 minimum model cost (pass-through, owner-free) only on a successful generation;
-if the key isn't configured the endpoint returns 503 and the frontend falls back
-to its built-in templated replies.
+if the key isn't configured the endpoint returns 503 with `code: "not_configured"`.
+
+A reply that FAILS is never charged: the bill is written after the text has
+parsed, and every failure path (no key, a model error, an empty answer, running
+out of time) returns before it. The screen says so beside the Send button, so it
+has to stay true — `test_occ_chat` pins each of those paths.
 """
+import logging
+
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -29,12 +35,34 @@ from .catalog import (
 from .models import (
     can_afford_ai,
     charge_ai_usage,
+    DAILY_PROMPT_MAX_CENTS,
+    daily_prompt_covers,
     daily_prompt_state,
     membership_for,
     profile_for,
     wallet_for,
 )
+from .deadline import Deadline, Expired
+from .resources import PROMPTZ
 from .views import credit_owner, is_owner
+
+log = logging.getLogger(__name__)
+
+# The 503 a member sees when chat isn't wired. One sentence, the same one the
+# screen shows — `code` is what lets the client tell "not switched on" from "the
+# model had a bad minute" without parsing prose.
+NOT_CONFIGURED = {"detail": "OCC's chat isn't switched on yet.", "code": "not_configured",
+                  "charged": 0}
+
+# What one chat message is allowed to cost a member in WAITING.
+#
+# The Anthropic client's own default is a ten-minute timeout and two retries, and
+# gunicorn's `--timeout` does not bound a request on the gthread worker (see
+# deadline.py) — so a reply that never came back could have held the member's
+# screen for half an hour with nothing erroring. One budget, made here, passed to
+# every call below it. Published on `GET /ai/models/` as `chat_budget_seconds`
+# so the screen's own timeout is derived from this number rather than guessed.
+CHAT_BUDGET_SECONDS = 100
 
 # The voice shapes the system prompt and nothing else. Which ENGINE runs it is
 # the member's own choice, gated by tier and priced by what it actually costs —
@@ -42,7 +70,7 @@ from .views import credit_owner, is_owner
 # "cheapest" voice ended up on the most expensive model in the catalogue.
 
 
-def _create_with_fallback(client, primary, fallback, **kwargs):
+def _create_with_fallback(client, primary, fallback, deadline=None, **kwargs):
     """Generate with `primary`, falling back to `fallback` if that model isn't
     available on this account or region.
 
@@ -53,17 +81,52 @@ def _create_with_fallback(client, primary, fallback, **kwargs):
 
     Only availability errors trigger the retry; auth, rate-limit and billing
     errors propagate unchanged — those are not something a cheaper model fixes.
+
+    `deadline` (a `Deadline`) bounds the WAIT: each call gets what is left of the
+    budget as its timeout, and a fallback that would start with nothing left
+    raises `Expired` instead of beginning a call it cannot finish. Without one the
+    behaviour is exactly what it was, which is what omviardz relies on.
     """
+    def attempt(model):
+        extra = {}
+        if deadline is not None:
+            deadline.check()
+            extra["timeout"] = deadline.remaining()
+        return client.messages.create(model=model, **extra, **kwargs)
+
     try:
-        return client.messages.create(model=primary, **kwargs)
+        return attempt(primary)
+    except Expired:
+        raise
     except Exception as exc:
         msg = str(exc).lower()
         unavailable = "404" in msg or "not_found" in msg or (
             "model" in msg and any(w in msg for w in ("not found", "does not exist", "unavailable", "not available", "invalid"))
         )
         if primary != fallback and unavailable:
-            return client.messages.create(model=fallback, **kwargs)
+            return attempt(fallback)
         raise
+
+
+# A key that was never set is a different problem from a model that is down, and
+# the member should be told which: one is "not switched on yet" and the other is
+# "try again". The SDK builds a client happily with no key and only complains at
+# the first request, with a TypeError about "authentication method" — so the
+# reliable signal is the exception, not a check up front (which would also break
+# every test that stands in for the SDK).
+_UNCONFIGURED_NAMES = {"AuthenticationError", "PermissionDeniedError"}
+
+
+def _is_unconfigured(exc):
+    if type(exc).__name__ in _UNCONFIGURED_NAMES:
+        return True
+    text = str(exc).lower()
+    return "authentication method" in text or "api_key" in text or "api key" in text
+
+
+def _is_timeout(exc):
+    return isinstance(exc, Expired) or "timeout" in type(exc).__name__.lower()
+
 
 COREY_VOICE = (
     "You are OCC (Ocular Code ConnectZ) speaking as Corey / K-Oth — the founder voice of "
@@ -166,10 +229,20 @@ class OccChatView(APIView):
                 status=status.HTTP_400_BAD_REQUEST)
         if not prompt:
             return Response({"detail": "prompt is required."}, status=status.HTTP_400_BAD_REQUEST)
-        model_voice = str(data.get("model", "corey-gpt")).lower()
+        # `model` is a VOICE (corey-gpt / standard / technical), not an engine.
+        # It is this message's dial and nothing more: when the request does not
+        # send one, the member's own stored VoiceZ voice applies. It used to
+        # default to "corey-gpt" and override the stored style every time, so a
+        # member who had chosen Standard or Technical was answered in Corey's
+        # voice by the one screen that took no voice field.
+        voice_asked = str(data.get("model") or "").strip().lower()
+        if voice_asked not in VOICE_STYLE:
+            voice_asked = ""
         knowledge = data.get("knowledge") or []  # [{course, text}] the user taught OCC
         history = data.get("history") or []       # [{role: 'user'|'occ', text}]
-        slang = bool(data.get("slang"))           # AAVE colloquialisms opt-in (Settings)
+        # AAVE colloquialisms opt-in (Settings): overrides the stored VoiceZ
+        # slang switch only when the request actually carries one.
+        slang_asked = "slang" in data
         suggest = bool(data.get("suggest"))       # Suggestion mode — always append a next-step
         acronyms = data.get("acronyms") or []     # [{term, means}] the member's CodeZ shorthand
 
@@ -193,32 +266,59 @@ class OccChatView(APIView):
         # vocal coach and the Gemini surfaces have honoured it all along.
         # Read before spending, because charge_ai_usage consumes it.
         _, _, daily_left = daily_prompt_state(request.user)
-        covered_free = bool(cost) and daily_left > 0
+        # Whether prompts REMAIN is only half of it — the allowance also has a
+        # ceiling, and this member may have picked an engine above it.
+        covered_free = daily_prompt_covers(cost) and daily_left > 0
 
         # Check affordability up front so we don't call the model then fail to bill.
-        if cost and not daily_left and not can_afford_ai(request.user, cost):
+        if cost and not covered_free and not can_afford_ai(request.user, cost):
+            # Two different walls, and telling somebody the wrong one sends them
+            # to wait until tomorrow for an allowance that was never going to
+            # cover this engine. Say which it is.
+            why = ("today's free prompts are spent"
+                   if daily_prompt_covers(cost)
+                   else f"a free daily prompt covers up to {DAILY_PROMPT_MAX_CENTS} {PROMPTZ} "
+                        f"— switch engine to run it free")
             return Response(
                 {"detail": f"{model_spec['emoji']} {model_spec['name']} costs "
-                           f"{cost} 🏷️ a message and today's free prompts are spent.",
+                           f"{cost} {PROMPTZ} a message and {why}.",
                  "cost_cents": cost, "engine": model_key,
-                 "open_in": "modelz"},
+                 "daily_prompt_max_cents": DAILY_PROMPT_MAX_CENTS,
+                 # There is no `modelz` tab — this said so for as long as the
+                 # file existed, and the jump went nowhere. The engine picker
+                 # is in OCC's own chat panel; topping up is PromptZ's door in
+                 # MembershipZ (which the client leaves out inside a shell).
+                 "open_in": "occ", "target": "occ-chat",
+                 "buy_in": "membershipz", "buy_target": "promptz-door"},
                 status=status.HTTP_402_PAYMENT_REQUIRED,
             )
 
         try:
             import anthropic
         except ImportError:
-            return Response({"detail": "LLM backend unavailable."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            log.warning("OCC chat: the `anthropic` package isn't installed on this server")
+            return Response(NOT_CONFIGURED, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         # The system prompt is assembled from parts rather than concatenated as
         # it goes, because the TOTAL has to fit a budget and you cannot trim a
         # string you have already joined. Fixed parts first (the voice and the
         # courses are what OCC *is*), then the member's own additions, which are
         # what gets shortened when the budget bites.
-        fixed = f"{VOICE_STYLE.get(model_voice, VOICE_STYLE['corey-gpt'])}\n\n{COURSES}"
-        # AAVE colloquialisms only apply to the Corey voice, and only when opted in.
-        if slang and model_voice == "corey-gpt":
-            fixed += f"\n\n{AAVE_STYLE}"
+        # One voice, from the member's own row, so a setting changed here holds
+        # in the coach and everywhere else a model writes to them. `override`
+        # is this request's dial — switching to terse technical mode for one
+        # task must not change what they get on every other screen.
+        from .voice import STYLES, prefs_dict, voice_prompt
+        _STYLE_BACK = {"corey-gpt": "corey", "standard": "standard", "technical": "technical"}
+        override = {}
+        if voice_asked:
+            override["style"] = _STYLE_BACK[voice_asked]
+        if slang_asked:
+            override["slang"] = bool(data.get("slang"))
+        fixed = voice_prompt(request.user, override=override or None, surface="occ") + f"\n\n{COURSES}"
+        # Which voice actually spoke — the dial if there was one, otherwise the
+        # member's stored style — for the ledger note and the reply.
+        model_voice = voice_asked or STYLES.get(prefs_dict(request.user)["style"], "corey-gpt")
         if suggest:
             fixed += f"\n\n{SUGGEST_STYLE}"
 
@@ -296,8 +396,15 @@ class OccChatView(APIView):
             image = None
             messages.append({"role": "user", "content": prompt})
 
+        deadline = Deadline(CHAT_BUDGET_SECONDS)
         try:
             client = anthropic.Anthropic()
+            # No SDK retries: the SDK would retry a timed-out call twice at the
+            # full timeout each, which is how a budget of 100s becomes 300s. The
+            # fallback below is the only second attempt, and it draws on the same
+            # deadline. (Stand-ins for the SDK need no `with_options`.)
+            if hasattr(client, "with_options"):
+                client = client.with_options(max_retries=0)
             # The member's chosen engine, falling back DOWN the ladder if it
             # isn't available on this account. Down rather than to a fixed
             # flagship: the member is billed for what they picked either way, so
@@ -305,19 +412,46 @@ class OccChatView(APIView):
             # paying the difference for a substitution nobody asked for.
             resp = _create_with_fallback(
                 client, model_spec["id"], AI_MODELS[AI_MODEL_ORDER[0]]["id"],
+                deadline=deadline,
                 max_tokens=3072,       # fuller Corey answers (was 1024)
                 system=system,
                 messages=messages,
             )
             text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
         except Exception as exc:  # missing/invalid key, network, rate limit, refusal
+            # Every branch here returns BEFORE the charge below: a reply that
+            # fails is not billed, and the body says so in a field the screen
+            # can read.
+            if _is_timeout(exc):
+                log.warning("OCC chat: %s timed out after %.0fs", model_spec["id"], deadline.spent())
+                return Response(
+                    {"detail": f"{model_spec['emoji']} {model_spec['name']} didn't answer within "
+                               f"{CHAT_BUDGET_SECONDS} seconds, so OCC stopped waiting. You weren't "
+                               "charged — try a shorter message, or a quicker engine.",
+                     "code": "timed_out", "charged": 0,
+                     "chat_budget_seconds": CHAT_BUDGET_SECONDS},
+                    status=status.HTTP_504_GATEWAY_TIMEOUT,
+                )
+            if _is_unconfigured(exc):
+                log.error("OCC chat: the Anthropic key is missing or refused — %s", str(exc)[:300])
+                return Response(NOT_CONFIGURED, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            # The raw exception stays in the log: it can name keys, hosts and
+            # account details, and "LLM backend error: ..." was never a sentence
+            # a member could act on.
+            log.error("OCC chat: %s call failed — %s", model_spec["id"], str(exc)[:300])
             return Response(
-                {"detail": f"LLM backend error: {exc}"[:200]},
+                {"detail": "OCC couldn't get an answer from the model just now. "
+                           "You weren't charged — try again in a moment.",
+                 "code": "backend_error", "charged": 0},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
         if not text:
-            return Response({"detail": "Empty response."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            return Response(
+                {"detail": "The model sent back an empty reply. You weren't charged — "
+                           "try rewording it.",
+                 "code": "empty_reply", "charged": 0},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         # The note names the ENGINE as well as the voice, because the engine is
         # what the money went on. A LogZ row reading "OCC corey-gpt · 15c" with
@@ -345,6 +479,9 @@ class OccChatView(APIView):
                # A run that cost nothing has to say so, or the member assumes
                # they were charged and stops asking.
                "free_prompt": covered_free,
+               # And what an allowance is worth, so a member on a dear engine
+               # can see WHY it wasn't free rather than guessing.
+               "daily_prompt_max_cents": DAILY_PROMPT_MAX_CENTS,
                # Say when history was dropped to stay inside the size budget.
                # Silently forgetting the start of a conversation is worse than
                # forgetting it out loud.
@@ -372,6 +509,6 @@ class OccChatView(APIView):
         else:
             # Even when it isn't kept, say where it COULD go rather than
             # leaving the member to guess that saving is possible at all.
-            out["can_save_work"] = {"app": "occ", "target": "occ:workz",
+            out["can_save_work"] = {"app": "occ", "target": "occ-workz",
                                     "label": "Keep this as WorkZ"}
         return Response(out)

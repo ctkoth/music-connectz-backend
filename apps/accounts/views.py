@@ -1,10 +1,17 @@
+import logging
 import re
 
 from django.contrib.auth import get_user_model
+from django.core import signing
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from apps.economy.personaz import clean_persona
+from apps.economy.personalityz import clean_code as clean_personality
+from apps.economy.religionz import clean_religion
+from apps.economy.languagez import clean_languages
 
 from .models import OAuthIdentity, Profile
 from .oauth import (
@@ -23,108 +30,295 @@ from .serializers import (
 )
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 def _unique_username(base):
-    base = re.sub(r"[^a-zA-Z0-9_.-]", "", (base or "user")).strip(".-_") or "user"
-    candidate = base[:140]
-    i = 1
-    while User.objects.filter(username__iexact=candidate).exists():
-        candidate = f"{base[:140]}{i}"
+    """A free handle built from whatever a provider called somebody.
+
+    This is the SECOND writer of usernames — `RegisterSerializer` is the other
+    — and it used to allow `.` and `-` and run to 140 characters, so the two
+    disagreed about what a handle is: a SoundCloud display name of
+    "bob.obrien" or "admin" registered here and would be refused on the form.
+    It answers to `usernames.USERNAME_RE` and `RESERVED` now, same as the form.
+
+    It SANITIZES and never refuses. An OAuth sign-in must not fail because
+    somebody's display name has an apostrophe in it — that is a wall in front
+    of the easiest door we have. Anything unusable becomes "user" plus a
+    number, which is ugly and works, and the member can be told to pick a
+    better one later.
+    """
+    from .usernames import RESERVED, USERNAME_RE
+
+    cleaned = re.sub(r"[^a-zA-Z0-9_]", "", (base or "")).strip("_")
+    # Room for the numeric suffix the loop may need, inside the 20-char rule.
+    stem = cleaned[:16] or "user"
+    if len(stem) < 3:
+        stem = f"{stem}user"[:16]
+
+    candidate = stem
+    i = 0
+    while (User.objects.filter(username__iexact=candidate).exists()
+           or candidate.lower() in RESERVED
+           or not USERNAME_RE.match(candidate)):
         i += 1
+        suffix = str(i)
+        candidate = f"{stem[:20 - len(suffix)]}{suffix}"
+        # Belt and braces: a stem that cannot be made to fit falls back rather
+        # than looping forever on an account nobody can finish creating.
+        if i > 9999:
+            candidate = f"user{User.objects.count() + 1}"[:20]
+            break
     return candidate
 
 
-def _clean_persona(raw):
-    """Normalize one PersonaZ entry, keeping its skills and their start dates.
+# The persona normalizer lives in apps.economy.personaz, next to the recovery
+# for the rows that lost the shape and the sweep that repairs them. It used to
+# be defined here, which meant the WRITE path knew how to normalize a persona
+# and no read path did — so a member whose row was already mangled stayed
+# mangled until they happened to save their profile again.
+_clean_persona = clean_persona
 
-    Accepts the string form (just a key) and the dict form; always returns a
-    dict so downstream code has one shape to reason about. Skill stints are the
-    input to profile_max_experience, so they are preserved verbatim — both the
-    new `periods` list and the legacy single `start`.
+
+def _note_signup(user, request):
+    """Record the signup address and raise a DupeZ flag if it is not the first.
+
+    Swallows everything. A duplicate check is a hint for a human to read later;
+    it may never be the reason somebody could not create an account.
     """
-    if not isinstance(raw, dict):
-        return {"key": str(raw)[:60], "name": str(raw)[:60], "skills": []}
-
-    skills = []
-    for s in (raw.get("skills") or [])[:100]:
-        if not isinstance(s, dict):
-            name = str(s)[:80]
-            if name:
-                skills.append({"name": name})
-            continue
-        name = str(s.get("name", ""))[:80]
-        if not name:
-            continue
-        # Stints. Experience is the SUM of these, so a member who stopped is
-        # not credited for the years they were away. The legacy single `start`
-        # is read as one still-open stint and preserved on the way through —
-        # dropping it here would silently zero somebody's experience.
-        periods = []
-        for pr in (s.get("periods") or [])[:20]:
-            if not isinstance(pr, dict):
-                continue
-            start = str(pr.get("start") or "")[:10]
-            if not start:
-                continue
-            end = str(pr.get("end") or "")[:10]
-            periods.append({"start": start, "end": end} if end else {"start": start})
-        # Hourly rate, in cents. The blueprint prices CallZ by "the other
-        # member's skill rate per hour" and nothing stored one, so the price
-        # range had no metric to gate on.
-        try:
-            rate = max(0, int(s.get("rate_cents") or 0))
-        except (TypeError, ValueError):
-            rate = 0
-        entry = {"name": name}
-        if periods:
-            entry["periods"] = periods
-        else:
-            start = str(s.get("start") or "")[:10]
-            if start:
-                entry["start"] = start
-        if rate:
-            entry["rate_cents"] = rate
-        skills.append(entry)
-        continue
-
-    key = str(raw.get("key") or raw.get("name") or "")[:60]
-    return {"key": key, "name": str(raw.get("name") or key)[:60], "skills": skills}
+    try:
+        from apps.economy.dupez import flag_signup
+        flag_signup(user, request)
+    except Exception:  # noqa: BLE001 — a hint must never break a signup
+        logger.exception("dupez: could not flag signup for %s", getattr(user, "id", "?"))
 
 
-def _user_from_oauth(info):
+def _note_seen(user, request):
+    """Record an address a returning account was seen from. Same guarantee."""
+    try:
+        from apps.economy.dupez import remember_address
+        remember_address(user, request)
+    except Exception:  # noqa: BLE001
+        logger.exception("dupez: could not record address for %s", getattr(user, "id", "?"))
+
+
+def _possible_match(name):
+    """A weak "is this you?" hint for the needs_choice screen.
+
+    A provider that hands over no email — SoundCloud's "KOTH" — matches
+    nothing, so the member is asked to guess between two buttons blind. Most
+    of the time they are not guessing: the handle they signed up with on the
+    provider and the handle they picked here are the same one, typed with
+    different case or a separator ("KOTH" / "K-Oth"). `normalize_handle`
+    strips both to the same string.
+
+    This is a hint, never a decision — the same line `dupez.signals_between`
+    draws for every signal it reports: nothing here merges an account or
+    signs anybody in, it only saves a member from picking the wrong button.
+    Best-effort and read-only, so a failure here must never take sign-in down
+    with it, same guarantee as `_note_signup`/`_note_seen` above.
+    """
+    from .usernames import normalize_handle
+    target = normalize_handle(name)
+    if not target:
+        return None
+    try:
+        for username, in User.objects.values_list("username").iterator():
+            if normalize_handle(username) == target:
+                return username
+    except Exception:  # noqa: BLE001 — a hint must never break a sign-in
+        logger.exception("oauth: could not compute a possible-match hint")
+    return None
+
+
+# A provider hand-off we have verified but not yet acted on.
+#
+# An OAuth authorization code is single-use: the moment we exchange it, it is
+# spent. So a member who is ASKED "do you already have an account?" cannot be
+# made to answer by replaying the original request — the second POST carries
+# this instead. It is signed by us and short-lived, so it proves we did the
+# verification without trusting the client to hand back a uid.
+PENDING_SALT = "oauth-pending-choice"
+PENDING_MAX_AGE = 15 * 60
+
+
+def _pending_token(info):
+    return signing.dumps(info, salt=PENDING_SALT)
+
+
+def _read_pending(token):
+    try:
+        return signing.loads(token, salt=PENDING_SALT, max_age=PENDING_MAX_AGE)
+    except signing.SignatureExpired:
+        raise OAuthError("That took too long — start the sign-in again.")
+    except signing.BadSignature:
+        raise OAuthError("That sign-in could not be verified. Start again.")
+
+
+def disconnect_block(user, remaining):
+    """Why this member may not disconnect a sign-in, or "" if they may.
+
+    `remaining` is how many identities they would have LEFT. An OAuth signup
+    gets `set_unusable_password()`, so for those members the provider is not a
+    convenience on top of a password — it IS the password. Removing the last
+    one with nothing behind it locks them out of their own account, and unlike
+    a deleted post there is no support path back in: the account is still
+    there, and nobody can prove it is theirs.
+
+    So the rule is the one the delete rules already draw. A disconnect may cost
+    a convenience; it may never cost the way in. It is refused only in the case
+    that actually bites — no password AND nothing else linked — because a
+    refusal that fires when a password exists is a control that does not work
+    for the people who set one up properly.
+    """
+    if remaining > 0 or user.has_usable_password():
+        return ""
+    if user.email:
+        return (
+            "This is the only way you can sign in — your account has no "
+            "password. Set one with Forgot password, then disconnect."
+        )
+    # No password and no address to send a reset to. Naming it is the whole
+    # value: "set a password" is useless advice to somebody who cannot receive
+    # the link, and they would find that out by being locked out.
+    return (
+        "This is the only way you can sign in, and there's no email on the "
+        "account to send a password reset to. Add an email first."
+    )
+
+
+def connections_for(user):
+    """Every linked sign-in, each carrying whether it can be removed and why.
+
+    The reason rides on the ROW rather than being worked out by the client:
+    whether a disconnect is refused depends on the password and on how many
+    others are linked, and a screen recomputing that would be the second place
+    the rule lives — the one that disagrees after the next change here.
+    """
+    rows = list(user.oauth_identities.all().order_by("created_at"))
+    out = []
+    for row in rows:
+        why = disconnect_block(user, len(rows) - 1)
+        out.append({
+            "provider": row.provider,
+            "email": row.email,
+            "connected_at": row.created_at.isoformat(),
+            "can_disconnect": not why,
+            "blocked_reason": why,
+        })
+    return out
+
+
+def _provider_vouches(info):
+    """True only when the provider said it confirmed the address it returned.
+
+    `oauth.py` sets `email_verified` per provider and leaves it False for every
+    userinfo endpoint that does not say. An address with no flag is a string the
+    member typed into somebody else's profile, so it never counts.
+    """
+    return bool(info.get("email") and info.get("email_verified"))
+
+
+def _note_email_verified(identity, info):
+    """A returning sign-in can upgrade what the identity says about its address.
+
+    Never the other way: one sign-in where a provider omits the flag is not a
+    reason to take back what an earlier one confirmed. And only a CONFIRMED
+    address replaces the stored one — an unconfirmed address from the provider
+    must not overwrite one the member has already proven.
+    """
+    if not _provider_vouches(info):
+        return
+    email = (info.get("email") or "").lower()
+    if identity.email_verified and identity.email == email:
+        return
+    identity.email, identity.email_verified = email, True
+    identity.save(update_fields=["email", "email_verified"])
+
+
+def _user_from_oauth(info, with_created=False, create=True):
     """Find-or-create a user from a verified OAuth payload, return (user).
+
+    `with_created` returns `(user, created)` instead, so a caller can tell a
+    brand-new account from a returning one — DupeZ needs the difference, and
+    every other caller keeps the original single-value shape.
 
     Matching an existing account by email hands the caller that account, so we
     only do it when the provider actually ASSERTED the address is verified.
     A provider that lets someone set an arbitrary unverified email would
     otherwise be a way to take over any account by claiming its address.
+
+    `create=False` stops at the point where a NEW account would be opened and
+    returns `None` instead, so the caller can ask the member whether they
+    already have one. That question is only worth asking here — where we could
+    not tell — and not on the two paths above it, which know:
+
+      * a known `provider_uid` IS the member, decided by a unique constraint;
+      * a verified email match IS the member, and links silently.
+
+    Asking a returning member on every sign-in would be friction on the common
+    path and, worse, would train people to click through an identity question
+    — which is how a safeguard turns into a duplicate factory.
     """
     identity = OAuthIdentity.objects.filter(
         provider=info["provider"], provider_uid=info["uid"]
     ).first()
     if identity:
-        return identity.user
+        _note_email_verified(identity, info)
+        return (identity.user, False) if with_created else identity.user
 
+    made = False
     user = None
-    if info.get("email"):
+    # Only auto-link if the provider VERIFIED the email. For unverified emails,
+    # the provider didn't assert ownership, so we ask the member instead of
+    # risking a duplicate account. If they say "yes I have one", they authenticate
+    # and link it via OAuthLinkView.
+    if info.get("email") and info.get("email_verified"):
         match = User.objects.filter(email__iexact=info["email"]).first()
-        if match and not info.get("email_verified"):
-            # Refuse rather than silently opening a second account on the same
-            # address — duplicate emails would also make password login
-            # ambiguous, since it resolves an identifier to a single user.
-            raise OAuthError(
-                f"An account already uses {info['email']}. "
-                f"{info['provider'].title()} didn't confirm you own that address, "
-                "so sign in with your original method and link it from there."
-            )
         user = match
 
+    if not user and not create:
+        # We genuinely cannot tell. Twitter reaches here EVERY time — its API
+        # returns no email at all, so before this there was nothing to match on
+        # and a second account was opened for an existing member every single
+        # time they used it.
+        return (None, False) if with_created else None
+
     if not user:
+        # Opening an account on an address somebody else already holds. The
+        # provider did not verify it, so this is an arbitrary string that
+        # happens to name a real member — and an `OAuthIdentity` carrying it
+        # is a STRONG duplicate signal in `dupez`, which is what lets a member
+        # close "their other account" without an owner reviewing it.
+        #
+        # `accounts_user_email_ci_uniq` already refused this, so the hole was
+        # closed — but by an IntegrityError, which reaches the member as a 500
+        # and reaches the next reader as nothing at all. Refusing here on
+        # purpose is the same protection with a sentence attached, and the
+        # sentence is the useful half: the member who legitimately lands on
+        # this is one who forgot they had an account, and the answer they need
+        # is the other button, not an error page.
+        if info.get("email") and User.objects.filter(email__iexact=info["email"]).exists():
+            raise OAuthError(
+                "An account already uses that email address. Sign in to it and "
+                f"link {info['provider'].title()} from there."
+            )
+        made = True
         base = info.get("name") or (info["email"].split("@")[0] if info.get("email") else info["provider"])
+        # Split the provider's name into first/last as a PREFILL. Only here, in
+        # the branch that opens a new account — a returning member's own edit
+        # must never be overwritten by whatever their Facebook says this week,
+        # and this is the one path where there is nothing to overwrite.
+        #
+        # One split on the first space: "de la Cruz" belongs in a last name
+        # whole, and a cleverer parse would be a guess about somebody's name
+        # rather than a field they can correct.
+        first, _, last = (info.get("name") or "").strip().partition(" ")
         user = User.objects.create_user(
             username=_unique_username(base),
             email=info.get("email", ""),
+            first_name=first[:150],
+            last_name=last.strip()[:150],
         )
         user.set_unusable_password()
         user.save()
@@ -135,9 +329,10 @@ def _user_from_oauth(info):
     OAuthIdentity.objects.get_or_create(
         provider=info["provider"],
         provider_uid=info["uid"],
-        defaults={"user": user, "email": info.get("email", "")},
+        defaults={"user": user, "email": info.get("email", ""),
+                  "email_verified": _provider_vouches(info)},
     )
-    return user
+    return (user, made) if with_created else user
 
 
 class RegisterView(APIView):
@@ -147,6 +342,11 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        # DupeZ: note where this account was made from, and raise a flag if
+        # another account was made from the same place. It flags — it never
+        # blocks a signup and never deletes anything, and it is wrapped
+        # because a duplicate check must not be able to fail a registration.
+        _note_signup(user, request)
         tokens = issue_tokens(user)
         return Response(
             {"user": PublicUserSerializer(user).data, **tokens},
@@ -158,9 +358,32 @@ class LoginView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        # This door took 25 wrong passwords in a row and answered 400 to every
+        # one of them, and would have taken 25 million: there was no rate
+        # limiting anywhere in this project. Only FAILURES count, so a member
+        # who signs in successfully never spends any of it — see ratelimit.py
+        # for why it is keyed on the account AND the address rather than
+        # either alone.
+        from .ratelimit import (login_block_reason, note_login_failure,
+                                note_login_success)
+
+        identifier = (request.data or {}).get("identifier", "")
+        blocked = login_block_reason(request, identifier)
+        if blocked:
+            return Response({"detail": blocked},
+                            status=status.HTTP_429_TOO_MANY_REQUESTS)
+
         serializer = LoginSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            # Counted BEFORE the error is raised, because a wrong password and
+            # a missing field arrive the same way and a guesser can send
+            # either.
+            note_login_failure(request, identifier)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
         user = serializer.validated_data["user"]
+        note_login_success(request, identifier)
+        _note_seen(user, request)
         tokens = issue_tokens(user)
         return Response({"user": PublicUserSerializer(user).data, **tokens})
 
@@ -181,12 +404,91 @@ class MeView(APIView):
     def patch(self, request):
         """Update the member's editable profile fields (personas, birthday →
         drives ZodiacZ + the AdZ age gate, nationalities, and basic display
-        bits) on the searchable economy profile. Returns the updated user."""
+        bits) on the searchable economy profile. Returns the updated user.
+
+        Premium members can also update their username/handle via the `username`
+        field. Free members cannot."""
         from apps.economy.catalog import over_char_limit
-        from apps.economy.models import membership_for, profile_for, zodiac_for
+        from apps.economy.visibility import merge_visibility
+        from apps.economy.models import (EXPLICIT_MIN_AGE, may_be_explicit,
+                                         membership_for, profile_for, zodiac_for)
         p = profile_for(request.user)
         data = request.data or {}
         changed = []
+
+        # Handle username updates (Premium only)
+        if "username" in data:
+            new_username = data.get("username", "").strip()
+            member = membership_for(request.user)
+
+            # Premium-only check
+            if member.tier != "premium":
+                return Response(
+                    {"detail": "Only Premium members can customize their handle. Upgrade in MembershipZ."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            # THE THIRD copy of this rule, and the third behaviour. It was the
+            # same regex typed out again — with no reserved list, so a Premium
+            # member could rename themselves `admin`, `support` or `official`:
+            # impersonation, behind a paywall. `username_problem` is the one
+            # rule now, shared with the register serializer and the
+            # availability endpoint.
+            #
+            # `taken=False` because the uniqueness question here is different:
+            # a rename must not report the member's own current handle as
+            # taken, so the exclude-self query below answers it instead.
+            from .usernames import username_problem
+
+            problem = username_problem(new_username, taken=False)
+            if problem:
+                return Response({"detail": problem},
+                                status=status.HTTP_400_BAD_REQUEST)
+
+            if User.objects.filter(username__iexact=new_username).exclude(id=request.user.id).exists():
+                return Response(
+                    {"detail": f"The handle '{new_username}' is taken. Try another."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            request.user.username = new_username
+            request.user.save(update_fields=["username"])
+            # NOT `changed`. That list is `Profile.save(update_fields=...)`,
+            # and `username` lives on User — so this raised
+            # "fields do not exist in this model" and 500'd, AFTER the handle
+            # had already been saved on the line above. The rename worked and
+            # reported failure, which is the inverse of the worst bug class in
+            # this app and just as bad: the member sees an error, tries again,
+            # and is told the handle is taken by themselves.
+            #
+            # `first_name`/`last_name` hit this same trap and were given their
+            # own `named` list; this one was missed. Anything on User goes in
+            # its own save, never in `changed`.
+        # A real name, kept separate from the handle. `username` is the address
+        # other members type; these are what somebody is called, and a provider
+        # supplies them at signup (Facebook through Spotify hands over a legal
+        # name). Django's own columns, so no third place to look.
+        #
+        # They are stored and displayed and NEVER matched on. Matching an
+        # account by name would hand it to anyone who typed that name into a
+        # provider's display-name field, which nobody verifies — the email rule
+        # above, minus the part that makes it safe.
+        # Tracked apart from `changed`, which is the Profile's update_fields —
+        # putting a User column in there makes Profile.save() raise for a field
+        # it has never heard of.
+        named = [f for f in ("first_name", "last_name") if f in data]
+        for field in named:
+            setattr(request.user, field, str(data.get(field) or "").strip()[:150])
+        if named:
+            request.user.save(update_fields=named)
+        if "visibility" in data:
+            # Merged, not replaced: the screen sends the fields it changed, and
+            # a whole-map write would silently reset every control the client
+            # happens not to know about — which is exactly what happens while
+            # the two repos deploy independently and one of them is a version
+            # behind.
+            p.visibility = merge_visibility(p.visibility, data["visibility"])
+            changed.append("visibility")
         if isinstance(data.get("personas"), list):
             # A persona is {"key", "name", "skills": [{"name", "start"}]} once
             # the member has used the skill picker, or a bare key string from
@@ -195,6 +497,25 @@ class MeView(APIView):
             # start dates the whole experience metric is derived from.
             p.personas = [_clean_persona(x) for x in data["personas"]][:50]
             changed.append("personas")
+        if "personality" in data:
+            # The SAME cleaner the other writer uses. A field with two
+            # endpoints gets one cleaner — see the note above PROFILE_FIELDS
+            # in economy/social.py about what happens when it gets two.
+            p.personality = clean_personality(data["personality"])
+            changed.append("personality")
+        # Popular-site profile fields — one cleaner, shared with ProfileView.
+        from apps.economy.social import clean_profile_field
+        for f in ("pronouns", "headline", "genres", "influences", "gear",
+                  "label", "timezone", "pinned_post_id", "cover_url"):
+            if f in data:
+                setattr(p, f, clean_profile_field(f, data[f]))
+                changed.append(f)
+        if "religion" in data:
+            p.religion = clean_religion(data["religion"])
+            changed.append("religion")
+        if "languages" in data:
+            p.languages = clean_languages(data["languages"])
+            changed.append("languages")
         if isinstance(data.get("nationalities"), list):
             p.nationalities = [str(x)[:60] for x in data["nationalities"]][:30]
             changed.append("nationalities")
@@ -204,6 +525,11 @@ class MeView(APIView):
             p.birthday = bd
             p.sign = zodiac_for(bd)
             changed += ["birthday", "sign"]
+            # A birthday that no longer clears the bar takes the explicit
+            # voice with it, rather than leaving a dormant True behind.
+            if p.voice_explicit and not may_be_explicit(p):
+                p.voice_explicit = False
+                changed.append("voice_explicit")
         # The bio is member-authored prose, so its ceiling is the tier's
         # character limit — not a column width. It used to share the truncation
         # below, which silently cut a Premium member at the old varchar(500);
@@ -223,6 +549,27 @@ class MeView(APIView):
         # Truncate to each column's real width — display_name/location/gender
         # are short identifiers, not prose, and overflowing them raises a
         # DataError (500) on PostgreSQL instead of quietly saving.
+        # VoiceZ switches. Explicit is the only one with a gate, and the gate
+        # is here rather than in the client: a request to be sworn at from an
+        # account that is thirteen is refused, and refused OUT LOUD, because
+        # silently storing False for something somebody just switched on is
+        # how a setting screen starts lying about itself.
+        if "voice" in data and isinstance(data["voice"], dict):
+            v = data["voice"]
+            if "explicit" in v:
+                want = bool(v["explicit"])
+                if want and not may_be_explicit(p):
+                    return Response(
+                        {"detail": f"The explicit voice is {EXPLICIT_MIN_AGE}+. Add a birthday that says so in ProfileZ.",
+                         "voice_explicit_allowed": False},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                p.voice_explicit = want
+                changed.append("voice_explicit")
+            for key in ("emoji", "slang"):
+                if key in v:
+                    setattr(p, f"voice_{key}", bool(v[key]))
+                    changed.append(f"voice_{key}")
         for f in ("display_name", "location", "gender"):
             if isinstance(data.get(f), str):
                 limit = p._meta.get_field(f).max_length
@@ -236,10 +583,51 @@ class MeView(APIView):
         """Permanently delete the signed-in account and its owned data. FK
         cascades remove profile, wallet, membership, posts, follows, etc.
         Required for app-store login policies + GDPR/CCPA erasure."""
+        from apps.economy.stripe_cancel import CancelFailed
+
+        from .erasure import delete_user
+
         user = request.user
-        username = user.username
-        user.delete()
+        try:
+            # Billing is cancelled first, then the rows cascade and the files go
+            # with them (erasure.py, stripe_cancel.py). If Stripe cannot be
+            # reached the account is NOT deleted and the member is told why.
+            delete_user(user)
+        except CancelFailed as exc:
+            return Response({"detail": exc.detail}, status=status.HTTP_502_BAD_GATEWAY)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UsernameAvailabilityView(APIView):
+    """GET /api/auth/check-username/?username=<handle> — check if a username is
+    available. Returns {available: bool, reason: str | null}."""
+
+    # Open logged-out, for the reason `rulez` and `trialdoorz` are: the one
+    # screen that needs this is the signup form, and nobody is signed in on
+    # it. Behind IsAuthenticated it could only ever answer the question for
+    # people who had already stopped asking it — which is why nothing called
+    # it, and why a whole form got filled in before "that username is taken".
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from .usernames import USERNAME_RULE, username_problem
+
+        username = request.query_params.get("username", "").strip()
+        me = getattr(request.user, "username", "") if request.user.is_authenticated else ""
+
+        # Asked about their own handle, which is neither free nor taken.
+        if me and username.lower() == me.lower():
+            return Response({"available": False, "rule": USERNAME_RULE,
+                             "reason": "This is already your handle."})
+
+        problem = username_problem(username)
+        return Response({
+            "available": problem is None,
+            # Travels either way so the form can state the rule BEFORE somebody
+            # picks a handle that breaks it, rather than only after.
+            "rule": USERNAME_RULE,
+            "reason": problem,
+        })
 
 
 class ReferralsView(APIView):
@@ -294,6 +682,21 @@ class OAuthLoginView(APIView):
     def post(self, request, provider):
         data = request.data or {}
         try:
+            # Answering the "do you already have one?" question. The original
+            # authorization code was spent on the first exchange, so the answer
+            # carries the signed result of that exchange instead of re-running
+            # it. Never the client's own idea of who they are.
+            if data.get("pending"):
+                info = _read_pending(data["pending"])
+                if info.get("provider") != provider:
+                    raise OAuthError("That sign-in was for a different provider.")
+                user, made = _user_from_oauth(info, with_created=True, create=True)
+                _note_signup(user, request) if made else _note_seen(user, request)
+                return Response({
+                    "user": PublicUserSerializer(user).data,
+                    **issue_tokens(user),
+                })
+
             if provider == "google":
                 info = verify_google(data.get("credential") or data.get("id_token"))
             elif provider == "github":
@@ -316,12 +719,163 @@ class OAuthLoginView(APIView):
                 )
             # Linking lives inside the same try so a refused link answers 400
             # with its reason, not a 500.
-            user = _user_from_oauth(info)
+            user, made = _user_from_oauth(info, with_created=True, create=False)
         except OAuthError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
+        if user is None:
+            # A new identity we could not tie to anybody. Ask rather than
+            # assume — but never refuse: a member whose only sign-in is a
+            # provider that hands over no email has to be able to join, or the
+            # safeguard becomes a limit that says WHETHER.
+            #
+            # 200, not an error: nothing went wrong, we just have a question.
+            return Response({
+                "needs_choice": True,
+                "provider": provider,
+                "email": info.get("email", ""),
+                "suggested_username": _unique_username(
+                    info.get("name")
+                    or (info["email"].split("@")[0] if info.get("email") else provider)
+                ),
+                # A hint, not a match: the provider's own display name against
+                # an existing username, normalized. See `_possible_match`.
+                "possible_match": _possible_match(info.get("name")),
+                "pending": _pending_token(info),
+                "detail": "Do you already have a Music ConnectZ account?",
+            })
+
+        # Signing in with a different provider is how most duplicates on this
+        # platform get made, so an account created HERE is the one worth
+        # noticing — the same call, gated on whether the account is new.
+        _note_signup(user, request) if made else _note_seen(user, request)
         tokens = issue_tokens(user)
         return Response({"user": PublicUserSerializer(user).data, **tokens})
+
+
+class OAuthLinkView(APIView):
+    """POST /api/auth/oauth/<provider>/link/ — link an OAuth provider to the
+    current user's account. For authenticated users only. Requires the user to
+    already have an account before linking.
+
+    Supports two flows:
+    1. Fresh OAuth verification: provide code/credential (same as direct linking)
+    2. Pending token: provide a pending token from an earlier OAuth attempt
+       (used when user logs in first, then links OAuth after authentication)
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, provider):
+        data = request.data or {}
+        try:
+            # Linking after a login: the member answered "I already have one",
+            # signed in, and is now spending the signed result of the exchange
+            # that already happened. Same key as the register path above — the
+            # authorization code was spent on that first exchange and cannot be
+            # replayed, so a pending token is the only thing left to present.
+            if data.get("pending"):
+                info = _read_pending(data["pending"])
+                if info.get("provider") != provider:
+                    raise OAuthError("That sign-in was for a different provider.")
+            else:
+                # Fresh OAuth verification (traditional flow)
+                if provider == "google":
+                    info = verify_google(data.get("credential") or data.get("id_token"))
+                elif provider == "github":
+                    info = exchange_github(
+                        data.get("code"), data.get("redirect_uri", "")
+                    )
+                elif provider == "apple":
+                    info = verify_apple(data.get("id_token") or data.get("credential"))
+                elif provider in OAUTH2_PROVIDERS:
+                    info = exchange_oauth2(
+                        provider,
+                        data.get("code"),
+                        data.get("redirect_uri", ""),
+                        data.get("code_verifier", ""),
+                    )
+                else:
+                    return Response(
+                        {"detail": f"Unsupported provider '{provider}'."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            # Check if this OAuth identity is already linked to another account
+            existing_identity = OAuthIdentity.objects.filter(
+                provider=info["provider"], provider_uid=info["uid"]
+            ).first()
+
+            if existing_identity:
+                if existing_identity.user_id == request.user.id:
+                    # Already linked to this account
+                    return Response(
+                        {"detail": f"{provider.title()} is already linked to your account."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                else:
+                    # Linked to a different account
+                    return Response(
+                        {
+                            "detail": f"This {provider.title()} account is already linked to another user. "
+                            "Please use a different account or contact support."
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            # Link this OAuth identity to the current user
+            OAuthIdentity.objects.create(
+                user=request.user,
+                provider=info["provider"],
+                provider_uid=info["uid"],
+                email=info.get("email", ""),
+                email_verified=_provider_vouches(info),
+            )
+
+            return Response(
+                {
+                    "detail": f"{provider.title()} successfully linked to your account.",
+                    "user": PublicUserSerializer(request.user).data,
+                }
+            )
+
+        except OAuthError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, provider):
+        """Disconnect a linked sign-in.
+
+        Linking existed from the start and unlinking never did, so a provider
+        attached to the wrong account could only be moved by someone with a
+        database shell. That is not an edge case: `_user_from_oauth` matches a
+        known `provider_uid` BEFORE anything else and signs you into whichever
+        account holds it, so a member whose SoundCloud landed on the wrong
+        account gets returned to it every single time, with no screen anywhere
+        offering a way out.
+
+        It takes the provider from the URL rather than a uid in the body: the
+        member is removing THEIR link to a provider, and a uid in a body is a
+        chance to name somebody else's.
+        """
+        identity = request.user.oauth_identities.filter(provider=provider).first()
+        if not identity:
+            return Response(
+                {"detail": f"No {provider.title()} sign-in is linked to your account."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        remaining = request.user.oauth_identities.exclude(pk=identity.pk).count()
+        blocked = disconnect_block(request.user, remaining)
+        if blocked:
+            return Response({"detail": blocked}, status=status.HTTP_400_BAD_REQUEST)
+
+        identity.delete()
+        return Response(
+            {
+                "detail": f"{provider.title()} disconnected. You can link it again any time.",
+                "user": PublicUserSerializer(request.user).data,
+            }
+        )
 
 
 class OAuthConfigView(APIView):
@@ -329,8 +883,9 @@ class OAuthConfigView(APIView):
     configured with, so the login buttons can read them at runtime instead of
     relying on build-time VITE_* vars. Client IDs are public; secrets stay here.
     Covers every provider the backend can complete a sign-in for — the id_token
-    verifiers (google/apple), GitHub, and the generic code-flow providers
+    verifiers (google), GitHub, and the generic code-flow providers
     (spotify/microsoft/facebook/soundcloud/twitter).
+    Note: Apple OAuth is temporarily disabled; verify_apple() is retained for re-enabling.
 
     This is also the only diagnostic for "every button says it isn't available".
     It is deliberately open: the login screen is signed-out, so it cannot need
@@ -365,14 +920,15 @@ class OAuthConfigView(APIView):
         # every screen stays silent about why. So say it here. Client IDs are
         # public, so naming the shape gives nothing away.
         warnings = []
-        g = cfg["google"]
+        g = cfg.get("google", "")
         if g and not g.endswith(".apps.googleusercontent.com"):
             warnings.append(
                 "GOOGLE_OAUTH_CLIENT_ID doesn't look like a Google client ID — those "
                 "end in .apps.googleusercontent.com. Check you pasted the client ID "
                 "and not the client secret."
             )
-        if cfg["apple"] and "." not in cfg["apple"]:
+        # Apple wants the Services ID (reverse-domain), not the 10-char Team ID.
+        if cfg.get("apple") and "." not in cfg.get("apple", ""):
             warnings.append(
                 "APPLE_OAUTH_CLIENT_ID should be the Services ID (a reverse-domain "
                 "string), not the Team ID."
@@ -388,3 +944,33 @@ class OAuthConfigView(APIView):
                     f"{name.title()} and failing on the way back."
                 )
         return Response({**cfg, "warnings": warnings, "needs": needs})
+
+
+class UsersView(APIView):
+    """DELETE /api/auth/users/{username}/ — owner can delete any account."""
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, username):
+        from apps.economy.dupez import is_owner_candidate, is_owner
+
+        # Check if caller is an owner
+        if not (is_owner(request.user) or is_owner_candidate(request.user)):
+            return Response({"detail": "owner only"}, status=status.HTTP_403_FORBIDDEN)
+
+        # Get the target user
+        target = User.objects.filter(username=username).first()
+        if not target:
+            return Response({"detail": "user not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Cancel their billing, delete the user, and the files they uploaded
+        # (see stripe_cancel.py and erasure.py).
+        from apps.economy.stripe_cancel import CancelFailed
+
+        from .erasure import delete_user
+
+        try:
+            delete_user(target)
+        except CancelFailed as exc:
+            return Response({"detail": exc.detail}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({"deleted": username}, status=status.HTTP_200_OK)

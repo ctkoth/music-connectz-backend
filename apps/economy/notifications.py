@@ -4,7 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Notification
+from .models import Notification, UserPreferences
 
 
 def _dict(n):
@@ -40,3 +40,21 @@ class NotificationsView(APIView):
             Notification.objects.filter(user=request.user, id=nid).update(read=True)
         unread = Notification.objects.filter(user=request.user, read=False).count()
         return Response({"unread": unread})
+
+
+def send_habit_reminder(user, habit):
+    """Create an in-app habit reminder notification if user has enabled notifications."""
+    try:
+        prefs = UserPreferences.objects.get(user=user)
+        if not prefs.notifications_enabled:
+            return None
+    except UserPreferences.DoesNotExist:
+        return None
+
+    notification = Notification.objects.create(
+        user=user,
+        kind="habit_reminder",
+        text=f"Time to complete your habit: {habit.title}",
+        item_id=f"habit:{habit.id}",
+    )
+    return notification

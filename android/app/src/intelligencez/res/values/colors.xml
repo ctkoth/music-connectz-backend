@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The IntelligenceZ sign's own near-black (INK in
+     android/tools/make_intelligencez_assets.py), so the status bar, splash and
+     adaptive-icon background meet the art with no seam. Overrides main's
+     brand_ink for this flavor only. -->
+<resources>
+    <color name="brand_ink">#02020C</color>
+</resources>

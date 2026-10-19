@@ -11,6 +11,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .copyrightz import CLAIMS, summary as copyright_summary
 from .directz_craft import CRAFT_SCORES
 from .models import (
     DirectZWork,
@@ -161,6 +162,37 @@ def craft_price(user):
     }
 
 
+def _apply_copyright_check(work, user):
+    """Identify the recordings in this work's audio, or record that we didn't.
+
+    Never raises and never blocks: the member's video is already saved, and a
+    recognition provider being slow must not cost them the upload. It is also
+    free — the check is a fingerprint lookup rather than a model run, so unlike
+    the craft rating there is nothing to bill and nothing to ask for first.
+
+    A match is not a verdict. Nothing here hides or refuses the work; it names
+    what was heard so the member can answer it before they publish, which is
+    the same rule as a price — something you find out by publishing is not a
+    warning, it's a takedown.
+    """
+    from .copyrightz import UNSCANNED, scan
+
+    try:
+        upload = _find_upload(user, work.media_url)
+        if upload is None:
+            work.copyright = {"state": UNSCANNED, "matches": [],
+                              "note": "no video attached" if not work.media_url
+                                      else "the video couldn't be found"}
+        else:
+            work.copyright = scan(upload.file.path, upload.content_type or "")
+    except Exception:  # noqa: BLE001 — a check is never worth losing a post over
+        logger.exception("directz: copyright check failed for work %s", work.id)
+        work.copyright = {"state": UNSCANNED, "matches": [],
+                          "note": "The copyright check couldn't run just now."}
+    work.copyright_state = work.copyright.get("state", UNSCANNED)
+    work.save(update_fields=["copyright", "copyright_state"])
+
+
 def _apply_craft_rating(work, user):
     """Watch the work's video and store the score, or store why we couldn't.
 
@@ -259,6 +291,16 @@ def _work_dict(w, request):
         # Why there is no rating, when there isn't. The screen shows this
         # instead of a number rather than beside one.
         "rating_note": w.rating_note,
+        # What was heard in the audio, what the member said about it, and the
+        # one line the screen puts under the player. `unscanned` is its own
+        # state and never reads as a pass.
+        "copyright": {
+            **(w.copyright or {}),
+            "state": w.copyright_state,
+            "claim": w.copyright_claim,
+            "claims": CLAIMS,
+            "summary": copyright_summary(w.copyright or {}, w.copyright_claim),
+        },
         **disp,  # rating, source (ai|users|None), ai_rating, user_median, count
     }
 
@@ -328,6 +370,10 @@ class DirectZWorksView(APIView):
             "contributors": contributors,
         }
         w = DirectZWork.objects.create(owner=request.user, **payload)
+        # Always, and never opt-in — unlike the craft rating below. The check
+        # costs nothing (a fingerprint lookup, not a model run) and the thing it
+        # protects the member from is a takedown on work they already published.
+        _apply_copyright_check(w, request.user)
         # Opt-in, and off by default. The rating comes from watching the video
         # — which costs real money on the platform's key — so posting must not
         # quietly become a paid action. A member who wants one asks for one,
@@ -362,3 +408,44 @@ class DirectZRateView(APIView):
             from .models import reward_for_rating
             reward_for_rating(request.user, "DirectZ")
         return Response(_work_dict(w, request))
+
+
+class DirectZCopyrightView(APIView):
+    """POST {claim} — the member's answer to what was heard in their own work.
+
+    The answer travels with the work rather than resolving it away. A match
+    stays a match; what changes is that the member has said which kind it is,
+    which is the difference between a queue of unanswered flags and a queue of
+    things nobody has looked at.
+
+    GET re-runs the check for a work that was never scanned — which is what a
+    member does after the provider goes in, or after they replace the video.
+    Re-running one that already has an answer is not offered: it would quietly
+    discard what they told us.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        from .copyrightz import UNSCANNED, readiness
+        w = DirectZWork.objects.filter(pk=pk, owner=request.user).first()
+        if not w:
+            return Response({"detail": "That work isn't yours or isn't there."},
+                            status=status.HTTP_404_NOT_FOUND)
+        if w.copyright_state == UNSCANNED:
+            _apply_copyright_check(w, request.user)
+        return Response({**_work_dict(w, request)["copyright"],
+                         "checker": readiness()})
+
+    def post(self, request, pk):
+        w = DirectZWork.objects.filter(pk=pk, owner=request.user).first()
+        if not w:
+            return Response({"detail": "That work isn't yours or isn't there."},
+                            status=status.HTTP_404_NOT_FOUND)
+        claim = str((request.data or {}).get("claim", "")).lower()
+        if claim and claim not in CLAIMS:
+            return Response({"detail": f"claim must be one of {sorted(CLAIMS)}",
+                             "claims": CLAIMS}, status=status.HTTP_400_BAD_REQUEST)
+        w.copyright_claim = claim
+        w.save(update_fields=["copyright_claim"])
+        return Response(_work_dict(w, request)["copyright"])

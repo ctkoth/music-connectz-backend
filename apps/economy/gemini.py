@@ -1,4 +1,4 @@
-"""Gemini generation for Image ConnectZ (image) + Video ConnectZ (Veo video).
+"""Gemini generation for Image ConnectZ (image). Video lives in videoz.py.
 
 Uses Google's Generative Language REST API. Charges the AI-cost minimum (PromptZ
 first, then cash) like the rest of the AI suite. Every endpoint 503s cleanly
@@ -20,7 +20,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import ai_cost
-from .models import can_afford_ai, charge_ai_usage, daily_prompt_state, wallet_for
+from .models import (can_afford_ai, charge_ai_usage, daily_prompt_covers,
+                     daily_prompt_state, wallet_for)
 from .views import credit_owner
 
 logger = logging.getLogger(__name__)
@@ -108,7 +109,8 @@ def _catalogue_for(kind, key):
         # it as one would leave a worker permanently convinced the key can run
         # nothing — the next take should get to ask again.
         try:
-            r = requests.get(f"{BASE}/models", params={"key": key, "pageSize": 200}, timeout=20)
+            r = requests.get(f"{BASE}/models", params={"pageSize": 200},
+                             headers=_auth(key), timeout=20)
         except requests.RequestException:
             logger.exception("Gemini: could not list models")
             return []
@@ -176,7 +178,7 @@ def generate_content(kind, body, *, key, timeout, env_vars=(), label="Gemini"):
     for model in model_chain(kind, *env_vars, key=key):
         tried.append(model)
         resp = requests.post(f"{BASE}/models/{model}:generateContent",
-                             params={"key": key}, json=body, timeout=timeout)
+                             headers=_auth(key), json=body, timeout=timeout)
         if resp.status_code != 404:
             if resp.status_code == 200:
                 _remember(kind, model)
@@ -188,6 +190,19 @@ def generate_content(kind, body, *, key, timeout, env_vars=(), label="Gemini"):
 
 def _key():
     return getattr(settings, "GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
+
+
+def _auth(key):
+    """The key goes in a header, never in the URL.
+
+    `?key=` put the API key in every request line, and `requests` writes the
+    request line into the message of the exceptions it raises ("Max retries
+    exceeded with url: /v1beta/models/…:generateContent?key=AIza…"). Several
+    callers log those and one used to return them to the member, so a DNS blip
+    could print part of the key into a log or a response. The header is the
+    documented alternative and is not part of any exception message.
+    """
+    return {"x-goog-api-key": key}
 
 
 def _bill(user, note, count_daily=False):
@@ -212,7 +227,7 @@ def _bill(user, note, count_daily=False):
     covered_free = False
     if count_daily:
         _, _, daily_left = daily_prompt_state(user)
-        covered_free = daily_left > 0
+        covered_free = daily_prompt_covers(cost) and daily_left > 0
     remaining = charge_ai_usage(user, cost, note=note, count_daily=count_daily)
     if remaining is None:
         return None
@@ -222,6 +237,13 @@ def _bill(user, note, count_daily=False):
         return 0
     credit_owner(user, cost, note)
     return cost
+
+
+# What Image ConnectZ tells a member when Gemini fails. Fixed sentences: the
+# exception text and Google's error body stay in the log.
+IMAGE_DOWN = "The image service didn't answer — nothing was charged."
+IMAGE_EMPTY = ("The image service didn't return a picture for that. Nothing was charged — "
+               "try different wording, or try again in a little while.")
 
 
 class GeminiImageView(APIView):
@@ -251,8 +273,13 @@ class GeminiImageView(APIView):
             ref_mime = header.split(";")[0].split(":")[-1] or "image/jpeg"
             parts.insert(0, {"inlineData": {"mimeType": ref_mime, "data": b64}})
         try:
+            # The key rides in a header, not the query string. `requests` names
+            # the full URL in every connection error it raises, and this view
+            # used to hand `str(exc)` to the member — so a dropped connection
+            # printed part of GEMINI_API_KEY on their screen.
             r = requests.post(
-                f"{BASE}/models/{model}:generateContent?key={key}",
+                f"{BASE}/models/{model}:generateContent",
+                headers={"x-goog-api-key": key},
                 json={"contents": [{"parts": parts}],
                       "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}},
                 timeout=90,
@@ -265,72 +292,14 @@ class GeminiImageView(APIView):
                     img = inline["data"]; mime = inline.get("mimeType") or inline.get("mime_type") or mime
                     break
             if not img:
-                detail = (data.get("error") or {}).get("message") or "No image returned."
-                return Response({"detail": f"Gemini: {detail}"[:200], "image": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        except Exception as exc:
-            return Response({"detail": f"Gemini error: {exc}"[:200], "image": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                # Google's own words are for the log, not the screen: they are a
+                # third party's text and can carry a project number or quota name.
+                logger.error("Image ConnectZ: no image — Gemini %s: %s", r.status_code,
+                             str((data.get("error") or {}).get("message") or "no error message")[:300])
+                return Response({"detail": IMAGE_EMPTY, "image": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except Exception:
+            logger.exception("Image ConnectZ: the Gemini call failed")
+            return Response({"detail": IMAGE_DOWN, "image": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         cost = _bill(request.user, f"Image ConnectZ (Gemini)")
         return Response({"image": f"data:{mime};base64,{img}", "cost_cents": cost, "money": round(wallet_for(request.user).money_cents / 100, 2)})
-
-
-class GeminiVideoView(APIView):
-    """POST { prompt } → start a Veo video generation; returns an operation name
-    to poll. Video gen is long-running (~1–2 min)."""
-
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        prompt = str((request.data or {}).get("prompt", "")).strip()
-        if not prompt:
-            return Response({"detail": "prompt required"}, status=status.HTTP_400_BAD_REQUEST)
-        key = _key()
-        if not key:
-            return Response({"detail": "Video generation isn't configured — set GEMINI_API_KEY on the backend.", "operation": None},
-                            status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        cost = ai_cost("standard")
-        if cost and not can_afford_ai(request.user, cost):
-            return Response({"detail": "Not enough PromptZ / balance.", "cost_cents": cost}, status=status.HTTP_402_PAYMENT_REQUIRED)
-
-        model = os.environ.get("GEMINI_VIDEO_MODEL", "veo-3.0-generate-preview")
-        try:
-            r = requests.post(
-                f"{BASE}/models/{model}:predictLongRunning?key={key}",
-                json={"instances": [{"prompt": prompt}]},
-                timeout=60,
-            )
-            data = r.json()
-            op = data.get("name")
-            if not op:
-                detail = (data.get("error") or {}).get("message") or "Could not start video generation."
-                return Response({"detail": f"Veo: {detail}"[:200], "operation": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        except Exception as exc:
-            return Response({"detail": f"Veo error: {exc}"[:200], "operation": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-
-        cost = _bill(request.user, "Video ConnectZ (Veo)")
-        return Response({"operation": op, "status": "pending", "cost_cents": cost})
-
-
-class GeminiVideoStatusView(APIView):
-    """POST { operation } → poll a Veo generation; returns { done, video_url }."""
-
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        op = str((request.data or {}).get("operation", "")).strip()
-        key = _key()
-        if not op or not key:
-            return Response({"detail": "operation and GEMINI_API_KEY required"}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            r = requests.get(f"{BASE}/{op}?key={key}", timeout=30)
-            data = r.json()
-            if not data.get("done"):
-                return Response({"done": False})
-            resp = data.get("response") or {}
-            uri = None
-            samples = (resp.get("generateVideoResponse") or {}).get("generatedSamples") or resp.get("generatedSamples") or []
-            if samples:
-                uri = (samples[0].get("video") or {}).get("uri") or samples[0].get("uri")
-            return Response({"done": True, "video_url": uri and f"{uri}&key={key}" if uri else None})
-        except Exception as exc:
-            return Response({"detail": f"Veo poll error: {exc}"[:200], "done": False}, status=status.HTTP_503_SERVICE_UNAVAILABLE)

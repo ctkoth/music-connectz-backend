@@ -1,4 +1,5 @@
 from django.contrib.auth import authenticate, get_user_model
+from django.db import transaction
 from django.db.models import Q
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -32,6 +33,24 @@ class PublicUserSerializer(serializers.ModelSerializer):
     birthday = serializers.SerializerMethodField()
     age = serializers.SerializerMethodField()
     zodiac = serializers.SerializerMethodField()
+    zodiac_cn = serializers.SerializerMethodField()
+    # VoiceZ. `voice_explicit_allowed` is served alongside the switch itself
+    # so the client can explain a disabled toggle instead of letting somebody
+    # flip it and watch it silently flip back.
+    voice = serializers.SerializerMethodField()
+    # Linked sign-ins, each carrying whether it can be disconnected and why
+    # not. Served here because this is what the account screen already reads,
+    # and a member cannot manage a link they cannot see they have.
+    connections = serializers.SerializerMethodField()
+    # Real name, separate from the handle. This serializer answers /api/auth/me/
+    # — the member's OWN view — so both halves are always returned here, and
+    # `visibility` says who else may see them. The surfaces that render another
+    # member read `public_name()` instead of these.
+    #
+    # Every field is listed, including the ones left at their default: a member
+    # can only check what they are exposing by seeing the whole list, which is
+    # the same reason the ZodiacZ panel publishes all twenty-four bonuses.
+    visibility = serializers.SerializerMethodField()
 
     # Nine of the fields below live on the economy profile/wallet/membership. Look
     # each row up ONCE per user and cache it on the serializer — resolving them
@@ -56,8 +75,33 @@ class PublicUserSerializer(serializers.ModelSerializer):
         from apps.economy.models import profile_age
         return profile_age(self._economy(obj, "profile"))
 
+    def get_voice(self, obj):
+        from apps.economy.models import may_be_explicit
+        p = self._economy(obj, "profile")
+        allowed = may_be_explicit(p)
+        return {
+            # Effective, not stored. Somebody can set this at 18 and then edit
+            # their birthday to fifteen; the stored bit would still say True
+            # and every screen reading it would swear at a child. The gate is
+            # applied on the way OUT as well as on the way in.
+            "explicit": bool(p.voice_explicit) and allowed,
+            "emoji": bool(p.voice_emoji),
+            "slang": bool(p.voice_slang),
+            "explicit_allowed": allowed,
+        }
+
     def get_zodiac(self, obj):
         return self._economy(obj, "profile").sign or ""
+
+    def get_zodiac_cn(self, obj):
+        """The animal, derived from the birthday rather than stored beside it.
+
+        `sign` is a column and needed a second writer to remember it, which is
+        how it got out of step once already. This reads the one source of
+        truth, so it cannot drift.
+        """
+        from apps.economy.models import chinese_zodiac_for
+        return chinese_zodiac_for(self._economy(obj, "profile").birthday)
 
     def get_is_owner(self, obj):
         return bool(obj.is_superuser or obj.is_staff)
@@ -78,7 +122,12 @@ class PublicUserSerializer(serializers.ModelSerializer):
         return self._economy(obj, "profile").onboarded
 
     def get_personas(self, obj):
-        return self._economy(obj, "profile").personas or []
+        # Through the normalizer, not straight off the column: a row that was
+        # written before the write path was fixed still holds a persona as the
+        # printed form of a dict, and serving it raw is what put
+        # "{'name': 'Independent Artist', ...}" on somebody's own profile.
+        from apps.economy.personaz import personas_of
+        return personas_of(self._economy(obj, "profile"))
 
     def get_nationalities(self, obj):
         return self._economy(obj, "profile").nationalities or []
@@ -88,8 +137,19 @@ class PublicUserSerializer(serializers.ModelSerializer):
         fields = (
             "id", "username", "email", "phone", "avatar_url", "is_owner",
             "tier", "spinaz", "energy", "onboarded", "personas", "nationalities",
-            "birthday", "age", "zodiac",
+            "birthday", "age", "zodiac", "zodiac_cn", "voice", "connections",
+            "first_name", "last_name", "visibility",
         )
+
+    def get_connections(self, obj):
+        from .views import connections_for
+
+        return connections_for(obj)
+
+    def get_visibility(self, obj):
+        from apps.economy.visibility import settings_for
+
+        return settings_for(self._economy(obj, "profile"))
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -103,11 +163,38 @@ class RegisterSerializer(serializers.Serializer):
     # Token from a no-account trial Boss Take. Signing up with it attaches that
     # take to the new account, so the thing they made at the door isn't lost.
     trial_token = serializers.CharField(required=False, allow_blank=True, allow_null=True, default="")
+    # A full week's routine built client-side on the BodieZ trial door — free,
+    # unlimited, no AI, no account, so nothing about building it touches the
+    # shared trial-take budget. It only becomes real BodieZRoutine rows if
+    # this registration actually completes, which is the "only keep it if you
+    # upgrade" the CTA on that screen promises.
+    trial_split = serializers.JSONField(required=False, default=list)
 
     def validate_username(self, value):
+        # `username_problem` is the same rule `check-username/` answers with.
+        # It was the checker's alone until now, and the checker cannot create
+        # an account — so a handle the availability endpoint would have
+        # refused was registered anyway, and there was nothing to notice.
+        from .usernames import username_problem
         value = value.strip()
-        if User.objects.filter(username__iexact=value).exists():
-            raise serializers.ValidationError("That username is taken.")
+        problem = username_problem(value)
+        if problem:
+            raise serializers.ValidationError(problem)
+        return value
+
+    def validate_password(self, value):
+        """Django's own validators — the ones `AUTH_PASSWORD_VALIDATORS` has
+        been configured with since the project was started.
+
+        `passwords.py` runs them on a RESET and this never ran them on a
+        REGISTER, so the rule was enforced at the weaker moment and not the
+        stronger one: you could sign up with the literal string "password",
+        and then be refused that same password if you ever tried to change to
+        it. Held forever, and the only way to find out it was not allowed was
+        to try to stop using it.
+        """
+        from django.contrib.auth import password_validation
+        password_validation.validate_password(value)
         return value
 
     def validate_email(self, value):
@@ -122,39 +209,86 @@ class RegisterSerializer(serializers.Serializer):
             raise serializers.ValidationError("An account already uses that phone number.")
         return value
 
+    def validate_trial_split(self, value):
+        # Cleaned here, never trusted raw — this is the one field on this
+        # serializer that arrives from someone who was never authenticated.
+        # Malformed input becomes an empty list rather than a 400: a broken
+        # trial split must never be the reason a registration fails.
+        from apps.economy.bodiez import clean_trial_split
+        return clean_trial_split(value)
+
     def create(self, validated):
-        user = User.objects.create_user(
-            username=validated["username"],
-            email=validated["email"],
-            password=validated["password"],
-        )
-        Profile.objects.update_or_create(
-            user=user, defaults={"phone": validated.get("phone", "")}
-        )
-        # Store the birthday on the searchable economy profile if provided.
-        birthday = (validated.get("birthday") or "").strip()
-        if birthday:
-            # Derive the sign here too, exactly as PATCH /api/auth/me/ does —
-            # otherwise a member who gave their birthday at signup had a blank
-            # ZodiacZ sign until they edited their profile again.
-            from apps.economy.models import profile_for, zodiac_for
-            ep = profile_for(user)
-            ep.birthday = birthday[:10]
-            ep.sign = zodiac_for(ep.birthday)
-            ep.save(update_fields=["birthday", "sign", "updated_at"])
-        # Two-sided referral: credit the inviter + welcome the joinee (once).
-        code = (validated.get("ref") or "").strip()
-        if code and code.lower() != user.username.lower():
-            from apps.economy.models import record_referral
-            referrer = User.objects.filter(username__iexact=code).first()
-            if referrer:
-                record_referral(referrer, user)
-        # Claim the trial take, if they came in through one. Best-effort by
-        # design — a stale token must never cost somebody their registration.
-        token = (validated.get("trial_token") or "").strip()
-        if token:
-            from apps.economy.models import claim_trial_take
-            claim_trial_take(user, token)
+        # Everything below used to run un-transacted: `create_user` committed
+        # immediately, and every step after it (the welcome bonus, the owner's
+        # bonus, the zodiac write, the referral, the trial claim) could still
+        # raise. When one did, the member got a 500 and NOT an account — but
+        # the username and email were already taken, permanently, by a user row
+        # with no way back to it. Retrying "register" then failed with "that
+        # username/email is taken", by themselves, forever. That is a dead end
+        # this screen exists to prevent, not cause. One atomic block: either
+        # the whole join happens or none of it does, and a bug in the welcome
+        # bonus can never brick a signup.
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=validated["username"],
+                email=validated["email"],
+                password=validated["password"],
+            )
+            Profile.objects.update_or_create(
+                user=user, defaults={"phone": validated.get("phone", "")}
+            )
+            # Welcome bonus for signing up — kickstart their balance
+            from apps.economy.models import award_spinaz, SIGNUP_WELCOME_SPINAZ
+            award_spinaz(user, SIGNUP_WELCOME_SPINAZ, "signup welcome bonus",
+                         app_key="profilez", target="signup")
+            # Platform owner bonus for each new join — incentivizes growth focus
+            from apps.economy.views import platform_owner
+            owner = platform_owner()
+            if owner and owner.id != user.id:
+                from datetime import timedelta
+                from django.utils import timezone
+                from apps.economy.models import OWNER_JOIN_BONUS_DAILY_CAP, Transaction
+                paid_today = Transaction.objects.filter(
+                    user=owner, app_key="profilez", target="signup",
+                    note__startswith="new member join",
+                    created_at__gte=timezone.now() - timedelta(hours=24)).count()
+                if paid_today < OWNER_JOIN_BONUS_DAILY_CAP:
+                    award_spinaz(owner, SIGNUP_WELCOME_SPINAZ, f"new member join ({user.username})",
+                                 app_key="profilez", target="signup")
+            # Store the birthday on the searchable economy profile if provided.
+            birthday = (validated.get("birthday") or "").strip()
+            if birthday:
+                # Derive the sign here too, exactly as PATCH /api/auth/me/ does —
+                # otherwise a member who gave their birthday at signup had a blank
+                # ZodiacZ sign until they edited their profile again.
+                from apps.economy.models import profile_for, zodiac_for
+                ep = profile_for(user)
+                ep.birthday = birthday[:10]
+                ep.sign = zodiac_for(ep.birthday)
+                ep.save(update_fields=["birthday", "sign", "updated_at"])
+            # Two-sided referral: credit the inviter + welcome the joinee (once).
+            code = (validated.get("ref") or "").strip()
+            if code and code.lower() != user.username.lower():
+                from apps.economy.models import record_referral
+                referrer = User.objects.filter(username__iexact=code).first()
+                if referrer:
+                    record_referral(referrer, user)
+            # Claim the trial take, if they came in through one. Best-effort by
+            # design — a stale token must never cost somebody their registration.
+            token = (validated.get("trial_token") or "").strip()
+            if token:
+                from apps.economy.models import claim_trial_take
+                claim_trial_take(user, token)
+            # The week they built on the BodieZ trial door, if any — already
+            # cleaned by validate_trial_split, so this is trusted here.
+            # A trial visitor who asked for retake reminders has joined: the
+            # emails pitch the no-account door, which is wrong advice now.
+            from apps.economy.retake import stop_for_member
+            stop_for_member(user)
+            trial_split = validated.get("trial_split") or []
+            if trial_split:
+                from apps.economy.bodiez import create_trial_split_routines
+                create_trial_split_routines(user, trial_split)
         return user
 
 

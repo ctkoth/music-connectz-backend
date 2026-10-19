@@ -1,3 +1,4 @@
+from decimal import Decimal
 from rest_framework import serializers
 
 from .models import LessonBooking, LessonOffer
@@ -12,10 +13,22 @@ class LessonOfferSerializer(serializers.ModelSerializer):
         fields = (
             "id", "teacher_username", "persona", "skill", "title", "description",
             "pricing_mode", "price", "currency", "city", "latitude", "longitude",
-            "remote_ok", "in_person_ok", "callz_ok", "rating_snapshot", "is_active",
+            "remote_ok", "in_person_ok", "callz_ok", "rating_snapshot", "is_active", "gates",
             "created_at", "distance_km",
         )
         read_only_fields = ("id", "teacher_username", "rating_snapshot", "created_at", "distance_km")
+
+    def validate_title(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError("Title is required.")
+        if len(value) > 140:
+            raise serializers.ValidationError("Title must be 140 characters or less.")
+        return value
+
+    def validate_price(self, value):
+        if value <= Decimal("0"):
+            raise serializers.ValidationError("Price must be greater than $0.")
+        return value
 
 
 class LessonBookingSerializer(serializers.ModelSerializer):
@@ -32,6 +45,13 @@ class LessonBookingSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ("id", "agreed_total", "currency", "status", "created_at",
                             "offer_title", "teacher_username", "student_username")
+
+    def validate_hours(self, value):
+        if value <= Decimal("0"):
+            raise serializers.ValidationError("Hours must be greater than 0.")
+        if value > Decimal("24"):
+            raise serializers.ValidationError("Hours must be 24 or less.")
+        return value
 
 
 from .models import LessonPost, LessonPostPurchase  # noqa: E402
@@ -74,3 +94,20 @@ class LessonPostCreateSerializer(serializers.ModelSerializer):
         model = LessonPost
         fields = ("persona", "skill", "title", "description", "media_ref",
                   "preview_ref", "price", "currency", "visibility")
+
+    def validate_title(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError("Title is required.")
+        if len(value) > 140:
+            raise serializers.ValidationError("Title must be 140 characters or less.")
+        return value
+
+    def validate_price(self, value):
+        if value <= Decimal("0"):
+            raise serializers.ValidationError("Price must be greater than $0.")
+        return value
+
+    def validate_media_ref(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError("Media ref (upload id) is required.")
+        return value

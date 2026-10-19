@@ -205,13 +205,18 @@ class TheRatingIsAskedForAndPricedFirst(Base):
     def test_a_rating_is_billed_once_a_usable_result_exists(self):
         up = self.upload()
         before = wallet_for(self.user).promptz
+        # Read the allowance BEFORE, rather than asserting against a literal.
+        # This assertion used to read `left < 1`, which only held while the free
+        # tier's allowance was exactly 1 — so raising it turned a real billing
+        # check into a test of the old number.
+        _, _, left_before = daily_prompt_state(self.user)
         with patch.object(directz_craft, "rate_video", return_value=(GOOD, None)):
             self.post(media_url=up.file.url)
         # The daily allowance covers the first one, so either the free prompt
         # went or PromptZ did — never both, and never nothing.
-        _, _, left = daily_prompt_state(self.user)
+        _, _, left_after = daily_prompt_state(self.user)
         spent = before - wallet_for(self.user).promptz
-        self.assertTrue(spent > 0 or left < 1)
+        self.assertTrue(spent > 0 or left_after == left_before - 1)
 
     def test_a_video_the_rater_could_not_read_is_never_billed(self):
         # The rule vocalcoach.py bills on.
@@ -354,3 +359,48 @@ class TheRatersCeilingIsItsOwnTransportsTests(Base):
                         "base64 of the advertised size does not fit the 20MB "
                         "inline request cap")
         self.assertIn(str(INLINE_MAX_MB), price["max_mb_why"])
+
+
+class TheOldFormulaIsGoneTests(TestCase):
+    """`directz_ai_rating` is deleted, not deprecated, and stays deleted.
+
+    It sat here deprecated for a while, justified by a docstring saying old rows
+    still carried its numbers — which stopped being true the moment migration
+    0073 nulled every one of them. A discredited scoring function in reach of an
+    import is a scoring function somebody will reach for, so this pins its
+    absence rather than trusting a comment asking people not to call it.
+    """
+
+    def test_the_function_does_not_exist(self):
+        from apps.economy import models
+        self.assertFalse(hasattr(models, "directz_ai_rating"))
+
+    def test_nothing_imports_it(self):
+        import pathlib
+        root = pathlib.Path(__file__).parent
+        offenders = []
+        for f in root.glob("*.py"):
+            if f.name.startswith("test_"):
+                continue
+            for i, line in enumerate(f.read_text().splitlines(), 1):
+                # A mention in prose explaining why it is gone is the point of
+                # the record. A CALL is the thing that must not come back.
+                if "directz_ai_rating(" in line and not line.lstrip().startswith("#"):
+                    offenders.append(f"{f.name}:{i}")
+        self.assertEqual(offenders, [])
+
+    def setUp(self):
+        self.user = User.objects.create_user("dir2", "d2@e.com", PW)
+
+    def test_a_work_the_model_could_not_watch_carries_no_rating(self):
+        # The honest answer, and the reason the old formula is not needed as a
+        # fallback: an empty rating invites a real one, a fake one ends it.
+        from apps.economy.models import directz_display_rating
+        work = DirectZWork.objects.create(
+            owner=self.user, title="Unwatchable", fmt="moviez",
+            ai_rating=None, craft={},
+            rating_note="rated by an older method that didn't watch the video",
+        )
+        d = directz_display_rating(work)
+        self.assertIsNone(d["rating"])
+        self.assertIsNone(d["source"])

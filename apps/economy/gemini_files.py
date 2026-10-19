@@ -49,9 +49,12 @@ API_MAX_MB = 2048
 # is. Bounded, because a member is sitting in front of this.
 POLL_SECONDS = 1.5
 POLL_TRIES = 40
+# A status GET reads one line of JSON. It carried the same 20s as a file
+# transfer, so forty stalled polls cost 800 seconds to learn nothing.
+POLL_TIMEOUT = 5
 
 
-def upload(fileobj, mime_type, size_bytes, display_name="take"):
+def upload(fileobj, mime_type, size_bytes, display_name="take", deadline=None):
     """Put a file where generateContent can reach it. Returns (file, error).
 
     `file` is {"uri", "name"} — `uri` goes in the request, `name` is what
@@ -66,8 +69,9 @@ def upload(fileobj, mime_type, size_bytes, display_name="take"):
         return None, "the coach isn't configured"
     try:
         start = requests.post(
-            f"{UPLOAD_BASE}?key={key}",
+            UPLOAD_BASE,
             headers={
+                "x-goog-api-key": key,    # a header, not ?key= — see gemini._auth
                 "X-Goog-Upload-Protocol": "resumable",
                 "X-Goog-Upload-Command": "start",
                 "X-Goog-Upload-Header-Content-Length": str(size_bytes),
@@ -75,7 +79,7 @@ def upload(fileobj, mime_type, size_bytes, display_name="take"):
                 "Content-Type": "application/json",
             },
             json={"file": {"display_name": str(display_name)[:120]}},
-            timeout=30,
+            timeout=deadline.remaining(cap=30) if deadline else 30,
         )
     except requests.RequestException:
         logger.exception("Files API: could not reach the upload endpoint")
@@ -103,7 +107,11 @@ def upload(fileobj, mime_type, size_bytes, display_name="take"):
                 "X-Goog-Upload-Command": "upload, finalize",
             },
             data=fileobj,
-            timeout=300,          # a big take over a slow link is still a take
+            # Was a flat 300 — five minutes for one leg of a request nobody
+            # was bounding as a whole. It answers to the member's budget now,
+            # and still gets most of it, because a big take over a slow link
+            # is still a take.
+            timeout=deadline.remaining(cap=300) if deadline else 300,
         )
     except requests.RequestException:
         logger.exception("Files API: upload leg failed")
@@ -121,20 +129,36 @@ def upload(fileobj, mime_type, size_bytes, display_name="take"):
         return None, "the coach's file store answered in a shape we don't know"
 
 
-def wait_active(f):
+def wait_active(f, deadline=None):
     """Block until an uploaded file is ready to be read, or give up.
 
     Video is transcoded after upload and is not readable until that finishes;
     referencing it too early fails the generate call. Audio is usually ACTIVE
     on arrival, so the common case costs one cheap GET.
+
+    THIS LOOP IS WHERE THE 853-SECOND SPINNER CAME FROM. It was bounded by a
+    TRY COUNT rather than by time, and each try carried a 20-second timeout on
+    a request that fetches a one-line status document. 40 x (20 + 1.5) = 860
+    seconds of worst case, and a member watched 853 of them.
+
+    Two changes, and the second is the one that generalises: the status GET
+    gets a timeout that matches what it actually is (a tiny JSON read, not a
+    file transfer), and the loop is bounded by the member's remaining budget
+    instead of by how many times it has been round.
     """
     key = _key()
     if f.get("state") == "ACTIVE":
         return True, None
     for _ in range(POLL_TRIES):
+        if deadline and deadline.expired():
+            return False, "that take took too long to process — try a shorter section"
         try:
-            r = requests.get(f"{FILES_BASE}/{f['name'].split('/')[-1]}?key={key}",
-                             timeout=20)
+            r = requests.get(
+                f"{FILES_BASE}/{f['name'].split('/')[-1]}",
+                headers={"x-goog-api-key": key},
+                # A status check, not a transfer. 20s here meant a stalled
+                # poll cost 20 seconds to learn nothing, forty times over.
+                timeout=deadline.remaining(cap=POLL_TIMEOUT) if deadline else POLL_TIMEOUT)
             state = r.json().get("state", "") if r.status_code == 200 else ""
         except (requests.RequestException, ValueError):
             state = ""
@@ -150,8 +174,8 @@ def delete(f):
     """Tidy up. Best-effort: files expire in 48 hours anyway, so failing to
     delete one is untidy, never a reason to fail the take that just worked."""
     try:
-        requests.delete(f"{FILES_BASE}/{f['name'].split('/')[-1]}?key={_key()}",
-                        timeout=15)
+        requests.delete(f"{FILES_BASE}/{f['name'].split('/')[-1]}",
+                        headers={"x-goog-api-key": _key()}, timeout=15)
     except requests.RequestException:                    # pragma: no cover
         logger.warning("Files API: could not delete %s", f.get("name"))
 

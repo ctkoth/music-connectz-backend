@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
+    chinese_zodiac_for,
     Follow,
     ItemRating,
     JournalEntry,
@@ -18,6 +19,7 @@ from .models import (
     profile_for,
     wallet_for,
 )
+from .personaz import personas_of
 
 
 class AccountExportView(APIView):
@@ -39,7 +41,8 @@ class AccountExportView(APIView):
             "profile": {
                 "display_name": p.display_name, "bio": p.bio, "location": p.location,
                 "gender": p.gender, "birthday": p.birthday, "sign": p.sign,
-                "nationalities": p.nationalities, "traits": p.traits, "personas": p.personas,
+                "sign_cn": chinese_zodiac_for(p.birthday),
+                "nationalities": p.nationalities, "traits": p.traits, "personas": personas_of(p),
                 "links": p.links, "external_followers": p.external_followers,
             },
             "social": {"following": following, "followers": followers},
@@ -77,7 +80,14 @@ class AccountDeleteView(APIView):
     def post(self, request):
         if str((request.data or {}).get("confirm", "")) != "DELETE":
             return Response({"detail": 'Send {"confirm": "DELETE"} to confirm.'}, status=status.HTTP_400_BAD_REQUEST)
+        from apps.accounts.erasure import delete_user
+
+        from .stripe_cancel import CancelFailed
+
         u = request.user
         username = u.username
-        u.delete()  # FK cascades remove all owned rows
+        try:
+            delete_user(u)  # billing stops first; the rows cascade; erasure.py takes the files
+        except CancelFailed as exc:
+            return Response({"detail": exc.detail}, status=status.HTTP_502_BAD_GATEWAY)
         return Response({"deleted": True, "username": username})

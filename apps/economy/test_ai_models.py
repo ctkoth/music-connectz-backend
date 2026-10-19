@@ -51,8 +51,9 @@ class TheLadderTests(Base):
     def test_free_gets_the_cheap_engine_only(self):
         self.assertEqual(ai_models_for(TIER_FREE), ["haiku"])
 
-    def test_premium_reaches_opus(self):
-        self.assertIn("opus", ai_models_for(TIER_PREMIUM))
+    def test_premium_reaches_sonnet_and_statz_adds_opus_and_fable(self):
+        self.assertEqual(ai_models_for(TIER_PREMIUM), ["haiku", "sonnet"])
+        self.assertEqual(ai_models_for(TIER_STATZ), ["haiku", "sonnet", "opus", "fable"])
 
     def test_only_statz_reaches_fable(self):
         self.assertNotIn("fable", ai_models_for(TIER_PREMIUM))
@@ -86,19 +87,27 @@ class WhatItCostsUsTests(Base):
     # (key, $ per M input, $ per M output)
     RATES = [("haiku", 1, 5), ("sonnet", 3, 15), ("opus", 5, 25), ("fable", 10, 50)]
 
-    def test_each_price_covers_a_typical_run(self):
+    def test_a_chat_message_is_a_deliberate_subsidy_of_one_promptz(self):
+        # Corey's call: one task is one PromptZ whatever the engine. That is BELOW
+        # what a typical message costs on the dearer engines, on purpose, so this
+        # states the gap rather than pretending the price covers it. If the price
+        # is ever meant to cover cost again, this is the test to turn back.
+        from apps.economy.catalog import AI_TASK_PROMPTZ
         for key, in_rate, out_rate in self.RATES:
             real = (10_000 / 1_000_000) * in_rate * 100 + (800 / 1_000_000) * out_rate * 100
-            self.assertGreaterEqual(
-                AI_MODELS[key]["cost_cents"], real,
-                f"{key} charges {AI_MODELS[key]['cost_cents']}c to run a "
-                f"{real:.1f}c message — the platform eats the difference")
+            self.assertEqual(AI_MODELS[key]["cost_cents"], AI_TASK_PROMPTZ)
+            self.assertGreater(real, 0)
 
     def test_the_old_flat_price_would_not_have(self):
         # The bug this replaced, pinned so it can't come back: 3c was the old
         # 'standard' price and it does not cover Opus, never mind Fable.
-        self.assertLess(3, AI_MODELS["opus"]["cost_cents"])
-        self.assertLess(3, AI_MODELS["fable"]["cost_cents"])
+        # Corey's rule since: one task is one PromptZ whatever the engine, so a
+        # chat message no longer tracks the provider's rate. The AGENT run still
+        # does (ai_run_cost_cents), which is where the real-rate fields matter.
+        from apps.economy.catalog import AI_TASK_PROMPTZ
+        for k in ("haiku", "sonnet", "opus", "fable"):
+            self.assertEqual(AI_MODELS[k]["cost_cents"], AI_TASK_PROMPTZ)
+        self.assertLess(AI_MODELS["haiku"]["in_cents_mtok"], AI_MODELS["fable"]["in_cents_mtok"])
 
 
 class TheDefaultTests(Base):
@@ -106,6 +115,7 @@ class TheDefaultTests(Base):
         # They paid for the tier. Quietly serving them the cheapest engine
         # would be selling a thing and then not handing it over.
         self.assertEqual(default_ai_model(TIER_FREE), "haiku")
+        self.assertEqual(default_ai_model(TIER_PREMIUM), "sonnet")
         self.assertEqual(default_ai_model(TIER_STATZ), "fable")
 
     def test_a_choice_above_your_tier_falls_back_rather_than_breaking(self):
@@ -185,7 +195,7 @@ class WhatOccChargesTests(Base):
         p.ai_model = "fable"
         p.save(update_fields=["ai_model"])
         _, spec = ai_model_for(p.ai_model, TIER_STATZ)
-        self.assertNotEqual(spec["cost_cents"], ai_cost("corey-gpt"))
+        self.assertEqual(spec["cost_cents"], ai_cost("corey-gpt"))     # one task, one PromptZ
         self.assertEqual(spec["cost_cents"], AI_MODELS["fable"]["cost_cents"])
 
     def test_a_free_member_on_occ_is_charged_the_cheap_engine(self):

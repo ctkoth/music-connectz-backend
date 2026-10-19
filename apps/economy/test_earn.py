@@ -111,7 +111,8 @@ class EarnListTests(TestCase):
         ways = self.ways()
         self.assertEqual(ways["rating"]["gain"], RATING_REWARD_ENERGY)
         self.assertEqual(ways["referral"]["gain"], 300)
-        self.assertEqual(ways["restricted"]["gain"], 300)
+        from apps.economy.models import RESTRICTED_JOIN_REWARD_SPINAZ
+        self.assertEqual(ways["restricted"]["gain"], RESTRICTED_JOIN_REWARD_SPINAZ)
 
     @override_settings(ADMOB_APP_ID="", ADMOB_REWARDED_UNIT_ID="")
     def test_an_unconfigured_adz_is_marked_unavailable_with_a_reason(self):
@@ -143,10 +144,20 @@ class EarnListTests(TestCase):
         self.assertFalse(onboard["available"])
         self.assertIn("claimed", onboard["reason"])
 
-    def test_passive_energy_is_honest_about_needing_reach(self):
+    def test_passive_energy_pays_before_anybody_has_heard_of_you(self):
+        """This test used to assert the opposite, and the opposite was the bug.
+
+        Passive Energy was reach ÷ tier with no floor, and reach is 0 until an
+        external account is VERIFIED — so the one row on the earn screen that
+        pays by the hour rendered greyed out, with "verify a social account" as
+        its whole answer, to every member on their first day.
+        """
         passive = self.ways()["passive"]
-        self.assertFalse(passive["available"])       # no verified sources yet
-        self.assertIn("reach", passive["reason"])
+        self.assertTrue(passive["available"])
+        self.assertGreater(passive["gain"], 0)
+        # Still says what raises it, because the floor is a floor and reach is
+        # what makes it move.
+        self.assertIn("reach", passive["note"])
 
     def test_earned_totals_reflect_what_actually_landed(self):
         target = User.objects.create_user("t", "t@e.com", PW)

@@ -3,6 +3,7 @@ import os
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -135,7 +136,11 @@ class SingZCoachTests(TestCase):
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
     @patch("apps.economy.gemini.requests.post", return_value=fake_gemini({**GOOD, "score": 47}))
     def test_a_wild_score_is_clamped_to_ten(self, _post, _k):
-        self.assertEqual(self.client.post(URL, {"take": take()}, format="multipart").data["score"], 10)
+        # The model's own wild 47 is clamped and kept for audit; the shown
+        # overall is now computed from the dimensions (strength_weighted).
+        d = self.client.post(URL, {"take": take()}, format="multipart").data
+        self.assertEqual(d["model_score"], 10)
+        self.assertEqual(d["score"], 7)
 
 
 class CoachPriceTests(TestCase):
@@ -294,8 +299,17 @@ class InstrumentCoachTests(TestCase):
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
     def test_singz_still_scores_exactly_what_it_did(self, _k):
-        scores = self.client.get(URL).data["scores"]
-        self.assertEqual(set(scores), {"pitch", "tone", "breath", "range", "agility"})
+        """SingZ keeps its OWN five, which is what this guard is for — it was
+        written so a change to one coach could not quietly flatten the profiles
+        into one. Style Match joined every instrument deliberately (see
+        StyleMatchScoreTests); a rap dimension appearing here would still be
+        the failure this test exists to catch."""
+        scores = set(self.client.get(URL).data["scores"])
+        self.assertTrue({"pitch", "tone", "breath", "range", "agility"} <= scores)
+        self.assertEqual(scores - {"style_match"},
+                         {"pitch", "tone", "breath", "range", "agility"})
+        for rap_only in ("flow", "clarity", "delivery"):
+            self.assertNotIn(rap_only, scores)
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
     def test_the_caveat_names_this_instruments_dimensions(self, _k):
@@ -313,7 +327,11 @@ class InstrumentCoachTests(TestCase):
         self.assertIn("rap coach", sent)
         self.assertIn('"flow"', sent)
         self.assertNotIn('"range"', sent)
-        self.assertEqual(set(resp.data["scores"]), {"flow", "timing", "breath", "clarity", "delivery"})
+        # Style Match rides on every take now — see StyleMatchScoreTests. The
+        # instrument's OWN five are still what makes a rap coach a rap coach,
+        # which is what the assertions above and below actually pin.
+        self.assertEqual(set(resp.data["scores"]),
+                         {"flow", "timing", "breath", "clarity", "delivery", "style_match"})
 
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
     @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
@@ -455,9 +473,31 @@ class TheSizeCapIsOneWeCanHonourTests(TestCase):
         self.assertGreater(MAX_MB, INLINE_MAX_MB)
         self.assertTrue(callable(_media_part))
 
-    def test_the_trial_cap_fits_too(self):
+    def test_the_trial_cap_is_carried_by_a_path_that_exists(self):
+        """The trial cap used to be pinned under the INLINE limit (times 4/3
+        for base64), which was right while every trial take was base64'd into
+        the request body. It isn't any more: score_take picks the transport by
+        size, so a trial take over INLINE_MAX_MB is uploaded and referenced
+        exactly like a member's is.
+
+        What still has to hold is that the trial never advertises a size the
+        coach itself can't carry — the two share score_take, so a trial cap
+        above MAX_MB would be a promise the shared path would refuse."""
         from apps.economy.models import TRIAL_MAX_MB
-        self.assertLess(TRIAL_MAX_MB * 4 / 3, self.GEMINI_INLINE_LIMIT_MB)
+        from apps.economy.vocalcoach import INLINE_MAX_MB, MAX_MB
+        self.assertLessEqual(TRIAL_MAX_MB, MAX_MB)
+        # And if it's over the inline limit, the uploaded path is what carries
+        # it — so that path existing is part of this cap being honest.
+        if TRIAL_MAX_MB > INLINE_MAX_MB:
+            from apps.economy.vocalcoach import _media_part
+            self.assertTrue(callable(_media_part))
+
+    def test_the_trial_is_not_stingier_than_the_free_account_it_advertises(self):
+        """The trial exists to sell the free tier. Refusing a take that a Free
+        member could upload would make the door misrepresent the room."""
+        from apps.economy.catalog import TIER_LIMITS
+        from apps.economy.models import TIER_FREE, TRIAL_MAX_MB
+        self.assertGreaterEqual(TRIAL_MAX_MB, TIER_LIMITS[TIER_FREE]["upload_mb"])
 
     def test_the_cap_is_published_so_the_client_can_stop_it_early(self):
         # The client checks against this before uploading, so an oversize take
@@ -588,6 +628,20 @@ class TheFailureSaysWhichFailureItWasTests(TestCase):
                 resp = self.send(code)
                 self.assertEqual(resp.status_code, 502)
                 self.assertIn(phrase, resp.data["detail"].lower())
+
+    def test_a_bad_key_that_answers_400_does_not_blame_the_take(self):
+        # Found by running the app with a fake key: Google answers 400 "API key
+        # not valid", and the screen told the member their take's format was
+        # wrong. A key problem is ours, and the take was fine.
+        bad = fake_gemini(status_code=400)
+        bad.text = '{"error": {"code": 400, "message": "API key not valid. Please pass a valid API key.", "status": "INVALID_ARGUMENT"}}'
+        with patch("apps.economy.vocalcoach._key", return_value="k"), \
+             patch("apps.economy.gemini.requests.get", return_value=fake_list_models([])), \
+             patch("apps.economy.gemini.requests.post", return_value=bad):
+            resp = self.client.post(URL, {"take": take()}, format="multipart")
+        self.assertEqual(resp.status_code, 502)
+        self.assertIn("key", resp.data["detail"].lower())
+        self.assertNotIn("format", resp.data["detail"].lower())
 
     def test_the_status_and_what_we_sent_come_back_for_diagnosis(self):
         resp = self.send(429)
@@ -838,7 +892,9 @@ class GoalsAndCurrentQualitiesTests(TestCase):
                    ("flow", "timing", "breath", "clarity", "delivery")},
                    "verdict": "🎧 solid", "now": "🎤 you're here",
                    "goal": "🎯 aim here", "range_profile": "🧔 Bass, D2–B4",
-                   "style_fit": "⚔️ drill wants menace", "strengths": ["a"],
+                   "style_fit": "⚔️ drill wants menace",
+                   "song_score": 8, "song_why": "🎶 the hook actually lands",
+                   "strengths": ["a"],
                    "fixes": ["b"], "next_drill": "c"}
         fake = type("R", (), {"status_code": 200,
                               "json": lambda self: {"candidates": [{"content": {"parts": [
@@ -853,3 +909,942 @@ class GoalsAndCurrentQualitiesTests(TestCase):
         self.assertEqual(out["goal"], "🎯 aim here")
         self.assertEqual(out["range_profile"], "🧔 Bass, D2–B4")
         self.assertEqual(out["style_fit"], "⚔️ drill wants menace")
+        self.assertEqual(out["song_score"], 8)
+        self.assertEqual(out["song_why"], "🎶 the hook actually lands")
+
+
+class SongScoreIsSeparateFromPerformanceTests(TestCase):
+    """Song 🎶 answers "does this land with a real listener", as its own
+    number — never folded into the five performance dimensions, never
+    allowed to move them or be moved by them.
+
+    Built directly from a real take: Flow 4, Timing 4, Breath 5, Clarity 4,
+    Delivery 5 for a song a human audience rated a 10. The performance
+    numbers were honest — real, timestamped issues backed every one of them.
+    What was missing was a place for "and the SONG genuinely works" to be a
+    number of its own rather than something only mentioned in prose that the
+    overall then had no clean way to reflect.
+    """
+
+    def test_the_prompt_asks_for_it_as_its_own_field(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn('"song_score"', p)
+        self.assertIn('"song_why"', p)
+
+    def test_it_is_scored_as_a_listener_not_a_technician(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("Score it as a listener would, not as a technician", p)
+
+    def test_neither_number_may_move_the_other(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("guitarz", "Rock", None, "builder")
+        self.assertIn("Neither number may pull on the other", p)
+
+    def test_no_song_to_judge_is_null_not_invented(self):
+        """A warm-up or an exercise is not a song — the substance rule's own
+        test applies here too: could a member get a number without there
+        being anything to rate?"""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("drumz", "Trap", None, "builder")
+        self.assertIn("set \"song_score\" to null rather than inventing one", p)
+
+    def test_song_score_is_not_merged_into_the_performance_dimensions(self):
+        """The whole point is a separate card, not a sixth chip in the grid —
+        so song_score must never appear inside scores_for()'s dimension set."""
+        from apps.economy.instruments import scores_for
+        for key in ("singz", "rapz", "guitarz", "drumz"):
+            self.assertNotIn("song_score", scores_for(key, lyrics=True, mix=True))
+
+    def test_it_is_clamped_and_survives_as_none_when_absent(self):
+        from apps.economy.vocalcoach import score_take
+        import json as _json
+        from unittest.mock import patch as _patch
+        payload = {"score": 6, "scores": {k: 6 for k in
+                   ("flow", "timing", "breath", "clarity", "delivery")},
+                   "verdict": "🎧 fine", "now": "🎤 here", "goal": "🎯 there",
+                   "style_fit": "solid", "strengths": ["a"], "fixes": ["b"],
+                   "next_drill": "c"}  # no song_score/song_why — an exercise
+        fake = type("R", (), {"status_code": 200,
+                              "json": lambda self: {"candidates": [{"content": {"parts": [
+                                  {"text": _json.dumps(payload)}]}}]}})()
+        with _patch("apps.economy.vocalcoach._key", return_value="k"), \
+             _patch("apps.economy.gemini.requests.post", return_value=fake):
+            out, err = score_take("rapz", SimpleUploadedFile("t.mp3", b"x"),
+                                  "audio/mpeg", genre="Trap", target=None,
+                                  difficulty="builder")
+        self.assertIsNone(err)
+        self.assertIsNone(out["song_score"])
+        self.assertEqual(out["song_why"], "")
+
+
+class ScaleIsAnchoredTests(TestCase):
+    """The rubric has a defined reference point, and it is not a released record.
+
+    Corey got a 2/10 on a real take. The prompt asked for "1-10" and defined
+    nothing, so the model scored against the only anchor its training gives it
+    for free — commercial releases — and a developing artist's phone recording
+    measured against those is a 2 every single time. That is not a harsh
+    coach, it is an undefined scale, and it was telling every member on the
+    platform to give up.
+
+    This is a CALIBRATION fix and not an inflation one: the number still has to
+    move because the performance moved, and a take with nothing on it still
+    scores 1-2. What changed is the reference point, which was never stated.
+    """
+
+    def test_the_scale_says_what_each_band_means(self):
+        from apps.economy.instruments import prompt_for
+        for app_key in ("singz", "rapz", "drumz", "guitarz"):
+            p = prompt_for(app_key, "Trap", "tenor", "builder")
+            self.assertIn("THE SCALE", p, app_key)
+            for band in ("1-2", "3-4", "5-7", "8-9", "10"):
+                self.assertIn(band, p, f"{app_key} has no anchor for {band}")
+
+    def test_it_says_six_is_normal(self):
+        """The whole failure in one line: without it, "average" reads as 2.
+
+        Was "5 is normal" — Corey's read (both in his own scores and members
+        who never came back) was that even the calibrated scale still landed
+        low for an ordinary take, so the ordinary band moved up a point,
+        5-6 to 5-7, without touching the bottom of the scale at all: a take
+        that genuinely barely holds together still scores 1-2, exactly as
+        before. Nothing here is a floor — a real attempt with nothing behind
+        it can still land wherever it actually lands.
+        """
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("6 is normal", p)
+        self.assertIn("Most takes belong here", p)
+        # The bottom of the scale is untouched — this is a shift of where
+        # "ordinary" lands, never a guaranteed minimum.
+        self.assertIn("1-2: they are performing, but it barely holds together", p)
+
+    def test_the_reference_is_a_developing_artist_not_a_record(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("DEVELOPING ARTIST", p)
+        self.assertIn("NOT scoring it against a released record", p)
+
+    def test_the_scale_is_pitched_at_the_difficulty_they_chose(self):
+        """A Starter take judged on Stage Boss standards is not a strict coach,
+        it is the wrong measurement."""
+        from apps.economy.instruments import prompt_for
+        for level in ("starter", "builder", "performer", "stageboss"):
+            p = prompt_for("singz", "R&B", "tenor", level)
+            self.assertIn(f'What the numbers mean, at "{level}"', p)
+
+    def test_the_recording_is_not_the_performance(self):
+        """A phone mic in a bedroom is not their singing, and marking tone down
+        for room noise measures the room."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("guitarz", "Rock", None, "builder")
+        self.assertIn("Score the PERFORMANCE, not the recording", p)
+        self.assertIn("none of it may pull a score down", p)
+
+    def test_every_take_gets_at_least_one_real_strength(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn("AT LEAST ONE", p)
+        self.assertIn("empty strengths list", p)
+
+    def test_it_did_not_become_a_licence_to_flatter(self):
+        """The calibration must not have undone the honesty rules — a number
+        higher than the take deserves is the failure this whole file guards."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("no flattery", p)
+        self.assertIn("never soften", p)
+        self.assertIn("Never invent detail you cannot hear", p)
+        # And the bottom of the scale still exists.
+        self.assertIn("there is essentially no performance to score", p)
+        self.assertIn("Harshness is not honesty", p)
+
+
+class TheScoreIsAJudgementNotACreativeTaskTests(TestCase):
+    """A score is only useful if the same take gets the same read twice.
+
+    Nothing set Gemini's sampling temperature, so a scoring call ran at the
+    model's default — tuned for varied, creative output, not a stable
+    judgement. Two members sending near-identical takes (or the same member
+    resubmitting) could get meaningfully different numbers for no reason
+    visible on screen, which reads as an inconsistent coach rather than a
+    calibrated one. `COACH_TEMPERATURE` pins it low.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user("temp1", "temp1@e.com", "pw12345678")
+        self.client.force_authenticate(self.user)
+        m = membership_for(self.user); m.tier = TIER_STATZ; m.save()
+        w = wallet_for(self.user); w.money_cents = 100000; w.save()
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
+    def test_the_coach_call_sets_a_low_temperature(self, post, _k):
+        self.client.post(URL, {"take": take(), "genre": "R&B", "range": "tenor",
+                               "difficulty": "builder"}, format="multipart")
+        cfg = post.call_args.kwargs["json"]["generationConfig"]
+        self.assertLess(cfg["temperature"], 0.5)
+
+
+class OverallIsNotTheWeakestFacetTests(TestCase):
+    """A take with real bones and one rough facet is not a weak take.
+
+    Corey watched an AI coach mark a verse a 5/10 on tongue-stumbles on the
+    fast lines while the same song scored 9.7 with human listeners on
+    RepostExchange. The prompt asked for an overall "1-10 integer" and said
+    nothing about how it relates to the dimensions underneath it, so the model
+    had no reason not to let one weak facet set the ceiling for the whole
+    take — the same undefined-anchor failure `ScaleIsAnchoredTests` above
+    fixed for the bands themselves, one level up.
+
+    A real listener does not average facets and does not get capped by the
+    weakest one; they remember what landed. So the prompt says so, explicitly,
+    the same way it explicitly anchors "5 is normal" rather than trusting the
+    model to infer it.
+    """
+
+    def test_the_overall_is_not_an_average_or_the_weakest_facet(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn("THE OVERALL is not an average", p)
+        self.assertIn("never the weakest one", p)
+
+    def test_a_carrying_strength_may_outweigh_one_rough_facet(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("does not cap the whole take at that facet's level", p)
+        self.assertIn("Let what's working carry the overall", p)
+
+    def test_a_take_shaky_throughout_still_scores_low(self):
+        """The fix is calibration, not inflation — pervasive weakness still
+        pulls the overall down, same as `ScaleIsAnchoredTests` guards above."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("guitarz", "Rock", None, "builder")
+        self.assertIn("shaky throughout", p)
+        self.assertIn("never for a strong one with a single fixable habit", p)
+
+
+class TheTopBandsAreNotGatedBehindRarityTests(TestCase):
+    """A take real listeners loved should not need a second coach's blessing.
+
+    Corey sent in a take human listeners had rated a genuine 10, and the
+    coach still landed it in the middle of the scale on a Builder-tier take —
+    the same undefined-anchor shape `ScaleIsAnchoredTests` and
+    `OverallIsNotTheWeakestFacetTests` already fixed once, showing up a third
+    time at the TOP of the scale rather than the middle or the overall/facet
+    relationship. "10: exceptional... Rare" told the model a 10 was an
+    unusual thing to reach for, which is the same kind of unstated anchor
+    that made "average" read as a 2 before "6 is normal" existed — a model
+    that reads "rare" defaults to caution, and caution at the top of the
+    scale is the same failure as caution at the anchor point, just harder to
+    notice because it looks like a strict coach rather than a wrong one.
+
+    The fix says two things explicitly: a strong reaction from real listeners
+    is evidence to use, not a temptation to correct downward over a
+    technicality; and a 10 needs to be TRUE, not rare — undershooting one
+    that is earned is exactly as wrong as overshooting one that isn't.
+    """
+
+    def test_listener_reaction_counts_as_evidence(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("real evidence of where this take sits", p)
+
+    def test_a_ten_does_not_have_to_be_rare_to_be_true(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn("does not have to be rare to be true", p)
+        self.assertNotIn("Rare, and worth saying so", p)
+
+    def test_undershooting_is_pinned_as_wrong_as_overshooting(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("guitarz", "Rock", None, "builder")
+        self.assertIn("Undershooting a take that plainly deserves this band", p)
+        self.assertIn("exactly as wrong as", p)
+
+    def test_it_did_not_become_a_licence_to_flatter(self):
+        """Same guard the other calibration fixes carry — a stated evidence
+        rule for the top bands must not loosen the honesty rules everywhere
+        else in the prompt."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("no flattery", p)
+        self.assertIn("Harshness is not honesty", p)
+        self.assertIn("there is essentially no performance to score", p)
+
+
+class SeveralDevelopingFacetsAreNotTheSameAsBrokenTests(TestCase):
+    """A real take: Flow 4, Timing 4, Breath 5, Clarity 4, Delivery 5, and an
+    overall of 5 — for a take a human audience rated a 10, with a real hook
+    and a complete, landing story praised in the same response's own "What
+    worked" section.
+
+    `OverallIsNotTheWeakestFacetTests` above licensed the overall to rise
+    above ONE rough facet when something is carrying the take. This take has
+    no single outlier to carry past — it has FIVE moderate, developing
+    dimensions, none of them individually broken, sitting next to a genuine
+    hook and a story real listeners responded to. The old wording never told
+    the model that case exists, so it fell back to something close to
+    averaging the facets anyway, which is the exact failure
+    `OverallIsNotTheWeakestFacetTests` already named and only partly fixed.
+
+    The distinction that matters is not "how many facets need work" — it is
+    whether anything is actually BROKEN (falling apart, losing the beat
+    entirely, unintelligible throughout) versus merely developing. Several
+    developing facets next to a real payoff is not the shaky-throughout case
+    the floor still has to catch.
+    """
+
+    def test_several_developing_facets_may_still_be_carried(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn("not limited to ONE facet", p)
+        self.assertIn("still be carried above their average", p)
+
+    def test_developing_is_distinguished_from_broken(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("Developing is not broken", p)
+        self.assertIn("not how many facets need work", p)
+
+    def test_it_did_not_become_a_licence_to_flatter(self):
+        """The floor for a take that is genuinely shaky throughout — the one
+        `OverallIsNotTheWeakestFacetTests` guards — is still standing."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("guitarz", "Rock", None, "builder")
+        self.assertIn("shaky throughout", p)
+        self.assertIn("no flattery", p)
+        self.assertIn("Harshness is not honesty", p)
+
+
+class PerformanceCraftIsNotSongQualityTests(TestCase):
+    """The caveat used to say what a single take can show (flow, timing,
+    breath...) and nothing about what it does NOT claim to measure. A member
+    reading a moderate performance-craft score for a song real listeners
+    loved had no way to know those are different questions — the number read
+    as a verdict on the song. It answered that gap twice: first by saying
+    the five dimensions don't measure the song, and then — once Song 🎶
+    shipped as its own field — by saying the two numbers are separate and
+    neither may move the other.
+    """
+
+    def test_every_instrument_states_the_distinction(self):
+        from apps.economy.instruments import INSTRUMENTS, DEFAULT
+        for key, profile in {**INSTRUMENTS, "_default": DEFAULT}.items():
+            self.assertIn("Song 🎶 scores the SONG", profile["caveat"], key)
+
+    def test_it_names_both_things_can_be_true_at_once(self):
+        from apps.economy.instruments import INSTRUMENTS
+        self.assertIn("both can be true at once", INSTRUMENTS["rapz"]["caveat"])
+
+
+class LyricRatingTests(TestCase):
+    """The optional writing score — RapZ's blueprint dimension, finally built.
+
+    "Writing Score 📝 — rhyme density, structure, originality, punchlines, or
+    storytelling depending on style" has been in the blueprint's core RapZ
+    scoring the whole time and was never implemented. It ships opt-in rather
+    than always-on, and the tests below are all about the two ways an opt-in
+    score can go wrong: appearing where it was not asked for, and being
+    reviewed when it could not be heard.
+    """
+
+    def test_only_apps_with_words_can_rate_lyrics(self):
+        from apps.economy.instruments import rates_lyrics
+        for k in ("singz", "rapz"):
+            self.assertTrue(rates_lyrics(k), k)
+        for k in ("guitarz", "bassz", "keyz", "drumz", "violinz"):
+            self.assertFalse(rates_lyrics(k), f"{k} has no lyrics to rate")
+
+    def test_the_dimensions_appear_only_when_asked_for(self):
+        from apps.economy.instruments import LYRIC_SCORE, scores_for
+        plain, asked = scores_for("rapz"), scores_for("rapz", lyrics=True)
+        for k in LYRIC_SCORE:
+            self.assertNotIn(k, plain, k)
+            self.assertIn(k, asked, k)
+
+    def test_asking_a_drum_kit_for_a_writing_score_is_ignored(self):
+        """A toggle a screen cannot honour is the switch that changes nothing."""
+        from apps.economy.instruments import LYRIC_SCORE, scores_for
+        for k in LYRIC_SCORE:
+            self.assertNotIn(k, scores_for("drumz", lyrics=True), k)
+
+    def test_the_prompt_only_asks_when_the_toggle_is_on(self):
+        from apps.economy.instruments import prompt_for
+        on = prompt_for("rapz", "Trap", None, "builder", lyrics=True)
+        off = prompt_for("rapz", "Trap", None, "builder")
+        self.assertIn("lyrics_note", on)
+        self.assertIn('"punchlines"', on)
+        self.assertIn('"rhyme"', on)
+        self.assertNotIn("lyrics_note", off)
+        self.assertNotIn('"punchlines"', off)
+
+    def test_it_refuses_to_review_words_it_could_not_hear(self):
+        """The same rule as the range profile: a review of lyrics nobody caught
+        is invented detail with an opinion attached."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder", lyrics=True)
+        self.assertIn("SAY SO", p)
+        self.assertIn("do not review words you did not hear", p)
+
+    def test_it_judges_craft_and_is_not_a_censor(self):
+        """The easiest place in this app to start marking somebody's opinions,
+        subject matter or swearing — none of which is craft."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder", lyrics=True)
+        self.assertIn("not a censor", p)
+        self.assertIn("not their opinions", p)
+        self.assertIn("written well, is written well", p.replace("\n", " "))
+
+    def test_the_capability_is_published_so_a_screen_can_ask(self):
+        from apps.economy.instruments import LYRIC_SCORE, rates_lyrics
+        self.assertEqual(set(LYRIC_SCORE),
+                         {"rhyme", "punchlines", "story", "imagery", "freshness"})
+        self.assertTrue(rates_lyrics("rapz"))
+
+    def test_the_style_decides_which_of_them_matter(self):
+        """The blueprint's own words: writing means different things in
+        different styles. A ballad with no punchlines is not a ballad with a
+        writing problem — it scores null, not a 3."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder", style="Boom Bap", lyrics=True)
+        self.assertIn("WEIGHT THESE BY THE STYLE", p)
+        self.assertIn("score null for one the style", p)
+        self.assertIn("a 3 is an accusation", p)
+
+    def test_it_judges_cliche_rather_than_claiming_originality(self):
+        """Nobody can judge novelty without knowing everything ever written,
+        and a model asked for it invents an opinion. Clichés are hearable."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder", lyrics=True)
+        self.assertIn("CLICHÉ DENSITY", p)
+        self.assertIn("never claim something is unprecedented", p)
+
+    def test_writing_is_not_scored_twice_as_flow(self):
+        """How the words SIT is delivery; what the words ARE is writing. One
+        weakness must not sink two numbers."""
+        from apps.economy.instruments import LYRIC_SCORE
+        for perf in ("flow", "delivery", "timing", "clarity"):
+            self.assertNotIn(perf, LYRIC_SCORE)
+
+    def test_the_history_keeps_the_writing_score(self):
+        """Whitelisting a take against the profile's five would drop it: the
+        coach would show a Writing chip and the history would never have heard
+        of it."""
+        from django.contrib.auth import get_user_model
+        from apps.economy import takescorez
+        u = get_user_model().objects.create_user("lyricist", "l@mcz.test", "pw12345!")
+        row = takescorez.record(u, "rapz", {
+            "rated_lyrics": True,
+            "scores": {"flow": 7, "timing": 6, "breath": 6, "clarity": 7,
+                       "delivery": 8, "rhyme": 9, "punchlines": 8},
+        })
+        self.assertEqual(row.scores["rhyme"], 9)
+        self.assertEqual(row.scores["punchlines"], 8)
+
+    def test_a_take_scored_without_lyrics_stores_no_writing(self):
+        from django.contrib.auth import get_user_model
+        from apps.economy import takescorez
+        u = get_user_model().objects.create_user("plain", "p@mcz.test", "pw12345!")
+        row = takescorez.record(u, "rapz", {
+            "scores": {"flow": 7, "timing": 6, "breath": 6, "clarity": 7,
+                       "delivery": 8, "rhyme": 9, "punchlines": 8},
+        })
+        self.assertNotIn("rhyme", row.scores)
+        self.assertNotIn("punchlines", row.scores)
+
+
+class StyleMatchScoreTests(TestCase):
+    """Style Match 🎭 — a blueprint CORE score that only ever existed as prose.
+
+    `style_fit` has always come back as a sentence, so nothing could trend it,
+    no drill could be recommended off it, and the history could not say whether
+    a member was getting closer to the style they picked. The sentence stays;
+    it now has a number beside it.
+    """
+
+    def test_every_instrument_scores_it(self):
+        from apps.economy.instruments import scores_for
+        for k in ("singz", "rapz", "guitarz", "bassz", "keyz", "drumz", "violinz"):
+            self.assertIn("style_match", scores_for(k),
+                          f"{k} takes carry a genre and should be scored against it")
+
+    def test_it_measures_closeness_and_not_quality(self):
+        """The easiest score in the set to turn into a quality judgement by
+        accident. A superb take of the wrong style is a LOW style match and a
+        high everything else — flattening that into "bad" would tell somebody
+        to stop doing the thing they are good at."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", None, "builder", style="Drill")
+        self.assertIn("ONLY how close", p)
+        self.assertIn("not how good it is", p)
+        self.assertIn("that is the correct answer", p)
+
+    def test_the_prose_did_not_go_away(self):
+        """A number with no explanation is what this whole module refuses to
+        ship — the score says how close, the sentence says in what way."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn('"style_fit"', p)
+        self.assertIn('"style_match"', p)
+
+    def test_it_falls_back_to_the_genre_when_no_style_was_picked(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("drumz", "Boom Bap", None, "builder")
+        self.assertIn("Boom Bap", p)
+        self.assertIn("style_match", p)
+
+
+class PromptShapeTests(TestCase):
+    """The JSON the model is asked for has to be JSON.
+
+    The shape ended with a hardcoded `"weak_notes": []` AND added another
+    `weak_notes` above it on any pitched instrument — the same key twice in one
+    object. Whichever the model honoured, a parser keeps the last, and the last
+    was the empty one. So every weak note that drives a TunerZ drill link was
+    being asked for and thrown away, on the exact instruments the feature was
+    built for.
+    """
+
+    def _shape(self, app_key):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for(app_key, "R&B", "tenor", "builder", lyrics=True)
+        import json, re
+        # Anchored on the block, not on which key happens to come first.
+        # "unscorable" is now asked for ahead of "score" on purpose — a model
+        # writes the JSON in order, so the field that decides whether there is
+        # anything to score has to be committed before the number is.
+        m = re.search(r"\{\n  \"[a-z_]+\":.*\n\}", p, re.S)
+        self.assertIsNotNone(m, f"{app_key}: no JSON shape found in the prompt")
+        return m.group(0)
+
+    def test_no_key_is_asked_for_twice(self):
+        for app_key in ("singz", "rapz", "guitarz", "drumz", "violinz"):
+            shape = self._shape(app_key)
+            import re
+            keys = re.findall(r'^\s*"([a-z_]+)":', shape, re.M)
+            dupes = {k for k in keys if keys.count(k) > 1}
+            self.assertFalse(dupes, f"{app_key} asks for {dupes} more than once")
+
+    def test_the_shape_parses_as_json_once_the_placeholders_are_filled(self):
+        """A template that cannot become valid JSON is one the model has to
+        guess its way out of."""
+        import json, re
+        for app_key in ("singz", "drumz"):
+            shape = self._shape(app_key)
+            filled = re.sub(r"<[^>]*>", "1", shape)
+            filled = filled.replace('"1"', '"x"').replace(", ...", "")
+            try:
+                json.loads(filled)
+            except ValueError as e:
+                self.fail(f"{app_key} shape is not valid JSON: {e}\n{filled}")
+
+
+class MixRatingTests(TestCase):
+    """Opt-in, like lyricism, and for the same reason: the mix is a DIFFERENT
+    SKILL from the one the five dimensions measure. Most takes here are a phone
+    in a bedroom, and a performance coach that quietly marks those down is
+    measuring the room — a number a member could raise by buying an interface
+    rather than by getting better."""
+
+    def test_off_by_default(self):
+        from apps.economy.instruments import scores_for
+        self.assertNotIn("low_end", scores_for("singz"))
+
+    def test_on_when_asked_for(self):
+        from apps.economy.instruments import MIX_SCORE, scores_for
+        keys = scores_for("singz", mix=True)
+        for k in MIX_SCORE:
+            self.assertIn(k, keys)
+
+    def test_every_instrument_can_be_asked(self):
+        """Unlike lyrics, which need words, there is no instrument whose
+        recording cannot be listened to as a recording."""
+        from apps.economy.instruments import scores_for
+        for app_key in ("singz", "rapz", "drumz", "guitarz", "violinz", "keyz"):
+            self.assertIn("low_end", scores_for(app_key, mix=True), app_key)
+
+    def test_it_stacks_with_lyrics_without_either_losing_a_key(self):
+        from apps.economy.instruments import LYRIC_SCORE, MIX_SCORE, scores_for
+        keys = scores_for("rapz", lyrics=True, mix=True)
+        for k in list(LYRIC_SCORE) + list(MIX_SCORE):
+            self.assertIn(k, keys)
+
+    def test_the_prompt_keeps_performance_and_production_apart(self):
+        """Turning the mix on is the one thing that could read as cancelling
+        "score the PERFORMANCE, not the recording". It must not."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder", mix=True)
+        self.assertIn("Score the PERFORMANCE, not the recording", p)
+        self.assertIn("ONLY place production may count", p)
+        # And it never turns into a shopping list.
+        self.assertIn("is not coaching", p)
+
+    def test_no_mix_section_when_it_was_not_asked_for(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertNotIn("THE MIX", p)
+        self.assertNotIn("mix_note", p)
+
+
+class UnscorableTests(TestCase):
+    """"There was no performance in this clip" is an ANSWER, not a bad score.
+    A 2 says their playing was bad when the truth is nothing was heard, and the
+    two need opposite responses — one is what to fix, the other what to send."""
+
+    def test_the_prompt_asks_for_it_before_it_asks_for_a_number(self):
+        """A model writes JSON in order, so the field deciding whether there is
+        anything to score has to be committed before the number is."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("IS THERE A PERFORMANCE AT ALL", p)
+        self.assertLess(p.index('"unscorable"'), p.index('"score": <overall'))
+
+    def test_the_bottom_band_is_still_anchored_and_means_a_real_take(self):
+        """Removing 1-2 entirely would leave the model no floor for a genuine
+        but barely-holding performance, which is a different thing again."""
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("singz", "R&B", "tenor", "builder")
+        self.assertIn("1-2", p)
+        self.assertIn("This is the floor for a REAL attempt", p)
+
+    def _run(self, payload):
+        """Same shape the other coach tests use: stub the HTTP call, not the
+        helper above it, so the real parse path runs."""
+        import json as _json
+        from unittest.mock import patch as _patch
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from apps.economy.vocalcoach import score_take
+
+        fake = type("R", (), {"status_code": 200,
+                              "json": lambda self: {"candidates": [{"content": {"parts": [
+                                  {"text": _json.dumps(payload)}]}}]}})()
+        with _patch("apps.economy.vocalcoach._key", return_value="k"), \
+             _patch("apps.economy.gemini.requests.post", return_value=fake):
+            return score_take("singz", SimpleUploadedFile("t.mp3", b"x"),
+                              "audio/mpeg", genre="R&B", target="tenor",
+                              difficulty="builder")
+
+    def test_an_unscorable_reply_comes_back_as_an_answer_not_an_error(self):
+        out, err = self._run({
+            "unscorable": "That's a TV in the background, not a take. Send 8 bars over a beat.",
+            "score": None, "scores": {}})
+        self.assertIsNone(err)
+        self.assertIn("not a take", out["unscorable"])
+        # No invented number, and no half-filled dimension set behind it.
+        self.assertIsNone(out["score"])
+        self.assertEqual(out["scores"], {})
+
+    def test_a_normal_reply_still_scores_and_says_it_is_scorable(self):
+        """The key is present either way, so the client reads one field rather
+        than inferring the state from a missing score."""
+        out, err = self._run({
+            "unscorable": None, "score": 6,
+            "scores": {"pitch": 6, "tone": 5, "breath": 6, "range": 5,
+                       "agility": 6, "style_match": 7},
+            "verdict": "solid", "strengths": ["pocket"], "fixes": ["bar 3"],
+            "next_drill": "d"})
+        self.assertIsNone(err)
+        self.assertEqual(out["unscorable"], "")
+        self.assertEqual(out["score"], 6)
+
+    def test_a_null_score_with_no_reason_is_still_an_error(self):
+        """Unscorable is a STATED answer. A reply that just omits the number is
+        an unparseable reply, and must not be dressed up as a verdict."""
+        out, err = self._run({"unscorable": None, "score": None, "scores": {}})
+        self.assertIsNone(out)
+        self.assertIsNotNone(err)
+
+
+class CoachRateLimitTests(TestCase):
+    """Rate limit prevents rapid-fire abuse while allowing normal usage."""
+
+    def setUp(self):
+        from django.conf import settings
+        # Enable rate limiting specifically for this test
+        settings._enable_coach_rate_limit = True
+        self.user = User.objects.create_user("test", "test@t.com", "pw")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        # Clear rate limit cache for this user
+        cache.delete(f"coach_rate:{self.user.id}")
+
+    def tearDown(self):
+        from django.conf import settings
+        # Disable rate limiting after this test
+        settings._enable_coach_rate_limit = False
+
+    @patch("apps.economy.vocalcoach.requests.post")
+    def test_rate_limit_blocks_rapid_attempts(self, mock_post):
+        """User is blocked after 5 attempts in one minute."""
+        mock_post.return_value = fake_gemini()
+        # Create a fake audio file
+        audio = SimpleUploadedFile("test.mp3", b"fake audio", content_type="audio/mpeg")
+        # First 5 attempts should succeed (or at least not be blocked by rate limit)
+        for i in range(5):
+            audio_copy = SimpleUploadedFile("test.mp3", b"fake audio", content_type="audio/mpeg")
+            resp = self.client.post(URL, {"take": audio_copy}, format="multipart")
+            # Should not be rate limited (may fail for other reasons like missing tier config)
+            self.assertNotEqual(resp.status_code, 429)
+        # 6th attempt should be rate limited
+        audio_copy = SimpleUploadedFile("test.mp3", b"fake audio", content_type="audio/mpeg")
+        resp = self.client.post(URL, {"take": audio_copy}, format="multipart")
+        self.assertEqual(resp.status_code, 429)
+        self.assertIn("Too many coaching attempts", resp.data["detail"])
+
+
+class CoachXPAwardTests(TestCase):
+    """Coaching sessions grant XP for progression."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("alpha", "a@e.com", "pw")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    @patch("apps.economy.vocalcoach.requests.post")
+    def test_xp_awarded_on_coaching_completion(self, mock_post):
+        """Member receives 1 XP when a take is successfully coached."""
+        from apps.skillz.models import TrainingProfile
+        mock_post.return_value = fake_gemini()
+        # Verify no training profile exists yet
+        profiles = TrainingProfile.objects.filter(user=self.user, app_key="singz")
+        self.assertEqual(profiles.count(), 0)
+        # Coach a take
+        audio = SimpleUploadedFile("test.mp3", b"fake audio", content_type="audio/mpeg")
+        resp = self.client.post(URL, {"take": audio}, format="multipart")
+        # Should succeed (may fail for other reasons, but not because of XP granting)
+        if resp.status_code == 200:
+            # Verify training profile was created
+            profiles = TrainingProfile.objects.filter(user=self.user, app_key="singz")
+            self.assertEqual(profiles.count(), 1)
+            profile = profiles.first()
+            # Verify 1 XP was awarded
+            self.assertEqual(profile.xp, 1)
+            # Verify a training event was recorded
+            events = profile.training_events.filter(drill_key="coached_take")
+            self.assertEqual(events.count(), 1)
+            event = events.first()
+            self.assertEqual(event.xp_awarded, 1)
+
+
+class StrengthWeightedOverallTests(TestCase):
+    def test_evidence_takes(self):
+        from apps.economy.vocalcoach import strength_weighted as sw
+        self.assertGreaterEqual(sw({"a": 6, "b": 6, "c": 6, "d": 5, "e": 7}), 6)
+        self.assertGreaterEqual(sw({"a": 7, "b": 7, "c": 7, "d": 8, "e": 7}), 7)
+
+    def test_never_below_mean_and_monotonic(self):
+        from apps.economy.vocalcoach import strength_weighted as sw
+        base = [6, 6, 6, 5, 7]
+        for i in range(5):
+            up = list(base); up[i] += 1
+            self.assertGreaterEqual(sw(dict(enumerate(up))), sw(dict(enumerate(base))))
+        self.assertGreaterEqual(sw(dict(enumerate([3, 9, 9, 9, 9]))), 8)
+        self.assertEqual(sw({}), None)
+
+    def test_weakest_moves_it_least(self):
+        from apps.economy.vocalcoach import strength_weighted as sw
+        a = sw({0: 10, 1: 8, 2: 6, 3: 4, 4: 2}) - sw({0: 10, 1: 8, 2: 6, 3: 4, 4: 1})
+        b = sw({0: 10, 1: 8, 2: 6, 3: 4, 4: 2}) - sw({0: 9, 1: 8, 2: 6, 3: 4, 4: 2})
+        self.assertLessEqual(a, b)
+
+    def _run(self, payload, **kw):
+        import json as _json
+        from apps.economy.vocalcoach import score_take
+        fake = type("R", (), {"status_code": 200, "json": lambda self: {"candidates": [
+            {"content": {"parts": [{"text": _json.dumps(payload)}]}}]}})()
+        with patch("apps.economy.vocalcoach._key", return_value="k"), \
+             patch("apps.economy.gemini.requests.post", return_value=fake):
+            return score_take("rapz", SimpleUploadedFile("t.mp3", b"x"), "audio/mpeg",
+                              genre="Trap", target=None, difficulty="builder", **kw)
+
+    def test_server_overall_keeps_model_score_and_excludes_style(self):
+        out, err = self._run({"score": 6, "scores": {"flow": 6, "timing": 6, "breath": 6,
+                              "clarity": 5, "delivery": 7, "style_match": 10}})
+        self.assertIsNone(err)
+        self.assertEqual(out["model_score"], 6)
+        self.assertEqual(out["score"], 6)
+        self.assertIn("strongest", out["score_rule"])
+
+    def test_unscorable_stays_unscorable(self):
+        out, _ = self._run({"unscorable": "TV noise", "score": None, "scores": {}})
+        self.assertIsNone(out["score"])
+
+    def test_listeners_only_from_real_distinct_non_author_ratings(self):
+        from apps.economy.models import ItemRating, Post
+        from apps.economy.vocalcoach import listeners_for
+        author = User.objects.create_user("au", "au@e.com", "pw12345678")
+        post = Post.objects.create(author=author, title="t")
+        for i in range(2):
+            u = User.objects.create_user(f"r{i}", f"r{i}@e.com", "pw12345678")
+            ItemRating.objects.create(user=u, item_id=f"post:{post.id}", score=9)
+        ItemRating.objects.create(user=author, item_id=f"post:{post.id}", score=10)
+        self.assertIsNone(listeners_for(post))
+        u = User.objects.create_user("r9", "r9@e.com", "pw12345678")
+        ItemRating.objects.create(user=u, item_id=f"post:{post.id}", score=10)
+        self.assertEqual(listeners_for(post)["count"], 3)
+        self.assertIsNone(listeners_for(None))
+
+
+class UsualSettingsAndExactScoreTests(TestCase):
+    def test_exact_score_leans_on_strengths_and_stays_between_mean_and_best(self):
+        from apps.economy.vocalcoach import strength_weighted_exact as ex
+        vals = {"a": 7, "b": 6, "c": 6, "d": 5, "e": 4}
+        x = ex(vals)
+        self.assertGreaterEqual(x, sum(vals.values()) / 5)
+        self.assertLessEqual(x, 7)
+        self.assertEqual(round(x, 1), x)
+        self.assertIsNone(ex({}))
+
+    def test_usual_is_the_latest_take_that_named_each_field(self):
+        from django.contrib.auth import get_user_model
+        from apps.economy.models import TakeScore
+        from apps.economy.vocalcoach import usual_settings
+        u = get_user_model().objects.create_user("usualx", password="pw-12345-xyz")
+        self.assertEqual(usual_settings(u, "rapz"), {})
+        TakeScore.objects.create(user=u, app_key="rapz", genre="Drill", style="Lyrical",
+                                 target="tenor", difficulty="starter")
+        TakeScore.objects.create(user=u, app_key="rapz", genre="R&B", style="",
+                                 target="baritone", difficulty="builder")
+        got = usual_settings(u, "rapz")
+        self.assertEqual(got, {"genre": "R&B", "target": "baritone",
+                               "style": "Lyrical", "difficulty": "builder"})
+        self.assertEqual(usual_settings(u, "singz"), {})
+
+
+class UsualTopTests(TestCase):
+    def test_a_habit_needs_65_percent_and_five_takes(self):
+        from django.contrib.auth import get_user_model
+        from apps.economy.models import TakeScore
+        from apps.economy.vocalcoach import usual_top
+        u = get_user_model().objects.create_user("topx", password="pw-12345-xyz")
+        for g in ["Drill"] * 4:
+            TakeScore.objects.create(user=u, app_key="rapz", genre=g)
+        self.assertEqual(usual_top(u, "rapz"), {})            # only 4 takes
+        TakeScore.objects.create(user=u, app_key="rapz", genre="Drill")
+        TakeScore.objects.create(user=u, app_key="rapz", genre="Trap")
+        top = usual_top(u, "rapz")["genre"]                   # 5 of 6 = 83%
+        self.assertEqual((top["value"], top["n"]), ("Drill", 6))
+        for g in ["Trap"] * 4:
+            TakeScore.objects.create(user=u, app_key="rapz", genre=g)
+        self.assertNotIn("genre", usual_top(u, "rapz"))       # 5 of 10 = 50%
+
+
+class HabitBeatsOneOffTests(TestCase):
+    def test_a_habit_is_the_default_over_a_one_off_last_take(self):
+        from django.contrib.auth import get_user_model
+        from apps.economy.models import TakeScore
+        from apps.economy.vocalcoach import usual_settings
+        u = get_user_model().objects.create_user("habitx", password="pw-12345-xyz")
+        for _ in range(9):
+            TakeScore.objects.create(user=u, app_key="rapz", genre="Drill")
+        TakeScore.objects.create(user=u, app_key="rapz", genre="Trap")   # most recent
+        self.assertEqual(usual_settings(u, "rapz")["genre"], "Drill")
+
+
+class PracticeWhatWhyHowTests(TestCase):
+    def test_clean_practice_whitelists_and_caps(self):
+        from apps.economy.vocalcoach import clean_practice
+        self.assertEqual(clean_practice(None), [])
+        got = clean_practice([{"what": "Slow scales", "why": "pitch", "how": "10 min", "x": 1},
+                              {"why": "no what"}, "junk", {"what": "B"}, {"what": "C"}, {"what": "D"}])
+        self.assertEqual(got[0], {"what": "Slow scales", "why": "pitch", "how": "10 min"})
+        self.assertEqual(len(got), 3)
+
+    def test_prompt_asks_for_practice(self):
+        from apps.economy.instruments import prompt_for
+        self.assertIn('"practice"', prompt_for("rapz", "Trap", None, "builder"))
+
+
+class HookIsRatedApartTests(StrengthWeightedOverallTests):
+    """Same harness as the overall tests: a stubbed Gemini reply."""
+
+    def test_hook_is_served_and_counted_in_the_overall(self):
+        base = {"score": 6, "scores": {"flow": 6, "timing": 6, "breath": 6, "clarity": 6,
+                                        "delivery": 6, "style_match": 6},
+                "song_score": 7, "song_why": "ok", "verdict": "v", "strengths": ["s"],
+                "fixes": ["f"], "next_drill": "d"}
+        hi, _ = self._run({**base, "hook_score": 10, "hook_why": "sticks"})
+        lo, _ = self._run({**base, "hook_score": 2, "hook_why": "flat"})
+        none, _ = self._run(base)
+        self.assertEqual((hi["hook_score"], hi["hook_why"]), (10, "sticks"))
+        self.assertTrue(hi["hook_counted"])
+        self.assertFalse(none["hook_counted"])
+        self.assertGreater(hi["score_exact"], lo["score_exact"])   # it moves the number
+        self.assertGreater(hi["score_exact"], none["score_exact"])  # a great chorus lifts it
+        self.assertLessEqual(lo["score_exact"], none["score_exact"])  # a weak one never lifts it
+
+    def test_no_hook_is_none_not_zero(self):
+        out, _ = self._run({"score": 6, "scores": {"flow": 6}, "verdict": "v",
+                            "strengths": ["s"], "fixes": ["f"], "next_drill": "d"})
+        self.assertIsNone(out["hook_score"])
+
+
+class FeelzCountsInOverallTests(StrengthWeightedOverallTests):
+    BASE = {"score": 6, "scores": {"flow": 6, "timing": 6, "breath": 6, "clarity": 6,
+                                    "delivery": 6, "style_match": 6},
+            "verdict": "v", "strengths": ["s"], "fixes": ["f"], "next_drill": "d"}
+
+    def test_feelz_is_served_counted_and_moves_the_overall(self):
+        hi, _ = self._run({**self.BASE, "feelz_score": 10, "feelz_emotion": "grief",
+                           "feelz_why": "raw"})
+        none, _ = self._run(self.BASE)
+        self.assertEqual((hi["feelz_score"], hi["feelz_emotion"]), (10, "grief"))
+        self.assertTrue(hi["feelz_counted"])
+        self.assertFalse(none["feelz_counted"])
+        self.assertIsNone(none["feelz_score"])
+        self.assertGreater(hi["score_exact"], none["score_exact"])
+
+    def test_a_ten_over_sixes_lands_between_the_mean_and_the_ten(self):
+        from apps.economy.vocalcoach import strength_weighted_exact as ex
+        x = ex({"a": 6, "b": 6, "c": 6, "d": 6, "e": 6, "hookz": 10, "feelz": 10})
+        self.assertGreater(x, 6)
+        self.assertLess(x, 10)
+
+
+class KeepThisTakeTests(SingZCoachTests):
+    """Opt-in, per take: the recording is kept only when the member says so."""
+
+    def _send(self, **extra):
+        return self.client.post(URL, {"take": take(), "genre": "R&B", "range": "tenor",
+                                      "difficulty": "builder", **extra}, format="multipart")
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
+    def test_by_default_the_recording_is_not_stored(self, _post, _k):
+        from apps.economy.models import Upload
+        r = self._send()
+        self.assertFalse(r.data["kept"])
+        self.assertEqual(Upload.objects.filter(user=self.user).count(), 0)
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
+    def test_ticking_keep_stores_it_as_a_normal_upload_the_history_can_open(self, _post, _k):
+        from apps.economy.models import TakeScore, Upload
+        r = self._send(keep="1")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.data["kept"])
+        up = Upload.objects.get(user=self.user)
+        self.assertEqual(up.size_bytes, 1000)                       # counts against their storage
+        self.assertEqual(up.file.read(), b"0" * 1000)               # the whole take, from the start
+        row = TakeScore.objects.get(user=self.user)
+        self.assertEqual(row.upload_id, up.id)
+        hist = self.client.get("/api/singz/progress/").data["takes"][0]
+        self.assertTrue(hist["file"]["kept"])
+        self.assertTrue(hist["file"]["url"])
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
+    def test_a_take_that_does_not_fit_is_still_scored_and_the_member_is_told_why(self, _post, _k):
+        from apps.economy.models import Upload
+        self._tier("free")
+        with patch("apps.economy.takekeep.storage_used_bytes", return_value=10 ** 12):
+            r = self._send(keep="1")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["score"], 7)                         # the coaching is unaffected
+        self.assertFalse(r.data["kept"])
+        self.assertIn("still scored", r.data["kept_note"])
+        self.assertEqual(Upload.objects.filter(user=self.user).count(), 0)

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ owns the splash screen. Same as main's, with the BodieZ icon in
+  place of the Music ConnectZ mark: the system masks it to a circle, which is
+  what ic_bodiez_foreground is drawn for.
+-->
+<resources>
+    <style name="Theme.MusicConnectZ.Splash" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowSplashScreenBackground">@color/brand_ink</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_bodiez_foreground</item>
+        <item name="android:statusBarColor">@color/brand_ink</item>
+        <item name="android:navigationBarColor">@color/brand_ink</item>
+    </style>
+</resources>

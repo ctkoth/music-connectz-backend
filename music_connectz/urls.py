@@ -7,7 +7,14 @@ from django.http import JsonResponse
 from django.urls import include, path, re_path
 from django.views.static import serve as static_serve
 
-from apps.economy.views import StatsView
+from apps.economy.views import (
+    AllMembersView,
+    FunnelEventView,
+    FunnelExcludeView,
+    FunnelSummaryView,
+    PublicStatsView,
+    StatsView,
+)
 from apps.omviardz.wellknown import AssetLinksView
 
 # SkillZ training is generated per app_key. MimeZ/DirectZ/LessonZ mount their own
@@ -21,7 +28,15 @@ except Exception:  # pragma: no cover - never let this take the deploy down
     def training_urlpatterns(app_key):
         return []
 
-INSTRUMENT_APP_KEYS = ["singz", "rapz"]
+# guitarz/bassz/keyz/drumz/violinz have had a scored profile in
+# apps/economy/instruments.py (dimensions, caveat, prompt_for) since it was
+# written — `prompt_for("drumz", ...)` is tested and has worked the whole
+# time. What they never had was a route: this list is the only thing that
+# turns a profile into `/api/<key>/coach/`, `/api/<key>/trial/` and a SkillZ
+# tree, so five fully-scoreable instruments 404'd behind a tab the frontend
+# never had reason to build. One line.
+INSTRUMENT_APP_KEYS = ["singz", "rapz", "guitarz", "bassz", "keyz", "drumz", "violinz",
+                       "flutez", "saxz", "clarinetz", "trumpetz"]
 
 # Boss Take — the blueprint's scored final take, coached by the StatZ AI coach.
 # Mounted for EVERY instrument app beside the SkillZ tree, because a take is a
@@ -31,6 +46,28 @@ try:
     from apps.economy.vocalcoach import SingZCoachView
 except Exception:  # pragma: no cover - never take the deploy down
     SingZCoachView = None
+
+try:
+    from apps.economy.coach_upgrades import CoachUpgradesView
+except Exception:  # pragma: no cover - never take the deploy down
+    CoachUpgradesView = None
+
+# The history behind that take. Its own try/except rather than the coach's,
+# because a coach that scores and cannot remember is still a working coach —
+# folding them together would mean an import error in the new module takes the
+# old feature off the platform.
+try:
+    from apps.economy.takescorez import AgreeView, ShareRecapView, ShareTakeView, ShareWinView, TakePromoView, TakePostView, TakeDownloadView, TakesExportView, GameProfileView, GoalView, ProgressView
+except Exception:  # pragma: no cover - never take the deploy down
+    AgreeView = ShareRecapView = ShareTakeView = ShareWinView = TakePromoView = TakePostView = TakeDownloadView = TakesExportView = GameProfileView = GoalView = ProgressView = None
+
+# GroupZ. Mounted at /api/groupz/ rather than under /api/economy/, because that
+# is where `GroupZ.jsx` has been calling since it was written — the tab has sat
+# on a spinner for its whole life against this exact path.
+try:
+    from apps.economy.groupz import GroupDeleteView, GroupMemberView, GroupsView
+except Exception:  # pragma: no cover - never take the deploy down
+    GroupDeleteView = GroupMemberView = GroupsView = None
 
 # The no-account trial take, and the public share endpoint the client has been
 # calling at this exact path since before it existed.
@@ -52,11 +89,61 @@ def health(_request):
         uploads = upload_storage_state()
     except Exception:                                    # pragma: no cover
         uploads = {"durable": None, "detail": "could not be determined"}
+    # Whether money can move, for the same reason uploads are here. A missing
+    # STRIPE_WEBHOOK_SECRET is the quiet one: checkout works, Stripe takes the
+    # money, and the delivery that credits the wallet is refused — the member
+    # is charged and nothing arrives, and nothing inside the app can see it.
+    try:
+        from apps.economy.payments_health import payments_state
+        payments = payments_state()
+    except Exception:                                    # pragma: no cover
+        payments = {"ready": None, "problems": ["could not be determined"]}
+    # Whether the AI surfaces can actually run, for the same reason uploads
+    # are reported here: it is a fact about the deployment that decides
+    # whether a headline feature works, and until now the only way to learn
+    # it was to open the Render dashboard or to press the button and get a
+    # 503. The coach, OCC, DirectZ craft and KeyConnectZ all hang off this
+    # one key.
+    #
+    # A BOOLEAN, never the key and never its length. This endpoint is open to
+    # anybody, and "configured" is the whole question — any detail beyond it
+    # is a fact about a secret, published.
+    #
+    # And it says CONFIGURED, not working: a key that is set can still be
+    # revoked, out of quota or restricted to the wrong API, and this cannot
+    # see any of that. tools/coach_live_check.sh is the only thing that can.
+    try:
+        from apps.economy.gemini import _key
+        ai_configured = bool(_key())
+    except Exception:                                    # pragma: no cover
+        ai_configured = None
+    # Whether a submission can be checked against commercial recordings at
+    # all. Same argument as the AI key: it decides whether a whole surface
+    # works, and readiness() already names which half is missing.
+    try:
+        from apps.economy.copyrightz import readiness
+        copyright_state = readiness()
+    except Exception:                                    # pragma: no cover
+        copyright_state = {"ready": None, "why": "could not be determined"}
     return JsonResponse(
         {
             "service": "music-connectz-backend",
             "status": "ok",
             "uploads": uploads,
+            "payments": payments,
+            "copyright": copyright_state,
+            "ai": {
+                "configured": ai_configured,
+                "detail": (
+                    "GEMINI_API_KEY is set — surfaces will attempt a real call. "
+                    "Set does not mean working; run tools/coach_live_check.sh."
+                    if ai_configured else
+                    "GEMINI_API_KEY is NOT set — the coach, OCC, DirectZ craft "
+                    "and KeyConnectZ voice all 503 until it is."
+                    if ai_configured is False else
+                    "could not be determined"
+                ),
+            },
             "endpoints": [
                 "/api/auth/register/",
                 "/api/auth/login/",
@@ -73,6 +160,14 @@ urlpatterns = [
     path("", health, name="health"),
     path("admin/", admin.site.urls),
     path("api/auth/stats/", StatsView.as_view(), name="auth-stats"),
+    path("api/auth/stats/all/", AllMembersView.as_view(), name="auth-stats-all"),
+    # No session required — the landing page's real member/online count.
+    path("api/auth/public-stats/", PublicStatsView.as_view(), name="auth-public-stats"),
+    # No session required — a step on the join funnel, logged by a visitor
+    # who may never have had one. Owner-only summary sits behind it.
+    path("api/auth/funnel/", FunnelEventView.as_view(), name="auth-funnel"),
+    path("api/auth/funnel/exclude/", FunnelExcludeView.as_view(), name="auth-funnel-exclude"),
+    path("api/auth/funnel/summary/", FunnelSummaryView.as_view(), name="auth-funnel-summary"),
     path("api/auth/", include("apps.accounts.urls")),
     path("api/economy/", include("apps.economy.urls")),
     path("api/mimez/", include("apps.mimez.urls")),
@@ -101,7 +196,56 @@ urlpatterns = [
 ] if TrialCoachView else []) + ([
     path(f"api/{key}/coach/", SingZCoachView.as_view(app_key=key), name=f"{key}-coach")
     for key in INSTRUMENT_APP_KEYS
-] if SingZCoachView else [])
+] if SingZCoachView else []) + ([
+    path(f"api/{key}/coach/upgrades/", CoachUpgradesView.as_view(app_key=key),
+         name=f"{key}-coach-upgrades")
+    for key in INSTRUMENT_APP_KEYS
+] if CoachUpgradesView else []) + ([
+    # The coach's memory. Bound per instrument beside the coach itself so a new
+    # instrument gets its history screen without a second list to keep in step
+    # — the gap `test_instrument_routes` exists to catch.
+    path(f"api/{key}/progress/", ProgressView.as_view(app_key=key), name=f"{key}-progress")
+    for key in INSTRUMENT_APP_KEYS
+] if ProgressView else []) + ([
+    path(f"api/{key}/goal/", GoalView.as_view(app_key=key), name=f"{key}-goal")
+    for key in INSTRUMENT_APP_KEYS
+] if GoalView else []) + ([
+    path(f"api/{key}/agree/", AgreeView.as_view(app_key=key), name=f"{key}-agree")
+    for key in INSTRUMENT_APP_KEYS
+] if AgreeView else []) + ([
+    path(f"api/{key}/take/<int:pk>/share/", ShareTakeView.as_view(app_key=key), name=f"{key}-take-share")
+    for key in INSTRUMENT_APP_KEYS
+] if ShareTakeView else []) + ([
+    path(f"api/{key}/take/<int:pk>/promo/", TakePromoView.as_view(app_key=key), name=f"{key}-take-promo")
+    for key in INSTRUMENT_APP_KEYS
+] if TakePromoView else []) + ([
+    path(f"api/{key}/take/<int:pk>/post/", TakePostView.as_view(app_key=key), name=f"{key}-take-post")
+    for key in INSTRUMENT_APP_KEYS
+] if TakePostView else []) + ([
+    path(f"api/{key}/take/<int:pk>/download/", TakeDownloadView.as_view(app_key=key), name=f"{key}-take-download")
+    for key in INSTRUMENT_APP_KEYS
+] if TakeDownloadView else []) + ([
+    path(f"api/{key}/takes/export/", TakesExportView.as_view(app_key=key), name=f"{key}-takes-export")
+    for key in INSTRUMENT_APP_KEYS
+] if TakesExportView else []) + ([
+    path(f"api/{key}/win/<str:dim>/share/", ShareWinView.as_view(app_key=key), name=f"{key}-win-share")
+    for key in INSTRUMENT_APP_KEYS
+] if ShareWinView else []) + ([
+    path(f"api/{key}/recap/share/", ShareRecapView.as_view(app_key=key), name=f"{key}-recap-share")
+    for key in INSTRUMENT_APP_KEYS
+] if ShareRecapView else []) + ([
+    # The game profile the RapZ and SingZ panels have been calling since they
+    # were written. Mounted for every instrument beside the coach, like the
+    # rest — a drummer has a BPM comfort range and a boss unlock too.
+    path(f"api/{key}/profile/", GameProfileView.as_view(app_key=key), name=f"{key}-profile")
+    for key in INSTRUMENT_APP_KEYS
+] if GameProfileView else []) + ([
+    path("api/groupz/", GroupsView.as_view(), name="groupz"),
+    # `<str:gid>` and not `<int:pk>`: FriendZ, FanZ and Blocked are derived
+    # rather than rows, so their ids are the words themselves.
+    path("api/groupz/<str:gid>/", GroupDeleteView.as_view(), name="groupz-one"),
+    path("api/groupz/<str:gid>/<str:action>/", GroupMemberView.as_view(), name="groupz-member"),
+] if GroupsView else [])
 
 # Serve user uploads. When S3/R2 is configured (S3_BUCKET_NAME), django-storages
 # serves media from the bucket and these URLs are absolute — this route isn't hit.

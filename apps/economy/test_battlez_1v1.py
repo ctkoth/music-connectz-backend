@@ -9,6 +9,7 @@ Real-money battles stay a vote rather than a switch. Wagering cash is regulated
 gambling in most places; counting who wants it is honest, shipping it on a show
 of hands would not be.
 """
+from unittest.mock import patch
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -41,6 +42,7 @@ def judge(entry, *scores):
             item_id=entry.item_key, score=s)
 
 
+@patch("apps.economy.battlez.BATTLE_CALLOUT_ENERGY", 0)
 class ChallengeTests(TestCase):
     def setUp(self):
         self.client = APIClient()

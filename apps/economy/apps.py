@@ -42,3 +42,5 @@ class EconomyConfig(AppConfig):
         # log nobody reads twice.
         from .storage_health import warn_once
         warn_once()
+        # Push rides on Notification's post_save; importing connects it.
+        from . import push  # noqa: F401

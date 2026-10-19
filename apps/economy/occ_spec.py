@@ -14,6 +14,7 @@ WHAT OCC IS NOT — stated here because the difference decides what can be built
   otherwise, and any tab that would need execution says so rather than shipping
   a button that lies.
 """
+from .features import required_tier
 from .models import TIER_DEBUG, TIER_FREE, TIER_PREMIUM, TIER_STATZ
 
 # Tier ladder — a member at or above the named tier passes. Matches
@@ -48,94 +49,126 @@ def tier_at_least(tier, needed):
 # it here is what makes dropping the file into the frontend's public/icons/ the
 # entire job. Until the file lands it 404s and the client shows the emoji, so
 # reserving a name costs a member nothing and saves a code change later.
+#
+# `built` says whether a SCREEN stands behind the tab today, and `open_in` +
+# `target` say where it opens — an app's tab key and the data-tour anchor to
+# land on inside it (what `goToSpot(tab, target)` takes). The first version of
+# this table named seven screens OCC does not have (an editor, a console, FileZ,
+# Welcome…) and the client rendered each as a card with "Not built yet" and no
+# button, and sent every "Open →" to an anchor (`occ:<key>`) that exists
+# nowhere. A tab that is not built is still listed — it is the spec, and
+# `builds` is what stands behind it — but it carries `built: False` and no door,
+# and the client does not draw it.
+#
+# `open_in` must be a tab the client actually mounts. `test_occ_routes` holds
+# the allow-list; the frontend's `occRoutes.test.mjs` checks it against
+# App.jsx's TABS, so adding a door to a tab that is not there fails a test
+# instead of playing a sound and going nowhere.
+#
+# Gates come from features.py wherever a feature exists, never typed a second
+# time: LogZ was typed as Premium here while features.py (and its own test)
+# say it is free, so the tab grid told a Free member to upgrade for the one
+# screen that answers "what took my ⚡".
 OCC_TABS = [
-    {"key": "editor", "open_in": "occ", "icon": "editor.png", "name": "Code editor", "emoji": "👁️‍🗨️", "needs": TIER_FREE,
+    {"key": "editor", "built": False, "icon": "editor.png", "name": "Code editor", "emoji": "👁️‍🗨️", "needs": TIER_FREE,
      "desc": "Write and edit your files.", "builds": "editor"},
-    {"key": "taskz", "open_in": "occ", "icon": "taskz.png", "name": "TaskZ", "emoji": "📑", "needs": TIER_FREE,
-     "desc": "Tasks OCC has been set, with live status, an ETA, and an undo window.",
+    {"key": "taskz", "built": True, "open_in": "occ", "target": "occ-taskz", "icon": "taskz.png", "name": "TaskZ", "emoji": "📑", "needs": TIER_FREE,
+     "desc": "Your to-do list for OCC work — suggestions, sandbox runs and anything you add.",
      "builds": "taskz"},
     # Not in the original list of twenty-one: added because an OCC result that
     # can't be shown, rated or carried anywhere is a dead end, and nothing here
     # is allowed to be one. WorkZ is where what you gave OCC and what it gave
     # back are kept, in the PostZ format, ready to post.
-    {"key": "workz", "open_in": "occ", "icon": "workz.png", "name": "WorkZ", "emoji": "🧾", "needs": TIER_FREE,
+    {"key": "workz", "built": True, "open_in": "occ", "target": "occ-workz", "icon": "workz.png", "name": "WorkZ", "emoji": "🧾", "needs": TIER_FREE,
      "desc": "What you gave OCC and what it gave back — post it, rate it, or take it "
              "into another app.", "builds": "workz"},
-    {"key": "codez", "open_in": "habitz", "icon": "codez.png", "name": "CodeZ", "emoji": "🧩", "needs": TIER_FREE,
+    {"key": "codez", "built": True, "open_in": "habitz", "target": "", "icon": "codez.png", "name": "CodeZ", "emoji": "🧩", "needs": TIER_FREE,
      "desc": "Your acronyms, typos and slang — what you meant, and how often you've typed it.",
      "builds": "codez"},
-    {"key": "pathz", "open_in": "habitz", "icon": "pathz.png", "name": "PathZ", "emoji": "🛤️", "needs": TIER_PREMIUM,
+    {"key": "pathz", "built": True, "open_in": "habitz", "target": "", "icon": "pathz.png", "name": "PathZ", "emoji": "🛤️", "needs": TIER_PREMIUM,
      "desc": "Your paths across devices.", "builds": "pathz"},
-    {"key": "mistakez", "open_in": "habitz", "icon": "mistakez.png", "name": "MistakeZ", "emoji": "❌", "needs": TIER_FREE,
+    {"key": "mistakez", "built": True, "open_in": "habitz", "target": "", "icon": "mistakez.png", "name": "MistakeZ", "emoji": "❌", "needs": TIER_FREE,
      "desc": "Errors the AI made here, kept so it doesn't make them twice.",
      "builds": "mistakez"},
-    {"key": "habitz", "open_in": "habitz", "icon": "habitz.png", "name": "HabitZ", "emoji": "🎂", "needs": TIER_FREE,
+    {"key": "habitz", "built": True, "open_in": "habitz", "target": "", "icon": "habitz.png", "name": "HabitZ", "emoji": "🎂", "needs": TIER_FREE,
      "desc": "Something you repeat, noticed and kept.", "builds": "habitz"},
-    {"key": "characterz", "icon": "characterz.png", "name": "CharacterZ", "emoji": "🤔", "needs": TIER_PREMIUM,
-     "desc": "MBTI characters attached to a FaceZ face, with a story and a voice.",
+    {"key": "characterz", "built": False, "icon": "characterz.png", "name": "CharacterZ", "emoji": "🤔", "needs": TIER_PREMIUM,
+     # Not "MBTI characters". This dict is served to members by `tabs_for`,
+     # so it was the second place on the platform publishing somebody else's
+     # trademark — while `personalityz.py`'s own docstring says in as many
+     # words that we deliberately do not call it that. The four axes are ours
+     # to describe; the name is not ours to use.
+     "desc": "Characters built on the four PersonalitieZ axes, attached to a "
+             "FaceZ face, with a story and a voice.",
      "builds": "characterz"},
-    {"key": "settings", "open_in": "occ", "icon": "preferencez.png", "name": "Settings", "emoji": "⚙️", "needs": TIER_FREE,
+    {"key": "settings", "built": True, "open_in": "occ", "target": "occ-settings", "icon": "preferencez.png", "name": "Settings", "emoji": "⚙️", "needs": TIER_FREE,
      "desc": "AutomationZ and SuggestionZ live here.", "builds": "settings"},
-    {"key": "console", "open_in": "occ", "icon": "console.png", "name": "Output / Console", "emoji": "🖥️", "needs": TIER_FREE,
+    {"key": "console", "built": False, "icon": "console.png", "name": "Output / Console", "emoji": "🖥️", "needs": TIER_FREE,
      "desc": "What OCC printed.", "builds": "console"},
-    {"key": "callz", "icon": "callz.png", "name": "CallZ", "emoji": "📞", "needs": TIER_STATZ,
+    {"key": "callz", "built": True, "open_in": "callz", "target": "", "icon": "callz.png", "name": "CallZ", "emoji": "📞", "needs": TIER_STATZ,
      "desc": "Talk it through.", "builds": "callz"},
-    {"key": "search", "open_in": "social", "icon": "search.png", "name": "Search", "emoji": "🔍", "needs": TIER_FREE,
+    {"key": "search", "built": False, "icon": "search.png", "name": "Search", "emoji": "🔍", "needs": TIER_FREE,
      "desc": "Across every tab.", "builds": "search"},
-    {"key": "tellz", "icon": "tellz.png", "name": "TellZ", "emoji": "🗣️", "needs": TIER_PREMIUM,
+    {"key": "tellz", "built": False, "icon": "tellz.png", "name": "TellZ", "emoji": "🗣️", "needs": required_tier("tellz"),
      "desc": "What you prompted or posted, per tab or across all of them.",
      "builds": "tellz"},
-    {"key": "logz", "open_in": "logz", "icon": "logz.png", "name": "LogZ", "emoji": "🪵", "needs": TIER_PREMIUM,
+    {"key": "logz", "built": True, "open_in": "logz", "target": "", "icon": "logz.png", "name": "LogZ", "emoji": "🪵", "needs": required_tier("logz"),
      "desc": "What was DONE, by day, week, month or a range you pick.",
      "builds": "logz"},
-    {"key": "pickconnectz", "icon": "pickconz.png", "name": "Pick ConnectZ", "emoji": "📌", "needs": TIER_FREE,
+    {"key": "pickconnectz", "built": False, "icon": "pickconz.png", "name": "Pick ConnectZ", "emoji": "📌", "needs": TIER_FREE,
      "desc": "Pin your favourites to the footer.", "builds": "pickconnectz"},
-    {"key": "filez", "open_in": "occ", "icon": "filez.png", "name": "FileZ", "emoji": "📁", "needs": TIER_FREE,
+    {"key": "filez", "built": False, "icon": "filez.png", "name": "FileZ", "emoji": "📁", "needs": TIER_FREE,
      "desc": "Files and uploads.", "builds": "filez"},
-    {"key": "gitz", "icon": "gitz.png", "name": "GitZ", "emoji": "🔀", "needs": TIER_STATZ,
+    {"key": "gitz", "built": False, "icon": "gitz.png", "name": "GitZ", "emoji": "🔀", "needs": required_tier("gitz"),
      "desc": "Branches, commits and pushes — every one of them a TaskZ task.",
      "builds": "gitz"},
-    {"key": "gamez", "icon": "gamez.png", "name": "GameZ", "emoji": "🎮", "needs": TIER_PREMIUM,
+    {"key": "gamez", "built": True, "open_in": "gamez", "target": "", "icon": "gamez.png", "name": "GameZ", "emoji": "🎮", "needs": required_tier("occ_games"),
      "desc": "Games you built here, by genre.", "builds": "gamez"},
-    {"key": "spinaz", "open_in": "logz", "icon": "spinaz.png", "name": "SpinaZ", "emoji": "🍥", "needs": TIER_FREE,
+    {"key": "spinaz", "built": True, "open_in": "logz", "target": "", "icon": "spinaz.png", "name": "SpinaZ", "emoji": "🍥", "needs": TIER_FREE,
      "desc": "How you earned and spent it.", "builds": "spinaz"},
-    {"key": "energy", "open_in": "logz", "icon": "energy.png", "name": "Energy", "emoji": "⚡", "needs": TIER_FREE,
+    {"key": "energy", "built": True, "open_in": "logz", "target": "", "icon": "energy.png", "name": "Energy", "emoji": "⚡", "needs": TIER_FREE,
      "desc": "How you earned and spent it.", "builds": "energy"},
-    {"key": "facez", "open_in": "profilez", "icon": "facez.png", "name": "FaceZ", "emoji": "🙄", "needs": TIER_FREE,
+    {"key": "facez", "built": True, "open_in": "facez", "target": "", "icon": "facez.png", "name": "FaceZ", "emoji": "🙄", "needs": TIER_FREE,
      "desc": "Faces available to AI images and video, taggable to a profile.",
      "builds": "facez"},
-    {"key": "welcome", "open_in": "occ", "icon": "welcome.png", "name": "Welcome", "emoji": "👋", "needs": TIER_FREE,
+    {"key": "welcome", "built": True, "open_in": "onboardz", "target": "", "icon": "welcome.png", "name": "Welcome", "emoji": "👋", "needs": TIER_FREE,
      "desc": "Start here.", "builds": "welcome"},
 ]
 
 # The two toggles the spec puts front and centre.
 OCC_TOGGLES = [
-    {"key": "automation", "name": "AutomationZ", "emoji": "🤖", "needs": TIER_STATZ,
-     "desc": "Performs tasks with no confirmation. You're told in LogZ as it happens."},
-    {"key": "suggestionz", "name": "SuggestionZ", "emoji": "💭", "needs": TIER_PREMIUM,
-     "desc": "Adds tasks and explains what, why and how before anything runs."},
+    {"key": "automation", "name": "AutomationZ", "emoji": "🤖", "needs": required_tier("automationz"),
+     "desc": "Does the safe suggestions itself, without asking, and tells you as it happens. "
+             "Anything that publishes, spends or other members can see still asks."},
+    {"key": "suggestionz", "name": "SuggestionZ", "emoji": "💭", "needs": required_tier("suggestionz"),
+     "desc": "Reads your account and proposes work, explaining what, why and how before anything runs."},
 ]
 
 # Languages you may build a game in. Unreal/C++ is the StatZ reservation.
+# The tiers are features.py's (`occ_games`, `occ_cpp`), read once here rather
+# than typed on seventeen rows — a second copy of a gate is how the tab grid
+# came to call LogZ Premium.
+_GAMES = required_tier("occ_games")
+_CPP = required_tier("occ_cpp")
 OCC_LANGUAGES = [
-    {"key": "python", "name": "Python", "needs": TIER_PREMIUM},
-    {"key": "javascript", "name": "JavaScript", "needs": TIER_PREMIUM},
-    {"key": "typescript", "name": "TypeScript", "needs": TIER_PREMIUM},
-    {"key": "csharp", "name": "C# (Unity)", "needs": TIER_PREMIUM},
-    {"key": "gdscript", "name": "GDScript (Godot)", "needs": TIER_PREMIUM},
-    {"key": "lua", "name": "Lua", "needs": TIER_PREMIUM},
-    {"key": "java", "name": "Java", "needs": TIER_PREMIUM},
-    {"key": "kotlin", "name": "Kotlin", "needs": TIER_PREMIUM},
-    {"key": "swift", "name": "Swift", "needs": TIER_PREMIUM},
-    {"key": "go", "name": "Go", "needs": TIER_PREMIUM},
-    {"key": "rust", "name": "Rust", "needs": TIER_PREMIUM},
-    {"key": "ruby", "name": "Ruby", "needs": TIER_PREMIUM},
-    {"key": "php", "name": "PHP", "needs": TIER_PREMIUM},
-    {"key": "haxe", "name": "Haxe", "needs": TIER_PREMIUM},
-    {"key": "gml", "name": "GML (GameMaker)", "needs": TIER_PREMIUM},
+    {"key": "python", "name": "Python", "needs": _GAMES},
+    {"key": "javascript", "name": "JavaScript", "needs": _GAMES},
+    {"key": "typescript", "name": "TypeScript", "needs": _GAMES},
+    {"key": "csharp", "name": "C# (Unity)", "needs": _GAMES},
+    {"key": "gdscript", "name": "GDScript (Godot)", "needs": _GAMES},
+    {"key": "lua", "name": "Lua", "needs": _GAMES},
+    {"key": "java", "name": "Java", "needs": _GAMES},
+    {"key": "kotlin", "name": "Kotlin", "needs": _GAMES},
+    {"key": "swift", "name": "Swift", "needs": _GAMES},
+    {"key": "go", "name": "Go", "needs": _GAMES},
+    {"key": "rust", "name": "Rust", "needs": _GAMES},
+    {"key": "ruby", "name": "Ruby", "needs": _GAMES},
+    {"key": "php", "name": "PHP", "needs": _GAMES},
+    {"key": "haxe", "name": "Haxe", "needs": _GAMES},
+    {"key": "gml", "name": "GML (GameMaker)", "needs": _GAMES},
     # Unreal is reserved for StatZ, which is what makes C++ the StatZ language.
-    {"key": "cpp", "name": "C++ (Unreal)", "needs": TIER_STATZ},
-    {"key": "c", "name": "C", "needs": TIER_STATZ},
+    {"key": "cpp", "name": "C++ (Unreal)", "needs": _CPP},
+    {"key": "c", "name": "C", "needs": _CPP},
 ]
 
 def languages_with_run_status():
@@ -159,15 +192,32 @@ OCC_IMAGE_EXPORTS = [
     "heic", "avif", "psd", "tga", "exr",
 ]
 
-# Which intelligence app an export is handed to, by media type. An export that
-# lands nowhere is a dead end; this is the routing table that stops that.
+# Which app an export is handed to, by media type. An export that lands nowhere
+# is a dead end; this is the routing table that stops that.
+#
+# `app` is a tab the client MOUNTS, and `target` is a data-tour anchor inside
+# it (or "" to land at the top — an anchor that does not exist makes the jump
+# a tab switch that pretends to be a landing). The first version named
+# `imagez` and `writez`, which are not tabs anywhere, and sent code to `occ`
+# itself, so every one of those pills played the open-in sound and went
+# nowhere. A media type with no real destination says so with an empty `app`
+# and gets no "Open in" row — WorkZ's "Share to PostZ" is the door for those,
+# and an honest absence beats a button onto nothing.
+#
+#   audio    -> DistributeZ  (a release is built from a track)
+#   video    -> DirectZ      (the releases list)
+#   document -> Sentence ConnectZ (the writer — a document goes to be rewritten)
+#   game     -> GameZ
+#   image    -> nothing mounted takes an image yet
+#   code     -> nothing: OCC IS where code lives, and "open in OCC" from OCC
+#               is the dead button
 EXPORT_ROUTES = {
-    "image": {"app": "imagez", "target": "imagez:library"},
-    "video": {"app": "directz", "target": "directz:works"},
-    "audio": {"app": "distributez", "target": "distributez:tracks"},
-    "document": {"app": "writez", "target": "writez:docs"},
-    "code": {"app": "occ", "target": "occ:filez"},
-    "game": {"app": "gamez", "target": "gamez:mine"},
+    "image": {"app": "", "target": "", "label": ""},
+    "video": {"app": "directz", "target": "directz-releases", "label": "DirectZ"},
+    "audio": {"app": "distributez", "target": "distributez-releases", "label": "DistributeZ"},
+    "document": {"app": "sentenceconnectz", "target": "sentencez-write", "label": "Sentence ConnectZ"},
+    "code": {"app": "", "target": "", "label": ""},
+    "game": {"app": "gamez", "target": "", "label": "GameZ"},
 }
 
 

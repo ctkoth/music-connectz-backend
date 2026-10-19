@@ -31,7 +31,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import over_char_limit
+from .catalog import OCC_MAX_PROMPT_CHARS, over_char_limit
 from .models import (
     OccOutput,
     OccTask,
@@ -63,20 +63,33 @@ def _send_targets(o):
     playlist has told you nothing. So each target carries whether it needs the
     work shared first, and once it IS shared the post id is right there for the
     client to land on.
+
+    Every `tab` here is one the client mounts, and every `target` an anchor that
+    exists in it (or "" to land at the top). The first version sent "Share to
+    PostZ" to `social`/`social-compose` and "Open in" to `imagez`, `writez` and
+    OCC itself — pills that played a sound and went nowhere. A media type with no
+    real destination (`EXPORT_ROUTES[...]["app"] == ""`) gets no "Open in" row at
+    all rather than a button onto nothing.
     """
     _, route = _route_for(o)
     shared = bool(o.shared_post_id)
     post_target = f"post-{o.shared_post_id}" if shared else ""
     audio = (o.media_type or "").lower() == "audio"
-    return [
-        {"key": "postz", "label": "Share to PostZ", "tab": "social",
-         "target": post_target or "social-compose", "needs_share": False,
+    rows = [
+        # PostZ's composer before it is posted, its feed after — the feed is
+        # where the post then lives to be rated, liked and commented on.
+        {"key": "postz", "label": "Share to PostZ", "tab": "postz",
+         "target": "feed" if shared else "composer", "needs_share": False,
          "done": shared,
          "note": "Where it gets rated, liked, disliked and commented on."},
-        {"key": route["app"], "label": f"Open in {route['app'].title()}",
-         "tab": route["app"], "target": route["target"], "needs_share": False,
-         "done": False,
-         "note": "The library for this kind of file."},
+    ]
+    if route["app"]:
+        rows.append(
+            {"key": route["app"], "label": f"Open in {route['label']}",
+             "tab": route["app"], "target": route["target"], "needs_share": False,
+             "done": False,
+             "note": "The library for this kind of file."})
+    rows += [
         # PostZ is for show, CollabZ is for collaboration — and the PostZ →
         # CollabZ handoff already exists, so this rides it rather than growing a
         # second way to start a deal.
@@ -89,6 +102,7 @@ def _send_targets(o):
          "done": False, "available": audio or bool(o.media_url),
          "note": "Share it first — playlists hold posts."},
     ]
+    return rows
 
 
 def output_dict(o, request=None):
@@ -131,6 +145,7 @@ def output_dict(o, request=None):
                                                      "ratings and comments arrive on the post."},
         # ---- where it goes next
         "export_route": route_key,
+        # "" when nothing mounted takes this kind of work — see EXPORT_ROUTES.
         "open_in": route["app"],
         "send_to": _send_targets(o),
         "created_at": o.created_at.isoformat(),
@@ -157,6 +172,11 @@ def _clean_fields(d, existing=None):
         "skill_cost_cents": max(0, int(d.get("skill_cost_cents",
                                              e.skill_cost_cents if e else 0) or 0)),
     }
+
+
+def fields_tab_is_chat(d):
+    """True when a work is being kept from OCC's chat panel (`tab: "chat"`)."""
+    return str(d.get("tab", "") or "").strip().lower() == "chat"
 
 
 class OccWorkzView(APIView):
@@ -198,7 +218,23 @@ class OccWorkzView(APIView):
             )
         # The prompt is the member's own writing, so it answers to their tier's
         # character limit — never to a column width.
-        cap = over_char_limit(input_text, membership_for(request.user).tier)
+        #
+        # EXCEPT when it is a chat prompt being kept. OCC's chat accepts a
+        # message up to OCC_MAX_PROMPT_CHARS whatever the tier, so keeping what
+        # was just asked has to take the same ceiling — otherwise a Free member
+        # could send 8,000 characters and then be told, on "Save to WorkZ", that
+        # the question they just asked is over their limit, with an upgrade
+        # sentence attached. Bounded either way: it is the chat's own cap.
+        if fields_tab_is_chat(d):
+            if len(input_text) > OCC_MAX_PROMPT_CHARS:
+                return Response(
+                    {"detail": f"That message is over {OCC_MAX_PROMPT_CHARS:,} characters.",
+                     "char_limit": OCC_MAX_PROMPT_CHARS},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            cap = 0
+        else:
+            cap = over_char_limit(input_text, membership_for(request.user).tier)
         if cap:
             return Response(
                 {"detail": f"That input is over your {cap:,}-character limit — "
@@ -250,7 +286,12 @@ class OccWorkDetailView(APIView):
             setattr(o, k, v)
         if "input_text" in d:
             text = str(d["input_text"] or "")
-            cap = over_char_limit(text, membership_for(request.user).tier)
+            # A chat prompt keeps the chat's ceiling when it is edited, too —
+            # see the note in OccWorkzView.post.
+            if fields_tab_is_chat({"tab": d.get("tab", o.tab)}):
+                cap = OCC_MAX_PROMPT_CHARS if len(text) > OCC_MAX_PROMPT_CHARS else 0
+            else:
+                cap = over_char_limit(text, membership_for(request.user).tier)
             if cap:
                 return Response(
                     {"detail": f"That input is over your {cap:,}-character limit.",
@@ -359,7 +400,10 @@ class OccWorkUnshareView(APIView):
         o.save(update_fields=["shared_post", "updated_at"])
         return Response({**output_dict(o, request), "unlinked_post": post_id,
                          "note": "The post is still up — delete it in PostZ if you want it gone.",
-                         "open_in": "social", "target": f"post-{post_id}"})
+                         # PostZ's feed — where the post still is and where it
+                         # is deleted. `social` is SocialConnectZ, and `post-<id>`
+                         # is an anchor nothing renders.
+                         "open_in": "postz", "target": "feed"})
 
 
 class PostOccWorkView(APIView):
@@ -389,5 +433,7 @@ class PostOccWorkView(APIView):
             },
             "mine": mine,
             "open_in": "occ" if mine else None,
-            "target": f"occ:workz:{o.id}" if mine else "",
+            # The data-tour anchor of the WorkZ card — `occ:workz:<id>` named
+            # nothing on the page, so the jump landed at the top of OCC.
+            "target": "occ-workz" if mine else "",
         })

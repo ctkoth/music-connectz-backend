@@ -16,6 +16,7 @@ from django.conf import settings
 from .gates import clean_gates, describe, failing_gate, member_metrics, refusal
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -28,6 +29,7 @@ from .models import (
     CollabDeal,
     ItemRating,
     Post,
+    RoyaltyEntry,
     Transaction,
     Wallet,
     badge_effects,
@@ -39,6 +41,7 @@ from .models import (
     profile_for,
     wallet_for,
 )
+from .postz import charge_skill_energy, skills_from
 from .views import is_owner
 
 User = get_user_model()
@@ -114,7 +117,12 @@ def deal_dict(deal, me=None, days_cache=None):
         # deal that isn't funded yet this is the window that WILL apply, which
         # is the only version of it worth showing a payer.
         "auto_release_days": escrow_release_days(deal, days_cache),
+        "partnered": deal.partnered or [],
         "auto_release_default_days": settings.ESCROW_AUTO_RELEASE_DAYS,
+        # A shortened window with no reason on it reads as a bug. Naming the
+        # thing that shortened it is the gain half of the cost/gain rule: the
+        # benefit is only worth earning if somebody can see it arrive.
+        "auto_release_partnerz": _all_payers_partner_every_payee(deal, days_cache),
         "i_am_participant": bool(me and any(p.get("username") == me.username for p in deal.participants)),
         "i_am_payer": bool(me and any(p.get("username") == me.username and int(p.get("pays_cents") or 0) > 0 for p in deal.participants)),
     }
@@ -137,6 +145,17 @@ def escrow_release_days(deal, cache=None):
     So every payer has to hold it, and the shortest window any of them earns
     is still floored at ESCROW_MIN_RELEASE_DAYS.
 
+    PartnerZ shortens it too, under the same rule and for the same reason. Two
+    people with PARTNER_WORKS finished works between them have evidence the
+    dispute window is protecting against something that has not happened, and
+    it is still each PAYER'S OWN protection being spent — so every payer has to
+    be a PartnerZ of every person being paid, and the floor still holds.
+
+    That narrowness is also what makes the benefit unfarmable, which is the
+    whole reason PartnerZ gets this and not a 🍥 payout: somebody running two
+    accounts owns both wallets, so their own money arriving four days sooner is
+    worth exactly nothing to them. See `groupz.PARTNER_ESCROW_DAYS_OFF`.
+
     `cache` is a username -> days-off dict shared across a list of deals, so
     rendering someone's whole DealZ tab doesn't re-read the same badges once
     per card.
@@ -154,13 +173,69 @@ def escrow_release_days(deal, cache=None):
         cache.update({n: 0 for n in missing})
         for u in User.objects.filter(username__in=missing):
             cache[u.username] = int(badge_effects(u).get("escrow_days_off", 0) or 0)
-    return max(settings.ESCROW_MIN_RELEASE_DAYS, base - min(cache[n] for n in names))
+    off = min(cache[n] for n in names)
+    if _all_payers_partner_every_payee(deal, cache):
+        from .groupz import PARTNER_ESCROW_DAYS_OFF
+        off += PARTNER_ESCROW_DAYS_OFF
+    return max(settings.ESCROW_MIN_RELEASE_DAYS, base - off)
+
+
+def _all_payers_partner_every_payee(deal, cache=None):
+    """Is every payer on this deal a PartnerZ of everybody they're paying?
+
+    Two queries per distinct cast, memoised into the same `cache` the badge
+    lookup uses (under a tuple key, so it cannot collide with a username), so
+    a DealZ tab of deals between the same people costs them once.
+
+    False the moment anybody on it can't be resolved to an account — an
+    unknown participant is never assumed to be in a partnership, the same way
+    an unknown payer is never assumed to hold a badge.
+    """
+    payers = {p.get("username") for p in deal.payers() if p.get("username")}
+    payees = {p.get("username") for p in deal.participants
+              if p.get("username") and int(p.get("receives_cents") or 0) > 0}
+    payees -= payers          # paying yourself is not a relationship
+    if not payers or not payees:
+        return False
+    key = ("partnerz", frozenset(payers), frozenset(payees))
+    if cache is not None and key in cache:
+        return cache[key]
+    answer = _partner_lookup(payers, payees)
+    if cache is not None:
+        cache[key] = answer
+    return answer
+
+
+def _partner_lookup(payers, payees):
+    from .groupz import partner_pairs_among
+    ids = dict(User.objects.filter(username__in=payers | payees)
+               .values_list("username", "id"))
+    if len(ids) != len(payers | payees):
+        return False
+    pairs = partner_pairs_among(ids.values())
+    return all(frozenset((ids[a], ids[b])) in pairs
+               for a in payers for b in payees)
 
 
 def maybe_auto_release(deal):
     """Lazily release a fully-funded deal whose auto-release window has passed
     and which isn't disputed — so recipients are never stuck waiting on an
-    unresponsive payer. Safe to call on any read."""
+    unresponsive payer. Safe to call on any read.
+
+    Escrow is a trust, in the literal sense the word carries in two
+    traditions this platform's members actually come from. Islamic law calls
+    it amanah — a thing held for another that must be returned exactly as
+    entrusted, on time, without the holder treating it as their own
+    (Qur'an 4:58, Saheeh International translation; al-Qaradawi, 1999, on
+    amanah as the basis of commercial trust). The window this function
+    enforces is that promise made mechanical: the platform holds the money,
+    not owns it, and `auto_release_at` is the date the trust is discharged
+    whether or not anyone presses a button. The same idea runs through the
+    parable of the talents — a steward is trusted with what belongs to
+    someone else and is answerable for what he does with it (Matthew 25:14-30,
+    ESV) — which is the same argument `EscrowWindow` makes to the payer on
+    screen: the days aren't a delay, they're what "held in trust" means.
+    """
     if deal.status not in (CollabDeal.STATUS_FUNDED, CollabDeal.STATUS_DELIVERED):
         return deal
     if not deal.auto_release_at or timezone.now() < deal.auto_release_at:
@@ -264,6 +339,25 @@ def release_deal(deal, note="collab release"):
     # later would mean somebody's share kept changing after they agreed to it.
     if deal.split_mode == CollabDeal.SPLIT_RATING:
         deal.participants, deal.split_snapshot = rating_split(deal)
+
+    # Lilith reads "still new" off released deals, so who was new has to be
+    # read HERE, before the status flips two dozen lines down — afterwards
+    # everybody in this deal has a released deal and nobody is new. The
+    # payout itself happens after the money moves.
+    from .lilith_taskz import beginners_among, settle_together
+    people = [u for u in (
+        [deal.initiator] + [User.objects.filter(username=e.get("username")).first()
+                            for e in deal.participants]) if u is not None]
+    was_beginner = beginners_among(people)
+
+    # Read BEFORE the zeroing twenty lines down. PartnerZ counts a deal that
+    # actually held something: an empty deal costs nothing to make, funds
+    # itself (`payers()` is empty, so `all_funded()` is `all([])`) and
+    # auto-releases on its own, so counting one would make the list free.
+    moved = bool(deal.held_cents or deal.held_spinaz or deal.held_stake_spinaz)
+
+    from .intelligence_royalty import cut_of, pay_owner_money, pay_owner_spinaz, record_paid
+    owed = []  # (user, cut, pct) — paid to the owner after every wallet here is saved
     paid_out = 0
     for entry in deal.participants:
         user = User.objects.filter(username=entry.get("username")).first()
@@ -271,17 +365,39 @@ def release_deal(deal, note="collab release"):
             continue
         recv = int(entry.get("receives_cents") or 0)
         stake = int(entry.get("stake_paid") or 0)
+        # K-Oth's IntelligenceZ royalty comes out of THIS member's share only,
+        # and only if they attached a piece to this deal themselves.
+        cut, pct = cut_of(user, "collab", deal.pk, recv)
+        net = recv - cut
+        tag = f" · −{pct:g}% IntelligenceZ royalty" if cut else ""
+        if cut:
+            owed.append((user, cut, pct))
         w = _locked_wallet(user)
         if deal.currency == CollabDeal.CURRENCY_MONEY:
             if recv:
-                w.money_cents += recv
+                w.money_cents += net
                 paid_out += recv
-                Transaction.objects.create(user=user, kind=Transaction.KIND_REWARD, amount_cents=recv, dev_tax_cents=0, note=f"CollabZ escrow: {deal.title}"[:200])
+                Transaction.objects.create(user=user, kind=Transaction.KIND_REWARD, amount_cents=net, dev_tax_cents=0, note=f"CollabZ escrow: {deal.title}{tag}"[:200])
+                # Record royalty split accrual
+                RoyaltyEntry.objects.create(
+                    user=user,
+                    kind=RoyaltyEntry.KIND_ACCRUAL,
+                    amount_cents=net,
+                    source=f"CollabZ: {deal.title}"[:200],
+                )
         else:
             if recv:
-                w.spinaz += recv
+                w.spinaz += net
         w.spinaz += stake  # good-faith stake returned
         w.save(update_fields=["money_cents", "spinaz", "updated_at"])
+    for user, cut, pct in owed:
+        note = f"IntelligenceZ royalty {pct:g}% from @{user.username} — CollabZ: {deal.title}"
+        if deal.currency == CollabDeal.CURRENCY_MONEY:
+            pay_owner_money(cut, note)
+            record_paid(user, "collab", deal.pk, cut, "money")
+        else:
+            pay_owner_spinaz(cut, note)
+            record_paid(user, "collab", deal.pk, cut, "spinaz")
     # Platform keeps the residual held money as developer tax on the deal.
     if deal.currency == CollabDeal.CURRENCY_MONEY:
         platform_tax = max(0, deal.held_cents - paid_out)
@@ -294,6 +410,23 @@ def release_deal(deal, note="collab release"):
     deal.auto_release_at = None
     deal.save(update_fields=["held_cents", "held_spinaz", "held_stake_spinaz", "status",
                              "auto_release_at", "participants", "split_snapshot", "updated_at"])
+    # A finished collab is the graduation this platform actually wants, so it
+    # is where the helping gets paid. Swallowed inside settle_together — the
+    # escrow release must land whether or not a bonus does.
+    settle_together(people, was_beginner)
+
+    # PartnerZ. Swallowed for the same reason: the money has already moved and
+    # a tally must never be able to undo that.
+    if moved:
+        try:
+            from .groupz import announce_partners, note_work
+            crossed = note_work([u.pk for u in people], collabs=1)
+            if crossed:
+                deal.partnered = announce_partners(crossed, "collab", deal.title or "this deal",
+                                                   item_id=f"collab:{deal.pk}")
+                deal.save(update_fields=["partnered"])
+        except Exception:
+            pass
     return deal
 
 
@@ -336,17 +469,30 @@ class CollabDealsView(APIView):
 
     def get(self, request):
         me = request.user
-        deals = CollabDeal.objects.filter(initiator=me)[:100]
-        # Also include deals where I'm a participant (JSON scan, bounded).
-        seen = {d.id for d in deals}
-        extra = [
-            d for d in CollabDeal.objects.exclude(id__in=seen).order_by("-created_at")[:300]
-            if any(p.get("username") == me.username for p in d.participants)
-        ][:100]
+        # ONE indexed query for both halves — the deals I started and the deals
+        # somebody put me in.
+        #
+        # This used to fetch the 300 most recent deals PLATFORM-WIDE and filter
+        # them in Python, so a deal you were a participant in **silently
+        # vanished from your screen** once 300 newer deals existed anywhere on
+        # the platform. The row stayed in the database. On an escrow surface
+        # that is somebody's funded deal disappearing with their money still
+        # held by it, and it gets worse the better the platform does.
+        #
+        # `CollabParticipant` is the index that makes this answerable — see its
+        # docstring for why a `participants__contains` lookup was not the fix.
+        deals = (CollabDeal.objects
+                 .filter(Q(initiator=me) | Q(participant_rows__user=me))
+                 .select_related("initiator")
+                 .distinct()
+                 .order_by("-created_at")[:200])
         days = {}   # one badge read per payer across the whole list, not per card
-        out = [deal_dict(maybe_auto_release(d), me, days) for d in list(deals) + extra]
+        out = [deal_dict(maybe_auto_release(d), me, days) for d in deals]
         return Response({"deals": out})
 
+    # Atomic because the ⚡ charge locks the wallet, and select_for_update
+    # outside a transaction locks nothing.
+    @transaction.atomic
     def post(self, request):
         d = request.data or {}
         title = str(d.get("title", "")).strip()[:160]
@@ -418,6 +564,22 @@ class CollabDealsView(APIView):
         for entry in settled:
             entry["funded"] = False
             entry["stake_paid"] = 0
+            # Starting a deal is saying yes to it; everybody else has to say so themselves.
+            if entry.get("username") == request.user.username:
+                entry["accepted_at"] = timezone.now().isoformat()
+
+        # Starting the deal costs ⚡ equal to the combined price of the skills
+        # the starter says they are bringing, from their own rates.
+        # NOT named `refusal` — that is the gates helper imported at module
+        # level and called above, and a local of the same name would shadow it
+        # for the whole method.
+        energy, denied = charge_skill_energy(request.user, skills_from(d))
+        if denied:
+            body, code = denied
+            body["detail"] = (f"Starting this costs {body['energy_needed']} ⚡ "
+                              f"and you have {body['energy_available']}.")
+            return Response(body, status=code)
+
         deal = CollabDeal.objects.create(
             initiator=request.user, title=title, currency=currency,
             stake_spinaz=stake, participants=settled, status=CollabDeal.STATUS_DRAFT,
@@ -428,15 +590,27 @@ class CollabDealsView(APIView):
             image_url=str(d.get("image_url", "") or "")[:500],
             lyrics=str(d.get("lyrics", "") or ""),
             items=_clean_items(d.get("items")),
-            split_mode=(CollabDeal.SPLIT_RATING
-                        if str(d.get("split_mode", "")).lower() == CollabDeal.SPLIT_RATING
-                        else CollabDeal.SPLIT_WORTH),
+            # Rating by default: everyone's cut follows what they were judged to
+            # contribute, falling back to agreed worth until enough outsiders rate.
+            split_mode=(CollabDeal.SPLIT_WORTH
+                        if str(d.get("split_mode", "")).lower() == CollabDeal.SPLIT_WORTH
+                        else CollabDeal.SPLIT_RATING),
         )
+        # ZodiacZ — Aquarius thinks in groups. `parts` includes the initiator,
+        # so "two or more OTHER people" is three on the deal and the stretch is
+        # five. Fired on the starter: they are the one who assembled the room.
+        # A deal needs two people minimum, and two is a pair — the sign is
+        # nudged at the crowd, so the base does not fire on the minimum.
+        if len(parts) >= 3:
+            from .signbonus import try_award
+            try_award(request.user, "collab_crowd", stretch=len(parts) >= 5)
+
         if source_post and source_post.author_id != request.user.id:
             notify(source_post.author, "system",
                    f"@{request.user.username} started a CollabZ deal on '{source_post.title}' 🤝",
                    actor=request.user, item_id=f"post:{source_post.id}")
-        return Response(deal_dict(deal, request.user), status=status.HTTP_201_CREATED)
+        return Response({**deal_dict(deal, request.user), **energy},
+                        status=status.HTTP_201_CREATED)
 
 
 class CollabDetailView(APIView):
@@ -493,6 +667,16 @@ class CollabFundView(APIView):
                 deal.status = CollabDeal.STATUS_FUNDED
                 deal.auto_release_at = timezone.now() + timedelta(days=escrow_release_days(deal))
             deal.save(update_fields=["held_cents", "held_spinaz", "held_stake_spinaz", "participants", "status", "auto_release_at", "updated_at"])
+
+            # ZodiacZ — the Pig pays the table. The stretch is a deal where
+            # somebody else is owed more than you are: generosity is measured
+            # against what you get back, not against what you put in.
+            mine_worth = int(entry.get("worth_cents") or 0)
+            most_owed = max((int(p.get("worth_cents") or 0) for p in deal.participants
+                             if p.get("username") != request.user.username), default=0)
+            from .signbonus import try_award
+            try_award(request.user, "collab_fund", stretch=most_owed > mine_worth)
+
             return Response(deal_dict(deal, request.user))
 
 
@@ -512,6 +696,13 @@ class CollabDeliverView(APIView):
         deal.status = CollabDeal.STATUS_DELIVERED
         deal.delivered_at = timezone.now()
         deal.save(update_fields=["status", "delivered_at", "updated_at"])
+
+        # ZodiacZ — the Ox finishes. The stretch is delivering on a deal you
+        # did not start, which is the same work with none of the glory.
+        from .signbonus import try_award
+        try_award(request.user, "collab_deliver",
+                  stretch=deal.initiator_id != request.user.id)
+
         return Response(deal_dict(deal, request.user))
 
 
@@ -610,3 +801,39 @@ class PostCollabsView(APIView):
             "post_id": post.id,
             "deals": [deal_dict(d, me, days) for d in visible],
         })
+
+
+class CollabAcceptView(APIView):
+    """POST /api/economy/collab/<id>/accept/ {accept: true|false} — say yes (or take it back)
+    to being on a deal somebody else put you on.
+
+    Naming a member on a deal needs nobody's consent, so on its own it proves nothing. This is
+    the consent. It is what lets a collab carry messages between an adult and a minor
+    (`models.collab_link`): both have to have accepted, and either can withdraw at any time to
+    close the channel. The person who started the deal has accepted by starting it and cannot
+    withdraw from their own deal here (that is cancelling it)."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        accept = request.data.get("accept", True)
+        accept = accept not in (False, "false", "0", 0, "no")
+        # Locked read-modify-write: fund/deliver/release rewrite this same JSON column, and an
+        # unlocked save here could put back a stale copy and un-fund somebody's stake.
+        with transaction.atomic():
+            deal = CollabDeal.objects.select_for_update().filter(pk=pk).first()
+            if not deal:
+                return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+            if deal.initiator_id == request.user.id:
+                return Response({"detail": "You started this deal, so you are already on it."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            parts = list(deal.participants or [])
+            mine = next((p for p in parts if str(p.get("username", "")).lower() == request.user.username.lower()), None)
+            if not mine:
+                return Response({"detail": "You are not on this deal."}, status=status.HTTP_403_FORBIDDEN)
+            if accept:
+                mine["accepted_at"] = mine.get("accepted_at") or timezone.now().isoformat()
+            else:
+                mine.pop("accepted_at", None)
+            deal.participants = parts
+            deal.save(update_fields=["participants", "updated_at"])
+        return Response({"accepted": bool(mine.get("accepted_at")), "deal": deal_dict(deal, request.user)})

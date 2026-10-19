@@ -1,36 +1,60 @@
 from datetime import timedelta
 
+import re
+
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import AI_MODEL_COSTS, SPECZ_CATALOG, ai_cost, cashout_rate, limits_for
+from .catalog import (AI_MODEL_COSTS, SPECZ_APP_KEYS, SPECZ_APPS,
+                      SPECZ_LABEL_MAX, SPECZ_PRICE_SPINAZ, SPECZ_VALUE_MAX,
+                      ai_cost, cashout_rate, limits_for)
 from .media import stable_media_url
+from . import take_analyzer
 from .models import (
     DEV_TAX,
+    FUNNEL_KINDS,
     MB,
     TIER_CHOICES,
     TIER_DEBUG,
     TIER_STATZ,
+    FunnelEvent,
+    FunnelExclusion,
     Membership,
+    Post,
     RoyaltyEntry,
     SpecZPurchase,
     Transaction,
     Upload,
     charge_ai_usage,
+    DAILY_PROMPT_MAX_CENTS,
     daily_prompt_state,
     energy_for_topup,
     ENERGY_TOPUP_MULT,
+    log_resource,
     membership_for,
     split_cents,
     storage_used_bytes,
     wallet_for,
 )
-from .serializers import TransactionSerializer, WalletSerializer
+from .serializers import RoyaltyEntrySerializer, TransactionSerializer, WalletSerializer
+from .serializers_metz import (
+    PracticeSessionSerializer,
+    DrumPatternSerializer,
+    ToolPreferenceSerializer,
+    PatternShareSerializer,
+    DrillTakeSerializer,
+    TakeAnalysisSerializer,
+)
+from .models import PracticeSession, DrumPattern, ToolPreference, PatternShare, DrillTake, TakeAnalysis
+from .models import Habit, Wallet
+# The one list of provider names, so the funnel cannot come to disagree
+# with the sign-in buttons about which providers exist.
+from apps.accounts.oauth import provider_requirements
 
 User = get_user_model()
 VALID_TIERS = {t[0] for t in TIER_CHOICES}
@@ -91,6 +115,14 @@ def ensure_owner(user):
     tier_before = membership_for(user).tier
     grant_badge(user, "owner")
     m = membership_for(user)
+    if m.owner_pinned:
+        # A tier the owner chose by hand to test — Free, Premium, StatZ or
+        # Debug — stands until they choose another. The badge may have just
+        # applied StatZ over it, so put it back.
+        if m.tier != tier_before:
+            m.tier = tier_before
+            m.save(update_fields=["tier", "updated_at"])
+        return m
     if tier_before == TIER_DEBUG and m.tier != TIER_DEBUG:
         # The badge applies StatZ the moment it lands. A deliberate Debug
         # switch outranks it, which has always been this function's rule.
@@ -232,13 +264,587 @@ class StatsView(APIView):
                 "my_energy": w.energy,
                 "my_spinaz": w.spinaz,
                 "my_promptz": w.promptz,  # prepaid AI credits (persist)
-                # Free daily prompts by tier (free 1 / premium 5 / statz 10) — reset daily, don't stack.
+                # Free daily prompts by tier (free 3 / premium 5 / statz 10) — reset daily, don't stack.
                 "my_promptz_daily": prompt_allowance,
+                # What one of them is worth. Published because "you have 3 left"
+                # is not the whole price when a dearer engine is billed anyway.
+                "my_promptz_daily_max_cents": DAILY_PROMPT_MAX_CENTS,
                 "my_promptz_daily_used": prompts_used,
                 "my_promptz_daily_remaining": prompts_remaining,
                 "dev_tax_rate": m.dev_tax_rate,
             }
         )
+
+
+class AllMembersView(APIView):
+    """GET /api/auth/stats/all/ — list all members ordered by join date.
+    Used by CommunityBar to show clickable member list."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        members = list(
+            User.objects.all()
+            .order_by("date_joined")
+            .values_list("username", flat=True)
+        )
+        return Response({"members": members})
+
+
+class PublicStatsView(APIView):
+    """Real member/online counts for a visitor who has no session yet.
+
+    StatsView (above) can't serve this: it's IsAuthenticated, and it marks
+    the CALLER as seen as a side effect of being read — so a public caller
+    with no membership row would either 500 or (worse) manufacture one.
+    This reads the same two numbers and nothing else: no username list, no
+    wallet, no per-member anything. Real counts or none — see CLAUDE.md on
+    substance over decoration; a landing page showing a fake community size
+    would be exactly the kind of number that "could look good without being
+    good."
+    """
+
+    # Members only (Corey's call): a small honest number reads as an empty
+    # room to somebody deciding whether to join, so a logged-out visitor is
+    # never shown it. Members still see the community grow in the header.
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        online_cutoff = timezone.now() - timedelta(minutes=5)
+        online_now = Membership.objects.filter(last_seen__gte=online_cutoff).count()
+        return Response({
+            "total_members": User.objects.count(),
+            "online_now": online_now,
+        })
+
+
+# A channel name: letters, digits, dash, underscore. Anything else is not a
+# channel, it is somebody putting data in a URL.
+_SRC_OK = re.compile(r"^[a-z0-9][a-z0-9_-]{0,23}$")
+
+
+# Age brackets, wide on purpose. A funnel does not need anybody's birthday and
+# this never reports one — the narrower the bucket the closer a "breakdown"
+# gets to naming the person in it, which on a platform with two members is one
+# step away by definition.
+_AGE_BANDS = ((13, 17), (18, 24), (25, 34), (35, 44), (45, 54), (55, 200))
+
+
+def _member_shape():
+    """Who actually joined, by gender and by age band.
+
+    This is deliberately NOT part of the funnel rows above, and the difference
+    is the whole reason it is a separate block. A `FunnelEvent` is a BROWSER
+    with no account — it has no gender and no age, and there is nothing to
+    ask; the model's own docstring promises nothing here is ever joined
+    against Users, and attaching either to a visitor's row would break that
+    promise to get a number that does not exist anyway.
+
+    So it answers the question one step later: not "who visits" but "who
+    stayed". Read off `Profile`, counted, never listed.
+
+    Three things it will not do:
+
+    - **`unset` is a row, not a rounding error.** A gender split computed over
+      the third of members who filled it in, presented as the membership, is
+      the decoration this file's own rules forbid: it could look fine while
+      describing almost nobody. The blanks are counted and shown.
+    - **The denominator travels with it.** Percentages of two people are not a
+      demographic, and `total` is what says so.
+    - **No exact ages and no dates.** A band, or `unset`.
+    """
+    from apps.economy.models import Profile, profile_age
+
+    # `profile_age` rather than a second birthday parser here. One age
+    # implementation, in the module that owns the column.
+    # `.iterator()` because this walks every profile and the owner opens the
+    # screen, not a member: two rows today, and no reason for the query that
+    # answers "who joined" to be the one that runs out of memory at scale.
+    rows = Profile.objects.only("gender", "birthday").iterator(chunk_size=2000)
+    genders, ages = {}, {f"{lo}-{hi}" if hi < 200 else f"{lo}+": 0 for lo, hi in _AGE_BANDS}
+    ages["unset"] = 0
+    # ACCOUNTS, not profile rows. A Profile is made lazily, so counting those
+    # would quietly drop every member who has not been near a screen that
+    # creates one — and a denominator that moves with an unrelated code path
+    # is not a denominator.
+    total = User.objects.count()
+    counted = 0
+    for row in rows:
+        counted += 1
+        key = (row.gender or "").strip().lower() or "unset"
+        genders[key] = genders.get(key, 0) + 1
+        age = profile_age(row)
+        if age is None:
+            ages["unset"] += 1
+            continue
+        for lo, hi in _AGE_BANDS:
+            if lo <= age <= hi:
+                ages[f"{lo}-{hi}" if hi < 200 else f"{lo}+"] += 1
+                break
+    # Accounts with no profile row at all. They are members; they just have
+    # nothing filled in, which is what `unset` means.
+    missing = max(total - counted, 0)
+    if missing:
+        genders["unset"] = genders.get("unset", 0) + missing
+        ages["unset"] += missing
+    return {
+        "total": total,
+        "genders": sorted(({"gender": g, "members": n} for g, n in genders.items()),
+                          key=lambda r: (r["gender"] == "unset", -r["members"])),
+        "ages": [{"band": b, "members": n} for b, n in ages.items()],
+        "note": ("Members, not visitors — a browser with no account has no age and no "
+                 "gender to report, and nothing here is joined back to a funnel row. "
+                 "`unset` is counted rather than dropped: a split over the members who "
+                 "filled it in, shown as the membership, describes nobody."),
+    }
+
+
+def _door_keys():
+    from apps.economy.trialdoorz import door_keys
+    # BodieZ is a trial door too, but not a scored instrument — nothing in
+    # `instruments.py` covers a workout, so it is not one of
+    # `INSTRUMENT_APP_KEYS` and `trialdoorz.door_keys()` does not carry it.
+    # Added here, once, rather than teaching that module about a door shaped
+    # nothing like the ones it reads off the URL conf.
+    from apps.economy.bodiez_trial import APP_KEY as BODIEZ_APP_KEY
+    return door_keys() + (BODIEZ_APP_KEY,)
+
+
+class FunnelEventView(APIView):
+    """One step of the join funnel, logged by a visitor who may have no
+    account yet: POST /api/auth/funnel/.
+
+    Before this, nothing on the logged-out path was measured at all — "why
+    isn't anybody joining" had no data behind it, only guesses. `kind` is
+    checked against FUNNEL_KINDS so a client typo can't silently open a new,
+    never-analysed event type; `meta` is checked against a small per-kind
+    allowlist so this never becomes a place free-typed text (and therefore
+    PII) can land by accident.
+    """
+
+    permission_classes = [AllowAny]
+
+    ALLOWED_KINDS = {k for k, _ in FUNNEL_KINDS}
+    # Per kind, the only meta keys accepted and how each is coerced. Anything
+    # else in the posted meta is dropped, not stored.
+    # Where somebody came FROM. A `?src=` on any entry URL, kept to a short
+    # slug so it is a channel name and never a tracking payload.
+    #
+    # Without this the funnel counts arrivals and cannot say which of them a
+    # given post, flyer or ad produced — so every channel looks identical at
+    # zero, and the first thing marketing money buys is an unanswerable
+    # question. It is deliberately NOT a full UTM set: source is the one field
+    # that changes a decision, and campaign/medium/term/content would be four
+    # more columns nobody reads.
+    _SRC = lambda v: (str(v).strip().lower()[:24] or None) if _SRC_OK.match(str(v).strip().lower()[:24] or "") else None
+
+    # Every mounted trial door, read from the routes rather than typed here.
+    # See trialdoorz.door_keys — a hardcoded pair meant a new door's events
+    # would arrive with the app dropped and read as no traffic at all.
+    _APP = lambda v: v if v in _door_keys() else None
+    # Why a take came back with no score, from a closed list. A slug, never
+    # the message the member saw: the reason is the thing that decides what to
+    # fix, and free text here would be the one place a visitor's own words
+    # could land in this table.
+    # `timeout` is new and is the one the 853-second spinner would have been,
+    # had anything been able to report it: the request was never answered. A
+    # dropped connection and a request nobody answered need opposite fixes —
+    # one is the member's link, the other is ours — so they are counted apart.
+    _WHY = lambda v: v if v in ("too_big", "refused", "network", "empty",
+                                "server", "timeout") else None
+    # What KIND OF SCREEN this happened on, in three buckets.
+    #
+    # Measured by the client from width and `pointer: coarse`, never read off
+    # the user agent — which lies by design, and which the frontend's own
+    # useScreenShape.js already refuses to trust for exactly this reason. It
+    # matters here more than anywhere: the trial's first move is a browser mic
+    # dialog, and a permission cliff on a phone is not a cliff on a laptop.
+    # One number covering both hides whichever is the problem.
+    # Which field a registration was refused on, from a closed list. The field
+    # name only - never the message, which can quote what the visitor typed.
+    _REG = lambda v: v if v in ("username", "email", "password", "birthday",
+                                "network", "server", "other") else None
+    _DEV = lambda v: v if v in ("phone", "tablet", "desktop") else None
+    # Why the recorder never started. "Denied" was the only story this funnel
+    # could tell, and it was the wrong one most of the time: a camera held by
+    # another app throws NotReadableError and a machine without one throws
+    # NotFoundError. Those need opposite answers and one of them is not a
+    # permission problem at all.
+    _MIC = lambda v: v if v in ("denied", "notfound", "inuse", "constrained",
+                                "insecure", "other") else None
+
+    # Why the trial door was shut, from a closed list — the three states
+    # `TrialCoachView` already distinguishes, kept apart here because they
+    # point at three different fixes: `already_used` is the per-IP window,
+    # `cap_reached` is the platform's daily ceiling, `not_configured` is a
+    # missing GEMINI_API_KEY. One row saying "blocked" would send somebody to
+    # fix whichever they guessed.
+    #
+    # `address_busy` is the fourth, and for most of this app's life it was
+    # wearing `already_used`'s clothes: the per-address ceiling was ONE, so a
+    # mobile carrier's shared CGNAT address meant a stranger spent the take
+    # and the next visitor was told they had used theirs. Counted apart
+    # because the fix for one is an account and the fix for the other is our
+    # own ceiling.
+    _BLOCKED = lambda v: v if v in ("already_used", "cap_reached",
+                                    "not_configured", "address_busy") else None
+
+    # Which sign-in it was, from `provider_requirements()` — the ONE list of
+    # provider names this platform has. Typing the eight in here would be the
+    # second place they live, and it was already wrong on the first draft: the
+    # list said "apple" and that provider is commented out over there, so the
+    # funnel would have accepted a kind no button can fire. Free text is out
+    # for the usual reason — it is how a table that holds no PII starts
+    # holding some.
+    _PROVIDER = lambda v: v if v in provider_requirements() else None
+
+    # Habit cadence, off `Habit.FREQUENCY_CHOICES`, same rule.
+    _FREQ = lambda v: v if v in dict(Habit.FREQUENCY_CHOICES) else None
+
+    META_SHAPE = {
+        "landing_view": {},
+        "try_view": {},
+        # Which "no" it was. Three completely different situations —
+        # the visitor spent today's take, the platform spent the day's, or
+        # nobody set the key — and a row that cannot tell them apart sends
+        # somebody to fix the wrong one.
+        "try_blocked": {"why": _BLOCKED},
+        "try_record": {
+                       # Camera or mic. The camera path asks for a second
+                       # permission and produces a file an order of magnitude
+                       # bigger, so a cliff on one of them is not a cliff on
+                       # the other and they must not be totalled together.
+                       "video": lambda v: bool(v)},
+        "try_mic_denied": {"video": lambda v: bool(v), "why": _MIC},
+        "try_attach": {},
+        "try_send": {},
+        "try_failed": {"why": _WHY},
+        "try_scored": {},
+        "register_fail": {"why": _REG},
+        # Which instrument's onboarding, because a modal that gets skipped on
+        # DrumZ and finished on SingZ is one number hiding two.
+        "onboard_habit": {"frequency": _FREQ},
+        "onboard_skip": {},
+        # Only the notification switch. Language and sound are settings rather
+        # than steps, and a funnel row that carries every preference a screen
+        # collects stops being a funnel; this one is here because a habit with
+        # its reminders off is a habit nobody is coming back to.
+        "onboard_prefs": {
+            "notifications_enabled": lambda v: bool(v)},
+        # The provider, from the same closed list the sign-in buttons use — a
+        # free-text provider name is how a table that holds no PII starts
+        # holding some.
+        "oauth_linked": {"provider": _PROVIDER},
+        "oauth_link_fail": {"provider": _PROVIDER},
+        "quiz_view": {"depth": lambda x: x if x in ("basic", "advanced") else None},
+        "quiz_done": {"depth": lambda x: x if x in ("basic", "advanced") else None,
+                      # How many of the four axes came out said. A visitor who
+                      # finishes with two letters answered the middle on two
+                      # axes, which is a different thing from abandoning.
+                      "axes": lambda v: v if isinstance(v, int) and 0 <= v <= 4 else None},
+        "try_shared": {},
+        "try_email": {},
+        "register_view": {
+            "has_ref": lambda v: bool(v),
+            "has_trial": lambda v: bool(v),
+        },
+    }
+
+    # Ambient keys — true of the VISIT rather than of the step, so they ride
+    # every kind instead of being remembered per entry.
+    #
+    # `register_success` and `login_success` were shaped under the key
+    # "registered", which is not a kind, so neither of them stored a `src`:
+    # the per-channel table could never show a single registration against
+    # the channel that produced it, and the one column a marketing spend is
+    # judged on was structurally always zero. Listing them per kind would fix
+    # those two and leave the next kind somebody adds with the same hole.
+    #
+    # `app_key` joined this list rather than staying a per-kind entry for the
+    # identical reason. It was declared on every trial-door step but never on
+    # `register_view` / `register_success` / `login_success` — so `by_door`
+    # (FunnelSummaryView) could show a door's own view→scored chain but could
+    # never show whether THOSE visitors went on to register, because the
+    # event that would answer that structurally carried no door. A per-kind
+    # allowlist is right for a field that means something different per step
+    # (`why`, `video`); it is the wrong shape for a fact about the whole
+    # visit, and app_key is exactly that: which door, if any, this browser
+    # was using when it did whatever it's doing now. `track.js` remembers the
+    # last one it saw and rides it on every call after, the same as `src`.
+    AMBIENT = {"src": _SRC, "dev": _DEV, "app_key": _APP}
+
+    def post(self, request):
+        kind = str(request.data.get("kind") or "")
+        anon_id = str(request.data.get("anon_id") or "").strip()[:64]
+        if kind not in self.ALLOWED_KINDS or not anon_id:
+            return Response({"detail": "Invalid event."}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw_meta = request.data.get("meta") or {}
+        shape = {**self.AMBIENT, **self.META_SHAPE.get(kind, {})}
+        meta = {}
+        if isinstance(raw_meta, dict):
+            for key, coerce in shape.items():
+                if key in raw_meta:
+                    value = coerce(raw_meta[key])
+                    if value is not None:
+                        meta[key] = value
+
+        FunnelEvent.objects.create(kind=kind, anon_id=anon_id, meta=meta)
+        # 204: there is nothing for the client to do with the response, and a
+        # beacon-style call (sendBeacon, fire-and-forget) never reads the body.
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class FunnelExcludeView(APIView):
+    """Owner-only: is THIS browser counted in the funnel? GET/POST
+    /api/auth/funnel/exclude/.
+
+    The owner tests the door as a stranger, and with a funnel this small their
+    own retries are a visible share of it. The browser id is sent by the owner
+    from the browser they mean - the same `anon_id` the funnel already keeps.
+
+    Exclusion is applied when the summary is READ, so it covers events already
+    logged and is undone by posting `excluded: false`.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _owner(self, request):
+        ensure_owner(request.user)
+        return is_owner(request.user)
+
+    def _state(self, anon_id):
+        return {
+            "anon_id_set": bool(anon_id),
+            "excluded": bool(anon_id) and FunnelExclusion.objects.filter(anon_id=anon_id).exists(),
+            "browsers_excluded": FunnelExclusion.objects.count(),
+        }
+
+    def get(self, request):
+        if not self._owner(request):
+            return Response({"detail": "Only the platform owner sees this."},
+                            status=status.HTTP_403_FORBIDDEN)
+        return Response(self._state(str(request.query_params.get("anon_id") or "").strip()[:64]))
+
+    def post(self, request):
+        if not self._owner(request):
+            return Response({"detail": "Only the platform owner sees this."},
+                            status=status.HTTP_403_FORBIDDEN)
+        anon_id = str(request.data.get("anon_id") or "").strip()[:64]
+        if not anon_id:
+            # Private-mode browsers send "". Refuse and say why rather than
+            # storing a row that matches nothing real.
+            return Response({"detail": "This browser has no funnel id to exclude (storage is blocked)."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if request.data.get("excluded", True):
+            FunnelExclusion.objects.get_or_create(anon_id=anon_id)
+        else:
+            FunnelExclusion.objects.filter(anon_id=anon_id).delete()
+        return Response(self._state(anon_id))
+
+
+class FunnelSummaryView(APIView):
+    """Owner-only read of the join funnel counts: GET /api/auth/funnel/summary/.
+
+    Real counts of real events, nothing modeled or estimated — the same
+    substance-over-decoration rule the rest of this file follows for scores
+    and ratings applies here too: a funnel number that could look fine
+    without the funnel actually working would be worse than no number.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        ensure_owner(request.user)  # promote the configured owner account, as StatsView does
+        if not is_owner(request.user):
+            return Response({"detail": "Only the platform owner sees this."},
+                            status=status.HTTP_403_FORBIDDEN)
+        days = min(max(int(request.query_params.get("days") or 30), 1), 90)
+        since = timezone.now() - timedelta(days=days)
+        # The owner's own browsers (FunnelExclusion) are left out of every
+        # count below, retroactively. See FunnelExcludeView.
+        excluded = FunnelExclusion.objects.values("anon_id")
+        rows = FunnelEvent.objects.filter(created_at__gte=since).exclude(anon_id__in=excluded)
+
+        steps = {}
+        for kind, label in FUNNEL_KINDS:
+            qs = rows.filter(kind=kind)
+            steps[kind] = {
+                "label": label,
+                "events": qs.count(),
+                # Unique browsers reaching this step — the number that
+                # actually answers "how many people," not "how many clicks."
+                "unique": qs.values("anon_id").distinct().count(),
+            }
+
+        # Conversion relative to the top of the funnel actually measured —
+        # landing_view unless nobody hit it yet (e.g. only /try was shared
+        # directly), in which case the largest step stands in as the base
+        # rather than dividing by zero.
+        base_kind = "landing_view" if steps["landing_view"]["unique"] else max(
+            steps, key=lambda k: steps[k]["unique"]
+        )
+        base = steps[base_kind]["unique"] or 1
+        for kind in steps:
+            steps[kind]["pct_of_base"] = round(100 * steps[kind]["unique"] / base, 1)
+
+        # The three rates the whole platform turns on, pinned rather than left
+        # to be worked out from eleven rows. Everything else here is a detail:
+        # comparing plans, escrow and streaks is theatre while the number of
+        # people who ever hear a score is one.
+        #
+        # Each is stated as its two counts AND the rate, because a rate with
+        # no denominator behind it is the decoration this file's own docstring
+        # warns about — 100% of two people is not a working funnel.
+        def _rate(from_kind, to_kind, label, note):
+            top = steps[from_kind]["unique"]
+            got = steps[to_kind]["unique"]
+            return {
+                "key": to_kind,
+                "label": label,
+                "from_kind": from_kind, "to_kind": to_kind,
+                "from": top, "to": got,
+                # None, not 0, when nobody reached the top of the step. A 0%
+                # against no visitors reads as a broken product; it is an
+                # empty measurement, and the two need opposite responses.
+                "pct": round(100 * got / top, 1) if top else None,
+                "note": note,
+            }
+
+        headline = [
+            _rate("landing_view", "try_view", "Landing → trial opened",
+                  "How many arrivals ever start the one thing the page promises."),
+            _rate("try_view", "try_scored", "Trial opened → scored",
+                  "The recorder. Everything below is unreachable until this works."),
+            _rate("try_scored", "register_success", "Scored → account created",
+                  "Whether a number somebody is proud of is worth keeping."),
+        ]
+
+        # Per channel. A count of arrivals that cannot say WHERE THEY CAME FROM
+        # makes every channel look identical at zero, which is exactly the
+        # state this platform is in — and the first thing marketing money buys
+        # is otherwise an unanswerable question.
+        #
+        # Counted on unique browsers per source, and carried through to the
+        # steps that matter: reaching the trial, getting a score, registering.
+        # A source with arrivals and no scores is a channel sending the wrong
+        # people; one with scores and no registers is a door problem, not a
+        # traffic problem, and those need opposite responses.
+        #
+        # The same split answers the same question about the SCREEN, so one
+        # implementation serves both: a channel and a device are each one
+        # ambient fact about a visit, and a funnel broken down by neither is
+        # a funnel that can only say "people leave".
+        all_rows = list(rows.values("kind", "anon_id", "meta"))
+
+        def split_by(key, label, rows_subset=None):
+            buckets = {}
+            for row in (rows_subset if rows_subset is not None else all_rows):
+                value = (row["meta"] or {}).get(key)
+                if not value:
+                    continue
+                entry = buckets.setdefault(value, {k: set() for k, _ in FUNNEL_KINDS})
+                entry[row["kind"]].add(row["anon_id"])
+            return sorted(
+                ({label: value,
+                  **{k: len(v) for k, v in kinds.items()},
+                  "total": len(set().union(*kinds.values())) if any(kinds.values()) else 0}
+                 for value, kinds in buckets.items()),
+                key=lambda r: -r["total"],
+            )
+
+        sources = split_by("src", "src")
+        # A permission cliff on a phone is not a cliff on a laptop, and the
+        # trial's first move is a browser mic dialog. Totalled together, the
+        # one number hides whichever of the two is the actual problem.
+        devices = split_by("dev", "dev")
+
+        # Per DOOR now, not just totalled across every one of them. SingZ and
+        # RapZ (and now BodieZ) each have their own visitors, and "sources"
+        # above answers "which channel works for the platform" while this
+        # answers "which channel works for THIS door" — a source that's
+        # strong for SingZ and dead for RapZ is invisible in the combined
+        # total, which just reads as a mediocre channel for both.
+        #
+        # Scoped to rows carrying that door's `app_key` — `try_view` and
+        # every recorder step already carry it, so a door's own funnel is
+        # exactly the subset of `all_rows` this filters to. No new query:
+        # same `all_rows` this endpoint already pulled once.
+        from apps.economy.bodiez_trial import APP_KEY as BODIEZ_APP_KEY
+        from apps.economy.trialdoorz import doors as trial_doors
+        # Read, not retyped — the same label the front door and the trial
+        # screen itself already show, so this screen can never call a door
+        # something a visitor never saw.
+        door_labels = {d["app_key"]: d["label"] for d in trial_doors()}
+        door_labels[BODIEZ_APP_KEY] = "BodieZ"
+
+        by_door = []
+        for key in _door_keys():
+            door_rows = [r for r in all_rows if (r["meta"] or {}).get("app_key") == key]
+            step_counts = {
+                kind: len({r["anon_id"] for r in door_rows if r["kind"] == kind})
+                for kind, _ in FUNNEL_KINDS
+            }
+            by_door.append({
+                "app_key": key,
+                "label": door_labels.get(key, key),
+                # BodieZ has no recorder — no mic, no file, no model call, so
+                # "scored" there is real arithmetic on a logged set or a
+                # built week, never a send-to-coach step. A client rendering
+                # every door the same way would show BodieZ a permanent wall
+                # of zeros for steps that were never going to fire, which
+                # reads as five broken features instead of one door that
+                # works differently. `has_recorder` lets the screen ask.
+                "has_recorder": key != BODIEZ_APP_KEY,
+                "steps": step_counts,
+                "sources": split_by("src", "src", door_rows),
+                "devices": split_by("dev", "dev", door_rows),
+            })
+
+        # WHY, for the steps that carry a reason: unique browsers per slug.
+        # The slugs were always stored; the screen only ever showed that a
+        # step happened, which is the count without the fix list.
+        reasons = {}
+        for rk in ("try_blocked", "try_mic_denied", "try_failed", "register_fail"):
+            seen = {}
+            for row in all_rows:
+                if row["kind"] != rk:
+                    continue
+                slug = (row["meta"] or {}).get("why") or "unknown"
+                seen.setdefault(slug, set()).add(row["anon_id"])
+            reasons[rk] = sorted(({"why": k, "unique": len(v)} for k, v in seen.items()),
+                                 key=lambda r: -r["unique"])
+
+        return Response({
+            "reasons": reasons,
+            "days": days,
+            "since": since,
+            # How many of the owner's own browsers are left out of these counts.
+            "browsers_excluded": FunnelExclusion.objects.count(),
+            "base_kind": base_kind,
+            "headline": headline,
+            "steps": steps,
+            "sources": sources,
+            "devices": devices,
+            "devices_note": ("Measured from the screen — width and whether the pointer is "
+                             "coarse — never from the user agent, which lies by design. "
+                             "Visits from before this shipped carry no shape and are "
+                             "counted in the steps above but not here."),
+            "by_door": by_door,
+            "by_door_note": ("Source and device, scoped to each trial door's own visitors — "
+                             "the same split as `sources`/`devices` above, run once per door "
+                             "instead of once for the whole funnel. No demographics here: a "
+                             "FunnelEvent is a browser with no account, so there is no age or "
+                             "gender to attach without joining an anonymous row back to a "
+                             "person — the promise `members` below depends on. Demographics "
+                             "stay platform-wide, for members, never per-door."),
+            "members": _member_shape(),
+            # Said out loud so an empty list reads as "nothing tagged" rather
+            # than "no traffic" — two very different problems.
+            "sources_note": ("Add ?src=<channel> to any link you post. Untagged "
+                             "arrivals are counted in the steps above but cannot "
+                             "be attributed to a channel."),
+        })
 
 
 class WalletView(APIView):
@@ -250,7 +856,14 @@ class WalletView(APIView):
         from .models import settle_energy
         w = settle_energy(request.user)
         recent = request.user.transactions.all()[:50]
-        return Response({"wallet": WalletSerializer(w).data, "transactions": TransactionSerializer(recent, many=True).data})
+        # Royalty entries grouped by source, descending by amount, so the largest
+        # earnings appear first and the member can see where their money came from.
+        royalties = request.user.royalty_entries.filter(kind=RoyaltyEntry.KIND_ACCRUAL).order_by("-amount_cents")
+        return Response({
+            "wallet": WalletSerializer(w).data,
+            "transactions": TransactionSerializer(recent, many=True).data,
+            "royalties": RoyaltyEntrySerializer(royalties, many=True).data,
+        })
 
 
 class AddFundsView(APIView):
@@ -289,25 +902,39 @@ class AddFundsView(APIView):
 
 
 class MembershipView(APIView):
-    """GET current tier; POST sets it (dev/testing — real upgrades go via billing)."""
+    """GET current tier; POST sets it — OWNER ONLY, for testing what each tier
+    sees. Everybody else changes tier through checkout.
+
+    This POST used to be open to any member "for dev/testing", which meant
+    anybody could make themselves StatZ for nothing with one request. No
+    screen called it, so closing it breaks nothing anybody uses.
+    """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         ensure_owner(request.user)  # self-heal owner promotion on any membership load
         m = membership_for(request.user)
-        return Response({"tier": m.tier, "dev_tax_rate": m.dev_tax_rate, "rates": DEV_TAX, "lifetime": m.lifetime, "founding": m.founding, "is_owner": is_owner(request.user)})
+        owner = is_owner(request.user)
+        out = {"tier": m.tier, "dev_tax_rate": m.dev_tax_rate, "rates": DEV_TAX, "lifetime": m.lifetime,
+               "founding": m.founding, "is_owner": owner}
+        if owner:
+            out["switchable"] = ["free", "premium", TIER_STATZ, TIER_DEBUG]
+            out["owner_pinned"] = m.owner_pinned
+        return Response(out)
 
     def post(self, request):
         tier = str(request.data.get("tier", "")).lower()
         if tier not in VALID_TIERS:
             return Response({"detail": f"tier must be one of {sorted(VALID_TIERS)}"}, status=status.HTTP_400_BAD_REQUEST)
-        if tier in OWNER_ONLY_TIERS and not is_owner(request.user):
-            return Response({"detail": "Debug tier is owner-only."}, status=status.HTTP_403_FORBIDDEN)
+        if not is_owner(request.user):
+            return Response({"detail": "Tiers change through checkout — MembershipZ has the plans."},
+                            status=status.HTTP_403_FORBIDDEN)
         m = membership_for(request.user)
         m.tier = tier
-        m.save(update_fields=["tier", "updated_at"])
-        return Response({"tier": m.tier, "dev_tax_rate": m.dev_tax_rate})
+        m.owner_pinned = True
+        m.save(update_fields=["tier", "owner_pinned", "updated_at"])
+        return Response({"tier": m.tier, "dev_tax_rate": m.dev_tax_rate, "owner_pinned": True})
 
 
 class OwnerClaimView(APIView):
@@ -374,6 +1001,13 @@ class PromptzBuyView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    def get(self, request):
+        """What a purchase buys, before it is made."""
+        from .catalog import PROMPTZ_BONUS
+        w = wallet_for(request.user)
+        return Response({"promptz_per_cent": PROMPTZ_BONUS, "money_cents": w.money_cents or 0,
+                         "examples": [{"cents": c, "promptz": round(c * PROMPTZ_BONUS)} for c in (100, 500, 1000)]})
+
     def post(self, request):
         pay_cents = int((request.data or {}).get("cents") or 0)
         if pay_cents <= 0:
@@ -384,19 +1018,93 @@ class PromptzBuyView(APIView):
                             status=status.HTTP_402_PAYMENT_REQUIRED)
         from .catalog import PROMPTZ_BONUS
 
-        w.money_cents -= pay_cents
+        # One conditional statement, so two taps racing can't both pass the check.
+        from django.db.models import F
+        if not Wallet.objects.filter(pk=w.pk, money_cents__gte=pay_cents).update(
+                money_cents=F("money_cents") - pay_cents):
+            return Response({"detail": "Not enough balance — add funds first.", "cost_cents": pay_cents},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
+        w.refresh_from_db()
         # Buy at 80% of face value. The rate is named in catalog.py rather than
         # written here, because it is what makes pass-through AI pricing a loss
         # — and a pricing relationship only one file can see is one nothing else
         # can price against.
         granted = round(pay_cents * PROMPTZ_BONUS)
-        w.promptz = (w.promptz or 0) + granted
-        w.save(update_fields=["money_cents", "promptz", "updated_at"])
+        Wallet.objects.filter(pk=w.pk).update(promptz=F("promptz") + granted)
+        w.refresh_from_db()
         Transaction.objects.create(
             user=request.user, kind=Transaction.KIND_PURCHASE, amount_cents=-pay_cents,
             dev_tax_cents=0, note=f"Bought {granted} PromptZ 🏷️",
         )
         return Response({"wallet": WalletSerializer(w).data, "granted": granted})
+
+
+class PromptzConvertView(APIView):
+    """GET / POST { spinaz } — turn earned SpinaZ into prepaid PromptZ at
+    catalog.SPINAZ_PER_PROMPTZ to 1.
+
+    GET states the rate and what the member's balance is worth BEFORE they
+    spend it, because a price discovered by paying it is a bill. POST does it.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _rate(self, w):
+        from .catalog import SPINAZ_PER_PROMPTZ
+        have = max(0, w.spinaz or 0)
+        return {
+            "spinaz_per_promptz": SPINAZ_PER_PROMPTZ,
+            "spinaz": have,
+            # What pressing it would get them, at everything they hold.
+            "max_promptz": have // SPINAZ_PER_PROMPTZ,
+            "note": f"{SPINAZ_PER_PROMPTZ} 🍥 → 1 🏷️. Earn 🍥 by rating, "
+                    f"referring and OfferZ — no card needed.",
+        }
+
+    def get(self, request):
+        return Response(self._rate(wallet_for(request.user)))
+
+    def post(self, request):
+        from .catalog import SPINAZ_PER_PROMPTZ
+
+        spend = int((request.data or {}).get("spinaz") or 0)
+        if spend <= 0:
+            return Response({"detail": "spinaz required"}, status=status.HTTP_400_BAD_REQUEST)
+        # Refuse a spend that would round down to nothing rather than taking it
+        # and granting zero — a conversion that silently eats 9 🍥 is theft with
+        # a rounding excuse.
+        if spend < SPINAZ_PER_PROMPTZ:
+            return Response(
+                {"detail": f"That converts to nothing — {SPINAZ_PER_PROMPTZ} 🍥 is the "
+                           f"smallest that buys 1 🏷️.",
+                 "spinaz_per_promptz": SPINAZ_PER_PROMPTZ},
+                status=status.HTTP_400_BAD_REQUEST)
+        w = wallet_for(request.user)
+        if (w.spinaz or 0) < spend:
+            return Response({"detail": f"That's {spend} 🍥 and you have {w.spinaz or 0}.",
+                             "spinaz": w.spinaz or 0},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
+        # Charge only for whole PromptZ. The remainder stays in their wallet.
+        granted = spend // SPINAZ_PER_PROMPTZ
+        charged = granted * SPINAZ_PER_PROMPTZ
+        from django.db.models import F
+        if not Wallet.objects.filter(pk=w.pk, spinaz__gte=charged).update(
+                spinaz=F("spinaz") - charged, promptz=F("promptz") + granted):
+            return Response({"detail": f"That's {charged} 🍥 and you don't have it any more."},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
+        w.refresh_from_db()
+        Transaction.objects.create(
+            user=request.user, kind=Transaction.KIND_PURCHASE, amount_cents=0,
+            dev_tax_cents=0, note=f"−{charged} 🍥 → +{granted} 🏷️",
+        )
+        # ZodiacZ — the Rat knows what a scrap is worth. Fired on the whole
+        # granted, not the spend, because five 🏷️ is the readable unit.
+        from .signbonus import try_award
+        try_award(request.user, "promptz_swap", stretch=granted >= 5)
+
+        return Response({"wallet": WalletSerializer(w).data,
+                         "granted": granted, "charged": charged,
+                         **self._rate(w)})
 
 
 class LimitsView(APIView):
@@ -406,7 +1114,8 @@ class LimitsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        from .catalog import chars_unlimited
+        from .catalog import (AVATAR_MAX_MB, chars_unlimited, edit_window_for,
+                              tier_ladder)
         from .models import third_party_ads_allowed
 
         m = membership_for(request.user)
@@ -415,7 +1124,39 @@ class LimitsView(APIView):
         # So the client can print "Unlimited" instead of a nine-figure number.
         lim["char_limit_unlimited"] = chars_unlimited(m.tier)
         lim["dev_tax_rate"] = m.dev_tax_rate
+        # What a profile picture may weigh, and what every tier buys. Both were
+        # copied into the client by hand — one as `const AVATAR_MAX_MB = 8`,
+        # one as a whole upload ladder — and a limit typed in two places is one
+        # that drifts, with the client's copy being the one nobody updates.
+        lim["avatar_max_mb"] = AVATAR_MAX_MB
+        lim["tiers"] = tier_ladder()
         lim["storage_used_mb"] = round(storage_used_bytes(request.user) / MB, 2)
+        # GroupZ. `custom_groups` rides in from limits_for above; these two are
+        # the parts it cannot know — how many are already made, and whether
+        # this tier may put an icon on one. Answered here so the screen states
+        # the ceiling BEFORE the Create button rather than on submit, and so
+        # the emoji rule is not re-derived from a tier over there.
+        from .groupz import can_set_emoji
+        from .models import Group
+        own_groups = list(Group.objects.filter(
+            owner=request.user, kind=Group.KIND_CUSTOM).values("id", "title", "emoji"))
+        lim["custom_groups_used"] = len(own_groups)
+        lim["can_set_emoji"] = can_set_emoji(m.tier)
+        # The audiences a profile field may name. Served from here so the
+        # visibility control offers the member's REAL groups rather than a
+        # client-side idea of what a group is — and so "who can see this" and
+        # "who is in my circle" read from one place, which is the whole reason
+        # GroupZ is the source rather than a second grouping concept.
+        lim["audiences"] = (
+            [{"token": "public", "label": "Public"},
+             {"token": "member", "label": "Members"},
+             {"token": "friends", "label": "FriendZ"},
+             {"token": "fans", "label": "FanZ"},
+             {"token": "partnerz", "label": "PartnerZ"},
+             {"token": "private", "label": "Private"}]
+            + [{"token": f"group:{g['id']}",
+                "label": f"{g['emoji']} {g['title']}".strip()} for g in own_groups]
+        )
         # Whether a third-party ad frame may be rendered for this member.
         #
         # Answered here rather than by the client, because the client would have
@@ -436,87 +1177,240 @@ class LimitsView(APIView):
         lim["journal"] = journal_limits_for(m.tier)
         lim["journal_by_tier"] = {t: v for t, v in JOURNAL_LIMITS.items()
                                   if t != TIER_DEBUG}
+        # Map embeds_per_post to embed_limit for frontend compatibility, and add
+        # the edit window duration for the client to render countdown timers.
+        if "embeds_per_post" in lim:
+            lim["embed_limit"] = lim.pop("embeds_per_post")
+        lim["edit_unlock_sec"] = edit_window_for(m.tier)
         return Response(lim)
 
 
 class SpecZView(APIView):
-    """GET the SpecZ catalog with owned flags; POST buys an item (StatZ only)."""
+    """GET your SpecZ and what one costs; POST writes one; DELETE removes one.
+
+    A SpecZ is a label and a value the member writes and attaches to an app —
+    "Preferred BPM: 140-150, dark strings" on PostZ. It was authored in the tab
+    and saved to `localStorage`: no API call, no balance touched, nothing on
+    the server. Meanwhile MembershipZ sold the SpecZ marketplace as THE
+    StatZ-only perk, so the one thing advertised as worth a subscription was
+    the one thing that charged nothing and did not survive a new browser.
+    """
 
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        owned = set(request.user.specz_purchases.values_list("item_id", flat=True))
-        items = [
-            {"id": iid, "name": d["name"], "price_cents": d["price_cents"], "owned": iid in owned}
-            for iid, d in SPECZ_CATALOG.items()
+    def _mine(self, user):
+        return [
+            {"id": p.id, "app_key": p.app_key, "label": p.label, "value": p.value,
+             "price_spinaz": p.price_spinaz, "created_at": p.created_at}
+            for p in user.specz_purchases.all()[:200]
         ]
-        return Response({"items": items})
+
+    def get(self, request):
+        w = wallet_for(request.user)
+        have = w.spinaz or 0
+        return Response({
+            "items": self._mine(request.user),
+            "price_spinaz": SPECZ_PRICE_SPINAZ,
+            "spinaz": have,
+            # Whether they can afford it travels WITH the price, so the tab
+            # states it on the button instead of after it is pressed.
+            "affordable": have >= SPECZ_PRICE_SPINAZ,
+            "apps": SPECZ_APPS,
+            "label_max": SPECZ_LABEL_MAX,
+            "value_max": SPECZ_VALUE_MAX,
+            "tier": membership_for(request.user).tier,
+            "tier_required": TIER_STATZ,
+        })
 
     def post(self, request):
-        m = membership_for(request.user)
-        if m.tier != TIER_STATZ:
-            return Response({"detail": "SpecZ is a StatZ-only marketplace"}, status=status.HTTP_403_FORBIDDEN)
-        item_id = str(request.data.get("item_id", ""))
-        item = SPECZ_CATALOG.get(item_id)
-        if not item:
-            return Response({"detail": "unknown item"}, status=status.HTTP_400_BAD_REQUEST)
-        if request.user.specz_purchases.filter(item_id=item_id).exists():
-            return Response({"detail": "already owned"}, status=status.HTTP_409_CONFLICT)
+        if membership_for(request.user).tier != TIER_STATZ:
+            return Response({"detail": "SpecZ is a StatZ-only marketplace"},
+                            status=status.HTTP_403_FORBIDDEN)
+        d = request.data or {}
+        app_key = str(d.get("app_key", "")).strip()
+        if app_key not in SPECZ_APP_KEYS:
+            return Response({"detail": "Pick an app to attach it to.",
+                             "apps": SPECZ_APPS}, status=status.HTTP_400_BAD_REQUEST)
+        label = str(d.get("label", "")).strip()
+        value = str(d.get("value", "")).strip()
+        if not label or not value:
+            return Response({"detail": "A SpecZ needs both a label and a value."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        # Refuse over-length rather than silently truncating. A save handler
+        # that quietly cuts what somebody typed and answers "saved" is the
+        # worst bug class in this app and has shipped twice.
+        if len(label) > SPECZ_LABEL_MAX or len(value) > SPECZ_VALUE_MAX:
+            return Response(
+                {"detail": f"Label is up to {SPECZ_LABEL_MAX} characters and value up to {SPECZ_VALUE_MAX}.",
+                 "label_max": SPECZ_LABEL_MAX, "value_max": SPECZ_VALUE_MAX},
+                status=status.HTTP_400_BAD_REQUEST)
         w = wallet_for(request.user)
-        price = item["price_cents"]
-        if w.money_cents < price:
-            return Response({"detail": "insufficient balance"}, status=status.HTTP_402_PAYMENT_REQUIRED)
-        dev, _ = split_cents(price, m.dev_tax_rate)  # developer tax recorded on the sale
-        w.money_cents -= price
-        w.save(update_fields=["money_cents", "updated_at"])
-        SpecZPurchase.objects.create(user=request.user, item_id=item_id, price_cents=price, dev_tax_cents=dev)
-        Transaction.objects.create(
-            user=request.user, kind=Transaction.KIND_PURCHASE, amount_cents=-price,
-            dev_tax_cents=dev, note=f"SpecZ: {item['name']}",
+        have = w.spinaz or 0
+        if have < SPECZ_PRICE_SPINAZ:
+            # Name both numbers. "Insufficient balance" makes somebody go and
+            # count their own SpinaZ to work out how short they are.
+            return Response(
+                {"detail": f"That's {SPECZ_PRICE_SPINAZ} 🍥 and you have {have}.",
+                 "price_spinaz": SPECZ_PRICE_SPINAZ, "spinaz": have},
+                status=status.HTTP_402_PAYMENT_REQUIRED)
+        # Charge only once everything above has passed, so a refused SpecZ is
+        # never a paid one — the rule the coach bills on.
+        w.spinaz = have - SPECZ_PRICE_SPINAZ
+        w.save(update_fields=["spinaz", "updated_at"])
+        p = SpecZPurchase.objects.create(
+            user=request.user, app_key=app_key, label=label, value=value,
+            price_spinaz=SPECZ_PRICE_SPINAZ,
         )
-        return Response({"wallet": WalletSerializer(w).data, "item_id": item_id, "dev_tax_cents": dev})
+        # Through log_resource so it lands in LogZ as a SpinaZ movement with
+        # its reason, like every other spend. A purchase that moves a balance
+        # and leaves no row is how "where did my SpinaZ go" starts.
+        log_resource(request.user, Transaction.RES_SPINAZ, -SPECZ_PRICE_SPINAZ,
+                     f"SpecZ on {app_key}: {label}")
+        return Response({"item": {"id": p.id, "app_key": p.app_key, "label": p.label,
+                                  "value": p.value, "price_spinaz": p.price_spinaz,
+                                  "created_at": p.created_at},
+                         "wallet": WalletSerializer(w).data, "spinaz": w.spinaz},
+                        status=status.HTTP_201_CREATED)
+
+    def delete(self, request, pk=None):
+        p = request.user.specz_purchases.filter(pk=pk).first()
+        if not p:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        p.delete()
+        # Deliberately no refund, and the tab says so before the button. Buying
+        # it back costs the same as buying it did; a delete that quietly
+        # returned the SpinaZ would make the price meaningless.
+        return Response({"deleted": pk, "refunded_spinaz": 0,
+                         "spinaz": wallet_for(request.user).spinaz})
 
 
 class RoyaltiesView(APIView):
-    """GET royalty balance + ledger."""
+    """GET royalty balance, ledger, and what each cashout plan would actually pay.
+
+    The plans ship WITH their arithmetic already done for this member. Cashing
+    out costs a percentage that depends on the plan and on the member's tier,
+    so a client that wanted to state the price before the button — which is the
+    rule — would otherwise have to hold its own copy of the tax table, and a
+    tier number retyped in the client is exactly how "20 free prompts" reached
+    nine places and drifted.
+
+    So the server answers the whole question: for this balance, at this tier,
+    each plan's rate, what it takes, and what lands. Same shape as the
+    KeyConnectZ allowance ladder — publish the ladder before either button is
+    pressed, so "quarterly keeps all of it" is a thing the member can SEE
+    rather than a thing they discover by picking the wrong one.
+    """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         w = wallet_for(request.user)
+        tier = membership_for(request.user).tier
+        gross = w.royalties_cents
+        plans = []
+        for plan in ("instant", "weekly", "monthly", "quarterly"):
+            rate = cashout_rate(plan, tier)
+            tax = round(gross * rate)
+            plans.append({
+                "plan": plan,
+                "rate": rate,
+                "rate_percent": round(rate * 100, 2),
+                # The two numbers the member is actually choosing between.
+                "tax_cents": tax,
+                "net_cents": gross - tax,
+            })
         entries = [
             {"kind": e.kind, "amount_cents": e.amount_cents, "tax_cents": e.tax_cents, "source": e.source, "created_at": e.created_at}
             for e in request.user.royalty_entries.all()[:50]
         ]
-        return Response({"royalties_cents": w.royalties_cents, "royalties": w.royalties, "entries": entries})
+        return Response({
+            "royalties_cents": gross, "royalties": w.royalties,
+            "tier": tier, "plans": plans, "entries": entries,
+            # Nothing accrues on its own yet. Saying so is the honest version of
+            # an empty screen — a member with 0 needs to know whether that means
+            # "you have earned nothing" or "nothing pays into this yet".
+            "accrual_is_live": False,
+        })
 
 
 class RoyaltyAccrueView(APIView):
-    """Accrue royalties to a user (called when their media earns; open for testing)."""
+    """Credit royalties to a member. OWNER ONLY.
+
+    This said "open for testing" and was exactly that: any authenticated member
+    could POST an arbitrary `amount_cents` to their own balance, and
+    `RoyaltyCashoutView` below moves that balance into `money_cents` — which
+    pays other members (`pay_between`), buys PromptZ, and settles CollabZ
+    deals. So the two endpoints together were an open mint, and the money did
+    not stay in the account that printed it.
+
+    Nothing here was ever load-bearing for a member: no client has ever called
+    it, and royalties do not accrue automatically yet (`accrual_is_live` above
+    says so out loud). Closing it costs nobody anything and had to happen
+    before any screen pointed at this balance.
+
+    `username` lets the owner credit the member whose media actually earned,
+    which is the job this endpoint exists to do — crediting only yourself was
+    never the useful version of it.
+    """
 
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        ensure_owner(request.user)
+        if not is_owner(request.user):
+            return Response({"detail": "Only the platform owner credits royalties."},
+                            status=status.HTTP_403_FORBIDDEN)
         try:
             amount_cents = int(request.data.get("amount_cents"))
         except (TypeError, ValueError):
             return Response({"detail": "amount_cents (integer) required"}, status=status.HTTP_400_BAD_REQUEST)
         if amount_cents <= 0:
             return Response({"detail": "amount must be positive"}, status=status.HTTP_400_BAD_REQUEST)
-        w = wallet_for(request.user)
-        w.royalties_cents += amount_cents
+        target = request.user
+        username = str(request.data.get("username") or "").strip()
+        if username:
+            target = User.objects.filter(username__iexact=username).first()
+            if not target:
+                return Response({"detail": f"No member called {username}."},
+                                status=status.HTTP_404_NOT_FOUND)
+        # A DistributeZ release's income: if the member attached an
+        # IntelligenceZ piece to it, K-Oth's share stays with the owner.
+        cut, pct = 0, 0
+        release_id = request.data.get("release_id")
+        if release_id:
+            from .intelligence_royalty import cut_of, record_paid
+            from .models import Release
+            release = Release.objects.filter(pk=release_id, user=target).first()
+            if not release:
+                return Response({"detail": "That release isn't theirs."}, status=status.HTTP_400_BAD_REQUEST)
+            cut, pct = cut_of(target, "release", release.pk, amount_cents)
+        source = str(request.data.get("source", ""))[:200]
+        w = wallet_for(target)
+        w.royalties_cents += amount_cents - cut
         w.save(update_fields=["royalties_cents", "updated_at"])
         RoyaltyEntry.objects.create(
-            user=request.user, kind=RoyaltyEntry.KIND_ACCRUAL, amount_cents=amount_cents,
-            source=str(request.data.get("source", ""))[:200],
+            user=target, kind=RoyaltyEntry.KIND_ACCRUAL, amount_cents=amount_cents - cut,
+            source=(source + (f" · −{pct:g}% IntelligenceZ royalty" if cut else ""))[:200],
         )
-        return Response({"royalties_cents": w.royalties_cents, "royalties": w.royalties})
+        if cut:
+            ow = wallet_for(request.user)
+            ow.royalties_cents += cut
+            ow.save(update_fields=["royalties_cents", "updated_at"])
+            RoyaltyEntry.objects.create(
+                user=request.user, kind=RoyaltyEntry.KIND_ACCRUAL, amount_cents=cut,
+                source=f"IntelligenceZ royalty {pct:g}% from @{target.username} — release #{release_id}"[:200],
+            )
+            record_paid(target, "release", int(release_id), cut, "money")
+        return Response({"username": target.username, "intelligence_cut_cents": cut,
+                         "royalties_cents": w.royalties_cents, "royalties": w.royalties})
 
 
 class RoyaltyCashoutView(APIView):
     """Cash out royalties into the wallet, applying the plan's tax.
 
-    Plans: instant (15%), weekly (per-tier 10/5/2), monthly (1%), quarterly (0%).
+    Plans: instant (15%), weekly (per-tier 10/5/3), monthly (1%), quarterly (0%).
+    The rates live in `catalog.cashout_rate` and are published, already
+    applied to this balance, by RoyaltiesView above — never retyped here.
     """
 
     permission_classes = [IsAuthenticated]
@@ -626,3 +1520,401 @@ class UploadDetailView(APIView):
         u.delete()
         m = membership_for(request.user)
         return Response(_storage_summary(request.user, m.tier))
+
+
+def _parse_embed_url(url, embed_type=""):
+    """Resolve a portfolio embed through WidgetZ, which is the one embed list.
+
+    There used to be a second one here — three providers, its own regexes, and
+    `spotify` and `soundcloud` STORING THE MEMBER'S OWN URL to be framed
+    verbatim. `widgetz` was written a week later around exactly the opposite
+    rule: read an id out of the link and build the provider's embed address
+    server-side, so nothing a member types reaches the frame. Two files
+    disagreeing about what an embed is meant an Apple Music link was a widget
+    on a profile and a 400 on a post — the same link, two answers.
+
+    One list now, so a provider added to `widgetz.PLAYERS` appears here for
+    free and neither can drift. `embed_type` is accepted and ignored: the URL
+    decides what it is, and a member picking the wrong radio button in the old
+    composer should not be told their perfectly good link is invalid.
+    """
+    from .widgetz import _player_for
+
+    spec = _player_for(str(url or "").strip())
+    if not spec:
+        return {"valid": False}
+    return {
+        "type": spec["provider"],
+        "url": spec["src"],
+        "valid": True,
+        # Carried through so the client sizes the frame from the same place
+        # the widget board does rather than keeping its own table of heights.
+        "aspect": spec.get("aspect", ""),
+        "height": spec.get("height", 0),
+        "label": spec.get("label", ""),
+    }
+
+
+class PostEmbedsView(APIView):
+    """POST adds an embed to a post; DELETE removes one. Portfolio showcase."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        post_id = request.data.get("post_id")
+        embed_url = request.data.get("url")
+        title = str(request.data.get("title", "") or "").strip()[:200]
+
+        # `type` is no longer read. The URL says what a link is, and requiring
+        # the member to also declare it meant a wrong radio button refused a
+        # link that worked. Old clients may still send it; it is ignored rather
+        # than rejected, so a stale tab keeps working across the deploy.
+        if not all([post_id, embed_url]):
+            return Response(
+                {"detail": "post_id and url required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            post = Post.objects.get(id=post_id, author=request.user)
+        except Post.DoesNotExist:
+            return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        m = membership_for(request.user)
+        lim = limits_for(m.tier)
+        embeds = post.embeds or []
+
+        if len(embeds) >= lim.get("embeds_per_post", 3):
+            return Response(
+                {"detail": f"embed limit ({lim.get('embeds_per_post', 3)}) reached for {m.tier} tier"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        parsed = _parse_embed_url(embed_url)
+        if not parsed.get("valid"):
+            from .widgetz import PLAYER_LABELS
+            return Response(
+                # Names what IS playable rather than repeating the member's own
+                # word back at them. "invalid youtube URL" on a link that was
+                # never YouTube is a refusal that helps nobody.
+                {"detail": "That link isn't one with a player we can embed. "
+                           f"These work: {', '.join(PLAYER_LABELS)}.",
+                 "players": PLAYER_LABELS},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        new_embed = {
+            # The URL decides the type, not the radio button — see above.
+            "type": parsed["type"],
+            "url": parsed["url"],
+            "title": title or parsed.get("label") or parsed["type"].title(),
+            "aspect": parsed.get("aspect", ""),
+            "height": parsed.get("height", 0),
+        }
+        embeds.append(new_embed)
+        post.embeds = embeds
+        post.save(update_fields=["embeds"])
+
+        return Response(
+            {"embeds": embeds, "limit": lim.get("embeds_per_post", 3)},
+            status=status.HTTP_201_CREATED,
+        )
+
+    def delete(self, request):
+        post_id = request.data.get("post_id")
+        embed_index = request.data.get("index")
+
+        if post_id is None or embed_index is None:
+            return Response(
+                {"detail": "post_id and index required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            post = Post.objects.get(id=post_id, author=request.user)
+        except Post.DoesNotExist:
+            return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        embeds = post.embeds or []
+        if embed_index < 0 or embed_index >= len(embeds):
+            return Response(
+                {"detail": "invalid embed index"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        embeds.pop(embed_index)
+        post.embeds = embeds
+        post.save(update_fields=["embeds"])
+
+        return Response({"embeds": embeds})
+
+
+class PracticeSessionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = PracticeSessionSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(user=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def get(self, request):
+        sessions = PracticeSession.objects.filter(user=request.user).order_by("-created_at")
+        serializer = PracticeSessionSerializer(sessions, many=True)
+        return Response(serializer.data)
+
+
+class DrumPatternView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = DrumPatternSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(user=request.user)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def get(self, request):
+        patterns = DrumPattern.objects.filter(user=request.user).order_by("-created_at")
+        serializer = DrumPatternSerializer(patterns, many=True)
+        return Response(serializer.data)
+
+
+class DrumPatternDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pattern_id):
+        try:
+            pattern = DrumPattern.objects.get(id=pattern_id, user=request.user)
+        except DrumPattern.DoesNotExist:
+            return Response({"detail": "pattern not found"}, status=status.HTTP_404_NOT_FOUND)
+        serializer = DrumPatternSerializer(pattern)
+        return Response(serializer.data)
+
+    def put(self, request, pattern_id):
+        try:
+            pattern = DrumPattern.objects.get(id=pattern_id, user=request.user)
+        except DrumPattern.DoesNotExist:
+            return Response({"detail": "pattern not found"}, status=status.HTTP_404_NOT_FOUND)
+        serializer = DrumPatternSerializer(pattern, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pattern_id):
+        try:
+            pattern = DrumPattern.objects.get(id=pattern_id, user=request.user)
+        except DrumPattern.DoesNotExist:
+            return Response({"detail": "pattern not found"}, status=status.HTTP_404_NOT_FOUND)
+        pattern.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PublicDrumPatternView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        patterns = DrumPattern.objects.filter(is_public=True).order_by("-created_at")
+        serializer = DrumPatternSerializer(patterns, many=True)
+        return Response(serializer.data)
+
+
+class ToolPreferenceView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        preference, _ = ToolPreference.objects.get_or_create(user=request.user)
+        serializer = ToolPreferenceSerializer(preference)
+        return Response(serializer.data)
+
+    def put(self, request):
+        preference, _ = ToolPreference.objects.get_or_create(user=request.user)
+        serializer = ToolPreferenceSerializer(preference, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PatternShareView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        pattern_id = request.data.get("pattern_id")
+        try:
+            pattern = DrumPattern.objects.get(id=pattern_id, user=request.user)
+        except DrumPattern.DoesNotExist:
+            return Response({"detail": "pattern not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        pattern.shares_count += 1
+        pattern.save(update_fields=["shares_count"])
+
+        share = PatternShare.objects.create(
+            pattern=pattern,
+            shared_by=request.user,
+        )
+        serializer = PatternShareSerializer(share)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def get(self, request):
+        shares = PatternShare.objects.filter(shared_by=request.user).order_by("-created_at")
+        serializer = PatternShareSerializer(shares, many=True)
+        return Response(serializer.data)
+
+
+class DrillTakeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        weak_note = request.data.get("weak_note")
+        original_frequency = request.data.get("original_frequency")
+        original_cents_off = request.data.get("original_cents_off")
+        accuracy_percent = request.data.get("accuracy_percent", 0)
+        duration_seconds = request.data.get("duration_seconds", 0)
+        final_frequency = request.data.get("final_frequency")
+        final_cents_off = request.data.get("final_cents_off")
+        key_context = request.data.get("key_context")
+        bpm_context = request.data.get("bpm_context")
+
+        improvement = None
+        if original_cents_off is not None and final_cents_off is not None:
+            improvement = abs(original_cents_off) - abs(final_cents_off)
+
+        drill_take = DrillTake.objects.create(
+            user=request.user,
+            weak_note=weak_note,
+            original_frequency=float(original_frequency) if original_frequency else 0,
+            original_cents_off=int(original_cents_off) if original_cents_off is not None else 0,
+            accuracy_percent=int(accuracy_percent) if accuracy_percent else 0,
+            duration_seconds=int(duration_seconds) if duration_seconds else 0,
+            final_frequency=float(final_frequency) if final_frequency else None,
+            final_cents_off=int(final_cents_off) if final_cents_off is not None else None,
+            key_context=key_context,
+            bpm_context=int(bpm_context) if bpm_context else None,
+        )
+
+        serializer = DrillTakeSerializer(drill_take)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def get(self, request):
+        note_filter = request.query_params.get("note")
+        drills = DrillTake.objects.filter(user=request.user).order_by("-created_at")
+        if note_filter:
+            drills = drills.filter(weak_note=note_filter)
+        serializer = DrillTakeSerializer(drills, many=True)
+        return Response(serializer.data)
+
+
+class CoachObservationsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from .models import Observation
+        from .observationz import _row
+        from django.utils import timezone
+
+        kind = "coach"
+        qs = request.user.observations.filter(kind=kind).order_by("-last_seen")
+
+        now = timezone.now()
+        result = []
+        for obs in qs[:100]:
+            row = _row(obs, now)
+            weak_note = row.get("key", "").split("_")[-1] if row.get("key") else None
+
+            drills = []
+            if weak_note:
+                drills_qs = DrillTake.objects.filter(
+                    user=request.user,
+                    weak_note=weak_note
+                ).order_by("-created_at")[:5]
+                drills = DrillTakeSerializer(drills_qs, many=True).data
+
+            row["drills"] = drills
+            row["best_accuracy"] = max([d["accuracy_percent"] for d in drills], default=0)
+            row["total_practice_seconds"] = sum(d["duration_seconds"] for d in drills)
+            result.append(row)
+
+        return Response({"coaching": result})
+
+
+class TakeAnalysisView(APIView):
+    """What the recording itself says about the pitch and the timing.
+
+    Computed on the first request that asks for it, not when the file lands.
+    There is no worker here, so analysing on upload would have meant seconds
+    of DSP inside the POST that saves the file — and `Upload` is the row
+    behind every avatar, cover and video on the platform, not just takes.
+
+    Owner-only. A post is public; a breakdown of where its author sang flat
+    is not.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, upload_id):
+        upload = Upload.objects.filter(id=upload_id, user=request.user).first()
+        if upload is None:
+            return Response({"detail": "That recording isn't yours or isn't here."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        if not take_analyzer.analyzable(upload):
+            return Response({"detail": "That upload isn't a recording."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        analysis = TakeAnalysis.objects.filter(upload=upload).first()
+        if analysis is None or analysis.analysis_status not in ("done", "failed"):
+            analysis = take_analyzer.analyze_take_audio(upload.id)
+            if analysis is None:
+                return Response({"detail": "That upload isn't a recording."},
+                                status=status.HTTP_404_NOT_FOUND)
+
+        return Response(TakeAnalysisSerializer(analysis).data)
+
+
+class LeaderboardsView(APIView):
+    """GET /api/economy/leaderboards/ — all leaderboards for a period.
+
+    Returns top earners, practitioners, and competitors by multiple metrics.
+    Drives competition and motivates premium upgrades by showing concrete ROI.
+    """
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from . import leaderboardz
+
+        period = request.query_params.get("period", "all")
+        period_days = {"week": 7, "month": 30, "all": None}.get(period, None)
+        limit = min(int(request.query_params.get("limit", 10)), 100)
+
+        return Response({
+            "period": period,
+            "period_days": period_days,
+            "spinaz_earners": leaderboardz.top_spinaz_earners(limit=limit, period_days=period_days),
+            "energy_earners": leaderboardz.top_energy_earners(limit=limit, period_days=period_days),
+            "raters": leaderboardz.top_raters(limit=limit, period_days=period_days),
+            "referrers": leaderboardz.top_referrers(limit=limit),
+            # Instrument-specific boards (singz, rapz, etc) on separate endpoints
+            "note": "Use /api/economy/leaderboards/xp/<app_key>/ for per-instrument SkillZ rankings",
+        })
+
+
+class InstrumentLeaderboardView(APIView):
+    """GET /api/economy/leaderboards/xp/<app_key>/ — top practitioners by instrument."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request, app_key):
+        from . import leaderboardz
+
+        period = request.query_params.get("period", "all")
+        period_days = {"week": 7, "month": 30, "all": None}.get(period, None)
+        limit = min(int(request.query_params.get("limit", 10)), 100)
+
+        return Response({
+            "app_key": app_key,
+            "period": period,
+            "leaders": leaderboardz.top_xp_earners_by_instrument(app_key, limit=limit, period_days=period_days),
+        })

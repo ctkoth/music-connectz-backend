@@ -140,7 +140,9 @@ class TheMoneyGateFiresFirst(Base):
         # The whole point: no work is done that we then can't bill for.
         client.assert_not_called()
         self.assertIn("🏷️", resp.json()["detail"])
-        self.assertEqual(resp.json()["open_in"], "modelz")
+        # There is no `modelz` tab. Topping up is PromptZ's door in MembershipZ.
+        self.assertEqual(resp.json()["open_in"], "membershipz")
+        self.assertEqual(resp.json()["target"], "promptz-door")
 
     def test_the_402_still_carries_the_numbers_so_the_screen_can_explain(self):
         w = wallet_for(self.user); w.promptz = 0; w.money_cents = 0; w.save()

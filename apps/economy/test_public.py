@@ -12,7 +12,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.economy.models import Post, TrialTake, profile_for
+from apps.economy.models import TRIAL_MAX_MB, Post, TrialTake, profile_for
 
 User = get_user_model()
 PW = "hunter2hunter2"
@@ -156,12 +156,30 @@ class TrialTakeTests(TestCase):
         self.assertEqual(TrialTake.objects.get().app_key, "rapz")
 
     @patch("apps.economy.trial._key", return_value="k")
-    def test_one_per_address_per_day(self, _k):
-        self.assertEqual(self._post().status_code, 201)
-        second = self._post()
+    def test_one_per_browser_per_day(self, _k):
+        """This used to read `one_per_address_per_day`, and the address was the
+        bug: mobile carriers put thousands of subscribers behind one CGNAT
+        address, so the first person through spent the free take for all of
+        them. The count is per BROWSER now — see test_trial_gate."""
+        self.assertEqual(self._post(anon_id="phone-a").status_code, 201)
+        second = self._post(anon_id="phone-a")
         self.assertEqual(second.status_code, 429, second.content)
         self.assertTrue(second.data["already_used"])
         self.assertEqual(TrialTake.objects.count(), 1)
+
+    @patch("apps.economy.trial._key", return_value="k")
+    def test_a_second_browser_on_the_same_address_is_a_second_person(self, _k):
+        """The fix, from the endpoint's own side."""
+        self.assertEqual(self._post(anon_id="phone-a").status_code, 201)
+        self.assertEqual(self._post(anon_id="phone-b").status_code, 201)
+        self.assertEqual(TrialTake.objects.count(), 2)
+
+    @patch("apps.economy.trial._key", return_value="k")
+    def test_a_browser_that_cannot_identify_itself_still_gets_a_take(self, _k):
+        """A private window throws on localStorage and sends "". Treating every
+        one of those as the same visitor would shut the door on all of them."""
+        self.assertEqual(self._post(anon_id="").status_code, 201)
+        self.assertEqual(self._post(anon_id="").status_code, 201)
 
     @patch("apps.economy.trial.trial_daily_cap", return_value=0)
     @patch("apps.economy.trial._key", return_value="k")
@@ -194,7 +212,10 @@ class TrialTakeTests(TestCase):
         self.assertEqual(resp.status_code, 200, resp.content)
         self.assertTrue(resp.data["free"])
         self.assertTrue(resp.data["available"])
-        self.assertEqual(resp.data["max_mb"], 8)
+        # The number, not a literal — this read 8 and so pinned the trial to a
+        # ceiling set before the Files API path existed. What matters is that
+        # the offer STATES it, and that it is the one the door enforces.
+        self.assertEqual(resp.data["max_mb"], TRIAL_MAX_MB)
         self.assertIn("difficulties", resp.data)
 
     @patch("apps.economy.trial._key", return_value="k")

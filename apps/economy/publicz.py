@@ -25,21 +25,31 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .badgez import public_badge_chip
+from .coachshare import coach_read_for, legacy_score
+from .visibility import redact
 from .models import (
     Post,
     Profile,
     badges_for,
+    public_name,
     can_view_post,
     item_rating_median,
 )
+from .personaz import links_of, personas_of
 
 
-def public_post_dict(p):
+def public_post_dict(p, viewer=None):
     """A shared post as a stranger sees it.
 
     Built field-by-field rather than by stripping the member payload — a
     deny-list quietly leaks whatever gets added to the post later, and this
     response is the one nobody has to log in to read.
+
+    `viewer` is the person opening the link, or None for a crawler and the edge
+    function that builds link previews. It only ever changes ONE thing — the
+    coach's read, which the author may have kept for members — and a signed-in
+    member opening the same link sees what they are entitled to rather than
+    the stranger's locked card.
     """
     from .crosspost import take_state_for
     from .postz import media_slots
@@ -51,17 +61,27 @@ def public_post_dict(p):
     # a query to say whose failure it actually was.
     state = take_state_for([(p, media_slots(p))]).get(p.id) or {}
     missing = bool(state.get("missing"))
+    coach = coach_read_for(p, viewer)
+    if coach["state"] == "shown" and coach.get("public"):
+        # The card image is a public address, so it is only named when a
+        # stranger could fetch it. A member-only read has no image to link.
+        coach["card_image"] = f"/api/economy/postz/{p.id}/coach-card.png"
+        coach["story_image"] = f"/api/economy/postz/{p.id}/coach-card.png?format=story"
     return {
         "id": p.id,
         "author": p.author.username,
         "title": p.title,
         "description": p.description,
-        "links": p.links or [],
+        "links": links_of(p),
         "media_type": p.media_type,
         "media_url": p.media_url,
         "is_album": p.is_album,
         "items": p.items or [],
-        "score": p.score or {},
+        # The whole stored read ONLY when `coach` says it is shown — see
+        # coachshare.legacy_score. Beside it, `coach` carries the labelled read
+        # or the locked card, never both an old and a new copy of the number.
+        "score": legacy_score(p, coach),
+        "coach": coach,
         "rating": item_rating_median(f"post:{p.id}"),
         "created_at": p.created_at.isoformat(),
         "take_missing": missing,
@@ -70,7 +90,10 @@ def public_post_dict(p):
     }
 
 
-def public_profile_dict(p):
+from apps.economy.social import _pinned, cover_abs  # noqa: E402
+
+
+def public_profile_dict(p, request=None):
     """A member's card as a stranger sees it — the work, not the person.
 
     Skills carry names and rates, deliberately: what somebody does and what
@@ -79,9 +102,7 @@ def public_profile_dict(p):
     inside the app and are nobody's business from outside it.
     """
     personas = []
-    for persona in (p.personas or []):
-        if not isinstance(persona, dict):
-            continue
+    for persona in personas_of(p):
         skills = []
         for s in (persona.get("skills") or []):
             if isinstance(s, dict) and s.get("name"):
@@ -93,21 +114,34 @@ def public_profile_dict(p):
             "key": persona.get("key", ""),
             "name": persona.get("name", ""),
             "skills": skills,
+            **({"roles": persona["roles"]} if persona.get("roles") else {}),
         })
-    return {
+    # Redacted for the anonymous audience: a member who moved bio or links to
+    # "member" must be honoured on the one page a stranger can open, which is
+    # the page this control exists for.
+    return redact({
         "username": p.user.username,
         "display_name": p.display_name or p.user.username,
+        # "" unless the member opted in — see public_name()'s note on why this
+        # never falls back to the handle.
+        "real_name": public_name(p),
         "bio": p.bio or "",
         "personas": personas,
+        # The work-facing popular-site fields. Timezone stays off the
+        # logged-out card: it narrows where somebody lives for no hiring gain.
+        "pronouns": p.pronouns, "headline": p.headline, "genres": p.genres or [],
+        "influences": p.influences or [], "gear": p.gear or [], "label": p.label,
+        "cover_url": cover_abs(p.cover_url, request),
+        "pinned_post": _pinned(p),
         # BadgeZ travels with the card. A shared profile is somebody's proof
         # they are worth hiring, and "ten deals, no dispute" is exactly the
         # part of that a stranger came to find out. Only badges the member
         # chose to show, and only what the badge is — never what it pays.
         "badge_title": p.badge_title,
         "badges": [public_badge_chip(b) for b in badges_for(p.user, only_visible=True)],
-        "links": p.links or [],
+        "links": links_of(p),
         "public": True,
-    }
+    }, p, None)
 
 
 class PublicPostView(APIView):
@@ -126,7 +160,13 @@ class PublicPostView(APIView):
         if not can_view_post(p, request.user):
             # 404, not 403 — confirming a private post exists is itself a leak.
             return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
-        return Response(public_post_dict(p))
+        resp = Response(public_post_dict(p, request.user))
+        # The body now depends on WHO is asking (a members-only read is shown to
+        # a member and locked to a stranger), so a shared cache must never hand
+        # one reader's copy to another.
+        resp["Cache-Control"] = "private"
+        resp["Vary"] = "Authorization"
+        return resp
 
 
 class PublicProfileView(APIView):
@@ -143,4 +183,4 @@ class PublicProfileView(APIView):
              .filter(user__username__iexact=str(username)[:150]).first())
         if not p:
             return Response({"detail": "profile not found"}, status=status.HTTP_404_NOT_FOUND)
-        return Response(public_profile_dict(p))
+        return Response(public_profile_dict(p, request))
