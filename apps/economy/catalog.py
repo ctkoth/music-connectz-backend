@@ -460,10 +460,16 @@ PLAYLIST_RECENCY_BOOST_MULTIPLIER = 1.5 # fresh content earns 50% more
 # curricula so it costs the least to serve.
 # Per-message minimum to cover the model (pass-through, no markup). Corey GPT is
 # deliberately the cheapest voice.
+# Corey's rule: ONE task costs ONE PromptZ, whatever engine ran it. A task that
+# genuinely combines several (a stitched video: one clip per shot) is charged one
+# PromptZ for every task in it. This is below the provider's real cost on the dearer
+# engines, so it is a subsidy by design; the daily prompts (3/5/10) still come first.
+AI_TASK_PROMPTZ = 1
+
 AI_MODEL_COSTS = {
-    "corey-gpt": 1,
-    "standard": 3,
-    "technical": 3,
+    "corey-gpt": AI_TASK_PROMPTZ,
+    "standard": AI_TASK_PROMPTZ,
+    "technical": AI_TASK_PROMPTZ,
 }
 
 
@@ -573,7 +579,7 @@ def ai_cost(model):
 AI_MODELS = {
     "haiku": {
         "id": "claude-haiku-4-5", "name": "Haiku", "emoji": "⚡",
-        "tier": TIER_FREE, "cost_cents": 2,
+        "tier": TIER_FREE, "cost_cents": AI_TASK_PROMPTZ,
         "in_cents_mtok": 100, "out_cents_mtok": 500,       # $1 / $5
         # Haiku 4.5 predates both controls and returns 400 for either. Declared
         # per model rather than assumed, because "every model takes effort" is
@@ -585,7 +591,7 @@ AI_MODELS = {
     },
     "sonnet": {
         "id": "claude-sonnet-5", "name": "Sonnet", "emoji": "🎼",
-        "tier": TIER_PREMIUM, "cost_cents": 5,
+        "tier": TIER_PREMIUM, "cost_cents": AI_TASK_PROMPTZ,
         # List price, not the introductory rate. The intro expires and a price
         # built on it would quietly start losing money on the day it does.
         "in_cents_mtok": 300, "out_cents_mtok": 1500,      # $3 / $15
@@ -594,14 +600,14 @@ AI_MODELS = {
     },
     "opus": {
         "id": "claude-opus-5", "name": "Opus", "emoji": "🎹",
-        "tier": TIER_PREMIUM, "cost_cents": 8,
+        "tier": TIER_PREMIUM, "cost_cents": AI_TASK_PROMPTZ,
         "in_cents_mtok": 500, "out_cents_mtok": 2500,      # $5 / $25
         "effort": True, "task_budget": True,
         "blurb": "Flagship. Long-horizon work, code, and anything that has to be right.",
     },
     "fable": {
         "id": "claude-fable-5", "name": "Fable", "emoji": "📖",
-        "tier": TIER_STATZ, "cost_cents": 15,
+        "tier": TIER_STATZ, "cost_cents": AI_TASK_PROMPTZ,
         "in_cents_mtok": 1000, "out_cents_mtok": 5000,     # $10 / $50
         "effort": True, "task_budget": True,
         "blurb": "The most capable model there is. The hardest problems, at the highest price.",

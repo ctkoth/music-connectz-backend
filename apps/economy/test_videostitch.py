@@ -160,11 +160,11 @@ class OwnerShortBalanceTests(TestCase):
 
 
 class VideoPriceIsSmallTests(TestCase):
-    def test_a_clip_costs_two_promptz_and_a_stitched_video_two_per_shot(self):
+    def test_a_clip_costs_one_promptz_and_a_stitched_video_one_per_shot(self):
         from apps.economy.videoz import price_cents
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("VIDEO_CONNECTZ_CENTS", None)
-            self.assertEqual(price_cents(), 2)
+            self.assertEqual(price_cents(), 1)
             # Common sense: the dearest video must cost less than the best tier's
             # whole day of prompts, or nobody could ever make it.
             from apps.economy.models import PROMPT_ALLOWANCE

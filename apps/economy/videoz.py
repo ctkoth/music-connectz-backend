@@ -84,10 +84,12 @@ KINDS = {
 }
 
 
-# Corey's call: a video costs 2 PromptZ a clip (a stitched one, 2 per shot), not
+# Corey's call: a video costs 1 PromptZ a clip (a stitched one, 1 per shot), not
 # hundreds. This is BELOW what the provider charges per clip, so every render is a
 # subsidy; VIDEO_CONNECTZ_CENTS raises it without a deploy of code.
-DEFAULT_PRICE = 2
+from .catalog import AI_TASK_PROMPTZ
+
+DEFAULT_PRICE = AI_TASK_PROMPTZ
 
 
 def price_cents():
