@@ -1074,6 +1074,21 @@ def take_report_text(take, label, labels=None):
             for p in r["practice"] if isinstance(p, dict)]
     if not r:
         lines += ["", "(This take was scored before the coach's read was kept, so only the score is here.)"]
+    # Gear advice is a separate PromptZ spend (coach_upgrades.py) that stores
+    # its result on this same take — it has to leave with the take's own
+    # export, or a member who paid for it can save everything about this take
+    # except the one thing they paid extra for.
+    upgrades = (take.upgrades or {}).get("items")
+    if upgrades:
+        lines += ["", "Gear and settings advice:"]
+        for it in upgrades:
+            lines.append(f"  [{it.get('category', 'other')}] {it.get('heading', '')}")
+            if it.get("advice"):
+                lines.append(f"    {it['advice']}")
+            for s in it.get("settings") or []:
+                lines.append(f"    · {s}")
+            for p in it.get("products") or []:
+                lines.append(f"    Product: {p.get('name', '')}")
     lines += ["", "Scored by the AI coach on Music ConnectZ. The score is the coach's reading of one take, "
                   "not a measure of you."]
     return "\n".join(lines)
@@ -1375,6 +1390,11 @@ class TakeDownloadView(APIView):
             row = take_row(take, label)
             body = {k: row[k] for k in ("id", "at", "overall", "exact", "scores", "genre", "style", "difficulty",
                                         "range_class", "read")}
+            # Paid for separately (coach_upgrades.py) but stored on this take —
+            # a member's own export of a take has to include everything they
+            # bought for it, not just the score.
+            if (take.upgrades or {}).get("items"):
+                body["upgrades"] = {"summary": take.upgrades.get("summary", ""), "items": take.upgrades["items"]}
             return Response({"filename": f"{self.app_key}-take-{stamp}.json", "content_type": "application/json",
                              "text": json.dumps(body, indent=2, ensure_ascii=False)})
         return Response({"filename": f"{self.app_key}-take-{stamp}.txt", "content_type": "text/plain",

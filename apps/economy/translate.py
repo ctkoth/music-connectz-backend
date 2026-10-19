@@ -15,7 +15,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import ai_cost
-from .models import charge_ai_usage, can_afford_ai, wallet_for
+from .models import Translation, charge_ai_usage, can_afford_ai, wallet_for
 from .views import credit_owner
 
 TRANSLATE_MODEL = "claude-opus-4-8"
@@ -43,10 +43,18 @@ def _system(target_name):
 
 
 class TranslateView(APIView):
-    """POST { texts: [str], target_lang, target_name?, source_lang? } → transcreated
-    strings. Charges the model minimum once per batch on success."""
+    """GET: your last 20 paid batches. POST { texts: [str], target_lang, target_name?,
+    source_lang? } → transcreated strings, kept. Charges the model minimum once
+    per batch on success."""
 
     permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        rows = Translation.objects.filter(user=request.user)[:20]
+        return Response({"translations": [
+            {"id": r.id, "target_lang": r.target_lang, "texts": r.texts,
+             "translations": r.translations, "created_at": r.created_at}
+            for r in rows]})
 
     def post(self, request):
         data = request.data or {}
@@ -107,4 +115,5 @@ class TranslateView(APIView):
         remaining = charge_ai_usage(request.user, cost, note=f"TranslateZ {target_lang}")
         credit_owner(request.user, cost, f"TranslateZ {target_lang}")
         money = round((remaining if remaining is not None else wallet_for(request.user).money_cents) / 100, 2)
-        return Response({"translations": out, "cost_cents": cost, "money": money})
+        row = Translation.objects.create(user=request.user, target_lang=target_lang, texts=texts, translations=out)
+        return Response({"translations": out, "cost_cents": cost, "money": money, "kept_id": row.id})

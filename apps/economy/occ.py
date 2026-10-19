@@ -489,26 +489,24 @@ class OccChatView(APIView):
                "limits": occ_limits(),
                "daily_prompts_left": daily_now, "daily_prompts": allowance}
 
-        # A reply you can't take anywhere is a dead end with a scrollbar. Asked
-        # to, OCC keeps the exchange as WorkZ — in the PostZ format — so it can
-        # be shared, rated, commented on, or carried into another app.
-        if data.get("save_work"):
-            from .models import OccOutput
-            from .occ_workz import output_dict
-            work = OccOutput.objects.create(
-                user=request.user,
-                tab=str(data.get("tab", "occ") or "occ")[:32],
-                input_text=prompt,
-                input_items=([{"url": "", "type": "image", "title": "prompt image", "lyrics": ""}]
-                             if image else []),
-                title=(prompt.strip().splitlines() or ["OCC reply"])[0][:160],
-                description=text[:20000],
-                media_type="document",
-            )
-            out["work"] = output_dict(work, request)
-        else:
-            # Even when it isn't kept, say where it COULD go rather than
-            # leaving the member to guess that saving is possible at all.
-            out["can_save_work"] = {"app": "occ", "target": "occ-workz",
-                                    "label": "Keep this as WorkZ"}
+        # A reply you can't take anywhere is a dead end with a scrollbar — and
+        # a billed one that disappears if you forget to tick a box is a spend
+        # with nothing to show for it (Corey's rule: every PromptZ spend
+        # leaves something kept). So this always lands as WorkZ now, in the
+        # PostZ format, ready to be shared, rated, commented on, or carried
+        # into another app — `save_work` used to gate whether it was kept at
+        # all; it no longer does anything, and a client may stop sending it.
+        from .models import OccOutput
+        from .occ_workz import output_dict
+        work = OccOutput.objects.create(
+            user=request.user,
+            tab=str(data.get("tab", "occ") or "occ")[:32],
+            input_text=prompt,
+            input_items=([{"url": "", "type": "image", "title": "prompt image", "lyrics": ""}]
+                         if image else []),
+            title=(prompt.strip().splitlines() or ["OCC reply"])[0][:160],
+            description=text[:20000],
+            media_type="document",
+        )
+        out["work"] = output_dict(work, request)
         return Response(out)

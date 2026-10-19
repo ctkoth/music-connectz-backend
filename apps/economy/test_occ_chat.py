@@ -358,9 +358,13 @@ class TheRefusalCarriesTheWayForward(Base):
                          ("membershipz", "promptz-door"))
         self.assertIn("today's free prompts are spent", resp.data["detail"])
 
-    def test_a_save_offer_points_at_a_real_anchor(self):
+    def test_every_reply_is_kept_as_work_whether_or_not_save_work_is_sent(self):
+        # A billed spend that disappears unless a box was ticked is a spend
+        # with nothing to show for it — so this no longer gates on save_work.
         resp, _ = self.say()
-        self.assertEqual(resp.data["can_save_work"]["target"], "occ-workz")
+        self.assertEqual(resp.data["work"]["tab"], "occ")
+        self.assertEqual(resp.data["work"]["description"], "a reply")
+        self.assertNotIn("can_save_work", resp.data)
 
     def test_a_free_member_can_still_choose_only_what_the_tier_allows(self):
         as_tier(self.user, TIER_FREE)
