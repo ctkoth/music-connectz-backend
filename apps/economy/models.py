@@ -7677,6 +7677,46 @@ class InstrumentalWork(models.Model):
         ordering = ["-created_at"]
 
 
+class GeneratedImage(models.Model):
+    """One image Image ConnectZ made: the prompt that made it and the file it produced.
+
+    A PromptZ spend must leave the member something tangible (Corey's rule) —
+    before this, `GeminiImageView` billed the charge and handed back a base64
+    string with nothing kept, so the image was gone the moment the tab closed
+    unless the member happened to save the data URI themselves. The bytes go
+    through an ordinary `Upload` (SET_NULL, same as MasterWork's file: deleting
+    it from the uploads screen leaves the record saying what was made rather
+    than cascading it away), so it counts toward storage like any other upload
+    and is served, downloaded and shared the same way everything else is.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="generated_images")
+    prompt = models.TextField()
+    upload = models.ForeignKey("Upload", on_delete=models.SET_NULL, null=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class Translation(models.Model):
+    """One batch TranslateZ translated, kept so a paid run isn't lost if the
+    member never gets to sending or posting what it produced.
+
+    `texts`/`translations` are JSON lists in the same order — a batch, not one
+    string, because that's the shape the endpoint has always taken and billed.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="translations")
+    target_lang = models.CharField(max_length=40)
+    texts = models.JSONField(default=list)
+    translations = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
 class MasterWork(models.Model):
     """One master Mix ConnectZ made and the member chose to keep.
 

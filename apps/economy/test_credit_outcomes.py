@@ -72,6 +72,29 @@ class CreditOutcomeAuditTests(TestCase):
         self.assertIn("free_way or no_free_way", C.validate({**bad, "outcomes": ["tangible"], "no_free_way": ""}))
         self.assertIn("outcomes", C.validate({**bad, "outcomes": ["profitable"]}))   # not one of the six
 
+    def test_a_promptz_spend_must_be_tangible_or_say_why_not(self):
+        # Corey's rule: every PromptZ spend — real model money — leaves
+        # something kept, or declares the deliberate reason it doesn't.
+        base = {"resource": "promptz", "buys": "A read.", "outcomes": ["learnable"],
+                "lands_in": ["x"], "no_free_way": "n/a"}
+        self.assertIn("tangible outcome or ephemeral_reason", C.validate(base))
+        self.assertNotIn("tangible outcome or ephemeral_reason",
+                         C.validate({**base, "outcomes": ["learnable", "tangible"]}))
+        self.assertNotIn("tangible outcome or ephemeral_reason",
+                         C.validate({**base, "ephemeral_reason": "A preview, not the thing itself."}))
+        # A spinaz/energy spend is untouched by this — it's declared on
+        # every entry here, but the rule is specifically about model money.
+        self.assertNotIn("tangible outcome or ephemeral_reason",
+                         C.validate({**base, "resource": "spinaz"}))
+
+    def test_every_promptz_entry_keeps_something_or_says_why_not(self):
+        # The same assertion `test_every_declaration_is_sound` already makes,
+        # named for what it specifically guards: a NEW PromptZ spend cannot
+        # ship billing a member and handing back nothing kept, silently.
+        for key, entry in C.CREDIT_OUTCOMES.items():
+            if entry.get("resource") == "promptz":
+                self.assertTrue("tangible" in (entry.get("outcomes") or []) or entry.get("ephemeral_reason"), key)
+
     def test_the_list_is_published_to_members_before_they_spend(self):
         u = get_user_model().objects.create_user("creditx", "c@e.com", "pw-Long-enough-1")
         c = APIClient()
