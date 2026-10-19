@@ -1001,6 +1001,101 @@ class BodieZSessionSummaryView(APIView):
         return Response(session_summary(sess))
 
 
+# Which Sentence ConnectZ kinds a workout can become. Not the whole list:
+# resume/cover_letter/bio are NO_INVENTION documents about a person's whole
+# history, and essay/contract/royalties/the lyric fixers answer a different
+# question entirely. A workout is one session — a poem, a lyric, a caption or
+# a post are the kinds that are actually about ONE thing that just happened.
+WORKOUT_WRITE_KINDS = ("poem", "lyrics", "caption", "post")
+
+
+def workout_topic(summary, label=""):
+    """The brief for "write about this workout" — assembled HERE, from
+    `session_summary`'s own numbers, never from anything a client sends. Same
+    shape as `takescorez.promo_topic`: a finished session is a settled record
+    (logged sets, nothing typed into this request), so writing from anything
+    else would risk a poem about a PR that was never actually hit.
+    """
+    facts = []
+    if summary.get("routine_title"):
+        facts.append(f"Routine: {summary['routine_title']}")
+    if summary.get("duration_seconds"):
+        facts.append(f"Duration: {summary['duration_seconds'] // 60} minutes")
+    exs = summary.get("exercises") or []
+    if exs:
+        facts.append("Exercises and what was done: " + "; ".join(
+            f"{e['name']} — {e['sets']} sets, {e['reps']} reps"
+            + (f" at up to {e['top_weight_kg']}kg" if e.get("top_weight_kg") else "")
+            for e in exs[:8]))
+    if summary.get("volume_kg"):
+        facts.append(f"Total volume moved: {summary['volume_kg']}kg")
+    for r in summary.get("records") or []:
+        if r["kind"] == "heaviest":
+            facts.append(f"Personal record: heaviest {r['exercise']} ever at {r['value_kg']}kg "
+                        f"(previous best {r['previous_kg']}kg)")
+        elif r["kind"] == "reps":
+            facts.append(f"Personal record: most reps on {r['exercise']} at "
+                        f"{r.get('weight_kg') or 'bodyweight'} — {r['reps']} (previous best {r['previous_reps']})")
+        elif r["kind"] == "session_volume":
+            facts.append(f"Personal record: most total weight moved in one session, "
+                        f"{r['value_kg']}kg (previous best {r['previous_kg']}kg)")
+    for name in summary.get("firsts") or []:
+        facts.append(f"First time logging {name}")
+    if not facts:
+        facts.append("A logged workout, with no sets recorded yet.")
+    rules = ["Write about THIS workout, in the first person, from the facts above only.",
+             "Do not invent an exercise, a weight, a rep count or a record that is not listed.",
+             "This is about training — a gym session, not a music performance."]
+    return "\n".join(["Facts:", *[f"- {f}" for f in facts], "", "Rules:", *[f"- {x}" for x in rules]])
+
+
+class BodieZSessionWriteView(APIView):
+    """/api/economy/bodiez/sessions/<id>/write/ — write about a finished workout.
+
+    GET says the price and the kinds on offer, before anything is spent. POST
+    writes it through Sentence ConnectZ's own writer — same price, same daily
+    allowance, same "a failed run is not charged" as every other door into it
+    — from a brief built out of the session's own logged sets, never from
+    anything the request sends. An in-progress session has no door here: its
+    summary is not settled yet, so there is nothing true to write from.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _session(self, request, session_id):
+        return BodieZSession.objects.filter(
+            id=session_id, user=request.user, ended_at__isnull=False).first()
+
+    def get(self, request, session_id):
+        sess = self._session(request, session_id)
+        if not sess:
+            return Response({"detail": "Session not found, or still in progress."},
+                            status=status.HTTP_404_NOT_FOUND)
+        from .crosspost import coach_price
+        price = coach_price(request.user)
+        from .sentencez import KINDS
+        kinds = [{"key": k, "label": KINDS[k]["label"], "emoji": KINDS[k]["emoji"]}
+                for k in WORKOUT_WRITE_KINDS]
+        return Response({"cost": {"resource": "promptz", "amount": price["amount"],
+                                  "free_today": price["free_today"]}, "kinds": kinds})
+
+    def post(self, request, session_id):
+        sess = self._session(request, session_id)
+        if not sess:
+            return Response({"detail": "Session not found, or still in progress."},
+                            status=status.HTTP_404_NOT_FOUND)
+        kind = str((request.data or {}).get("kind") or "poem")
+        if kind not in WORKOUT_WRITE_KINDS:
+            kind = "poem"
+        from .sentencez import clean_hashtags, write_piece
+        summary = session_summary(sess)
+        topic = workout_topic(summary)
+        title = summary.get("routine_title") or "ad-hoc"
+        return write_piece(request.user, kind, topic,
+                           hashtags=clean_hashtags((request.data or {}).get("hashtags")),
+                           spend_note=f"Sentence ConnectZ — about a BodieZ workout ({title})",
+                           extra_inputs={"bodiez_session": sess.pk})
+
+
 MAX_PAST_SETS = 100
 MAX_PAST_DAYS = 365 * 5
 
