@@ -793,6 +793,12 @@ def _consume_daily_prompt(user, cost_cents):
     return True
 
 
+def is_platform_owner(user):
+    """The superuser account. The one place 'who may run AI without a balance' is
+    decided, so the prompt path and Video ConnectZ cannot disagree."""
+    return bool(getattr(user, "is_superuser", False))
+
+
 def charge_ai_usage(user, cost_cents, note="AI usage", count_daily=False):
     """Debit the *minimum* cost to cover an AI model run — pure pass-through, no
     developer tax. When `count_daily` is set (a genuine prompt run) and the run is
@@ -812,6 +818,15 @@ def charge_ai_usage(user, cost_cents, note="AI usage", count_daily=False):
         )
         return w.money_cents
     if (w.promptz or 0) + w.money_cents < cost_cents:
+        if is_platform_owner(user):
+            # The owner pays the model bill directly whatever the wallet says, so a
+            # short balance is no reason to refuse them (Corey's call). Logged at
+            # zero so LogZ still shows the run; nothing is taken.
+            Transaction.objects.create(
+                user=user, kind=Transaction.KIND_SPEND, amount_cents=0,
+                dev_tax_cents=0, note=(note + " · owner, balance short, not charged")[:200],
+            )
+            return w.money_cents
         return None
     from_promptz = min(w.promptz or 0, cost_cents)  # PromptZ first
     from_cash = cost_cents - from_promptz

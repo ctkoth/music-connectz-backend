@@ -39,13 +39,14 @@ from rest_framework.views import APIView
 
 from .catalog import over_char_limit
 from .media import stable_media_url
-from .models import Face, Upload, VideoStitch, VideoWork, membership_for, wallet_for
+from .models import (Face, Upload, VideoStitch, VideoWork, is_platform_owner, membership_for,
+                     wallet_for)
 from .videoz import (ASPECTS, CLIP_SECONDS, ROYALTY_PCT, _key, poll, price_cents, refund,
                      start_render)
 
 logger = logging.getLogger(__name__)
 
-MIN_SHOTS, MAX_SHOTS = 2, 6
+MIN_SHOTS, MAX_SHOTS = 2, 4
 CLAIM_STALE_SECONDS = 240
 FFMPEG_TIMEOUT = 200
 AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".opus", ".webm")
@@ -192,6 +193,7 @@ class VideoStitchView(APIView):
             "prices": {str(n): n * clip for n in range(MIN_SHOTS, MAX_SHOTS + 1)},
             "what_you_get": WHAT_YOU_GET,
             "promptz": w.promptz or 0, "money_cents": w.money_cents,
+            "owner_free": is_platform_owner(request.user),
             "aspects": list(ASPECTS), "tracks": tracks,
             "faces": [{"id": f.id, "url": request.build_absolute_uri(f.image.url)}
                       for f in Face.objects.filter(owner=request.user).exclude(image="")[:30]],
@@ -235,7 +237,7 @@ class VideoStitchView(APIView):
         clip = price_cents()
         total = clip * len(shots)
         w = wallet_for(user)
-        if (w.promptz or 0) + w.money_cents < total:
+        if not is_platform_owner(user) and (w.promptz or 0) + w.money_cents < total:
             return Response({"detail": f"Not enough PromptZ or balance for {len(shots)} shots.",
                              "price_cents": total}, status=status.HTTP_402_PAYMENT_REQUIRED)
         started = []

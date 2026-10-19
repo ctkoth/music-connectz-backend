@@ -34,6 +34,7 @@ def media(kind, tmp):
     return open(path, "rb").read()
 
 
+@patch.dict(os.environ, {"VIDEO_CONNECTZ_CENTS": "400"})
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp())
 @patch("apps.economy.videoz._key", return_value="K")
 class VideoStitchTests(TestCase):
@@ -117,3 +118,54 @@ class VideoStitchTests(TestCase):
             d = self.c.get(f"{URL}{st.id}/").json()
         self.assertEqual(d["status"], "failed")
         self.assertIsNone(d["video_url"])
+
+
+@patch.dict(os.environ, {"VIDEO_CONNECTZ_CENTS": "400"})
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+@patch("apps.economy.videoz._key", return_value="K")
+class OwnerShortBalanceTests(TestCase):
+    """The superuser can render and run prompts with a short balance; nobody else can."""
+
+    def make(self, **kw):
+        name = kw.pop("name")
+        u = User.objects.create_user(name, f"{name}@e.com", "pw-Long-enough-1", **kw)
+        w = wallet_for(u); w.promptz = 0; w.money_cents = 0; w.save()
+        t = Upload.objects.create(user=u, name="s.mp3", content_type="audio/mpeg")
+        c = APIClient(); c.force_authenticate(u)
+        return u, t, c
+
+    def post(self, c, t):
+        with patch("apps.economy.videoz.requests.post", return_value=ok()):
+            return c.post(URL, {"track_id": t.id, "shots": ["a", "b"]}, format="json")
+
+    def test_owner_renders_with_nothing_held(self, _):
+        u, t, c = self.make(name="boss", is_superuser=True)
+        self.assertEqual(self.post(c, t).status_code, 201)
+        self.assertEqual(wallet_for(u).money_cents, 0)
+        self.assertEqual(VideoWork.objects.filter(user=u).count(), 2)
+        self.assertTrue(c.get("/api/economy/videoz/").json()["can_afford"])
+
+    def test_everyone_else_is_still_refused(self, _):
+        u, t, c = self.make(name="member")
+        self.assertEqual(self.post(c, t).status_code, 402)
+        self.assertFalse(c.get("/api/economy/videoz/").json()["can_afford"])
+
+    def test_owner_prompts_run_when_short_and_leave_a_zero_ledger_line(self, _):
+        from apps.economy.models import Transaction, charge_ai_usage
+        owner, _t, _c = self.make(name="boss2", is_superuser=True)
+        member, _t2, _c2 = self.make(name="member2")
+        self.assertIsNotNone(charge_ai_usage(owner, 300, "Test run"))
+        self.assertTrue(Transaction.objects.filter(user=owner, amount_cents=0, note__contains="owner").exists())
+        self.assertIsNone(charge_ai_usage(member, 300, "Test run"))
+
+
+class VideoPriceIsSmallTests(TestCase):
+    def test_a_clip_costs_two_promptz_and_a_stitched_video_two_per_shot(self):
+        from apps.economy.videoz import price_cents
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VIDEO_CONNECTZ_CENTS", None)
+            self.assertEqual(price_cents(), 2)
+            # Common sense: the dearest video must cost less than the best tier's
+            # whole day of prompts, or nobody could ever make it.
+            from apps.economy.models import PROMPT_ALLOWANCE
+            self.assertLess(videostitch.MAX_SHOTS * price_cents(), PROMPT_ALLOWANCE["statz"])

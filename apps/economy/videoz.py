@@ -39,7 +39,8 @@ from rest_framework.views import APIView
 
 from .gemini import BASE, _key
 from .catalog import over_char_limit
-from .models import Face, Transaction, Upload, VideoWork, membership_for, wallet_for
+from .models import (Face, Transaction, Upload, VideoWork, is_platform_owner, membership_for,
+                     wallet_for)
 from .media import stable_media_url
 from .views import credit_owner
 
@@ -83,11 +84,17 @@ KINDS = {
 }
 
 
+# Corey's call: a video costs 2 PromptZ a clip (a stitched one, 2 per shot), not
+# hundreds. This is BELOW what the provider charges per clip, so every render is a
+# subsidy; VIDEO_CONNECTZ_CENTS raises it without a deploy of code.
+DEFAULT_PRICE = 2
+
+
 def price_cents():
     try:
-        return max(1, int(os.environ.get("VIDEO_CONNECTZ_CENTS", "400")))
+        return max(1, int(os.environ.get("VIDEO_CONNECTZ_CENTS", str(DEFAULT_PRICE))))
     except ValueError:
-        return 400
+        return DEFAULT_PRICE
 
 
 def _auth(key):
@@ -104,7 +111,13 @@ def hold(user, cost):
     """Take `cost` (PromptZ first, then cash) and say exactly how, or None."""
     w = type(wallet_for(user)).objects.select_for_update().get(pk=wallet_for(user).pk)
     if (w.promptz or 0) + w.money_cents < cost:
-        return None
+        if not is_platform_owner(user):
+            return None
+        # The owner pays the provider directly: render with nothing held. Zero
+        # held means a refund hands back zero, and LogZ still shows the render.
+        Transaction.objects.create(user=user, kind=Transaction.KIND_SPEND, amount_cents=0, dev_tax_cents=0,
+                                   note="Video ConnectZ — owner, balance short, not charged")
+        return 0, 0
     p = min(w.promptz or 0, cost)
     c = cost - p
     w.promptz -= p
@@ -262,7 +275,7 @@ class VideoView(APIView):
             # What the price buys, for the line beside the button — before it is pressed.
             "what_you_get": WHAT_YOU_GET, "clip_seconds": CLIP_SECONDS,
             "promptz": w.promptz or 0, "money_cents": w.money_cents,
-            "can_afford": (w.promptz or 0) + w.money_cents >= cost,
+            "can_afford": is_platform_owner(request.user) or (w.promptz or 0) + w.money_cents >= cost,
             "faces": [{"id": f.id, "url": request.build_absolute_uri(f.image.url)}
                       for f in Face.objects.filter(owner=request.user).exclude(image="")[:30]],
             "royalty_pct": ROYALTY_PCT,

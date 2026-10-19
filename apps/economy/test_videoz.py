@@ -1,5 +1,6 @@
 """Video ConnectZ: price held at start and returned in full on any failure,
 the file stored as the member's own upload, and the API key never shown."""
+import os
 import tempfile
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
@@ -24,6 +25,7 @@ def resp(code=200, json=None, content=b""):
     return r
 
 
+@patch.dict(os.environ, {"VIDEO_CONNECTZ_CENTS": "400"})
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp(), OWNER_USERNAMES=["koth"], OWNER_EMAILS=[])
 @patch("apps.economy.videoz._key", return_value=KEY)
 class VideoTests(TestCase):
@@ -141,6 +143,7 @@ DONE_JSON = {"done": True, "response": {"generateVideoResponse": {"generatedSamp
     {"video": {"uri": "https://generativelanguage.googleapis.com/v1beta/files/x:download?alt=media"}}]}}}
 
 
+@patch.dict(os.environ, {"VIDEO_CONNECTZ_CENTS": "400"})
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp(), OWNER_USERNAMES=["koth"], OWNER_EMAILS=[])
 @patch("apps.economy.videoz._key", return_value=KEY)
 class RefundRunsOnceTests(TestCase):
@@ -250,6 +253,7 @@ class RefundRunsOnceTests(TestCase):
         self.assertEqual((w.status, w.error), ("failed", "the render failed"))
 
 
+@patch.dict(os.environ, {"VIDEO_CONNECTZ_CENTS": "400"})
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp(), OWNER_USERNAMES=["koth"], OWNER_EMAILS=[])
 @patch("apps.economy.videoz._key", return_value=KEY)
 class OnlyOneRequestFetchesTheBytesTests(TestCase):
@@ -339,6 +343,7 @@ class OnlyOneRequestFetchesTheBytesTests(TestCase):
         self.assertEqual(c.get(URL).json()["works"][0]["error"], "")
 
 
+@patch.dict(os.environ, {"VIDEO_CONNECTZ_CENTS": "400"})
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp(), OWNER_USERNAMES=["koth"], OWNER_EMAILS=[])
 @patch("apps.economy.videoz._key", return_value=KEY)
 class StartFailureSaysWhoseFaultTests(TestCase):
@@ -414,6 +419,7 @@ class StartFailureSaysWhoseFaultTests(TestCase):
         self.assertNotIn("reword", err.lower())
 
 
+@patch.dict(os.environ, {"VIDEO_CONNECTZ_CENTS": "400"})
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp(), OWNER_USERNAMES=["koth"], OWNER_EMAILS=[])
 @patch("apps.economy.videoz._key", return_value=KEY)
 class WhatThePriceBuysTests(TestCase):
@@ -427,6 +433,7 @@ class WhatThePriceBuysTests(TestCase):
         self.assertIn("refund", line.lower())            # and a failed render costs nothing
 
 
+@patch.dict(os.environ, {"VIDEO_CONNECTZ_CENTS": "400"})
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp(), OWNER_USERNAMES=["koth"], OWNER_EMAILS=[])
 @patch("apps.economy.videoz._key", return_value=KEY)
 class TheKeyStaysOutOfTheUrlTests(TestCase):
