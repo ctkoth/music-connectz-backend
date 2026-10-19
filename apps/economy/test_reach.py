@@ -1,4 +1,5 @@
 """Who can reach me: range gates on messages and calls sent TO a member."""
+from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
@@ -7,6 +8,7 @@ from .models import Follow, profile_for
 User = get_user_model()
 
 
+@patch("apps.economy.messages_view.DM_COLD_ENERGY", 0)
 class ReachGates(TestCase):
     def setUp(self):
         self.me = User.objects.create_user(username="quiet", password="pw")

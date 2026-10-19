@@ -1,3 +1,5 @@
+from unittest.mock import patch
+from unittest.mock import patch
 from datetime import date
 
 from django.contrib.auth import get_user_model
@@ -19,6 +21,7 @@ def member(name, age=None):
     return u
 
 
+@patch("apps.economy.messages_view.DM_COLD_ENERGY", 0)
 class AgeGroupContactTests(TestCase):
     """No adult-to-minor contact: not in a message, not in a call, not in a search."""
 

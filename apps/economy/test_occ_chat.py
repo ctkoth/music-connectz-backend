@@ -105,10 +105,11 @@ class ThePriceIsKnownBeforeSending(Base):
     def test_an_engine_the_allowance_covers_says_free_today(self):
         self.assertTrue(self.row("haiku")["free_today"])
 
-    def test_a_dearer_engine_is_not_free_even_with_prompts_left(self):
-        # A free prompt covers up to DAILY_PROMPT_MAX_CENTS; Sonnet is above it.
+    def test_a_dearer_engine_is_free_today_while_prompts_are_left(self):
+        # One task is one PromptZ whatever the engine (Corey's rule), so a free
+        # prompt covers Sonnet as it does Haiku.
         as_tier(self.user, TIER_PREMIUM)
-        self.assertFalse(self.row("sonnet")["free_today"])
+        self.assertTrue(self.row("sonnet")["free_today"])
 
     def test_free_today_goes_when_the_prompts_do(self):
         self.use_up_the_free_prompts()
@@ -365,4 +366,4 @@ class TheRefusalCarriesTheWayForward(Base):
         as_tier(self.user, TIER_FREE)
         r = self.client.patch(MODELS, {"model": "opus"}, format="json")
         self.assertEqual(r.status_code, 403)
-        self.assertEqual(r.data["required_tier"], "premium")
+        self.assertEqual(r.data["required_tier"], "statz")

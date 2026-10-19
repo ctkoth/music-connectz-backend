@@ -176,21 +176,21 @@ class PriceTests(HubBase):
         self.assertEqual(key, "haiku")
         self.assertTrue(p["free_today"])
 
-    def test_occ_on_an_engine_dearer_than_a_free_prompt_is_not_free_today(self):
+    def test_occ_on_a_dear_engine_is_one_promptz_and_free_today_under_the_flat_rule(self):
         m = membership_for(self.me)
-        m.tier = "premium"
+        m.tier = "statz"
         m.save()
         p = profile_for(self.me)
         p.ai_model = "opus"
         p.save()
         price = self.app("occ")["price"]
         self.assertEqual(price["engine"], "Opus")
-        self.assertEqual(price["cost_cents"], 8)
-        self.assertFalse(price["free_today"], "a free daily prompt only covers up to a ceiling")
-        self.assertGreater(price["daily_remaining"], 0, "prompts remain; it is the engine that is dear")
+        self.assertEqual(price["cost_cents"], 1)
+        self.assertTrue(price["free_today"], "one task is one PromptZ, which a free daily prompt covers")
+        self.assertGreater(price["daily_remaining"], 0)
         p.ai_model = "sonnet"
         p.save()
-        self.assertEqual(self.app("occ")["price"]["cost_cents"], 5)
+        self.assertEqual(self.app("occ")["price"]["cost_cents"], 1)
 
     def test_a_choice_above_the_tier_falls_back_rather_than_being_quoted(self):
         p = profile_for(self.me)

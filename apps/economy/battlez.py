@@ -182,7 +182,7 @@ class BattlesView(APIView):
         except (TypeError, ValueError):
             entry_spinaz = 0
         with transaction.atomic():
-            if spend_energy(request.user, BATTLE_HOST_ENERGY, f"Host battle: {title[:60]}",
+            if BATTLE_HOST_ENERGY and spend_energy(request.user, BATTLE_HOST_ENERGY, f"Host battle: {title[:60]}",
                             app_key="battlez", target="battlez:host") is None:
                 have = max(0, wallet_for(request.user).energy or 0)
                 return Response({
@@ -546,7 +546,7 @@ class BattleChallengeView(APIView):
         kind = str(d.get("kind", "1v1")).lower()
         # Charged with the create in one unit, so a failed call-out is free.
         with transaction.atomic():
-            if spend_energy(request.user, BATTLE_CALLOUT_ENERGY,
+            if BATTLE_CALLOUT_ENERGY and spend_energy(request.user, BATTLE_CALLOUT_ENERGY,
                             f"Challenge to @{opponent.username}",
                             app_key="battlez", target="battlez:challenge") is None:
                 have = max(0, wallet_for(request.user).energy or 0)
