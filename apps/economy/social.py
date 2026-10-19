@@ -663,11 +663,14 @@ def _profile_card(p, request=None, badges=None, audience=None, batched=None):
         "sign_cn": chinese_zodiac_for(p.birthday),
         "regions": p.regions,
         "nationalities": p.nationalities,
-        # Social ConnectZ shows this as the member's own claimed identity —
-        # "Producer", "Mix Engineer" — the same PersonaZ classes ProfileZ
-        # renders, read through the one repair-on-read helper rather than
-        # `profile.personas` directly (see personaz.py: a mangled row must
-        # not reach a search result any more than it reaches its owner).
+        # Social ConnectZ's directory renders a persona label + city per
+        # card, same as the full profile does — leaving these off the
+        # compact card meant the search list either showed nothing real for
+        # either, or had to fake them (which is how the demo SEED array in
+        # the frontend happened in the first place). personas_of repairs a
+        # mangled row the same way it does everywhere else personas are read
+        # (see personaz.py and the two-writers note in CLAUDE.md).
+        "location": p.location,
         "personas": personas_of(p),
         "sober": p.sober,
         # The code AND the per-axis form, because the profile screen renders
