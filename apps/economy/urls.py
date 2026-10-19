@@ -193,7 +193,7 @@ from .habits import HabitCreateView, HabitCompleteView
 from .bodiez import (
     BodieZAccessView, BodieZBoardView, BodieZCustomDaysView, BodieZStepsView, BodieZCustomExerciseView, BodieZCustomExerciseDetailView, BodieZPastSessionView, BodieZStepCoachView, BodieZCustomDayDetailView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
     BodieZGoalDetailView, BodieZGoalsView, BodieZRecoveryView, BodieZRoutinesView,
-    BodieZRoutineDetailView, BodieZRoutineCopyView, BodieZSessionRoutineView, BodieZSessionsView, BodieZSessionDetailView, BodieZSessionSummaryView, BodieZSetsView, BodieZLbFixView,
+    BodieZRoutineDetailView, BodieZRoutineCopyView, BodieZSessionRoutineView, BodieZSessionsView, BodieZSessionDetailView, BodieZSessionSummaryView, BodieZSessionWriteView, BodieZSetsView, BodieZLbFixView,
     BodieZProgressView, BodieZWeightLogView,
 )
 from .lessonz import (
@@ -560,6 +560,8 @@ urlpatterns = [
          name="economy-bodiez-session"),
     path("bodiez/sessions/<int:session_id>/summary/", BodieZSessionSummaryView.as_view(),
          name="economy-bodiez-session-summary"),
+    path("bodiez/sessions/<int:session_id>/write/", BodieZSessionWriteView.as_view(),
+         name="economy-bodiez-session-write"),
     path("bodiez/sessions/<int:session_id>/sets/", BodieZSetsView.as_view(),
          name="economy-bodiez-sets"),
     path("bodiez/lb-fix/", BodieZLbFixView.as_view(), name="economy-bodiez-lb-fix"),
