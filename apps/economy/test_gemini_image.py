@@ -12,7 +12,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from apps.economy.models import Transaction, wallet_for
+from apps.economy.models import GeneratedImage, Transaction, wallet_for
 
 URL = "/api/economy/gemini/image/"
 KEY = "AIzaSyTHE-SECRET-KEY-0123456789"
@@ -74,6 +74,43 @@ class ImageKeyTests(TestCase):
             r = self.c.post(URL, {"prompt": "x"}, format="json")
         self.assertNotIn(KEY, r.content.decode())
         self.assertEqual(r.status_code, 503)
+
+    def test_a_generated_image_is_kept_not_just_handed_back(self, _):
+        # Corey's rule: a PromptZ spend leaves something tangible. Before
+        # this, a billed image was a base64 string and nothing else — gone
+        # the moment the tab closed unless the member saved it themselves.
+        ok = MagicMock(status_code=200)
+        ok.json.return_value = {"candidates": [{"content": {"parts": [
+            {"inlineData": {"mimeType": "image/png", "data": "QUJD"}}]}}]}
+        before = GeneratedImage.objects.count()
+        with patch("apps.economy.gemini.requests.post", return_value=ok):
+            r = self.c.post(URL, {"prompt": "a neon cat"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(GeneratedImage.objects.count(), before + 1)
+        work = r.json()["work"]
+        self.assertIsNotNone(work)
+        self.assertEqual(work["prompt"], "a neon cat")
+        self.assertTrue(work["url"])
+
+    def test_past_images_are_reopenable(self, _):
+        ok = MagicMock(status_code=200)
+        ok.json.return_value = {"candidates": [{"content": {"parts": [
+            {"inlineData": {"mimeType": "image/png", "data": "QUJD"}}]}}]}
+        with patch("apps.economy.gemini.requests.post", return_value=ok):
+            self.c.post(URL, {"prompt": "a neon cat"}, format="json")
+        r = self.c.get(URL)
+        self.assertEqual(r.status_code, 200)
+        images = r.json()["images"]
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0]["prompt"], "a neon cat")
+
+    def test_only_your_own_images_come_back(self, _):
+        other = get_user_model().objects.create_user("other", "o@e.com", "pw-Long-enough-1")
+        from apps.economy.models import Upload
+        up = Upload.objects.create(user=other, name="x.png", content_type="image/png")
+        GeneratedImage.objects.create(user=other, prompt="secret", upload=up)
+        r = self.c.get(URL)
+        self.assertEqual(r.json()["images"], [])
 
     def test_the_providers_own_error_text_is_not_forwarded(self, _):
         refused = MagicMock(status_code=429)

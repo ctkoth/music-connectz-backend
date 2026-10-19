@@ -18,6 +18,16 @@ So every module that spends a resource is declared here, once, with:
   `no_free_way` — the honest reason there isn't one. One of the two, never
                 neither: a member who can learn it for free should be told.
 
+Corey's second rule, narrower: **every PromptZ spend specifically — the resource
+that costs real Gemini/Anthropic money, not SpinaZ or Energy — must leave the
+member something tangible: saved, reopenable, and exportable or shareable.**
+A reply shown once and gone is a spend with nothing to show for it, however
+"understandable" or "learnable" it was. So a `resource: "promptz"` entry must
+include `"tangible"` in its `outcomes`, OR declare `ephemeral_reason` — the
+stated reason it deliberately keeps nothing (a preview before a choice, a
+privacy-sensitive reading never stored), same shape as `free_way`/
+`no_free_way`: one of the two, never silently neither.
+
 `test_credit_outcomes` is the enforcement. It walks the source, finds every
 module that calls a spend primitive, and fails if one is not declared here — so
 a NEW way to spend credits cannot ship without saying what it buys, and a
@@ -83,6 +93,9 @@ CREDIT_OUTCOMES = {
         "buys": "A spoken sample of a voice, so you hear it before you choose it.",
         "outcomes": ["understandable"],
         "lands_in": ["voicez"],
+        "ephemeral_reason": "It's a preview before a choice, not the thing itself — the voice you then "
+                            "pick and use is free and yours at every tier; saving the sample would mean "
+                            "keeping a clip whose only purpose was to be heard once and decided on.",
         "free_way": {"label": "Choosing and using your own voice is free; only the sample is metered.",
                      "tab": "voicez"}},
     "occ": {
@@ -100,7 +113,11 @@ CREDIT_OUTCOMES = {
     "directz_app": {
         "resource": "promptz", "label": "DirectZ craft rating",
         "buys": "A watched-and-scored read of your video: framing, editing, lighting, sound, story.",
-        "outcomes": ["understandable", "learnable", "braggable"],
+        # The score writes onto the DirectZWork row itself (directz_app.py
+        # `_apply_craft_rating`), which is a public, listed work — tangible and
+        # shareable were missing from this list even though the code already
+        # delivers both; this was a declaration bug, not a product one.
+        "outcomes": ["understandable", "learnable", "braggable", "tangible", "shareable"],
         "lands_in": ["directz", "postz"],
         "free_way": {"label": "A daily free prompt covers a run.", "tab": "directz"}},
     "translate": {
@@ -114,18 +131,38 @@ CREDIT_OUTCOMES = {
         "buys": "A read of how a photo presents, with what to change.",
         "outcomes": ["understandable", "learnable"],
         "lands_in": ["profilez", "facez"],
+        "ephemeral_reason": "Nothing is stored by design (attractivenessz.py): no photo, no score, no "
+                            "history. A repeated biometric-adjacent rating held over time is its own "
+                            "privacy risk that a stateless call does not create.",
         "no_free_way": "It reads one photo with a model; the daily free allowance is the free way in."},
     "lookmaxz_view": {
         "resource": "promptz", "label": "LookZMaxZ reading",
         "buys": "A sector-by-sector read of how a photo presents (face, skin, teeth, styling) with what to change and where to shop for it.",
-        "outcomes": ["understandable", "learnable", "tangible"],
+        # Extends AttractivenessZ and inherits its privacy line: the reading
+        # itself is never stored (only the member's own shop-market
+        # preferences are, in LookmaxPrefs — a different thing). "tangible"
+        # was here before this, which overclaimed what the code does; this is
+        # the declaration catching up to the deliberate design, not a new one.
+        "outcomes": ["understandable", "learnable"],
         "lands_in": ["lookmaxz", "bodiez"],
+        "ephemeral_reason": "Inherits AttractivenessZ's privacy line: the reading is never stored, for "
+                            "the same reason (a held biometric-adjacent history is its own risk). Only "
+                            "the member's own shop-market preferences persist, in LookmaxPrefs.",
         "free_way": {"label": "Body, the shop and your marketplaces are free; a daily free prompt covers a reading.", "tab": "lookmaxz"}},
     "views": {
         "resource": "promptz", "label": "AI usage charge",
         "buys": "The model run another screen asked for, billed once and logged with its reason.",
-        "outcomes": ["understandable", "tangible"],
+        # This is the generic pass-through other screens bill an ad hoc AI
+        # call through — it has no content model of its own, so "tangible"
+        # here used to mean only "it shows up in your ledger," not "the
+        # output is saved." The LogZ line is real but it is a bill, not a
+        # kept result; the caller is the one that owes its own declaration
+        # for whatever it actually produces.
+        "outcomes": ["understandable"],
         "lands_in": ["logz"],
+        "ephemeral_reason": "A generic billing pass-through for another screen's own ad hoc AI call — "
+                            "it has no output of its own to keep. Whatever calls this should carry its "
+                            "own declaration for what IT produces and keeps.",
         "free_way": {"label": "A daily free prompt covers a run, and every charge is in LogZ.", "tab": "logz"}},
     "battlez": {
         "resource": "spinaz", "label": "Battle stake",
@@ -196,6 +233,14 @@ def validate(entry):
     free, none = entry.get("free_way"), entry.get("no_free_way")
     if not ((free and free.get("label") and free.get("tab")) or (none and str(none).strip())):
         out.append("free_way or no_free_way")
+    # Corey's rule, narrower: a PromptZ spend — the resource that costs real
+    # model money — must leave the member something tangible, or say plainly
+    # why it deliberately doesn't. Silence on this is what let gemini.py bill
+    # a member and hand back nothing kept.
+    if entry.get("resource") == "promptz":
+        ephemeral = entry.get("ephemeral_reason")
+        if "tangible" not in got and not (ephemeral and str(ephemeral).strip()):
+            out.append("tangible outcome or ephemeral_reason")
     return out
 
 

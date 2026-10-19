@@ -8,11 +8,15 @@ Model names are env-overridable since Google revises them often — and, since
 one of those revisions took the Boss Take coach down mid-promotion, they are
 CHAINS rather than single names. See MODEL_CHAINS below.
 """
+import base64
+import binascii
 import logging
 import os
+import time
 
 import requests
 from django.conf import settings
+from django.core.files.base import ContentFile
 
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -20,9 +24,25 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import ai_cost
-from .models import (can_afford_ai, charge_ai_usage, daily_prompt_covers,
-                     daily_prompt_state, wallet_for)
+from .media import stable_media_url
+from .models import (GeneratedImage, Upload, can_afford_ai, charge_ai_usage,
+                     daily_prompt_covers, daily_prompt_state, wallet_for)
 from .views import credit_owner
+
+# Mapping is deliberately small: these are the only MIME types Gemini's image
+# models return. An unlisted one still saves — just under a generic name —
+# rather than 500ing on a format we didn't expect.
+_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
+
+
+def _image_dict(work, request=None):
+    up = work.upload
+    return {
+        "id": work.id, "prompt": work.prompt, "created_at": work.created_at,
+        # None when the file itself was later removed from the uploads screen —
+        # the record still says what was made, same as MasterWork.
+        "url": stable_media_url(up, request) if up else None,
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -247,9 +267,13 @@ IMAGE_EMPTY = ("The image service didn't return a picture for that. Nothing was 
 
 
 class GeminiImageView(APIView):
-    """POST { prompt } → a generated image as a data URI. Synchronous."""
+    """GET: images you've made. POST { prompt } → a generated image, kept."""
 
     permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        works = GeneratedImage.objects.filter(user=request.user).select_related("upload")[:30]
+        return Response({"images": [_image_dict(w, request) for w in works]})
 
     def post(self, request):
         prompt = str((request.data or {}).get("prompt", "")).strip()
@@ -302,4 +326,22 @@ class GeminiImageView(APIView):
             return Response({"detail": IMAGE_DOWN, "image": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         cost = _bill(request.user, f"Image ConnectZ (Gemini)")
-        return Response({"image": f"data:{mime};base64,{img}", "cost_cents": cost, "money": round(wallet_for(request.user).money_cents / 100, 2)})
+
+        # The spend is already charged above — a storage failure past this
+        # point must not look like a refusal, so it's logged, never raised.
+        # The member still gets their image in the response either way;
+        # only the "kept" copy is at risk, and that's the half we can afford
+        # to lose on a bad day, not the half we already billed for.
+        work = None
+        try:
+            raw = base64.b64decode(img)
+            name = f"image-connectz-{int(time.time() * 1000)}.{_EXT.get(mime, 'png')}"
+            up = Upload(user=request.user, name=name, size_bytes=len(raw), content_type=mime)
+            up.file.save(name, ContentFile(raw), save=False)
+            up.save()
+            work = GeneratedImage.objects.create(user=request.user, prompt=prompt, upload=up)
+        except (binascii.Error, ValueError, OSError):
+            logger.exception("Image ConnectZ: billed but couldn't save a kept copy")
+
+        return Response({"image": f"data:{mime};base64,{img}", "work": _image_dict(work, request) if work else None,
+                          "cost_cents": cost, "money": round(wallet_for(request.user).money_cents / 100, 2)})
