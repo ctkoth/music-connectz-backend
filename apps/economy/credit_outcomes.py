@@ -184,7 +184,7 @@ CREDIT_OUTCOMES = {
         "free_way": {"label": "Energy regenerates hourly.", "tab": "collabz"}},
     "postz": {
         "resource": "energy", "label": "Posting",
-        "buys": "A post that is live, linkable, and earns from ratings and joins.",
+        "buys": "A post that is live, linkable, and earns from ratings and joins; or a day near the top of the feed for a post you boost.",
         "outcomes": ["shareable", "lucrative", "braggable", "tangible"],
         "lands_in": ["postz", "battlez", "distributez"],
         "free_way": {"label": "Energy regenerates hourly, so posting is paid for in time, not money.",

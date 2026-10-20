@@ -7,7 +7,7 @@ from .questz import QuestBoardView, QuestClaimView
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
 from .embedplays import EmbedPlayView
-from .postz import (PostCostView, PostDeleteView, PostOpenView, PostsView,
+from .postz import (PostBoostView, PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView, PostProgressionView, DiscoveryFeedView, PostSaleView)
 from .publicz import PublicPostView, PublicProfileView
 from .links import LinkClickView, LinkTalliesView
@@ -328,6 +328,7 @@ urlpatterns = [
     # `posts/<id>/coach/` is the same view under the name the screens were
     # briefed with; `postz/` is where every other PostZ route lives.
     path("postz/<int:pk>/coach/", PostCoachView.as_view(), name="economy-postz-coach"),
+    path("postz/<int:pk>/boost/", PostBoostView.as_view(), name="economy-postz-boost"),
     path("posts/<int:pk>/coach/", PostCoachView.as_view(), name="economy-posts-coach"),
     path("postz/<int:pk>/coach-card.png", post_coach_card, name="economy-postz-coach-card"),
     path("soundz/", SoundZView.as_view(), name="economy-soundz"),

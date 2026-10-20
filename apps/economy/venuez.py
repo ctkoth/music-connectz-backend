@@ -570,7 +570,7 @@ class VenueQuoteView(APIView):
 
         # Only the named skills are charged in ⚡ — the rule the booking follows,
         # quoted here by the same helper so the two cannot answer differently.
-        cost, lines = post_cost_cents(request.user, asked)
+        cost, lines = post_cost_cents(request.user, asked, floor=0)
         have = max(0, wallet_for(request.user).energy or 0)
         return Response({
             "quote": quote_for(event, request.user, skills=skills, hours=hours),

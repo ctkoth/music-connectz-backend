@@ -682,6 +682,20 @@ FOLLOW_ENERGY = 1
 # Hosting an open battle puts a listing in everyone's BattleZ.
 BATTLE_HOST_ENERGY = 1
 
+# Every post costs at least this much ⚡, whatever skills went into it. A post with
+# no priced skill used to be free, so the cheapest thing to do was also the thing
+# nothing paid for. Not a wall: a post still goes through with less than this.
+POST_ENERGY_FLOOR = 1
+
+# Boosting a post: ⚡ buys a day near the top of the feed for a PUBLIC post of
+# yours. It buys visibility only - never ratings, plays or royalties - and it is
+# labelled "Boosted" on the card. At most BOOST_SLOTS boosted posts lead the feed
+# at once (the most recently boosted), so paying cannot bury everything else.
+BOOST_ENERGY = 40
+BOOST_HOURS = 24
+BOOST_MAX_AHEAD_HOURS = 72
+BOOST_SLOTS = 3
+
 # ⚡ to coach a POST from PostZ (the post door; a freshly recorded take stays
 # PromptZ-only). Corey: ten times the prompt cost, by tier. The base is 10 x
 # AI_TASK_PROMPTZ and each tier multiplies it by how much more it regenerates

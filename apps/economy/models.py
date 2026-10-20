@@ -1737,6 +1737,8 @@ class Post(models.Model):
     # the author's off switch for the case where it isn't welcome.
     allow_in_playlists = models.BooleanField(default=True)
     skill_cost_cents = models.PositiveIntegerField(default=0)  # combined skill price of what's used
+    # Paid visibility (postz boost): while in the future, this post may lead the feed.
+    boosted_until = models.DateTimeField(null=True, blank=True, db_index=True)
     # Progression tracking: when did this post become eligible for next tier?
     battle_eligible_at = models.DateTimeField(null=True, blank=True)  # when rating count/avg hit threshold
     collab_eligible_at = models.DateTimeField(null=True, blank=True)  # when quality score hit threshold

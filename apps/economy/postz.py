@@ -15,7 +15,8 @@ from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Sum, When
 from django.utils import timezone
 
-from .catalog import edit_window_for
+from .catalog import (BOOST_ENERGY, BOOST_HOURS, BOOST_MAX_AHEAD_HOURS, BOOST_SLOTS,
+                      POST_ENERGY_FLOOR, edit_window_for)
 from .coachshare import clean_visibility, coach_read_for, for_new_post, legacy_score
 from .crosspost import coach_cap, coach_price, destinations_for, take_state_for
 from .gates import clean_gates, failing_gate, member_metrics, refusal
@@ -47,6 +48,7 @@ from .models import (
     split_cents,
     submission_cap_for,
     submissions_used_today,
+    spend_energy,
     wallet_for,
     post_collab_threshold,
     post_is_battle_eligible,
@@ -260,6 +262,9 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
         "joins": (p.joins.count() if p.visibility == "restricted" else 0) if joins is None else joins,
         "shares": p.shares.count() if shares is None else shares,
         "up": up, "down": down, "vibe": vibe, "flagged": flagged,
+        "boosted": bool(p.boosted_until and p.boosted_until > timezone.now()),
+        "boost_cost_energy": BOOST_ENERGY,
+        "boosted_until": p.boosted_until.isoformat() if p.boosted_until else None,
         "rating": item_rating_median(f"post:{p.id}") if rating is _UNSET else rating,
         "created_at": p.created_at.isoformat(),
         "edited_at": p.edited_at.isoformat() if p.edited_at else None,
@@ -335,7 +340,7 @@ def skill_prices(user):
     return out
 
 
-def post_cost_cents(user, skills_used):
+def post_cost_cents(user, skills_used, floor=None):
     """What posting this costs: the combined price of the skills that went in.
 
     Computed HERE, from the member's own rates, never taken from the request.
@@ -360,6 +365,12 @@ def post_cost_cents(user, skills_used):
     off = badge_effects(user).get("post_discount_pct", 0)
     if off and total:
         total = max(0, total - int(total * off / 100))
+    # Every POST costs at least the floor. Submissions that refuse when short
+    # (battles, collabs, venues) pass floor=0: a floor there would be a wall.
+    floor = POST_ENERGY_FLOOR if floor is None else floor
+    if total < floor:
+        lines.append({"skill": "Posting", "cents": floor - total})
+        total = floor
     return total, lines
 
 
@@ -424,7 +435,7 @@ def charge_skill_energy(user, skills):
     Returns (info, refusal). `refusal` is a (payload, status) pair or None,
     matching `create_post`'s error shape.
     """
-    cost, lines = post_cost_cents(user, skills)
+    cost, lines = post_cost_cents(user, skills, floor=0)
     if not cost:
         return {"energy_cost": 0, "energy_charged": 0}, None
 
@@ -658,6 +669,65 @@ class SubmissionsView(APIView):
         return Response({"used": used, "cap": cap, "remaining": max(0, cap - used)})
 
 
+def _boost_state(post, user):
+    """What boosting this post would do right now, said before it is pressed."""
+    now = timezone.now()
+    until = post.boosted_until if post.boosted_until and post.boosted_until > now else None
+    base = until or now
+    new_until = base + timedelta(hours=BOOST_HOURS)
+    ahead = (new_until - now).total_seconds() / 3600
+    why = ""
+    if post.author_id != user.id:
+        why = "You can only boost your own post."
+    elif post.visibility not in ("public", ""):
+        why = "Only a public post can be boosted: a private or members-only post is not in the open feed."
+    elif ahead > BOOST_MAX_AHEAD_HOURS:
+        why = f"It is already boosted for more than {BOOST_MAX_AHEAD_HOURS - BOOST_HOURS} hours. Come back when that is nearly up."
+    return {"cost_energy": BOOST_ENERGY, "hours": BOOST_HOURS, "slots": BOOST_SLOTS,
+            "boosted_until": until.isoformat() if until else None,
+            "new_until": new_until.isoformat(), "allowed": not why, "why_not": why,
+            "energy": max(0, wallet_for(user).energy or 0),
+            "what_you_get": f"A place near the top of the feed for {BOOST_HOURS} hours, labelled Boosted. "
+                            "It buys visibility only: it does not change ratings, plays or royalties. "
+                            f"At most {BOOST_SLOTS} boosted posts lead the feed at once."}
+
+
+class PostBoostView(APIView):
+    """GET /postz/<id>/boost/ — the price and whether it can be bought. POST — boost it."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        post = Post.objects.filter(pk=pk).first()
+        if not post or (post.author_id != request.user.id and post.visibility not in ("public", "")):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(_boost_state(post, request.user))
+
+    def post(self, request, pk):
+        post = Post.objects.filter(pk=pk, author=request.user).first()
+        if not post:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        st = _boost_state(post, request.user)
+        if not st["allowed"]:
+            return Response({"detail": st["why_not"], **st}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            if spend_energy(request.user, BOOST_ENERGY, f"Boost: {post.title[:60]}",
+                            app_key="postz", target=f"post:{post.id}") is None:
+                have = st["energy"]
+                return Response({
+                    "detail": f"Boosting costs {BOOST_ENERGY} \u26a1 and you have {have}. Nothing was charged.",
+                    "insufficient": True, "resource": "energy",
+                    "cost": {"resource": "energy", "amount": BOOST_ENERGY},
+                    "energy_needed": BOOST_ENERGY, "energy_available": have,
+                    "energy_short": BOOST_ENERGY - have,
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+            Post.objects.filter(pk=post.pk).update(boosted_until=timezone.now() + (
+                (post.boosted_until - timezone.now() if post.boosted_until and post.boosted_until > timezone.now()
+                 else timedelta(0)) + timedelta(hours=BOOST_HOURS)))
+        post.refresh_from_db()
+        return Response({**_boost_state(post, request.user), "boosted": True})
+
+
 class PostsView(APIView):
     """GET the visible feed; POST creates a post (charges the skill-cost energy).
 
@@ -750,6 +820,13 @@ class PostsView(APIView):
             posts.sort(key=lambda d: (d["rating"] or 0, d["vibe"]), reverse=True)
         else:  # hot
             posts.sort(key=lambda d: hot(d, by_id[d["id"]]), reverse=True)
+        # Paid placement: up to BOOST_SLOTS active boosted posts lead, most recently
+        # boosted first, and every one says so on its card. The rest keep their place.
+        live = sorted((d for d in posts if d["boosted"] and not d["flagged"]),
+                      key=lambda d: d["boosted_until"], reverse=True)[:BOOST_SLOTS]
+        if live:
+            lead = {d["id"] for d in live}
+            posts = live + [d for d in posts if d["id"] not in lead]
         from .ratez import rating_reward
         return Response({"posts": posts[:100], "sort": sort,
                          "rating_reward": rating_reward(request.user)})
