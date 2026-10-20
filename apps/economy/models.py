@@ -2365,6 +2365,68 @@ def notify(user, kind, text, actor=None, item_id=""):
     return Notification.objects.create(user=user, actor=actor, kind=kind, text=text[:280], item_id=item_id or "")
 
 
+# ---- LabelZ: public label groups and e-signed artist agreements ----
+#
+# The frontend (`src/apps/LabelZ.jsx`) has called `GET/POST /api/labelz/` and
+# `/api/labelz/contracts/` since it shipped, and neither route existed: every
+# load of the tab 404'd. `management/commands/appz_usage.py` flagged this as
+# BROKEN rather than quiet for exactly that reason. These two models are the
+# feature the frontend has been waiting for.
+
+
+class Label(models.Model):
+    """A public label group. A member starts one; `LabelContract` below is
+    the signed agreement a label offers an artist — the label itself is just
+    the group and who owns it."""
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="labels_owned")
+    name = models.CharField(max_length=120)
+    bio = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Label<{self.id}> {self.name}"
+
+
+class LabelContract(models.Model):
+    """An e-signed artist agreement offered by a label to an artist. Advances
+    are display text only, never a real transfer — the frontend's own line
+    says advances settle off-platform, and this model holds it to that: there
+    is no SpinaZ or money movement anywhere in this file.
+
+    `doc_sha256` is taken once, at offer time, over exactly what was offered
+    (label, artist, title, terms, advance line) — an audit trail that can
+    prove what a signature was actually put to, even if the label's own
+    name or bio changes later.
+    """
+    STATUS_OFFERED, STATUS_SIGNED, STATUS_DECLINED = "offered", "signed", "declined"
+    STATUS_CHOICES = [
+        (STATUS_OFFERED, "Offered"), (STATUS_SIGNED, "Signed"), (STATUS_DECLINED, "Declined"),
+    ]
+    label = models.ForeignKey(Label, on_delete=models.CASCADE, related_name="contracts")
+    artist = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="label_contracts")
+    title = models.CharField(max_length=200, default="Artist Agreement")
+    terms_text = models.TextField()
+    advance_display = models.CharField(max_length=80, blank=True, default="")
+    doc_sha256 = models.CharField(max_length=64, blank=True, default="")
+    owner_signed_name = models.CharField(max_length=200, blank=True, default="")
+    artist_signed_name = models.CharField(max_length=200, blank=True, default="")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OFFERED)
+    created_at = models.DateTimeField(auto_now_add=True)
+    signed_at = models.DateTimeField(null=True, blank=True)
+    declined_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["artist", "status"]), models.Index(fields=["label", "status"])]
+
+    def __str__(self):
+        return f"LabelContract<{self.id}> {self.label_id}->{self.artist_id} {self.status}"
+
+
 # ---- DupeZ: one person, more than one account ----
 #
 # Two accounts belonging to the same person is not, by itself, misconduct — it

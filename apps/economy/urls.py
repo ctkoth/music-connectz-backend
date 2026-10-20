@@ -33,6 +33,8 @@ from .voicez import VoiceDetailView, VoicePreviewView, VoicesView
 from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView, DupeZVerifyView,
                     DupeZReviewView, DupeZView)
 from .callz import CallDetailView, CallRateView, CallsView
+from .labelz import (LabelContractActionView, LabelContractsView, LabelDetailView,
+                     LabelListCreateView)
 from .sharecard import post_card, profile_card
 from .scoreshare import ScoreShareHumanView, ScoreShareView, score_card_png
 from .coachshare import PostCoachView, post_coach_card
@@ -625,6 +627,13 @@ urlpatterns = [
     # Attendance-gated, unlike a battle and unlike a collab split. Somebody
     # who was not in the room has nothing to report about it.
     path("venuez/<int:pk>/rate/", VenueRateView.as_view(), name="economy-venue-rate"),
+    # LabelZ — public label groups and e-signed artist agreements. Neither
+    # route existed before this; every load of the tab 404'd.
+    path("labelz/", LabelListCreateView.as_view(), name="economy-labelz"),
+    path("labelz/<int:pk>/", LabelDetailView.as_view(), name="economy-label"),
+    path("labelz/contracts/", LabelContractsView.as_view(), name="economy-label-contracts"),
+    path("labelz/contracts/<int:pk>/<str:action>/", LabelContractActionView.as_view(),
+         name="economy-label-contract-action"),
     # The work going back and forth: v1 down, v2 up.
     # A finished collab becomes ONE post, owned by everyone who made it.
     path("collab/<int:pk>/post/", CollabPostView.as_view(), name="economy-collab-post"),

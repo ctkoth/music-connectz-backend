@@ -202,7 +202,7 @@ LOGICZ_TABS = [
      "apps": [_app("Coach", "🤖", "What to practise next, and why.", True),
               _app("Practice Pad", "🎛️", "A beat sequencer to warm up on.", True)]},
     {"key": "labelz", "name": "LabelZ", "emoji": "🏷️", "icon": "labelz.png",
-     "desc": "Public groups — a label anyone can find and ask to join.", "apps": []},
+     "desc": "Public label groups — browse them, and sign an artist agreement a label offers you.", "apps": []},
     {"key": "groupz", "name": "GroupZ", "emoji": "👥", "icon": "groupz.png",
      "desc": "Your own groupings of other members. Local to you, editable, private.",
      "apps": []},
