@@ -40,7 +40,7 @@ class TheAppRemembersWhatItFoundOutTests(TestCase):
     def setUp(self):
         self.me = User.objects.create_user(username="maker", password=PW)
         m = membership_for(self.me); m.tier = TIER_STATZ; m.save()
-        w = wallet_for(self.me); w.money_cents = 100000; w.save()
+        w = wallet_for(self.me); w.money_cents = 100000; w.energy = 1000; w.save()
         self.c = APIClient(); self.c.force_authenticate(self.me)
         self.up = Upload.objects.create(
             user=self.me, name="take.webm", size_bytes=900, content_type="audio/webm",

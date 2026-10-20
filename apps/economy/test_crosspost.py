@@ -314,7 +314,7 @@ class CoachThePostTests(TestCase):
         self.them = User.objects.create_user(username="rando", password=PW)
         for u in (self.me, self.them):
             m = membership_for(u); m.tier = TIER_STATZ; m.save()
-            w = wallet_for(u); w.money_cents = 100000; w.save()
+            w = wallet_for(u); w.money_cents = 100000; w.energy = 1000; w.save()   # coaching a post costs ⚡ too
         self.c = APIClient(); self.c.force_authenticate(self.me)
         self.tc = APIClient(); self.tc.force_authenticate(self.them)
 

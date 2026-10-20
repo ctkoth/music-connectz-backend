@@ -44,13 +44,15 @@ class ThePriceIsQuotedFirstTests(CostBase):
         lines = {l["skill"]: l["cents"] for l in r.data["lines"]}
         self.assertEqual(lines, {"Beat Producer": 40, "Ghost Writer": 0})
 
-    def test_an_unpriced_skill_costs_nothing_and_says_so(self):
+    def test_an_unpriced_skill_costs_only_the_floor_and_says_so(self):
+        from apps.economy.catalog import POST_ENERGY_FLOOR
         r = self.client.get(f"{COST}?skills=Ghost Writer")
-        self.assertEqual(r.data["cost"]["amount"], 0)
+        self.assertEqual(r.data["cost"]["amount"], POST_ENERGY_FLOOR)
         self.assertIn("haven't priced", r.data["note"])
 
-    def test_no_skills_is_free(self):
-        self.assertEqual(self.client.get(COST).data["cost"]["amount"], 0)
+    def test_no_skills_costs_the_floor(self):
+        from apps.economy.catalog import POST_ENERGY_FLOOR
+        self.assertEqual(self.client.get(COST).data["cost"]["amount"], POST_ENERGY_FLOOR)
 
     def test_it_says_what_will_actually_come_off(self):
         w = wallet_for(self.user); w.energy = 30; w.save(update_fields=["energy"])
@@ -74,9 +76,10 @@ class TheChargeMatchesTheQuoteTests(CostBase):
         self.assertEqual(r.data["energy_charged"], quoted)
         self.assertEqual(wallet_for(self.user).energy, 460)
 
-    def test_a_post_with_no_skills_is_still_free(self):
+    def test_a_post_with_no_skills_costs_only_the_floor(self):
+        from apps.economy.catalog import POST_ENERGY_FLOOR
         self.client.post(POSTZ, {"title": "Take"}, format="json")
-        self.assertEqual(wallet_for(self.user).energy, 500)
+        self.assertEqual(wallet_for(self.user).energy, 500 - POST_ENERGY_FLOOR)
 
     def test_the_cost_comes_from_my_rates_not_from_the_request(self):
         # A client-supplied price is a price the client can set to zero, which
