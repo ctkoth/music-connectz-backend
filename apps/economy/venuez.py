@@ -442,6 +442,121 @@ class VenueDetailView(APIView):
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
         return Response(event_dict(event, request.user))
 
+    def patch(self, request, pk):
+        """Fix a listing instead of cancelling it (which refunds and closes
+        every booking) and reposting. Every booking's own price is frozen at
+        the moment it was made (`booking_dict`'s own comment: "a PersonaZ
+        rate edited afterwards cannot move what was agreed"), so most of a
+        listing can change freely under bookings that already exist without
+        touching what anyone already agreed to pay:
+
+        - title/description/area/address/category/min_age/gates/basis/
+          skills/starts_at(future)/hours/spinaz_price are always editable
+          by the host, while the listing isn't cancelled or done.
+        - capacity may change either way, but never below the seats already
+          ACCEPTED or ATTENDED — shrinking under people already in the room.
+        - `kind` decides WHO pays WHOM (`quote_for`'s whole job), so it is
+          locked the moment this listing has a single booking of ANY status,
+          even just requested — changing it after that would leave an
+          existing booking's `payer_is_host` answering a question the live
+          listing no longer asks.
+        """
+        event = VenueEvent.objects.filter(pk=pk, host=request.user).first()
+        if not event:
+            return Response({"detail": "Not yours, or not here."}, status=status.HTTP_404_NOT_FOUND)
+        if event.status in (VenueEvent.STATUS_CANCELLED, VenueEvent.STATUS_DONE):
+            return Response({"detail": f"Can't edit a {event.status} listing."},
+                            status=status.HTTP_409_CONFLICT)
+
+        d = request.data or {}
+        fields = []
+
+        if "kind" in d:
+            if event.bookings.exists():
+                return Response({"detail": "Can't change what kind of room this is once "
+                                           "somebody has asked for a seat."},
+                                status=status.HTTP_409_CONFLICT)
+            kind = str(d["kind"]).strip()
+            if kind not in dict(VenueEvent.KIND_CHOICES):
+                return Response({"detail": "kind must be performance|session|free|spinaz"},
+                                status=status.HTTP_400_BAD_REQUEST)
+            event.kind = kind
+            fields.append("kind")
+
+        if "title" in d:
+            title = str(d["title"]).strip()[:160]
+            if not title:
+                return Response({"detail": "A venue needs a title."}, status=status.HTTP_400_BAD_REQUEST)
+            event.title = title
+            fields.append("title")
+        if "area" in d:
+            area = str(d["area"]).strip()[:120]
+            if not area:
+                return Response({"detail": "A venue needs an area."}, status=status.HTTP_400_BAD_REQUEST)
+            event.area = area
+            fields.append("area")
+        if "description" in d:
+            event.description = str(d["description"] or "")[:4000]
+            fields.append("description")
+        if "address" in d:
+            event.address = str(d["address"] or "").strip()[:300]
+            fields.append("address")
+        if "category" in d and d["category"] in dict(VenueEvent.CATEGORY_CHOICES):
+            event.category = d["category"]
+            fields.append("category")
+        if "basis" in d and d["basis"] in dict(VenueEvent.BASIS_CHOICES):
+            event.basis = d["basis"]
+            fields.append("basis")
+        if "skills" in d:
+            event.skills = [str(s).strip()[:80] for s in (d["skills"] or []) if str(s).strip()][:40]
+            fields.append("skills")
+        if "min_age" in d:
+            event.min_age = _int(d, "min_age", event.min_age, 0, 99)
+            fields.append("min_age")
+        if "gates" in d:
+            event.gates = clean_gates(d["gates"])
+            fields.append("gates")
+        if "hours" in d:
+            event.hours = _int(d, "hours", event.hours, 1, 24)
+            fields.append("hours")
+        if "starts_at" in d:
+            starts_at = parse_datetime(str(d["starts_at"]))
+            if not starts_at:
+                return Response({"detail": "starts_at must be an ISO datetime."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if timezone.is_naive(starts_at):
+                starts_at = timezone.make_aware(starts_at)
+            if starts_at < timezone.now():
+                return Response({"detail": "That's in the past."}, status=status.HTTP_400_BAD_REQUEST)
+            event.starts_at = starts_at
+            fields.append("starts_at")
+        if "capacity" in d:
+            held = event.bookings.filter(status__in=[VenueBooking.STATUS_ACCEPTED,
+                                                      VenueBooking.STATUS_ATTENDED]).count()
+            capacity = _int(d, "capacity", event.capacity, 1, 500)
+            if capacity < held:
+                return Response({"detail": f"{held} seats are already accepted — capacity can't drop below that."},
+                                status=status.HTTP_409_CONFLICT)
+            event.capacity = capacity
+            fields.append("capacity")
+        if "spinaz_price" in d:
+            event.spinaz_price = _int(d, "spinaz_price", event.spinaz_price, 0, 100000)
+            fields.append("spinaz_price")
+        # Whatever kind the listing ends this request as — just changed, or
+        # unchanged — is the one the price rule applies to.
+        if event.kind == VenueEvent.KIND_SPINAZ and event.spinaz_price < 1:
+            return Response({"detail": "A SpinaZ room needs an entry price of at least 1 🍥."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if event.kind != VenueEvent.KIND_SPINAZ and event.spinaz_price:
+            event.spinaz_price = 0
+            if "spinaz_price" not in fields:
+                fields.append("spinaz_price")
+
+        if not fields:
+            return Response({"detail": "Nothing to change."}, status=status.HTTP_400_BAD_REQUEST)
+        event.save(update_fields=fields)
+        return Response(event_dict(event, request.user))
+
     def delete(self, request, pk):
         """The host calls it off. Bookings are told by the status, not deleted —
         somebody who was accepted needs to see that it is cancelled, not find
