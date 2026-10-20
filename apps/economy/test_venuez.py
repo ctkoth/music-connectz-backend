@@ -711,3 +711,129 @@ class VenueRangeGates(TestCase):
             "gates": {"rating": [7, None], "junk": [1, 2]},
         }, "application/json")
         self.assertEqual(r.json()["gates"], {"rating": [7.0, None]})
+
+
+class VenueEditTests(TestCase):
+    """PATCH a listing instead of cancel-and-repost — the audit's own gap:
+    a host could cancel (refunding and closing every booking) but not fix
+    a typo in the price, time, description or capacity."""
+
+    def setUp(self):
+        self.host = User.objects.create_user(username="edithost", password="pw")
+        self.visitor = User.objects.create_user(username="editvis", password="pw")
+        self.stranger = User.objects.create_user(username="editstr", password="pw")
+        _priced(self.host, Mixing=5000)
+        for u in (self.host, self.visitor):
+            w = wallet_for(u); w.money_cents = 100000; w.save()
+
+    def _mk(self, kind=VenueEvent.KIND_PERFORMANCE, **kw):
+        return _event(self.host, kind, address="12 Real Street", **kw)
+
+    def test_the_host_can_fix_a_typo_with_nobody_booked(self):
+        ev = self._mk()
+        self.client.force_login(self.host)
+        r = self.client.patch(f"/api/economy/venuez/{ev.id}/",
+                              {"title": "Fixed Title", "description": "fixed brief"},
+                              "application/json")
+        self.assertEqual(r.status_code, 200, r.json())
+        ev.refresh_from_db()
+        self.assertEqual((ev.title, ev.description), ("Fixed Title", "fixed brief"))
+
+    def test_someone_elses_listing_is_not_found(self):
+        ev = self._mk()
+        self.client.force_login(self.stranger)
+        r = self.client.patch(f"/api/economy/venuez/{ev.id}/", {"title": "stolen"}, "application/json")
+        self.assertEqual(r.status_code, 404)
+        ev.refresh_from_db()
+        self.assertNotEqual(ev.title, "stolen")
+
+    def test_info_fields_edit_fine_even_with_a_real_booking_present(self):
+        """A booking's own price is frozen at request time, so changing the
+        description/area afterwards touches nothing anybody agreed to."""
+        ev = self._mk()
+        self.client.force_login(self.visitor)
+        self.client.post(f"/api/economy/venuez/{ev.id}/book/", {}, "application/json")
+        self.client.force_login(self.host)
+        r = self.client.patch(f"/api/economy/venuez/{ev.id}/",
+                              {"description": "updated brief", "area": "New City"},
+                              "application/json")
+        self.assertEqual(r.status_code, 200, r.json())
+
+    def test_kind_can_change_before_anybody_has_asked(self):
+        ev = self._mk(VenueEvent.KIND_PERFORMANCE)
+        self.client.force_login(self.host)
+        r = self.client.patch(f"/api/economy/venuez/{ev.id}/", {"kind": "session"}, "application/json")
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertEqual(VenueEvent.objects.get(pk=ev.id).kind, "session")
+
+    def test_kind_is_locked_once_a_booking_exists(self):
+        ev = self._mk()
+        self.client.force_login(self.visitor)
+        self.client.post(f"/api/economy/venuez/{ev.id}/book/", {}, "application/json")
+        self.client.force_login(self.host)
+        r = self.client.patch(f"/api/economy/venuez/{ev.id}/", {"kind": "session"}, "application/json")
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(VenueEvent.objects.get(pk=ev.id).kind, "performance")
+
+    def test_capacity_cannot_drop_below_seats_already_accepted(self):
+        # Capacity floors at 1 (same as create), so proving "can't drop
+        # below held" needs held >= 2 — one accepted seat can never be
+        # refused a capacity of 1, because 1 is as low as the field allows.
+        ev = self._mk(capacity=5)
+        visitor2 = User.objects.create_user(username="editvis2", password="pw")
+        w2 = wallet_for(visitor2); w2.money_cents = 100000; w2.save()
+        for v in (self.visitor, visitor2):
+            self.client.force_login(v)
+            bid = self.client.post(f"/api/economy/venuez/{ev.id}/book/", {},
+                                   "application/json").json()["booking"]["id"]
+            self.client.force_login(self.host)
+            self.client.post(f"/api/economy/venuez/bookings/{bid}/respond/",
+                             {"accept": True}, "application/json")
+        r = self.client.patch(f"/api/economy/venuez/{ev.id}/", {"capacity": 1}, "application/json")
+        self.assertEqual(r.status_code, 409)
+        r2 = self.client.patch(f"/api/economy/venuez/{ev.id}/", {"capacity": 2}, "application/json")
+        self.assertEqual(r2.status_code, 200, r2.json())
+
+    def test_starts_at_cannot_move_into_the_past(self):
+        ev = self._mk()
+        self.client.force_login(self.host)
+        r = self.client.patch(f"/api/economy/venuez/{ev.id}/",
+                              {"starts_at": (timezone.now() - timedelta(days=1)).isoformat()},
+                              "application/json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_rescheduling_is_fine_with_a_booking_already_in_place(self):
+        ev = self._mk()
+        self.client.force_login(self.visitor)
+        self.client.post(f"/api/economy/venuez/{ev.id}/book/", {}, "application/json")
+        self.client.force_login(self.host)
+        new_time = (timezone.now() + timedelta(days=5)).isoformat()
+        r = self.client.patch(f"/api/economy/venuez/{ev.id}/", {"starts_at": new_time}, "application/json")
+        self.assertEqual(r.status_code, 200, r.json())
+
+    def test_a_spinaz_room_cannot_drop_its_price_to_zero(self):
+        ev = self._mk(VenueEvent.KIND_SPINAZ, spinaz_price=10)
+        self.client.force_login(self.host)
+        r = self.client.patch(f"/api/economy/venuez/{ev.id}/", {"spinaz_price": 0}, "application/json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_switching_away_from_spinaz_zeroes_the_price(self):
+        ev = self._mk(VenueEvent.KIND_SPINAZ, spinaz_price=10)
+        self.client.force_login(self.host)
+        r = self.client.patch(f"/api/economy/venuez/{ev.id}/", {"kind": "free"}, "application/json")
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertEqual(VenueEvent.objects.get(pk=ev.id).spinaz_price, 0)
+
+    def test_a_cancelled_listing_cannot_be_edited(self):
+        ev = self._mk()
+        ev.status = VenueEvent.STATUS_CANCELLED
+        ev.save(update_fields=["status"])
+        self.client.force_login(self.host)
+        r = self.client.patch(f"/api/economy/venuez/{ev.id}/", {"title": "late"}, "application/json")
+        self.assertEqual(r.status_code, 409)
+
+    def test_patching_nothing_recognised_says_so(self):
+        ev = self._mk()
+        self.client.force_login(self.host)
+        r = self.client.patch(f"/api/economy/venuez/{ev.id}/", {}, "application/json")
+        self.assertEqual(r.status_code, 400)
