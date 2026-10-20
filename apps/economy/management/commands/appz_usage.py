@@ -58,6 +58,7 @@ APPS = {
     "venuez": (m.VenueBooking.objects, "visitor", "created_at"),
     "battlez": (m.BattleEntry.objects, "user", "created_at"),
     "groupz": (m.GroupMember.objects, "member", "added_at"),
+    "labelz": (m.LabelContract.objects, "artist", "created_at"),
     "lessonz": (lessonz_models.LessonBooking.objects, "student", "created_at"),
     "mimez": (mimez_models.MimeZSubmission.objects, "user", "created_at"),
 }
@@ -78,14 +79,6 @@ NOT_MEASURABLE = {
     "statsz": "read-only dashboard over other apps' data",
     "membershipz": "tier is on Membership, not a repeated action",
     "logz": "read-only ledger view",
-    # Not "quiet" — BROKEN. The frontend calls POST/GET /api/labelz/ and
-    # /api/labelz/contracts/ and neither route is mounted anywhere in this
-    # backend (checked: no match in music_connectz/urls.py or any app's
-    # urls.py). Every load of this tab 404s. Its usage number isn't low,
-    # it's undefined — nobody could have used it since whenever the route
-    # was removed or never finished. Worth Corey's eyes before "cut" or
-    # "fix the route" gets decided either way.
-    "labelz": "BROKEN — no /api/labelz/ route exists; every load 404s",
     "opportunitiez": "a filtered directory over Profile rows, not a repeated action — nothing to count",
     "soundz": "a sound-pack preference on Profile, not a repeated action — nothing to count",
     "metz": "client-only audio tool, no server round trip",
