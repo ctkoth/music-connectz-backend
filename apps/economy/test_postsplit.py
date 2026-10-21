@@ -90,7 +90,15 @@ class GatesOnPostsAndLessons(TestCase):
         self.author = User.objects.create_user(username="gauth", password="pw")
         self.adult = User.objects.create_user(username="gadult", password="pw")
         self.noage = User.objects.create_user(username="gnoage", password="pw")
-        p = profile_for(self.adult); p.birthday = "1990-01-01"; p.save()
+        p = profile_for(self.adult); p.birthday = "1990-01-01"; p.verified_18plus = True; p.save()
+        # LessonZ's own adult-verification gate (Profile.verified_18plus) is a
+        # BLANKET check, separate from the per-offer age RANGE gate this test
+        # exercises (gates={"age": [21, None]}). `gnoage` needs to clear the
+        # blanket check and still have no declared birthday, so it's the
+        # specific 21+ gate that refuses them, not the blanket one.
+        np = profile_for(self.noage)
+        np.verified_18plus = True
+        np.save(update_fields=["verified_18plus"])
 
     def test_restricted_post_join_respects_gates(self):
         post = Post.objects.create(author=self.author, title="VIP", visibility="restricted",
