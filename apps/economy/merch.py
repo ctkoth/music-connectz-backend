@@ -4,13 +4,14 @@ enforced server-side (via pay_between). Substances/paraphernalia are not a
 category — this is legal goods only.
 """
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import MerchItem, MerchPurchase, pay_between, wallet_for
+from .models import MerchItem, MerchPurchase, pay_between, refund_cents, wallet_for
 from .serializers import WalletSerializer
 
 MIN_PRICE = 100        # $1
@@ -75,6 +76,92 @@ class MerchDetailView(APIView):
             it.image.delete(save=False)
         it.delete()
         return Response({"deleted": pk})
+
+
+def _purchase_dict(p):
+    return {
+        "id": p.id,
+        "item_id": p.item_id,
+        "item_title": p.item.title,
+        "buyer": p.buyer.username,
+        "price_cents": p.price_cents,
+        "dev_tax_cents": p.dev_tax_cents,
+        "net_received_cents": p.price_cents - p.dev_tax_cents,
+        "refunded": p.refunded,
+        "refunded_at": p.refunded_at,
+        "refund_reason": p.refund_reason,
+        "created_at": p.created_at,
+    }
+
+
+class MerchSalesView(APIView):
+    """GET your own sales — the half of MerchZ that had no screen at all.
+    A seller could see what they'd LISTED but never what anyone had actually
+    BOUGHT from them, which is also the only place a refund can start from."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        rows = (MerchPurchase.objects.filter(item__seller=request.user)
+                .select_related("item", "buyer").order_by("-created_at")[:200])
+        return Response({"sales": [_purchase_dict(p) for p in rows]})
+
+
+class MerchRefundView(APIView):
+    """GET: what refunding this sale costs you, before you press anything —
+    the cost/gain rule applied to the most expensive thing a seller can do
+    here. POST: do it.
+
+    Corey's call: the SELLER eats the developer tax. A refund gives the
+    buyer back the full `price_cents`, and the seller's wallet is debited
+    that same full amount — not just the net they were paid — so the tax
+    the platform took on the original sale is never handed back to anyone.
+    `refund_cents` is its own atomic primitive for exactly that reason: it
+    is not `pay_between` run backwards, because `pay_between` would split
+    the tax AGAIN on the way back.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _mine(self, request, pk):
+        p = (MerchPurchase.objects.filter(pk=pk).select_related("item", "buyer").first())
+        if not p:
+            return None
+        if p.item.seller_id != request.user.id and not (request.user.is_staff or request.user.is_superuser):
+            return None
+        return p
+
+    def get(self, request, pk):
+        p = self._mine(request, pk)
+        if not p:
+            return Response({"detail": "Not yours, or not here."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(_purchase_dict(p))
+
+    def post(self, request, pk):
+        p = self._mine(request, pk)
+        if not p:
+            return Response({"detail": "Not yours, or not here."}, status=status.HTTP_404_NOT_FOUND)
+        if p.refunded:
+            return Response({"detail": "Already refunded."}, status=status.HTTP_400_BAD_REQUEST)
+        reason = str(request.data.get("reason", "") or "")[:200]
+        with transaction.atomic():
+            new_balance = refund_cents(p.item.seller, p.buyer, p.price_cents,
+                                       note=f"MerchZ refund: {p.item.title}")
+            if new_balance is None:
+                return Response(
+                    {"detail": f"You received {p.price_cents - p.dev_tax_cents}¢ net from this sale, but "
+                               f"refunding it costs the full {p.price_cents}¢ — the platform's fee isn't "
+                               f"given back on a refund. Your balance doesn't cover that right now."},
+                    status=status.HTTP_402_PAYMENT_REQUIRED,
+                )
+            p.refunded = True
+            p.refunded_at = timezone.now()
+            p.refund_reason = reason
+            p.save(update_fields=["refunded", "refunded_at", "refund_reason"])
+        return Response({
+            "purchase": _purchase_dict(p),
+            "wallet": WalletSerializer(wallet_for(request.user)).data,
+        })
 
 
 class MerchBuyView(APIView):

@@ -171,6 +171,11 @@ class Transaction(models.Model):
     # it is the only one that is not revenue, not a reward and not an internal
     # move — totalling it as any of those would overstate all three.
     KIND_PAYOUT = "payout"
+    # A purchase undone. Its own kind rather than another KIND_SPEND/KIND_REWARD
+    # pair, because a refund moves the FULL price both ways (the seller eats the
+    # developer tax), which would read as a second purchase if it were logged
+    # the same way the first one was.
+    KIND_REFUND = "refund"
     KIND_CHOICES = [
         (KIND_ADD, "Add funds"),
         (KIND_PURCHASE, "Purchase"),
@@ -180,6 +185,7 @@ class Transaction(models.Model):
         (KIND_INTELLIGENCE, "Intelligence royalty"),
         (KIND_TRANSFER, "Transfer"),
         (KIND_PAYOUT, "Payout to bank"),
+        (KIND_REFUND, "Refund"),
     ]
 
     # Which resource moved. Money was the only thing ever recorded, so SpinaZ
@@ -677,6 +683,39 @@ def pay_between(payer, payee, amount_cents, note=""):
     Transaction.objects.create(user=payer, kind=Transaction.KIND_SPEND, amount_cents=-amount_cents, dev_tax_cents=dev, note=note[:200])
     Transaction.objects.create(user=payee, kind=Transaction.KIND_REWARD, amount_cents=net, dev_tax_cents=dev, note=note[:200])
     return dev, net
+
+
+def refund_cents(seller, buyer, amount_cents, note=""):
+    """Undo a sale: the buyer gets back the FULL `amount_cents` they paid,
+    and the seller's wallet is debited the same full amount — not just the
+    net they received after `pay_between`'s developer tax. That is the
+    policy choice: the seller eats the tax on a refund, same as they would
+    on any marketplace. Returns the seller's new balance, or None if they
+    can no longer cover it (they may have already spent what they earned).
+
+    A conditional atomic update, the `spend_spinaz`/`pay_between` shape:
+    `filter(money_cents__gte=amount).update(...)` is one statement the
+    database serialises, so this can't double-refund the same sale under
+    concurrent requests any more than a spend can be spent twice.
+    """
+    from django.db.models import F
+
+    amount_cents = int(amount_cents)
+    if amount_cents < 0:
+        return None
+    if amount_cents == 0:
+        return 0
+    wallet_for(seller)
+    wallet_for(buyer)
+    moved = Wallet.objects.filter(user=seller, money_cents__gte=amount_cents).update(
+        money_cents=F("money_cents") - amount_cents, updated_at=timezone.now())
+    if not moved:
+        return None
+    Wallet.objects.filter(user=buyer).update(
+        money_cents=F("money_cents") + amount_cents, updated_at=timezone.now())
+    Transaction.objects.create(user=seller, kind=Transaction.KIND_REFUND, amount_cents=-amount_cents, note=note[:200])
+    Transaction.objects.create(user=buyer, kind=Transaction.KIND_REFUND, amount_cents=amount_cents, note=note[:200])
+    return Wallet.objects.values_list("money_cents", flat=True).get(user=seller)
 
 
 def can_afford_ai(user, cost_cents):
@@ -3289,6 +3328,17 @@ class MerchPurchase(models.Model):
     price_cents = models.PositiveIntegerField(default=0)
     dev_tax_cents = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
+    # There was no refund/dispute path at all until this: once a purchase
+    # existed there was nowhere for "item misdescribed" or "buyer regrets it"
+    # to go. Corey's call on who eats the fee: the SELLER does — a refund
+    # gives the buyer back the full `price_cents`, not just what the seller
+    # received net of the platform's cut, so the seller is out the tax too.
+    # That is the opposite of `pay_between`'s own split on the way in, which
+    # is why the refund is its own helper rather than `pay_between` run in
+    # reverse.
+    refunded = models.BooleanField(default=False)
+    refunded_at = models.DateTimeField(null=True, blank=True)
+    refund_reason = models.CharField(max_length=200, blank=True, default="")
 
     class Meta:
         ordering = ["-created_at"]
