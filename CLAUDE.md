@@ -263,21 +263,16 @@ give them the link. A read-only surface is usually an unfinished one.
 
 ### Known violation, not yet fixed
 
-- **LogZ is this rule's own counter-example.** This section used to list it
-  as one of the working ones — "LogZ rows carry the reason a resource moved,
-  so a balance leads back to the action that changed it" — and that line was
-  never true. `Transaction.note` (`logz.py: _row()`) is a free-text sentence
-  ("SingZ Boss Take — AI Coach — post #47"), not a structured reference, and
-  `LogZ.jsx` renders it as plain text with no button, no link, nowhere to
-  go. A member reading "post #47" in their ledger cannot get from that
-  sentence to the post.
-  Fixing it for real means giving `Transaction` a structured `app_key`/
-  `target` (the same shape `Observation` already uses) and threading it
-  through every call site that writes one — `vocalcoach.py`, `crosspost.py`,
-  `battlez.py`, `adz.py`, `offerz.py`, referrals, and more — which is a
-  schema migration plus a multi-file call-site sweep, not a one-screen fix.
-  Correct the doc first (done, here); the code is still owed the fix this
-  section claims it already has.
+- **LogZ was this rule's own counter-example, and it's fixed now.** This
+  section used to say `Transaction.note` was free text with nowhere to go —
+  true when it was written. `Transaction` carries `app_key`/`target`/`ref`
+  now (the same shape `Observation` already used), threaded through
+  `spend_spinaz`/`award_spinaz`/`award_energy`/`log_resource`, and
+  `LogZ.jsx` renders real `goToSpot` links off `open_in`. See "Credits buy
+  outcomes" below for the current state — `ref` (which resolves to a
+  rating/report/file via `logz_outcomes.outcomes_for`) is still only set by
+  the coach and Sentence ConnectZ, so most spends carry `app_key`/`target`
+  but not yet a `ref`. That's the real remaining gap, not a free-text note.
 
 
 ---
