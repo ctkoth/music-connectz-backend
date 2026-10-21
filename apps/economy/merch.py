@@ -88,10 +88,17 @@ class MerchBuyView(APIView):
             return Response({"detail": "item not found"}, status=status.HTTP_404_NOT_FOUND)
         if it.seller_id == request.user.id:
             return Response({"detail": "you can't buy your own item"}, status=status.HTTP_400_BAD_REQUEST)
+        # The real guard is inside `pay_between` now (a conditional atomic
+        # update), so two concurrent buys of the same balance can't both
+        # pass. This stays as the fast, friendly rejection for the common
+        # case — not having the money — before anything is created.
         w = wallet_for(request.user)
         if w.money_cents < it.price_cents:
             return Response({"detail": "insufficient balance"}, status=status.HTTP_402_PAYMENT_REQUIRED)
         with transaction.atomic():
-            dev, _net = pay_between(request.user, it.seller, it.price_cents, note=f"MerchZ: {it.title}")
+            moved = pay_between(request.user, it.seller, it.price_cents, note=f"MerchZ: {it.title}")
+            if moved is None:
+                return Response({"detail": "insufficient balance"}, status=status.HTTP_402_PAYMENT_REQUIRED)
+            dev, _net = moved
             MerchPurchase.objects.create(buyer=request.user, item=it, price_cents=it.price_cents, dev_tax_cents=dev)
         return Response({"wallet": WalletSerializer(wallet_for(request.user)).data, "item_id": it.id, "dev_tax_cents": dev})

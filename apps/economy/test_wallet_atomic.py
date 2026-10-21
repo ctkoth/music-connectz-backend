@@ -19,7 +19,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from .models import (Wallet, award_energy, award_promptz, award_spinaz,
-                     spend_spinaz, wallet_for)
+                     pay_between, split_cents, spend_spinaz, wallet_for)
 
 User = get_user_model()
 PW = "hunter2hunter2"
@@ -131,3 +131,91 @@ class TheBattlePathsRefuseRatherThanOverdrawTests(TestCase):
                         {"side": "host", "amount": 30}, format="json")
         self.assertEqual(r.status_code, 201, r.data)
         self.assertEqual(bal(self.better), 20)
+
+
+class PayBetweenMoneyIsAtomicTests(TestCase):
+    """`pay_between` moves real money, and used to be a plain read-modify-
+    write with the balance check left entirely to the caller: "caller must
+    ensure the payer has the balance and wrap in a transaction." Every call
+    site (MerchZ, a legacy VenueZ attend in social.py, CallZ) honoured the
+    transaction half and none of them locked the row, so two concurrent
+    spends of the same real-money balance could both pass their own
+    unlocked pre-check and both go through — the same failure already fixed
+    for SpinaZ/Energy with `spend_spinaz`, left open on real money."""
+
+    def setUp(self):
+        self.payer = User.objects.create_user("payer1", "p1@x.test", PW)
+        self.payee = User.objects.create_user("payee1", "p2@x.test", PW)
+        w = wallet_for(self.payer)
+        w.money_cents = 1000
+        w.save(update_fields=["money_cents"])
+
+    def test_an_affordable_move_lands_on_both_sides(self):
+        from .models import membership_for
+        dev, net = split_cents(500, membership_for(self.payer).dev_tax_rate)
+        result = pay_between(self.payer, self.payee, 500, note="test")
+        self.assertEqual(result, (dev, net))
+        self.assertEqual(bal(self.payer, "money_cents"), 500)
+        self.assertEqual(bal(self.payee, "money_cents"), net)
+
+    def test_an_overdraw_is_refused_and_moves_nothing(self):
+        self.assertIsNone(pay_between(self.payer, self.payee, 5000, note="too much"))
+        self.assertEqual(bal(self.payer, "money_cents"), 1000)
+        self.assertEqual(bal(self.payee, "money_cents"), 0)
+
+    def test_the_same_balance_cannot_be_spent_twice(self):
+        """The exact race the fork found: an unlocked `if balance < price`
+        check followed by a separate spend, two statements a buyer is not
+        obliged to wait between."""
+        self.assertIsNotNone(pay_between(self.payer, self.payee, 700, note="first"))
+        self.assertIsNone(pay_between(self.payer, self.payee, 700, note="second"))
+        self.assertEqual(bal(self.payer, "money_cents"), 300)
+
+    def test_a_refused_move_writes_no_ledger_row(self):
+        from .models import Transaction
+        before = Transaction.objects.count()
+        pay_between(self.payer, self.payee, 5000, note="nope")
+        self.assertEqual(Transaction.objects.count(), before)
+
+    def test_zero_is_a_no_op_success_negative_is_refused(self):
+        # A free venue, a $0 booking that never happened — callers rely on
+        # `pay_between(..., 0, ...)` succeeding trivially rather than being
+        # treated as a failed payment.
+        self.assertEqual(pay_between(self.payer, self.payee, 0, note="zero"), (0, 0))
+        self.assertIsNone(pay_between(self.payer, self.payee, -5, note="negative"))
+        self.assertEqual(bal(self.payer, "money_cents"), 1000)
+
+
+class MerchBuyRaceTests(TestCase):
+    """The view-level regression: MerchZ's own balance check still exists
+    as a friendly fast path, but the real guard now lives inside
+    `pay_between` — unpacking its result has to survive a `None` without
+    crashing, and must not leave a `MerchPurchase` row with no payment
+    behind it."""
+
+    def setUp(self):
+        from .models import MerchItem
+        self.buyer = User.objects.create_user("merchbuyer", "mb@x.test", PW)
+        self.seller = User.objects.create_user("merchseller", "ms@x.test", PW)
+        w = wallet_for(self.buyer)
+        w.money_cents = 500
+        w.save(update_fields=["money_cents"])
+        self.item = MerchItem.objects.create(seller=self.seller, title="Shirt",
+                                             price_cents=500, active=True)
+        self.c = APIClient()
+        self.c.force_authenticate(self.buyer)
+
+    def test_a_buy_that_exactly_affords_it_succeeds(self):
+        r = self.c.post(f"/api/economy/merch/{self.item.pk}/buy/", {}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(bal(self.buyer, "money_cents"), 0)
+
+    def test_a_buy_past_the_balance_is_402_and_creates_no_purchase(self):
+        from .models import MerchPurchase
+        w = wallet_for(self.buyer)
+        w.money_cents = 100
+        w.save(update_fields=["money_cents"])
+        r = self.c.post(f"/api/economy/merch/{self.item.pk}/buy/", {}, format="json")
+        self.assertEqual(r.status_code, 402)
+        self.assertEqual(MerchPurchase.objects.filter(buyer=self.buyer).count(), 0)
+        self.assertEqual(bal(self.buyer, "money_cents"), 100)

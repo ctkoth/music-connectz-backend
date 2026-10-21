@@ -9,6 +9,8 @@ channels):
   channel, live session, or location exchange.
 - Payment is one-directional: the student pays the teacher. Never reversed.
 """
+from decimal import Decimal
+
 from django.db import transaction
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -16,7 +18,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
-    MIN_TEACH_RATING, LessonPost, LessonPostPurchase, get_skill_rating,
+    MIN_TEACH_RATING, VISIBILITY_CHOICES, LessonPost, LessonPostPurchase,
+    get_skill_rating,
 )
 from .serializers import LessonPostCreateSerializer, LessonPostSerializer
 from .views import _Gate  # platform adult gate (defensive import lives there)
@@ -33,11 +36,21 @@ class PostListCreateView(APIView):
 
     def get(self, request):
         qp = request.query_params
-        qs = LessonPost.objects.filter(is_active=True).select_related("teacher")
+        # ?mine=1 needs to include UNPUBLISHED posts too — previously the
+        # is_active=True filter ran BEFORE the mine filter, so a teacher who
+        # unpublished their own post lost all visibility of it, including
+        # the one place (their own "mine" list) they'd need in order to
+        # publish it again. `visible_to()` already lets the teacher see
+        # their own regardless of is_active; the queryset just never gave
+        # it the chance to.
+        mine = qp.get("mine") in ("1", "true")
+        qs = LessonPost.objects.select_related("teacher")
+        if mine:
+            qs = qs.filter(teacher=request.user)
+        else:
+            qs = qs.filter(is_active=True)
         if qp.get("skill"):
             qs = qs.filter(skill__iexact=qp["skill"].strip())
-        if qp.get("mine") in ("1", "true"):
-            qs = qs.filter(teacher=request.user)
         rows = [p for p in qs[:300] if p.visible_to(request.user)]
         ser = LessonPostSerializer(rows, many=True, context={"request": request})
         return Response(ser.data)
@@ -97,3 +110,93 @@ class PostUnlockView(APIView):
 
         out = LessonPostSerializer(post, context={"request": request})
         return Response(out.data, status=200 if not created else 201)
+
+
+class PostDetailView(APIView):
+    """PATCH: fix a typo'd title/price/description/visibility instead of
+    taking the post down and reposting. `media_ref`/`preview_ref` can be
+    swapped too (a re-upload). `skill` is locked for the same reason as
+    LessonOffer's: the rating snapshot was checked for this skill.
+
+    DELETE: unpublish, never a hard delete. `LessonPostPurchase.post` is
+    CASCADE — hard-deleting a post a student already paid to unlock would
+    wipe their purchase record along with it.
+    """
+
+    permission_classes = [_Gate]
+
+    def _mine(self, request, pk):
+        try:
+            return LessonPost.objects.get(pk=pk, teacher=request.user)
+        except LessonPost.DoesNotExist:
+            return None
+
+    def patch(self, request, pk):
+        post = self._mine(request, pk)
+        if not post:
+            return Response({"detail": "Not yours, or not here."}, status=status.HTTP_404_NOT_FOUND)
+
+        d = request.data or {}
+        if "skill" in d and str(d["skill"]).strip().lower() != post.skill:
+            return Response(
+                {"detail": "Can't change what skill this teaches — your rating was checked "
+                            "for this one."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        fields = []
+        if "title" in d:
+            title = str(d["title"]).strip()
+            if not title:
+                return Response({"detail": "Title is required."}, status=status.HTTP_400_BAD_REQUEST)
+            if len(title) > 140:
+                return Response({"detail": "Title must be 140 characters or less."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            post.title = title
+            fields.append("title")
+        if "description" in d:
+            post.description = str(d["description"] or "")
+            fields.append("description")
+        if "media_ref" in d:
+            media_ref = str(d["media_ref"] or "").strip()
+            if not media_ref:
+                return Response({"detail": "Media ref (upload id) is required."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            post.media_ref = media_ref
+            fields.append("media_ref")
+        if "preview_ref" in d:
+            post.preview_ref = str(d["preview_ref"] or "")
+            fields.append("preview_ref")
+        if "price" in d:
+            try:
+                price = Decimal(str(d["price"]))
+            except Exception:
+                return Response({"detail": "price must be a number."}, status=status.HTTP_400_BAD_REQUEST)
+            if price <= Decimal("0"):
+                return Response({"detail": "Price must be greater than $0."}, status=status.HTTP_400_BAD_REQUEST)
+            post.price = price
+            fields.append("price")
+        if "currency" in d:
+            post.currency = str(d["currency"] or "USD")[:8]
+            fields.append("currency")
+        if "visibility" in d and d["visibility"] in dict(VISIBILITY_CHOICES):
+            post.visibility = d["visibility"]
+            fields.append("visibility")
+        if "is_active" in d:
+            post.is_active = bool(d["is_active"])
+            fields.append("is_active")
+
+        if not fields:
+            return Response({"detail": "Nothing to change."}, status=status.HTTP_400_BAD_REQUEST)
+        post.save(update_fields=fields)
+        return Response(LessonPostSerializer(post, context={"request": request}).data)
+
+    def delete(self, request, pk):
+        post = self._mine(request, pk)
+        if not post:
+            return Response({"detail": "Not yours, or not here."}, status=status.HTTP_404_NOT_FOUND)
+        if not post.is_active:
+            return Response({"detail": "Already unpublished."}, status=status.HTTP_400_BAD_REQUEST)
+        post.is_active = False
+        post.save(update_fields=["is_active"])
+        return Response(LessonPostSerializer(post, context={"request": request}).data)

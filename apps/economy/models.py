@@ -637,17 +637,43 @@ def credit_funds(user, amount_cents, note="Add funds"):
 
 
 def pay_between(payer, payee, amount_cents, note=""):
-    """Move money payer -> payee, applying the payer's developer tax. The payee
-    receives the net; the platform keeps the tax. Caller must ensure the payer
-    has the balance and wrap in a transaction. Returns (dev_cents, net_cents)."""
+    """Move real money payer -> payee, applying the payer's developer tax.
+    The payee receives the net; the platform keeps the tax. Returns
+    (dev_cents, net_cents), or None if the payer can't cover it.
+
+    A CONDITIONAL atomic decrement, the same shape `spend_spinaz` already
+    uses for SpinaZ: `filter(money_cents__gte=amount).update(F(...))` is one
+    statement the database serialises, so two concurrent calls against the
+    same balance can't both succeed. This used to be a plain read-modify-
+    write with the docstring saying "caller must ensure the payer has the
+    balance and wrap in a transaction" — every call site wrapped it in a
+    transaction and none of them obeyed the "ensure the balance" half with a
+    lock, so two concurrent spends of the same real-money balance (MerchZ, a
+    VenueZ attend, CallZ) could both pass their own unlocked check and both
+    go through. CLAUDE.md already documents this exact failure for the
+    SpinaZ/Energy wallet and fixed it there; this was the same bug, left
+    open on the one wallet field that holds real money.
+    """
+    from django.db.models import F
+
+    amount_cents = int(amount_cents)
+    if amount_cents < 0:
+        return None
+    if amount_cents == 0:
+        # A free venue, a $0 lesson that never happened — a no-op transfer
+        # is a legitimate call, not a refusal. Every call site before this
+        # fix relied on `pay_between(..., 0, ...)` succeeding trivially.
+        return (0, 0)
     m = membership_for(payer)
-    pw = wallet_for(payer)
-    rw = wallet_for(payee)
     dev, net = split_cents(amount_cents, m.dev_tax_rate)
-    pw.money_cents -= amount_cents
-    rw.money_cents += net
-    pw.save(update_fields=["money_cents", "updated_at"])
-    rw.save(update_fields=["money_cents", "updated_at"])
+    wallet_for(payer)   # make sure both rows exist before the conditional update
+    wallet_for(payee)
+    moved = Wallet.objects.filter(user=payer, money_cents__gte=amount_cents).update(
+        money_cents=F("money_cents") - amount_cents, updated_at=timezone.now())
+    if not moved:
+        return None
+    Wallet.objects.filter(user=payee).update(
+        money_cents=F("money_cents") + net, updated_at=timezone.now())
     Transaction.objects.create(user=payer, kind=Transaction.KIND_SPEND, amount_cents=-amount_cents, dev_tax_cents=dev, note=note[:200])
     Transaction.objects.create(user=payee, kind=Transaction.KIND_REWARD, amount_cents=net, dev_tax_cents=dev, note=note[:200])
     return dev, net
