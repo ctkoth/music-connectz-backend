@@ -23,7 +23,6 @@ from apps.economy.models import (
     CollabDeal,
     OverallRating,
     Profile,
-    Venue,
     profile_for,
 )
 from apps.economy.social import profile_skill_rate
@@ -251,57 +250,6 @@ class MemberSearchGateTests(TestCase):
         make_member("near", lat=40.05, lng=-74.0)
         resp = self.client.get("/api/economy/members/", {"max_km": 50})
         self.assertIsNotNone(resp.data["members"][0]["distance_km"])
-
-
-class VenueGateTests(TestCase):
-    """A venue advertises its gates and the door enforces the same ones."""
-
-    def setUp(self):
-        self.client = APIClient()
-        self.host = User.objects.create_user("host", "h@e.com", PW)
-
-    def venue(self, **kw):
-        return Venue.objects.create(host=self.host, title="Session", host_price_cents=0, **kw)
-
-    def test_a_host_can_post_gates_and_read_them_back(self):
-        self.client.force_authenticate(self.host)
-        resp = self.client.post("/api/economy/venues/", {
-            "title": "Studio night", "gates": {"rating": [6, 10], "km": 25},
-        }, format="json")
-        self.assertEqual(resp.status_code, 201, resp.content)
-        self.assertEqual(resp.data["venue"]["gates"], {"rating": [6.0, 10.0], "km": [None, 25.0]})
-
-    def test_a_member_outside_the_range_is_refused_and_told_which_one(self):
-        v = self.venue(gates={"rating": [6, 10]})
-        self.client.force_authenticate(make_member("weak", rating=2))
-        resp = self.client.post(f"/api/economy/venues/{v.pk}/join/")
-        self.assertEqual(resp.status_code, 403, resp.content)
-        self.assertEqual(resp.data["gate"], "rating")
-        self.assertIn("skill rating", resp.data["detail"])
-
-    def test_an_unrated_member_is_refused_too(self):
-        v = self.venue(gates={"rating": [1, 10]})
-        self.client.force_authenticate(make_member("unrated"))
-        self.assertEqual(self.client.post(f"/api/economy/venues/{v.pk}/join/").status_code, 403)
-
-    def test_a_member_inside_every_range_gets_in(self):
-        v = self.venue(gates={"rating": [6, 10], "age": [18, None]})
-        self.client.force_authenticate(make_member("solid", rating=8, age=30))
-        resp = self.client.post(f"/api/economy/venues/{v.pk}/join/")
-        self.assertEqual(resp.status_code, 200, resp.content)
-
-    def test_an_ungated_venue_asks_nobody_for_anything(self):
-        v = self.venue()
-        self.client.force_authenticate(make_member("anyone"))
-        self.assertEqual(self.client.post(f"/api/economy/venues/{v.pk}/join/").status_code, 200)
-
-    def test_the_legacy_min_attract_venues_still_work(self):
-        # Venues created before gates existed carry min_attract and nothing else.
-        v = self.venue(min_attract=8)
-        self.client.force_authenticate(make_member("plain", attract=3))
-        resp = self.client.post(f"/api/economy/venues/{v.pk}/join/")
-        self.assertEqual(resp.status_code, 403, resp.content)
-        self.assertIn("attractiveness 8+", resp.data["detail"])
 
 
 class CollabGateTests(TestCase):

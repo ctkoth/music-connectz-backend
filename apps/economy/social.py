@@ -30,8 +30,6 @@ from .models import (
     item_rating_median,
     SocialComment,
     profile_for,
-    Venue,
-    VenueAttendance,
     attractiveness_median,
     attractiveness_medians,
     attractiveness_shown_medians,
@@ -39,7 +37,6 @@ from .models import (
     overall_medians,
     face_median,
     membership_for,
-    pay_between,
     profile_age,
     haversine_km,
     Follow,
@@ -54,7 +51,6 @@ from .models import (
     Post,
     blocked_user_ids,
     Block,
-    wallet_for,
     Badge,
     badge_effects,
     recheck_badges,
@@ -65,8 +61,7 @@ from .models import (
 )
 from .badgez import worn_badges, worn_badges_by_user
 from .catalog import AVATAR_MAX_MB, limits_for, over_char_limit
-from .gates import GATE_KEYS, clean_gates, failing_gate, member_metrics, refusal
-from .serializers import WalletSerializer
+from .gates import clean_gates, failing_gate, member_metrics
 from .personaz import clean_link, clean_persona, links_of, personas_of
 from .personalityz import (AXES as PERSONALITY_AXES, as_dict as personality_dict,
                            clean_code as clean_personality, filter_reason,
@@ -75,115 +70,6 @@ from .religionz import clean_religion
 from .languagez import clean_languages
 
 User = get_user_model()
-VALID_TYPES = {"party", "openmic", "theater", "show", "custom"}
-
-
-def _venue_dict(v, request):
-    return {
-        "id": v.id,
-        "title": v.title,
-        "mode": v.mode,
-        "vtype": v.vtype,
-        "custom_name": v.custom_name,
-        "host": v.host.username,
-        "mine": v.host_id == request.user.id,
-        "host_price_cents": v.host_price_cents,
-        "visitor_pay_cents": v.visitor_pay_cents,
-        "min_attract": v.min_attract,
-        "gates": v.gates or {},
-        "attending": v.attendances.filter(visitor=request.user).exists(),
-        "created_at": v.created_at,
-    }
-
-
-class VenuesView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        venues = Venue.objects.select_related("host").all()[:200]
-        return Response({"venues": [_venue_dict(v, request) for v in venues]})
-
-    def post(self, request):
-        d = request.data
-        title = str(d.get("title", "")).strip()
-        if not title:
-            return Response({"detail": "title required"}, status=status.HTTP_400_BAD_REQUEST)
-        mode = d.get("mode") if d.get("mode") in (Venue.MODE_COLLAB, Venue.MODE_PERF) else Venue.MODE_COLLAB
-        vtype = d.get("vtype") if d.get("vtype") in VALID_TYPES else "party"
-
-        def cents(key):
-            try:
-                return max(0, int(d.get(key) or 0))
-            except (TypeError, ValueError):
-                return 0
-
-        v = Venue.objects.create(
-            host=request.user, title=title[:120], mode=mode, vtype=vtype,
-            custom_name=str(d.get("custom_name", ""))[:60],
-            host_price_cents=cents("host_price_cents"),
-            visitor_pay_cents=cents("visitor_pay_cents") if mode == Venue.MODE_COLLAB else 0,
-            min_attract=min(10, max(0, cents("min_attract"))),
-            gates=clean_gates(d.get("gates")),
-        )
-        return Response({"venue": _venue_dict(v, request)}, status=status.HTTP_201_CREATED)
-
-
-class VenueJoinView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        venue = Venue.objects.select_related("host").filter(pk=pk).first()
-        if not venue:
-            return Response({"detail": "venue not found"}, status=status.HTTP_404_NOT_FOUND)
-        if venue.host_id == request.user.id:
-            return Response({"detail": "you can't attend your own venue"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # All five ranges, evaluated exactly as search evaluates them, so what
-        # a host advertises and what the door enforces cannot diverge.
-        if venue.gates:
-            me = profile_for(request.user)
-            host_p = profile_for(venue.host)
-            origin = ((host_p.lat, host_p.lng)
-                      if (host_p.share_location and host_p.lat is not None) else (None, None))
-            failed = failing_gate(member_metrics(me, origin), venue.gates)
-            if failed:
-                return Response(refusal(failed, venue.gates), status=status.HTTP_403_FORBIDDEN)
-
-        # Legacy attractiveness gate — rated visitors below the bar are blocked.
-        if venue.min_attract > 0:
-            med = attractiveness_median(request.user)
-            if med is not None and med < venue.min_attract:
-                return Response(
-                    {"detail": f"needs attractiveness {venue.min_attract}+, yours is {med}"},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-
-        vw = wallet_for(request.user)
-        if vw.money_cents < venue.host_price_cents:
-            return Response({"detail": "insufficient balance to attend"}, status=status.HTTP_402_PAYMENT_REQUIRED)
-
-        with transaction.atomic():
-            # Visitor pays the host (developer tax enforced). The real guard
-            # is inside `pay_between` (a conditional atomic update); the
-            # unlocked check above is just the fast, friendly rejection.
-            if pay_between(request.user, venue.host, venue.host_price_cents, note=f"VenueZ: {venue.title} (attend)") is None:
-                return Response({"detail": "insufficient balance to attend"}, status=status.HTTP_402_PAYMENT_REQUIRED)
-            earned_net = 0
-            # Collaborative: host also pays the visitor their skill price, if the host can cover it.
-            if venue.mode == Venue.MODE_COLLAB and venue.visitor_pay_cents > 0:
-                moved = pay_between(venue.host, request.user, venue.visitor_pay_cents, note=f"VenueZ: {venue.title} (skill payout)")
-                if moved is not None:
-                    _dev, earned_net = moved
-            VenueAttendance.objects.update_or_create(
-                venue=venue, visitor=request.user,
-                defaults={"paid_cents": venue.host_price_cents, "earned_cents": earned_net},
-            )
-
-        return Response({
-            "wallet": WalletSerializer(wallet_for(request.user)).data,
-            "paid_cents": venue.host_price_cents,
-            "earned_cents": earned_net,
-        })
 
 
 class AttractivenessView(APIView):

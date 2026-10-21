@@ -159,8 +159,6 @@ from .social import (
     FaceDetailView,
     FaceRateView,
     FaceZView,
-    VenueJoinView,
-    VenuesView,
 )
 from .views import (
     AddFundsView,
@@ -381,8 +379,6 @@ urlpatterns = [
     path("founding/checkout/", FoundingCheckoutView.as_view(), name="economy-founding-checkout"),
     path("premium/checkout/", PremiumCheckoutView.as_view(), name="economy-premium-checkout"),
     path("statz/checkout/", StatZCheckoutView.as_view(), name="economy-statz-checkout"),
-    path("venues/", VenuesView.as_view(), name="economy-venues"),
-    path("venues/<int:pk>/join/", VenueJoinView.as_view(), name="economy-venue-join"),
     path("attractiveness/", AttractivenessView.as_view(), name="economy-attractiveness"),
     path("attractiveness/rate/", AttractivenessRateView.as_view(), name="economy-attractiveness-rate"),
     path("facez/", FaceZView.as_view(), name="economy-facez"),
