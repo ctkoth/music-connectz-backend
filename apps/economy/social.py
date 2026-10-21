@@ -163,14 +163,17 @@ class VenueJoinView(APIView):
             return Response({"detail": "insufficient balance to attend"}, status=status.HTTP_402_PAYMENT_REQUIRED)
 
         with transaction.atomic():
-            # Visitor pays the host (developer tax enforced).
-            pay_between(request.user, venue.host, venue.host_price_cents, note=f"VenueZ: {venue.title} (attend)")
+            # Visitor pays the host (developer tax enforced). The real guard
+            # is inside `pay_between` (a conditional atomic update); the
+            # unlocked check above is just the fast, friendly rejection.
+            if pay_between(request.user, venue.host, venue.host_price_cents, note=f"VenueZ: {venue.title} (attend)") is None:
+                return Response({"detail": "insufficient balance to attend"}, status=status.HTTP_402_PAYMENT_REQUIRED)
             earned_net = 0
             # Collaborative: host also pays the visitor their skill price, if the host can cover it.
             if venue.mode == Venue.MODE_COLLAB and venue.visitor_pay_cents > 0:
-                hw = wallet_for(venue.host)
-                if hw.money_cents >= venue.visitor_pay_cents:
-                    _dev, earned_net = pay_between(venue.host, request.user, venue.visitor_pay_cents, note=f"VenueZ: {venue.title} (skill payout)")
+                moved = pay_between(venue.host, request.user, venue.visitor_pay_cents, note=f"VenueZ: {venue.title} (skill payout)")
+                if moved is not None:
+                    _dev, earned_net = moved
             VenueAttendance.objects.update_or_create(
                 venue=venue, visitor=request.user,
                 defaults={"paid_cents": venue.host_price_cents, "earned_cents": earned_net},
