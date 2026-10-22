@@ -560,9 +560,11 @@ def founding_status():
     founding StatZ prices (lifetime one-time, and grandfathered year/month)."""
     from .catalog import (
         FOUNDING_LIMIT, FOUNDING_PRICE_CENTS, LIFETIME_PRICE_CENTS, FOUNDING_TIER,
-        FOUNDING_YEAR_CENTS, FOUNDING_MONTH_CENTS,
+        FOUNDING_YEAR_CENTS, FOUNDING_MONTH_CENTS, FOUNDING_DISCOUNT,
     )
-    claimed = Membership.objects.filter(lifetime=True).count()
+    # A seat is a founding membership of ANY plan. Counting only lifetime seats let
+    # monthly and yearly founding rates sell without end, while the terms said 50.
+    claimed = Membership.objects.filter(founding=True).count()
     return {
         "claimed": claimed,
         "limit": FOUNDING_LIMIT,
@@ -573,6 +575,7 @@ def founding_status():
         "full_price_cents": LIFETIME_PRICE_CENTS,
         "year_cents": FOUNDING_YEAR_CENTS,
         "month_cents": FOUNDING_MONTH_CENTS,
+        "discount_pct": round(FOUNDING_DISCOUNT * 100),
     }
 
 
@@ -602,7 +605,7 @@ def grant_lifetime(user):
         m = Membership.objects.select_for_update().get_or_create(user=user)[0]
         if m.lifetime:
             return m
-        claimed = Membership.objects.select_for_update().filter(lifetime=True).count()
+        claimed = Membership.objects.select_for_update().filter(founding=True).count()
         if claimed >= FOUNDING_LIMIT:
             return None
         m.lifetime = True
@@ -4645,7 +4648,7 @@ BADGES = {
         "icon": "badge_founding.png", "name": "Founding Fifty", "emoji": "🏛️", "title": "Founding Fifty", "gifted": False,
         "desc": f"One of the first {FOUNDING_SEATS} members to pay for this.",
         "how": f"Claim a founding seat in MembershipZ — {FOUNDING_SEATS} of them, "
-               "at half price, and when they're gone they're gone.",
+               "at the founding discount, and when they're gone they're gone.",
         # x2, matching Sexy on its own and clearing it once you have also
         # proven an audience (x1.25 -> 2.5). A member who paid $150 for one of
         # fifty scarce seats should not earn LESS than a member the room rated
@@ -4654,7 +4657,7 @@ BADGES = {
         # x1.5 was the first attempt and it did not work: 1.5 x 1.25 = 1.875,
         # still under Sexy's 2.0. The test that pins the ordering caught it.
         "effects": {"energy_multiplier": 2.0},
-        "effect_note": "Double Energy, on top of the half-price seat itself.",
+        "effect_note": "Double Energy, on top of the discounted seat itself.",
         "check": lambda u: membership_for(u).founding,
     },
     # ---- earned ----

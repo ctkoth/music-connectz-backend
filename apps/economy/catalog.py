@@ -499,9 +499,17 @@ STATZ_PLANS = {
     "month": {"mode": "subscription", "cents": STATZ_MONTH_CENTS, "interval": "month", "kind": "statz_sub"},
 }
 
-# Founding StatZ: the first 50 members get StatZ at half price — as a one-time
+# Founding StatZ: the first 50 members get StatZ at a discount — as a one-time
 # lifetime seat, or grandfathered founding rates by year / month. Derived from
-# the StatZ prices above so the discount is always genuinely half.
+# the StatZ prices above so the discount is always exactly what it says.
+#
+# 30% off, down from 50% (Corey's call): at half price a founding member who used
+# every daily AI run cost more in model spend (~$8.25/mo) than the seat brought in
+# after Stripe ($6-7/mo). At 30% the yearly seat nets ~$8.47/mo and the monthly
+# ~$9.90. Seats already sold keep the price they paid — every checkout fixes its own
+# amount at Stripe, and the terms promise "we don't raise it underneath you".
+# The lifetime seat is one payment against a cost that never stops, so at full use
+# it is paid off after ~2 years whatever its price; it is capped at 50 with the rest.
 #
 # Half of StatZ must still cost more than Premium at every interval, or the
 # first 50 pay less for more. At Premium $10 it did not ($7.50 < $10) and the
@@ -510,11 +518,11 @@ STATZ_PLANS = {
 # decides — move a price and it says whether the founding seats still fit.
 FOUNDING_TIER = TIER_STATZ
 FOUNDING_LIMIT = 50
-FOUNDING_DISCOUNT = 0.50              # first 50 pay half
-_half = lambda cents: int(cents * (1 - FOUNDING_DISCOUNT))
-FOUNDING_PRICE_CENTS = _half(LIFETIME_PRICE_CENTS)   # $150 lifetime
-FOUNDING_YEAR_CENTS = _half(STATZ_YEAR_CENTS)        # $75/yr
-FOUNDING_MONTH_CENTS = _half(STATZ_MONTH_CENTS)      # $7.50/mo
+FOUNDING_DISCOUNT = 0.30              # first 50 pay 70%
+_founding = lambda cents: int(round(cents * (1 - FOUNDING_DISCOUNT)))
+FOUNDING_PRICE_CENTS = _founding(LIFETIME_PRICE_CENTS)   # $210 lifetime
+FOUNDING_YEAR_CENTS = _founding(STATZ_YEAR_CENTS)        # $105/yr
+FOUNDING_MONTH_CENTS = _founding(STATZ_MONTH_CENTS)      # $10.50/mo
 FOUNDING_PLANS = {
     "lifetime": {"mode": "payment", "cents": FOUNDING_PRICE_CENTS, "interval": None, "kind": "lifetime"},
     "year": {"mode": "subscription", "cents": FOUNDING_YEAR_CENTS, "interval": "year", "kind": "founding_sub"},

@@ -61,7 +61,9 @@ def _facts_block(facts):
     if costs:
         lines.append("AI cents per message: " + ", ".join(f"{k}={v}" for k, v in costs.items()))
     if facts.get("founding_limit"):
-        lines.append(f"founding StatZ seats: first {facts['founding_limit']} at half price")
+        from apps.economy.catalog import FOUNDING_DISCOUNT
+        lines.append(f"founding StatZ seats: first {facts['founding_limit']} at "
+                     f"{round(FOUNDING_DISCOUNT * 100)}% off")
     return "TRUE PLATFORM NUMBERS (quote these, never other ones):\n" + "\n".join(lines)
 
 
