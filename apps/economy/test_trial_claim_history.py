@@ -40,3 +40,17 @@ class ClaimedTakeShowsUpTests(TestCase):
         trial("tok-b", score=None)
         u = self.join("tok-b")
         self.assertFalse(TakeScore.objects.filter(user=u).exists())
+
+
+class BackfillTests(TestCase):
+    def test_an_old_claim_is_backfilled_once(self):
+        from apps.economy.models import backfill_trial_history
+        u = User.objects.create_user(username="early", password="hunter2hunter2")
+        t = trial("old-1")
+        TrialTake.objects.filter(pk=t.pk).update(claimed_by=u, claimed_at=timezone.now())  # claimed before the fix
+        self.assertEqual(len(backfill_trial_history(write=False)), 1)               # dry: listed, not written
+        self.assertFalse(TakeScore.objects.filter(user=u).exists())
+        self.assertEqual(len(backfill_trial_history(write=True)), 1)
+        self.assertEqual(TakeScore.objects.get(user=u).ref, f"trial:{t.pk}")
+        self.assertEqual(backfill_trial_history(write=True), [])                    # a re-run adds nothing
+        self.assertEqual(TakeScore.objects.filter(user=u).count(), 1)
