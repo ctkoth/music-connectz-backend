@@ -90,6 +90,9 @@ def suggestions_for(user):
             "why": "A list you can't read is a list you stop reading, and the "
                    "failures are hiding what's actually queued.",
             "how": "Marks them cancelled. Nothing is deleted and nothing is undone.",
+            # The member may clear some and keep others; capped so the payload stays small.
+            "choices": [{"id": t.id, "title": t.title[:120]} for t in
+                        OccTask.objects.filter(user=user, status=OccTask.STATUS_FAILED).order_by("-id")[:CHOICES_CAP]],
         })
 
     # --- suggest-only: publishes, spends, or is visible to other people.
@@ -156,7 +159,10 @@ def _earnable(user):
     return out
 
 
-def perform(user, key):
+CHOICES_CAP = 50
+
+
+def perform(user, key, ids=None):
     """Run an auto-safe suggestion. Returns (detail, undo_payload).
 
     `undo_payload` is the RECORD of what was done, and `can_reverse` is what says
@@ -184,8 +190,12 @@ def perform(user, key):
         # same lie in a longer coat. The record stays; the button does not.
         return detail, {"action": "claim_badges", "granted": won, "lost": lost}
     if key == "clear_failed":
-        ids = list(OccTask.objects.filter(user=user, status=OccTask.STATUS_FAILED)
-                   .values_list("id", flat=True))
+        # `ids` narrows it to what the member ticked. Only THEIR failed tasks can match, so a
+        # forged or stale id clears nothing. None means "all", as before.
+        failed = OccTask.objects.filter(user=user, status=OccTask.STATUS_FAILED)
+        if ids is not None:
+            failed = failed.filter(id__in=[i for i in ids if isinstance(i, int)])
+        ids = list(failed.values_list("id", flat=True))
         OccTask.objects.filter(id__in=ids).update(status=OccTask.STATUS_CANCELLED)
         return f"Cleared {len(ids)} failed task(s)", {"action": "clear_failed", "ids": ids}
     return "", {}
@@ -308,7 +318,8 @@ class OccSuggestView(APIView):
                 # `automated` means OCC did it WITHOUT being asked. A member who
                 # pressed Do it asked.
                 task.automated = automation and not confirmed
-                detail, undo = perform(request.user, item["key"])
+                picked = body.get("ids") if isinstance(body.get("ids"), list) else None
+                detail, undo = perform(request.user, item["key"], picked if confirmed else None)
                 task.status = OccTask.STATUS_DONE
                 task.progress = 100
                 task.detail = detail

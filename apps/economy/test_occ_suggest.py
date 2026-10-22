@@ -290,3 +290,36 @@ class DoItReallyDoesItTests(SuggestBase):
         by_key = {i["key"]: i for i in self.client.get(SUGGEST).data["suggestions"]}
         self.assertEqual(by_key["price_skills"]["target"], "skills")
         self.assertEqual(by_key["verify_social"]["target"], "connections")
+
+
+class ChoosingWhichFailedToClearTests(SuggestBase):
+    def failed(self, n, user=None):
+        return [OccTask.objects.create(user=user or self.user, title=f"t{i}", status=OccTask.STATUS_FAILED)
+                for i in range(n)]
+
+    def test_the_suggestion_lists_the_failed_tasks_to_choose_from(self):
+        self.failed(5)
+        row = next(i for i in self.client.get(SUGGEST).data["suggestions"] if i["key"] == "clear_failed")
+        self.assertEqual(len(row["choices"]), 5)
+
+    def test_only_the_ticked_ones_are_cleared(self):
+        ts = self.failed(5)
+        keep = ts[0]
+        self.client.post(SUGGEST, {"key": "clear_failed", "confirm": True,
+                                   "ids": [t.id for t in ts[1:]]}, format="json")
+        keep.refresh_from_db()
+        self.assertEqual(keep.status, OccTask.STATUS_FAILED)
+        self.assertEqual(OccTask.objects.filter(user=self.user, status=OccTask.STATUS_CANCELLED).count(), 4)
+
+    def test_without_ids_it_clears_all_as_before(self):
+        self.failed(5)
+        self.client.post(SUGGEST, {"key": "clear_failed", "confirm": True}, format="json")
+        self.assertEqual(OccTask.objects.filter(user=self.user, status=OccTask.STATUS_FAILED).count(), 0)
+
+    def test_somebody_elses_task_id_clears_nothing_of_theirs(self):
+        other = User.objects.create_user(username="other", password=PW)
+        theirs = self.failed(1, other)[0]
+        self.failed(5)
+        self.client.post(SUGGEST, {"key": "clear_failed", "confirm": True, "ids": [theirs.id]}, format="json")
+        theirs.refresh_from_db()
+        self.assertEqual(theirs.status, OccTask.STATUS_FAILED)
