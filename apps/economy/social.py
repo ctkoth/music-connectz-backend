@@ -7,7 +7,7 @@ that gates venues, mirroring the collab/battle filter.
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import status
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -1026,10 +1026,11 @@ class ProfileView(APIView):
 
 
 class ProfileAvatarView(APIView):
-    """Upload the current user's profile picture (multipart 'avatar')."""
+    """Set the current user's profile picture: a new file (multipart 'avatar'), or an
+    image already in their FileZ ({upload_id}) — the same checks either way."""
 
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     # A profile picture is displayed at 56–80px. Anything past a few MB is a
     # mistake or an abuse, whatever the member's upload tier allows elsewhere.
@@ -1039,6 +1040,8 @@ class ProfileAvatarView(APIView):
 
     def post(self, request):
         f = request.FILES.get("avatar")
+        if not f and request.data.get("upload_id") not in (None, ""):
+            return self._from_filez(request)
         if not f:
             return Response({"detail": "avatar file required"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1056,6 +1059,35 @@ class ProfileAvatarView(APIView):
 
         p = profile_for(request.user)
         p.avatar = f
+        p.save(update_fields=["avatar", "updated_at"])
+        return Response(_profile_full(p, request))
+
+    def _from_filez(self, request):
+        """An image the member already uploaded, copied into the avatar slot. Only their
+        own file, only an image, under the same size ceiling, and not one storage lost."""
+        import os
+        from django.core.files.base import ContentFile
+        try:
+            pk = int(request.data.get("upload_id"))
+        except (TypeError, ValueError):
+            return Response({"detail": "Pick a file."}, status=status.HTTP_400_BAD_REQUEST)
+        u = request.user.uploads.filter(pk=pk).first()
+        if not u:
+            return Response({"detail": "That file isn't in your FileZ."}, status=status.HTTP_404_NOT_FOUND)
+        if not (u.content_type or "").lower().startswith("image/"):
+            return Response({"detail": "That file isn't an image. Pick a JPG, PNG, WebP or GIF."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if u.size_bytes > self.MAX_MB * 1024 * 1024:
+            return Response({"detail": f"That image is too big for a profile picture — keep it under {self.MAX_MB}MB."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            with u.file.open("rb") as fh:
+                data = fh.read()
+        except Exception:
+            return Response({"detail": "That file couldn't be read from storage."},
+                            status=status.HTTP_410_GONE)
+        p = profile_for(request.user)
+        p.avatar.save(os.path.basename(u.file.name) or f"avatar-{u.pk}", ContentFile(data), save=False)
         p.save(update_fields=["avatar", "updated_at"])
         return Response(_profile_full(p, request))
 
