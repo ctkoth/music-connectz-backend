@@ -73,7 +73,8 @@ class PassTwoRequestTests(TestCase):
         out = run(client_returning(resp(GOOD), seen=seen))
         kw = seen[0]
         self.assertEqual(kw["model"], "claude-sonnet-5-5")
-        self.assertEqual(kw["output_config"]["effort"], "medium")
+        self.assertEqual(kw["output_config"]["effort"], "low")
+        self.assertEqual(kw["max_tokens"], 2500)
         fmt = kw["output_config"]["format"]
         self.assertEqual(fmt["type"], "json_schema")
         self.assertFalse(fmt["schema"]["additionalProperties"])
