@@ -210,8 +210,13 @@ class TheWholeCatalogueTests(Base):
     def test_free_stops_at_its_cap_and_reads_one_page(self):
         get, calls = self.fake_soundcloud(450)
         r = self.go(get)
-        self.assertEqual(r.data["imported"], 5)
+        self.assertEqual(r.data["imported"], 10)          # Free: your last 10
         self.assertEqual(len(calls), 1)
+
+    def test_premium_brings_the_last_25(self):
+        self.tier(TIER_PREMIUM)
+        get, calls = self.fake_soundcloud(450)
+        self.assertEqual(self.go(get).data["imported"], 25)
 
     def test_a_next_link_off_soundclouds_api_is_never_followed(self):
         """The token rides on every page request; a next_href pointing

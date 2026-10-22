@@ -153,8 +153,10 @@ def import_cap(tier):
     """How many tracks one import may bring in; None is the whole catalogue.
 
     A ladder on volume, not on access: one-at-a-time posting of a SoundCloud
-    link is free at every tier and always has been. Free is 5 rather than 0
-    because an importer that imports nothing is a button that lies.
+    link is free at every tier and always has been. Newest first, so each number
+    is "your last N": Free 10 (was 5, Corey's call), Premium 25, StatZ the whole
+    catalogue. Free is never 0, because an importer that imports nothing is a
+    button that lies.
     """
     return limits_for(tier)["soundcloud_import"]
 

@@ -121,7 +121,7 @@ UNLIMITED_CHARS = 10 ** 9
 # cannot add more (`social.links_over_cap`).
 TIER_LIMITS = {
     TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500, "embeds_per_post": 3,
-                "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 5, "profile_links": 25},
+                "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 10, "profile_links": 25},
     TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 15,
                    "widgets_open": 12, "custom_groups": 5, "soundcloud_import": 25, "profile_links": 100},
     # StatZ writes without a character cap (Corey's call). It was 5,000 for a
