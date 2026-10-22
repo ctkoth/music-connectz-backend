@@ -711,6 +711,20 @@ class FunnelSummaryView(APIView):
                 "note": note,
             }
 
+        # The PersonalitieZ test is the other no-account door, and it had two plain rows
+        # and no rate. This one is SAME-BROWSER: of the browsers that finished the test,
+        # how many later created an account — which a comparison of two totals cannot
+        # say, since a register_success from somewhere else would count either way.
+        quiz_done = set(rows.filter(kind="quiz_done").values_list("anon_id", flat=True)) - {""}
+        joined = set(rows.filter(kind="register_success").values_list("anon_id", flat=True))
+        quiz_rate = {
+            "key": "quiz_join", "label": "Test finished → account created",
+            "from_kind": "quiz_done", "to_kind": "register_success",
+            "from": len(quiz_done), "to": len(quiz_done & joined),
+            "pct": round(100 * len(quiz_done & joined) / len(quiz_done), 1) if quiz_done else None,
+            "note": "Same browser: finished the PersonalitieZ test, then made an account.",
+        }
+
         headline = [
             _rate("landing_view", "try_view", "Landing → trial opened",
                   "How many arrivals ever start the one thing the page promises."),
@@ -823,6 +837,9 @@ class FunnelSummaryView(APIView):
             "browsers_excluded": FunnelExclusion.objects.count(),
             "base_kind": base_kind,
             "headline": headline,
+            # Beside the three, not among them: those decide what to work on for the
+            # coach's door; this is the other no-account door, read the same way.
+            "quiz": quiz_rate,
             "steps": steps,
             "sources": sources,
             "devices": devices,

@@ -356,3 +356,25 @@ class SharedByTests(TestCase):
         for i in range(SHARED_MIN):
             declared(f"c{i}", "IN-P")
         self.assertIsNone(shared_by("IN-P"))
+
+
+class ATestTakenBeforeJoiningIsKeptTests(TestCase):
+    """"Save this — free account" now does: the result rides the signup into the profile."""
+
+    def join(self, personality):
+        from rest_framework.test import APIClient as _C
+        r = _C().post("/api/auth/register/", {"username": "quizzer", "email": "q@example.com",
+                                              "password": "Sturdy-pass-8812", "personality": personality},
+                      format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        return _profile_for(User.objects.get(username="quizzer"))
+
+    def test_the_result_is_on_the_new_profile(self):
+        p = self.join({"code": "INFP", "clarity": {"ie": 70, "zz": 99}, "depth": "basic"})
+        self.assertEqual(p.personality, "INFP")
+        self.assertEqual(p.personality_detail["depth"], "basic")
+        self.assertNotIn("zz", p.personality_detail["clarity"])
+
+    def test_junk_saves_nothing_and_never_fails_the_signup(self):
+        p = self.join({"code": "!!!!"})
+        self.assertIn(p.personality, ("", "----"))
