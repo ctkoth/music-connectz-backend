@@ -25,16 +25,18 @@ member got a usable result, so it is billed exactly once, by the view, after
 REAL COST (claude-sonnet-5-5, $2 / $10 per MTok = 0.0002c / 0.001c per token):
 
     input   system ~3.2k (voice paradigm, rules) + data ~1.3k  = ~4.5k  -> 0.9c
-    output  max_tokens 4000 (thinking counts toward it)         <= 4.0c
+    output  max_tokens 2500 (thinking counts toward it)         <= 2.5c
     ------------------------------------------------------------------
-    worst case, pass 2 alone                                    <= 4.9c
-    typical (800 answer tokens + ~700 thinking)                 ~  2.4c
+    worst case, pass 2 alone                                    <= 3.4c
+    typical (800 answer tokens + less thinking at effort "low") ~  1.5-2c
+
+(Was effort "medium" / max_tokens 4000: worst 4.9c, typical ~2.4c.)
 
 Plus the Gemini listener (~0.5-1c for a normal take). The member-facing price
 is `ai_cost("standard")` = 3c and a free daily prompt covers it
 (DAILY_PROMPT_MAX_CENTS = 3). So a typical coached take now costs the platform
-~3-3.5c against 3c collected, and the worst case ~6c: roughly break-even typical,
-a loss of up to ~3c at the tail. NOTHING here changes a price — that is Corey's
+~2.5-3c against 3c collected, and the worst case ~4.4c: break-even or better
+typical, a loss of up to ~1.4c at the tail (was ~6c / ~3c at effort "medium"). NOTHING here changes a price — that is Corey's
 call. Levers, cheapest first: effort "low", a smaller `max_tokens`, or pricing the
 coached take above the free-prompt ceiling. Every run logs its real usage and
 cents (`coach_think: ...`) so the decision can be made from data.
@@ -58,9 +60,12 @@ from .instruments import profile_for_app, scores_for
 logger = logging.getLogger(__name__)
 
 COACH_THINK_MODEL = os.environ.get("COACH_THINK_MODEL", "claude-sonnet-5-5")
-THINK_MAX_TOKENS = int(os.environ.get("COACH_THINK_MAX_TOKENS", "4000"))
+THINK_MAX_TOKENS = int(os.environ.get("COACH_THINK_MAX_TOKENS", "2500"))
 THINK_CAP_SECONDS = 40
-THINK_EFFORT = "medium"
+# "low" and 2500 (were "medium" and 4000) by Corey's call, to cut the worst case. A
+# typical answer is ~1.5k tokens; a run that hits the cap falls back to the listener's
+# notes, as before. Both are env vars so a quality complaint can be answered without a deploy.
+THINK_EFFORT = os.environ.get("COACH_THINK_EFFORT", "low")
 # cents per token: $2 and $10 per MTok.
 IN_CENTS_PER_TOKEN = 200 / 1_000_000
 OUT_CENTS_PER_TOKEN = 1000 / 1_000_000
