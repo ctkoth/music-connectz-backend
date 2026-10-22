@@ -200,6 +200,45 @@ class BattlesView(APIView):
         return Response(battle_dict(b, request), status=status.HTTP_201_CREATED)
 
 
+class BattlePublicView(APIView):
+    """GET /api/economy/battlez/<pk>/public/ — a battle as a stranger may see it.
+
+    Battles are open to every age inside the app, and stay so. This read is for the
+    shared link, where the viewer is anybody on the internet: an under-18 member's
+    take, name and win are left out of it entirely — not blurred, not counted — so the
+    page cannot be used to find them. Unknown ages count as adults, the same rule
+    `is_minor` follows everywhere. Read-only; entering and rating need an account.
+    """
+    from rest_framework.permissions import AllowAny
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, pk):
+        from .models import is_minor
+        b = Battle.objects.select_related("host__mcz_profile", "winner__mcz_profile").filter(pk=pk).first()
+        if not b:
+            return Response({"detail": "battle not found"}, status=status.HTTP_404_NOT_FOUND)
+        host_ok = not is_minor(b.host)
+        entries = []
+        for e in b.entries.select_related("user__mcz_profile").order_by("created_at"):
+            if is_minor(e.user):
+                continue
+            entries.append({"username": e.user.username, "title": e.title,
+                            "media_type": e.media_type, "media_url": e.media_url,
+                            "image_url": e.image_url, "created_at": e.created_at.isoformat()})
+        winner = b.winner.username if b.winner_id and not is_minor(b.winner) else ""
+        return Response({
+            "id": b.id, "title": b.title, "kind": b.kind or "1v1", "mode": b.mode,
+            "genre": b.genre, "status": b.status,
+            "ends_at": b.ends_at.isoformat() if b.ends_at else None,
+            "host": b.host.username if host_ok else "",
+            "description": b.description if host_ok else "",
+            "media_type": b.media_type if host_ok else "", "media_url": b.media_url if host_ok else "",
+            "image_url": b.image_url if host_ok else "",
+            "entries": entries, "winner": winner,
+        })
+
+
 class BattleDetailView(APIView):
     permission_classes = [IsAuthenticated]
 

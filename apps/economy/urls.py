@@ -59,7 +59,7 @@ from .gemini import GeminiImageView
 from .notifications import NotificationsView
 from .push import PushPrefsView, PushSubscribeView, PushTestView, PushView
 from .earn import EarnView
-from .battlez import (BattlesView, BattleChallengeView, BattleDetailView,
+from .battlez import (BattlesView, BattleChallengeView, BattleDetailView, BattlePublicView,
                       BattleEnterView, BattleRespondView, BattleSettleView,
                       BattleWagerView, MoneyBattleVoteView)
 from .opportunitiez import OpportunitieZView
@@ -221,6 +221,7 @@ urlpatterns = [
     path("battlez/challenge/", BattleChallengeView.as_view(), name="economy-battle-challenge"),
     path("battlez/moneyvote/", MoneyBattleVoteView.as_view(), name="economy-battle-moneyvote"),
     path("battlez/<int:pk>/", BattleDetailView.as_view(), name="economy-battle"),
+    path("battlez/<int:pk>/public/", BattlePublicView.as_view(), name="economy-battle-public"),
     path("battlez/<int:pk>/respond/", BattleRespondView.as_view(), name="economy-battle-respond"),
     path("battlez/<int:pk>/wager/", BattleWagerView.as_view(), name="economy-battle-wager"),
     path("battlez/<int:pk>/settle/", BattleSettleView.as_view(), name="economy-battle-settle"),
