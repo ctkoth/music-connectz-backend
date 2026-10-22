@@ -1479,6 +1479,26 @@ def _storage_summary(user, tier):
     }
 
 
+_MEDIA_ID = re.compile(r"/media/(\d+)/")
+
+
+def _posts_by_upload(user):
+    """{upload id: {id, visibility}} for the member's own posts, newest post wins.
+
+    One query: a stored media address is `/api/economy/media/<id>/<name>`, so the id
+    is read out of each post's primary address and every album item's.
+    """
+    out = {}
+    for p in (Post.objects.filter(author=user).only("id", "media_url", "items", "visibility")
+              .order_by("created_at")[:2000]):
+        urls = [p.media_url] + [i.get("url", "") for i in (p.items or []) if isinstance(i, dict)]
+        for url in urls:
+            mt = _MEDIA_ID.search(url or "")
+            if mt:
+                out[int(mt.group(1))] = {"id": p.id, "visibility": p.visibility or "public"}
+    return out
+
+
 class UploadsView(APIView):
     """GET lists the user's uploads + storage summary; POST uploads one file.
 
@@ -1492,7 +1512,15 @@ class UploadsView(APIView):
 
     def get(self, request):
         m = membership_for(request.user)
-        uploads = [_upload_dict(u, request) for u in request.user.uploads.all()[:200]]
+        posted = _posts_by_upload(request.user)
+        uploads = []
+        for u in request.user.uploads.all()[:200]:
+            row = _upload_dict(u, request)
+            # The post this file lives in, if any — that is where its likes, ratings,
+            # comments, shares and other-app doors are. FileZ links to it rather than
+            # running a second social layer on raw files.
+            row["post"] = posted.get(u.pk)
+            uploads.append(row)
         return Response({"uploads": uploads, **_storage_summary(request.user, m.tier)})
 
     def post(self, request):
