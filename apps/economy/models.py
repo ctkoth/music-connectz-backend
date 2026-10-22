@@ -3928,13 +3928,35 @@ def _claim_coached_trial(user, take):
     try:
         from .instruments import INSTRUMENTS
         if take.app_key not in INSTRUMENTS:
-            return
+            return None
+        ref = f"trial:{take.pk}"
+        if TakeScore.objects.filter(user=user, ref=ref).exists():
+            return None                     # already in their history: a re-run adds nothing
         from .takescorez import record
-        row = record(user, take.app_key, take.result or {}, source="trial", ref=f"trial:{take.pk}")
+        row = record(user, take.app_key, take.result or {}, source="trial", ref=ref)
         if row:
             TakeScore.objects.filter(pk=row.pk).update(created_at=take.created_at)
+        return row
     except Exception:                                       # pragma: no cover
-        pass
+        return None
+
+
+def backfill_trial_history(write=False):
+    """Every take claimed before `_claim_coached_trial` existed, put into its owner's history.
+
+    Returns the takes that were (or, dry, would be) written. Safe to run any number of
+    times: a take whose `trial:<pk>` row exists is skipped, so a second run writes nothing.
+    """
+    from .instruments import INSTRUMENTS
+    owed = []
+    for take in (TrialTake.objects.filter(claimed_by__isnull=False, scored=True, app_key__in=list(INSTRUMENTS))
+                 .select_related("claimed_by").order_by("pk")):
+        if TakeScore.objects.filter(user=take.claimed_by, ref=f"trial:{take.pk}").exists():
+            continue
+        if write and _claim_coached_trial(take.claimed_by, take) is None:
+            continue
+        owed.append(take)
+    return owed
 
 
 def _claim_bodiez_trial(user, take):

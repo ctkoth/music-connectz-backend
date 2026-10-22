@@ -323,3 +323,36 @@ class TestEndpointTests(TestCase):
             if "test_personalityz" in line or "personalityz.py" in line:
                 continue
             self.assertNotRegex(line, r"order_by|sort|rank|median|leaderboard")
+
+
+# --- the test result's "N members share this type" ------------------------------
+from apps.economy.personalityz import SHARED_MIN, shared_by  # noqa: E402
+from apps.economy.models import profile_for as _profile_for  # noqa: E402
+
+
+def declared(name, code, private=False):
+    p = _profile_for(User.objects.create_user(username=name, password="hunter2hunter2"))
+    p.personality = code
+    if private:
+        p.visibility = {"personality": ["private"]}
+    p.save()
+
+
+class SharedByTests(TestCase):
+    def test_below_the_minimum_it_says_nothing(self):
+        for i in range(SHARED_MIN - 1):
+            declared(f"a{i}", "INFP")
+        self.assertIsNone(shared_by("INFP"))
+        declared("last", "INFP")
+        self.assertEqual(shared_by("INFP"), SHARED_MIN)
+
+    def test_a_private_declaration_is_not_counted(self):
+        for i in range(SHARED_MIN):
+            declared(f"b{i}", "ESTJ")
+        declared("hidden", "ESTJ", private=True)
+        self.assertEqual(shared_by("ESTJ"), SHARED_MIN)
+
+    def test_a_partial_code_gets_no_count(self):
+        for i in range(SHARED_MIN):
+            declared(f"c{i}", "IN-P")
+        self.assertIsNone(shared_by("IN-P"))
