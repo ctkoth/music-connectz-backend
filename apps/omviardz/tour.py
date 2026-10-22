@@ -682,7 +682,7 @@ STEPS = {
                 "explain": (
                     "📊 No character cap, the biggest storage, the lowest cut, and SpecZ — the "
                     "analytics and metadata reports nobody else can buy. 🔥 First 50 members "
-                    "get a founding rate at half price, including a one-time lifetime seat. "
+                    "get a founding rate at a discount, including a one-time lifetime seat. "
                     "That's a real deadline, not a fake urgency banner. 👀"
                 ),
             },

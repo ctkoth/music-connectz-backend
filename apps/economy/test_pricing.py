@@ -25,10 +25,21 @@ class PricingLadderTests(TestCase):
         self.assertGreater(catalog.FOUNDING_YEAR_CENTS, catalog.PREMIUM_YEAR_CENTS)
         self.assertGreater(catalog.FOUNDING_PRICE_CENTS, catalog.PREMIUM_YEAR_CENTS)
 
-    def test_founding_really_is_half(self):
-        self.assertEqual(catalog.FOUNDING_MONTH_CENTS * 2, catalog.STATZ_MONTH_CENTS)
-        self.assertEqual(catalog.FOUNDING_YEAR_CENTS * 2, catalog.STATZ_YEAR_CENTS)
-        self.assertEqual(catalog.FOUNDING_PRICE_CENTS * 2, catalog.LIFETIME_PRICE_CENTS)
+    def test_founding_is_exactly_the_stated_discount(self):
+        self.assertEqual(catalog.FOUNDING_DISCOUNT, 0.30)
+        self.assertEqual(catalog.FOUNDING_MONTH_CENTS, 1050)
+        self.assertEqual(catalog.FOUNDING_YEAR_CENTS, 10500)
+        self.assertEqual(catalog.FOUNDING_PRICE_CENTS, 21000)
+
+    def test_a_founding_seat_covers_a_member_who_uses_every_ai_run(self):
+        # ~2.75c is a typical coached take after the logic pass went to effort "low".
+        # Net of Stripe (2.9% + 30c), each recurring founding plan must cover a month
+        # of the full StatZ allowance at that cost, or the seat is sold at a loss.
+        from apps.economy.models import PROMPT_ALLOWANCE
+        cost = PROMPT_ALLOWANCE["statz"] * 30 * 2.75
+        net = lambda cents: cents * 0.971 - 30
+        self.assertGreater(net(catalog.FOUNDING_MONTH_CENTS), cost)
+        self.assertGreater(net(catalog.FOUNDING_YEAR_CENTS) / 12, cost)
         self.assertEqual(set(catalog.FOUNDING_PLANS), {"lifetime", "year", "month"})
 
     def test_the_published_numbers(self):
