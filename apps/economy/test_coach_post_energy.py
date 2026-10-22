@@ -1,4 +1,4 @@
-"""Coaching a post costs tiered ⚡ on top of the prompt, checked before the model runs."""
+"""Coaching a post costs a flat ⚡ on top of the prompt, checked before the model runs."""
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -18,13 +18,13 @@ class CoachPostEnergyTests(TestCase):
     def tier(self, t):
         m = membership_for(self.u); m.tier = t; m.save(update_fields=["tier", "updated_at"])
 
-    def test_the_price_is_tiered_and_published_before_anything_runs(self):
+    def test_the_price_is_flat_and_published_before_anything_runs(self):
         for t in ("free", "premium", "statz"):
             self.tier(t)
             self.assertEqual(coach_post_energy(self.u), COACH_POST_ENERGY[t])
             self.assertEqual(self.c.get("/api/singz/coach/").json()["post_energy_cost"], COACH_POST_ENERGY[t])
-        self.assertLess(COACH_POST_ENERGY["free"], COACH_POST_ENERGY["premium"])
-        self.assertLess(COACH_POST_ENERGY["premium"], COACH_POST_ENERGY["statz"])
+        # Flat: paying more must not make the same action dearer.
+        self.assertEqual(len({COACH_POST_ENERGY[t] for t in ("free", "premium", "statz")}), 1)
 
     def test_without_the_energy_the_post_is_refused_before_the_model_runs(self):
         post = Post.objects.create(author=self.u, title="my verse")
