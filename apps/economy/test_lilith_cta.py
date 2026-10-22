@@ -208,6 +208,17 @@ class StarterTests(TestCase):
         self.assertTrue(again.json()["already"])
         self.assertEqual(LilithRoutine.objects.count(), 1)
 
+    def test_a_routine_starter_can_be_kept_on_another_cadence(self):
+        r = self.c.post("/api/economy/lilith/starters/", {"kind": "routine", "key": "ship_one", "cadence": "monthly"}, format="json")
+        self.assertEqual(r.status_code, 201)
+        row = LilithRoutine.objects.get()
+        self.assertEqual((row.cadence, row.action, row.title), ("monthly", "post_made", "Ship One Thing"))
+
+    def test_a_cadence_outside_the_list_is_refused(self):
+        r = self.c.post("/api/economy/lilith/starters/", {"kind": "routine", "key": "ship_one", "cadence": "hourly"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(LilithRoutine.objects.count(), 0)
+
     def test_the_tier_ceiling_applies(self):
         keys = ["daily_rapz", "off_the_top", "write_sixteen", "ship_one"]
         codes = [self.c.post("/api/economy/lilith/starters/", {"kind": "routine", "key": k}, format="json").status_code
