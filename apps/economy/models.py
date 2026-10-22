@@ -3912,15 +3912,37 @@ def claim_trial_take(user, token):
     take.save(update_fields=["claimed_by", "claimed_at"])
     if take.app_key == "bodiez":
         _claim_bodiez_trial(user, take)
+    elif take.scored:
+        _claim_coached_trial(user, take)
     return take
+
+
+def _claim_coached_trial(user, take):
+    """A scored trial take becomes the first row of the member's coach history.
+
+    The docstring below used to say the history "reads it back" through `claimed_by`;
+    nothing did, so the take somebody signed up to keep was never shown to them again.
+    It goes through `takescorez.record`, the same writer a member's own take uses, dated
+    when it was actually performed. Best-effort, like the rest of the claim.
+    """
+    try:
+        from .instruments import INSTRUMENTS
+        if take.app_key not in INSTRUMENTS:
+            return
+        from .takescorez import record
+        row = record(user, take.app_key, take.result or {}, source="trial", ref=f"trial:{take.pk}")
+        if row:
+            TakeScore.objects.filter(pk=row.pk).update(created_at=take.created_at)
+    except Exception:                                       # pragma: no cover
+        pass
 
 
 def _claim_bodiez_trial(user, take):
     """The exercise a BodieZ trial visitor picked becomes a real routine on
     their new account, in Inbox where every hand-built routine starts.
 
-    SingZ and RapZ's claim already carries the take's SCORE into the new
-    account via `claimed_by` — a member's coach history reads it back. BodieZ
+    A coached take's claim writes a row into the member's coach history
+    (`_claim_coached_trial`). BodieZ
     has no equivalent history row for one arithmetic set, so the thing worth
     keeping is what they were BUILDING: the exercise, reps and weight they
     picked stop being a page that vanishes with the tab and become the first
