@@ -1864,8 +1864,10 @@ class DailySubmission(models.Model):
 # Post progression thresholds: when PostZ becomes BattleZ/CollabZ eligible
 # Rating count needed for BattleZ (5+ ratings = eligible for competitions)
 BATTLE_RATING_THRESHOLD = 5
-# Average rating needed for CollabZ (tier-gated: Free 8.0, Premium 7.0, StatZ 6.0)
-COLLAB_RATING_THRESHOLD = {"free": 8.0, "premium": 7.0, "statz": 6.0}
+# Average rating needed for CollabZ — ONE bar for everybody (Corey's call). It was
+# 8.0 / 7.0 / 6.0 by tier, which sold a lower quality bar: a rating measures the post,
+# and what the author pays for must never change what counts as good enough.
+COLLAB_RATING_THRESHOLD = 7.0
 
 SUBMISSION_DAILY_CAP = {"free": 5, "premium": 15, "statz": 50}
 
@@ -1873,12 +1875,9 @@ SUBMISSION_DAILY_CAP = {"free": 5, "premium": 15, "statz": 50}
 def post_collab_threshold(post):
     """Rating score needed for this post to become CollabZ-eligible.
 
-    Lower tier = higher bar. StatZ gets easiest access (6.0), Free toughest (8.0).
+    The same for every author, whatever their tier.
     """
-    if not post or not post.author:
-        return 8.0
-    tier = membership_for(post.author).tier
-    return COLLAB_RATING_THRESHOLD.get(tier, 8.0)
+    return COLLAB_RATING_THRESHOLD
 
 
 def post_is_battle_eligible(post):

@@ -6,7 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import SoundCloudEngagement, Transaction, membership_for
+from .models import SoundCloudEngagement, Transaction, award_energy, award_spinaz, membership_for
 from .catalog import limits_for
 
 # Daily engagement reward caps
@@ -16,11 +16,16 @@ ENGAGEMENT_DAILY_CAPS = {
     SoundCloudEngagement.KIND_COMMENT: 5,
 }
 
-# Reward amounts (energy, spinaz)
+# Reward amounts (energy, spinaz). Self-reported: the member types a track id and nothing
+# asks SoundCloud whether the like happened, so this pays what rating somebody's post pays
+# (1 ⚡) and no 🍥 at all. It used to say 10 / 25 / 50 🍥 and 1 / 3 / 5 ⚡ — and it never
+# credited a wallet, only wrote ledger rows, so members were told about a reward that did
+# not land. It pays through award_energy now, so the wallet and LogZ agree. Raise it again
+# only once the engagement is checked against SoundCloud (the import's sign-in can).
 ENGAGEMENT_REWARDS = {
-    SoundCloudEngagement.KIND_LIKE: {"energy": 1, "spinaz": 10},
-    SoundCloudEngagement.KIND_REPOST: {"energy": 3, "spinaz": 25},
-    SoundCloudEngagement.KIND_COMMENT: {"energy": 5, "spinaz": 50},
+    SoundCloudEngagement.KIND_LIKE: {"energy": 1, "spinaz": 0},
+    SoundCloudEngagement.KIND_REPOST: {"energy": 1, "spinaz": 0},
+    SoundCloudEngagement.KIND_COMMENT: {"energy": 1, "spinaz": 0},
 }
 
 ENGAGEMENT_LABELS = {
@@ -124,25 +129,12 @@ class SoundCloudEngagementView(APIView):
         energy = reward.get("energy", 0)
         spinaz = reward.get("spinaz", 0)
 
-        # Create transaction for energy
         if energy:
-            Transaction.objects.create(
-                user=request.user,
-                kind=Transaction.KIND_EARN,
-                resource=Transaction.RES_ENERGY,
-                amount=energy,
-                note=f"{ENGAGEMENT_LABELS.get(kind, kind)}: {track_title or track_url}",
-            )
-
-        # Create transaction for spinaz
+            award_energy(request.user, energy, f"{ENGAGEMENT_LABELS.get(kind, kind)}: {track_title or track_url}",
+                         app_key="soundcloudengagementz")
         if spinaz:
-            Transaction.objects.create(
-                user=request.user,
-                kind=Transaction.KIND_EARN,
-                resource=Transaction.RES_SPINAZ,
-                amount=spinaz,
-                note=f"{ENGAGEMENT_LABELS.get(kind, kind)}: {track_title or track_url}",
-            )
+            award_spinaz(request.user, spinaz, f"{ENGAGEMENT_LABELS.get(kind, kind)}: {track_title or track_url}",
+                         app_key="soundcloudengagementz")
 
         # Mark as rewarded
         engagement.rewarded = True

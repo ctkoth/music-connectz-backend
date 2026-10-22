@@ -710,8 +710,11 @@ BOOST_SLOTS = 3
 # (ENERGY_FLOOR_PER_HOUR 2 / 6 / 20 an hour = x1 / x3 / x10), so it is felt at every
 # tier and never a wall: the tier buys how MUCH regenerates, not whether it runs.
 COACH_POST_ENERGY_BASE = 10 * AI_TASK_PROMPTZ
-COACH_POST_ENERGY = {"free": COACH_POST_ENERGY_BASE, "premium": COACH_POST_ENERGY_BASE * 3,
-                     "statz": COACH_POST_ENERGY_BASE * 10, "debug": COACH_POST_ENERGY_BASE * 10}
+#
+# Then made FLAT (Corey's call): scaled by tier, a StatZ member saw a price ten times a
+# Free member's for the same action, which reads as paying more for paying more. The
+# same 10 ⚡ is fewer hours of regeneration on a higher tier, which is the benefit.
+COACH_POST_ENERGY = {t: COACH_POST_ENERGY_BASE for t in ("free", "premium", "statz", "debug")}
 
 # What an agent run is CHARGED, as a multiple of what it COST to serve.
 #
