@@ -928,42 +928,6 @@ def link_spend(user, ref, since, note_prefix):
         return False
 
 
-# ---- VenueZ ----
-class Venue(models.Model):
-    MODE_COLLAB = "collaborative"
-    MODE_PERF = "performance"
-    MODE_CHOICES = [(MODE_COLLAB, "Collaborative"), (MODE_PERF, "Performance")]
-
-    host = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="venues")
-    title = models.CharField(max_length=120)
-    mode = models.CharField(max_length=16, choices=MODE_CHOICES, default=MODE_COLLAB)
-    vtype = models.CharField(max_length=24, default="party")  # party/openmic/theater/show/custom
-    custom_name = models.CharField(max_length=60, blank=True, default="")
-    host_price_cents = models.PositiveIntegerField(default=0)
-    visitor_pay_cents = models.PositiveIntegerField(default=0)
-    min_attract = models.PositiveSmallIntegerField(default=0)  # 0-10, legacy
-    # All five range gates: {"rating": [lo, hi], "price": [...], "attract": ...,
-    # "age": ..., "km": [None, hi]}. Exclusive — no value for a gated metric
-    # means excluded. min_attract above is kept so old venues keep working.
-    gates = models.JSONField(default=dict, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-
-
-class VenueAttendance(models.Model):
-    venue = models.ForeignKey(Venue, on_delete=models.CASCADE, related_name="attendances")
-    visitor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="venue_attendances")
-    paid_cents = models.PositiveIntegerField(default=0)
-    earned_cents = models.PositiveIntegerField(default=0)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ("venue", "visitor")
-        ordering = ["-created_at"]
-
-
 # ---- Attractiveness (RateZ) ----
 class AttractivenessRating(models.Model):
     rater = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="attractiveness_given")
