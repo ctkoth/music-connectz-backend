@@ -1167,6 +1167,11 @@ class LilithStarterAddView(APIView):
             spec = ST.routine_by_key(key)
             if not spec:
                 return Response({"detail": "No such starter."}, status=404)
+            # The member may keep it on a different rhythm than the starter's own. Only WHICH of the
+            # three, from the closed list: the title, action and goal still come from the server.
+            cadence = str(request.data.get("cadence") or spec["cadence"])
+            if cadence not in CADENCES:
+                return Response({"detail": "Choose daily, weekly or monthly."}, status=400)
             if live_routines(request.user).filter(template=key).exists():
                 return Response({"detail": "That one is already on your board.", "already": True}, status=200)
             back = LilithRoutine.objects.filter(user=request.user, template=key, trashed_at__isnull=False).first()
@@ -1179,7 +1184,7 @@ class LilithStarterAddView(APIView):
                                            "A tier up raises it.", "at_limit": True},
                                 status=status.HTTP_402_PAYMENT_REQUIRED)
             r = LilithRoutine.objects.create(
-                user=request.user, title=spec["title"], note=spec["note"], cadence=spec["cadence"],
+                user=request.user, title=spec["title"], note=spec["note"], cadence=cadence,
                 app_key=_coach_for(request, spec, key), target=spec["target"], template=key,
                 action=spec.get("action", ""), goal=spec.get("goal", 1))
             return Response(_routine_dict(r), status=status.HTTP_201_CREATED)
