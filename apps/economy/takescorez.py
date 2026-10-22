@@ -1195,6 +1195,9 @@ def _progress(user, app_key, limit):
             "goal_match": goal_match(user, app_key),
         },
         "takes": [take_row(t, prof["label"], price, best, lessons_ctx) for t in takes],
+        # The number a "beat it tomorrow" nudge points at: the member's best overall on this
+        # coach across ALL their takes, not just the rows listed. None until there is one.
+        "personal_best": best[0] if best else None,
         "coaching": coaching(user, app_key, price),
         "recap": recap(user, app_key),
         "total_takes": TakeScore.objects.filter(user=user, app_key=app_key).count(),

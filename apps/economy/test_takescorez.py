@@ -321,6 +321,13 @@ class ApiTests(TestCase):
         self.c = APIClient()
         self.c.force_authenticate(self.u)
 
+    def test_progress_names_the_personal_best_across_every_take(self):
+        self.assertIsNone(self.c.get("/api/rapz/progress/").data["personal_best"])
+        scored(self.u, "rapz", flow=8, timing=8)
+        scored(self.u, "rapz", flow=5, timing=5)
+        scored(self.u, "singz", pitch=10, tone=10)          # another coach's best is not this one's
+        self.assertEqual(self.c.get("/api/rapz/progress/").data["personal_best"], 8)
+
     def test_progress_is_mounted_for_every_instrument(self):
         from music_connectz.urls import INSTRUMENT_APP_KEYS
         for key in INSTRUMENT_APP_KEYS:
