@@ -168,6 +168,34 @@ class OfferListCreateView(APIView):
         return Response(ser.data, status=status.HTTP_201_CREATED)
 
 
+class OfferPublicView(APIView):
+    """GET /api/lessonz/offers/<pk>/public/ — a lesson listing as a stranger may see it,
+    for the shared /l/<id> link.
+
+    Published listings only. Never the latitude and longitude — those exist so the
+    member search can measure distance, and a stranger gets the city. A listing whose
+    teacher is a known minor is not served here at all: a page that invites anybody on
+    the internet to book an under-18 member is the contact the age groups exist to
+    stop. Booking needs an account, so this is read-only.
+    """
+    from rest_framework.permissions import AllowAny
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, pk):
+        from apps.economy.models import is_minor
+        o = LessonOffer.objects.select_related("teacher__mcz_profile").filter(pk=pk, is_active=True).first()
+        if not o or is_minor(o.teacher):
+            return Response({"detail": "That lesson isn't available."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "id": o.id, "teacher_username": o.teacher.username, "skill": o.skill,
+            "title": o.title, "description": o.description,
+            "pricing_mode": o.pricing_mode, "price": str(o.price), "currency": o.currency,
+            "city": o.city, "remote_ok": o.remote_ok, "in_person_ok": o.in_person_ok,
+            "callz_ok": o.callz_ok, "rating_snapshot": o.rating_snapshot,
+        })
+
+
 class OfferDetailView(APIView):
     """A teacher could publish an offer and never see it again — no detail
     route existed at all, so a price typo or wanting to raise a rate meant
