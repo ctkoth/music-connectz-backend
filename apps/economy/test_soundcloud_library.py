@@ -66,7 +66,7 @@ class ListingTests(Base):
         sec = next(r for r in d["rows"] if r["private_on_sc"])
         self.assertEqual(sec["soundcloud_url"], "")
         self.assertIsNone(d["import"]["ladder"]["statz"])
-        self.assertEqual(d["import"]["ladder"]["free"], 5)
+        self.assertEqual(d["import"]["ladder"]["free"], 10)
         self.assertIn("restricted", d["explain"])
         from apps.economy.models import RESTRICTED_JOIN_REWARD_SPINAZ
         self.assertIn(str(RESTRICTED_JOIN_REWARD_SPINAZ), d["explain"]["restricted"])
