@@ -748,3 +748,20 @@ class FunnelReasonsTests(TestCase):
         self.assertEqual(reasons["try_mic_denied"], [{"why": "notfound", "unique": 1}])
         # An unlisted slug is dropped on arrival, so it counts as unknown.
         self.assertEqual({r["why"] for r in reasons["register_fail"]}, {"password", "unknown"})
+
+
+class QuizRateTests(FunnelSummaryTests):
+    """The test's own headline rate is same-browser: finished it, THEN made an account."""
+
+    def test_only_browsers_that_did_both_count(self):
+        from apps.economy.models import FunnelEvent
+        for anon in ("q1", "q2", "q3"):
+            FunnelEvent.objects.create(kind="quiz_done", anon_id=anon)
+        FunnelEvent.objects.create(kind="register_success", anon_id="q2")
+        FunnelEvent.objects.create(kind="register_success", anon_id="never-took-it")
+        row = self.owner_client().get(SUMMARY).data["quiz"]
+        self.assertEqual((row["from"], row["to"], row["pct"]), (3, 1, 33.3))
+
+    def test_nobody_took_it_reads_as_no_measurement(self):
+        row = self.owner_client().get(SUMMARY).data["quiz"]
+        self.assertIsNone(row["pct"])
