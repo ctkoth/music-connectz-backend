@@ -24,10 +24,15 @@ services:
     # A service with a disk deploys with a short gap instead of zero-downtime.
     # That is the price. It is seconds, once per deploy, against never losing
     # a member's only copy of a take.
+    #
+    # 50GB, up from 10: the tiers promise 5GB (Premium) and 100GB (StatZ) a member,
+    # and at 10GB two full Premium vaults filled the disk for everybody. Still a
+    # stopgap — the bucket below is the real answer for StatZ-sized vaults. Render
+    # grows a disk but never shrinks one, so this number only ever goes up.
     disk:
       name: mcz-media
       mountPath: /var/mcz-media
-      sizeGB: 10
+      sizeGB: 50
     envVars:
       - key: SECRET_KEY
         generateValue: true
