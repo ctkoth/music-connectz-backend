@@ -101,6 +101,22 @@ def trial_state(ip, anon_id=""):
     return today, browser_done, ip_over
 
 
+from .retake import offer as remind_offer  # noqa: E402
+
+
+def example_for(app_key):
+    """The owner's most recent shared take on this coach, as its public card, or None."""
+    from .models import ScoreShare
+    from .scoreshare import share_dict
+    for row in (ScoreShare.objects.select_related("user")
+                .filter(app_key=app_key, user__is_superuser=True).order_by("-created_at")[:10]):
+        p = row.payload or {}
+        if p.get("progress") or p.get("recap"):
+            continue                       # a climb or a month is not "what one take gets"
+        return share_dict(row)
+    return None
+
+
 class TrialCoachView(APIView):
     """GET what the trial offers and whether it's available; POST one take.
 
@@ -173,6 +189,13 @@ class TrialCoachView(APIView):
             "rates_mix": rates_mix(self.app_key),
             "mix_scores": MIX_SCORE if rates_mix(self.app_key) else {},
             "caveat": profile["caveat"],
+            # What a score looks like, before anybody performs for one: a real card, never
+            # a made-up one. Only the OWNER's own shared takes — featuring a member's card
+            # on the front door is a use they never agreed to, anonymised or not. None when
+            # the owner has shared nothing on this coach; the screen then shows nothing.
+            "example": example_for(self.app_key),
+            # Whether the "email me the score" field may render BEFORE the take is sent.
+            "remind": remind_offer(),
         })
 
     def post(self, request):
@@ -259,8 +282,14 @@ class TrialCoachView(APIView):
             anon_id=anon_id, result=payload,
             scored=payload.get("score") is not None,
         )
-        from .retake import offer as remind_offer, rearm_for
+        from .retake import arm as remind_arm, rearm_for
         rearm_for(take)
+        # The address typed BEFORE sending: the score goes out the moment it exists, so
+        # closing the tab during the wait no longer loses it. Never fails the take.
+        emailed = None
+        if take.scored and str(data.get("email") or "").strip():
+            body, _code = remind_arm(take, data.get("email"), anon_id)
+            emailed = body
         from .models import mint_score_share
         share = mint_score_share(self.app_key, payload, genre=data.get("genre", ""))
         return Response({
@@ -278,6 +307,7 @@ class TrialCoachView(APIView):
             # The way back, for somebody not ready to make an account: email
             # the score and a retake reminder. `ready: false` renders nothing.
             "remind": remind_offer() if payload.get("score") is not None else None,
+            "emailed": emailed,
         }, status=status.HTTP_201_CREATED)
 
 
