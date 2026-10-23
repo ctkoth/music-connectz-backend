@@ -69,6 +69,12 @@ CREDIT_OUTCOMES = {
         "outcomes": ["learnable", "understandable", "tangible"],
         "lands_in": ["singz", "rapz"],
         "no_free_way": "It names specific gear and settings for one take; the free read already says what to fix."},
+    "writecoach": {
+        "resource": "promptz", "label": "Writing coach",
+        "buys": "Your written lyrics scored on five dimensions, each with the reason and the fix, kept so you see them move.",
+        "outcomes": ["tangible", "learnable", "understandable", "braggable"],
+        "lands_in": ["sentenceconnectz", "postz"],
+        "free_way": {"label": "A daily free prompt covers a read.", "tab": "writez"}},
     "sentencez": {
         "resource": "promptz", "label": "Sentence ConnectZ",
         "buys": "A written piece, or five ranked suggestions for a weak area, kept in your library.",
