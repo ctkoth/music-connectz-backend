@@ -76,7 +76,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import (BODIEZ_BUCKETS, BODIEZ_DAY_TAGS, BODIEZ_GOAL_KINDS, BodieZAccess,
+from .models import (BODIEZ_BUCKETS, BODIEZ_DAY_TAGS, BODIEZ_GOAL_KINDS, BodieZAccess, BodieZLeaderboard,
                      BodieZCustomDay, BodieZExercise, BodieZGoal, BodieZRecoveryLog, BodieZRoutine, BodieZStepLog, BodieZSession, BodieZSet,
                      BodieZWeightLog, StudentRelationship)
 
@@ -989,7 +989,115 @@ def session_summary(sess):
         "exercises": sorted(exercises, key=lambda e: e["name"]),
         "records": records, "firsts": sorted(firsts),
         "coaches": coaches,
+        "coach_rating": {**session_coach_rating(sess), "caveat": SESSION_RATING_CAVEAT},
     }
+
+
+SESSION_RATING_CAVEAT = (
+    "Session rating is out of 10 and compares each lift in this workout with "
+    "your own earlier best at it (10 for up, 6 for held, 3 for down, averaged). "
+    "It says how this session moved against YOU, not how strong you are next to "
+    "anyone else, and a lift you have never logged before is not rated."
+)
+
+
+def session_coach_rating(sess):
+    """{"rating": int|None, "why": str, "exercises": [...]} for ONE session.
+
+    Same arithmetic as `muscle_coach_ratings`, same constants, but the
+    question is "how did THIS workout go" — each lift here against the best
+    of the member's earlier finished sessions. None, never 0, when no lift
+    has an earlier session to be compared with.
+    """
+    mine = defaultdict(list)
+    for x in sess.sets.select_related("exercise"):
+        mine[_lane(x)].append(x)
+    prior = defaultdict(lambda: defaultdict(list))
+    for x in (BodieZSet.objects
+              .filter(session__user=sess.user, session__ended_at__isnull=False,
+                      session__started_at__lt=sess.started_at,
+                      exercise_id__in={k[0] for k in mine})
+              .exclude(session=sess)):
+        prior[_lane(x)][x.session_id].append(x)
+    rated = []
+    for lane, ss in mine.items():
+        now = _session_metric(ss)
+        if not now or lane not in prior:
+            continue
+        kind, latest = now
+        earlier = [m[1] for m in (_session_metric(v) for v in prior[lane].values())
+                   if m and m[0] == kind]
+        if not earlier or max(earlier) <= 0:
+            continue
+        before = max(earlier)
+        ratio = latest / before
+        trend = "up" if ratio >= RATING_UP else "down" if ratio < RATING_DOWN else "held"
+        rated.append({"exercise_id": lane[0], "one_sided": lane[1],
+                      "exercise_name": _lane_name(ss[0].exercise.name, lane[1]),
+                      "trend": trend, "metric": kind,
+                      "latest": round(latest, 1), "earlier_best": round(before, 1)})
+    if not rated:
+        return {"rating": None, "exercises": [],
+                "why": "Needs a lift you have logged in an earlier session to rate."}
+    rated.sort(key=lambda r: r["exercise_name"])
+    n = {t: sum(1 for r in rated if r["trend"] == t) for t in ("up", "held", "down")}
+    bits = [f"{n[t]} {t}" for t in ("up", "held", "down") if n[t]]
+    pts = [RATING_POINTS[r["trend"]] for r in rated]
+    return {"rating": round(sum(pts) / len(pts)), "exercises": rated,
+            "why": f"{len(rated)} lift{'s' if len(rated) != 1 else ''} compared: {', '.join(bits)}."}
+
+
+# Standing = mean session rating over the trailing window, and only once enough
+# sessions have been rated that one lucky workout cannot top the board.
+LB_WINDOW_DAYS = 30
+LB_MIN_SESSIONS = 3
+LB_RULE = (
+    f"Ranked by the average session rating over the last {LB_WINDOW_DAYS} days, "
+    f"once you have {LB_MIN_SESSIONS} rated sessions. It measures progress against "
+    "your own history, not strength, so a beginner can top it. Only members who "
+    "opt in appear, with their username and average; you can leave any time."
+)
+
+
+def leaderboard_rows(limit=25):
+    cutoff = timezone.now() - timedelta(days=LB_WINDOW_DAYS)
+    out = []
+    for opt in BodieZLeaderboard.objects.select_related("user"):
+        sessions = (BodieZSession.objects
+                    .filter(user=opt.user, ended_at__isnull=False, started_at__gte=cutoff))
+        rs = [r for r in (session_coach_rating(s)["rating"] for s in sessions) if r is not None]
+        if len(rs) >= LB_MIN_SESSIONS:
+            out.append({"username": opt.user.username, "average": round(sum(rs) / len(rs), 1),
+                        "rated_sessions": len(rs)})
+    out.sort(key=lambda r: (-r["average"], -r["rated_sessions"], r["username"]))
+    for i, r in enumerate(out[:limit]):
+        r["rank"] = i + 1
+    return out[:limit]
+
+
+class BodieZLeaderboardView(APIView):
+    """GET /api/economy/bodiez/leaderboard/ — the rule, whether I'm on it, the board.
+    POST {opt_in: bool} — join or leave. Free; leaving removes the row."""
+    permission_classes = [IsAuthenticated]
+
+    def _payload(self, request):
+        return {"opted_in": BodieZLeaderboard.objects.filter(user=request.user).exists(),
+                "rule": LB_RULE, "window_days": LB_WINDOW_DAYS,
+                "min_sessions": LB_MIN_SESSIONS, "leaders": leaderboard_rows()}
+
+    def get(self, request):
+        return Response(self._payload(request))
+
+    def post(self, request):
+        want = request.data.get("opt_in")
+        if not isinstance(want, bool):
+            return Response({"detail": "opt_in must be true or false."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if want:
+            BodieZLeaderboard.objects.get_or_create(user=request.user)
+        else:
+            BodieZLeaderboard.objects.filter(user=request.user).delete()
+        return Response(self._payload(request))
 
 
 class BodieZSessionSummaryView(APIView):

@@ -6378,6 +6378,14 @@ class BodieZAccess(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
 
+class BodieZLeaderboard(models.Model):
+    """A member's opt-in to the BodieZ session-rating leaderboard. No row means
+    not on it; the default is off and only the member writes it."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name="bodiez_leaderboard")
+    opted_in_at = models.DateTimeField(auto_now_add=True)
+
+
 # The blueprint gives BodieZ the same five-bucket scheduler Lilith already
 # has — Inbox/Today/Upcoming/Anytime/Someday — plus Trash, because a deleted
 # routine landing straight in the database with no undo is a harsher edit

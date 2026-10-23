@@ -199,7 +199,7 @@ from .habits import HabitCreateView, HabitCompleteView
 from .bodiez import (
     BodieZAccessView, BodieZBoardView, BodieZCustomDaysView, BodieZStepsView, BodieZCustomExerciseView, BodieZCustomExerciseDetailView, BodieZPastSessionView, BodieZStepCoachView, BodieZCustomDayDetailView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
     BodieZGoalDetailView, BodieZGoalsView, BodieZRecoveryView, BodieZRoutinesView,
-    BodieZRoutineDetailView, BodieZRoutineCopyView, BodieZSessionRoutineView, BodieZSessionsView, BodieZSessionDetailView, BodieZSessionSummaryView, BodieZSessionWriteView, BodieZSetsView, BodieZSetOrderView, BodieZLbFixView,
+    BodieZRoutineDetailView, BodieZRoutineCopyView, BodieZSessionRoutineView, BodieZSessionsView, BodieZSessionDetailView, BodieZSessionSummaryView, BodieZLeaderboardView, BodieZSessionWriteView, BodieZSetsView, BodieZSetOrderView, BodieZLbFixView,
     BodieZProgressView, BodieZWeightLogView,
 )
 from .lessonz import (
@@ -586,6 +586,7 @@ urlpatterns = [
     path("bodiez/progress/", BodieZProgressView.as_view(), name="economy-bodiez-progress"),
     path("bodiez/board/", BodieZBoardView.as_view(), name="economy-bodiez-board"),
     path("bodiez/access/", BodieZAccessView.as_view(), name="economy-bodiez-access"),
+    path("bodiez/leaderboard/", BodieZLeaderboardView.as_view(), name="economy-bodiez-leaderboard"),
     path("bodiez/bodymap/", BodieZBodyMapView.as_view(), name="economy-bodiez-bodymap"),
     path("bodiez/coach/", BodieZCoachView.as_view(), name="economy-bodiez-coach"),
     path("bodiez/goals/", BodieZGoalsView.as_view(), name="economy-bodiez-goals"),
