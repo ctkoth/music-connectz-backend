@@ -3962,6 +3962,17 @@ def _claim_coached_trial(user, take):
         row = record(user, take.app_key, take.result or {}, source="trial", ref=ref)
         if row:
             TakeScore.objects.filter(pk=row.pk).update(created_at=take.created_at)
+            # The take's XP lands with it, once (the ref check above stops a re-run), so a
+            # new member's first level-up is something they already did.
+            try:
+                from apps.skillz.models import TrainingProfile
+                from .vocalcoach import coach_xp_base
+                r = take.result or {}
+                prof, _ = TrainingProfile.objects.get_or_create(user=user, app_key=take.app_key)
+                prof.add_xp(coach_xp_base(r.get("score_exact", r.get("score"))))
+                prof.save(update_fields=["xp"])
+            except Exception:                               # pragma: no cover
+                pass
         return row
     except Exception:                                       # pragma: no cover
         return None
