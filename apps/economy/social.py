@@ -376,6 +376,17 @@ def clean_profile_field(field, value):
     return value
 
 
+WALLPAPER_REFUSAL = ("A profile wallpaper is a Premium or StatZ perk. Your profile picture is free "
+                     "at every tier; upgrade in MembershipZ to add a wallpaper.")
+
+
+def wallpaper_allowed(user):
+    """Premium and StatZ (and the owner's debug tier) may set a wallpaper. The real
+    tier only: a StatZ sample must not leave a wallpaper behind it."""
+    from .models import TIER_FREE
+    return membership_for(user).tier != TIER_FREE
+
+
 def cover_abs(path, request=None):
     """A stored cover path, absolute when a request is there to say the host."""
     if not path:
@@ -633,6 +644,7 @@ def _profile_full(p, request, recheck=False):
         # the tier's own number, so the screen can say when somebody is over it.
         **(_links_ceiling(p) if mine else {}),
         "verified_18plus": p.verified_18plus,
+        **({"wallpaper_allowed": wallpaper_allowed(p.user), "wallpaper_note": WALLPAPER_REFUSAL} if mine else {}),
         # What the badges on this card add up to — yours only. An effect total
         # is a read of somebody's economy, not a thing to publish about them.
         "badge_effects": badge_effects(p.user) if mine else {},
@@ -995,6 +1007,14 @@ class ProfileView(APIView):
                      "links_limit": over, "links_tier_cap": tier_cap, "links_count": len(incoming)},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+        # The wallpaper is decoration, so it is the one profile field the tier
+        # decides WHETHER on (as KeyConnectZ's wallpaper is). Nobody loses one
+        # they already have: removing, or re-saving the same one, always works.
+        if "cover_url" in d:
+            new_cover = clean_profile_field("cover_url", d["cover_url"])
+            if new_cover and new_cover != (p.cover_url or "") and not wallpaper_allowed(request.user):
+                return Response({"detail": WALLPAPER_REFUSAL, "wallpaper_allowed": False},
+                                status=status.HTTP_403_FORBIDDEN)
         for f in PROFILE_FIELDS:
             if f in d:
                 setattr(p, f, clean_profile_field(f, d[f]))

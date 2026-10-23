@@ -49,6 +49,8 @@ from .models import (
     item_rating_medians,
     overall_median,
     skill_rating_median,
+    SocialComment,
+    attractiveness_shown_medians,
     Transaction,
 )
 
@@ -134,6 +136,17 @@ def contribution_of(user):
     }
 
 
+def comments_of(user, viewer, limit=10):
+    """Comments left on the member's posts that the VIEWER may see, newest first."""
+    posts = {f"post:{x.id}": x for x in Post.objects.filter(author=user).order_by("-created_at")[:100]
+             if can_view_post(x, viewer)}
+    rows = (SocialComment.objects.filter(item_id__in=list(posts)).exclude(user=user)
+            .select_related("user").order_by("-created_at")[:limit])
+    return [{"id": c.id, "by": c.user.username, "body": c.body[:400],
+             "post_id": posts[c.item_id].id, "post_title": posts[c.item_id].title,
+             "at": c.created_at.isoformat()} for c in rows]
+
+
 class RatezView(APIView):
     """GET /api/economy/ratez/ — every rating about a member, by kind.
 
@@ -181,6 +194,7 @@ class RatezView(APIView):
                 "count": OverallRating.objects.filter(target=user).count(),
             },
             "contribution": contribution_of(user),
+            "comments": comments_of(user, request.user),
             # Rating people on looks is adults-only in BOTH directions (Play
             # Families) — AttractivenessRateView and FaceZ already hold that
             # line, and this read did not: anybody could read anybody's,
@@ -190,7 +204,13 @@ class RatezView(APIView):
                  "locked": adult_only_reason(request.user) or adult_only_reason(user)}
                 if (adult_only_reason(request.user) or adult_only_reason(user)) else
                 {"kind": "attractiveness", "of": "you",
-                 "median": attractiveness_median(user),
+                 # A member who hides theirs has no value here (their switch,
+                 # honoured everywhere else already); the owner still sees it.
+                 "median": (attractiveness_median(user)
+                            if user.id == request.user.id or attractiveness_shown_medians([user.id])
+                            else None),
+                 "hidden": (user.id != request.user.id and not attractiveness_shown_medians([user.id])
+                            and attractiveness_median(user) is not None),
                  "note": "Kept apart from the rest on purpose — it is not a "
                          "judgement of anybody's work."}),
         })
