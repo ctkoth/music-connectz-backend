@@ -503,6 +503,7 @@ class FunnelEventView(APIView):
 
     META_SHAPE = {
         "landing_view": {},
+        "landing_cta": {"at": lambda v: v if v in ("hero", "compare", "doors") else None},
         "try_view": {},
         # Which "no" it was. Three completely different situations —
         # the visitor spent today's take, the platform spent the day's, or

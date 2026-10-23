@@ -61,6 +61,14 @@ class FunnelEventTests(TestCase):
         self.assertEqual(row.kind, "try_shared")
         self.assertEqual(row.meta, {"app_key": "rapz"})
 
+    def test_the_landing_button_says_which_one_and_nothing_else(self):
+        for at, kept in (("compare", "compare"), ("hero", "hero"), ("made-up", None)):
+            FunnelEvent.objects.all().delete()
+            r = self.client.post(EVENT, {"kind": "landing_cta", "anon_id": "abc123",
+                                         "meta": {"at": at}}, format="json")
+            self.assertEqual(r.status_code, 204)
+            self.assertEqual(FunnelEvent.objects.get().meta, {"at": kept} if kept else {})
+
     def test_a_kind_with_no_declared_shape_stores_no_non_ambient_meta(self):
         r = self.client.post(EVENT, {
             "kind": "landing_view", "anon_id": "abc123", "meta": {"why": "too_big"},
