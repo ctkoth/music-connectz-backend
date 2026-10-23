@@ -8210,6 +8210,8 @@ class MangaPage(models.Model):
     style = models.CharField(max_length=40, blank=True, default="")
     character_ids = models.JSONField(default=list, blank=True)
     panels = models.JSONField(default=list, blank=True)
+    # The whole page drawn as ONE image (page mode), beside or instead of the panels.
+    page_image = models.CharField(max_length=300, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

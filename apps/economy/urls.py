@@ -14,7 +14,7 @@ from .gallery import GalleryView
 from .aienergy import AiEnergyView
 from .writecoach import WriteCoachView
 from .characterz import CharacterDetailView, CharactersView
-from .mangaz import MangaPageView, MangaPagesView
+from .mangaz import MangaPageView, MangaPagesView, MangaPanelDrawView
 from .statshare import FunnelShareView, ViewShareView
 from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
@@ -457,6 +457,7 @@ urlpatterns = [
     path("characterz/<int:pk>/", CharacterDetailView.as_view(), name="economy-character"),
     path("mangaz/", MangaPagesView.as_view(), name="economy-mangaz"),
     path("mangaz/<int:pk>/", MangaPageView.as_view(), name="economy-manga-page"),
+    path("mangaz/<int:pk>/panel/<int:n>/draw/", MangaPanelDrawView.as_view(), name="economy-manga-draw"),
     path("views/post/<int:pk>/share/", ViewShareView.as_view(), name="economy-views-share"),
     path("funnel/share/", FunnelShareView.as_view(), name="economy-funnel-share"),
     # Nothing is a dead end: every app this post can open in, and the price of
