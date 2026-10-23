@@ -8167,3 +8167,32 @@ class WriteScore(models.Model):
 
     class Meta:
         ordering = ("-created_at",)
+
+
+# ---- CharacterZ ----
+class Character(models.Model):
+    """A character: a look (FaceZ) with a personality (PersonalitieZ) and a voice.
+
+    The voice is stored on the character in VoiceZ's own shape (bio, personality,
+    spec dials, sample) and cleaned by voicez.clean_payload, so a character's lines in
+    MangaZ are written from the same description a VoiceZ voice is. It only ever shapes
+    that character's dialogue.
+
+    The look is a drawing, or the member's own face — never another real person's.
+    `look_attested` is the member's say-so, required whenever a look is set.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="characters")
+    name = models.CharField(max_length=60)
+    face = models.ForeignKey(Face, on_delete=models.SET_NULL, null=True, blank=True, related_name="characters")
+    upload = models.ForeignKey(Upload, on_delete=models.SET_NULL, null=True, blank=True, related_name="characters")
+    look_attested = models.BooleanField(default=False)
+    looks = models.CharField(max_length=300, blank=True, default="")
+    bio = models.TextField(blank=True, default="")
+    personality = models.CharField(max_length=4, blank=True, default="")
+    spec = models.JSONField(default=dict, blank=True)
+    sample = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
