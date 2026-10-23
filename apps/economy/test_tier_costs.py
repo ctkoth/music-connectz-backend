@@ -46,3 +46,11 @@ class XpTests(TestCase):
         p = TrainingProfile.objects.create(user=u, app_key="singz")
         self.assertEqual(p.add_xp(40), 60)
         self.assertEqual(p.xp, 60)
+
+
+class TrialAsMemberTests(TestCase):
+    def test_the_trial_result_states_what_joining_is_worth(self):
+        from apps.economy.trial import _as_member
+        self.assertIsNone(_as_member({"score": None}))
+        self.assertEqual(_as_member({"score": 8, "score_exact": 8.0}),
+                         {"daily_prompts": 3, "energy": 1, "xp": 40, "kept": True})
