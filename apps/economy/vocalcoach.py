@@ -1131,7 +1131,8 @@ class SingZCoachView(APIView):
         # the post, offering the way back to it — are its alone.
         reference = str(request.data.get("reference", "")).lower() in ("1", "true", "yes", "on")
         if reference and (request.data.get("post_id") not in (None, "")
-                          or request.data.get("journal_id") not in (None, "")):
+                          or request.data.get("journal_id") not in (None, "")
+                          or request.data.get("upload_id") not in (None, "")):
             return Response({"detail": "A reference listen is an upload of somebody else's "
                                        "track. Your own posts and journal go through My take."},
                             status=status.HTTP_400_BAD_REQUEST)
@@ -1145,6 +1146,10 @@ class SingZCoachView(APIView):
                 return err
             if post is None:
                 stored, f, content_type, err = self._take_from_journal(request)
+                if err:
+                    return err
+            if post is None and stored is None:
+                stored, f, content_type, err = self._take_from_upload(request)
                 if err:
                     return err
         if post is not None:
@@ -1281,7 +1286,7 @@ class SingZCoachView(APIView):
                            "more, so there's nothing for the coach to listen to. Record "
                            "or attach the take here and it'll be scored.",
                  **({"post_id": post.id} if post else
-                    {"journal_id": (stored or {}).get("id")}),
+                    {f"{(stored or {}).get('kind') or 'journal'}_id": (stored or {}).get("id")}),
                  "take_missing": True},
                 status=status.HTTP_410_GONE)
         finally:
@@ -1325,7 +1330,7 @@ class SingZCoachView(APIView):
             difficulty=data.get("difficulty"), genre=genre, target=target,
             style=data.get("style"), upload=getattr(f, "instance", None) or _kept,
             source=("post" if post is not None else
-                    "journal" if stored is not None else "upload"),
+                    (stored or {}).get("kind") or "upload"),
             ref=(f"post:{post.id}" if post is not None else
                  str((stored or {}).get("id") or "")),
             context={"heard": payload.get("heard") or [], "verdict": payload.get("verdict", ""),
@@ -1368,7 +1373,11 @@ class SingZCoachView(APIView):
                 _row.save(update_fields=["share_token"])
             except Exception:                                # pragma: no cover
                 pass
-        if stored is not None and post is None:
+        if stored is not None and post is None and stored.get("kind") == "upload":
+            # From FileZ (any app's Doors bar): the way back is the file itself.
+            out.update({"source": "upload", "upload_id": stored["id"],
+                        "open_in": "filez", "target": "filez-list"})
+        elif stored is not None and post is None:
             # A scored take is never a dead end either: the score offers the way
             # back to the day it came from.
             out.update({"source": "journal", "journal_id": stored["id"],
@@ -1504,6 +1513,42 @@ class SingZCoachView(APIView):
         # that is the slot it fills.
         content_type = (upload.content_type or "").lower() or f"{kind}/webm"
         return post, upload.file, content_type, None
+
+    def _take_from_upload(self, request):
+        """(stored, file, content_type, error) for one of the member's own uploads.
+
+        The Doors bar's "Coach it": a file already in FileZ, from whichever app made it,
+        scored without being uploaded a second time. Yours only (the query says so), and
+        audio or video only, read off the row's own type.
+        """
+        from .models import Upload
+        raw = request.data.get("upload_id")
+        if raw in (None, ""):
+            return None, None, "", None
+        try:
+            pk = int(raw)
+        except (TypeError, ValueError):
+            return None, None, "", Response({"detail": "upload_id must be a number."},
+                                            status=status.HTTP_400_BAD_REQUEST)
+        u = Upload.objects.filter(pk=pk, user=request.user).first()
+        if not u:
+            return None, None, "", Response({"detail": "file not found"},
+                                            status=status.HTTP_404_NOT_FOUND)
+        ctype = (u.content_type or "").lower()
+        if not (ctype.startswith("audio") or ctype.startswith("video")):
+            return None, None, "", Response(
+                {"detail": "The coach scores audio or video, and that file is neither.",
+                 "upload_id": u.id}, status=status.HTTP_400_BAD_REQUEST)
+        cap_mb, cap_is_tier = cap_for(request.user)
+        if (u.size_bytes or 0) > cap_mb * 1024 * 1024:
+            return None, None, "", Response(
+                {"detail": f"That file is {u.size_bytes / (1024 * 1024):.0f}MB. "
+                           + cap_why(cap_mb, cap_is_tier)
+                           + " Attach just the section you want scored.",
+                 "coach_budget_seconds": COACH_BUDGET_SECONDS, "max_mb": cap_mb,
+                 "max_mb_is_tier_limit": cap_is_tier, "upload_id": u.id},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+        return {"kind": "upload", "id": u.id, "title": u.name}, u.file, ctype, None
 
     def _take_from_journal(self, request):
         """(stored, file, content_type, error) for a take on a journal entry.

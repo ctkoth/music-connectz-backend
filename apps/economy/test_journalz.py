@@ -454,3 +454,30 @@ class CoachingAVoiceNoteWithoutPublishingItTests(Base):
         self.assertTrue(singz["available"])
         self.assertEqual(singz["coach_kind"], "audio")
         self.assertEqual(singz["carry"]["journal_id"], e.id)
+
+
+class CoachingAFileFromFileZTests(CoachingAVoiceNoteWithoutPublishingItTests):
+    """The Doors bar's Coach it: any of your own uploads, without uploading it twice."""
+
+    def up(self, owner=None, ctype="audio/webm", name="take.webm"):
+        return Upload.objects.create(
+            user=owner or self.me, file=SimpleUploadedFile(name, b"0" * 900, content_type=ctype),
+            name=name, size_bytes=900, content_type=ctype)
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
+    def test_my_upload_is_scored_and_points_back_to_filez(self, _rq, _k):
+        u = self.up()
+        r = self.c.post("/api/singz/coach/", {"upload_id": u.id}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual((r.data["source"], r.data["upload_id"], r.data["open_in"]), ("upload", u.id, "filez"))
+
+    def test_not_mine_and_not_audio_are_refused(self):
+        theirs = self.up(owner=self.them)
+        self.assertEqual(self.c.post("/api/singz/coach/", {"upload_id": theirs.id}, format="json").status_code, 404)
+        img = self.up(ctype="image/png", name="x.png")
+        self.assertEqual(self.c.post("/api/singz/coach/", {"upload_id": img.id}, format="json").status_code, 400)
+
+    # The parent's journal tests are not re-run here.
+    test_a_private_entry_can_be_coached_and_stays_private = None
+    test_somebody_elses_diary_is_not_coachable = None
