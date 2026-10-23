@@ -8148,3 +8148,22 @@ class LookmaxPrefs(models.Model):
                                 related_name="lookmax_prefs")
     markets = models.JSONField(default=list, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+# ---- Writing coach ----
+class WriteScore(models.Model):
+    """One written piece the writing coach scored. Keyed like a take: one number per
+    dimension, so the history can show a dimension move. The text is kept (it is the
+    member's own writing, typed into a field that says it is scored and saved) so the
+    history can open it again and the fixer can take it."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="write_scores")
+    kind = models.CharField(max_length=16, default="lyrics")
+    title = models.CharField(max_length=120, blank=True, default="")
+    text = models.TextField()
+    overall = models.FloatField(null=True, blank=True)
+    scores = models.JSONField(default=dict, blank=True)
+    read = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
