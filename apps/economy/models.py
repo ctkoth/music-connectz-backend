@@ -765,7 +765,14 @@ def award_promptz(user, amount, note="PromptZ", *, app_key="", target=""):
 # looked at, in one sitting. At DAILY_PROMPT_MAX_CENTS below that is 9c a day of
 # model cost for a member paying nothing, and only for one who spends all three
 # every day.
-PROMPT_ALLOWANCE = {"free": 3, "premium": 5, "statz": 10, "debug": 10 ** 6}
+#
+# Free 4, Premium 7, StatZ 12 (Corey's call, Oct 2026). The worst case — a
+# member who spends every free prompt every day at DAILY_PROMPT_MAX_CENTS — is
+# $3.60/mo for Free, $6.30/mo against Premium's $7, and $10.80/mo against
+# StatZ's $15 ($10.50 for a founding month, so a founding member who maxes it
+# daily costs slightly more than they pay). The typical member uses far less;
+# this records the ceiling so the next move is made knowing it.
+PROMPT_ALLOWANCE = {"free": 4, "premium": 7, "statz": 12, "debug": 10 ** 6}
 
 # What ONE free daily prompt is allowed to be worth, in cents.
 #

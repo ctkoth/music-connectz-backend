@@ -52,5 +52,6 @@ class TrialAsMemberTests(TestCase):
     def test_the_trial_result_states_what_joining_is_worth(self):
         from apps.economy.trial import _as_member
         self.assertIsNone(_as_member({"score": None}))
+        from apps.economy.models import PROMPT_ALLOWANCE
         self.assertEqual(_as_member({"score": 8, "score_exact": 8.0}),
-                         {"daily_prompts": 3, "energy": 1, "xp": 40, "kept": True})
+                         {"daily_prompts": PROMPT_ALLOWANCE["free"], "energy": 1, "xp": 40, "kept": True})

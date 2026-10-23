@@ -1562,7 +1562,7 @@ The three, and what each looked like from the inside:
 - **`PROMPT_ALLOWANCE["free"]` was 1** — one AI run a day across the coach, OCC,
   DirectZ and every Gemini surface combined. The ANONYMOUS trial door hands a
   stranger the same one (`TRIAL_PER_IP_HOURS`), so registering bought literally
-  nothing on the axis people arrive for. It is 3.
+  nothing on the axis people arrive for. It was 3, and is 4 now (below).
 - **Passive Energy was `reach_median // divisor` with no floor**, and
   `reach_median` is 0 until an external account is VERIFIED — so the app
   published "⚡ regenerates hourly at reach ÷ tier", showed a new member their
@@ -1601,17 +1601,17 @@ So, when adding or moving a limit:
 - **Never lower a live limit without a plan for the members already over it** —
   the `TIER_LIMITS` note says this about storage and it is true of all of them.
 
-### Known limit still owed a decision (Corey's, not the code's)
+### The free daily prompts are 4 / 7 / 12 (Corey's call, Oct 2026)
 
-**Premium's allowance is pinned by Premium's price, and Premium's price is
-pinned by the founding discount.** The founding seat is half of StatZ
-($7.50/mo), and `catalog.py` asserts founding StatZ must cost more than
-Premium — so Premium cannot exceed $7.50, and at $6/mo its AI allowance cannot
-widen much past 5/day before the model cost eats the subscription (5/day at
-`DAILY_PROMPT_MAX_CENTS` is $4.50/mo of the $6). Free went to 3 and Premium
-stayed at 5, which is a thin gap. Making the founding discount LIFETIME-ONLY
-would unpin the monthly ladder. That is a pricing decision, so the code
-records it here rather than making it.
+`PROMPT_ALLOWANCE` is Free 4, Premium 7, StatZ 12. The ceiling, for a member who
+spends every free prompt every day at `DAILY_PROMPT_MAX_CENTS` (3c): $3.60/mo for
+Free, $6.30 of Premium's $7, $10.80 of StatZ's $15 — and $10.80 against a founding
+month's $10.50, so a founding member who maxes it daily costs a little more than they
+pay. At the coach's ~2.75c a take the YEARLY founding seat ($105/yr, $8.47/mo after
+Stripe) is $1.43/month short for a member who maxes it daily — 50 seats, so ~$72/mo at
+worst, platform-wide. `test_pricing` pins those gaps. Typical use is far below the ceiling; this is written down so the next move is
+made knowing it. Every screen reads the numbers from `/api/economy/tiers/`, and the
+tests read the constant, so moving it again is one line.
 
 ## Nothing in this project was rate limited, including the login door
 

@@ -97,9 +97,10 @@ class ThePriceIsKnownBeforeSending(Base):
         return next(r for r in self.state()["models"] if r["key"] == key)
 
     def test_the_free_allowance_is_published_with_what_is_left(self):
+        from apps.economy.models import PROMPT_ALLOWANCE
         st = self.state()
-        self.assertEqual(st["daily_prompts"], 3)
-        self.assertEqual(st["daily_prompts_left"], 3)
+        self.assertEqual(st["daily_prompts"], PROMPT_ALLOWANCE["free"])
+        self.assertEqual(st["daily_prompts_left"], PROMPT_ALLOWANCE["free"])
         self.assertIn("daily_prompt_max_cents", st)
 
     def test_an_engine_the_allowance_covers_says_free_today(self):
@@ -151,7 +152,8 @@ class ThePriceIsKnownBeforeSending(Base):
         resp, _ = self.say()
         self.assertTrue(resp.data["free_prompt"])
         self.assertEqual(wallet_for(self.user).promptz, 50)
-        self.assertEqual(resp.data["daily_prompts_left"], 2)
+        from apps.economy.models import PROMPT_ALLOWANCE
+        self.assertEqual(resp.data["daily_prompts_left"], PROMPT_ALLOWANCE["free"] - 1)
 
 
 class AReplyThatFailsIsNeverCharged(Base):

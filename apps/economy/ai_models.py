@@ -102,7 +102,7 @@ def model_state(user):
         "models": [model_row(k, allowed, current, daily_left=daily_left, user=user)
                    for k in AI_MODEL_ORDER],
         # The free daily prompts and the wallet, so a message's price can be
-        # stated BEFORE it is sent: "Free today — uses 1 of your 3 free prompts"
+        # stated BEFORE it is sent: "Free today — uses 1 of your N free prompts"
         # or "−5 🏷️". The answer used to arrive only in the reply, which is
         # the bill rather than the price.
         "daily_prompts": allowance,

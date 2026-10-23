@@ -264,7 +264,7 @@ class StatsView(APIView):
                 "my_energy": w.energy,
                 "my_spinaz": w.spinaz,
                 "my_promptz": w.promptz,  # prepaid AI credits (persist)
-                # Free daily prompts by tier (free 3 / premium 5 / statz 10) — reset daily, don't stack.
+                # Free daily prompts by tier (models.PROMPT_ALLOWANCE) — reset daily, don't stack.
                 "my_promptz_daily": prompt_allowance,
                 # What one of them is worth. Published because "you have 3 left"
                 # is not the whole price when a dearer engine is billed anyway.
