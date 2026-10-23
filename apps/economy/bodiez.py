@@ -398,12 +398,15 @@ def _set_dict(s):
     return {"id": s.id, "exercise_id": s.exercise_id, "exercise_name": s.exercise.name,
             "set_number": s.set_number, "reps": s.reps,
             "weight_kg": float(s.weight_kg) if s.weight_kg is not None else None,
-            "one_sided": s.one_sided,
+            "one_sided": s.one_sided, "position": s.position,
             "rest_seconds": s.rest_seconds, "created_at": s.created_at.isoformat()}
 
 
 def _session_dict(sess, sets=None):
     sets = sets if sets is not None else list(sess.sets.select_related("exercise"))
+    # The member's order where they set one (typed in, edited or dragged), else the order
+    # it happened. The model's own ordering is per-exercise set number, which interleaves.
+    sets = sorted(sets, key=lambda s: (s.position, s.id))
     return {
         "id": sess.id,
         "routine_id": sess.routine_id,
@@ -1198,9 +1201,9 @@ class BodieZPastSessionView(APIView):
         BodieZSession.objects.filter(id=sess.id).update(started_at=when)
         sess.refresh_from_db()
         counts = defaultdict(int)
-        for _id, ex, reps, weight, side in clean:
+        for pos, (_id, ex, reps, weight, side) in enumerate(clean, 1):
             counts[ex.id] += 1
-            BodieZSet.objects.create(session=sess, exercise=ex, set_number=counts[ex.id],
+            BodieZSet.objects.create(session=sess, exercise=ex, set_number=counts[ex.id], position=pos,
                                      reps=reps, weight_kg=weight, rest_seconds=None, one_sided=side)
         out = _session_dict(sess)
         out["summary"] = session_summary(sess)
@@ -1298,6 +1301,34 @@ class BodieZSessionRoutineView(APIView):
         return Response(_routine_dict(r), status=status.HTTP_201_CREATED)
 
 
+class BodieZSetOrderView(APIView):
+    """POST /api/economy/bodiez/sessions/{id}/order/ {ids: [...]} — put the sets in this
+    order. Live or finished: dragging a set is a display order, not a rewrite, so it
+    changes nothing that was measured (rest, time, weight). `ids` must be exactly this
+    session's sets, each once, or nothing moves."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, session_id):
+        sess = BodieZSession.objects.filter(id=session_id, user=request.user).first()
+        if not sess:
+            return Response({"detail": "Session not found."}, status=status.HTTP_404_NOT_FOUND)
+        ids = request.data.get("ids")
+        rows = {x.id: x for x in sess.sets.all()}
+        if (not isinstance(ids, list) or len(ids) != len(rows)
+                or any(not isinstance(i, int) or isinstance(i, bool) for i in ids)
+                or set(ids) != set(rows)):
+            return Response({"detail": "Send every set of this workout, once each."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        counts = defaultdict(int)
+        with transaction.atomic():
+            for pos, i in enumerate(ids, 1):
+                row = rows[i]
+                counts[row.exercise_id] += 1
+                row.position, row.set_number = pos, counts[row.exercise_id]
+                row.save(update_fields=["position", "set_number"])
+        return Response(_session_dict(sess))
+
+
 class BodieZSetsView(APIView):
     """POST /api/economy/bodiez/sessions/{id}/sets/ — log one set.
     PUT replaces every set of a FINISHED session — the edit of a workout
@@ -1329,11 +1360,11 @@ class BodieZSetsView(APIView):
         counts = defaultdict(int)
         with transaction.atomic():
             kept = set()
-            for set_id, ex, reps, weight, side in clean:
+            for pos, (set_id, ex, reps, weight, side) in enumerate(clean, 1):
                 counts[ex.id] += 1
                 row = existing.get(set_id)
                 if row is None or set_id in kept:
-                    BodieZSet.objects.create(session=sess, exercise=ex, set_number=counts[ex.id],
+                    BodieZSet.objects.create(session=sess, exercise=ex, set_number=counts[ex.id], position=pos,
                                              reps=reps, weight_kg=weight, rest_seconds=None, one_sided=side,
                                              converted_from_lb=True)
                     continue
@@ -1345,10 +1376,10 @@ class BodieZSetsView(APIView):
                 # fix must never convert it again.
                 if row.exercise_id != ex.id:
                     row.rest_seconds = None
-                row.exercise, row.set_number, row.reps = ex, counts[ex.id], reps
+                row.exercise, row.set_number, row.reps, row.position = ex, counts[ex.id], reps, pos
                 row.weight_kg, row.one_sided, row.converted_from_lb = weight, side, True
                 row.save(update_fields=["exercise", "set_number", "reps", "weight_kg", "one_sided",
-                                        "rest_seconds", "converted_from_lb"])
+                                        "rest_seconds", "converted_from_lb", "position"])
             BodieZSet.objects.filter(id__in=list(existing.keys() - kept)).delete()
         out = _session_dict(sess)
         out["summary"] = session_summary(sess)
@@ -1393,7 +1424,11 @@ class BodieZSetsView(APIView):
         set_number = sess.sets.filter(exercise=exercise).count() + 1
         prev = sess.sets.order_by("-created_at").first()
         rest = int((timezone.now() - prev.created_at).total_seconds()) if prev else None
+        # Last in the member's order: once any set was dragged, a new one with position 0
+        # would sort to the top.
+        last_pos = sess.sets.aggregate(m=Max("position"))["m"] or 0
         s = BodieZSet.objects.create(session=sess, exercise=exercise, set_number=set_number,
+                                      position=last_pos + 1 if last_pos else 0,
                                       reps=reps, weight_kg=weight_kg, rest_seconds=rest, one_sided=side)
         return Response(_set_dict(s), status=status.HTTP_201_CREATED)
 

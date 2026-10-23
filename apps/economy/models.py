@@ -6510,6 +6510,10 @@ class BodieZSet(models.Model):
     # arm / ONE leg. A one-arm set at 40 is not a 40 set, so records, ratings
     # and "last time" compare a set only with sets done the same way.
     one_sided = models.CharField(max_length=3, blank=True, default="")
+    # Where the member PUT this set in a typed-in or edited workout (1-based). 0 on a set
+    # logged live, which reads in the order it happened. Without it, dragging an
+    # exercise or a set into a new order saved and came back in creation order.
+    position = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
