@@ -8196,3 +8196,22 @@ class Character(models.Model):
 
     class Meta:
         ordering = ["name", "id"]
+
+
+# ---- MangaZ ----
+class MangaPage(models.Model):
+    """One page: the member's idea, their characters, and the panel script the AI wrote
+    (editable before anything is drawn). `panels` is [{n, shot, setting, action,
+    characters, dialogue: [{who, line}], image}] — image filled by the drawing step.
+    Always AI-made, and labelled so wherever it is shown."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="manga_pages")
+    title = models.CharField(max_length=120, blank=True, default="")
+    idea = models.TextField()
+    style = models.CharField(max_length=40, blank=True, default="")
+    character_ids = models.JSONField(default=list, blank=True)
+    panels = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
