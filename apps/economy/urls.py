@@ -10,6 +10,7 @@ from .embedplays import EmbedPlayView
 from .postz import (PostBoostView, PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView, PostProgressionView, DiscoveryFeedView, PostSaleView)
 from .publicz import PublicPostView, PublicProfileView
+from .gallery import GalleryView
 from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
 from .rulez import RulezView
@@ -444,6 +445,7 @@ urlpatterns = [
     # No account needed — a public post by link, and the author behind it.
     path("postz/<int:pk>/", PublicPostView.as_view(), name="economy-postz-public"),
     path("public/members/<str:username>/", PublicProfileView.as_view(), name="economy-public-member"),
+    path("gallery/<str:username>/", GalleryView.as_view(), name="economy-gallery"),
     # Nothing is a dead end: every app this post can open in, and the price of
     # each before it is spent.
     path("postz/<int:pk>/embed-play/", EmbedPlayView.as_view(), name="economy-postz-embed-play"),
