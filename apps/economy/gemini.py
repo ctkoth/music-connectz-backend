@@ -266,6 +266,28 @@ IMAGE_EMPTY = ("The image service didn't return a picture for that. Nothing was 
                "try different wording, or try again in a little while.")
 
 
+def draw_image(key, parts, timeout=90):
+    """One image generation call. Returns (base64_data, mime) or (None, None); never
+    raises for a bad answer (Google's text is logged, never shown)."""
+    model = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image-preview")
+    try:
+        r = requests.post(f"{BASE}/models/{model}:generateContent", headers={"x-goog-api-key": key},
+                          json={"contents": [{"parts": parts}],
+                                "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}},
+                          timeout=timeout)
+        data = r.json()
+    except Exception:
+        logger.exception("draw_image: the Gemini call failed")
+        return None, None
+    for part in (data.get("candidates") or [{}])[0].get("content", {}).get("parts", []):
+        inline = part.get("inlineData") or part.get("inline_data")
+        if inline and inline.get("data"):
+            return inline["data"], inline.get("mimeType") or inline.get("mime_type") or "image/png"
+    logger.error("draw_image: no image — Gemini %s: %s", getattr(r, "status_code", 0),
+                 str((data.get("error") or {}).get("message") or "no error message")[:300])
+    return None, None
+
+
 class GeminiImageView(APIView):
     """GET: images you've made. POST { prompt } → a generated image, kept."""
 
