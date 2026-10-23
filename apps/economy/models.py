@@ -5752,6 +5752,11 @@ class JournalMention(models.Model):
 # the client can't quietly start a new, never-analysed event kind.
 FUNNEL_KINDS = (
     ("landing_view", "Landing page viewed"),
+    # Which landing button sent them to the trial: the headline, the "what you do
+    # now vs here" comparison, or the doors further down. landing_view -> try_view
+    # says how many went; this says what convinced them, which is the question the
+    # comparison exists to answer.
+    ("landing_cta", "Landing button to the trial pressed"),
     ("try_view", "Trial take screen opened"),
     # Between opening the trial and getting a number there is a RECORDER, and
     # for the whole life of this funnel it was one unmeasured step. Thirteen
