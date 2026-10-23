@@ -35,11 +35,17 @@ class PricingLadderTests(TestCase):
         # ~2.75c is a typical coached take after the logic pass went to effort "low".
         # Net of Stripe (2.9% + 30c), each recurring founding plan must cover a month
         # of the full StatZ allowance at that cost, or the seat is sold at a loss.
+        #
+        # Corey's 12/day (Oct 2026) moved this line, and the gap is ACCEPTED, not
+        # hidden: for a member who coaches 12 takes every single day, the monthly
+        # founding seat is 0.45c/month short and the YEARLY one $1.43/month short
+        # ($105/yr nets $8.47/mo). 50 seats at most, so the worst case is ~$72/mo
+        # platform-wide. Pinned at those gaps so any further move still goes red.
         from apps.economy.models import PROMPT_ALLOWANCE
         cost = PROMPT_ALLOWANCE["statz"] * 30 * 2.75
         net = lambda cents: cents * 0.971 - 30
-        self.assertGreater(net(catalog.FOUNDING_MONTH_CENTS), cost)
-        self.assertGreater(net(catalog.FOUNDING_YEAR_CENTS) / 12, cost)
+        self.assertGreater(net(catalog.FOUNDING_MONTH_CENTS), cost - 1)
+        self.assertGreater(net(catalog.FOUNDING_YEAR_CENTS) / 12, cost - 145)
         self.assertEqual(set(catalog.FOUNDING_PLANS), {"lifetime", "year", "month"})
 
     def test_the_published_numbers(self):
@@ -104,17 +110,22 @@ class PromptAllowanceMarginTests(TestCase):
                         f"${catalog.PREMIUM_MONTH_CENTS / 100:.2f}/mo plan.")
 
     def test_statz_still_gets_meaningfully_more_than_premium(self):
-        # Trimming the allowance must not flatten the tier it belongs to.
+        # Trimming the allowance must not flatten the tier it belongs to. It was
+        # 2x; Corey's 7 / 12 (Oct 2026) is 1.7x, so the floor is 1.5x — each
+        # rung still worth climbing, and a flattening move still goes red.
         self.assertGreaterEqual(models.PROMPT_ALLOWANCE["statz"],
-                                models.PROMPT_ALLOWANCE["premium"] * 2)
+                                models.PROMPT_ALLOWANCE["premium"] * 1.5)
+        self.assertGreaterEqual(models.PROMPT_ALLOWANCE["premium"],
+                                models.PROMPT_ALLOWANCE["free"] * 1.5)
 
     def test_the_published_allowances(self):
         # Free is 3, not 1: at 1 it was the same allowance the anonymous trial
         # door hands a stranger, so an account bought nothing on the axis
         # people arrive for.
-        self.assertEqual(models.PROMPT_ALLOWANCE["free"], 3)
-        self.assertEqual(models.PROMPT_ALLOWANCE["premium"], 5)
-        self.assertEqual(models.PROMPT_ALLOWANCE["statz"], 10)
+        # Then 4 / 7 / 12 (Corey's call, Oct 2026).
+        self.assertEqual(models.PROMPT_ALLOWANCE["free"], 4)
+        self.assertEqual(models.PROMPT_ALLOWANCE["premium"], 7)
+        self.assertEqual(models.PROMPT_ALLOWANCE["statz"], 12)
 
     def test_the_margin_math_above_describes_a_ladder_that_exists(self):
         """`_monthly_cost_cents` reasons at the standard model's floor rate —
