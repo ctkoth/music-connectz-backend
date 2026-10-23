@@ -966,6 +966,22 @@ def coach_post_energy(user):
     return COACH_POST_ENERGY.get(membership_for(user).tier, COACH_POST_ENERGY["free"])
 
 
+
+COACH_XP_FOR_TURNING_UP = 10
+
+
+def coach_xp_base(rating):
+    """XP for one coached take before the tier bonus: 10 for doing it, plus
+    (rating − 5) × 10 above a 5. Corey asked for (rating − 5) × 10; on its own that
+    hands a beginner at 3 or 4 nothing, so the members who most need to keep
+    practising would level slowest. The floor pays the effort, the bonus pays the
+    quality, and neither ever moves a rating."""
+    try:
+        r = float(rating)
+    except (TypeError, ValueError):
+        return COACH_XP_FOR_TURNING_UP
+    return COACH_XP_FOR_TURNING_UP + max(0, round((r - 5) * 10))
+
 class SingZCoachView(APIView):
     """The Boss Take coach for any InstrumentZ app.
 
@@ -1407,19 +1423,19 @@ class SingZCoachView(APIView):
             song_bpm = post.bpm
         record_coaching_observations(request.user, payload, song_key=song_key, song_bpm=song_bpm)
 
-        # Award XP for completing a coaching session. Every take scored is
-        # progress toward mastery, so the member gets 1 XP per coached take.
+        # XP for a coached take: 10 for turning up plus (rating − 5) × 10 above a 5,
+        # then the tier bonus (see coach_xp_base). XP is never a rating.
         try:
             profile, _ = TrainingProfile.objects.get_or_create(
                 user=request.user, app_key=self.app_key
             )
-            profile.add_xp(1)
+            out["xp_awarded"] = landed = profile.add_xp(coach_xp_base(out.get("score_exact", out.get("score"))))
             profile.save(update_fields=["xp"])
             TrainingEvent.objects.create(
                 profile=profile,
                 drill_key="coached_take",
                 score=0,  # Not a drill with a score
-                xp_awarded=1,
+                xp_awarded=landed,
             )
         except Exception:
             # XP granting is best-effort; a failure should not block the

@@ -279,7 +279,7 @@ def run_agent(user, prompt, *, project="main", model_key=None,
     if price:
         remaining = charge_ai_usage(
             user, price, note=f"OCC agent · {spec['name']} · {turns} turns",
-            count_daily=False)
+            count_daily=False, engine=model_key)
         # None means they couldn't cover it. The work is already done and the
         # tokens are already spent, so the honest thing is to record it and say
         # so rather than pretend the run didn't happen.
