@@ -116,7 +116,7 @@ class _CompleteView(APIView):
 
         xp_gain = drill.xp + max(0, min(score, 100))  # base + perf bonus, capped
         was_level = profile.level
-        profile.add_xp(xp_gain)
+        xp_gain = profile.add_xp(xp_gain)
         profile.drills_completed += 1
         profile.touch_streak()
         profile.save()

@@ -867,7 +867,31 @@ def is_platform_owner(user):
     return bool(getattr(user, "is_superuser", False))
 
 
-def charge_ai_usage(user, cost_cents, note="AI usage", count_daily=False):
+# ⚡ per AI run (Corey's numbers): the engine's base times the tier's factor, rounded
+# up, at least 1. Dearer engines cost more ⚡; higher tiers pay less, the same shape
+# they earn it faster. Any run that is not one of the named engines (the coach, the
+# writer) is base 1. Taken UP TO what the member holds, never refused for it: a tier
+# says how much, never whether, and ⚡ regenerates at a floor for everybody.
+AI_ENERGY_BASE = {"haiku": 1, "sonnet": 2, "opus": 4, "fable": 8}
+AI_ENERGY_TIER_FACTOR = {"free": 1.0, "premium": 0.5, "statz": 0.25, "debug": 0.25}
+
+
+def ai_energy_cost(user, engine=None, tier=None):
+    import math
+    tier = tier or membership_for(user).tier
+    base = AI_ENERGY_BASE.get(str(engine or "").lower(), 1)
+    return max(1, math.ceil(base * AI_ENERGY_TIER_FACTOR.get(tier, 1.0)))
+
+
+def _take_ai_energy(user, engine, note):
+    from .occ_run import _spend_energy_up_to
+    taken = _spend_energy_up_to(user, ai_energy_cost(user, engine))
+    if taken:
+        log_resource(user, Transaction.RES_ENERGY, -taken, (note + " · ⚡ for the run")[:200])
+    return taken
+
+
+def charge_ai_usage(user, cost_cents, note="AI usage", count_daily=False, engine=None):
     """Debit the *minimum* cost to cover an AI model run — pure pass-through, no
     developer tax. When `count_daily` is set (a genuine prompt run) and the run is
     inside DAILY_PROMPT_MAX_CENTS, the day's free allowance is spent first and
@@ -884,6 +908,7 @@ def charge_ai_usage(user, cost_cents, note="AI usage", count_daily=False):
             user=user, kind=Transaction.KIND_SPEND, amount_cents=0,
             dev_tax_cents=0, note=(note + " · daily prompt 🏷️")[:200],
         )
+        _take_ai_energy(user, engine, note)
         return w.money_cents
     if (w.promptz or 0) + w.money_cents < cost_cents:
         if is_platform_owner(user):
@@ -908,6 +933,7 @@ def charge_ai_usage(user, cost_cents, note="AI usage", count_daily=False):
         user=user, kind=Transaction.KIND_SPEND, amount_cents=-from_cash,
         dev_tax_cents=0, note=(note + tag)[:200],
     )
+    _take_ai_energy(user, engine, note)
     return w.money_cents
 
 

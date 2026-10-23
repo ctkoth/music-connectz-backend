@@ -142,7 +142,7 @@ class BreathZView(APIView):
         counted = _today_count(profile) < COUNTED_PER_DAY
         xp = p["xp"] if counted else 0
         if counted:
-            profile.add_xp(xp)
+            xp = profile.add_xp(xp)
             profile.drills_completed += 1
             profile.touch_streak()
             profile.save()

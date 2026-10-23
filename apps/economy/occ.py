@@ -458,7 +458,7 @@ class OccChatView(APIView):
         # no way to tell which model ran is a balance that can't be explained.
         remaining = charge_ai_usage(
             request.user, cost, note=f"OCC {model_voice} · {model_spec['name']}",
-            count_daily=True)
+            count_daily=True, engine=model_key)
         # Route the model charge to the platform owner as revenue ("pay Corey"),
         # keeping money conserved — unless the payer *is* the owner (self-neutral),
         # or a free daily prompt covered it. Nothing left the member's wallet in

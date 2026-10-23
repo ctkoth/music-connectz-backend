@@ -224,7 +224,7 @@ def _award_xp(user, xp):
     try:
         from apps.skillz.models import TrainingProfile
         prof, _ = TrainingProfile.objects.get_or_create(user=user, app_key="lilith")
-        prof.xp = (prof.xp or 0) + xp
+        prof.add_xp(xp)
         prof.save(update_fields=["xp"])
     except Exception:
         # A task must complete whether or not the XP lands, the same way

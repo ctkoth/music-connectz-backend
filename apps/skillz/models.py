@@ -20,6 +20,23 @@ def _level_for_xp(xp: int) -> int:
     return 1 + (max(0, int(xp)) // 500)
 
 
+
+# XP tier bonus (Corey's numbers). Applied wherever XP lands, so every "+N ⭐" a screen
+# quotes and every XP row agree.
+XP_TIER_MULTIPLIER = {"free": 1.0, "premium": 1.25, "statz": 1.5, "debug": 1.5}
+
+
+def tier_xp(user, base) -> int:
+    base = max(0, int(base or 0))
+    if not base or not user:
+        return base
+    try:
+        from apps.economy.models import membership_for
+        tier = membership_for(user).tier
+    except Exception:
+        tier = "free"
+    return int(round(base * XP_TIER_MULTIPLIER.get(tier, 1.0)))
+
 class TrainingProfile(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -67,8 +84,13 @@ class TrainingProfile(models.Model):
         self.longest_streak = max(self.longest_streak, self.current_streak)
         self.last_active = today
 
-    def add_xp(self, amount: int):
-        self.xp = (self.xp or 0) + max(0, int(amount))
+    def add_xp(self, amount: int) -> int:
+        """Add XP with the member's tier bonus applied, and return what landed. XP
+        rewards effort, never quality, so a tier may make you level faster — it never
+        touches a rating or a skill level."""
+        landed = tier_xp(self.user, amount)
+        self.xp = (self.xp or 0) + landed
+        return landed
 
 
 class Drill(models.Model):
