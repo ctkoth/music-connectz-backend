@@ -69,6 +69,12 @@ CREDIT_OUTCOMES = {
         "outcomes": ["learnable", "understandable", "tangible"],
         "lands_in": ["singz", "rapz"],
         "no_free_way": "It names specific gear and settings for one take; the free read already says what to fix."},
+    "mangaz": {
+        "resource": "promptz", "label": "MangaZ",
+        "buys": "A manga page script from your characters and idea, kept and editable, then drawn panel by panel.",
+        "outcomes": ["tangible", "shareable", "braggable"],
+        "lands_in": ["postz", "filez", "merchz"],
+        "free_way": {"label": "A daily free prompt covers a script; making characters is free.", "tab": "characterz"}},
     "writecoach": {
         "resource": "promptz", "label": "Writing coach",
         "buys": "Your written lyrics scored on five dimensions, each with the reason and the fix, kept so you see them move.",
