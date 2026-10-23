@@ -147,7 +147,7 @@ class WriteCoachView(APIView):
             overall=out["score_exact"], scores={d["key"]: d["score"] for d in out["dimensions"]},
             read={k: out[k] for k in ("verdict", "strengths", "dimensions")})
         try:
-            prof, _ = TrainingProfile.objects.get_or_create(user=request.user, app_key="writez")
+            prof, _ = TrainingProfile.objects.get_or_create(user=request.user, app_key="sentencez")
             out["xp_awarded"] = prof.add_xp(coach_xp_base(out["score_exact"]))
             prof.save(update_fields=["xp"])
         except Exception:                                  # pragma: no cover

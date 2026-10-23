@@ -74,7 +74,7 @@ CREDIT_OUTCOMES = {
         "buys": "Your written lyrics scored on five dimensions, each with the reason and the fix, kept so you see them move.",
         "outcomes": ["tangible", "learnable", "understandable", "braggable"],
         "lands_in": ["sentenceconnectz", "postz"],
-        "free_way": {"label": "A daily free prompt covers a read.", "tab": "writez"}},
+        "free_way": {"label": "A daily free prompt covers a read; writing in SentenceZ is always free.", "tab": "sentencez"}},
     "sentencez": {
         "resource": "promptz", "label": "Sentence ConnectZ",
         "buys": "A written piece, or five ranked suggestions for a weak area, kept in your library.",
