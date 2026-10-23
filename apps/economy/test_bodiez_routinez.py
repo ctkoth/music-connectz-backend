@@ -83,6 +83,47 @@ class EditLoggedWorkoutTests(_Base):
         self.assertEqual(rows[1].exercise_id, self.row.id)
         self.assertIn("summary", r.data)
 
+    def test_a_dragged_order_is_what_comes_back(self):
+        sess = self.past([{"exercise_id": self.bench.id, "reps": 5, "weight_kg": 60},
+                          {"exercise_id": self.bench.id, "reps": 8, "weight_kg": 50},
+                          {"exercise_id": self.row.id, "reps": 10}])
+        b1, b2, rw = sess["sets"]
+        self.assertEqual([x["position"] for x in sess["sets"]], [1, 2, 3])
+        # Row first, then the two bench sets the other way round.
+        r = self.client.put(f"/api/economy/bodiez/sessions/{sess['id']}/sets/", {"sets": [
+            {"id": rw["id"], "exercise_id": self.row.id, "reps": 10},
+            {"id": b2["id"], "exercise_id": self.bench.id, "reps": 8, "weight_kg": 50},
+            {"id": b1["id"], "exercise_id": self.bench.id, "reps": 5, "weight_kg": 60},
+        ]}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        order = sorted(r.data["sets"], key=lambda x: (x["position"], x["id"]))
+        self.assertEqual([x["id"] for x in order], [rw["id"], b2["id"], b1["id"]])
+        # set_number follows the new order within the exercise.
+        self.assertEqual(BodieZSet.objects.get(id=b2["id"]).set_number, 1)
+
+    def test_order_endpoint_moves_sets_of_a_live_session_and_keeps_rest(self):
+        live = BodieZSession.objects.create(user=self.user)
+        a = BodieZSet.objects.create(session=live, exercise=self.bench, set_number=1, reps=5, rest_seconds=None)
+        b = BodieZSet.objects.create(session=live, exercise=self.bench, set_number=2, reps=6, rest_seconds=90)
+        url = f"/api/economy/bodiez/sessions/{live.id}/order/"
+        self.assertEqual(self.client.post(url, {"ids": [b.id]}, format="json").status_code, 400)
+        self.assertEqual(self.client.post(url, {"ids": [b.id, b.id]}, format="json").status_code, 400)
+        r = self.client.post(url, {"ids": [b.id, a.id]}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        b.refresh_from_db()
+        self.assertEqual((b.position, b.set_number, b.rest_seconds), (1, 1, 90))
+        # A set logged after the drag lands last, not first.
+        r = self.client.post(f"/api/economy/bodiez/sessions/{live.id}/sets/",
+                             {"exercise_id": self.row.id, "reps": 8}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        got = self.client.get(f"/api/economy/bodiez/sessions/{live.id}/")
+        if got.status_code == 200:
+            self.assertEqual([x["id"] for x in got.data["sets"]][-1], r.data["id"])
+        self.assertEqual(BodieZSet.objects.get(id=r.data["id"]).position, 3)
+        other = User.objects.create_user(username="o2", password="pw")
+        c = APIClient(); c.force_authenticate(other)
+        self.assertEqual(c.post(url, {"ids": [a.id, b.id]}, format="json").status_code, 404)
+
     def test_edited_weight_is_never_converted_again_by_the_pounds_fix(self):
         sess = self.past([{"exercise_id": self.bench.id, "reps": 5, "weight_kg": 60}])
         s = sess["sets"][0]
