@@ -661,6 +661,11 @@ class FunnelSummaryView(APIView):
             return Response({"detail": "Only the platform owner sees this."},
                             status=status.HTTP_403_FORBIDDEN)
         days = min(max(int(request.query_params.get("days") or 30), 1), 90)
+        return Response(self.summary(days))
+
+    def summary(self, days):
+        """The whole funnel for the last `days`, as a dict — what GET serves, and what a
+        shared FunnelZ post is written from, so the two can never disagree."""
         since = timezone.now() - timedelta(days=days)
         # The owner's own browsers (FunnelExclusion) are left out of every
         # count below, retroactively. See FunnelExcludeView.
@@ -830,7 +835,7 @@ class FunnelSummaryView(APIView):
             reasons[rk] = sorted(({"why": k, "unique": len(v)} for k, v in seen.items()),
                                  key=lambda r: -r["unique"])
 
-        return Response({
+        return {
             "reasons": reasons,
             "days": days,
             "since": since,
@@ -862,7 +867,7 @@ class FunnelSummaryView(APIView):
             "sources_note": ("Add ?src=<channel> to any link you post. Untagged "
                              "arrivals are counted in the steps above but cannot "
                              "be attributed to a channel."),
-        })
+        }
 
 
 class WalletView(APIView):

@@ -11,6 +11,7 @@ from .postz import (PostBoostView, PostCostView, PostDeleteView, PostOpenView, P
                     PostJoinView, PostShareView, SubmissionsView, PostProgressionView, DiscoveryFeedView, PostSaleView)
 from .publicz import PublicPostView, PublicProfileView
 from .gallery import GalleryView
+from .statshare import FunnelShareView, ViewShareView
 from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
 from .rulez import RulezView
@@ -446,6 +447,8 @@ urlpatterns = [
     path("postz/<int:pk>/", PublicPostView.as_view(), name="economy-postz-public"),
     path("public/members/<str:username>/", PublicProfileView.as_view(), name="economy-public-member"),
     path("gallery/<str:username>/", GalleryView.as_view(), name="economy-gallery"),
+    path("views/post/<int:pk>/share/", ViewShareView.as_view(), name="economy-views-share"),
+    path("funnel/share/", FunnelShareView.as_view(), name="economy-funnel-share"),
     # Nothing is a dead end: every app this post can open in, and the price of
     # each before it is spent.
     path("postz/<int:pk>/embed-play/", EmbedPlayView.as_view(), name="economy-postz-embed-play"),
