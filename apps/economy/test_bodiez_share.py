@@ -48,3 +48,45 @@ class ShareTests(TestCase):
         c = self.code()
         self.r.delete()
         self.assertEqual(self.cb.post("/api/economy/bodiez/routines/redeem/", {"code": c}, format="json").status_code, 404)
+
+
+class RoutineRatingTests(TestCase):
+    def setUp(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from .models import BodieZSession, BodieZSet
+        self.u = User.objects.create_user(username="rater", password="pw")
+        self.c = APIClient(); self.c.force_authenticate(self.u)
+        self.bench = BodieZExercise.objects.create(name="RR Bench", muscle_group="chest", equipment="barbell")
+        self.row = BodieZExercise.objects.create(name="RR Row", muscle_group="back", equipment="barbell")
+        self.squat = BodieZExercise.objects.create(name="RR Squat", muscle_group="upper_legs", equipment="barbell")
+        for days in (20, 13, 6, 0):
+            t = timezone.now() - timedelta(days=days)
+            ss = BodieZSession.objects.create(user=self.u, started_at=t, ended_at=t)
+            for n in range(4):
+                BodieZSet.objects.create(session=ss, exercise=self.bench, set_number=n + 1, reps=5, weight_kg=60 + days * -0.5)
+            BodieZSet.objects.create(session=ss, exercise=self.row, set_number=5, reps=5, weight_kg=50)
+
+    def routines(self):
+        return {r["title"]: r for r in self.c.get("/api/economy/bodiez/routines/").data["routines"]}
+
+    def test_routine_is_thorough_when_all_its_lifts_are_done(self):
+        BodieZRoutine.objects.create(user=self.u, title="Both", exercises=[
+            {"exercise_id": self.bench.id}, {"exercise_id": self.row.id}])
+        r = self.routines()["Both"]
+        self.assertTrue(1 <= r["coach_rating"] <= 10)
+        self.assertEqual(len(r["coach_exercises"]), 2)
+        self.assertIn("Thorough", r["coach_why"])
+
+    def test_a_lift_never_done_drags_the_routine_down(self):
+        BodieZRoutine.objects.create(user=self.u, title="Half", exercises=[{"exercise_id": self.bench.id}])
+        BodieZRoutine.objects.create(user=self.u, title="HalfPlus", exercises=[
+            {"exercise_id": self.bench.id}, {"exercise_id": self.squat.id}])
+        rs = self.routines()
+        self.assertGreater(rs["Half"]["coach_rating"], rs["HalfPlus"]["coach_rating"])
+
+    def test_unlogged_routine_is_not_rated_rather_than_zero(self):
+        BodieZRoutine.objects.create(user=self.u, title="New", exercises=[{"exercise_id": self.squat.id}])
+        r = self.routines()["New"]
+        self.assertIsNone(r["coach_rating"])
+        self.assertIn("thorough", r["coach_why"].lower())

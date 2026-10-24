@@ -640,12 +640,23 @@ class BodieZCustomDayDetailView(APIView):
 
 
 class BodieZRoutinesView(APIView):
-    """GET/POST /api/economy/bodiez/routines/"""
+    """GET/POST /api/economy/bodiez/routines/
+
+    GET carries each routine's Coach rating out of 10, read off the member's own
+    FINISHED sessions (see `routine_coach_ratings`). It is progress, not
+    attendance, so it is None until a lift in the routine has two comparable
+    sessions."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        rows = BodieZRoutine.objects.filter(user=request.user)
-        return Response({"routines": [_routine_dict(r) for r in rows]})
+        rows = list(BodieZRoutine.objects.filter(user=request.user))
+        rated = routine_coach_ratings(request.user, rows)
+        out = []
+        for r in rows:
+            d = _routine_dict(r)
+            d.update(rated[r.id])
+            out.append(d)
+        return Response({"routines": out, "rating_caveat": RATING_CAVEAT})
 
     def post(self, request):
         # Cut to the column: SQLite ignores varchar length and Postgres does
@@ -1381,43 +1392,50 @@ class BodieZProgressView(APIView):
         })
 
 
-# --- Coach rating per muscle -------------------------------------------------
+# --- Thorough rating: how THOROUGHLY a lift, routine or muscle has been trained --
 #
-# A muscle's rating is how its own logged lifts MOVED against the member's own
-# earlier best — never against other people and never from how much was done.
-# That second half is the substance rule: sets and sessions are effort, and
-# "ratings may not reward effort", so a member who trains a muscle five days a
-# week and goes nowhere does not get a good number for turning up (the
-# volume_score beside it already measures turning up, and says so).
+# One 1-10 scale for all three, read off the member's own FINISHED sessions in
+# the last THOROUGH_DAYS (28). Corey's call, replacing an earlier progress-only
+# 10/6/3 that said whether a lift went up and nothing about how completely it
+# was being trained. Three parts, each a plain comparison the member can check:
 #
-# Per exercise, from FINISHED sessions only: each session reduces to one number
-# (best estimated one-rep max for weighted sets, Epley; best single-set reps
-# for bodyweight ones), the latest session is compared to the best of the
-# sessions before it, and it is one of three words:
+#   consistency  distinct days it was trained         vs THOROUGH_TARGET_DAYS   40%
+#   volume       working sets a week, averaged        vs the target for it      35%
+#   progress     latest session vs own earlier best   up 1 / held .67 / down .33  25%
 #
-#   up    latest >= 102% of the earlier best   10
-#   held  between 90% and 102%                  6   ("ordinary is 6" — see the
-#                                                   vocal coach's scale)
-#   down  latest <  90% of the earlier best     3
+# score = round(1 + 9 * weighted share), so one lone set is a 1-2 and "twice a
+# week, enough sets, still improving" is a 10. Progress is left out and the
+# other two re-weighted until a lift has two comparable sessions (it cannot be
+# judged on one), so a new lift is not marked down for having no history.
 #
-# The muscle's rating is the mean of its exercises' points, rounded. The 90%
-# floor is deliberate: one tired day is not a regression, and a rating that
-# punished it would teach members to skip logging bad sessions. Below it, the
-# bottom is still the bottom — a lift that really fell scores a 3, not a 6.
-#
-# `None` (not 0) until at least one exercise has two comparable sessions: no
-# rating invites a real one, and a fake zero tells a new member they are bad
-# at a muscle they have trained once.
+# SUBSTANCE, said out loud: turning up and sets are effort, and this number now
+# includes them. That is why the score is named "thorough" and the caveat says
+# it is how completely something is trained, not how strong you are, and why
+# the third part is still there: a muscle hit every day that goes nowhere cannot
+# reach 10. `None` (never 0) when nothing was logged in the window.
+THOROUGH_DAYS = 28
+THOROUGH_TARGET_DAYS = 8          # twice a week, over the window
+THOROUGH_LIFT_WEEKLY_SETS = 6     # one lift; a muscle uses the bodymap's own target
 RATING_UP = 1.02
 RATING_DOWN = 0.90
-RATING_POINTS = {"up": 10, "held": 6, "down": 3}
+TREND_SHARE = {"up": 1.0, "held": 0.67, "down": 0.33}
 RATING_CAVEAT = (
-    "Coach rating compares your latest logged session of each lift for this "
-    "muscle with your own earlier best (estimated one-rep max, or best reps for "
-    "bodyweight lifts): 10 for up, 6 for held, 3 for down, averaged. It says "
-    "how your lifts moved, not how strong you are next to anyone else, and it "
-    "needs two sessions of the same exercise before it says anything."
+    "Thorough rating: how thoroughly this has been trained, 1 to 10, from your "
+    "finished sessions in the last 28 days: how many days you trained it (40%), "
+    "how many working sets a week (35%), and whether it is going up against "
+    "your own earlier best (25%, once a lift has two sessions). It is not how "
+    "strong you are next to anyone else, and one session cannot make a 10."
 )
+
+
+def thoroughness(days, weekly_sets, target_weekly_sets, trend=None):
+    """The 1-10 score from its three parts. Pure; `trend` is up/held/down/None."""
+    parts = [(min(1.0, days / THOROUGH_TARGET_DAYS), 0.40),
+             (min(1.0, weekly_sets / target_weekly_sets), 0.35)]
+    if trend in TREND_SHARE:
+        parts.append((TREND_SHARE[trend], 0.25))
+    share = sum(v * w for v, w in parts) / sum(w for _, w in parts)
+    return max(1, min(10, round(1 + 9 * share)))
 
 
 def _session_metric(sets):
@@ -1429,52 +1447,125 @@ def _session_metric(sets):
     return ("reps", float(max(reps))) if reps else None
 
 
-def muscle_coach_ratings(sets):
+def _trend_of(by_session):
+    """up/held/down for one lift's sessions (ordered by session start), or None."""
+    ordered = sorted(by_session.values(), key=lambda ss: ss[0].session.started_at)
+    metrics = [m for m in (_session_metric(ss) for ss in ordered) if m]
+    if len(metrics) < 2:
+        return None, None, None
+    kind, latest = metrics[-1]
+    # Like with like: a session logged with weight and one without are not the
+    # same measurement.
+    earlier = [v for k, v in metrics[:-1] if k == kind]
+    if not earlier or max(earlier) <= 0:
+        return None, None, None
+    before = max(earlier)
+    ratio = latest / before
+    trend = "up" if ratio >= RATING_UP else "down" if ratio < RATING_DOWN else "held"
+    return trend, kind, (round(latest, 1), round(before, 1))
+
+
+def _mean_trend(trends):
+    """One trend word for several lifts' trends (or None if none had one)."""
+    pts = [TREND_SHARE[t] for t in trends if t]
+    if not pts:
+        return None
+    avg = sum(pts) / len(pts)
+    return "up" if avg >= 0.84 else "held" if avg >= 0.5 else "down"
+
+
+def lift_thoroughness(sets, now=None):
+    """{exercise_id: {...}} for every lift logged in the window, from finished
+    `BodieZSet` rows (exercise and session loaded). Sides of a one-arm/one-leg
+    lift are rated as one lift for the routine, and listed apart in the muscle."""
+    now = now or timezone.now()
+    cutoff = now - timedelta(days=THOROUGH_DAYS)
+    sets = list(sets)
+    lanes = defaultdict(lambda: defaultdict(list))        # (exercise, side) -> session -> sets
+    for st in sets:
+        lanes[(st.exercise, st.one_sided)][st.session_id].append(st)
+    out = {}
+    for (exercise, side), by_session in lanes.items():
+        recent = [x for ss in by_session.values() for x in ss if x.session.started_at >= cutoff]
+        if not recent:
+            continue
+        days = len({timezone.localtime(x.session.started_at).date() for x in recent})
+        weekly = len(recent) / (THOROUGH_DAYS / 7)
+        trend, kind, nums = _trend_of(by_session)
+        row = {"exercise_id": exercise.id, "one_sided": side,
+               "exercise_name": _lane_name(exercise.name, side),
+               "muscle_group": exercise.muscle_group,
+               "rating": thoroughness(days, weekly, THOROUGH_LIFT_WEEKLY_SETS, trend),
+               "days_trained": days, "sets_per_week": round(weekly, 1), "trend": trend}
+        if nums:
+            row.update({"metric": kind, "latest": nums[0], "earlier_best": nums[1]})
+        out[(exercise.id, side)] = row
+    return out
+
+
+def muscle_coach_ratings(sets, now=None, target_weekly_sets=10):
     """{muscle_group: {"rating": int|None, "why": str, "exercises": [...]}}
     for an iterable of finished `BodieZSet` rows (exercise and session
-    already loaded)."""
-    per = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))  # muscle -> ex -> session -> sets
-    for s in sets:
-        per[s.exercise.muscle_group][(s.exercise, s.one_sided)][s.session_id].append(s)
-
+    already loaded). `exercises` lists every lift of that muscle logged in the
+    window, each with its own 1-10 `rating`."""
+    now = now or timezone.now()
+    cutoff = now - timedelta(days=THOROUGH_DAYS)
+    sets = list(sets)
+    lifts = lift_thoroughness(sets, now)
+    recent_by_muscle = defaultdict(list)
+    for st in sets:
+        if st.session.started_at >= cutoff:
+            recent_by_muscle[st.exercise.muscle_group].append(st)
     out = {}
-    for muscle, by_ex in per.items():
-        rated = []
-        for (exercise, side), by_session in by_ex.items():
-            ordered = sorted(by_session.values(), key=lambda ss: ss[0].session.started_at)
-            metrics = [m for m in (_session_metric(ss) for ss in ordered) if m]
-            if len(metrics) < 2:
-                continue
-            kind, latest = metrics[-1]
-            # Like with like: a session logged with weight and one without
-            # are not the same measurement.
-            earlier = [v for k, v in metrics[:-1] if k == kind]
-            if not earlier or max(earlier) <= 0:
-                continue
-            before = max(earlier)
-            ratio = latest / before
-            trend = "up" if ratio >= RATING_UP else "down" if ratio < RATING_DOWN else "held"
-            rated.append({
-                "exercise_id": exercise.id, "one_sided": side,
-                "exercise_name": _lane_name(exercise.name, side),
-                "trend": trend, "metric": kind,
-                "latest": round(latest, 1), "earlier_best": round(before, 1),
-            })
-        if not rated:
-            out[muscle] = {"rating": None, "exercises": [],
-                           "why": "Needs two logged sessions of the same exercise to rate."}
-            continue
-        rated.sort(key=lambda r: r["exercise_name"])
-        points = [RATING_POINTS[r["trend"]] for r in rated]
-        n = {t: sum(1 for r in rated if r["trend"] == t) for t in ("up", "held", "down")}
-        bits = [f"{n[t]} {t}" for t in ("up", "held", "down") if n[t]]
+    for muscle, recent in recent_by_muscle.items():
+        rows = sorted((r for r in lifts.values() if r["muscle_group"] == muscle),
+                      key=lambda r: r["exercise_name"])
+        days = len({timezone.localtime(x.session.started_at).date() for x in recent})
+        weekly = len(recent) / (THOROUGH_DAYS / 7)
+        trend = _mean_trend(r["trend"] for r in rows)
         out[muscle] = {
-            "rating": round(sum(points) / len(points)),
-            "exercises": rated,
-            "why": f"{len(rated)} lift{'s' if len(rated) != 1 else ''} compared: {', '.join(bits)}.",
+            "rating": thoroughness(days, weekly, target_weekly_sets, trend),
+            "exercises": rows,
+            "why": (f"Thorough on {days} day{'s' if days != 1 else ''}, with {weekly:.1f} sets a week "
+                    f"over the last {THOROUGH_DAYS} days"
+                    + (f"; its lifts are {trend} against your own earlier best." if trend else ".")),
         }
     return out
 
+
+def routine_coach_ratings(user, routines, now=None):
+    """{routine_id: {"coach_rating", "coach_why", "coach_exercises"}}.
+
+    A routine's rating is the mean of its lifts' thoroughness, and a lift in the
+    routine that was NOT logged in the window counts as a 1 — so a routine you
+    only half do is rated as half done, which is the point of rating a routine.
+    None (never 0) when none of its lifts were logged in the window."""
+    sets = (BodieZSet.objects.filter(session__user=user, session__ended_at__isnull=False)
+            .select_related("exercise", "session"))
+    per_lift = defaultdict(list)
+    for r in lift_thoroughness(sets, now).values():
+        per_lift[r["exercise_id"]].append(r["rating"])
+    rating = {i: round(sum(v) / len(v)) for i, v in per_lift.items()}
+    out = {}
+    for r in routines:
+        ids = []
+        for e in (r.exercises or []):
+            i = e.get("exercise_id") if isinstance(e, dict) else None
+            if isinstance(i, int) and i not in ids:
+                ids.append(i)
+        done = [i for i in ids if i in rating]
+        if not done:
+            out[r.id] = {"coach_rating": None, "coach_exercises": [],
+                         "coach_why": f"Not thorough yet — nothing from this routine logged in the last {THOROUGH_DAYS} days."}
+            continue
+        scores = [rating.get(i, 1) for i in ids]
+        out[r.id] = {
+            "coach_rating": max(1, min(10, round(sum(scores) / len(scores)))),
+            "coach_exercises": [{"exercise_id": i, "rating": rating.get(i)} for i in ids],
+            "coach_why": (f"Thorough on {len(done)} of {len(ids)} lift{'s' if len(ids) != 1 else ''} logged in the last "
+                          f"{THOROUGH_DAYS} days; the rest count as 1."),
+        }
+    return out
 
 
 class BodieZBodyMapView(APIView):
@@ -1536,9 +1627,9 @@ class BodieZBodyMapView(APIView):
         by_muscle = defaultdict(list)
         for s in sets:
             by_muscle[s.exercise.muscle_group].append(s)
-        ratings = muscle_coach_ratings(sets)
+        ratings = muscle_coach_ratings(sets, now, self.TARGET_WEEKLY_SETS)
         unrated = {"rating": None, "exercises": [],
-                   "why": "Needs two logged sessions of the same exercise to rate."}
+                   "why": f"Not thorough yet — nothing logged for this muscle in the last {THOROUGH_DAYS} days."}
 
         rows = []
         for muscle, label in BodieZExercise.MUSCLE_CHOICES:
