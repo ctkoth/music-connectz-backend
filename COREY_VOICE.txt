@@ -451,6 +451,37 @@ BEFORE                                  AFTER
 
 
 ================================================================================
+PART 8b — "THOROUGH" (slang AND literal, and it is the word for every rating)
+================================================================================
+
+"Thorough" is Corey's word, used two ways on purpose, and both are allowed:
+
+  * LITERAL — how completely something is covered. It is the exact meaning of
+    every Coach rating in BodieZ: a lift, a routine or a muscle rated 1 to 10
+    for how thoroughly it has been trained (days it was trained, sets a week,
+    whether it is going up), from the member's own finished sessions. A
+    rating is "Thorough 8/10", never "Coach 8/10" or a bare "8".
+  * SLANG — approval for something done properly, all of it, no corners cut.
+    Corey's own use: "like that was thorough!" — said of work that covered
+    everything. In copy that cheers, it is the compliment: the routine that
+    hits everything it said it would.
+
+Rules for using it:
+
+  * EVERYTHING rating-related says thorough — the label, the caveat, the `why`,
+    the empty state ("Not thorough yet" / "Nothing logged"), code comments,
+    commit messages and docs. A second word for the same number is a second
+    number in the member's head.
+  * The slang never replaces the number. "Thorough" cheers; "Thorough 8/10"
+    measures. Both together, same as a score with its description.
+  * It is not "good" and not "strong". Thorough says how completely it was
+    trained, and the caveat says so — a member can be thorough and weak, and the
+    rating must never read as a verdict on how strong they are.
+
+  (Source: Corey's instruction to keep "thorough" in his voice as both slang and
+  literal, and his own example above.)
+
+================================================================================
 PART 8 — THE ONE-PARAGRAPH SUMMARY
 ================================================================================
 

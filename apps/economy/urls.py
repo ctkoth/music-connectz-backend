@@ -199,7 +199,7 @@ from .habits import HabitCreateView, HabitCompleteView
 from .bodiez import (
     BodieZAccessView, BodieZBoardView, BodieZCustomDaysView, BodieZStepsView, BodieZCustomExerciseView, BodieZCustomExerciseDetailView, BodieZPastSessionView, BodieZStepCoachView, BodieZCustomDayDetailView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
     BodieZGoalDetailView, BodieZGoalsView, BodieZRecoveryView, BodieZRoutinesView,
-    BodieZRoutineDetailView, BodieZRoutineCopyView, BodieZSessionRoutineView, BodieZSessionsView, BodieZSessionDetailView, BodieZSessionSummaryView, BodieZSessionWriteView, BodieZSetsView, BodieZSetOrderView, BodieZLbFixView,
+    BodieZRoutineDetailView, BodieZRoutineCopyView, BodieZRoutineShareView, BodieZRoutineRedeemView, BodieZSessionRoutineView, BodieZSessionsView, BodieZSessionDetailView, BodieZSessionSummaryView, BodieZSessionWriteView, BodieZSetsView, BodieZSetOrderView, BodieZLbFixView,
     BodieZProgressView, BodieZWeightLogView,
 )
 from .lessonz import (
@@ -564,6 +564,9 @@ urlpatterns = [
          name="economy-bodiez-custom-day"),
     path("bodiez/pair/", BodieZPairView.as_view(), name="economy-bodiez-pair"),
     path("bodiez/routines/", BodieZRoutinesView.as_view(), name="economy-bodiez-routines"),
+    path("bodiez/routines/redeem/", BodieZRoutineRedeemView.as_view(), name="economy-bodiez-routine-redeem"),
+    path("bodiez/routines/<int:routine_id>/share/", BodieZRoutineShareView.as_view(),
+         name="economy-bodiez-routine-share"),
     path("bodiez/routines/<int:routine_id>/copy/", BodieZRoutineCopyView.as_view(),
          name="economy-bodiez-routine-copy"),
     path("bodiez/sessions/<int:session_id>/routine/", BodieZSessionRoutineView.as_view(),
