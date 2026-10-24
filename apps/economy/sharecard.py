@@ -31,8 +31,10 @@ import html
 from django.http import HttpResponse
 from django.utils.html import escape
 
+from .coachshare import public_read
 from .models import Post, Profile, can_view_post
 from .publicz import public_profile_dict
+from .scoreshare import short_verdict
 
 SITE = "https://musicconnectz.net"
 
@@ -112,14 +114,28 @@ def post_card(request, pk):
     author = post.author.username
     title = (post.title or "Untitled").strip()
     desc = (post.description or "").strip() or f"A track by {author} on Music ConnectZ."
-    score = ""
-    if isinstance(post.score, dict) and post.score.get("score") is not None:
-        # The score is the shareable part — it is what somebody posts to show.
-        score = f" Scored {post.score['score']}/10 by the coach."
+    path = f"/p/{post.pk}"
+    # A crawler is a stranger, so the preview carries the coach's read only when
+    # a stranger may see it: the same `coach_read_for(post, None)` the page and
+    # the JSON use. Members-only and private reads get the generic tags — a
+    # score in an og:title is a score in every chat app that unfurls the link,
+    # which is the opposite of "members only".
+    read = public_read(post)
+    if read:
+        return HttpResponse(_doc(
+            path=path,
+            title=f"{title} — {read['score']}/10 from the Music ConnectZ coach",
+            # The coach's own first sentence. The member's description is the
+            # fallback, not the lead: the verdict is what a stranger on Reddit
+            # or TikTok came to see next to the song.
+            description=short_verdict(read.get("verdict", "")) or desc,
+            image=f"{SITE}/api/economy/postz/{post.pk}/coach-card.png",
+            body=f"<p>By {escape(author)}.</p>",
+        ), content_type="text/html; charset=utf-8")
     return HttpResponse(_doc(
-        path=f"/p/{post.pk}",
+        path=path,
         title=f"{title} — {author} on Music ConnectZ",
-        description=(desc + score)[:300],
+        description=desc[:300],
         image=f"{SITE}/og-card.png",
         body=f"<p>By {escape(author)}.</p>",
     ), content_type="text/html; charset=utf-8")

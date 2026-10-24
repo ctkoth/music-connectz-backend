@@ -84,8 +84,13 @@ class MetricCountTests(TestCase):
 
     def test_a_minor_cannot_search_by_use(self):
         c = APIClient(); c.force_authenticate(User.objects.get(username="teen"))
+        member("teenpeer", birthday=teen_birthday(), substances={"thc": "often"})
         got = {m["username"] for m in c.get("/api/economy/members/?uses=alcohol").json()["members"]}
-        self.assertIn("me", got)   # the filter is dropped, not applied
+        # The filter is dropped, not applied: a peer who does not use alcohol is still
+        # listed. (Adults are not listed to a minor at all — the age-group rule — so the
+        # proof has to be another minor, not "me".)
+        self.assertIn("teenpeer", got)
+        self.assertNotIn("me", got)
 
 
 class ZodiacDatesTests(TestCase):

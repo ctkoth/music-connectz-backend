@@ -270,12 +270,13 @@ class FrequencyReachesTheScreensTests(TestCase):
         return self._as(self.me)
 
     def test_a_minor_viewer_cannot_read_frequency_by_uses(self):
-        self._member("adult", {"thc": "daily"})
+        self._member("peer", {"thc": "rarely"}, birthday="2013-02-01")
         r = self._minor_viewer().get("/api/economy/members/", {"uses": "thc", "use_freq": "daily"})
         self.assertEqual(r.status_code, 200)
         self.assertFalse(any("use_frequency" in m for m in r.data["members"]))
-        # the filter is dropped, not applied: the adult is not singled out by it
-        self.assertIn("adult", {m["username"] for m in r.data["members"]})
+        # the filter is dropped, not applied: a peer who does not match it is still listed
+        # (adults are never listed to a minor — the age-group rule — so the peer is a minor)
+        self.assertIn("peer", {m["username"] for m in r.data["members"]})
 
     def test_a_minor_viewer_cannot_step_substance_max_to_read_a_frequency(self):
         self._member("adult", {"thc": "often"})

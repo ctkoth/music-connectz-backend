@@ -48,6 +48,12 @@ _DRUMS = {"timing": "Timing ⏱️", "groove": "Groove 🕺", "dynamics": "Dynam
           "consistency": "Consistency 📐", "fills": "Fills 🥁"}
 _BOWED = {"intonation": "Intonation 🎯", "tone": "Tone 🌈", "bowing": "Bowing 🏹",
           "timing": "Timing ⏱️", "vibrato": "Vibrato 〰️"}
+# Winds and brass. Breath is a dimension here because it is what the instrument IS:
+# unlike a drummer, a flute player's air is the thing being played. That also makes
+# the recovery-first rule (takescorez.STRAIN_DIMENSIONS) apply to them, and BreathZ
+# is the free practice beside it.
+_WINDS = {"intonation": "Intonation 🎯", "tone": "Tone 🌈", "breath": "Breath 🫁",
+          "articulation": "Articulation 🗣️", "timing": "Timing ⏱️"}
 
 # What a single take genuinely cannot show, said out loud rather than scored.
 #
@@ -123,6 +129,13 @@ INSTRUMENTS = {
         "scores": _BOWED, "range_label": None, "ranges": [], "style_label": None, "styles": [],
         "caveat": "Intonation, tone, bowing, timing and vibrato are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
     },
+    **{key: {
+        "label": label, "performer": performer, "coach": f"{noun} coach",
+        "scores": _WINDS, "range_label": None, "ranges": [], "style_label": None, "styles": [],
+        "caveat": "Intonation, tone, breath, articulation and timing are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
+    } for key, label, performer, noun in (
+        ("flutez", "FluteZ", "flautist", "flute"), ("saxz", "SaxZ", "saxophonist", "saxophone"),
+        ("clarinetz", "ClarinetZ", "clarinetist", "clarinet"), ("trumpetz", "TrumpetZ", "trumpeter", "trumpet"))},
 }
 
 # Anything mounted without its own entry still gets a coach rather than a 404,
@@ -259,7 +272,8 @@ def scores_for(app_key, *, lyrics=False, mix=False):
             **(MIX_SCORE if (mix and rates_mix(app_key)) else {})}
 
 
-def prompt_for(app_key, genre, target, difficulty, style=None, lyrics=False, mix=False):
+def prompt_for(app_key, genre, target, difficulty, style=None, lyrics=False, mix=False,
+               listeners=None):
     """The coaching prompt, in this instrument's own terms."""
     p = profile_for_app(app_key)
     lyrics = bool(lyrics) and rates_lyrics(app_key)
@@ -397,12 +411,19 @@ Cents_off: negative = flat, positive = sharp. If pitch is 70+, return []."""
         ',\n  "weak_notes": [{"note": "...", "frequency": 330, "cents_off": 0}, ...]'
         if has_pitch else "")
 
+    # Server-read evidence only (vocalcoach.listeners_for); never member-typed.
+    listener_line = (
+        f"\n- Real listeners on Music ConnectZ rated this post {listeners['median']}/10 "
+        f"across {listeners['count']} ratings — evidence the song connects. It does not "
+        "change what you hear in the performance; score what you hear."
+        if listeners else "")
+
     return f"""You are the Music ConnectZ {p['coach']}. You are listening to one \
 recorded take from a member training in {p['label']}.
 
 Their context:
 - Genre: {genre}{target_line}{style_line}
-- Difficulty: {difficulty}
+- Difficulty: {difficulty}{listener_line}
 
 Score the take and coach it. Write the way a good engineer talks to an artist \
 in the room: direct, specific, second person, no hedging and no flattery. Name \
@@ -435,8 +456,11 @@ a clip with nothing in it; that one is "unscorable" above.
 - 3-4: real attempt, but the fundamentals come apart often enough that it is \
 the first thing to fix.
 - 5-7: a solid, ordinary take from somebody at this level. Things to fix, \
-nothing broken. **Most takes belong here** — 6 is normal, not a failure.
-- 8-9: clearly good for this level — the kind of take that actually lands \
+nothing broken. **Most takes belong here** — 6 is normal, not a failure. \
+7 is the top of this band and it is not ordinary: 7 = clearly above ordinary, a \
+real strength a listener would point to, and nothing that breaks the take.
+- 8-9: 8 = strong across the board, a take that would hold up next to released \
+records in its lane. Clearly good for this level — the kind of take that actually lands \
 with real listeners, not just technically clean. If people who heard it \
 responded strongly, that reaction is real evidence of where this take sits, \
 not something to talk yourself out of over a technicality nobody but \
@@ -513,6 +537,12 @@ note, the fact they went for it. Finding it is the job. An empty strengths list 
 is a failure of listening, not an honest verdict, and it is what turns coaching \
 into a list of complaints somebody closes.
 
+"heard" is the evidence, not the advice: up to 8 concrete observations, each \
+only what you can actually hear, with the time if you are sure of it. Omit \
+anything you are unsure of; an empty list is a correct answer. A second pass \
+checks your advice against these, so an observation you invented here becomes \
+advice somebody follows.
+
 Three things every answer carries, because a score with no destination is a \
 number and not coaching:
 
@@ -520,6 +550,20 @@ number and not coaching:
 {p['label']}'s own terms, the honest read a stranger would give it.
 - "goal": what they are aiming at from here, pitched at "{difficulty}" and at \
 {aim}. Concrete enough to know when they have hit it.{range_ask}{style_ask}{style_scale}{lyric_ask}{mix_ask}{weak_notes_section}
+
+"hook_score" rates the HOOK on its own - in this app a chorus IS a hook (as is any refrain or repeated tag line), so rate the chorus, not the verses: a take can have a strong hook inside a rough performance and the reverse, so judge it by itself - do not let the verses colour it. The server counts it as one part of the overall, so do not fold it into your own overall either. Null when there is no hook - a scale, a warm-up or an exercise has none.
+
+"feelz_score" rates the FEEL, apart from the polish: how strongly an honest listener would be moved, whatever the emotion - a raw sad verse that lands is a 9, a clean take with nothing behind it is a 4. Do not reward happiness or punish roughness, and say plainly in feelz_why that this is your read as a listener, not a prediction of how any particular person will feel. The server counts it as one part of the overall, so do not fold it into your own overall either. Null for a scale, warm-up or exercise.
+
+"feelz_cause" is only for a FEELZ of 6 or lower, and it comes FIRST in your thinking: decide honestly WHY the feeling or the words are not coming through, because the fix depends on it - "performance" (mumbled or swallowed words, trailing off, flat intention, rushing, singing too far from the mic, no support behind the line - the take itself), "mix" (the vocal is balanced badly against the instrumental or processed badly), "recording" (the mic, room or levels), or "both". Unclear vocals are very often the performance, so never default to blaming the mix or the gear: if you can hear the performer mumbling, the cause is the performance and "mix_tips" must be empty. Null if FEELZ is 7 or higher or null.
+
+Delivery is the biggest lever on FEELZ, so when you give tips lead with delivery - how the line is actually sung or said - before phrasing, dynamics or pacing, and put gear or room last unless the recording is plainly the cause.
+
+"feelz_tips" is only for a FEELZ of 6 or lower: up to three specific things to try to carry more feeling in THIS take. Each has a "kind" - one of delivery (how it is sung or said: intention, attack, tone), diction (enunciation: swallowed consonants, mumbled or slurred words, endings that trail off), projection (support, volume and how close to the mic you sing or speak), phrasing (where lines start, stretch or land), dynamics (loud and soft, build and release), pacing (rushing, dragging, the space left between lines), intention (what the words are really about and who they are said to), gear (the microphone or chain is making it thin, harsh or distant - say what kind of change, e.g. a large-diaphragm condenser or a dynamic mic closer to the mouth, a pop filter, never a brand), or room (reflections, noise or distance in the recording space) - plus "what" (the specific change, naming the moment or line where it went flat), "why" (how it holds the feeling back) and "how" (the steps to try on the next take). Use gear or room ONLY when the recording itself, not the performance, is what you hear holding the feeling back. Never a general reminder to "feel it more". If FEELZ is 7 or higher, or null, return an empty list.
+
+"mix_tips" is separate, and is about the MIX, not the performance: when the vocal is hard to make out or to feel because of how it sits in the mix - buried under the instrumental, muddy low-mids, harsh or sibilant top, too dry or too washy, uneven level - give up to three: "what" to change in the mix, "why" it hides the words or the feeling, and "how" to do it (a starting EQ region to cut or lift, compression guidance, vocal level against the beat, a de-esser, how much reverb or delay), plus "helps": clarity, feelz or both. Name the moment it is worst. Only what you can actually hear; if the vocal sits well, or there is no instrumental or mix to speak of, return an empty list.
+
+"practice" is up to three exercises, one for each of your fixes, worst first: what to do, why it fixes THAT problem in THIS take, and how to run it. Specific to what you heard - never generic advice.
 
 Return ONLY valid JSON, no markdown fence, in exactly this shape:
 {{
@@ -530,9 +574,81 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "goal": "<what they're aiming at next, and how they'll know they got there>",{range_field}
   "style_fit": "<how it sits against the style or genre they picked>",
   "song_score": <1-10, or null if there's no actual song here to judge>,
-  "song_why": "<one sentence, as a listener: what makes it land or not>",{lyric_fields}{mix_fields}
+  "song_why": "<one sentence, as a listener: what makes it land or not>",
+  "hook_score": <1-10 for the HOOK alone - the chorus first, else any refrain or most repeatable moment - or null if the take has no chorus or hook to judge>,
+  "hook_why": "<one sentence: what makes the hook stick or not - the melody, the rhythm of the words, the repetition>",
+  "feelz_score": <1-10 for FEELZ - how strongly the take carries a real emotion across to a listener - or null if it is an exercise with no emotion to judge>,
+  "feelz_emotion": "<the emotion or emotions you hear, in one to three plain words, e.g. 'grief', 'defiant joy', 'longing'>",
+  "feelz_why": "<one sentence: what makes it move you or not - the voice, the pacing, the honesty, the space it leaves>",
+  "feelz_cause": "<performance|mix|recording|both, or null when FEELZ is 7 or higher>",
+  "feelz_tips": [{{"kind": "<delivery|diction|projection|phrasing|dynamics|pacing|intention|gear|room>", "what": "<only when FEELZ is 6 or lower: the specific moment and change>", "why": "<how it holds the feeling back>", "how": "<steps to try next take>"}}, ...],
+  "mix_tips": [{{"helps": "<clarity|feelz|both>", "what": "<the mix change>", "why": "<what it is hiding>", "how": "<how to do it>"}}, ...],{lyric_fields}{mix_fields}
+  "heard": [{{"t": "<m:ss, or empty if unsure>", "what": "<one plain sentence: what is audible>", "dim": "<one score key above, or other>", "confidence": <1-3>}}, ...],
   "verdict": "<one sentence in that voice, what this take actually is>",
   "strengths": ["<what genuinely worked, named specifically - AT LEAST ONE, always>", "..."],
   "fixes": ["<the moment it goes wrong, and the fix — the two that matter most, worst first>", "..."],
-  "next_drill": "<one drill to run before the next take: what to do, how many reps>"{weak_notes_field}
+  "next_drill": "<one drill to run before the next take: what to do, how many reps>",
+  "practice": [{{"what": "<the drill, concretely - one exercise>", "why": "<which problem in THIS take it fixes, and why this exercise fixes it>", "how": "<the steps: tempo or setting, reps or minutes, and how they will know it worked>"}}, ...]{weak_notes_field}
+}}"""
+
+
+def reference_prompt_for(app_key, genre, style=None):
+    """The prompt for a REFERENCE LISTEN: somebody else's recording.
+
+    A different question from `prompt_for`, not a reworded one. The take
+    prompt judges a developing artist's practice performance and hands them
+    fixes; here nobody is being judged. The same keyed dimensions come back
+    (this module is the one source of them, so the screen's labels and the
+    server's whitelist cannot disagree), read as "how strongly does this
+    track show it", and the notes say what the track does and what a
+    performer could learn from it. There is deliberately no "fixes": a fix is
+    advice to the person who played it, and that person is not the listener.
+    Lyrics, mix and listener ratings are not offered either - the first two
+    are opt-ins about the member's own take, the last is evidence about a
+    member's own post.
+    """
+    p = profile_for_app(app_key)
+    keys = list(scores_for(app_key))
+    shape = ", ".join(f'"{k}": <1-10>' for k in keys)
+    style_line = (f"\n- {p['style_label']}: {style}"
+                  if p.get("style_label") and style else "")
+    return f"""You are the Music ConnectZ {p['coach']}, doing a REFERENCE LISTEN.
+
+This is ANOTHER ARTIST'S RECORDING that a member chose to listen through, in \
+{p['label']} terms. It is NOT the listener's own performance. Nobody is being \
+graded and nothing here is a score of the member. Do not address the \
+listener's playing, do not tell them what to fix, and never assume who made it.
+
+Context:
+- Genre: {genre}{style_line}
+
+Describe what you actually hear, dimension by dimension, and give the same \
+1-10 reading you would for any recording: how strongly this track shows that \
+quality. 1-2 = barely holds together, 3-4 = often comes apart, 5-7 = solid and \
+ordinary, 8-9 = strong, 10 = exceptional. Read the recording as it is; do not \
+inflate a famous-sounding track or mark an unpolished one down for its room. \
+Never invent detail you cannot hear.
+
+IS THERE A PERFORMANCE AT ALL? Silence, room noise, talking, or plainly the \
+wrong file: set "unscorable" to a short sentence saying what you heard, set \
+"score" and every entry in "scores" to null, and stop.
+
+Frame every note as what THIS TRACK does well and what a performer could \
+learn or borrow from it. Plain, specific and warm, with a fitting emoji or \
+two. Contractions are fine. Name the moment, not the category.
+
+Return ONLY valid JSON, no markdown fence, in exactly this shape:
+{{
+  "unscorable": <null, or a short sentence: what you heard, and what to send instead>,
+  "score": <overall 1-10 integer, or null if unscorable>,
+  "scores": {{{shape}}},
+  "now": "<what this track is, in {p['label']}'s own terms>",
+  "goal": "<what the track is going for and how it gets there>",
+  "style_fit": "<how it sits against {genre}: what that genre asks for and what this track does with it>",
+  "song_score": <1-10 as a listener reacts to the song itself, or null if there is no song>,
+  "song_why": "<one sentence: what makes it land or not>",
+  "heard": [{{"t": "<m:ss, or empty if unsure>", "what": "<one plain sentence: what is audible>", "dim": "<one score key above, or other>", "confidence": <1-3>}}, ...],
+  "verdict": "<one sentence: what this track is>",
+  "strengths": ["<what this track does well, specifically - at least one>", "..."],
+  "borrow": "<one thing a performer could try or borrow from this track, concrete>"
 }}"""

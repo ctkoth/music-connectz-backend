@@ -28,6 +28,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import ai_cost, over_char_limit
+from .deadline import Deadline, Expired
 from .gemini import _bill, _key, generate_content
 from .models import (InstrumentalWork, membership_for, can_afford_ai, daily_prompt_covers,
                      daily_prompt_state)
@@ -39,6 +40,13 @@ BPM_MIN, BPM_MAX = 60, 200
 BARS = (4, 8)
 MAX_TRACKS = 6
 MAX_NOTES = 400
+# How long a member may be kept waiting for one POST, start to finish. The
+# screen used to give up at 30s while the server let the model run for 90 and
+# then charged and saved a piece nobody was waiting for any more. The screen
+# reads this from GET and waits LONGER than it (a server that answers in time
+# must always be the one that decides), and the model call takes what is left
+# of it rather than a number of its own — see deadline.py for why.
+BUDGET_SECONDS = 60
 TPB = 480  # ticks per beat
 
 # General MIDI programs. Drums ride channel 10 (index 9) and take no program.
@@ -120,7 +128,14 @@ def key_signature(key):
     root = _KEY_ROOT[name]
     major_root = (root + 3) % 12 if minor else root
     order = {0: 0, 7: 1, 2: 2, 9: 3, 4: 4, 11: 5, 6: 6, 1: -5, 8: -4, 3: -3, 10: -2, 5: -1}
-    return order[major_root], 1 if minor else 0
+    sf = order[major_root]
+    # Six sharps and six flats are the same key on a keyboard, so the table can
+    # only hold one of them; it holds sharps. A key SPELLED with a flat (Eb
+    # minor, whose relative major is Gb) wants the flat side, or a score shows
+    # D# minor — seven-note names nobody reads — for a member who picked Eb.
+    if abs(sf) == 6 and len(name) > 1 and name[1] == "b":
+        sf = -6
+    return sf, 1 if minor else 0
 
 
 def prompt_for(genre, instruments, bpm, key, bars, brief=""):
@@ -230,9 +245,19 @@ def midi_bytes(tracks, bpm, key, title=""):
     return header + b"".join(chunks)
 
 
+def missing_parts(asked, tracks):
+    """Instrument ids that were asked for and are not in the tracks that were kept."""
+    kept = {t.get("instrument") for t in tracks or [] if isinstance(t, dict)}
+    return [i for i in asked or [] if i not in kept]
+
+
 def _work_dict(w):
     return {"id": w.id, "genre": w.genre, "instruments": w.instruments, "bpm": w.bpm, "key": w.key,
             "bars": w.bars, "brief": w.brief, "tracks": w.tracks, "created_at": w.created_at.isoformat(),
+            # A loop short of a requested part is billed in full (one model run
+            # was made either way), so the screen must say WHICH parts are not
+            # in the file rather than leave a member to count tracks.
+            "missing": missing_parts(w.instruments, w.tracks),
             "royalty_pct": ROYALTY_PCT}
 
 
@@ -258,6 +283,7 @@ class InstrumentalView(APIView):
             "instruments": [{"id": k, "label": v["label"]} for k, v in INSTRUMENTS.items()],
             "keys": key_list(),
             "bpm": [BPM_MIN, BPM_MAX], "bars": list(BARS), "max_tracks": MAX_TRACKS,
+            "budget_seconds": BUDGET_SECONDS,
             "cost_cents": cost, "free_today": free, "daily_remaining": daily_left,
             "daily_allowance": allowance,
             "can_run": bool(_key()) and (free or can_afford_ai(request.user, cost)),
@@ -269,6 +295,7 @@ class InstrumentalView(APIView):
         })
 
     def post(self, request):
+        deadline = Deadline(BUDGET_SECONDS)
         d = request.data or {}
         genre = str(d.get("genre", "")).strip()[:60]
         brief = str(d.get("brief", "")).strip()
@@ -305,7 +332,20 @@ class InstrumentalView(APIView):
         body = {"contents": [{"parts": [{"text": prompt_for(genre, instruments, bpm, key, bars, brief)}]}],
                 "generationConfig": {"temperature": 0.9, "responseMimeType": "application/json"}}
         try:
-            resp, tried = generate_content("text", body, key=api_key, timeout=90, label="Instrumental ConnectZ")
+            deadline.check("the request was still being prepared when the time ran out")
+            resp, tried = generate_content("text", body, key=api_key, timeout=deadline.remaining(cap=90),
+                                           label="Instrumental ConnectZ")
+            # `generate_content` walks a chain of models with ONE timeout each,
+            # so a call can overrun the budget by more than it was given. An
+            # answer that lands after the member's wait is over is not billed:
+            # they were told it was still running, and nothing here is theirs.
+            deadline.check("the composer was still going when the time ran out")
+        except Expired as e:
+            logger.warning("Instrumental ConnectZ: over budget after %.0fs — %s", deadline.spent(), e.message)
+            return Response({"detail": f"The composer is taking longer than it should — {e.message}. "
+                                       "Nothing was charged. Try again, or pick fewer instruments.",
+                             "timed_out": True, "waited_seconds": int(deadline.spent())},
+                            status=status.HTTP_504_GATEWAY_TIMEOUT)
         except requests.RequestException:
             logger.exception("Instrumental ConnectZ: could not reach Gemini")
             return Response({"detail": "Couldn't reach the composer. Nothing was charged — try again."},
@@ -351,6 +391,8 @@ class InstrumentalMidiView(APIView):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         title = f"{w.genre or 'Instrumental'} in {w.key} at {w.bpm} BPM"
         resp = HttpResponse(midi_bytes(w.tracks, w.bpm, w.key, title), content_type="audio/midi")
-        slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:60] or "instrumental"
+        # "#" would be dropped as punctuation and F# minor would download as
+        # "f-minor", the name of a different key. Spell the sharp out first.
+        slug = re.sub(r"[^a-z0-9]+", "-", title.lower().replace("#", " sharp ")).strip("-")[:60] or "instrumental"
         resp["Content-Disposition"] = f'attachment; filename="{slug}.mid"'
         return resp

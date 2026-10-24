@@ -66,12 +66,18 @@ def skills_of(user):
     for r in SkillRating.objects.filter(subject=user).values_list("skill", "score"):
         rows.setdefault(r[0], []).append(r[1])
     out = []
+    from . import royaltyfactor as rf
+    opted = rf.opted_in(user)
     for skill, scores in rows.items():
+        rating, detail = (rf.blended_skill_rating(user, skill) if opted and rf.coach_skill_key(skill)
+                          else (skill_rating_median(user, skill), None))
         out.append({
             "skill": skill,
-            "rating": skill_rating_median(user, skill),
+            "rating": rating,
             "count": len(scores),
             "kind": "skill",
+            # Said when the AI coach is part of the number, so the rating is never unexplained.
+            **({"coach": detail["coach"]} if detail and detail.get("coach") else {}),
         })
     out.sort(key=lambda r: (-r["count"], -(r["rating"] or 0)))
     return out

@@ -99,17 +99,17 @@ class PublishingChargesTheShortfallTests(TestCase):
         w.energy = 1000
         w.save(update_fields=["energy", "updated_at"])
 
-    def test_an_import_with_no_skills_publishes_free(self):
+    def test_an_import_with_no_skills_publishes_for_only_the_floor(self):
         # Every SoundCloud track lands with no skills_used — there is nothing
-        # to price, so nothing is owed on publish, the same as import itself
-        # being free.
+        # to price, so only the post floor is owed on publish (import itself is free).
+        from apps.economy.catalog import POST_ENERGY_FLOOR
         p = Post.objects.create(author=self.author, title="Track",
                                 visibility="private", skill_cost_cents=0)
         w = wallet_for(self.author)
         before = w.energy
         self.client.post(EDIT_URL, {"edit_id": p.pk, "visibility": "public"}, format="json")
         w.refresh_from_db()
-        self.assertEqual(w.energy, before)
+        self.assertEqual(w.energy, before - min(before, POST_ENERGY_FLOOR))
 
     def test_a_never_charged_draft_is_charged_in_full_on_publish(self):
         """A member added a priced skill to an imported draft before

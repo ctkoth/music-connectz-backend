@@ -8,6 +8,7 @@ import logging
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
+from django.db import transaction
 from django.db.models import Q
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -18,9 +19,9 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from .catalog import limits_for, edit_window_for
+from .catalog import DM_COLD_ENERGY, limits_for, edit_window_for
 from .models import (
-    Message, Notification, blocked_user_ids, membership_for, notify,
+    Message, Notification, blocked_user_ids, membership_for, notify, spend_energy, wallet_for,
 )
 
 User = get_user_model()
@@ -104,11 +105,35 @@ def _email_new_message(recipient, sender, body):
         return False
 
 
+def is_cold(me, other):
+    """True when `me` writing to `other` opens a conversation with nobody's say-so.
+
+    Free: any earlier message in either direction (a reply, a follow-up), someone
+    who follows `me` (they asked to hear from them), and a live accepted collab.
+    What is left is a stranger, which is the only case spam needs a price for.
+    Read BEFORE the message exists — afterwards every conversation has history.
+    """
+    from .models import Follow, collab_link
+    if Message.objects.filter(Q(sender=me, recipient=other) | Q(sender=other, recipient=me)).exists():
+        return False
+    if Follow.objects.filter(follower=other, following=me).exists():
+        return False
+    return not collab_link(me, other)
+
+
 class MessagesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         me = request.user
+        quote = (request.query_params.get("cost_for") or "").strip()
+        if quote:
+            # The price for THIS recipient, asked for before the button is pressed.
+            other = User.objects.filter(username=quote).first()
+            cold = bool(other and other.id != me.id and is_cold(me, other))
+            return Response({"to": quote, "cold": cold,
+                             "cost_energy": DM_COLD_ENERGY if cold else 0,
+                             "energy": max(0, wallet_for(me).energy or 0)})
         peer = (request.query_params.get("with") or "").strip()
         if peer:
             other = User.objects.filter(username=peer).first()
@@ -141,9 +166,9 @@ class MessagesView(APIView):
             "conversations": list(convos.values()),
             "inbox": inbox,
             "sent": sent,
-            # DMs cost nothing here today. Reported so the client states the
-            # real price instead of assuming one.
-            "dm_cost_energy": 0,
+            # What opening a conversation with a stranger costs; replies and
+            # follow-ups are free. `?cost_for=<username>` quotes one recipient.
+            "dm_cost_energy": DM_COLD_ENERGY,
         })
 
     def post(self, request):
@@ -179,6 +204,9 @@ class MessagesView(APIView):
             return Response({"detail": "can't message yourself"}, status=status.HTTP_400_BAD_REQUEST)
         if other.id in blocked_user_ids(me):
             return Response({"detail": "You've blocked this user (or they blocked you)."}, status=status.HTTP_403_FORBIDDEN)
+        from .models import NO_CROSS_AGE_MESSAGE, may_message
+        if not may_message(me, other):
+            return Response({"detail": NO_CROSS_AGE_MESSAGE, "age_group": True}, status=status.HTTP_403_FORBIDDEN)
         from .gates import reach_block
         blocked = reach_block(me, other)
         if blocked:
@@ -200,7 +228,21 @@ class MessagesView(APIView):
         from . import karmaz
         cold = karmaz.cold_reply(me, other) if first_to_them else None
 
-        m = Message.objects.create(sender=me, recipient=other, body=body, media_url=media_url, media_type=media_type)
+        # The charge and the message are one unit: a send that fails after the
+        # spend rolls the spend back, so a failed attempt is never charged.
+        price = DM_COLD_ENERGY if is_cold(me, other) else 0
+        with transaction.atomic():
+            if price and spend_energy(me, price, f"Message to @{other.username}",
+                                      app_key="messagez", target="messagez:compose") is None:
+                have = max(0, wallet_for(me).energy or 0)
+                return Response({
+                    "detail": f"Starting a conversation with someone new costs {price} ⚡ and you have {have}. "
+                              "Nothing was sent or charged. Replies are free.",
+                    "insufficient": True, "resource": "energy",
+                    "cost": {"resource": "energy", "amount": price},
+                    "energy_needed": price, "energy_available": have, "energy_short": price - have,
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+            m = Message.objects.create(sender=me, recipient=other, body=body, media_url=media_url, media_type=media_type)
         if first_to_them:
             from .signbonus import try_award
             try_award(me, "first_message", stretch=spoken_to + 1 >= 3)
@@ -213,6 +255,7 @@ class MessagesView(APIView):
         # the cost/gain rule: a reward the member never sees is a coincidence,
         # and a coincidence changes nobody's behaviour.
         body_out = _msg(m, me)
+        body_out["cost_energy"] = price
         if cold and (cold.get("reply") or cold.get("capped")):
             body_out["earned"] = cold
         return Response(body_out, status=status.HTTP_201_CREATED)

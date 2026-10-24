@@ -196,3 +196,73 @@ class FeatureGateTests(TestCase):
         self.assertTrue(feats)
         for f in feats:
             self.assertTrue(f["label"] and f["emoji"] and f["blurb"], f)
+
+
+class LedgerOpensOntoWhatItBoughtTests(TestCase):
+    """A spend is a fee until the ledger can point at what it paid for. A coach
+    spend opens onto the rating, the report and the file."""
+
+    def setUp(self):
+        from django.utils import timezone
+        from apps.economy.models import TakeScore, link_spend
+        self.user = User.objects.create_user("buyer", "b@e.com", "pw12345678")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        self.t0 = timezone.now()
+        Transaction.objects.create(user=self.user, kind=Transaction.KIND_SPEND, amount_cents=0,
+                                   note="RapZ Boss Take — AI Coach · daily prompt 🏷️")
+        self.take = TakeScore.objects.create(
+            user=self.user, app_key="rapz", overall=6, genre="Trap", scores={"flow": 6},
+            read={"verdict": "Locked in.", "strengths": ["Cadence"], "fixes": ["Last bar"],
+                  "practice": [{"what": "Slow bars", "why": "w", "how": "h"}], "exact": 6.2})
+        self.linked = link_spend(self.user, f"take:{self.take.pk}", self.t0, "RapZ Boss Take — AI Coach")
+
+    def _row(self):
+        return [e for e in self.client.get(URL).json()["entries"] if e["ref"]][0]
+
+    def test_the_spend_is_pointed_at_the_take_it_bought(self):
+        self.assertTrue(self.linked)
+        o = self._row()["outcome"]
+        self.assertEqual(o["kind"], "take")
+        self.assertEqual(o["rating"]["score"], 6)
+        self.assertEqual(o["rating"]["exact"], 6.2)
+        self.assertEqual(o["report"]["verdict"], "Locked in.")
+        self.assertEqual(o["report"]["fixes"], ["Last bar"])
+        self.assertEqual(o["report"]["practice"][0]["what"], "Slow bars")
+
+    def test_each_number_is_paired_with_what_the_coach_heard_behind_it(self):
+        self.take.scores = {"flow": 6, "timing": 4}
+        self.take.upgrades = {"context": {"heard": [
+            {"t": "0:12", "what": "Drifts behind the beat in the second bar", "dim": "timing", "confidence": 3},
+            {"t": "0:03", "what": "Maybe late", "dim": "timing", "confidence": 1},
+            {"t": "0:20", "what": "Cadence stays locked", "dim": "flow", "confidence": 2}]}}
+        self.take.save(update_fields=["scores", "upgrades"])
+        dims = {d["key"]: d for d in self._row()["outcome"]["rating"]["dimensions"]}
+        self.assertEqual(dims["timing"]["value"], 4)
+        self.assertEqual(dims["timing"]["detail"], "Drifts behind the beat in the second bar")  # the confident one
+        self.assertEqual(dims["flow"]["detail"], "Cadence stays locked")
+        self.assertTrue(dims["flow"]["label"])                                                  # never a bare key
+
+    def test_the_file_is_shown_when_kept_and_said_plainly_when_it_was_not(self):
+        o = self._row()["outcome"]
+        self.assertFalse(o["file"]["kept"])                        # scored, not kept
+        self.assertIn("not kept", o["file"]["why"])
+        from apps.economy.models import Upload
+        from django.core.files.base import ContentFile
+        up = Upload.objects.create(user=self.user, name="take.webm", content_type="audio/webm", size_bytes=3,
+                                   file=ContentFile(b"abc", name="take.webm"))
+        self.take.upload = up
+        self.take.save(update_fields=["upload"])
+        f = self._row()["outcome"]["file"]
+        self.assertTrue(f["kept"])
+        self.assertEqual(f["name"], "take.webm")
+        self.assertTrue(f["url"])
+
+    def test_a_row_with_no_ref_has_no_outcome_and_a_forged_ref_reads_as_nothing(self):
+        other = User.objects.create_user("other", "o@e.com", "pw12345678")
+        from apps.economy.models import TakeScore
+        theirs = TakeScore.objects.create(user=other, app_key="rapz", overall=9)
+        Transaction.objects.create(user=self.user, kind=Transaction.KIND_SPEND, amount_cents=-1,
+                                   note="forged", ref=f"take:{theirs.pk}")
+        rows = {e["note"]: e for e in self.client.get(URL).json()["entries"]}
+        self.assertIsNone(rows["forged"]["outcome"])               # somebody else's take is not shown

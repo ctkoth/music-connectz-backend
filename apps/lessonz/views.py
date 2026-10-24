@@ -3,27 +3,49 @@ from decimal import Decimal
 
 from django.db import transaction
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
-    METHOD_CALLZ, METHOD_IN_PERSON, METHOD_REMOTE, MIN_TEACH_RATING, MODE_HOUR,
-    STATUS_ACCEPTED, STATUS_CANCELLED, STATUS_COMPLETED, STATUS_DECLINED,
+    METHOD_CALLZ, METHOD_IN_PERSON, METHOD_REMOTE, MIN_TEACH_RATING, MODE_CHOICES,
+    MODE_HOUR, STATUS_ACCEPTED, STATUS_CANCELLED, STATUS_COMPLETED, STATUS_DECLINED,
     STATUS_REQUESTED, LessonBooking, LessonOffer, LessonPayment,
     get_skill_rating, get_user_tier,
 )
 from .serializers import LessonBookingSerializer, LessonOfferSerializer
 
-# AGE GATE — LessonZ arranges paid 1:1 contact, so it is adult-verified only,
-# using the platform's existing gate (snapshot-at-activation preserved there).
-try:
-    from apps.common.gates import AdultVerifiedOnly as _Gate  # type: ignore
-except Exception:  # pragma: no cover
-    try:
-        from apps.common.tiergate import AdultVerifiedOnly as _Gate  # type: ignore
-    except Exception:  # pragma: no cover
-        _Gate = IsAuthenticated
+
+class AdultVerifiedOnly(BasePermission):
+    """LessonZ arranges paid 1:1 contact, so it answers to the same real gate
+    BattleZ money-betting and LookmaxZ use: `Profile.verified_18plus` —
+    Stripe Identity, never a self-reported birthday.
+
+    This used to be `from apps.common.gates import AdultVerifiedOnly`, with a
+    second fallback import of the same name from `apps.common.tiergate`, both
+    inside bare `except Exception: pass`. Neither module has ever existed in
+    this codebase — there is no `apps/common` directory at all — so both
+    imports always raised ImportError and `_Gate` was plain `IsAuthenticated`
+    the entire time. Every claim in this module's own docstring ("LessonZ is
+    AGE-GATED... paid 1:1 contact between users is adult-verified only") was
+    false: any signed-in member, minor or unverified adult, could publish an
+    offer, book one, or act on a booking. That's the platform's own ScoutZ
+    rule (no adult-to-minor contact) broken on the one surface that pays for
+    1:1 contact by the hour.
+    """
+
+    message = ("LessonZ is 18+ ID-verified only — live 1:1 paid lessons need Stripe "
+               "Identity verification on your profile before you can teach or book one.")
+
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return False
+        from apps.economy.models import profile_for
+
+        return bool(profile_for(request.user).verified_18plus)
+
+
+_Gate = AdultVerifiedOnly
 
 
 def _haversine_km(lat1, lon1, lat2, lon2):
@@ -63,7 +85,16 @@ class OfferListCreateView(APIView):
 
     def get(self, request):
         qp = request.query_params
-        qs = LessonOffer.objects.filter(is_active=True).select_related("teacher")
+        # ?mine=1 is the teacher's own "my offers" panel — it has to show
+        # UNPUBLISHED ones too (is_active=False), or unpublishing an offer
+        # would make it invisible to the one person who's allowed to edit
+        # it back. Everyone else only ever sees what's actually live.
+        mine = qp.get("mine") in ("1", "true")
+        qs = LessonOffer.objects.select_related("teacher")
+        if mine:
+            qs = qs.filter(teacher=request.user)
+        else:
+            qs = qs.filter(is_active=True)
 
         if qp.get("skill"):
             qs = qs.filter(skill__iexact=qp["skill"].strip())
@@ -135,6 +166,154 @@ class OfferListCreateView(APIView):
         ser.save(teacher=request.user, skill=skill, rating_snapshot=rating,
                  gates=clean_gates(data.get("gates")))
         return Response(ser.data, status=status.HTTP_201_CREATED)
+
+
+class OfferPublicView(APIView):
+    """GET /api/lessonz/offers/<pk>/public/ — a lesson listing as a stranger may see it,
+    for the shared /l/<id> link.
+
+    Published listings only. Never the latitude and longitude — those exist so the
+    member search can measure distance, and a stranger gets the city. A listing whose
+    teacher is a known minor is not served here at all: a page that invites anybody on
+    the internet to book an under-18 member is the contact the age groups exist to
+    stop. Booking needs an account, so this is read-only.
+    """
+    from rest_framework.permissions import AllowAny
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, pk):
+        from apps.economy.models import is_minor
+        o = LessonOffer.objects.select_related("teacher__mcz_profile").filter(pk=pk, is_active=True).first()
+        if not o or is_minor(o.teacher):
+            return Response({"detail": "That lesson isn't available."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "id": o.id, "teacher_username": o.teacher.username, "skill": o.skill,
+            "title": o.title, "description": o.description,
+            "pricing_mode": o.pricing_mode, "price": str(o.price), "currency": o.currency,
+            "city": o.city, "remote_ok": o.remote_ok, "in_person_ok": o.in_person_ok,
+            "callz_ok": o.callz_ok, "rating_snapshot": o.rating_snapshot,
+        })
+
+
+class OfferDetailView(APIView):
+    """A teacher could publish an offer and never see it again — no detail
+    route existed at all, so a price typo or wanting to raise a rate meant
+    nothing could be done short of a database edit by hand. Not even a
+    read: the teacher had no way to confirm what they'd actually published.
+
+    PATCH: fix it in place. Each booking already froze its own
+    `agreed_total` at `compute_total()` time, so editing the offer
+    afterward never touches what a student already agreed to pay — same
+    reasoning as VenueZ's listing edit. `skill` is locked: the rating that
+    was checked at publish time was checked for THIS skill, and changing it
+    afterward would leave a rating-gated listing nobody re-checked.
+
+    DELETE: unpublish, never a hard delete. `LessonBooking.offer` is
+    CASCADE, so deleting an offer with real bookings on it would destroy
+    every one of those students' booking history along with the listing —
+    the same mistake flagged for MerchZ (`MerchPurchase.item` is CASCADE
+    too). Unpublishing just stops new bookings; it can be turned back on.
+    """
+
+    permission_classes = [_Gate]
+
+    def _mine(self, request, pk):
+        try:
+            return LessonOffer.objects.get(pk=pk, teacher=request.user)
+        except LessonOffer.DoesNotExist:
+            return None
+
+    def patch(self, request, pk):
+        offer = self._mine(request, pk)
+        if not offer:
+            return Response({"detail": "Not yours, or not here."}, status=status.HTTP_404_NOT_FOUND)
+
+        d = request.data or {}
+        if "skill" in d and str(d["skill"]).strip().lower() != offer.skill:
+            return Response(
+                {"detail": "Can't change what skill this teaches — your rating was checked "
+                            "for this one. Unpublish this and make a new offer for a "
+                            "different skill instead."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if str(d.get("callz_ok")).lower() in ("1", "true") and get_user_tier(request.user) != "statz":
+            return Response(
+                {"detail": "Offering lessons over CallZ is StatZ-exclusive."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        fields = []
+        if "title" in d:
+            title = str(d["title"]).strip()
+            if not title:
+                return Response({"detail": "Title is required."}, status=status.HTTP_400_BAD_REQUEST)
+            if len(title) > 140:
+                return Response({"detail": "Title must be 140 characters or less."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            offer.title = title
+            fields.append("title")
+        if "description" in d:
+            offer.description = str(d["description"] or "")
+            fields.append("description")
+        if "pricing_mode" in d and d["pricing_mode"] in dict(MODE_CHOICES):
+            offer.pricing_mode = d["pricing_mode"]
+            fields.append("pricing_mode")
+        if "price" in d:
+            try:
+                price = Decimal(str(d["price"]))
+            except Exception:
+                return Response({"detail": "price must be a number."}, status=status.HTTP_400_BAD_REQUEST)
+            if price <= Decimal("0"):
+                return Response({"detail": "Price must be greater than $0."}, status=status.HTTP_400_BAD_REQUEST)
+            offer.price = price
+            fields.append("price")
+        if "currency" in d:
+            offer.currency = str(d["currency"] or "USD")[:8]
+            fields.append("currency")
+        if "city" in d:
+            offer.city = str(d["city"] or "")[:80]
+            fields.append("city")
+        if "latitude" in d:
+            offer.latitude = d["latitude"]
+            fields.append("latitude")
+        if "longitude" in d:
+            offer.longitude = d["longitude"]
+            fields.append("longitude")
+        if "remote_ok" in d:
+            offer.remote_ok = bool(d["remote_ok"])
+            fields.append("remote_ok")
+        if "in_person_ok" in d:
+            offer.in_person_ok = bool(d["in_person_ok"])
+            fields.append("in_person_ok")
+        if "callz_ok" in d:
+            offer.callz_ok = bool(d["callz_ok"])
+            fields.append("callz_ok")
+        if "gates" in d:
+            from apps.economy.gates import clean_gates
+            offer.gates = clean_gates(d["gates"])
+            fields.append("gates")
+        if "is_active" in d:
+            offer.is_active = bool(d["is_active"])
+            fields.append("is_active")
+
+        if not offer.remote_ok and not offer.in_person_ok:
+            return Response({"detail": "A lesson has to be offered some way — remote or in person."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if not fields:
+            return Response({"detail": "Nothing to change."}, status=status.HTTP_400_BAD_REQUEST)
+        offer.save(update_fields=fields)
+        return Response(LessonOfferSerializer(offer).data)
+
+    def delete(self, request, pk):
+        offer = self._mine(request, pk)
+        if not offer:
+            return Response({"detail": "Not yours, or not here."}, status=status.HTTP_404_NOT_FOUND)
+        if not offer.is_active:
+            return Response({"detail": "Already unpublished."}, status=status.HTTP_400_BAD_REQUEST)
+        offer.is_active = False
+        offer.save(update_fields=["is_active"])
+        return Response(LessonOfferSerializer(offer).data)
 
 
 class BookingListCreateView(APIView):
@@ -233,7 +412,7 @@ class BookingActionView(APIView):
             if not is_teacher or booking.status != STATUS_ACCEPTED:
                 return Response({"detail": "Only the teacher can complete an accepted booking."}, status=400)
             booking.status = STATUS_COMPLETED
-            payment, _ = LessonPayment.objects.get_or_create(
+            payment, created = LessonPayment.objects.get_or_create(
                 booking=booking,
                 defaults={
                     "payer": booking.student,          # student pays...
@@ -242,18 +421,29 @@ class BookingActionView(APIView):
                     "currency": booking.currency,
                 },
             )
-            # Defensive hook into the platform wallet if it exists.
-            try:  # pragma: no cover - environment dependent
-                from apps.common.wallet import charge as _charge
+            # This used to hook into `apps.common.wallet.charge`, which has
+            # never existed in this codebase — the bare except swallowed the
+            # ImportError every time, so `LessonPayment` rows were created
+            # with `settled=False` and no money EVER moved. "Complete" looked
+            # like it worked (200, a payment row, a completed booking) while
+            # the student was never charged and the teacher was never paid.
+            # `pay_between` is the platform's real one-way wallet move
+            # (money_cents, not dollars), the same primitive MerchZ/CallZ use.
+            if created and payment.amount > 0:
+                from apps.economy.models import pay_between
 
-                ref = _charge(payer=booking.student, payee=booking.offer.teacher,
-                              amount=booking.agreed_total, currency=booking.currency,
-                              memo=f"LessonZ #{booking.id}")
-                payment.settled = True
-                payment.external_ref = str(ref or "")
-                payment.save(update_fields=["settled", "external_ref"])
-            except Exception:
-                pass  # recorded, settle via wallet later
+                amount_cents = int((payment.amount * 100).to_integral_value())
+                moved = pay_between(booking.student, booking.offer.teacher, amount_cents,
+                                     note=f"LessonZ #{booking.id} · {booking.offer.title}"[:200])
+                if moved is not None:
+                    payment.settled = True
+                    payment.save(update_fields=["settled"])
+                # moved is None (insufficient balance): the booking still
+                # completes — the lesson happened — but the payment stays
+                # unsettled rather than blocking the teacher from marking a
+                # lesson they already gave as done. LogZ/LessonZ's own
+                # history can surface an unsettled payment for the teacher
+                # to chase; that's a follow-on screen, not this endpoint's job.
         else:
             return Response({"detail": f"Unknown action '{action}'."}, status=400)
 

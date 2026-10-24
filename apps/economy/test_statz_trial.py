@@ -24,12 +24,49 @@ class StatzTrialTests(TestCase):
         self.assertFalse(statz_trial.has_statz(self.user))
         s = self.c.post(URL).json()
         self.assertTrue(s["active"]); self.assertFalse(s["available"])
-        self.assertGreater(s["seconds_left"], 59 * 60)
+        self.assertGreater(s["seconds_left"], 59 * 60)          # the FIRST sample ever is the full hour
+        self.assertLessEqual(s["seconds_left"], 60 * 60)
+        self.assertEqual((s["last_minutes"], s["minutes"]), (60, 15))   # what was used, and what comes next
         self.assertTrue(statz_trial.has_statz(self.user))
 
-    def test_once_ever(self):
+    def test_once_a_day_not_once_ever(self):
         self.c.post(URL)
-        self.assertEqual(self.c.post(URL).status_code, 409)
+        StatzTrial.objects.filter(user=self.user).update(ends_at=timezone.now() - timedelta(seconds=1))
+        self.assertEqual(self.c.post(URL).status_code, 409)               # same day: spent
+        s = self.c.get(URL).json()
+        self.assertTrue(s["used"]); self.assertFalse(s["available"])
+        self.assertTrue(s["next_at"]); self.assertGreater(s["seconds_until_next"], 23 * 3600)
+
+    def test_it_comes_back_a_day_after_the_last_one_started(self):
+        self.c.post(URL)
+        ago = timezone.now() - timedelta(hours=23, minutes=59)
+        StatzTrial.objects.filter(user=self.user).update(started_at=ago, ends_at=ago + timedelta(minutes=15))
+        self.assertFalse(self.c.get(URL).json()["available"])               # 23h59m: not yet
+        StatzTrial.objects.filter(user=self.user).update(started_at=ago - timedelta(minutes=2))
+        s = self.c.get(URL).json()
+        self.assertTrue(s["available"]); self.assertFalse(s["used"])
+        r = self.c.post(URL)
+        self.assertEqual(r.status_code, 201)
+        self.assertTrue(r.json()["active"])
+        self.assertEqual(StatzTrial.objects.filter(user=self.user).count(), 1)   # the one row, re-armed
+
+    def test_the_offer_says_an_hour_the_first_time_and_fifteen_after(self):
+        first = self.c.get(URL).json()
+        self.assertTrue(first["first"]); self.assertEqual(first["minutes"], 60)
+        self.c.post(URL)
+        ago = timezone.now() - timedelta(hours=25)
+        StatzTrial.objects.filter(user=self.user).update(started_at=ago, ends_at=ago + timedelta(minutes=60))
+        again = self.c.get(URL).json()
+        self.assertTrue(again["available"]); self.assertFalse(again["first"]); self.assertEqual(again["minutes"], 15)
+        s = self.c.post(URL).json()
+        self.assertLessEqual(s["seconds_left"], 15 * 60)                 # the second window is fifteen
+        self.assertEqual(s["last_minutes"], 15)
+
+    def test_pressing_it_while_running_is_not_a_second_window(self):
+        first = self.c.post(URL).json()["ends_at"]
+        again = self.c.post(URL)
+        self.assertEqual(again.status_code, 200)
+        self.assertEqual(again.json()["ends_at"], first)
 
     def test_it_really_ends(self):
         self.c.post(URL)
@@ -54,3 +91,45 @@ class StatzTrialTests(TestCase):
         s = self.c.get(URL).json()
         self.assertFalse(s["available"]); self.assertTrue(s["is_statz"])
         self.assertEqual(self.c.post(URL).status_code, 400)
+
+
+class StatzDriversAuditTests(TestCase):
+    """Every place StatZ is the difference is on one list, with whether the free hour
+    covers it and why not when it doesn't — and the list cannot drift from the code."""
+
+    def test_the_sampled_rows_are_exactly_the_features_the_screen_lists(self):
+        from apps.economy.statz_trial import DRIVERS, FEATURES
+        self.assertEqual({d["key"] for d in DRIVERS if d["sampled"]}, {f["key"] for f in FEATURES})
+
+    def test_every_unsampled_driver_says_why(self):
+        from apps.economy.statz_trial import DRIVERS
+        for d in DRIVERS:
+            if not d["sampled"]:
+                self.assertTrue(len(d.get("why_not", "")) > 20, d["key"])
+
+    def test_a_module_that_asks_for_statz_must_be_on_the_list(self):
+        """Walk the source: any module calling has_statz()/feature_tier() that the
+        audit does not name is a StatZ gate nobody decided about."""
+        import re
+        from pathlib import Path
+        from apps.economy.statz_trial import FEATURE_MODULES
+        root = Path(__file__).parent
+        callers = set()
+        for f in root.glob("*.py"):
+            if f.name.startswith("test_") or f.name == "statz_trial.py":
+                continue
+            if re.search(r"\b(has_statz|feature_tier)\(", f.read_text(encoding="utf-8")):
+                callers.add(f.stem)
+        self.assertEqual(callers - FEATURE_MODULES, set(), "a StatZ gate is not on the audit list")
+        self.assertEqual({m for m in FEATURE_MODULES if (root / f"{m}.py").exists()} - callers - {"coachvoice", "voicez", "modal_sandbox", "lessonz", "catalog", "lookmaxz"}, set(),
+                         "the audit names a module that no longer gates anything")
+
+    def test_the_state_publishes_what_the_hour_leaves_out_and_when_it_warns(self):
+        from django.contrib.auth import get_user_model
+        from apps.economy.statz_trial import WARN_AT_SECONDS, state
+        u = get_user_model().objects.create_user("auditee", "a@e.com", "pw-Long-enough-1")
+        s = state(u)
+        self.assertIn("viewz_tracks", [f["key"] for f in s["features"]])
+        self.assertIn("custom_voices", [d["key"] for d in s["also_in_statz"]])
+        self.assertEqual(s["warn_at_seconds"], WARN_AT_SECONDS)
+        self.assertTrue(all(w < 60 * 60 for w in WARN_AT_SECONDS))

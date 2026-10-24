@@ -33,10 +33,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import ai_cost
-from .deadline import COACH_BUDGET_SECONDS, Deadline, Expired
+from .catalog import COACH_POST_ENERGY, ai_cost
+from .deadline import (COACH_BUDGET_SECONDS, COACH_THINK_RESERVE_SECONDS, Deadline,
+                       Expired)
 from .instruments import (DIFFICULTIES, LYRIC_SCORE, MIX_SCORE, profile_for_app,
-                          prompt_for, rates_lyrics, rates_mix, scores_for)
+                          prompt_for, reference_prompt_for, rates_lyrics, rates_mix,
+                          scores_for)
 from .gemini import _bill, _key, generate_content
 from .models import (
     PROMPT_ALLOWANCE,
@@ -49,6 +51,7 @@ from .models import (
     mark_upload_missing,
     membership_for,
     record_observation,
+    spend_energy,
     wallet_for,
 )
 from apps.skillz.models import TrainingProfile, TrainingEvent
@@ -252,9 +255,205 @@ def _clamp(v, lo=1, hi=10):
         return None
 
 
+SCORE_RULE = ("Overall leans on your strongest parts — your best dimensions count "
+              "most, your weakest counts least. HookZ (your chorus) and FeelZ (how it moves a listener) are "
+              "two of them when the take has them.")
+MIN_LISTENERS = 3
+REFERENCE_NOTICE = ("Use music you have the right to analyse. This is a private listen — "
+                    "it isn't posted, saved to your profile or counted toward your skills. "
+                    "The file is used for this analysis only and isn't kept.")
+
+
+def clean_practice(raw):
+    """[{what, why, how}] — at most three, each field capped, `what` required."""
+    out = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw[:10]:
+        if len(out) == 3:
+            break
+        if not isinstance(item, dict):
+            continue
+        what = str(item.get("what", "")).strip()[:200]
+        if not what:
+            continue
+        out.append({"what": what,
+                    "why": str(item.get("why", "")).strip()[:300],
+                    "how": str(item.get("how", "")).strip()[:400]})
+    return out
+
+
+FEELZ_TIPS_BELOW = 7
+# Server-owned, so a kind the model invents is "delivery" rather than a label nobody wrote.
+FEELZ_TIP_KINDS = {"delivery": "Delivery", "diction": "Diction & clarity", "projection": "Projection & mic technique",
+                   "phrasing": "Phrasing", "dynamics": "Dynamics", "pacing": "Pacing",
+                   "intention": "Intention", "gear": "Mic & gear", "room": "Room & recording"}
+
+
+def _wwh(item, default_kind=None):
+    """One tip as {what, why, how}. A plain string (an earlier shape) is a `what`."""
+    if isinstance(item, dict):
+        what = str(item.get("what") or item.get("tip") or "").strip()[:300]
+        why, how = str(item.get("why") or "").strip()[:300], str(item.get("how") or "").strip()[:400]
+    else:
+        what, why, how = str(item or "").strip()[:300], "", ""
+    return what, why, how
+
+
+# Delivery first: it is the biggest lever on feeling, and the one the member controls today. The
+# recording comes last — unless the coach itself says the recording or the mix is the cause.
+_TIP_ORDER = ["delivery", "diction", "projection", "phrasing", "dynamics", "pacing", "intention", "gear", "room"]
+
+
+def _feelz_tips(raw, feelz, cause=""):
+    """[{kind, label, what, why, how, tip}] — only for a low FeelZ, whatever the model sent, at most
+    three. `tip` repeats `what` for anything that read the earlier shape."""
+    if feelz is None or feelz >= FEELZ_TIPS_BELOW or not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        what, why, how = _wwh(item)
+        if not what:
+            continue
+        kind = str(item.get("kind") if isinstance(item, dict) else "").strip().lower()
+        kind = kind if kind in FEELZ_TIP_KINDS else "delivery"
+        out.append({"kind": kind, "label": FEELZ_TIP_KINDS[kind], "what": what, "why": why, "how": how, "tip": what})
+    order = _TIP_ORDER if cause not in ("recording", "mix") else ["gear", "room"] + _TIP_ORDER[:-2]
+    out.sort(key=lambda t: order.index(t["kind"]))          # stable: the coach's own order within a kind
+    return out[:3]
+
+
+FEELZ_CAUSES = {"performance": "The performance", "mix": "The mix", "recording": "The recording",
+                "both": "The performance and the recording"}
+
+
+def _feelz_cause(raw, feelz):
+    """Why the feeling is not coming through — only for a low FeelZ, and only a cause the server names."""
+    if feelz is None or feelz >= FEELZ_TIPS_BELOW:
+        return ""
+    c = str(raw or "").strip().lower()
+    return c if c in FEELZ_CAUSES else ""
+
+
+MIX_HELPS = {"clarity": "Clarity", "feelz": "FeelZ", "both": "Clarity and FeelZ"}
+
+
+def _mix_tips(raw):
+    """[{helps, helps_label, what, why, how}] — mix changes for a vocal that is hard to make out or feel.
+    Not gated on a score: a mix can hide the words on a take whose overall is fine. The model is told
+    to return none when the vocal sits well, and the server only cleans and caps."""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        what, why, how = _wwh(item)
+        if not what:
+            continue
+        helps = str(item.get("helps") if isinstance(item, dict) else "").strip().lower()
+        helps = helps if helps in MIX_HELPS else "both"
+        out.append({"helps": helps, "helps_label": MIX_HELPS[helps], "what": what, "why": why, "how": how})
+    return out[:3]
+
+
+def strength_weighted_exact(scores):
+    """The overall to one decimal, from PERFORMANCE dimensions only, leaning hard
+    on strengths.
+
+    Sort descending and weight by squared rank: n^2, (n-1)^2, ... 1, so the best
+    dimensions drive the number and the weakest barely move it. Monotone weights,
+    so it is never below the plain mean and never above the best dimension. Style
+    Match and Song are separate numbers by design and must not be passed in.
+    Returns None when there are no usable scores.
+    """
+    vals = sorted((v for v in (scores or {}).values() if isinstance(v, (int, float))), reverse=True)
+    if not vals:
+        return None
+    n = len(vals)
+    num = sum(v * (n - i) ** 2 for i, v in enumerate(vals))
+    den = sum((n - i) ** 2 for i in range(n))
+    return max(1.0, min(10.0, round(num / den, 1)))
+
+
+def strength_weighted(scores):
+    """The whole-number overall (what is stored); see strength_weighted_exact."""
+    x = strength_weighted_exact(scores)
+    return None if x is None else max(1, min(10, int(x + 0.5)))
+
+
+def clean_heard(raw, dims):
+    """The listener's observations, whitelisted: max 8, lengths capped, dim in
+    the instrument's own keys (else 'other'), confidence 1-3."""
+    out = []
+    if not isinstance(raw, list):
+        return out
+    for h in raw[:8]:
+        if not isinstance(h, dict) or not str(h.get("what", "")).strip():
+            continue
+        t = str(h.get("t", "") or "").strip()[:8]
+        if t and not re.fullmatch(r"\d{1,2}:\d{2}", t):
+            t = ""
+        dim = str(h.get("dim", "other")).strip()
+        try:
+            conf = max(1, min(3, int(h.get("confidence"))))
+        except (TypeError, ValueError):
+            conf = 1
+        out.append({"t": t, "what": str(h["what"]).strip()[:240],
+                    "dim": dim if dim in dims else "other", "confidence": conf})
+    return out
+
+
+def post_for_upload(upload, user):
+    """The member's OWN post that carries this stored upload, if any. Lets the
+    journal door show real listener ratings for a song that was also posted."""
+    try:
+        name = os.path.basename(str(upload.file.name))
+        if not name:
+            return None
+        from .models import Post
+        return Post.objects.filter(author=user, media_url__endswith=name).first()
+    except Exception:
+        return None
+
+
+def listeners_for(post, author_excluded=True):
+    """{median, count} from real ItemRating rows on this post, else None.
+
+    Only server-read ratings: distinct raters other than the post's author,
+    at least MIN_LISTENERS. A client-typed number is never consulted.
+    """
+    if post is None:
+        return None
+    from .models import ItemRating, _median
+    rows = ItemRating.objects.filter(item_id=f"post:{post.id}").exclude(user_id=post.author_id)
+    scores = list(rows.values_list("score", flat=True))
+    if len(scores) < MIN_LISTENERS:
+        return None
+    return {"median": _median(scores), "count": len(scores)}
+
+
+def listener_reasons(post, limit=5):
+    """What real listeners said about this song, in their words — for its AUTHOR only.
+
+    [{score, text}], newest first, no names. Kept apart from `listeners_for` on purpose:
+    that dict is fed into the coach's PROMPT, and a stranger's free text must never be
+    an input to a model; this is only ever shown to the person it is about."""
+    if post is None:
+        return []
+    from .models import ItemRating
+    rows = (ItemRating.objects.filter(item_id=f"post:{post.id}").exclude(user_id=post.author_id)
+            .exclude(reason="").order_by("-updated_at")[:limit])
+    return [{"score": r.score, "text": r.reason} for r in rows]
+
+
 def score_take(app_key, f, content_type, *, genre, target, difficulty, style=None,
-               user=None, lyrics=False, mix=False, deadline=None):
+               user=None, lyrics=False, mix=False, deadline=None, listeners=None,
+               think=True, reference=False):
     """Send one take to the model. Returns (payload, error) — exactly one is None.
+
+    `reference=True` is a REFERENCE LISTEN: somebody else's recording, read
+    with `reference_prompt_for`. No fixes, no second pass, no lyric/mix/
+    listener inputs, no house voice - and `payload["reference"]` is True so
+    nothing downstream can mistake it for the member's own take.
 
     Shared by the member coach and the no-account trial, deliberately: a trial
     that grades on an easier rubric is a lie about the product, and the first
@@ -276,15 +475,21 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     # well as in `prompt_for` because this value also decides what the whitelist
     # below will accept: a drum take asked for a writing score must not end up
     # with a column for one.
-    lyrics = bool(lyrics) and rates_lyrics(app_key)
+    reference = bool(reference)
+    lyrics = bool(lyrics) and rates_lyrics(app_key) and not reference
     # Same shape as lyrics, and opt-in for the same reason: the mix is a
     # different skill from the one the five dimensions measure, and most takes
     # here are a phone in a bedroom. Scoring production by default would mark
     # somebody down for their room — a number they could raise by buying an
     # interface rather than by getting better, which is the substance rule
     # inverted.
-    mix = bool(mix) and rates_mix(app_key)
-    prompt = prompt_for(
+    mix = bool(mix) and rates_mix(app_key) and not reference
+    if reference:
+        think = False
+        listeners = None
+    prompt = reference_prompt_for(
+        app_key, str(genre or "unspecified")[:60], style=str(style or "")[:60] or None,
+    ) if reference else prompt_for(
         app_key,
         genre=str(genre or "unspecified")[:60],
         target=str(target or "unspecified")[:60],
@@ -292,6 +497,7 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         style=str(style or "")[:60] or None,
         lyrics=lyrics,
         mix=mix,
+        listeners=listeners,
     )
     # The house voice for the PROSE inside the scored fields, from the member's
     # own row — the short form, not the full preamble. `prompt_for` states the
@@ -299,7 +505,8 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     # answer; a voice note that displaced it would risk a take that scored fine
     # coming back unparseable.
     from .voice import prose_voice
-    prompt = f"{prose_voice(user)}\n\n{prompt}"
+    if not reference:
+        prompt = f"{prose_voice(user, surface='coach')}\n\n{prompt}"
     # Normalise BEFORE the call. An unsupported container is a refusal we can
     # give instantly and explain, rather than a round trip that comes back as a
     # generic failure the member reads as "my take was bad".
@@ -321,6 +528,9 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     # number they actually experience.
     if deadline is None:
         deadline = Deadline(COACH_BUDGET_SECONDS)
+    # Pass 2 (coach_think) is promised the last seconds of the SAME clock; the
+    # listener's legs get a view with that held back.
+    whole, deadline = deadline, deadline.holding_back(COACH_THINK_RESERVE_SECONDS)
 
     # How the take travels: inline for small ones, uploaded-and-referenced for
     # anything the inline request can't carry. Deciding it HERE means the trial
@@ -406,8 +616,15 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         # The upstream body is deliberately NOT forwarded: it is a third party's
         # error text, and it is not ours to put in front of a member. The status
         # plus our own reading of it is the useful part.
+        # A 400 is the take's fault ONLY when Google says it is. A rotated or
+        # mistyped key also answers 400 ("API key not valid"), and blaming the
+        # member's file for it sends them off re-exporting a take that was fine.
+        key_refused = resp.status_code == 400 and (
+            "API_KEY_INVALID" in resp.text or "API key not valid" in resp.text
+            or "API key expired" in resp.text)
         why = {
-            400: "that take's format wasn't accepted",
+            400: ("the coach's API key was refused" if key_refused
+                  else "that take's format wasn't accepted"),
             403: "the coach's API key was refused",
             404: "the coach can't reach a model right now — we're on it",
             429: "the coach has hit its limit for now — try again shortly",
@@ -444,6 +661,10 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
             "scores": {},
             "rated_lyrics": lyrics,
             "rated_mix": mix,
+            "reference": reference,
+            "heard": [],
+            "think": {"used": False, "model": "",
+                      "reason": "Nothing was scored, so there was nothing to check."},
         }, None
 
     if not parsed or _clamp(parsed.get("score")) is None:
@@ -451,13 +672,59 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         return None, ({"detail": "The coach's reply didn't come back readable. Try again."},
                       status.HTTP_502_BAD_GATEWAY)
 
+    perf = {k: _clamp((parsed.get("scores") or {}).get(k))
+            for k in scores_for(app_key, lyrics=lyrics, mix=mix)}
+    model_score = _clamp(parsed.get("score"))
+    # Performance dimensions only: style_match is closeness, not quality.
+    perf_only = {k: v for k, v in perf.items() if k != "style_match"}
+    # HookZ counts as one more strength-weighted part of the overall (Corey's
+    # call): a chorus that lands is part of a take that works. It joins only when
+    # the model found a chorus to judge — a missing hook is absent, never a 0.
+    hook = _clamp(parsed.get("hook_score"))
+    hook_counted = hook is not None
+    if hook_counted:
+        perf_only = {**perf_only, "hookz": hook}
+    # FeelZ: how strongly it moves a listener, counted the same way and for the
+    # same reason. Low-polish songs become people's favourites on exactly this,
+    # and an overall that cannot see it keeps telling a member their best-loved
+    # song was ordinary. Absent, never 0, for an exercise with nothing to feel.
+    feelz = _clamp(parsed.get("feelz_score"))
+    feelz_counted = feelz is not None
+    if feelz_counted:
+        perf_only = {**perf_only, "feelz": feelz}
+    overall = strength_weighted(perf_only)
+    overall_exact = strength_weighted_exact(perf_only)
+    if overall is None:
+        overall = model_score
+    if abs(overall - model_score) >= 2:
+        logger.info("%s coach: model overall %s vs weighted %s", app_key, model_score, overall)
     listy = lambda v: [str(x)[:300] for x in v][:6] if isinstance(v, list) else []
-    return {
-        "score": _clamp(parsed.get("score")),
+    result = {
+        "score": overall,
+        # The same number to one decimal, for the screen: 6.2 and 6.0 are both "6"
+        # as a whole number, and a member watching a take improve needs the 0.2.
+        "score_exact": overall_exact if overall_exact is not None else float(overall),
+        "model_score": model_score,
+        "score_rule": SCORE_RULE,
+        # Whether the hook is inside `score`, so the screen can say so beside it.
+        "hook_counted": hook_counted,
+        "feelz_score": feelz,
+        "feelz_emotion": str(parsed.get("feelz_emotion", "")).strip()[:60],
+        "feelz_why": str(parsed.get("feelz_why", ""))[:400],
+        "feelz_counted": feelz_counted,
+        # Specific ways to carry more feeling — only for a low FeelZ, whatever the model sent: a 9
+        # with a to-do list is a score contradicting itself.
+        "feelz_tips": _feelz_tips(parsed.get("feelz_tips"), feelz, _feelz_cause(parsed.get("feelz_cause"), feelz)),
+        "feelz_cause": _feelz_cause(parsed.get("feelz_cause"), feelz),
+        "feelz_cause_label": FEELZ_CAUSES.get(_feelz_cause(parsed.get("feelz_cause"), feelz), ""),
+        # When the coach itself says the PERFORMANCE is why it is unclear, mix changes are not offered:
+        # a mix tip on a mumbled vocal sends somebody to fix the wrong thing.
+        "mix_tips": ([] if _feelz_cause(parsed.get("feelz_cause"), feelz) == "performance"
+                     else _mix_tips(parsed.get("mix_tips"))),
+        "listeners": listeners,
         # One source for the dimension list, so the prompt cannot ask for six
         # and the whitelist keep five.
-        "scores": {k: _clamp((parsed.get("scores") or {}).get(k))
-                   for k in scores_for(app_key, lyrics=lyrics, mix=mix)},
+        "scores": perf,
         "rated_lyrics": lyrics,
         "rated_mix": mix,
         # A scored take is explicitly NOT unscorable, so the client reads one
@@ -480,15 +747,39 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         # rule's exact failure case.
         "song_score": _clamp(parsed.get("song_score")),
         "song_why": str(parsed.get("song_why", ""))[:400],
+        # HookZ: the hook rated on its own, beside the song and never inside the
+        # overall. Legitimately None — a warm-up has no hook, and a number made
+        # up for one is the substance rule's failure case.
+        "hook_score": _clamp(parsed.get("hook_score")),
+        "hook_why": str(parsed.get("hook_why", ""))[:400],
         # Only present when it was asked for. Whitelisted like everything else,
         # so a model that volunteers a lyric review on a drum take is ignored.
         **({"lyrics_read": str(parsed.get("lyrics_read", ""))[:1200],
             "lyrics_note": str(parsed.get("lyrics_note", ""))[:800]} if lyrics else {}),
         **({"mix_note": str(parsed.get("mix_note", ""))[:800]} if mix else {}),
+        "heard": clean_heard(parsed.get("heard"), set(perf) | {"other"}),
         "strengths": listy(parsed.get("strengths")),
         "fixes": listy(parsed.get("fixes")),
         "next_drill": str(parsed.get("next_drill", ""))[:300],
-    }, None
+        # What / why / how, per fix. Whitelisted field by field so a key the
+        # model invents never reaches the screen; an item with no `what` is
+        # dropped, and the screen falls back to `next_drill` when none survive.
+        "practice": clean_practice(parsed.get("practice")),
+    }
+    if reference:
+        # Somebody else's recording: nothing here is advice to the listener.
+        result.update({
+            "reference": True, "fixes": [], "next_drill": "",
+            "borrow": str(parsed.get("borrow", ""))[:400],
+            "think": {"used": False, "model": "",
+                      "reason": "A reference listen has no fixes pass."},
+        })
+    if think:
+        from . import coach_think
+        coach_think.apply(
+            app_key, result, user=user, genre=genre, target=target,
+            difficulty=difficulty, style=style, deadline=whole, trial=user is None)
+    return result, None
 
 
 def record_coaching_observations(user, payload, song_key=None, song_bpm=None):
@@ -613,6 +904,84 @@ def coach_rate_limit_check(user):
     return None
 
 
+def usual_top(user, app_key, window=60, min_uses=5):
+    """The value a member picks MOST for each setting, when it is a habit.
+
+    {field: {value, share, n}} — only where one value carries at least 65% of
+    at least `min_uses` takes. The default is still their LAST choice
+    (`usual_settings`); this is what the screen offers as a suggestion when the
+    two differ. Below the bar nothing is said: a 3-of-5 is not a habit.
+    """
+    try:
+        from collections import Counter
+        from .models import TakeScore
+        rows = list(TakeScore.objects.filter(user=user, app_key=app_key)
+                    .order_by("-created_at")[:window])
+        out = {}
+        for field in ("genre", "target", "style", "difficulty"):
+            vals = [(getattr(t, field, "") or "").strip() for t in rows]
+            vals = [v for v in vals if v]
+            if len(vals) < min_uses:
+                continue
+            value, n = Counter(vals).most_common(1)[0]
+            if n / len(vals) >= 0.65:
+                out[field] = {"value": value, "share": round(n / len(vals), 2), "n": len(vals)}
+        return out
+    except Exception:
+        return {}
+
+
+def usual_settings(user, app_key, window=40):
+    """What this member usually aims a take at, read from the takes they sent.
+
+    Per field, the value on their most recent take that named one; a field they
+    have never filled in is simply absent. Read from history rather than from a
+    stored preference on purpose: a preference is a second copy that drifts, and
+    the takes are the truth about what they actually choose. The picker still
+    checks each value against the options it is offered, so a retired genre
+    cannot be restored into a select that no longer has it.
+    """
+    try:
+        from .models import TakeScore
+        rows = TakeScore.objects.filter(user=user, app_key=app_key).order_by("-created_at")[:window]
+        out = {}
+        for field in ("genre", "target", "style", "difficulty"):
+            for t in rows:
+                v = (getattr(t, field, "") or "").strip()
+                if v:
+                    out[field] = v
+                    break
+        # A habit beats a one-off: nine Drill takes and one Trap, Trap last,
+        # opens on Drill. Below the 65%-of-5 bar the latest take wins.
+        for field, top in usual_top(user, app_key).items():
+            out[field] = top["value"]
+        return out
+    except Exception:
+        return {}
+
+
+def coach_post_energy(user):
+    """⚡ to coach a post, by the member's tier; the figure the screen quotes."""
+    from .models import membership_for
+    return COACH_POST_ENERGY.get(membership_for(user).tier, COACH_POST_ENERGY["free"])
+
+
+
+COACH_XP_FOR_TURNING_UP = 10
+
+
+def coach_xp_base(rating):
+    """XP for one coached take before the tier bonus: 10 for doing it, plus
+    (rating − 5) × 10 above a 5. Corey asked for (rating − 5) × 10; on its own that
+    hands a beginner at 3 or 4 nothing, so the members who most need to keep
+    practising would level slowest. The floor pays the effort, the bonus pays the
+    quality, and neither ever moves a rating."""
+    try:
+        r = float(rating)
+    except (TypeError, ValueError):
+        return COACH_XP_FOR_TURNING_UP
+    return COACH_XP_FOR_TURNING_UP + max(0, round((r - 5) * 10))
+
 class SingZCoachView(APIView):
     """The Boss Take coach for any InstrumentZ app.
 
@@ -676,6 +1045,8 @@ class SingZCoachView(APIView):
             # A take the coach can't read is never billed — _bill runs only
             # after a usable result parses. Worth saying, not just doing.
             "charged_on_failure": False,
+            # What coaching a POST also costs in ⚡ (a fresh recording costs none).
+            "post_energy_cost": coach_post_energy(request.user),
             # THIS member's ceiling, and whose it is — the coach's judgement or
             # their tier's own upload limit, whichever binds them first. This
             # flag was a hardcoded False, which was safe only while the coach's
@@ -709,6 +1080,11 @@ class SingZCoachView(APIView):
             "style_label": profile.get("style_label"),
             "styles": [{"key": k, "label": l} for k, l in profile.get("styles", [])],
             "difficulties": DIFFICULTIES,
+            # This week's shared prompt, the same for everyone (challengez.py).
+            "challenge": __import__("apps.economy.challengez", fromlist=["x"]).challenge_for(self.app_key),
+            # Their own last settings, so the pickers open on them.
+            "usual": usual_settings(request.user, self.app_key),
+            "usual_top": usual_top(request.user, self.app_key),
             # Whether this coach can judge writing at all. Served rather than
             # guessed by the client, because a toggle offered on a drum take is
             # the switch-that-changes-nothing this codebase already has a note
@@ -721,6 +1097,18 @@ class SingZCoachView(APIView):
             "rates_mix": rates_mix(self.app_key),
             "mix_scores": MIX_SCORE if rates_mix(self.app_key) else {},
             "caveat": profile["caveat"],
+            # The second pass and the opt-in gear advice, priced BEFORE either
+            # is pressed. The logic check is inside the take's price.
+            "think": {"model": __import__("apps.economy.coach_think", fromlist=["x"]).COACH_THINK_MODEL,
+                      "configured": __import__("apps.economy.coach_think", fromlist=["x"]).has_key(),
+                      "in_price": True},
+            "reference": {
+                "available": True, "label": "Reference listen",
+                "cost_cents": cost, "free_today": daily_left > 0,
+                "charged_on_failure": False, "saved": False,
+                "notice": REFERENCE_NOTICE,
+            },
+            "upgrades": __import__("apps.economy.coach_upgrades", fromlist=["x"]).quote(request.user),
         })
 
     def post(self, request):
@@ -757,6 +1145,13 @@ class SingZCoachView(APIView):
         # from storage. `post` stays set only for the post door, because the
         # things that are genuinely post-shaped — writing the score back onto
         # the post, offering the way back to it — are its alone.
+        reference = str(request.data.get("reference", "")).lower() in ("1", "true", "yes", "on")
+        if reference and (request.data.get("post_id") not in (None, "")
+                          or request.data.get("journal_id") not in (None, "")
+                          or request.data.get("upload_id") not in (None, "")):
+            return Response({"detail": "A reference listen is an upload of somebody else's "
+                                       "track. Your own posts and journal go through My take."},
+                            status=status.HTTP_400_BAD_REQUEST)
         post = stored = None
         f = request.FILES.get("take")
         if f:
@@ -769,10 +1164,28 @@ class SingZCoachView(APIView):
                 stored, f, content_type, err = self._take_from_journal(request)
                 if err:
                     return err
+            if post is None and stored is None:
+                stored, f, content_type, err = self._take_from_upload(request)
+                if err:
+                    return err
         if post is not None:
             stored = {"kind": "post", "title": post.title, "id": post.id}
         if not f:
             return Response({"detail": "Record or attach a take first."}, status=status.HTTP_400_BAD_REQUEST)
+        # Coaching a POST also costs ⚡, checked BEFORE the model runs so nobody
+        # waits on a scoring they cannot pay for. Charged after a usable result.
+        energy_cost = coach_post_energy(request.user) if post is not None else 0
+        if energy_cost:
+            have = max(0, wallet_for(request.user).energy or 0)
+            if have < energy_cost:
+                return Response({
+                    "detail": f"Coaching a post costs {energy_cost} ⚡ and you have {have}. "
+                              "Nothing was run or charged. A freshly recorded take costs no ⚡.",
+                    "insufficient": True, "resource": "energy",
+                    "cost": {"resource": "energy", "amount": energy_cost},
+                    "energy_needed": energy_cost, "energy_available": have,
+                    "energy_short": energy_cost - have,
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
         # Video has always been accepted here — the model watches the take as
         # well as hearing it, which is worth real marks on delivery and breath.
         # The refusal copy said "isn't audio" and contradicted the check, which
@@ -822,8 +1235,10 @@ class SingZCoachView(APIView):
         # and no tier lifts it. It never refuses the take, only the hard
         # setting: somebody told they may not sing today sings anyway,
         # somewhere that is not counting.
-        blocked = takescorez.recovery_block(request.user, self.app_key,
-                                            data.get("difficulty"))
+        # A reference listen is not the member performing, so the recovery
+        # gate (which is about their voice and body today) has no say in it.
+        blocked = None if reference else takescorez.recovery_block(
+            request.user, self.app_key, data.get("difficulty"))
         if blocked:
             return Response({"detail": blocked["why"], "recovery": blocked},
                             status=status.HTTP_409_CONFLICT)
@@ -833,9 +1248,11 @@ class SingZCoachView(APIView):
         # afterwards is measured against it without anybody re-picking it from
         # a dropdown, which is the Auto-Goal Bridge's basis.
         target = data.get("range")
-        if not target:
+        if not target and not reference:
             _decl = takescorez.profile_row(request.user, self.app_key)
             target = (_decl.goal_range or _decl.confirmed_range) if _decl else None
+        if reference:
+            return self._reference(request, f, content_type, genre)
         try:
             if stored is not None:
                 # Opened here rather than in the lookup, so a take refused on
@@ -851,6 +1268,9 @@ class SingZCoachView(APIView):
                 # Only the voice the prose comes back in. The rubric is the
                 # same one the logged-out trial is scored on.
                 user=request.user,
+                listeners=listeners_for(post) or listeners_for(
+                    post_for_upload(getattr(f, "instance", None), request.user)),
+                deadline=Deadline(COACH_BUDGET_SECONDS),
             )
         except Exception:
             # Almost always a recording that is no longer in storage. Say that,
@@ -882,7 +1302,7 @@ class SingZCoachView(APIView):
                            "more, so there's nothing for the coach to listen to. Record "
                            "or attach the take here and it'll be scored.",
                  **({"post_id": post.id} if post else
-                    {"journal_id": (stored or {}).get("id")}),
+                    {f"{(stored or {}).get('kind') or 'journal'}_id": (stored or {}).get("id")}),
                  "take_missing": True},
                 status=status.HTTP_410_GONE)
         finally:
@@ -903,28 +1323,77 @@ class SingZCoachView(APIView):
         note = f"{profile_for_app(self.app_key)['label']} Boss Take — AI Coach"
         if stored is not None:
             note += f" — {stored['kind']} #{stored['id']}"
+        from django.utils import timezone as _tz
+        _t0 = _tz.now()
         charged = _bill(request.user, note=note, count_daily=True)
+        if energy_cost:
+            spend_energy(request.user, energy_cost, f"Coach a post — {post.title[:50]}",
+                         app_key=self.app_key, target=f"post:{post.id}")
         # Keep it. Until this line every score this app has ever produced was
         # handed to the browser and dropped, which is why the blueprint's
         # whole intelligence layer — goal bridge, difficulty adjustment, range
         # mapping, the heatmap, every weekly plan — had no material to work
         # with. Best-effort inside `record`: a bookkeeping failure must never
         # turn a take the member paid for into an error.
-        takescorez.record(
+        # Keep this take — opt-in, for THIS take only, and only for a fresh recording
+        # (one that came from a post or a journal entry is already stored there).
+        from . import takekeep
+        _kept, _kept_note = (takekeep.keep_take(request.user, f)
+                             if takekeep.wants_keep(data.get("keep")) and stored is None and not getattr(f, "instance", None)
+                             else (None, ""))
+        _row = takescorez.record(
             request.user, self.app_key, payload,
             difficulty=data.get("difficulty"), genre=genre, target=target,
-            style=data.get("style"), upload=getattr(f, "instance", None),
+            style=data.get("style"), upload=getattr(f, "instance", None) or _kept,
             source=("post" if post is not None else
-                    "journal" if stored is not None else "upload"),
+                    (stored or {}).get("kind") or "upload"),
             ref=(f"post:{post.id}" if post is not None else
                  str((stored or {}).get("id") or "")),
+            context={"heard": payload.get("heard") or [], "verdict": payload.get("verdict", ""),
+                     "genre": genre, "target": target},
         )
-        out = {**payload, "cost_cents": charged}
+        if _row is not None:
+            # Point the ledger row for this spend at the take it bought, so LogZ
+            # opens onto the rating, the report and the file.
+            from .models import link_spend
+            link_spend(request.user, f"take:{_row.pk}", _t0, note)
+        out = {**payload, "cost_cents": charged, "energy_cost": energy_cost,
+               "take_score_id": getattr(_row, "pk", None),
+               "listener_reasons": listener_reasons(post),
+               "kept": bool(_kept), "kept_note": _kept_note}
         # A shareable card for this take, minted from the coach's own answer.
         from .models import mint_score_share
-        _share = mint_score_share(self.app_key, payload, user=request.user, genre=genre)
+        from .challengez import challenge_tag
+        _tag = challenge_tag(self.app_key, genre, data.get("difficulty"))
+        _share = mint_score_share(self.app_key, {**payload, **({"challenge": _tag} if _tag else {})},
+                                  user=request.user, genre=genre)
         out["share_url"] = f"/s/{_share}" if _share else ""
-        if stored is not None and post is None:
+        # Teach it (6+) or learn it from someone (below 5): from the number the member was shown.
+        from . import takelessons
+        _exact = payload.get("score_exact")
+        out["lessons"] = takelessons.for_take(
+            request.user, self.app_key, _exact if _exact is not None else payload.get("score"),
+            weakest_label=profile_for_app(self.app_key)["scores"].get(getattr(_row, "weakest", "") or "", ""))
+        try:
+            out["collab"] = takelessons.collab_door(
+                self.app_key, _exact if _exact is not None else payload.get("score"), genre=genre,
+                weakest_label=profile_for_app(self.app_key)["scores"].get(getattr(_row, "weakest", "") or "", ""),
+                take_id=getattr(_row, "pk", None))
+        except Exception:                                    # pragma: no cover - never cost a paid take
+            out["collab"] = None
+        if _share and _row is not None:
+            # Remember the link ON the take, so sharing it later from the history
+            # hands back this same card instead of minting a second one.
+            try:
+                _row.share_token = _share
+                _row.save(update_fields=["share_token"])
+            except Exception:                                # pragma: no cover
+                pass
+        if stored is not None and post is None and stored.get("kind") == "upload":
+            # From FileZ (any app's Doors bar): the way back is the file itself.
+            out.update({"source": "upload", "upload_id": stored["id"],
+                        "open_in": "filez", "target": "filez-list"})
+        elif stored is not None and post is None:
             # A scored take is never a dead end either: the score offers the way
             # back to the day it came from.
             out.update({"source": "journal", "journal_id": stored["id"],
@@ -954,19 +1423,19 @@ class SingZCoachView(APIView):
             song_bpm = post.bpm
         record_coaching_observations(request.user, payload, song_key=song_key, song_bpm=song_bpm)
 
-        # Award XP for completing a coaching session. Every take scored is
-        # progress toward mastery, so the member gets 1 XP per coached take.
+        # XP for a coached take: 10 for turning up plus (rating − 5) × 10 above a 5,
+        # then the tier bonus (see coach_xp_base). XP is never a rating.
         try:
             profile, _ = TrainingProfile.objects.get_or_create(
                 user=request.user, app_key=self.app_key
             )
-            profile.add_xp(1)
+            out["xp_awarded"] = landed = profile.add_xp(coach_xp_base(out.get("score_exact", out.get("score"))))
             profile.save(update_fields=["xp"])
             TrainingEvent.objects.create(
                 profile=profile,
                 drill_key="coached_take",
                 score=0,  # Not a drill with a score
-                xp_awarded=1,
+                xp_awarded=landed,
             )
         except Exception:
             # XP granting is best-effort; a failure should not block the
@@ -974,6 +1443,36 @@ class SingZCoachView(APIView):
             logger.exception("Failed to award XP for coached take for user %s", request.user.id)
 
         return Response(out)
+
+    def _reference(self, request, f, content_type, genre):
+        """A reference listen: somebody else's track, analysed and forgotten.
+
+        Everything a take does AFTER scoring is deliberately absent: no
+        TakeScore, no share card, no coaching observations, no SkillZ XP, no
+        post write-back. The only things written are the billing and ledger
+        lines, because the member spent a prompt. The uploaded file is the
+        request's own temporary upload - never an Upload row, so it is not in
+        their storage quota and is never served back - and any Files API copy
+        is deleted by score_take's cleanup.
+        """
+        data = request.data
+        try:
+            payload, err = score_take(
+                self.app_key, f, content_type, genre=genre, target=None,
+                difficulty=None, style=data.get("style"), user=request.user,
+                deadline=Deadline(COACH_BUDGET_SECONDS), reference=True)
+        except Exception:
+            logger.exception("%s reference listen: file could not be read", self.app_key)
+            return Response({"detail": "The coach couldn't read that file. Nothing was charged.",
+                             "reference": True}, status=status.HTTP_400_BAD_REQUEST)
+        if err:
+            body, code = err
+            return Response({**body, "reference": True}, status=code)
+        charged = _bill(request.user,
+                        note=f"{profile_for_app(self.app_key)['label']} Reference listen — AI",
+                        count_daily=True)
+        return Response({**payload, "cost_cents": charged, "reference": True,
+                         "saved": False, "take_score_id": None, "share_url": ""})
 
     def _take_from_post(self, request):
         """(post, file, content_type, error_response) for a post-sourced take.
@@ -1030,6 +1529,42 @@ class SingZCoachView(APIView):
         # that is the slot it fills.
         content_type = (upload.content_type or "").lower() or f"{kind}/webm"
         return post, upload.file, content_type, None
+
+    def _take_from_upload(self, request):
+        """(stored, file, content_type, error) for one of the member's own uploads.
+
+        The Doors bar's "Coach it": a file already in FileZ, from whichever app made it,
+        scored without being uploaded a second time. Yours only (the query says so), and
+        audio or video only, read off the row's own type.
+        """
+        from .models import Upload
+        raw = request.data.get("upload_id")
+        if raw in (None, ""):
+            return None, None, "", None
+        try:
+            pk = int(raw)
+        except (TypeError, ValueError):
+            return None, None, "", Response({"detail": "upload_id must be a number."},
+                                            status=status.HTTP_400_BAD_REQUEST)
+        u = Upload.objects.filter(pk=pk, user=request.user).first()
+        if not u:
+            return None, None, "", Response({"detail": "file not found"},
+                                            status=status.HTTP_404_NOT_FOUND)
+        ctype = (u.content_type or "").lower()
+        if not (ctype.startswith("audio") or ctype.startswith("video")):
+            return None, None, "", Response(
+                {"detail": "The coach scores audio or video, and that file is neither.",
+                 "upload_id": u.id}, status=status.HTTP_400_BAD_REQUEST)
+        cap_mb, cap_is_tier = cap_for(request.user)
+        if (u.size_bytes or 0) > cap_mb * 1024 * 1024:
+            return None, None, "", Response(
+                {"detail": f"That file is {u.size_bytes / (1024 * 1024):.0f}MB. "
+                           + cap_why(cap_mb, cap_is_tier)
+                           + " Attach just the section you want scored.",
+                 "coach_budget_seconds": COACH_BUDGET_SECONDS, "max_mb": cap_mb,
+                 "max_mb_is_tier_limit": cap_is_tier, "upload_id": u.id},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+        return {"kind": "upload", "id": u.id, "title": u.name}, u.file, ctype, None
 
     def _take_from_journal(self, request):
         """(stored, file, content_type, error) for a take on a journal entry.

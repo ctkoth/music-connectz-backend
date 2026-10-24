@@ -7,6 +7,7 @@ below is one of those four, because the failure mode of this feature is not a
 crash — it is a member noticing their birthday earns them less than somebody
 else's, and being right.
 """
+from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
@@ -374,6 +375,7 @@ class BothPublished(TestCase):
         self.assertIsNone(r.data["mine_animal"])
 
 
+@patch("apps.economy.messages_view.DM_COLD_ENERGY", 0)
 class TheAnimalHooks(TestCase):
     """Each animal fires off something the platform ALREADY does."""
 
@@ -421,10 +423,11 @@ class TheAnimalHooks(TestCase):
     def test_the_swap_pays_the_rat_and_five_promptz_is_the_stretch(self):
         rat = animal_member("rat3", "Rat")
         w = wallet_for(rat)
-        w.spinaz = 60
+        from apps.economy.catalog import SPINAZ_PER_PROMPTZ
+        w.spinaz = SPINAZ_PER_PROMPTZ * 5 + 10
         w.save(update_fields=["spinaz", "updated_at"])
         self.client.force_authenticate(rat)
-        r = self.client.post("/api/economy/promptz/convert/", {"spinaz": 50},
+        r = self.client.post("/api/economy/promptz/convert/", {"spinaz": SPINAZ_PER_PROMPTZ * 5},
                              format="json")
         self.assertEqual(r.status_code, 200, r.content)
         tiers = set(SignBonusAward.objects.filter(user=rat)

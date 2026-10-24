@@ -228,12 +228,20 @@ class QuotaAndQueueTests(ReleaseBase):
         self.assertEqual(r.data["quota"]["left"], 0)
         self.assertEqual(Release.objects.get(pk=second["id"]).status, Release.STATUS_READY)
 
-    def test_paid_tiers_are_not_capped(self):
-        q = self.client.get(RELEASES).data["quota"]
-        self.assertIsNone(q["per_month"])
-        for _ in range(3):
+    def test_the_ladder_is_1_5_10_and_the_owner_is_uncapped(self):
+        for tier, cap in (("free", 1), ("premium", 5), ("statz", 10)):
+            m = membership_for(self.user); m.tier = tier; m.save(update_fields=["tier", "updated_at"])
+            self.assertEqual(self.client.get(RELEASES).data["quota"]["per_month"], cap, tier)
+        m = membership_for(self.user); m.tier = "debug"; m.save(update_fields=["tier", "updated_at"])
+        self.assertIsNone(self.client.get(RELEASES).data["quota"]["per_month"])
+
+    def test_premium_stops_at_five(self):
+        m = membership_for(self.user); m.tier = "premium"; m.save(update_fields=["tier", "updated_at"])
+        for _ in range(5):
             rel = self.ready_release()
             self.assertEqual(self.client.post(f"{RELEASES}{rel['id']}/submit/", {}, format="json").status_code, 200)
+        rel = self.ready_release()
+        self.assertEqual(self.client.post(f"{RELEASES}{rel['id']}/submit/", {}, format="json").status_code, 403)
 
     def test_the_list_says_what_submitting_actually_does(self):
         self.assertIn("RoyaltieZ", self.client.get(RELEASES).data["how_it_works"])

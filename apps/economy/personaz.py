@@ -159,6 +159,169 @@ def clean_persona(raw):
     return out
 
 
+# ------------------------------------------------- what a persona's skills say they ARE
+
+# "Independent Artist" or "Designer" says nothing about what the person does. Next to it goes what
+# their declared skills add up to: rapping → 🎤 Rapper, singing → 🎶 Singer, guitar → 🎸 Guitarist,
+# Adobe Illustrator → 🖌️ Illustrator. Matched on the skill's stable key (acoustic_guitar) OR its label
+# ("Acoustic Guitar 🎸") — a stint is stored under either — and listed in the order the member
+# declared them. A wildcard ("Any Rapping") counts: claiming the category is claiming the role.
+#
+# DECLARED, never inferred (the PersonalitieZ rule): nothing is read from takes, posts or ratings, so
+# no one is called a Rapper because of what a model heard. It is derived on READ and never stored — a
+# stored copy would go stale the day a skill is removed.
+#
+# {persona letters-only key: [(emoji, role, {skill tokens}), ...]}. Tokens are unique to a role within
+# a persona, with one deliberate exception noted inline.
+_ARTIST = [
+    ("🎤", "Rapper", {"any_rapping", "alternative_rap", "boom_bap", "chopper", "cloud_rap", "conscious_rap", "crunk",
+                      "drill", "emo_rap", "g_funk", "gangsta_rap", "hardcore_hip_hop", "jazz_rap", "mumble_rap",
+                      "old_school", "snap", "trap", "rapping", "rap"}),
+    # "bass" is the VOICE here (a range class); the instrument is bass_guitar / double_bass below.
+    ("🎶", "Singer", {"any_singing", "bass", "baritone", "tenor", "countertenor", "contralto", "alto",
+                      "mezzo_soprano", "soprano", "vocals", "singing"}),
+    ("🎸", "Guitarist", {"acoustic_guitar", "electric_guitar", "guitar"}),
+    ("🎸", "Bassist", {"bass_guitar", "double_bass"}),
+    ("🎹", "Pianist", {"acoustic_piano", "digital_piano", "piano"}),
+    ("🎹", "Keyboardist", {"any_keyboard", "synthesizer", "organ", "harpsichord", "keys"}),
+    ("🪗", "Accordionist", {"accordion"}),
+    ("🥁", "Drummer", {"drums_snare", "drums_bass", "drums_bongo", "drums", "drummer"}),
+    ("🥁", "Percussionist", {"any_percussion", "cymbals"}),
+    ("🎻", "Violinist", {"violin"}),
+    ("🎻", "Violist", {"viola"}),
+    ("🎻", "Cellist", {"cello"}),
+    ("🎵", "Harpist", {"harp"}),
+    ("🪕", "Banjo player", {"banjo"}),
+    ("🎵", "Mandolinist", {"mandolin"}),
+    ("🎸", "Ukulele player", {"ukulele"}),
+    ("✍️", "Songwriter", {"songwriting"}),
+    ("🔥", "Freestyler", {"freestyle"}),
+]
+_ROLES = {
+    ("indieartist", "independentartist"): _ARTIST,
+    ("designer",): [
+        ("🖌️", "Illustrator", {"illustrator", "icon_design"}),
+        ("🎨", "Graphic Designer", {"graphic_design", "photoshop", "indesign", "coreldraw", "affinity", "canva",
+                                    "any_design_skill", "any_design_software", "asset_production"}),
+        ("🎯", "UI/UX Designer", {"figma", "ui_ux", "sketch"}),
+        ("🔤", "Typographer", {"typography"}),
+        ("🏷️", "Brand Designer", {"brand_identity"}),
+        ("🌈", "Colour Specialist", {"color_theory"}),
+        ("📐", "Layout Designer", {"composition"}),
+        ("🧊", "3D Artist", {"blender"}),
+        ("✨", "Motion Designer", {"after_effects_design"}),
+        ("📖", "Visual Storyteller", {"visual_storytelling"}),
+    ],
+    ("videographer",): [
+        ("🎥", "Videographer", {"filming", "cinematography", "camera_operation", "any_video_skill", "lighting",
+                                "audio_capture"}),
+        ("✂️", "Video Editor", {"editing", "premiere", "resolve", "finalcut", "vegas", "filmora",
+                                "any_video_software"}),
+        ("🎨", "Colourist", {"color_grading"}),
+        ("✨", "Motion Designer", {"motion_graphics", "aftereffects"}),
+        ("🚁", "Drone Operator", {"drone"}),
+        ("🎞️", "Music Video Producer", {"music_video"}),
+        ("🗂️", "Storyboard Artist", {"storyboarding"}),
+    ],
+    ("producer",): [
+        ("🎚️", "Beat Maker", {"beat_making", "any_production", "drum_programming"}),
+        ("🎛️", "Sound Designer", {"sound_design", "synthesis"}),
+        ("🎼", "Arranger", {"arrangement"}),
+        ("🎵", "Sampler", {"sampling"}),
+    ],
+    ("mixengineer",): [
+        ("🎛️", "Mixing Engineer", {"mixing", "eq", "compression", "reverb_fx", "any_engineering", "stem_prep"}),
+        ("🎙️", "Mastering Engineer", {"mastering"}),
+        ("🎯", "Vocal Tuner", {"vocal_tuning"}),
+    ],
+    ("ghostwriter",): [
+        ("✍️", "Lyricist", {"bars", "any_writing"}),
+        ("🪝", "Hook Writer", {"hooks"}),
+        ("🎼", "Topline Writer", {"toplines"}),
+        ("📖", "Story Writer", {"storytelling", "concept_development"}),
+    ],
+    ("developer",): [
+        ("🖥️", "Frontend Developer", {"frontend"}),
+        ("🗄️", "Backend Developer", {"backend"}),
+        ("📱", "Mobile Developer", {"mobile"}),
+        ("🎚️", "Audio / DSP Engineer", {"audio_dsp"}),
+        ("🔌", "API Developer", {"apis"}),
+        ("🚀", "DevOps Engineer", {"devops"}),
+    ],
+    ("actor", "actress"): [
+        ("🎪", "Stage Actor", {"stage_acting"}),
+        ("🎥", "Screen Actor", {"screen_acting"}),
+        ("😂", "Improviser", {"improv"}),
+        ("🗣️", "Monologist", {"monologues"}),
+    ],
+    ("dancer",): [
+        ("🎤", "Hip-Hop Dancer", {"hip_hop"}), ("🩰", "Ballet Dancer", {"ballet"}),
+        ("🎭", "Contemporary Dancer", {"contemporary"}), ("🎷", "Jazz Dancer", {"jazz", "street_jazz"}),
+        ("💃", "Latin Dancer", {"latin"}), ("🎪", "Popper", {"popping"}), ("🔐", "Locker", {"locking"}),
+        ("🎩", "Tap Dancer", {"tap"}), ("🕺", "Freestyle Dancer", {"freestyle"}),
+        ("📋", "Choreographer", {"choreography"}), ("👨\u200d🏫", "Dance Teacher", {"teaching"}),
+    ],
+    ("mime",): [
+        ("👄", "Lip-Syncer", {"lipsync"}), ("🎭", "Pantomimist", {"pantomime"}),
+    ],
+    ("director",): [
+        ("🎬", "Director", {"any_direction", "shot_calling", "talent_direction", "scene_blocking", "set_management"}),
+        ("📝", "Treatment Writer", {"treatment_writing"}),
+    ],
+    ("manager",): [
+        ("📋", "Project Manager", {"project_management", "performance_tracking", "resource_management"}),
+        ("🗓️", "Release Planner", {"release_planning"}),
+        ("🧭", "Team Lead", {"team_leadership", "strategic_planning", "any_leadership"}),
+    ],
+    ("arscout",): [
+        ("🔭", "Talent Scout", {"talent_spotting", "any_scouting", "roster_building", "trend_reading"}),
+        ("📊", "Market Analyst", {"market_analysis"}),
+        ("📜", "Deal Maker", {"deal_structuring"}),
+    ],
+}
+
+# Role → the AI coach for that instrument, so a rapper is pointed at RapZ. One list; Lilith reads it.
+ROLE_COACH = {"Rapper": "rapz", "Singer": "singz", "Guitarist": "guitarz", "Ukulele player": "guitarz",
+              "Bassist": "bassz", "Pianist": "keyz", "Keyboardist": "keyz", "Drummer": "drumz",
+              "Percussionist": "drumz", "Violinist": "violinz"}
+
+
+def _skill_token(name):
+    """'Acoustic Guitar 🎸' and 'acoustic_guitar' → 'acoustic_guitar'."""
+    import re
+    return re.sub(r"[^a-z0-9]+", "_", re.sub(r"[^\x00-\x7f]", "", str(name or "").lower())).strip("_")
+
+
+def role_pairs(persona):
+    """[(emoji, role)] this persona's declared skills add up to, in declared order. [] when the
+    persona has no role table or none of its skills name a role."""
+    import re
+    ident = {re.sub(r"[^a-z]", "", str(persona.get(f, "")).lower()) for f in ("key", "name")} - {""}
+    table = next((t for keys, t in _ROLES.items() if ident & set(keys)), None)
+    if not table:
+        return []
+    out = []
+    for s in persona.get("skills") or []:
+        tok = f"_{_skill_token(s.get('name') if isinstance(s, dict) else s)}_"
+        # A stint is stored under the key ("illustrator") or the label ("Adobe Illustrator 🖌️"), so a
+        # key matches as a whole run of words inside the token. The LONGEST key wins: "bass_guitar"
+        # is a Bassist although "bass" (the voice) is inside it.
+        best = None
+        for emoji, role, keys in table:
+            for k in keys:
+                if f"_{k}_" in tok and (best is None or len(k) > best[0]):
+                    best = (len(k), emoji, role)
+        if best and best[2] not in [r for _, r in out]:
+            out.append((best[1], best[2]))
+    return out
+
+
+def artist_roles(persona):
+    """The display strings: '🎤 Rapper', '🖌️ Illustrator'. Named for the first persona that had
+    them; it now covers every persona with a role table."""
+    return [f"{e} {r}" for e, r in role_pairs(persona)]
+
+
 def personas_of(profile):
     """Every persona on a profile, in the one shape, repaired if it needs it.
 
@@ -166,7 +329,14 @@ def personas_of(profile):
     member whose row was mangled sees their own personas correctly TODAY rather
     than after the next sweep and after their next save.
     """
-    return [clean_persona(x) for x in (getattr(profile, "personas", None) or [])]
+    out = []
+    for x in (getattr(profile, "personas", None) or []):
+        c = clean_persona(x)
+        roles = artist_roles(c)
+        if roles:
+            c["roles"] = roles          # derived on read; clean_persona drops it on any write
+        out.append(c)
+    return out
 
 
 def needs_repair(stored):

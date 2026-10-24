@@ -150,14 +150,39 @@ class AutomationZActsTests(SuggestBase):
         note = self.user.notifications.first()
         self.assertIsNotNone(note)
         self.assertIn("without asking", note.text)
-        self.assertIn("Undo it", note.text)
+        self.assertIn("Claimed 2 badge(s)", note.text)
+        # Claiming a badge is NOT reversible (see the test below), so the
+        # notification must not promise an undo it cannot deliver.
+        self.assertNotIn("Undo it", note.text)
 
-    def test_what_it_did_can_be_undone(self):
+    def test_claiming_badges_is_recorded_but_not_offered_as_undoable(self):
+        # A badge is earned state: BadgeZ re-checks on every open, so revoking one
+        # here would be re-granted by the member's next visit, and a badge that
+        # grants a tier changes the membership, which revoking does not put back.
+        # An "undo" that holds until the next page load is a lie in a longer coat.
         self.earn_a_badge()
         r = self.client.post(SUGGEST, {}, format="json")
         task = OccTask.objects.get(pk=r.data["ran"][0])
-        self.assertTrue(task.undo_payload)
+        self.assertEqual(task.undo_payload["action"], "claim_badges")      # the record
+        self.assertIn("ear", task.undo_payload["granted"])
+        row = self.client.get("/api/economy/occ/taskz/").data["tasks"][0]
+        self.assertFalse(row["undoable"])
+        self.assertIsNone(row["undo_deadline"])
+        self.assertTrue(row["automated"])       # OCC recorded what it did
+
+    def test_clearing_failed_tasks_is_undoable_and_says_so(self):
+        for i in range(5):
+            OccTask.objects.create(user=self.user, title=f"f{i}", status=OccTask.STATUS_FAILED)
+        r = self.client.post(SUGGEST, {}, format="json")
+        task = OccTask.objects.get(pk=r.data["ran"][0])
+        self.assertEqual(OccTask.objects.filter(status=OccTask.STATUS_CANCELLED).count(), 5)
         self.assertTrue(task.can_undo(TIER_STATZ))
+        self.assertIn("Undo it", self.user.notifications.first().text)
+        # And Undo really restores them.
+        resp = self.client.post(f"/api/economy/occ/taskz/{task.pk}/undo/", {}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(OccTask.objects.filter(status=OccTask.STATUS_FAILED).count(), 5)
+        self.assertEqual(OccTask.objects.filter(status=OccTask.STATUS_CANCELLED).count(), 0)
 
     def test_publishing_your_work_still_asks_even_on_statz(self):
         # A tier can remove a tap; it cannot make an irreversible thing
@@ -199,3 +224,102 @@ class AutomationZActsTests(SuggestBase):
         r = self.client.post(SUGGEST, {}, format="json")
         self.assertEqual(r.data["ran"], [])
         self.assertFalse(r.data["automation"])
+
+
+class DoItReallyDoesItTests(SuggestBase):
+    """Pressing Do it on ONE suggestion performs it — the tap is the confirmation.
+
+    "Do it" used to move a task to `queued` and nothing ever ran it: the same lie
+    TaskZ told, one level up.
+    """
+
+    def test_a_confirmed_safe_suggestion_is_performed_without_automation(self):
+        self.earn_a_badge()
+        r = self.client.post(SUGGEST, {"key": "claim_badges", "confirm": True}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(len(r.data["ran"]), 1)
+        self.assertTrue(Badge.objects.filter(user=self.user, key="ear").exists())
+        task = OccTask.objects.get(pk=r.data["ran"][0])
+        self.assertEqual(task.status, OccTask.STATUS_DONE)
+        self.assertIn("Claimed 2 badge(s)", r.data["detail"])
+
+    def test_a_member_who_asked_is_not_told_it_ran_without_asking(self):
+        self.earn_a_badge()
+        r = self.client.post(SUGGEST, {"key": "claim_badges", "confirm": True}, format="json")
+        task = OccTask.objects.get(pk=r.data["ran"][0])
+        self.assertFalse(task.automated)
+        # (Granting a badge sends its own "You earned…" note; what must not
+        # appear is OCC claiming it acted without being asked.)
+        self.assertFalse(any("without asking" in n.text for n in self.user.notifications.all()))
+
+    def test_it_finishes_the_suggested_row_rather_than_adding_a_second(self):
+        self.earn_a_badge()
+        self.client.post(SUGGEST, {}, format="json")                    # proposes, waits
+        self.assertEqual(OccTask.objects.filter(status=OccTask.STATUS_SUGGESTED).count(), 1)
+        self.client.post(SUGGEST, {"key": "claim_badges", "confirm": True}, format="json")
+        self.assertEqual(OccTask.objects.count(), 1)
+        self.assertEqual(OccTask.objects.get().status, OccTask.STATUS_DONE)
+
+    def test_one_that_publishes_or_spends_cannot_be_done_for_you(self):
+        OccOutput.objects.create(user=self.user, title="a hook")
+        r = self.client.post(SUGGEST, {"key": "share_work", "confirm": True}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.data["tab"], "occ")           # ...and says where to take it
+        self.assertEqual(OccOutput.objects.get().shared_post_id, None)
+        self.assertFalse(OccTask.objects.exists())
+
+    def test_a_suggestion_that_is_no_longer_needed_does_nothing_and_says_so(self):
+        r = self.client.post(SUGGEST, {"key": "claim_badges", "confirm": True}, format="json")
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("nothing was done", r.data["detail"])
+
+    def test_the_gates_still_apply(self):
+        as_tier(self.user, TIER_FREE)
+        self.earn_a_badge()
+        r = self.client.post(SUGGEST, {"key": "claim_badges", "confirm": True}, format="json")
+        self.assertEqual(r.status_code, 403)
+        self.assertFalse(Badge.objects.filter(user=self.user).exists())
+
+    def test_the_doors_land_on_anchors_that_exist_in_profilez(self):
+        # `personaz` and `socialz` named anchors ProfileZ does not have. The real
+        # ones are `skills` and `connections`.
+        p = profile_for(self.user)
+        p.personas = [{"key": "p", "name": "P", "skills": [{"name": "Beat Producer"}]}]
+        p.links = [{"url": "https://example.com/me", "verified": False}]
+        p.save(update_fields=["personas", "links"])
+        by_key = {i["key"]: i for i in self.client.get(SUGGEST).data["suggestions"]}
+        self.assertEqual(by_key["price_skills"]["target"], "skills")
+        self.assertEqual(by_key["verify_social"]["target"], "connections")
+
+
+class ChoosingWhichFailedToClearTests(SuggestBase):
+    def failed(self, n, user=None):
+        return [OccTask.objects.create(user=user or self.user, title=f"t{i}", status=OccTask.STATUS_FAILED)
+                for i in range(n)]
+
+    def test_the_suggestion_lists_the_failed_tasks_to_choose_from(self):
+        self.failed(5)
+        row = next(i for i in self.client.get(SUGGEST).data["suggestions"] if i["key"] == "clear_failed")
+        self.assertEqual(len(row["choices"]), 5)
+
+    def test_only_the_ticked_ones_are_cleared(self):
+        ts = self.failed(5)
+        keep = ts[0]
+        self.client.post(SUGGEST, {"key": "clear_failed", "confirm": True,
+                                   "ids": [t.id for t in ts[1:]]}, format="json")
+        keep.refresh_from_db()
+        self.assertEqual(keep.status, OccTask.STATUS_FAILED)
+        self.assertEqual(OccTask.objects.filter(user=self.user, status=OccTask.STATUS_CANCELLED).count(), 4)
+
+    def test_without_ids_it_clears_all_as_before(self):
+        self.failed(5)
+        self.client.post(SUGGEST, {"key": "clear_failed", "confirm": True}, format="json")
+        self.assertEqual(OccTask.objects.filter(user=self.user, status=OccTask.STATUS_FAILED).count(), 0)
+
+    def test_somebody_elses_task_id_clears_nothing_of_theirs(self):
+        other = User.objects.create_user(username="other", password=PW)
+        theirs = self.failed(1, other)[0]
+        self.failed(5)
+        self.client.post(SUGGEST, {"key": "clear_failed", "confirm": True, "ids": [theirs.id]}, format="json")
+        theirs.refresh_from_db()
+        self.assertEqual(theirs.status, OccTask.STATUS_FAILED)

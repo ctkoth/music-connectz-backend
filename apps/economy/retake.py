@@ -63,8 +63,8 @@ MAX_FAILURES = 3
 SCHEDULE = (f"Your score and drill now, a reminder to send another take on day {DAY3} "
             f"and day {DAY7}, then nothing. Every email has a one-click stop.")
 
-_LABELS = {"singz": "SingZ", "rapz": "RapZ", "guitarz": "GuitarZ", "bassz": "BassZ",
-           "keyz": "KeyZ", "drumz": "DrumZ", "violinz": "ViolinZ"}
+from .instruments import INSTRUMENTS as _INSTRUMENTS
+_LABELS = {k: v["label"] for k, v in _INSTRUMENTS.items()}   # derived: one list of coaches
 
 
 def ready():
@@ -234,50 +234,63 @@ class RetakeRemindView(APIView):
                              "ready": False}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         email = str(request.data.get("email") or "").strip()[:254]
-        try:
-            validate_email(email)
-        except ValidationError:
-            return Response({"detail": "That doesn't look like an email address."},
-                            status=status.HTTP_400_BAD_REQUEST)
-
         token = str(request.data.get("claim_token") or "").strip()[:64]
         cutoff = timezone.now() - timedelta(days=TRIAL_CLAIM_DAYS)
         take = TrialTake.objects.filter(token=token, created_at__gte=cutoff).first() if token else None
-        if not take or not take.scored:
-            return Response({"detail": "That take has expired, or never got a score — "
-                                       "score one first and this will send it."},
-                            status=status.HTTP_400_BAD_REQUEST)
+        body, code = arm(take, email, str(request.data.get("anon_id") or ""))
+        return Response(body, status=code)
 
-        existing = RetakeReminder.objects.filter(trial_take=take).first()
-        if existing and existing.email.lower() == email.lower() and existing.stopped_at is None:
-            # Pressed twice. Already sent; sending again is how a button
-            # becomes spam.
-            return Response({"sent": True, "email": existing.email, "schedule": SCHEDULE})
 
-        since = timezone.now() - timedelta(hours=24)
-        if RetakeReminder.objects.filter(email__iexact=email, created_at__gte=since).count() \
-                >= PER_EMAIL_PER_DAY:
-            return Response({"detail": "That address has had enough from us today. Try tomorrow."},
-                            status=status.HTTP_429_TOO_MANY_REQUESTS)
+def arm(take, email, anon_id=""):
+    """Send the score now and arm the day-3 / day-7 reminders. (body, status).
 
-        r = existing or RetakeReminder(trial_take=take, token=secrets.token_urlsafe(24))
-        r.email, r.app_key = email, take.app_key
-        r.anon_id = str(request.data.get("anon_id") or take.anon_id or "").strip()[:64]
-        r.armed_at, r.stage, r.failures = timezone.now(), 0, 0
-        r.stopped_at, r.stop_reason = None, ""
-        r.save()
+    One path for both doors: the remind field under a score, and the email a visitor
+    types BEFORE sending — so somebody who closes the tab while the coach listens
+    still gets their score. Same checks either way: a real address, a scored take,
+    the per-address daily ceiling, and a failed send arms nothing.
+    """
+    if not ready():
+        return ({"detail": "Email isn't switched on here yet, so we can't send this. "
+                           "Make a free account and your take is kept instead.", "ready": False},
+                status.HTTP_503_SERVICE_UNAVAILABLE)
+    email = (email or "").strip()[:254]
+    try:
+        validate_email(email)
+    except ValidationError:
+        return {"detail": "That doesn't look like an email address."}, status.HTTP_400_BAD_REQUEST
+    if not take or not take.scored:
+        return ({"detail": "That take has expired, or never got a score — "
+                           "score one first and this will send it."}, status.HTTP_400_BAD_REQUEST)
 
-        if not send(r, RetakeReminder.STAGE_SCORE):
-            # Nothing armed: a reminder schedule hanging off an email that
-            # never arrived would be reminding them of something they never got.
-            r.stopped_at, r.stop_reason = timezone.now(), "failed"
-            r.save(update_fields=["stopped_at", "stop_reason"])
-            return Response({"detail": "We couldn't send to that address. Check it and try again."},
-                            status=status.HTTP_502_BAD_GATEWAY)
-        r.stage = RetakeReminder.STAGE_SCORE
-        r.save(update_fields=["stage"])
-        return Response({"sent": True, "email": r.email, "schedule": SCHEDULE},
-                        status=status.HTTP_201_CREATED)
+    existing = RetakeReminder.objects.filter(trial_take=take).first()
+    if existing and existing.email.lower() == email.lower() and existing.stopped_at is None:
+        # Pressed twice. Already sent; sending again is how a button
+        # becomes spam.
+        return {"sent": True, "email": existing.email, "schedule": SCHEDULE}, status.HTTP_200_OK
+
+    since = timezone.now() - timedelta(hours=24)
+    if RetakeReminder.objects.filter(email__iexact=email, created_at__gte=since).count() \
+            >= PER_EMAIL_PER_DAY:
+        return ({"detail": "That address has had enough from us today. Try tomorrow."},
+                status.HTTP_429_TOO_MANY_REQUESTS)
+
+    r = existing or RetakeReminder(trial_take=take, token=secrets.token_urlsafe(24))
+    r.email, r.app_key = email, take.app_key
+    r.anon_id = str(anon_id or take.anon_id or "").strip()[:64]
+    r.armed_at, r.stage, r.failures = timezone.now(), 0, 0
+    r.stopped_at, r.stop_reason = None, ""
+    r.save()
+
+    if not send(r, RetakeReminder.STAGE_SCORE):
+        # Nothing armed: a reminder schedule hanging off an email that
+        # never arrived would be reminding them of something they never got.
+        r.stopped_at, r.stop_reason = timezone.now(), "failed"
+        r.save(update_fields=["stopped_at", "stop_reason"])
+        return ({"detail": "We couldn't send to that address. Check it and try again."},
+                status.HTTP_502_BAD_GATEWAY)
+    r.stage = RetakeReminder.STAGE_SCORE
+    r.save(update_fields=["stage"])
+    return {"sent": True, "email": r.email, "schedule": SCHEDULE}, status.HTTP_201_CREATED
 
 
 _PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

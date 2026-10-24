@@ -323,3 +323,58 @@ class TestEndpointTests(TestCase):
             if "test_personalityz" in line or "personalityz.py" in line:
                 continue
             self.assertNotRegex(line, r"order_by|sort|rank|median|leaderboard")
+
+
+# --- the test result's "N members share this type" ------------------------------
+from apps.economy.personalityz import SHARED_MIN, shared_by  # noqa: E402
+from apps.economy.models import profile_for as _profile_for  # noqa: E402
+
+
+def declared(name, code, private=False):
+    p = _profile_for(User.objects.create_user(username=name, password="hunter2hunter2"))
+    p.personality = code
+    if private:
+        p.visibility = {"personality": ["private"]}
+    p.save()
+
+
+class SharedByTests(TestCase):
+    def test_below_the_minimum_it_says_nothing(self):
+        for i in range(SHARED_MIN - 1):
+            declared(f"a{i}", "INFP")
+        self.assertIsNone(shared_by("INFP"))
+        declared("last", "INFP")
+        self.assertEqual(shared_by("INFP"), SHARED_MIN)
+
+    def test_a_private_declaration_is_not_counted(self):
+        for i in range(SHARED_MIN):
+            declared(f"b{i}", "ESTJ")
+        declared("hidden", "ESTJ", private=True)
+        self.assertEqual(shared_by("ESTJ"), SHARED_MIN)
+
+    def test_a_partial_code_gets_no_count(self):
+        for i in range(SHARED_MIN):
+            declared(f"c{i}", "IN-P")
+        self.assertIsNone(shared_by("IN-P"))
+
+
+class ATestTakenBeforeJoiningIsKeptTests(TestCase):
+    """"Save this — free account" now does: the result rides the signup into the profile."""
+
+    def join(self, personality):
+        from rest_framework.test import APIClient as _C
+        r = _C().post("/api/auth/register/", {"username": "quizzer", "email": "q@example.com",
+                                              "password": "Sturdy-pass-8812", "personality": personality},
+                      format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        return _profile_for(User.objects.get(username="quizzer"))
+
+    def test_the_result_is_on_the_new_profile(self):
+        p = self.join({"code": "INFP", "clarity": {"ie": 70, "zz": 99}, "depth": "basic"})
+        self.assertEqual(p.personality, "INFP")
+        self.assertEqual(p.personality_detail["depth"], "basic")
+        self.assertNotIn("zz", p.personality_detail["clarity"])
+
+    def test_junk_saves_nothing_and_never_fails_the_signup(self):
+        p = self.join({"code": "!!!!"})
+        self.assertIn(p.personality, ("", "----"))

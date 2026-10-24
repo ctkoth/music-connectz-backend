@@ -28,6 +28,7 @@ from .models import (
 )
 from .occ_agent import MAX_TURNS, run_agent
 from .occ_tools import TOOLS
+from .resources import PROMPTZ
 
 
 def agent_status(user, project="main"):
@@ -68,7 +69,7 @@ def agent_status(user, project="main"):
         # reached the model isn't charged.
         "billing_note": (
             f"You're charged for the tokens the run actually uses, up to "
-            f"{budget['max_cents']} 🏷️. It stops at that ceiling rather than "
+            f"{budget['max_cents']} {PROMPTZ}. It stops at that ceiling rather than "
             "going past it, and a run that never reaches the model costs nothing."),
     }
 
@@ -101,10 +102,11 @@ class OccAgentView(APIView):
             # Checked before the model runs, so we never do the work and then
             # fail to bill for it.
             return Response(
-                {"detail": f"An agent run can cost up to {st['max_cents']} 🏷️ and "
+                {"detail": f"An agent run can cost up to {st['max_cents']} {PROMPTZ} and "
                            f"you have {st['promptz']}. Top up, or a tier up "
                            "carries a bigger allowance.",
-                 "open_in": "modelz", **st},
+                 # PromptZ's door in MembershipZ — there is no `modelz` tab.
+                 "open_in": "membershipz", "target": "promptz-door", **st},
                 status=status.HTTP_402_PAYMENT_REQUIRED)
 
         out = run_agent(

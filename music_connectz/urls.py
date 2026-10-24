@@ -35,7 +35,8 @@ except Exception:  # pragma: no cover - never let this take the deploy down
 # turns a profile into `/api/<key>/coach/`, `/api/<key>/trial/` and a SkillZ
 # tree, so five fully-scoreable instruments 404'd behind a tab the frontend
 # never had reason to build. One line.
-INSTRUMENT_APP_KEYS = ["singz", "rapz", "guitarz", "bassz", "keyz", "drumz", "violinz"]
+INSTRUMENT_APP_KEYS = ["singz", "rapz", "guitarz", "bassz", "keyz", "drumz", "violinz",
+                       "flutez", "saxz", "clarinetz", "trumpetz"]
 
 # Boss Take — the blueprint's scored final take, coached by the StatZ AI coach.
 # Mounted for EVERY instrument app beside the SkillZ tree, because a take is a
@@ -46,14 +47,19 @@ try:
 except Exception:  # pragma: no cover - never take the deploy down
     SingZCoachView = None
 
+try:
+    from apps.economy.coach_upgrades import CoachUpgradesView
+except Exception:  # pragma: no cover - never take the deploy down
+    CoachUpgradesView = None
+
 # The history behind that take. Its own try/except rather than the coach's,
 # because a coach that scores and cannot remember is still a working coach —
 # folding them together would mean an import error in the new module takes the
 # old feature off the platform.
 try:
-    from apps.economy.takescorez import GameProfileView, GoalView, ProgressView
+    from apps.economy.takescorez import AgreeView, ShareRecapView, ShareTakeView, ShareWinView, TakePromoView, TakePostView, TakeDownloadView, TakesExportView, GameProfileView, GoalView, ProgressView
 except Exception:  # pragma: no cover - never take the deploy down
-    GameProfileView = GoalView = ProgressView = None
+    AgreeView = ShareRecapView = ShareTakeView = ShareWinView = TakePromoView = TakePostView = TakeDownloadView = TakesExportView = GameProfileView = GoalView = ProgressView = None
 
 # GroupZ. Mounted at /api/groupz/ rather than under /api/economy/, because that
 # is where `GroupZ.jsx` has been calling since it was written — the tab has sat
@@ -191,6 +197,10 @@ urlpatterns = [
     path(f"api/{key}/coach/", SingZCoachView.as_view(app_key=key), name=f"{key}-coach")
     for key in INSTRUMENT_APP_KEYS
 ] if SingZCoachView else []) + ([
+    path(f"api/{key}/coach/upgrades/", CoachUpgradesView.as_view(app_key=key),
+         name=f"{key}-coach-upgrades")
+    for key in INSTRUMENT_APP_KEYS
+] if CoachUpgradesView else []) + ([
     # The coach's memory. Bound per instrument beside the coach itself so a new
     # instrument gets its history screen without a second list to keep in step
     # — the gap `test_instrument_routes` exists to catch.
@@ -200,6 +210,30 @@ urlpatterns = [
     path(f"api/{key}/goal/", GoalView.as_view(app_key=key), name=f"{key}-goal")
     for key in INSTRUMENT_APP_KEYS
 ] if GoalView else []) + ([
+    path(f"api/{key}/agree/", AgreeView.as_view(app_key=key), name=f"{key}-agree")
+    for key in INSTRUMENT_APP_KEYS
+] if AgreeView else []) + ([
+    path(f"api/{key}/take/<int:pk>/share/", ShareTakeView.as_view(app_key=key), name=f"{key}-take-share")
+    for key in INSTRUMENT_APP_KEYS
+] if ShareTakeView else []) + ([
+    path(f"api/{key}/take/<int:pk>/promo/", TakePromoView.as_view(app_key=key), name=f"{key}-take-promo")
+    for key in INSTRUMENT_APP_KEYS
+] if TakePromoView else []) + ([
+    path(f"api/{key}/take/<int:pk>/post/", TakePostView.as_view(app_key=key), name=f"{key}-take-post")
+    for key in INSTRUMENT_APP_KEYS
+] if TakePostView else []) + ([
+    path(f"api/{key}/take/<int:pk>/download/", TakeDownloadView.as_view(app_key=key), name=f"{key}-take-download")
+    for key in INSTRUMENT_APP_KEYS
+] if TakeDownloadView else []) + ([
+    path(f"api/{key}/takes/export/", TakesExportView.as_view(app_key=key), name=f"{key}-takes-export")
+    for key in INSTRUMENT_APP_KEYS
+] if TakesExportView else []) + ([
+    path(f"api/{key}/win/<str:dim>/share/", ShareWinView.as_view(app_key=key), name=f"{key}-win-share")
+    for key in INSTRUMENT_APP_KEYS
+] if ShareWinView else []) + ([
+    path(f"api/{key}/recap/share/", ShareRecapView.as_view(app_key=key), name=f"{key}-recap-share")
+    for key in INSTRUMENT_APP_KEYS
+] if ShareRecapView else []) + ([
     # The game profile the RapZ and SingZ panels have been calling since they
     # were written. Mounted for every instrument beside the coach, like the
     # rest — a drummer has a BPM comfort range and a boss unlock too.

@@ -13,7 +13,8 @@ User = get_user_model()
 # failing a build; it already caught one incomplete instrument rollout
 # (INSTRUMENT_APP_KEYS grown to 7 without this list, or the reverse) before
 # it reached a PR.
-FRONTEND_INSTRUMENT_KEYS = ["singz", "rapz", "guitarz", "bassz", "keyz", "drumz", "violinz"]
+FRONTEND_INSTRUMENT_KEYS = ["singz", "rapz", "guitarz", "bassz", "keyz", "drumz", "violinz",
+                            "flutez", "saxz", "clarinetz", "trumpetz"]
 
 
 class InstrumentSkillZRoutesTests(TestCase):

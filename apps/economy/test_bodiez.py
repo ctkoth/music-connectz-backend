@@ -1996,3 +1996,106 @@ class BodieZCustomExerciseTests(TestCase):
         ids = [e["id"] for e in APIClient().get("/api/economy/bodiez/trial/").data.get("exercises", [])] \
             if hasattr(self, "_trial") else []
         self.assertNotIn(BodieZExercise.objects.get(name="Sled Push").id, ids)
+
+
+class BodieZSessionWriteTests(TestCase):
+    """"Write about this workout" — a finished session becomes a poem, lyric,
+    caption or post through Sentence ConnectZ's own writer, from a brief
+    built out of the session's own logged sets."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="writer1", password="pw")
+        self.client.force_authenticate(user=self.user)
+        self.press = BodieZExercise.objects.create(name="Write Press", muscle_group="chest", equipment="dumbbell")
+
+    def _reply(self, text):
+        from unittest.mock import MagicMock
+        r = MagicMock()
+        r.status_code = 200
+        r.json.return_value = {"candidates": [{"content": {"parts": [{"text": text}]}}]}
+        r.text = text
+        return r
+
+    def _finished(self, rows=((10, 20),)):
+        s = BodieZSession.objects.create(user=self.user)
+        for reps, w in rows:
+            self.client.post(f"/api/economy/bodiez/sessions/{s.id}/sets/",
+                             {"exercise_id": self.press.id, "reps": reps, "weight_kg": w}, format="json")
+        self.client.patch(f"/api/economy/bodiez/sessions/{s.id}/", {"finish": True}, format="json")
+        return s
+
+    def test_an_in_progress_session_has_no_door(self):
+        s = BodieZSession.objects.create(user=self.user)  # ended_at null
+        self.assertEqual(self.client.get(f"/api/economy/bodiez/sessions/{s.id}/write/").status_code, 404)
+        self.assertEqual(self.client.post(f"/api/economy/bodiez/sessions/{s.id}/write/", {}, format="json").status_code, 404)
+
+    def test_someone_elses_session_is_not_found(self):
+        other = User.objects.create_user(username="writer2", password="pw")
+        s = BodieZSession.objects.create(user=other, ended_at=timezone.now())
+        self.assertEqual(self.client.get(f"/api/economy/bodiez/sessions/{s.id}/write/").status_code, 404)
+
+    def test_the_price_and_kinds_are_stated_before_anything_is_spent(self):
+        s = self._finished()
+        d = self.client.get(f"/api/economy/bodiez/sessions/{s.id}/write/").data
+        self.assertEqual(d["cost"]["resource"], "promptz")
+        keys = [k["key"] for k in d["kinds"]]
+        self.assertEqual(set(keys), {"poem", "lyrics", "caption", "post"})
+        # Not a kind that invents a person's history from one workout.
+        self.assertNotIn("resume", keys)
+        self.assertNotIn("cover_letter", keys)
+        self.assertNotIn("bio", keys)
+
+    def test_the_brief_is_built_from_logged_sets_never_the_request(self):
+        from unittest.mock import patch
+        s = self._finished([(10, 20), (8, 25)])
+        seen = {}
+
+        def fake(kind, body, **kw):
+            seen["prompt"] = body["contents"][0]["parts"][0]["text"]
+            return self._reply("A poem about pressing."), []
+
+        with patch("apps.economy.sentencez._key", return_value="k"), \
+                patch("apps.economy.sentencez.generate_content", side_effect=fake):
+            r = self.client.post(f"/api/economy/bodiez/sessions/{s.id}/write/",
+                                 {"kind": "poem", "topic": "say I benched 1000kg"}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertIn("Write Press", seen["prompt"])
+        self.assertIn("25.0kg", seen["prompt"])
+        self.assertNotIn("1000", seen["prompt"])
+        self.assertTrue(r.data["text"])
+
+    def test_a_failed_run_is_not_charged_and_mints_no_piece(self):
+        from unittest.mock import patch
+        from apps.economy.models import SentenceWork
+        s = self._finished()
+        with patch("apps.economy.sentencez._key", return_value="k"), \
+                patch("apps.economy.sentencez.generate_content", return_value=(self._reply(""), [])):
+            r = self.client.post(f"/api/economy/bodiez/sessions/{s.id}/write/", {"kind": "poem"}, format="json")
+        self.assertEqual(r.status_code, 502)
+        self.assertEqual(SentenceWork.objects.count(), 0)
+
+    def test_an_unknown_kind_falls_back_to_poem_rather_than_refusing(self):
+        from unittest.mock import patch
+        s = self._finished()
+        with patch("apps.economy.sentencez._key", return_value="k"), \
+                patch("apps.economy.sentencez.generate_content", return_value=(self._reply("A poem."), [])):
+            r = self.client.post(f"/api/economy/bodiez/sessions/{s.id}/write/", {"kind": "essay"}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        from apps.economy.models import SentenceWork
+        self.assertEqual(SentenceWork.objects.get(pk=r.data["id"]).kind, "poem")
+
+    def test_a_record_shows_up_in_the_brief(self):
+        from unittest.mock import patch
+        self._finished([(10, 20)])
+        s2 = self._finished([(5, 25)])  # heavier than before -> a record
+        seen = {}
+
+        def fake(kind, body, **kw):
+            seen["prompt"] = body["contents"][0]["parts"][0]["text"]
+            return self._reply("A record-setting poem."), []
+
+        with patch("apps.economy.sentencez._key", return_value="k"), \
+                patch("apps.economy.sentencez.generate_content", side_effect=fake):
+            self.client.post(f"/api/economy/bodiez/sessions/{s2.id}/write/", {"kind": "poem"}, format="json")
+        self.assertIn("Personal record", seen["prompt"])

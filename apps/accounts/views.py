@@ -335,6 +335,35 @@ def _user_from_oauth(info, with_created=False, create=True):
     return (user, made) if with_created else user
 
 
+def _keep_test_result(user, raw):
+    """The PersonalitieZ result a visitor took BEFORE they had an account.
+
+    The result screen says "A free account keeps it" over a "Save this" button, and
+    nothing carried it: the new member started with a blank personality. The browser
+    keeps the result and sends it with the signup; it is written here through the same
+    `clean_code` every other personality write uses. A code with no letter said is not
+    saved, and a failure here never fails the registration.
+    """
+    if not isinstance(raw, dict):
+        return
+    try:
+        from apps.economy.models import profile_for
+        from apps.economy.personalityz import AXES, DEPTHS
+        code = clean_personality(raw.get("code"))
+        if not code or not code.strip("-"):
+            return
+        keys = {a["key"] for a in AXES}
+        clarity = {k: max(0, min(100, int(v))) for k, v in (raw.get("clarity") or {}).items()
+                   if k in keys and isinstance(v, (int, float))}
+        depth = raw.get("depth") if raw.get("depth") in DEPTHS else "basic"
+        prof = profile_for(user)
+        prof.personality = code
+        prof.personality_detail = {"clarity": clarity, "depth": depth}
+        prof.save(update_fields=["personality", "personality_detail"])
+    except Exception:                                       # pragma: no cover
+        pass
+
+
 class RegisterView(APIView):
     permission_classes = [AllowAny]
 
@@ -347,6 +376,7 @@ class RegisterView(APIView):
         # blocks a signup and never deletes anything, and it is wrapped
         # because a duplicate check must not be able to fail a registration.
         _note_signup(user, request)
+        _keep_test_result(user, (request.data or {}).get("personality"))
         tokens = issue_tokens(user)
         return Response(
             {"user": PublicUserSerializer(user).data, **tokens},

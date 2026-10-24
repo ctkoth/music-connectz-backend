@@ -132,7 +132,14 @@ class ABuiltAppNamesItsDoorTests(TestCase):
         keys = {t["key"] for t in LOGICZ_TABS}
         # The tabs LogicZ itself describes, plus the ones a row may point at
         # that live under another group's key.
-        extra = {"vybez", "profilez", "soundcloudengagementz"}
+        #
+        # The IntelligenceZ apps are tabs the frontend mounts in the same
+        # release as the hub that points at them (Mix ConnectZ is new with it).
+        # They are named here, not in LOGICZ_TABS, because each is a screen of
+        # its own and the hub tab is the one place LogicZ describes them.
+        extra = {"vybez", "profilez", "soundcloudengagementz",
+                 "sentenceconnectz", "instrumentalconnectz", "mixconnectz",
+                 "videoconnectz", "facez", "voicez", "lookmaxz"}
         for app in apps_by_name().values():
             if app["tab"]:
                 self.assertIn(app["tab"], keys | extra,

@@ -60,8 +60,12 @@ class AllowanceCeilingTests(TestCase):
         # And the coach and every other Gemini surface, which all price here.
         self.assertTrue(daily_prompt_covers(ai_cost("standard")))
 
-    def test_a_dear_engine_is_not_an_allowance(self):
-        self.assertFalse(daily_prompt_covers(AI_MODELS["fable"]["cost_cents"]))
+    def test_every_engine_is_one_task_so_the_allowance_covers_all_of_them(self):
+        # Corey's rule: one task costs one PromptZ whatever the engine. That makes a
+        # free daily prompt cover Fable too. It was the opposite while the price
+        # tracked the provider's rate; if per-engine prices come back, so does the
+        # old assertion (not covered above DAILY_PROMPT_MAX_CENTS).
+        self.assertTrue(daily_prompt_covers(AI_MODELS["fable"]["cost_cents"]))
 
     def test_a_covered_run_spends_a_prompt_and_no_money(self):
         w = wallet_for(self.user)

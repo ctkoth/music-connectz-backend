@@ -31,8 +31,21 @@ WHAT IT COSTS
 Nothing. Importing is not posting: an imported draft has been shown to no one.
 The normal cost of a post applies when they publish one, which is the moment it
 reaches anybody.
+
+NOTHING HERE HAS RUN AGAINST SOUNDCLOUD. There is no client id/secret in CI or on
+a dev box, and SoundCloud gates new API apps, so every test mocks `requests`. The
+field names read from their track objects (created_at, artwork_url, sharing,
+permalink_url, secret_uri) are from their documentation, not from a live reply.
+
+WHAT AN IMPORTED POST CARRIES (inside the embed entry, no schema)
+-----------------------------------------------------------------
+`imported`, `imported_at`, `released_at` (SoundCloud's own date, validated),
+`artwork` (https, SoundCloud CDN only) and `permalink` (public tracks only: a
+private track's permalink carries its secret). `soundcloud_library.py` reads
+these to manage the drafts after import; older imports have only `sc_id`.
 """
 import re
+from datetime import datetime, timezone as dt_tz
 from urllib.parse import quote, urlparse
 
 import requests
@@ -93,6 +106,40 @@ def _private_player(t):
             "height": 166}
 
 
+def _released_at(t):
+    """SoundCloud's own date for the track as an aware datetime, or None.
+    Accepts "2011/04/06 15:37:43 +0000" and ISO 8601. Never future, never
+    before SoundCloud existed: a bad date is dropped, not guessed."""
+    raw = str(t.get("created_at") or t.get("release_date") or "").strip()
+    if not raw:
+        return None
+    d = None
+    for fmt in ("%Y/%m/%d %H:%M:%S %z", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z"):
+        try:
+            d = datetime.strptime(raw.replace("Z", "+0000"), fmt)
+            break
+        except ValueError:
+            continue
+    if d is None:
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=dt_tz.utc)
+    if d.year < 2007 or d > datetime.now(dt_tz.utc):
+        return None
+    return d
+
+
+def _artwork(t):
+    u = urlparse(str(t.get("artwork_url") or ""))
+    if u.scheme == "https" and u.hostname and (u.hostname.endswith(".sndcdn.com") or u.hostname.endswith(".soundcloud.com")):
+        return u.geturl()[:300]
+    return ""
+
+
+def is_import_embed(e):
+    return isinstance(e, dict) and e.get("type") == "soundcloud" and bool(e.get("imported") or e.get("sc_id"))
+
+
 def has_private_track(post):
     """True when a post frames a track that is private on SoundCloud.
 
@@ -106,8 +153,10 @@ def import_cap(tier):
     """How many tracks one import may bring in; None is the whole catalogue.
 
     A ladder on volume, not on access: one-at-a-time posting of a SoundCloud
-    link is free at every tier and always has been. Free is 5 rather than 0
-    because an importer that imports nothing is a button that lies.
+    link is free at every tier and always has been. Newest first, so each number
+    is "your last N": Free 10 (was 5, Corey's call), Premium 25, StatZ the whole
+    catalogue. Free is never 0, because an importer that imports nothing is a
+    button that lies.
     """
     return limits_for(tier)["soundcloud_import"]
 
@@ -231,11 +280,12 @@ class SoundCloudImportView(APIView):
             token = None
 
         char_cap = TIER_LIMITS.get(tier, {}).get("char_limit", UNLIMITED_CHARS)
-        wanted, private = [], 0
+        wanted, private, unplayable = [], 0, 0
         for t in tracks if isinstance(tracks, list) else []:
             permalink = (t.get("permalink_url") or "").strip()
             title = (t.get("title") or "").strip()[:160]
             if not (permalink and title):
+                unplayable += 1
                 continue
             # A private track comes in as a PRIVATE draft, played through its
             # secret address. It is flagged on the embed, because publishing
@@ -257,6 +307,7 @@ class SoundCloudImportView(APIView):
                 # of `w.soundcloud.com/player`.
                 spec = _player_for(permalink)
             if not spec:
+                unplayable += 1
                 continue
             desc = (t.get("description") or "").strip()
             if over_char_limit(desc, tier):
@@ -264,7 +315,9 @@ class SoundCloudImportView(APIView):
             wanted.append({"url": spec["src"], "title": title, "aspect": spec.get("aspect", ""),
                            "height": spec.get("height", 0), "genre": (t.get("genre") or "").strip()[:40],
                            "description": desc, "private": is_private,
-                           "sc_id": str(t.get("id") or "")})
+                           "sc_id": str(t.get("id") or ""),
+                           "released": _released_at(t), "artwork": _artwork(t),
+                           "permalink": "" if is_private else permalink[:300]})
             if cap is not None and len(wanted) >= cap:
                 break
 
@@ -275,6 +328,9 @@ class SoundCloudImportView(APIView):
             return w["url"] in skipped or (w["sc_id"] and ("id", w["sc_id"]) in skipped)
         fresh = [w for w in wanted if not here(w)]
         already = len(wanted) - len(fresh)
+        now_iso = datetime.now(dt_tz.utc).isoformat()
+        from .postz import post_cost_cents, suggest_skills
+        skills, skills_from_where = suggest_skills(request.user)
         with transaction.atomic():
             made = [
                 Post.objects.create(
@@ -286,15 +342,25 @@ class SoundCloudImportView(APIView):
                     # host; this is a post that frames their track.
                     embeds=[{"type": "soundcloud", "url": w["url"], "title": w["title"],
                              "aspect": w["aspect"], "height": w["height"], "sc_id": w["sc_id"],
+                             "imported": True, "imported_at": now_iso,
+                             **({"released_at": w["released"].isoformat()} if w["released"] else {}),
+                             **({"artwork": w["artwork"]} if w["artwork"] else {}),
+                             **({"permalink": w["permalink"]} if w["permalink"] else {}),
                              **({"private_on_sc": True} if w["private"] else {})}],
                     visibility="private",
+                    skills_used=skills,
                 )
                 for w in fresh
             ]
         private_in = sum(1 for w in fresh if w["private"])
+        cost, _lines = post_cost_cents(request.user, skills)
 
         parts = [f"{len(made)} track{'' if len(made) == 1 else 's'} imported as drafts. "
                  "They're private until you publish them."]
+        if made and skills:
+            parts.append(f"Skills pre-filled from your {'usual' if skills_from_where == 'habit' else 'last post' if skills_from_where == 'last' else 'declared'} "
+                         f"({', '.join(skills[:6])}{'…' if len(skills) > 6 else ''}) — change them before publishing. "
+                         f"Publishing each costs {cost} ⚡; nothing is charged until you do.")
         if already:
             parts.append(f"{already} were already here.")
         if private_in:
@@ -303,20 +369,38 @@ class SoundCloudImportView(APIView):
         if private:
             parts.append(f"{private} private track{'' if private == 1 else 's'} couldn't come in "
                          "(SoundCloud gave no secret link for them).")
+        capped = cap is not None and len(tracks) >= cap
         if not complete:
-            parts.append("SoundCloud was slow, so this stopped partway — run it again for the rest; "
-                         "nothing already imported comes in twice.")
+            parts.append(f"SoundCloud was slow, so this stopped after reading {len(tracks)} tracks. "
+                         "Nothing is lost: run it again to carry on, nothing already imported comes in twice "
+                         "(it re-reads from your newest, so a second run only reaches further "
+                         "if SoundCloud is faster).")
+        elif capped:
+            parts.append(f"Your plan brings in your newest {cap} tracks per import; "
+                         "running it again re-reads those same tracks, so it will not reach older ones.")
+        if unplayable:
+            parts.append(f"{unplayable} had no player we could use and were left out.")
         return Response({
             "imported": len(made),
             "already_here": already,
             "private_imported": private_in,
             "private_skipped": private,
             "complete": complete,
+            "read": len(tracks),
+            "unplayable": unplayable,
+            # Not knowable without another SoundCloud call, so never a made-up
+            # count: True means "there may be more than this run read".
+            "more_may_remain": (not complete) or capped,
+            "left": 0 if (complete and not capped) else None,
+            "capped_by_plan": capped,
             "max_tracks": cap,
             "whole_catalogue": cap is None,
             # Said out loud because it is the whole reason this is safe to use:
             # the member handed over an authorisation and gets to see that
             # nothing was kept from it.
+            "suggested_skills": skills,
+            "suggested_from": skills_from_where,
+            "publish_cost_energy": cost,
             "token_kept": False,
             "detail": " ".join(parts),
         }, status=status.HTTP_201_CREATED)

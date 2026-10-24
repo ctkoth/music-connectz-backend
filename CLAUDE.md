@@ -263,21 +263,16 @@ give them the link. A read-only surface is usually an unfinished one.
 
 ### Known violation, not yet fixed
 
-- **LogZ is this rule's own counter-example.** This section used to list it
-  as one of the working ones — "LogZ rows carry the reason a resource moved,
-  so a balance leads back to the action that changed it" — and that line was
-  never true. `Transaction.note` (`logz.py: _row()`) is a free-text sentence
-  ("SingZ Boss Take — AI Coach — post #47"), not a structured reference, and
-  `LogZ.jsx` renders it as plain text with no button, no link, nowhere to
-  go. A member reading "post #47" in their ledger cannot get from that
-  sentence to the post.
-  Fixing it for real means giving `Transaction` a structured `app_key`/
-  `target` (the same shape `Observation` already uses) and threading it
-  through every call site that writes one — `vocalcoach.py`, `crosspost.py`,
-  `battlez.py`, `adz.py`, `offerz.py`, referrals, and more — which is a
-  schema migration plus a multi-file call-site sweep, not a one-screen fix.
-  Correct the doc first (done, here); the code is still owed the fix this
-  section claims it already has.
+- **LogZ was this rule's own counter-example, and it's fixed now.** This
+  section used to say `Transaction.note` was free text with nowhere to go —
+  true when it was written. `Transaction` carries `app_key`/`target`/`ref`
+  now (the same shape `Observation` already used), threaded through
+  `spend_spinaz`/`award_spinaz`/`award_energy`/`log_resource`, and
+  `LogZ.jsx` renders real `goToSpot` links off `open_in`. See "Credits buy
+  outcomes" below for the current state — `ref` (which resolves to a
+  rating/report/file via `logz_outcomes.outcomes_for`) is still only set by
+  the coach and Sentence ConnectZ, so most spends carry `app_key`/`target`
+  but not yet a `ref`. That's the real remaining gap, not a free-text note.
 
 
 ---
@@ -1567,7 +1562,7 @@ The three, and what each looked like from the inside:
 - **`PROMPT_ALLOWANCE["free"]` was 1** — one AI run a day across the coach, OCC,
   DirectZ and every Gemini surface combined. The ANONYMOUS trial door hands a
   stranger the same one (`TRIAL_PER_IP_HOURS`), so registering bought literally
-  nothing on the axis people arrive for. It is 3.
+  nothing on the axis people arrive for. It was 3, and is 4 now (below).
 - **Passive Energy was `reach_median // divisor` with no floor**, and
   `reach_median` is 0 until an external account is VERIFIED — so the app
   published "⚡ regenerates hourly at reach ÷ tier", showed a new member their
@@ -1606,17 +1601,17 @@ So, when adding or moving a limit:
 - **Never lower a live limit without a plan for the members already over it** —
   the `TIER_LIMITS` note says this about storage and it is true of all of them.
 
-### Known limit still owed a decision (Corey's, not the code's)
+### The free daily prompts are 4 / 7 / 12 (Corey's call, Oct 2026)
 
-**Premium's allowance is pinned by Premium's price, and Premium's price is
-pinned by the founding discount.** The founding seat is half of StatZ
-($7.50/mo), and `catalog.py` asserts founding StatZ must cost more than
-Premium — so Premium cannot exceed $7.50, and at $6/mo its AI allowance cannot
-widen much past 5/day before the model cost eats the subscription (5/day at
-`DAILY_PROMPT_MAX_CENTS` is $4.50/mo of the $6). Free went to 3 and Premium
-stayed at 5, which is a thin gap. Making the founding discount LIFETIME-ONLY
-would unpin the monthly ladder. That is a pricing decision, so the code
-records it here rather than making it.
+`PROMPT_ALLOWANCE` is Free 4, Premium 7, StatZ 12. The ceiling, for a member who
+spends every free prompt every day at `DAILY_PROMPT_MAX_CENTS` (3c): $3.60/mo for
+Free, $6.30 of Premium's $7, $10.80 of StatZ's $15 — and $10.80 against a founding
+month's $10.50, so a founding member who maxes it daily costs a little more than they
+pay. At the coach's ~2.75c a take the YEARLY founding seat ($105/yr, $8.47/mo after
+Stripe) is $1.43/month short for a member who maxes it daily — 50 seats, so ~$72/mo at
+worst, platform-wide. `test_pricing` pins those gaps. Typical use is far below the ceiling; this is written down so the next move is
+made knowing it. Every screen reads the numbers from `/api/economy/tiers/`, and the
+tests read the constant, so moving it again is one line.
 
 ## Nothing in this project was rate limited, including the login door
 
@@ -2264,3 +2259,401 @@ Corey's to move**.
 - `POST /api/economy/profile/` is the only writer of a profile's links. **Nothing mounted in
   the frontend could call it** until `PortfolioLinks.jsx` — the feature had a reader on three
   screens (card, public profile, widget board) and no way to make a link.
+
+## Plays on Music ConnectZ from the embedded SoundCloud player
+
+`apps/economy/embedplays.py`, `EmbedPlay` (migration 0195, additive). A play is a
+member who listened 30 s (`EMBED_PLAY_MIN_SECONDS`) through heartbeats clamped to
+the wall clock (as `record_listen`), once per member per post per day; the author,
+a second account in the same browser (`anon_id`), more than 5 counted plays on a
+post from one address a day, and non-SoundCloud embed indexes do not count. Pays
+nothing. Served as `mcz_plays` on a post, batched in one query and skipped when no
+post in the batch frames SoundCloud. **No rebuild command**: the count is derived
+from `counted` rows, not a stored counter, so it cannot drift. Labelled "on Music
+ConnectZ" and never mixed with SoundCloud's own number. Never run against a real
+SoundCloud widget (no access from CI).
+
+
+## Credits buy outcomes, and the list is enforced (Corey's rule)
+
+**Every credit spent buys something tangible, shareable, understandable, lucrative,
+braggable or learnable.** `apps/economy/credit_outcomes.py` declares, per spending
+module: the resource, what it buys in one sentence, which of the six outcomes it
+delivers, where the thing can be USED (`lands_in`), and either a `free_way` or an
+honest `no_free_way`. `test_credit_outcomes` walks the source, finds every module that
+calls a spend primitive (`charge_ai_usage`, `_bill`, `spend_spinaz`,
+`charge_skill_energy`, `_spend_energy_up_to`, or an energy decrement) and fails if one
+is undeclared — its first run found `collab.py` spending Energy on starting a deal and
+saying nothing — and fails when a declaration outlives the code. `GET
+/api/economy/creditz/` publishes the list.
+
+A spend also points at what it bought: `Transaction.ref` ("take:12", "sentence:4"),
+set with `link_spend` AFTER the thing exists (nothing is charged for an empty answer,
+so the ledger row is written first). `logz_outcomes.outcomes_for` resolves a page of
+rows to the rating, the report and the file in two queries, filtered by owner so a
+forged ref reads as nothing. Only the coach and Sentence ConnectZ link so far; the
+other spenders are declared but their rows carry no `ref` yet.
+
+**The file is not always kept, and the ledger says so.** A take recorded in the coach is
+scored and not stored; the recording exists only when it came from a post or journal
+entry, or the member posted it. Keeping every take would change what the privacy policy
+promises and what storage costs — the owner's decision, not a default.
+
+## Coach history is where the member's work becomes shareable
+
+- `TakeScore.read` keeps the coach's read (verdict, strengths, fixes, practice, exact
+  score, HookZ, FeelZ) — never the lyrics it transcribed. `overall` is the number the
+  member was SHOWN; it used to be the plain mean of the dimensions, so the history
+  disagreed with the score they had just been given.
+- `takescorez.exports_for` is the one list of doors out of a past take: share, post,
+  message, journal, drills, breath, the lyric writers, a battle — each with what it does
+  and what it costs before it is pressed. `coaching()` is the board: wins, strengths,
+  alerts and problem areas, worded by the server, each problem with its free way and,
+  for a lyric dimension, the paid writer.
+- **Lyric fixers** (`sentencez.FIXERS`): punchlines, hooks, rhymes, imagery, story beats,
+  fresh angles — five suggestions per run, each with technique and why, ranked by what
+  members rate highest only once a technique has `MIN_RATINGS_TO_RANK` ratings (else in
+  the writer's order, and it says so). Every one is a saved `SentenceWork`, so the
+  existing K-Oth royalty applies to the part a member keeps. HookZ and FeelZ count in
+  the overall, strength-weighted; both are absent, never 0, when a take has none.
+- **Shares are minted server-side from stored data** (`share_take`, `ShareWinView`) and
+  never from a request; the card shows the number the member saw (`score_exact`), says
+  who made it only if they DECLARED it (`ScoreShareHumanView`), and gives the reasons
+  behind the score. `ScoreShare.views` counts opens of the public page.
+- `breathz.py` is free breath training: patterns, minimums and the daily XP cap are the
+  server's; sessions earn XP for turning up and never move a rating (a timer cannot
+  measure a breath — the coach's Breath score is the measure, read back beside it).
+- `whyz.py` says why a member is here with THEIR proof, and never a number it cannot back.
+
+## Age groups, keeping takes, challenges and listener reasons
+
+- **No adult-to-minor contact** (`models.may_contact`, symmetric): DMs, calls and member
+  search stay within an age group. The LessonZ comments already stated this as "the ScoutZ
+  rule" and nothing enforced it for DMs or search until now. Unknown ages count as adults
+  (matching `is_minor`). **Collabs and battles across ages are still open** — the stated
+  policy in `adult_only_reason` ("posting, collabs, BattleZ… stay open") — and that, plus
+  any romantic or "dating" surface for under-18s, is the owner's call; the recommendation is
+  that InfernoZ (listed as "projects & dating", not built) and VybeZ's dating filters are 18+.
+- **Keep this take** (`takekeep.py`): opt-in per take (`keep=1`), stored as an ordinary
+  Upload under the existing quota, never charged, and a take that does not fit is still
+  scored with `kept_note` saying why. The privacy policy changed with it.
+- **The weekly challenge** (`challengez.py`) is derived from the ISO week alone — one prompt
+  per coach for everybody — and a shared card carries the week only when the take answered
+  it. **Listener reasons** (`ItemRating.reason`) reach only the performer
+  (`listener_reasons`), kept apart from `listeners_for`, which feeds the coach's prompt.
+
+## A SpinaZ is worth one cent, and what a visit pays follows from that
+
+Corey's valuation: **1 🍥 = 1¢.** Every minting constant reads as cash from that, which is
+the only way "limit the earn so it doesn't inflate" has a number to check. A members-only
+(restricted) post paid its author **300 🍥 per engaged member** — $3.00 for somebody staying
+five seconds, and at `JOIN_REWARD_DAILY_CAP_PER_AUTHOR` (500) that is up to $1,500 a day
+from one account. `RESTRICTED_JOIN_REWARD_SPINAZ` is **150** now (Corey's two options were
+300 and 150; this is the recommendation, reversible in one line). **Not changed, and the
+bigger exposure:** `JOIN_MIN_ACTIVE_SECONDS` is 5 and the per-author cap is 500, so the
+worst case is still $750 a day per author. A recommendation, Corey's to move: a per-author
+cap near 40 and a longer minimum stay.
+
+## A past take writes its own promo post, and the brief is the server's
+
+`takescorez.TakePromoView` (`/api/<key>/take/<id>/promo/`; GET = price, POST = run) mints the
+take's public share link, then runs the SAME writer Sentence ConnectZ uses (`sentencez.write_piece`,
+extracted from `SentenceView.post` so there is one run, one price, one "a failed run is not
+charged") with a brief built by `promo_topic` from what the coach stored — score as shown,
+verdict, two strengths, the link. Nothing in the request reaches the brief. The writer is told
+to use only those facts and to say "human-made, AI-scored" only when the member declared it on
+the share. The door (`promopost`, second after share) carries its price like every paid door;
+standalone shells never offer it (no writer in their listing or data-safety answers).
+
+## ViewZ results, and the audit of everything StatZ is the difference for
+
+`viewz.post_results` / `ViewPostResultsView` (`/views/post/<id>/`), `ViewMineView` (`/views/mine/`):
+numbers for everybody (views, people, stayed %, came-back %, live now, what visitors did), by-day
+history, and — only `has_statz` — each viewer as a track with one clip per visit (start, end,
+seconds). `stayed` = visits of at least `MIN_VIEW_SECONDS`; `came back` = people with more than one
+separate stretch; neither is video retention and none is blended into a score. Share-link opens are
+`ScoreShare.views`; who opened is not recorded, so none is claimed. A promo post's LogZ row carries
+`results` (opens, read at request time).
+
+**`statz_trial.DRIVERS` is the audit**: every StatZ difference, `sampled` or not, with `why_not` for the
+ones the free hour cannot honestly switch off (a saved voice, a cloned voice, a code sandbox, a
+visibility setting other members see, tier limits). `test_statz_drivers` walks the source: a module that
+calls `has_statz`/`feature_tier` and is not named fails, and the sampled rows must be exactly `FEATURES`.
+The state also publishes `also_in_statz` and `warn_at_seconds` (600, 60) for the screen.
+
+## Takes leave as files, and a take points at where its results are
+
+`GET /api/<key>/take/<id>/download/?format=txt|json` and `/api/<key>/takes/export/?format=csv|json`
+answer `{filename, content_type, text}` (the screen makes the file, because a plain link cannot
+carry the login header). Own takes only; a take with no stored read says so rather than inventing
+one; an unmeasured dimension is a blank cell, never 0; a CSV cell that starts like a formula
+(`= + - @`) is made a literal because a verdict is model text. `progress(limit=)` lists ten by
+default and `?takes=all` (capped at `ALL_TAKES_CAP`) lists the rest — the history used to stop at
+ten with no sign of the others.
+
+The doors out of a take, audited (`exports_for`): share, promo post, **Instagram caption** (same
+server-built brief, kind `caption`), draft in PostZ, message, journal, drills, breath training, the
+lyric fixers for weak dimensions, enter a battle (post-sourced takes), **see how its link is doing**
+(ViewZ, once a link exists) and **download**. Not offered, on purpose: improving the member's own
+WORDS in Sentence ConnectZ from a take — the coach never stores what it transcribed, so there is
+nothing honest to send; the fixers write new lines for the weak dimension instead.
+
+ViewZ post results also carry `sources` and `devices` (counts for everybody; "direct" is a visit with
+no `?src=`) and **ActionZ** (`action_log`, StatZ): every rating, comment, like, share, members-only
+join and message from the post, newest first, with `via_page` (did they also open the post's page).
+Link opens still have no per-source split — `ScoreShare.views` is one counter, and recording a
+source per open would be a new table.
+
+## The StatZ sample: a first hour, then fifteen minutes every 24 hours
+
+The one-time hour was the whole of what a member could learn about StatZ, and it could burn before
+there was anything to look at (ViewZ is worth checking again after a post is promoted). The FIRST
+sample ever is `FIRST_TRIAL_MINUTES` (60); every later one is `TRIAL_MINUTES` (15), once every
+`TRIAL_COOLDOWN_HOURS` (24) measured from the last window's START (the clock is UTC, and a calendar day
+would hand a New York member a fresh window at 7pm). No schema change: the one `StatzTrial` row is
+re-armed with a conditional update so two presses at once cannot open two windows. A press while a
+window runs returns that window (200, not a second one). `state()` publishes `minutes`,
+`last_minutes`, `first`, `next_at` and `seconds_until_next`. Nothing the sample unlocks changes: it
+only widens `has_statz`/`feature_tier` while a window runs, and the `DRIVERS` audit's reasons for what
+it does not cover still hold. **A recommendation, Corey's to move:** hour-then-15 rather than either
+alone; the cooldown is one constant.
+
+`ViewMineView` also carries ActionZ across all of a member's posts (`action_counts` for everybody,
+`action_log` for StatZ — fetched once for the whole list, tested to cost the same queries for one post
+or many) and `sources`/`devices` over every post.
+
+## Dating is 18+, collabs are open at any age (Corey's calls)
+
+`MembersView` refuses a minor when the request names the VybeZ surface (`?vybez=1`) — 403 with
+`VYBEZ_MINOR_REASON`. The gate is on the SURFACE, not the search, because that endpoint is also how
+CollabZ, BattleZ, VenueZ and MessageZ pick people. Orientation (`attracted_to`, `asexual`) was already
+adult-only both ways. Collabs and battles across ages were an open question and are now decided: open
+(`test_a_minor_and_an_adult_can_make_a_collab_together`). What is NOT opened: a direct message or call
+between an adult and a minor (`may_contact`) — the recommendation was and is that a collab does not need
+one. A close-in-age exception ("teens may date adults within 5 years") was considered and rejected: it is
+a rule about when an act is a crime, not a safety rule for introducing strangers, and ages here are
+self-entered. Teens may still see each other as friends and collaborators; a ±2-year band for minors
+(so a 13 and a 17 cannot reach each other) was recommended and is **not built**. InfernoZ's dating half,
+when it exists, refuses minors the same way.
+
+## Cross-age messages inside a collab: consent is the acceptance, not the naming
+
+Corey: adults and minors may message each other inside a collab, and call when the adult is on
+StatZ. `models.may_message` / `may_call` are `may_contact` plus `collab_link(a, b)`: a shared deal
+that is not released/refunded/cancelled and that **both have accepted**.
+
+- **Being named on a deal is not consent.** `CollabDealsView.post` lets the starter name any member,
+  so "both are on a collab" would let an adult open a channel to a minor by creating a deal. The
+  starter has accepted by starting (`accepted_at` stamped on their entry); everyone else presses
+  accept (`POST /collab/<id>/accept/ {accept}`), and may withdraw at any time. The participant list
+  is rebuilt from a whitelist on create, so a request cannot carry someone else's `accepted_at`
+  (`test_a_starter_cannot_forge_somebody_elses_acceptance`). The accept view locks the row: fund,
+  deliver and release rewrite the same JSON column and a stale save would un-fund a stake.
+- **Blocks still win**, checked before the age rule. The channel closes with the work.
+- **Calls need BOTH members on paid StatZ** (tier statz/debug — the free hour does not count,
+  anybody can start it), on top of the accepted collab. Corey's call; first read as "the adult on
+  StatZ", corrected to both. Reversible in `may_call`. A lapse closes the call door again.
+- Everything else stays age-grouped: member search, direct messages with no shared collab, calls.
+  VybeZ (finding a date) is 18+ regardless.
+
+## 18+ ID checks end in a stated success or failure
+
+`IdentityCheck` is one row per Stripe Identity session: status (`verified`, `failed`, `under_18`,
+`unreadable`, `canceled`, or open) and the reason (Stripe's code, worded by `identity.REASONS`).
+The old flow set a boolean on a pass and did NOTHING on any other ending, so a member who scanned
+three times could not tell whether it worked — a failed scan, a genuine ID that proved under 18 and a
+DOB that could not be read back were all silent.
+
+- `GET /identity/` serves `last` as `{result: success|failure|pending, detail, reason}`, plus
+  `attempts_left_today` and `can_start`. Success is never worded as pending, failure always names why.
+- **After success a new scan is refused** (`already: true`, no Stripe session created — a check is
+  paid for). After `MAX_FAILED_PER_DAY` (3) non-passes in 24h it is refused with the last reason.
+  An open session is reused for 30 minutes rather than duplicated.
+- **The webhook is not the only route**: GET and POST first retrieve any open session from Stripe
+  (`refresh`), so a deploy without the identity events subscribed still reports. If members say the
+  badge never appears, check the endpoint is subscribed to `identity.verification_session.*`.
+- A final result is never overwritten by a late event, and a session only applies to the row's own
+  member (`metadata.user_id` must match the row).
+
+## Hashtags in the writer: asked for, ordered, and held to
+
+`sentencez.clean_hashtags` reads the member's number (None = did not say, 0..`HASHTAG_MAX` 30; junk is
+"did not say", never a refusal) for the `post` and `caption` kinds, on the screen's POST and on a take's
+promo POST. The prompt asks for exactly N, together on the last line, most to least relevant, and no
+filler tags. **The model is not trusted to count:** `fit_hashtags` trims the TRAILING all-hashtag block to
+the first N (the most relevant, by the prompt's own ordering); a tag inside a sentence is part of the
+sentence and stays. Fewer than asked is reported as `hashtags: {asked, got}`, never padded. The caption
+kind's built-in "5-10 hashtags" yields to the number so the prompt never holds two instructions.
+
+## Ratings move royalties by (median − 5) × 10%, and the AI coach can count — if the member says so
+
+`royaltyfactor.py`. Corey's formula: royalties change by the median rating minus 5, times 10% — each
+point above 5 adds 10%, each below takes 10% off. **5 pays the base rate, 10 pays 150%, 1 pays 60%**
+(`PIVOT`, `STEP`; written as ".10%" in the instruction and read as 10% per point, because 0.10% would
+move a payout by half a percent at most and could not make "bad ratings get less" true — reversible in
+one constant). Never zero, and neutral until `MIN_RATERS` (5) people OUTSIDE the credits have rated: an
+unrated track is not a badly-rated one.
+
+1. **The track:** the median of outside ratings scales what the post earns per play
+   (`accrue_playlist_royalties_for_date`). Said before the payout: `GET /royalty/ratings/` serves the rule
+   and each post's factor and why; RoyaltieZ shows it.
+2. **The skills:** each credited person's share is scaled by the same formula applied to their rating in
+   the skill they brought (`skill_haircut`, from `skills_for_post`; the name predates the formula — it is a
+   bonus above 5), averaged over those skills so bringing five does not multiply one bad one five times.
+   **Never twice:** a post from a deal whose pot was already re-cut by contribution rating
+   (`basis == "rating"`) has had each person's rating applied once already. Nothing is redistributed — a
+   factor below 1 is money not paid, not money moved to someone else.
+
+**This formula pays a bonus, so rating is now worth gaming.** The guards are the design: only outside
+raters count, the median (one rater cannot move it), five of them before it moves anything, and a rating
+needs the listen the rating endpoint already requires. Worst case is +50% on a track whose five-plus
+outside raters all gave it a 10 — which is exactly the ring a rating-for-rating exchange would build, so
+watch `rating_adjusted_posts` in the accrual summary. An earlier draft had no bonus above 7 for that reason;
+Corey's formula has one and this is the cost of it.
+
+**The AI coach as a skill voice is OPT-IN** (`Profile.coach_counts_for_skillz`, off by default,
+`POST /skillz-coach/ {enabled}`). On, the median of the member's last `COACH_WINDOW` (10) takes for the
+matching instrument (`COACH_SKILLS` maps persona-skill names to coaches — one list, extend it there)
+joins their listener ratings as `COACH_VOTES` (2) votes, only once there are `MIN_COACH_TAKES` (3) takes
+behind it so one lucky take cannot carry it. **It cuts both ways and the note says so before the toggle
+is pressed** — a weak run lowers the rating as surely as a strong one raises it. Listener ratings stay
+the majority. `ratez.skills_of` shows `coach` detail on a blended rating so a number is never
+unexplained. `skill_rating_median` itself is untouched (it is called per card; the blend costs a
+profile read, so it lives in the royalty and own-skills paths only).
+
+Known gap, Corey's to decide: a post with credited contributors and **no** deal is split in equal
+shares, then each share takes its skill haircut — so a weak skill earns less but the money is not moved
+to the stronger one.
+
+## Lilith's call-to-action routines: Lilith ticks them, the member cannot
+
+**A routine or task can name a VERIFIED action** (`action` + `goal`; `lilith_actions.py`). Lilith keeps
+it herself, from rows the platform already writes when the thing really happens — a `TakeScore`, a
+`Post`, a `Message`, an `ItemRating`, a `BodieZSession`, a freestyle `Post`, a `BattleEntry` — and the
+member has no button for it (`409` from the old tick endpoints, with "2 of 3 so far"). A typed tick is
+unverified; a row is a performance that happened. That is what makes the streak the "you cannot backdate
+a habit" claim made literal: only rows created AFTER the routine existed count (`sweep_routine`).
+
+- **The audit** is the catalogue: ~40 actions (every coach's scored takes, drills, practice sessions,
+  breathing, posts, freestyle posts, journal entries, Sentence ConnectZ pieces, instrumentals, videos,
+  mixes, releases, playlists, uploads, messages, ratings, comments, shares, score cards, follows, invites,
+  collabs, battles, freestyle/cypher battles, lesson bookings and offers, workouts). `test_lilith_cta`
+  reads every one against a fresh user, so a renamed field is a red test, not a routine that never ticks.
+  NOT verifiable, on purpose: profile edits (`updated_at` moves for reasons that aren't the member's work),
+  listening/reading (a tab left open), and anything like "was kind" — those stay ordinary self tasks.
+- **Cadence.** `LilithRoutine.cadence` = daily | weekly | monthly; a streak counts PERIODS (days, ISO weeks
+  Mon–Sun, calendar months) and keeping twice in one period is one keep. Rungs per cadence pay the same
+  20 / 50 / 150 🍥 (+⚡): daily 7/30/100, weekly 4/12/26, monthly 3/6/12 — fewer ticks to farm and longer
+  real time to earn, which is the point.
+- **Catch-up.** The sweep walks the periods since the last keep, so a board not opened for a week does
+  not break a run the member actually kept. It runs on the board read (a write on a read: there is no
+  cron, and it is idempotent).
+- **A milestone is once for life per starter/title, not per row.** `keep_routine` checks a stable ledger ref
+  (`ms:<template-or-title-hash>:<cadence>:<rung>`) — before this, deleting and re-making a routine re-earned
+  the rung. Custom routines are keyed by a hash of the title, so renaming is the only way round it (known,
+  small: 20 🍥 per 7 real days per routine, capped by the tier's routine ceiling).
+- **Starters** (`lilith_starters.py`) are names + descriptions + the control they open + the cadence, served
+  in the board and added by `POST /lilith/starters/ {kind, key}`: the content is the SERVER'S, a request
+  cannot set `action` or `app_key` (a task's `source=platform` decides what it pays). Only
+  `INSTRUMENT_AWARE` starters take the coach the member names. One "record a take" task and one daily
+  routine are GENERATED per coach (`take_<app>`, `daily_<app>`), so a rapper's streak is RapZ takes and a
+  SingZ take cannot keep it. Rap pack: Off the Top (freestyle post, weekly), Sixteen on Paper (Sentence
+  ConnectZ, weekly), Cypher Night (freestyle/cypher battle, monthly).
+- **Suggestions** (`lilith_suggest.py`) rank from three honest signals and say WHY in a sentence: the
+  persona (what they declared), the instrument (their scored takes, else their declared skills through the
+  role table), and the records (a habit waiting to be a streak at 3+ in 14 days; a gap — takes but no
+  posts, posts but no ratings, ratings but no messages). It only suggests; nothing is added until tapped.
+  Counts are cached 10 minutes per member.
+
+## Roles next to a persona: what a member's skills say they ARE
+
+`personaz.artist_roles` / `role_pairs`: an Independent Artist is shown as "Independent Artist · 🎤 Rapper,
+🎶 Singer, 🎸 Guitarist"; a Designer as "· 🖌️ Illustrator, 🎯 UI/UX Designer"; the same for videographers,
+producers, mix engineers, ghost writers, developers, actors, dancers, mimes, directors, managers and A&R
+scouts. DECLARED skills only (never inferred from takes or ratings), derived on READ by `personas_of` and
+dropped by `clean_persona` on any write, so a stale copy cannot be stored. A stint is stored under its key or
+its label, so a key matches as a whole run of words and the LONGEST key wins ("bass_guitar" is a Bassist
+although "bass", the voice, is inside it; "trapeze" is not a Rapper). `ROLE_COACH` maps a role to its AI
+coach, which Lilith reads to point a rapper at RapZ. Rated skills are deliberately not used: reading them
+would put a query on every member card, and `personas_of` costs none.
+
+## LookZMaxZ: sectors for adults, server arithmetic, and a shop no model can write into
+
+`apps/economy/lookmaxz.py` + `lookmaxz_view.py` (`/api/economy/lookmaxz/`, `.../shop/`, `.../markets/`) extend
+AttractivenessZ and inherit all of its lines: **18+ verified (Stripe Identity), self-attested photo, presentation never
+identity, nothing stored.** The adult wall covers the free parts too (shop, body, markets) — the framing is the risk, not
+the price.
+
+- **Sectors:** face (hair, facial hair, brows — what a barber can change, never face shape), skin, teeth (never alignment),
+  styling, and **body, which is read from BodieZ progress and never from a photo.** A body shape is the clearest trait no
+  one can change by Tuesday; scoring one from a picture is how a looks app becomes an eating-disorder app.
+- **The model scores factors; the server does the arithmetic.** Sector = mean of scored factors, overall = mean of the
+  asked-for photo sectors, photo quality shown apart. A factor the photo does not show is None, never guessed. Undeclared
+  sectors/factors from the model are dropped (`clean_reply`).
+- **`FACTORS` is what/why/how per factor, one place.** The prompt is built from `what`, the screen shows all three before a
+  photo, and `test_lookmaxz` fails if a declared factor has no entry or an entry has no factor.
+- **Nothing a model wrote reaches a link.** `PRODUCTS` is the server's catalogue, chosen by which factor scored under
+  `WORK_BELOW`; categories not brands; every sector states when to see a professional. No affiliate tag, said on screen.
+- **The tier buys WHERE you shop, never whether.** Everybody: Amazon, eBay, Walmart, in that order. StatZ (real tier, not
+  the sample — `statz_trial.DRIVERS` `shop_markets`, `sampled: False`) saves their own list in `LookmaxPrefs`, the only
+  thing stored. Templates: https, exactly one `{q}`, public host (no IP literal, localhost, credentials), capped at 8,
+  repaired on read, query percent-encoded. A lapse keeps the saved list and serves the defaults.
+- **Billing:** one price per reading, billed only after a readable result; unreadable or nothing-scorable is free.
+- **Found on the way:** `vocalcoach.gemini_mime` is the audio/video list and has never held an image, so AttractivenessZ
+  answered "can't read image/jpeg" to every real photo — its tests mock the rating, which is why nothing noticed.
+  `attractivenessz.gemini_image_mime` is the fix; both modules use it. Like the coach and TTS transports, **the photo path
+  has never run against Google** (CI has no key).
+
+## Lilith: moving, Trash and recommendations
+
+`POST /lilith/move/` moves a task between buckets or into/out of daily/weekly/monthly routines, or to Trash and back.
+Finished tasks are immovable and a moved entry never mints (task XP once per task, milestone rungs once per starter via the
+stable `ms:` ref); a routine changing cadence restarts its run and the response says so. Trash is `trashed_at`, excluded from
+ceilings, sweeps and ticks, and purged after 30 days on a board read. Recommendations come from `lilith_suggest.signals`
+(profile completeness, personas, ever-posted/shared/collabbed, collabs waiting, last take) — computed from the member's own
+state at request time, cached ten minutes, each with a `because` so none is unexplained.
+
+## Inclusive principles, exclusive standards — set by the member (Corey's principle)
+
+Freedom of choice, discourage bureaucracy: the platform is inclusive, the bar is the member's. Every metric that can
+be a range already is (`gates.py`: rating, price, attractiveness, age, km) and the member search, gated deals,
+battles, lessons, venues and message reach all evaluate them from one spec. **A range is exclusive, and a member's
+own switch beats it**: `Membership.attractiveness_public` was honoured by the rating endpoint only, so the community
+attractiveness number still rode every search card and could be read off by stepping a range one band at a time.
+`models.attractiveness_shown_medians` is the one reader the gate, the card and the rating response use now, and a
+hidden score is "no value" — which an active range treats as out. Do not put an approval queue in front of something
+a member can set for themselves. The AI LookZMaxZ readings are NOT a filterable metric and never will be: nothing
+about them is stored (so there is nothing to filter), and a self-attested photo is not proof enough to rank people on.
+
+## Posting a take, and what a low FeelZ is told to do
+
+`takescorez.TakePostView` (`/api/<key>/take/<id>/post/`) makes a PostZ post from one of the member's own takes through
+`postz.create_post` — one creation path, so the daily submission cap, sanitising and zodiac hooks are the composer's.
+The score and read come from the stored take and the share token (never from a body); the recording is the kept upload by
+its stable address. **Playable by link means kept**: an unkept take posts without media and `GET` says so first. The
+member ticks score / feedback / recording separately; score + feedback together carry the coach's read card, either alone
+goes as plain text because the card cannot show half of itself. Note `VISIBILITIES` is `("", "members", "private")` —
+public is the EMPTY string, and "public" is refused.
+
+**HookZ and FeelZ on the row** (`extras_of`): labelled, with the reason, the emotion, and `counted` — whether each was
+inside the overall the member was shown (stored on the read as `hook_counted` / `feelz_counted`; older takes carry
+neither and say nothing). Both are strength-weighted into the overall like any dimension, never a 0 when unjudged.
+**`feelz_tips`** exist only for a FeelZ under `FEELZ_TIPS_BELOW` (7) whatever the model sent — a 9 with a to-do list is a score
+contradicting itself — each `{kind, label, what, why, how}` with kinds server-owned (`FEELZ_TIP_KINDS`; an invented kind
+becomes delivery). **`mix_tips`** are separate and not score-gated: a vocal can be buried on a take whose overall is fine.
+They are `{helps: clarity|feelz|both, what, why, how}`, about the mix and never the performance, and the prompt says to
+return none when the vocal sits well. Mic/room tips say what kind of change, never a brand.
+
+## A shared rating carries every metric, and a history share is as full as a live one
+
+An audit of what the coach produces against what a share carried found the history thinner than the live result: a take's stored
+read kept the verdict, strengths, fixes and a few numbers, but not where the member is (`now`), what they aim at (`goal`), the style
+read, the song score and its reason, the next drill, or HookZ / FeelZ with their reasons — so a card or post made from the history
+said less than the screen the member had just seen. `read_of` keeps them now, `share_payload` passes them with `extras` (HookZ /
+FeelZ rows, cleaned once by `extras_of`) and `mix_tips`, and `scoreshare.clean_extras` / `clean_mix` re-clean on the way OUT to a
+stranger's page (whitelisted keys, caps) because a stored row is read for years. `coachshare._KEEP` / `read_view` carry the same to a
+post's read card, and `render_card` draws "HookZ 8 · FeelZ 4 · longing" — numbers and emotion only; the tips stay on the page.
+**An older share link is filled in, never replaced** (`share_take`): only keys it lacks are added, so a declaration (`human`), a recap or
+a challenge already on it survives. Cards are cached a day, so a refilled one reaches the picture on the next day's fetch.
+**Not shared, on purpose:** the take's file (only a post can carry a kept recording), the transcribed lyrics (never stored), and the
+member's listener reasons (the performer's alone).

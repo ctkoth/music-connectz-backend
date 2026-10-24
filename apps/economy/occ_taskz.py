@@ -5,18 +5,29 @@ because git integration becomes a task». So a git action is not a side channel
 with its own screen — it is a TaskZ row, with the same status, the same live
 progress, and the same undo window as an edit. One list, one truth.
 
-Two toggles decide how a task starts:
+Two toggles decide how a SUGGESTED task starts:
 
 * **SuggestionZ** (Premium) proposes tasks and must explain WHAT, WHY and HOW
   before anything runs. All three or it isn't a suggestion, it's an assertion.
-* **AutomationZ** (StatZ) runs them with no confirmation and NOTIFIES you as it
-  happens. Off by default — a setting that acts on your code unasked is
-  not one to inherit silently.
+* **AutomationZ** (StatZ) performs the suggestions that are safe to take without
+  asking, and NOTIFIES you as it happens. Off by default — a setting that acts
+  on your code unasked is not one to inherit silently.
 
-A task is only undoable if it can describe its own reversal. "Undo" that can't
-put anything back is a button that lies, so `undoable` is computed from whether
-an undo payload exists, never assumed.
+**A task a member types in is a to-do, and nothing runs it.** It used to be
+created `queued`, flagged `automated` when AutomationZ was on, and announced with
+"🤖 OCC ran '…' automatically" — while no worker, no job and no loop anywhere
+picked a queued row up. A notification claiming work that never happened is the
+worst thing this module could send, so it sends nothing: what OCC really runs
+(the sandbox, the agent loop, the suggestions in `occ_suggest`) writes its own
+task rows as it goes, and those are the only ones that say "ran".
+
+A task is only undoable if OCC can actually put it back. "Undo" that can't
+reverse anything is a button that lies, so `undoable` is computed from whether a
+REVERSER exists for the recorded action (`occ_suggest.REVERSIBLE`), never from
+whether a payload merely exists — a payload is a record of what was done, and the
+undo endpoint used to flip a status label and report a reversal nothing performed.
 """
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -30,6 +41,7 @@ from .models import (
     occ_settings_for,
     occ_undo_window,
 )
+from .occ_suggest import can_reverse, reverse
 from .occ_spec import (
     EXPORT_ROUTES,
     GAME_GENRES,
@@ -53,14 +65,20 @@ def task_dict(t, tier):
         "progress": t.progress,
         "eta_seconds": t.eta_seconds,
         "detail": t.detail,
-        "automated": t.automated,
+        # "OCC did this without being asked" — said only when OCC recorded what it
+        # did. Rows written before this was fixed carry the flag from a POST that
+        # ran nothing, and they must not start claiming work if a member later
+        # ticks them off by hand.
+        "automated": bool(t.automated and t.status in (OccTask.STATUS_DONE, OccTask.STATUS_UNDONE)
+                          and t.undo_payload),
         "run_seconds": t.run_seconds,
         "git": ({"repo": t.git_repo, "branch": t.git_branch, "ref": t.git_ref}
                 if t.kind == OccTask.KIND_GIT else None),
         # Computed, never assumed — see the module docstring.
-        "undoable": t.can_undo(tier),
+        "undoable": bool(t.can_undo(tier) and can_reverse(t.undo_payload)),
         "undo_deadline": (t.undo_deadline(tier).isoformat()
-                          if t.status == OccTask.STATUS_DONE and t.undo_payload else None),
+                          if t.status == OccTask.STATUS_DONE and can_reverse(t.undo_payload)
+                          else None),
         "undo_window_seconds": occ_undo_window(tier),
         "started_at": t.started_at.isoformat() if t.started_at else None,
         "finished_at": t.finished_at.isoformat() if t.finished_at else None,
@@ -190,9 +208,11 @@ class OccSettingsView(APIView):
 class OccTasksView(APIView):
     """GET the task list; POST adds one.
 
-    A task added while AutomationZ is on starts QUEUED and runs itself. With it
-    off, a SuggestionZ task starts SUGGESTED and waits — which is the whole
-    difference between the two toggles, expressed once, here.
+    A task added here is a to-do: it starts QUEUED (the stored word for "on the
+    list") and waits for the member to tick it off. Nothing picks it up — see the
+    module docstring. A SuggestionZ task starts SUGGESTED and waits to be read.
+    The AutomationZ/SuggestionZ difference lives in `occ_suggest`, where
+    something actually runs.
     """
 
     permission_classes = [IsAuthenticated]
@@ -224,7 +244,6 @@ class OccTasksView(APIView):
         if kind not in dict(OccTask.KIND_CHOICES):
             kind = OccTask.KIND_OTHER
 
-        s = occ_settings_for(request.user)
         tier = membership_for(request.user).tier
         suggested = bool(d.get("suggested"))
 
@@ -248,7 +267,6 @@ class OccTasksView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        automated = bool(s.automation and tier_at_least(tier, "statz") and not suggested)
         task = OccTask.objects.create(
             user=request.user, title=title[:200], kind=kind,
             status=(OccTask.STATUS_SUGGESTED if suggested else OccTask.STATUS_QUEUED),
@@ -258,14 +276,12 @@ class OccTasksView(APIView):
             git_repo=str(d.get("git_repo", "") or "")[:200],
             git_branch=str(d.get("git_branch", "") or "")[:120],
             git_ref=str(d.get("git_ref", "") or "")[:80],
-            undo_payload=d.get("undo_payload") if isinstance(d.get("undo_payload"), dict) else {},
-            automated=automated,
+            # No `undo_payload` and no `automated` from the client: both are
+            # records of something OCC DID, written by the code that did it. A
+            # payload sent from outside could only ever be a reversal OCC has no
+            # reverser for, and a flag sent from outside is the claim "OCC ran
+            # this" with nothing behind it.
         )
-        if automated:
-            # AutomationZ says so in LogZ as it happens, which is the promise
-            # the toggle makes in exchange for not asking.
-            notify(request.user, "occ",
-                   f"🤖 OCC ran '{task.title}' automatically. Undo it in TaskZ.")
         return Response(task_dict(task, tier), status=status.HTTP_201_CREATED)
 
 
@@ -304,9 +320,7 @@ class OccTaskDetailView(APIView):
                 setattr(t, field, max(0, int(d[field])) if field == "eta_seconds"
                         else str(d[field]))
                 changed.append(field)
-        if isinstance(d.get("undo_payload"), dict):
-            t.undo_payload = d["undo_payload"]
-            changed.append("undo_payload")
+        # `undo_payload` is deliberately not patchable — see OccTasksView.post.
 
         if changed:
             t.save(update_fields=list(dict.fromkeys(changed + ["updated_at"])))
@@ -325,7 +339,14 @@ class OccTaskDetailView(APIView):
 
 
 class OccTaskUndoView(APIView):
-    """POST /api/economy/occ/taskz/<pk>/undo/ — inside the tier's window."""
+    """POST /api/economy/occ/taskz/<pk>/undo/ — inside the tier's window.
+
+    Puts the change back, then says so. The order is the point: this used to set
+    the status to "undone" and notify "↩️ OCC undid '…'" without reading the
+    payload at all, so the member was told a reversal had happened that nothing
+    had performed. Now the reverser runs first, inside one transaction with the
+    status change, and a task OCC cannot reverse is refused rather than relabelled.
+    """
 
     permission_classes = [IsAuthenticated]
 
@@ -337,9 +358,9 @@ class OccTaskUndoView(APIView):
         if t.status != OccTask.STATUS_DONE:
             return Response({"detail": f"You can only undo a finished task — that one is {t.status}."},
                             status=status.HTTP_409_CONFLICT)
-        if not t.undo_payload:
+        if not t.undo_payload or not can_reverse(t.undo_payload):
             # Better to refuse than to claim a reversal nothing can perform.
-            return Response({"detail": "This task didn't record how to reverse it, so it can't be undone."},
+            return Response({"detail": "OCC has no way to put that one back, so it can't be undone."},
                             status=status.HTTP_409_CONFLICT)
         if not t.can_undo(tier):
             return Response(
@@ -348,7 +369,15 @@ class OccTaskUndoView(APIView):
                  "undo_deadline": t.undo_deadline(tier).isoformat()},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        t.status = OccTask.STATUS_UNDONE
-        t.save(update_fields=["status", "updated_at"])
-        notify(request.user, "occ", f"↩️ OCC undid '{t.title}'.")
+        with transaction.atomic():
+            # Locked and re-read: two taps on Undo must reverse once, not twice.
+            t = OccTask.objects.select_for_update().get(pk=t.pk)
+            if t.status != OccTask.STATUS_DONE:
+                return Response({"detail": f"You can only undo a finished task — that one is {t.status}."},
+                                status=status.HTTP_409_CONFLICT)
+            said = reverse(request.user, t.undo_payload)
+            t.status = OccTask.STATUS_UNDONE
+            t.detail = said
+            t.save(update_fields=["status", "detail", "updated_at"])
+        notify(request.user, "occ", f"↩️ OCC undid '{t.title}' — {said}.")
         return Response(task_dict(t, tier))

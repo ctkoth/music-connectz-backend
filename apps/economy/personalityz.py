@@ -359,6 +359,21 @@ def score(answers, depth="basic"):
     }
 
 
+SHARED_MIN = 5
+
+
+def shared_by(code):
+    """Members who declared exactly this full code, counting only those who have not
+    made the field private. None for a partial code or a count under SHARED_MIN."""
+    if not code or "-" in code or len(code) != len(AXES):
+        return None
+    from .models import Profile
+    from .visibility import PRIVATE, level_for
+    n = sum(1 for p in Profile.objects.filter(personality=code).only("visibility")
+            if level_for(p, "personality") != [PRIVATE])
+    return n if n >= SHARED_MIN else None
+
+
 class PersonalityTestView(APIView):
     """GET the questions, POST the answers. Open logged-out, on purpose.
 
@@ -415,6 +430,10 @@ class PersonalityTestView(APIView):
             **result,
             "depth": depth,
             "axes": as_dict(result["code"]),
+            # How many members said the same four letters — a reason to join that is
+            # about the visitor, not a pitch. A count, never names, and None below
+            # SHARED_MIN so a small number cannot point at anybody.
+            "shared_by": shared_by(result["code"]),
             # Never implied. A visitor's result lives in their browser until
             # they make an account, and saying "saved" to somebody with no
             # account is the kind of small lie that gets found out at login.

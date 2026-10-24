@@ -224,7 +224,11 @@ class BillingIsHonest(Base):
         # the member pays are two numbers, and the wallet must see the second.
         from apps.economy.catalog import ai_run_charge_cents, ai_run_cost_cents
         before = wallet_for(self.user).promptz
-        out = self.run_with([reply([text_block("done")], tokens=1_000_000)])
+        # Sized to land UNDER the tier's ceiling: a run over it is charged the
+        # ceiling (TheChargeNeverPassesTheCeilingShown), which would make this
+        # test about the clamp instead of about price versus cost.
+        out = self.run_with([reply([text_block("done")], tokens=300_000)])
+        self.assertLess(out["cost_cents"], out["max_cents"])
         spent = before - wallet_for(self.user).promptz
         self.assertEqual(spent, out["cost_cents"])
         self.assertGreater(spent, out["served_cents"])
@@ -374,3 +378,61 @@ class FreeTierRuns(Base):
     def test_a_free_member_is_put_on_a_model_their_tier_owns(self):
         out = self.run_with([reply([text_block("done")])])
         self.assertEqual(out["engine"], "haiku")
+
+
+class TheChargeNeverPassesTheCeilingShown(Base):
+    """The gate checks the spend BEFORE each call, so the last call completes and
+    can carry a run past the ceiling. The button said "up to N", not "about N"."""
+
+    def test_a_run_that_overshoots_is_charged_the_ceiling_not_the_overshoot(self):
+        from apps.economy.catalog import ai_run_charge_cents
+        huge = reply([tool_block("glob", {})], stop_reason="tool_use", tokens=100_000_000)
+        before = wallet_for(self.user).promptz
+        out = self.run_with([huge, reply([text_block("more")])])
+        self.assertEqual(out["stopped"], "budget")
+        # The real price of what ran is above the ceiling...
+        self.assertGreater(ai_run_charge_cents(out["engine"], out["usage"]), out["max_cents"])
+        # ...and the member is charged the ceiling, no more.
+        self.assertEqual(out["cost_cents"], out["max_cents"])
+        self.assertEqual(before - wallet_for(self.user).promptz, out["max_cents"])
+        # What the platform absorbed is still on the record.
+        self.assertGreater(out["served_cents"], 0)
+
+    def test_an_ordinary_run_is_still_charged_what_it_used(self):
+        before = wallet_for(self.user).promptz
+        out = self.run_with([reply([text_block("done")], tokens=1_000)])
+        self.assertLess(out["cost_cents"], out["max_cents"])
+        self.assertEqual(before - wallet_for(self.user).promptz, out["cost_cents"])
+
+
+class TheKeyIsCheckedExplicitly(Base):
+    """The SDK builds a client with no key and only complains at the first
+    request — so "did the constructor raise?" never fired, and an unconfigured
+    server created a TaskZ row, failed the first call and answered 201 with
+    "couldn't be reached": a missing key reported as an outage."""
+
+    def test_no_key_means_no_client(self):
+        import os
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(occ_agent._client())
+
+    def test_a_key_builds_the_client(self):
+        import os
+        fake = type("anthropic", (), {"Anthropic": lambda: "client"})
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}, clear=True), \
+                patch.dict("sys.modules", {"anthropic": fake}):
+            self.assertEqual(occ_agent._client(), "client")
+
+    def test_with_no_key_nothing_is_created_or_charged(self):
+        import os
+        before = wallet_for(self.user).promptz
+        with patch.dict(os.environ, {}, clear=True):
+            out = run_agent(self.user, "do it")
+        self.assertEqual(out["stopped"], "unavailable")
+        self.assertEqual(OccTask.objects.count(), 0)
+        self.assertEqual(wallet_for(self.user).promptz, before)
+
+    def test_the_result_opens_where_the_task_row_is(self):
+        out = self.run_with([reply([text_block("done")])])
+        # `occ:filez` named an anchor that exists nowhere (OCC has no files screen).
+        self.assertEqual((out["open_in"], out["target"]), ("occ", "occ-taskz"))

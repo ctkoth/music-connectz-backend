@@ -58,6 +58,7 @@ APPS = {
     "venuez": (m.VenueBooking.objects, "visitor", "created_at"),
     "battlez": (m.BattleEntry.objects, "user", "created_at"),
     "groupz": (m.GroupMember.objects, "member", "added_at"),
+    "labelz": (m.LabelContract.objects, "artist", "created_at"),
     "lessonz": (lessonz_models.LessonBooking.objects, "student", "created_at"),
     "mimez": (mimez_models.MimeZSubmission.objects, "user", "created_at"),
 }
@@ -66,24 +67,18 @@ APPS = {
 # app_key), so they get their own pass rather than a queryset each — a drummer
 # and a singer write the same table, split by the column that already tells
 # them apart.
-INSTRUMENT_KEYS = ["singz", "rapz", "guitarz", "bassz", "keyz", "violinz", "drumz"]
+from apps.economy.instruments import INSTRUMENTS as _INSTRUMENTS
+INSTRUMENT_KEYS = list(_INSTRUMENTS)   # derived: one list of coaches
 
 NOT_MEASURABLE = {
     "onboardz": "steps live on Profile/Post/Habit, already counted there",
     "vybez": "live search, no rows of its own",
+    "lookmaxz": "stateless by design — no photo, score or history is kept; only a StatZ shopping preference",
     "coachz": "hub screen over the instrument coaches below",
     "profilez": "every member has one; edits aren't logged as events",
     "statsz": "read-only dashboard over other apps' data",
     "membershipz": "tier is on Membership, not a repeated action",
     "logz": "read-only ledger view",
-    # Not "quiet" — BROKEN. The frontend calls POST/GET /api/labelz/ and
-    # /api/labelz/contracts/ and neither route is mounted anywhere in this
-    # backend (checked: no match in music_connectz/urls.py or any app's
-    # urls.py). Every load of this tab 404s. Its usage number isn't low,
-    # it's undefined — nobody could have used it since whenever the route
-    # was removed or never finished. Worth Corey's eyes before "cut" or
-    # "fix the route" gets decided either way.
-    "labelz": "BROKEN — no /api/labelz/ route exists; every load 404s",
     "opportunitiez": "a filtered directory over Profile rows, not a repeated action — nothing to count",
     "soundz": "a sound-pack preference on Profile, not a repeated action — nothing to count",
     "metz": "client-only audio tool, no server round trip",

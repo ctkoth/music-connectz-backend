@@ -42,18 +42,28 @@ HOW_IT_WORKS = ("Submitting sends the release to the Music ConnectZ team, who pu
 # Free sends one release a calendar month; Premium and StatZ, as many as they
 # like. The ladder rule: a tier says how OFTEN, never whether — a Free member
 # can always release.
-FREE_PER_MONTH = 1
+#
+# Corey's ladder: Free 1, Premium 5, StatZ 10 releases a calendar month. The owner's
+# own tier (debug) is uncapped.
+PER_MONTH = {TIER_FREE: 1, "premium": 5, "statz": 10}
+FREE_PER_MONTH = PER_MONTH[TIER_FREE]
 
 
 def quota_for(user):
-    """{per_month, used, left} for this calendar month — per_month None = no cap."""
+    """{per_month, used, left, next_per_month} for this calendar month — per_month
+    None = no cap. `next_per_month` is the next tier's number, so a screen can say
+    what upgrading holds without typing it."""
     tier = membership_for(user).tier
-    if tier != TIER_FREE:
-        return {"tier": tier, "per_month": None, "used": None, "left": None}
+    cap = PER_MONTH.get(tier)
+    if cap is None:
+        return {"tier": tier, "per_month": None, "used": None, "left": None, "next_per_month": None}
     now = timezone.now()
     used = Release.objects.filter(user=user, status=Release.STATUS_SUBMITTED,
                                   submitted_at__year=now.year, submitted_at__month=now.month).count()
-    return {"tier": tier, "per_month": FREE_PER_MONTH, "used": used, "left": max(0, FREE_PER_MONTH - used)}
+    order = list(PER_MONTH)
+    nxt = PER_MONTH[order[order.index(tier) + 1]] if order.index(tier) + 1 < len(order) else None
+    return {"tier": tier, "per_month": cap, "used": used, "left": max(0, cap - used),
+            "next_per_month": nxt}
 
 
 def release_dict(r):
@@ -274,8 +284,9 @@ class ReleaseSubmitView(APIView):
         q = quota_for(request.user)
         if q["per_month"] is not None and q["left"] <= 0:
             return Response(
-                {"detail": f"Free sends {q['per_month']} release a month and this month's is used. "
-                           "It stays ready here — send it next month, or Premium sends as many as you like.",
+                {"detail": f"Your plan sends {q['per_month']} release{'s' if q['per_month'] != 1 else ''} a month "
+                           "and this month's are used. It stays ready here — send it next month"
+                           + (f", or the next plan sends {q['next_per_month']} a month." if q["next_per_month"] else "."),
                  "quota": q, "upgrade": {"tab": "membershipz", "target": "membershipz-plans"}},
                 status=status.HTTP_403_FORBIDDEN,
             )

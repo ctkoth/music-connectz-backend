@@ -564,6 +564,9 @@ class CollabDealsView(APIView):
         for entry in settled:
             entry["funded"] = False
             entry["stake_paid"] = 0
+            # Starting a deal is saying yes to it; everybody else has to say so themselves.
+            if entry.get("username") == request.user.username:
+                entry["accepted_at"] = timezone.now().isoformat()
 
         # Starting the deal costs ⚡ equal to the combined price of the skills
         # the starter says they are bringing, from their own rates.
@@ -618,6 +621,72 @@ class CollabDetailView(APIView):
         if not deal:
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
         deal = maybe_auto_release(deal)
+        return Response(deal_dict(deal, request.user))
+
+    @transaction.atomic
+    def patch(self, request, pk):
+        """The deal's own starter can fix a typo'd title, description or
+        worth split — but only while it is still a DRAFT, nobody but them
+        has funded anything, and nobody but them has accepted. Past that
+        point somebody else has put real money or real consent behind the
+        numbers as they stand, and changing them underneath that is exactly
+        what the escrow exists to prevent. There is no edit for WHO is on a
+        deal or for anything once it is funded — that is a different deal,
+        and the way to make one is to cancel this draft and start it."""
+        deal = CollabDeal.objects.select_for_update().filter(pk=pk).first()
+        if not deal:
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        if deal.initiator_id != request.user.id:
+            return Response({"detail": "Only the deal's own starter can edit it."},
+                            status=status.HTTP_403_FORBIDDEN)
+        if deal.status != CollabDeal.STATUS_DRAFT:
+            return Response({"detail": f"Can't edit a {deal.status} deal — nothing moves once it's funded."},
+                            status=status.HTTP_409_CONFLICT)
+        others = [p for p in deal.participants if p.get("username") != request.user.username]
+        if any(p.get("accepted_at") for p in others):
+            return Response({"detail": "Somebody else has already accepted this deal — "
+                                       "the numbers they agreed to can't move under them now."},
+                            status=status.HTTP_409_CONFLICT)
+        if any(p.get("funded") for p in deal.participants):
+            return Response({"detail": "Somebody has already funded their share — "
+                                       "the split can't change once real money is behind it."},
+                            status=status.HTTP_409_CONFLICT)
+
+        d = request.data or {}
+        fields = []
+        if "title" in d:
+            deal.title = str(d["title"]).strip()[:160]
+            fields.append("title")
+        if "description" in d:
+            deal.description = str(d["description"] or "")
+            fields.append("description")
+        if isinstance(d.get("worths"), dict):
+            parts = [dict(p) for p in deal.participants]
+            changed = False
+            for p in parts:
+                raw = d["worths"].get(p.get("username"))
+                if raw is None:
+                    continue
+                try:
+                    worth = max(0, int(round(float(raw))))
+                except (TypeError, ValueError):
+                    continue
+                p["worth_cents"] = worth
+                changed = True
+            if changed:
+                settled = {s["username"]: s for s in collab_settlement(parts, currency=deal.currency)}
+                for p in parts:
+                    s = settled.get(p.get("username"))
+                    if s:
+                        p["pays_cents"] = s["pays_cents"]
+                        p["receives_cents"] = s["receives_cents"]
+                        p["tax_cents"] = s["tax_cents"]
+                deal.participants = parts
+                fields.append("participants")
+        if not fields:
+            return Response({"detail": "Nothing to change."}, status=status.HTTP_400_BAD_REQUEST)
+        fields.append("updated_at")
+        deal.save(update_fields=fields)
         return Response(deal_dict(deal, request.user))
 
 
@@ -754,8 +823,18 @@ class CollabRefundView(APIView):
         entry = _entry_for(deal, request.user.username)
         is_payer = bool(entry and int(entry.get("pays_cents") or 0) > 0)
         owner = is_owner(request.user)
-        if not (is_payer or owner):
-            return Response({"detail": "only a paying collaborator or the platform can refund"}, status=status.HTTP_403_FORBIDDEN)
+        # The deal's own starter can withdraw it while it's still a DRAFT, even
+        # if they are not a payer (they might be the one being paid). Nothing
+        # is held yet on a draft, so there is nothing at risk — unlike a funded
+        # deal, where only a payer getting their OWN money back (or the
+        # platform) may refund it, for the same reason `escrow_release_days`
+        # never lets anyone but a payer spend a payer's own protection.
+        initiator_withdrawing_draft = (deal.initiator_id == request.user.id
+                                       and deal.status == CollabDeal.STATUS_DRAFT)
+        if not (is_payer or owner or initiator_withdrawing_draft):
+            return Response({"detail": "only a paying collaborator, the deal's own starter "
+                                       "(while it's still a draft), or the platform can refund"},
+                            status=status.HTTP_403_FORBIDDEN)
         # A payer can self-serve a refund only before delivery or during a dispute;
         # once delivered, resolution is owner-mediated.
         if not owner and deal.status == CollabDeal.STATUS_DELIVERED:
@@ -798,3 +877,39 @@ class PostCollabsView(APIView):
             "post_id": post.id,
             "deals": [deal_dict(d, me, days) for d in visible],
         })
+
+
+class CollabAcceptView(APIView):
+    """POST /api/economy/collab/<id>/accept/ {accept: true|false} — say yes (or take it back)
+    to being on a deal somebody else put you on.
+
+    Naming a member on a deal needs nobody's consent, so on its own it proves nothing. This is
+    the consent. It is what lets a collab carry messages between an adult and a minor
+    (`models.collab_link`): both have to have accepted, and either can withdraw at any time to
+    close the channel. The person who started the deal has accepted by starting it and cannot
+    withdraw from their own deal here (that is cancelling it)."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        accept = request.data.get("accept", True)
+        accept = accept not in (False, "false", "0", 0, "no")
+        # Locked read-modify-write: fund/deliver/release rewrite this same JSON column, and an
+        # unlocked save here could put back a stale copy and un-fund somebody's stake.
+        with transaction.atomic():
+            deal = CollabDeal.objects.select_for_update().filter(pk=pk).first()
+            if not deal:
+                return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+            if deal.initiator_id == request.user.id:
+                return Response({"detail": "You started this deal, so you are already on it."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            parts = list(deal.participants or [])
+            mine = next((p for p in parts if str(p.get("username", "")).lower() == request.user.username.lower()), None)
+            if not mine:
+                return Response({"detail": "You are not on this deal."}, status=status.HTTP_403_FORBIDDEN)
+            if accept:
+                mine["accepted_at"] = mine.get("accepted_at") or timezone.now().isoformat()
+            else:
+                mine.pop("accepted_at", None)
+            deal.participants = parts
+            deal.save(update_fields=["participants", "updated_at"])
+        return Response({"accepted": bool(mine.get("accepted_at")), "deal": deal_dict(deal, request.user)})

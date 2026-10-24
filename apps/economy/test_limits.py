@@ -1,3 +1,5 @@
+from unittest.mock import patch
+from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -20,6 +22,7 @@ class CharLimitTests(TestCase):
         self.assertTrue(chars_unlimited(TIER_STATZ))
 
 
+@patch("apps.economy.messages_view.DM_COLD_ENERGY", 0)
 class MessageCapTests(TestCase):
     """The cap is enforced on send, so this is where each tier's number has to hold."""
 

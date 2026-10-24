@@ -8,11 +8,15 @@ Model names are env-overridable since Google revises them often — and, since
 one of those revisions took the Boss Take coach down mid-promotion, they are
 CHAINS rather than single names. See MODEL_CHAINS below.
 """
+import base64
+import binascii
 import logging
 import os
+import time
 
 import requests
 from django.conf import settings
+from django.core.files.base import ContentFile
 
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -20,9 +24,25 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .catalog import ai_cost
-from .models import (can_afford_ai, charge_ai_usage, daily_prompt_covers,
-                     daily_prompt_state, wallet_for)
+from .media import stable_media_url
+from .models import (GeneratedImage, Upload, can_afford_ai, charge_ai_usage,
+                     daily_prompt_covers, daily_prompt_state, wallet_for)
 from .views import credit_owner
+
+# Mapping is deliberately small: these are the only MIME types Gemini's image
+# models return. An unlisted one still saves — just under a generic name —
+# rather than 500ing on a format we didn't expect.
+_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
+
+
+def _image_dict(work, request=None):
+    up = work.upload
+    return {
+        "id": work.id, "prompt": work.prompt, "created_at": work.created_at,
+        # None when the file itself was later removed from the uploads screen —
+        # the record still says what was made, same as MasterWork.
+        "url": stable_media_url(up, request) if up else None,
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +129,8 @@ def _catalogue_for(kind, key):
         # it as one would leave a worker permanently convinced the key can run
         # nothing — the next take should get to ask again.
         try:
-            r = requests.get(f"{BASE}/models", params={"key": key, "pageSize": 200}, timeout=20)
+            r = requests.get(f"{BASE}/models", params={"pageSize": 200},
+                             headers=_auth(key), timeout=20)
         except requests.RequestException:
             logger.exception("Gemini: could not list models")
             return []
@@ -177,7 +198,7 @@ def generate_content(kind, body, *, key, timeout, env_vars=(), label="Gemini"):
     for model in model_chain(kind, *env_vars, key=key):
         tried.append(model)
         resp = requests.post(f"{BASE}/models/{model}:generateContent",
-                             params={"key": key}, json=body, timeout=timeout)
+                             headers=_auth(key), json=body, timeout=timeout)
         if resp.status_code != 404:
             if resp.status_code == 200:
                 _remember(kind, model)
@@ -189,6 +210,19 @@ def generate_content(kind, body, *, key, timeout, env_vars=(), label="Gemini"):
 
 def _key():
     return getattr(settings, "GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
+
+
+def _auth(key):
+    """The key goes in a header, never in the URL.
+
+    `?key=` put the API key in every request line, and `requests` writes the
+    request line into the message of the exceptions it raises ("Max retries
+    exceeded with url: /v1beta/models/…:generateContent?key=AIza…"). Several
+    callers log those and one used to return them to the member, so a DNS blip
+    could print part of the key into a log or a response. The header is the
+    documented alternative and is not part of any exception message.
+    """
+    return {"x-goog-api-key": key}
 
 
 def _bill(user, note, count_daily=False):
@@ -225,10 +259,43 @@ def _bill(user, note, count_daily=False):
     return cost
 
 
+# What Image ConnectZ tells a member when Gemini fails. Fixed sentences: the
+# exception text and Google's error body stay in the log.
+IMAGE_DOWN = "The image service didn't answer — nothing was charged."
+IMAGE_EMPTY = ("The image service didn't return a picture for that. Nothing was charged — "
+               "try different wording, or try again in a little while.")
+
+
+def draw_image(key, parts, timeout=90):
+    """One image generation call. Returns (base64_data, mime) or (None, None); never
+    raises for a bad answer (Google's text is logged, never shown)."""
+    model = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image-preview")
+    try:
+        r = requests.post(f"{BASE}/models/{model}:generateContent", headers={"x-goog-api-key": key},
+                          json={"contents": [{"parts": parts}],
+                                "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}},
+                          timeout=timeout)
+        data = r.json()
+    except Exception:
+        logger.exception("draw_image: the Gemini call failed")
+        return None, None
+    for part in (data.get("candidates") or [{}])[0].get("content", {}).get("parts", []):
+        inline = part.get("inlineData") or part.get("inline_data")
+        if inline and inline.get("data"):
+            return inline["data"], inline.get("mimeType") or inline.get("mime_type") or "image/png"
+    logger.error("draw_image: no image — Gemini %s: %s", getattr(r, "status_code", 0),
+                 str((data.get("error") or {}).get("message") or "no error message")[:300])
+    return None, None
+
+
 class GeminiImageView(APIView):
-    """POST { prompt } → a generated image as a data URI. Synchronous."""
+    """GET: images you've made. POST { prompt } → a generated image, kept."""
 
     permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        works = GeneratedImage.objects.filter(user=request.user).select_related("upload")[:30]
+        return Response({"images": [_image_dict(w, request) for w in works]})
 
     def post(self, request):
         prompt = str((request.data or {}).get("prompt", "")).strip()
@@ -252,8 +319,13 @@ class GeminiImageView(APIView):
             ref_mime = header.split(";")[0].split(":")[-1] or "image/jpeg"
             parts.insert(0, {"inlineData": {"mimeType": ref_mime, "data": b64}})
         try:
+            # The key rides in a header, not the query string. `requests` names
+            # the full URL in every connection error it raises, and this view
+            # used to hand `str(exc)` to the member — so a dropped connection
+            # printed part of GEMINI_API_KEY on their screen.
             r = requests.post(
-                f"{BASE}/models/{model}:generateContent?key={key}",
+                f"{BASE}/models/{model}:generateContent",
+                headers={"x-goog-api-key": key},
                 json={"contents": [{"parts": parts}],
                       "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}},
                 timeout=90,
@@ -266,10 +338,32 @@ class GeminiImageView(APIView):
                     img = inline["data"]; mime = inline.get("mimeType") or inline.get("mime_type") or mime
                     break
             if not img:
-                detail = (data.get("error") or {}).get("message") or "No image returned."
-                return Response({"detail": f"Gemini: {detail}"[:200], "image": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        except Exception as exc:
-            return Response({"detail": f"Gemini error: {exc}"[:200], "image": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                # Google's own words are for the log, not the screen: they are a
+                # third party's text and can carry a project number or quota name.
+                logger.error("Image ConnectZ: no image — Gemini %s: %s", r.status_code,
+                             str((data.get("error") or {}).get("message") or "no error message")[:300])
+                return Response({"detail": IMAGE_EMPTY, "image": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except Exception:
+            logger.exception("Image ConnectZ: the Gemini call failed")
+            return Response({"detail": IMAGE_DOWN, "image": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         cost = _bill(request.user, f"Image ConnectZ (Gemini)")
-        return Response({"image": f"data:{mime};base64,{img}", "cost_cents": cost, "money": round(wallet_for(request.user).money_cents / 100, 2)})
+
+        # The spend is already charged above — a storage failure past this
+        # point must not look like a refusal, so it's logged, never raised.
+        # The member still gets their image in the response either way;
+        # only the "kept" copy is at risk, and that's the half we can afford
+        # to lose on a bad day, not the half we already billed for.
+        work = None
+        try:
+            raw = base64.b64decode(img)
+            name = f"image-connectz-{int(time.time() * 1000)}.{_EXT.get(mime, 'png')}"
+            up = Upload(user=request.user, name=name, size_bytes=len(raw), content_type=mime)
+            up.file.save(name, ContentFile(raw), save=False)
+            up.save()
+            work = GeneratedImage.objects.create(user=request.user, prompt=prompt, upload=up)
+        except (binascii.Error, ValueError, OSError):
+            logger.exception("Image ConnectZ: billed but couldn't save a kept copy")
+
+        return Response({"image": f"data:{mime};base64,{img}", "work": _image_dict(work, request) if work else None,
+                          "cost_cents": cost, "money": round(wallet_for(request.user).money_cents / 100, 2)})

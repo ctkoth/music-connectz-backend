@@ -24,7 +24,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import over_char_limit
+from .catalog import BATTLE_CALLOUT_ENERGY, BATTLE_HOST_ENERGY, over_char_limit
 from .gates import clean_gates, describe, failing_gate, member_metrics, refusal
 from .models import (
     BATTLE_MIN_RATINGS,
@@ -33,7 +33,9 @@ from .models import (
     BattleEntry,
     BattleWager,
     MoneyBattleVote,
+    award_energy,
     award_spinaz,
+    spend_energy,
     spend_spinaz,
     blocked_user_ids,
     item_rating_median,
@@ -157,7 +159,8 @@ class BattlesView(APIView):
             "mine": set(BattleEntry.objects.filter(battle_id__in=ids, user=request.user)
                         .values_list("battle_id", flat=True)),
         }
-        return Response({"battles": [battle_dict(b, request, with_entries=False,
+        return Response({"challenge_cost_energy": BATTLE_CALLOUT_ENERGY, "host_cost_energy": BATTLE_HOST_ENERGY,
+                         "battles": [battle_dict(b, request, with_entries=False,
                                                  batched=batched) for b in qs]})
 
     def post(self, request):
@@ -178,13 +181,62 @@ class BattlesView(APIView):
             entry_spinaz = max(0, int(d.get("entry_spinaz") or 0))
         except (TypeError, ValueError):
             entry_spinaz = 0
-        b = Battle.objects.create(
-            host=request.user, title=title[:160], description=description,
-            genre=str(d.get("genre", "") or "")[:40],
-            gates=clean_gates(d.get("gates")), entry_spinaz=entry_spinaz,
-            **_media(d),
-        )
+        with transaction.atomic():
+            if BATTLE_HOST_ENERGY and spend_energy(request.user, BATTLE_HOST_ENERGY, f"Host battle: {title[:60]}",
+                            app_key="battlez", target="battlez:host") is None:
+                have = max(0, wallet_for(request.user).energy or 0)
+                return Response({
+                    "detail": f"Hosting an open battle costs {BATTLE_HOST_ENERGY} ⚡ and you have {have}. "
+                              "Nothing was posted or charged.",
+                    "insufficient": True, "resource": "energy",
+                    "cost": {"resource": "energy", "amount": BATTLE_HOST_ENERGY},
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+            b = Battle.objects.create(
+                host=request.user, title=title[:160], description=description,
+                genre=str(d.get("genre", "") or "")[:40],
+                gates=clean_gates(d.get("gates")), entry_spinaz=entry_spinaz,
+                **_media(d),
+            )
         return Response(battle_dict(b, request), status=status.HTTP_201_CREATED)
+
+
+class BattlePublicView(APIView):
+    """GET /api/economy/battlez/<pk>/public/ — a battle as a stranger may see it.
+
+    Battles are open to every age inside the app, and stay so. This read is for the
+    shared link, where the viewer is anybody on the internet: an under-18 member's
+    take, name and win are left out of it entirely — not blurred, not counted — so the
+    page cannot be used to find them. Unknown ages count as adults, the same rule
+    `is_minor` follows everywhere. Read-only; entering and rating need an account.
+    """
+    from rest_framework.permissions import AllowAny
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, pk):
+        from .models import is_minor
+        b = Battle.objects.select_related("host__mcz_profile", "winner__mcz_profile").filter(pk=pk).first()
+        if not b:
+            return Response({"detail": "battle not found"}, status=status.HTTP_404_NOT_FOUND)
+        host_ok = not is_minor(b.host)
+        entries = []
+        for e in b.entries.select_related("user__mcz_profile").order_by("created_at"):
+            if is_minor(e.user):
+                continue
+            entries.append({"username": e.user.username, "title": e.title,
+                            "media_type": e.media_type, "media_url": e.media_url,
+                            "image_url": e.image_url, "created_at": e.created_at.isoformat()})
+        winner = b.winner.username if b.winner_id and not is_minor(b.winner) else ""
+        return Response({
+            "id": b.id, "title": b.title, "kind": b.kind or "1v1", "mode": b.mode,
+            "genre": b.genre, "status": b.status,
+            "ends_at": b.ends_at.isoformat() if b.ends_at else None,
+            "host": b.host.username if host_ok else "",
+            "description": b.description if host_ok else "",
+            "media_type": b.media_type if host_ok else "", "media_url": b.media_url if host_ok else "",
+            "image_url": b.image_url if host_ok else "",
+            "entries": entries, "winner": winner,
+        })
 
 
 class BattleDetailView(APIView):
@@ -531,15 +583,29 @@ class BattleChallengeView(APIView):
                 return Response(body, status=status.HTTP_403_FORBIDDEN)
 
         kind = str(d.get("kind", "1v1")).lower()
-        b = Battle.objects.create(
-            host=request.user, opponent=opponent,
-            title=(title or f"@{request.user.username} vs @{opponent.username}")[:160],
-            description=str(d.get("description", "") or ""),
-            genre=str(d.get("genre", "") or "")[:40],
-            mode=Battle.MODE_1V1,
-            kind=kind if kind in ("1v1", "freestyle", "cypher") else "1v1",
-            gates=gates, status=Battle.STATUS_PENDING, **_media(d),
-        )
+        # Charged with the create in one unit, so a failed call-out is free.
+        with transaction.atomic():
+            if BATTLE_CALLOUT_ENERGY and spend_energy(request.user, BATTLE_CALLOUT_ENERGY,
+                            f"Challenge to @{opponent.username}",
+                            app_key="battlez", target="battlez:challenge") is None:
+                have = max(0, wallet_for(request.user).energy or 0)
+                return Response({
+                    "detail": f"Calling someone out costs {BATTLE_CALLOUT_ENERGY} ⚡ and you have {have}. "
+                              "Nothing was sent or charged. It is refunded if they decline.",
+                    "insufficient": True, "resource": "energy",
+                    "cost": {"resource": "energy", "amount": BATTLE_CALLOUT_ENERGY},
+                    "energy_needed": BATTLE_CALLOUT_ENERGY, "energy_available": have,
+                    "energy_short": BATTLE_CALLOUT_ENERGY - have,
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+            b = Battle.objects.create(
+                host=request.user, opponent=opponent,
+                title=(title or f"@{request.user.username} vs @{opponent.username}")[:160],
+                description=str(d.get("description", "") or ""),
+                genre=str(d.get("genre", "") or "")[:40],
+                mode=Battle.MODE_1V1,
+                kind=kind if kind in ("1v1", "freestyle", "cypher") else "1v1",
+                gates=gates, status=Battle.STATUS_PENDING, **_media(d),
+            )
         notify(opponent, "system",
                f"@{request.user.username} challenged you to '{b.title}' ⚔️",
                actor=request.user, item_id=b.item_key)
@@ -565,6 +631,9 @@ class BattleRespondView(APIView):
         if not bool((request.data or {}).get("accept", True)):
             b.status = Battle.STATUS_DECLINED
             b.save(update_fields=["status", "updated_at"])
+            if b.mode == Battle.MODE_1V1:
+                award_energy(b.host, BATTLE_CALLOUT_ENERGY, f"Refund: @{request.user.username} declined",
+                             app_key="battlez", target="battlez:challenge")
             notify(b.host, "system", f"@{request.user.username} declined '{b.title}'.",
                    actor=request.user, item_id=b.item_key)
             return Response(battle_dict(b, request))

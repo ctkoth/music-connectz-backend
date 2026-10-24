@@ -28,7 +28,7 @@ from .models import (
 from . import stripe_cancel
 from .serializers import WalletSerializer
 from .models import wallet_for
-from .catalog import FOUNDING_PLANS, FOUNDING_TIER, PREMIUM_PLANS, STATZ_PLANS
+from .catalog import FOUNDING_DISCOUNT, FOUNDING_PLANS, FOUNDING_TIER, PREMIUM_PLANS, STATZ_PLANS
 
 MIN_CENTS = 100          # $1 minimum
 MAX_CENTS = 1_000_000    # $10,000 cap per funding
@@ -225,7 +225,7 @@ class FoundingCheckoutView(APIView):
         stripe.api_key = settings.STRIPE_SECRET_KEY
         price_data = {
             "currency": "usd",
-            "product_data": {"name": f"Music ConnectZ — Founding StatZ ({plan}, 50% off)"},
+            "product_data": {"name": f"Music ConnectZ — Founding StatZ ({plan}, {round(FOUNDING_DISCOUNT * 100)}% off)"},
             "unit_amount": cfg["cents"],
         }
         if cfg["interval"]:
@@ -499,8 +499,9 @@ class StripeWebhookView(APIView):
                 # subscription, so Premium followed by StatZ would leave Premium
                 # unnamed by any row. The ledger keeps every one.
                 stripe_cancel.remember(user, obj.get("customer"), obj.get("subscription"), kind)
-        elif etype == "identity.verification_session.verified":
-            # Stripe Identity confirmed a government ID — set 18+ iff the DOB proves it.
+        elif etype.startswith("identity.verification_session."):
+            # Every ending is recorded (verified, requires_input with its reason, canceled,
+            # processing); 18+ is set only on a verified pass whose DOB proves it.
             from .identity import mark_18plus_from_session
             mark_18plus_from_session(event["data"]["object"] or {})
         elif etype in ("invoice.payment_succeeded", "invoice.paid"):

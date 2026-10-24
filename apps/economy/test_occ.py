@@ -100,7 +100,11 @@ class SpecTests(TestCase):
         # above them.
         tabs = {t["key"]: t for t in self.spec()["tabs"]}
         self.assertFalse(tabs["gitz"]["allowed"])
-        self.assertFalse(tabs["logz"]["allowed"])
+        self.assertFalse(tabs["pathz"]["allowed"])
+        # LogZ is FREE — features.py says so and test_logz pins it. This table
+        # typed it as Premium for a long time, so the tab grid told a Free member
+        # to upgrade for the one screen that answers "what took my ⚡".
+        self.assertTrue(tabs["logz"]["allowed"])
         self.assertTrue(tabs["taskz"]["allowed"])
         # 21 from the spec + WorkZ, which the spec's own rule (nothing is a
         # dead end) demanded once OCC started producing things.
@@ -142,19 +146,27 @@ class SpecTests(TestCase):
 
     def test_it_says_plainly_that_it_cannot_run_code(self):
         # Better said once than discovered by pressing a button that does
-        # nothing.
+        # nothing — and said in a member's words: the env-var names are for
+        # whoever runs the server.
         spec = self.spec()
         self.assertFalse(spec["can_execute"])
-        self.assertIn("sandbox", spec["execute_note"])
+        self.assertEqual(spec["execute_note"], "Running code isn't switched on yet.")
+        self.assertNotIn("MODAL_TOKEN", spec["execute_note"])
 
     def test_ico_is_among_the_image_exports(self):
         self.assertIn("ico", self.spec()["image_exports"])
 
-    def test_exports_route_to_an_intelligence_app_by_media_type(self):
+    def test_exports_route_to_an_app_the_client_mounts_by_media_type(self):
         routes = self.spec()["export_routes"]
-        self.assertEqual(routes["image"]["app"], "imagez")
+        self.assertEqual(routes["audio"]["app"], "distributez")
         self.assertEqual(routes["video"]["app"], "directz")
-        self.assertTrue(all(r.get("target") for r in routes.values()))
+        self.assertEqual(routes["document"]["app"], "sentenceconnectz")
+        self.assertEqual(routes["game"]["app"], "gamez")
+        # `imagez` and `writez` were never tabs, and code was routed to OCC
+        # itself. A kind with no real destination says so with an empty app and
+        # the client draws no door — see test_occ_routes for the allow-list.
+        self.assertEqual(routes["image"]["app"], "")
+        self.assertEqual(routes["code"]["app"], "")
 
     def test_the_taxonomy_is_served_whole(self):
         genres = self.spec()["game_genres"]
@@ -254,12 +266,29 @@ class TaskZTests(TestCase):
         self.assertEqual(resp.status_code, 403, resp.content)
         self.assertEqual(resp.data["required_tier"], "statz")
 
-    def test_automation_marks_a_task_as_run_without_asking(self):
+    def test_a_task_typed_in_is_a_todo_and_nothing_claims_to_have_run_it(self):
+        # It used to be flagged `automated` when AutomationZ was on, and the
+        # member was notified "🤖 OCC ran '…' automatically" — while nothing
+        # anywhere picked a queued row up. A notification claiming work that
+        # never happened is the one thing this module must never send.
         as_tier(self.user, TIER_STATZ)
         s = occ_settings_for(self.user)
         s.automation = True
         s.save(update_fields=["automation"])
-        self.assertTrue(self.add().data["automated"])
+        resp = self.add()
+        self.assertFalse(resp.data["automated"])
+        self.assertEqual(resp.data["status"], "queued")
+        self.assertFalse(self.user.notifications.exists())
+        self.assertNotIn("ran", " ".join(n.text for n in self.user.notifications.all()))
+
+    def test_a_task_cannot_be_born_claiming_a_reversal_or_a_run(self):
+        # `undo_payload` and `automated` are records of what OCC DID, written by
+        # the code that did it — not fields a request body can fill in.
+        resp = self.add(undo_payload={"action": "clear_failed", "ids": [1]}, automated=True)
+        task = OccTask.objects.get(pk=resp.data["id"])
+        self.assertEqual(task.undo_payload, {})
+        self.assertFalse(task.automated)
+        self.assertFalse(resp.data["undoable"])
 
     def test_a_suggestion_is_never_automated_even_with_automation_on(self):
         # The whole point of a suggestion is that it waits to be read.
@@ -294,32 +323,108 @@ class TaskZTests(TestCase):
 
 
 class UndoTests(TestCase):
+    """Undo puts something back, or it is not offered.
+
+    It used to set the status to "undone" and send "↩️ OCC undid '…'" without ever
+    reading the payload — a status label flipped and a notification claiming a
+    reversal nothing performed.
+    """
+
     def setUp(self):
         self.client = APIClient()
         self.user = User.objects.create_user("k", "k@e.com", PW)
         self.client.force_authenticate(self.user)
 
+    def cleared(self, n=2):
+        """`n` tasks that OCC cancelled for the member, and the task that did it."""
+        ids = [OccTask.objects.create(user=self.user, title=f"f{i}",
+                                      status=OccTask.STATUS_CANCELLED).id
+               for i in range(n)]
+        return ids
+
     def done(self, undo=True):
+        ids = self.cleared() if undo else []
         t = OccTask.objects.create(
-            user=self.user, title="Rename", status=OccTask.STATUS_DONE,
+            user=self.user, title="Clear 2 failed tasks", status=OccTask.STATUS_DONE,
             finished_at=timezone.now(),
-            undo_payload={"restore": "old.py"} if undo else {})
+            undo_payload={"action": "clear_failed", "ids": ids} if undo else {})
+        t.cleared_ids = ids
         return t
 
     def undo(self, t):
         return self.client.post(f"/api/economy/occ/taskz/{t.pk}/undo/", {}, format="json")
 
-    def test_a_finished_task_can_be_taken_back(self):
+    def test_a_finished_task_is_actually_put_back(self):
         t = self.done()
         resp = self.undo(t)
         self.assertEqual(resp.status_code, 200, resp.content)
         self.assertEqual(resp.data["status"], "undone")
+        # The point: the tasks OCC cancelled are failed again, not just relabelled.
+        self.assertEqual(
+            set(OccTask.objects.filter(id__in=t.cleared_ids).values_list("status", flat=True)),
+            {OccTask.STATUS_FAILED})
+        self.assertIn("Put 2 failed task(s) back", resp.data["detail"])
+
+    def test_the_notification_says_what_moved(self):
+        t = self.done()
+        self.undo(t)
+        note = self.user.notifications.first()
+        self.assertIn("undid", note.text)
+        self.assertIn("Put 2 failed task(s) back", note.text)
+
+    def test_it_only_reverses_once(self):
+        t = self.done()
+        self.assertEqual(self.undo(t).status_code, 200)
+        OccTask.objects.filter(id__in=t.cleared_ids).update(status=OccTask.STATUS_CANCELLED)
+        self.assertEqual(self.undo(t).status_code, 409)
+        self.assertEqual(
+            set(OccTask.objects.filter(id__in=t.cleared_ids).values_list("status", flat=True)),
+            {OccTask.STATUS_CANCELLED}, "the second tap must not reverse again")
+
+    def test_a_task_the_member_changed_since_is_left_alone(self):
+        # Restoring from a stale list of ids would undo THEIR decision.
+        t = self.done()
+        OccTask.objects.filter(pk=t.cleared_ids[0]).update(status=OccTask.STATUS_DONE)
+        resp = self.undo(t)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(OccTask.objects.get(pk=t.cleared_ids[0]).status, OccTask.STATUS_DONE)
+        self.assertEqual(OccTask.objects.get(pk=t.cleared_ids[1]).status, OccTask.STATUS_FAILED)
+        self.assertIn("1 had changed since", resp.data["detail"])
+
+    def test_someone_elses_tasks_are_never_restored(self):
+        other = User.objects.create_user("o", "o@e.com", PW)
+        theirs = OccTask.objects.create(user=other, title="x", status=OccTask.STATUS_CANCELLED)
+        t = OccTask.objects.create(
+            user=self.user, title="Clear", status=OccTask.STATUS_DONE,
+            finished_at=timezone.now(),
+            undo_payload={"action": "clear_failed", "ids": [theirs.id]})
+        self.undo(t)
+        theirs.refresh_from_db()
+        self.assertEqual(theirs.status, OccTask.STATUS_CANCELLED)
 
     def test_a_task_that_cannot_describe_its_reversal_says_so(self):
         # Better to refuse than to offer a button that can't put anything back.
         resp = self.undo(self.done(undo=False))
         self.assertEqual(resp.status_code, 409, resp.content)
         self.assertIn("can't be undone", resp.data["detail"])
+
+    def test_a_record_with_no_reverser_is_not_undoable_either(self):
+        # A payload that merely EXISTS is a record of what was done, not a way
+        # back. These two are what the old code would have "undone" by relabelling.
+        for payload in ({"restore": "old.py"},
+                        {"action": "claim_badges", "granted": ["ear"], "lost": []}):
+            t = OccTask.objects.create(
+                user=self.user, title="x", status=OccTask.STATUS_DONE,
+                finished_at=timezone.now(), undo_payload=payload)
+            self.assertFalse(
+                self.client.get("/api/economy/occ/taskz/").data["tasks"][0]["undoable"], payload)
+            resp = self.undo(t)
+            self.assertEqual(resp.status_code, 409, payload)
+            t.refresh_from_db()
+            self.assertEqual(t.status, OccTask.STATUS_DONE, "it must not be relabelled")
+            self.assertFalse(self.user.notifications.exists(),
+                             "no 'OCC undid …' for something nothing undid")
+            t.delete()
 
     def test_the_window_is_the_tier_ladder(self):
         as_tier(self.user, TIER_FREE)
@@ -345,7 +450,7 @@ class UndoTests(TestCase):
         self.done()
         self.done(undo=False)
         rows = self.client.get("/api/economy/occ/taskz/").data["tasks"]
-        self.assertEqual({r["undoable"] for r in rows}, {True, False})
+        self.assertEqual({r["undoable"] for r in rows if r["status"] == "done"}, {True, False})
 
     def test_a_queued_task_is_cancelled_not_undone(self):
         t = OccTask.objects.create(user=self.user, title="x", status=OccTask.STATUS_QUEUED)

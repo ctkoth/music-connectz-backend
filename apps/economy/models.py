@@ -171,6 +171,11 @@ class Transaction(models.Model):
     # it is the only one that is not revenue, not a reward and not an internal
     # move — totalling it as any of those would overstate all three.
     KIND_PAYOUT = "payout"
+    # A purchase undone. Its own kind rather than another KIND_SPEND/KIND_REWARD
+    # pair, because a refund moves the FULL price both ways (the seller eats the
+    # developer tax), which would read as a second purchase if it were logged
+    # the same way the first one was.
+    KIND_REFUND = "refund"
     KIND_CHOICES = [
         (KIND_ADD, "Add funds"),
         (KIND_PURCHASE, "Purchase"),
@@ -180,6 +185,7 @@ class Transaction(models.Model):
         (KIND_INTELLIGENCE, "Intelligence royalty"),
         (KIND_TRANSFER, "Transfer"),
         (KIND_PAYOUT, "Payout to bank"),
+        (KIND_REFUND, "Refund"),
     ]
 
     # Which resource moved. Money was the only thing ever recorded, so SpinaZ
@@ -229,6 +235,12 @@ class Transaction(models.Model):
     # only inferred applies to navigation as much as to errors.
     app_key = models.CharField(max_length=24, blank=True, default="")
     target = models.CharField(max_length=60, blank=True, default="")
+    # What this spend BOUGHT, as "<kind>:<id>" ("take:123", "sentence:45"). A
+    # credit that leaves and buys nothing the ledger can point at is a fee; with
+    # this, a row opens onto the rating, the report and the file it paid for
+    # (logz_outcomes.py). Like app_key/target it is only ever set by the code
+    # that knows, never inferred from the note.
+    ref = models.CharField(max_length=40, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -548,9 +560,11 @@ def founding_status():
     founding StatZ prices (lifetime one-time, and grandfathered year/month)."""
     from .catalog import (
         FOUNDING_LIMIT, FOUNDING_PRICE_CENTS, LIFETIME_PRICE_CENTS, FOUNDING_TIER,
-        FOUNDING_YEAR_CENTS, FOUNDING_MONTH_CENTS,
+        FOUNDING_YEAR_CENTS, FOUNDING_MONTH_CENTS, FOUNDING_DISCOUNT,
     )
-    claimed = Membership.objects.filter(lifetime=True).count()
+    # A seat is a founding membership of ANY plan. Counting only lifetime seats let
+    # monthly and yearly founding rates sell without end, while the terms said 50.
+    claimed = Membership.objects.filter(founding=True).count()
     return {
         "claimed": claimed,
         "limit": FOUNDING_LIMIT,
@@ -561,6 +575,7 @@ def founding_status():
         "full_price_cents": LIFETIME_PRICE_CENTS,
         "year_cents": FOUNDING_YEAR_CENTS,
         "month_cents": FOUNDING_MONTH_CENTS,
+        "discount_pct": round(FOUNDING_DISCOUNT * 100),
     }
 
 
@@ -590,7 +605,7 @@ def grant_lifetime(user):
         m = Membership.objects.select_for_update().get_or_create(user=user)[0]
         if m.lifetime:
             return m
-        claimed = Membership.objects.select_for_update().filter(lifetime=True).count()
+        claimed = Membership.objects.select_for_update().filter(founding=True).count()
         if claimed >= FOUNDING_LIMIT:
             return None
         m.lifetime = True
@@ -631,20 +646,79 @@ def credit_funds(user, amount_cents, note="Add funds"):
 
 
 def pay_between(payer, payee, amount_cents, note=""):
-    """Move money payer -> payee, applying the payer's developer tax. The payee
-    receives the net; the platform keeps the tax. Caller must ensure the payer
-    has the balance and wrap in a transaction. Returns (dev_cents, net_cents)."""
+    """Move real money payer -> payee, applying the payer's developer tax.
+    The payee receives the net; the platform keeps the tax. Returns
+    (dev_cents, net_cents), or None if the payer can't cover it.
+
+    A CONDITIONAL atomic decrement, the same shape `spend_spinaz` already
+    uses for SpinaZ: `filter(money_cents__gte=amount).update(F(...))` is one
+    statement the database serialises, so two concurrent calls against the
+    same balance can't both succeed. This used to be a plain read-modify-
+    write with the docstring saying "caller must ensure the payer has the
+    balance and wrap in a transaction" — every call site wrapped it in a
+    transaction and none of them obeyed the "ensure the balance" half with a
+    lock, so two concurrent spends of the same real-money balance (MerchZ, a
+    VenueZ attend, CallZ) could both pass their own unlocked check and both
+    go through. CLAUDE.md already documents this exact failure for the
+    SpinaZ/Energy wallet and fixed it there; this was the same bug, left
+    open on the one wallet field that holds real money.
+    """
+    from django.db.models import F
+
+    amount_cents = int(amount_cents)
+    if amount_cents < 0:
+        return None
+    if amount_cents == 0:
+        # A free venue, a $0 lesson that never happened — a no-op transfer
+        # is a legitimate call, not a refusal. Every call site before this
+        # fix relied on `pay_between(..., 0, ...)` succeeding trivially.
+        return (0, 0)
     m = membership_for(payer)
-    pw = wallet_for(payer)
-    rw = wallet_for(payee)
     dev, net = split_cents(amount_cents, m.dev_tax_rate)
-    pw.money_cents -= amount_cents
-    rw.money_cents += net
-    pw.save(update_fields=["money_cents", "updated_at"])
-    rw.save(update_fields=["money_cents", "updated_at"])
+    wallet_for(payer)   # make sure both rows exist before the conditional update
+    wallet_for(payee)
+    moved = Wallet.objects.filter(user=payer, money_cents__gte=amount_cents).update(
+        money_cents=F("money_cents") - amount_cents, updated_at=timezone.now())
+    if not moved:
+        return None
+    Wallet.objects.filter(user=payee).update(
+        money_cents=F("money_cents") + net, updated_at=timezone.now())
     Transaction.objects.create(user=payer, kind=Transaction.KIND_SPEND, amount_cents=-amount_cents, dev_tax_cents=dev, note=note[:200])
     Transaction.objects.create(user=payee, kind=Transaction.KIND_REWARD, amount_cents=net, dev_tax_cents=dev, note=note[:200])
     return dev, net
+
+
+def refund_cents(seller, buyer, amount_cents, note=""):
+    """Undo a sale: the buyer gets back the FULL `amount_cents` they paid,
+    and the seller's wallet is debited the same full amount — not just the
+    net they received after `pay_between`'s developer tax. That is the
+    policy choice: the seller eats the tax on a refund, same as they would
+    on any marketplace. Returns the seller's new balance, or None if they
+    can no longer cover it (they may have already spent what they earned).
+
+    A conditional atomic update, the `spend_spinaz`/`pay_between` shape:
+    `filter(money_cents__gte=amount).update(...)` is one statement the
+    database serialises, so this can't double-refund the same sale under
+    concurrent requests any more than a spend can be spent twice.
+    """
+    from django.db.models import F
+
+    amount_cents = int(amount_cents)
+    if amount_cents < 0:
+        return None
+    if amount_cents == 0:
+        return 0
+    wallet_for(seller)
+    wallet_for(buyer)
+    moved = Wallet.objects.filter(user=seller, money_cents__gte=amount_cents).update(
+        money_cents=F("money_cents") - amount_cents, updated_at=timezone.now())
+    if not moved:
+        return None
+    Wallet.objects.filter(user=buyer).update(
+        money_cents=F("money_cents") + amount_cents, updated_at=timezone.now())
+    Transaction.objects.create(user=seller, kind=Transaction.KIND_REFUND, amount_cents=-amount_cents, note=note[:200])
+    Transaction.objects.create(user=buyer, kind=Transaction.KIND_REFUND, amount_cents=amount_cents, note=note[:200])
+    return Wallet.objects.values_list("money_cents", flat=True).get(user=seller)
 
 
 def can_afford_ai(user, cost_cents):
@@ -691,7 +765,14 @@ def award_promptz(user, amount, note="PromptZ", *, app_key="", target=""):
 # looked at, in one sitting. At DAILY_PROMPT_MAX_CENTS below that is 9c a day of
 # model cost for a member paying nothing, and only for one who spends all three
 # every day.
-PROMPT_ALLOWANCE = {"free": 3, "premium": 5, "statz": 10, "debug": 10 ** 6}
+#
+# Free 4, Premium 7, StatZ 12 (Corey's call, Oct 2026). The worst case — a
+# member who spends every free prompt every day at DAILY_PROMPT_MAX_CENTS — is
+# $3.60/mo for Free, $6.30/mo against Premium's $7, and $10.80/mo against
+# StatZ's $15 ($10.50 for a founding month, so a founding member who maxes it
+# daily costs slightly more than they pay). The typical member uses far less;
+# this records the ceiling so the next move is made knowing it.
+PROMPT_ALLOWANCE = {"free": 4, "premium": 7, "statz": 12, "debug": 10 ** 6}
 
 # What ONE free daily prompt is allowed to be worth, in cents.
 #
@@ -787,7 +868,37 @@ def _consume_daily_prompt(user, cost_cents):
     return True
 
 
-def charge_ai_usage(user, cost_cents, note="AI usage", count_daily=False):
+def is_platform_owner(user):
+    """The superuser account. The one place 'who may run AI without a balance' is
+    decided, so the prompt path and Video ConnectZ cannot disagree."""
+    return bool(getattr(user, "is_superuser", False))
+
+
+# ⚡ per AI run (Corey's numbers): the engine's base times the tier's factor, rounded
+# up, at least 1. Dearer engines cost more ⚡; higher tiers pay less, the same shape
+# they earn it faster. Any run that is not one of the named engines (the coach, the
+# writer) is base 1. Taken UP TO what the member holds, never refused for it: a tier
+# says how much, never whether, and ⚡ regenerates at a floor for everybody.
+AI_ENERGY_BASE = {"haiku": 1, "sonnet": 2, "opus": 4, "fable": 8}
+AI_ENERGY_TIER_FACTOR = {"free": 1.0, "premium": 0.5, "statz": 0.25, "debug": 0.25}
+
+
+def ai_energy_cost(user, engine=None, tier=None):
+    import math
+    tier = tier or membership_for(user).tier
+    base = AI_ENERGY_BASE.get(str(engine or "").lower(), 1)
+    return max(1, math.ceil(base * AI_ENERGY_TIER_FACTOR.get(tier, 1.0)))
+
+
+def _take_ai_energy(user, engine, note):
+    from .occ_run import _spend_energy_up_to
+    taken = _spend_energy_up_to(user, ai_energy_cost(user, engine))
+    if taken:
+        log_resource(user, Transaction.RES_ENERGY, -taken, (note + " · ⚡ for the run")[:200])
+    return taken
+
+
+def charge_ai_usage(user, cost_cents, note="AI usage", count_daily=False, engine=None):
     """Debit the *minimum* cost to cover an AI model run — pure pass-through, no
     developer tax. When `count_daily` is set (a genuine prompt run) and the run is
     inside DAILY_PROMPT_MAX_CENTS, the day's free allowance is spent first and
@@ -804,8 +915,18 @@ def charge_ai_usage(user, cost_cents, note="AI usage", count_daily=False):
             user=user, kind=Transaction.KIND_SPEND, amount_cents=0,
             dev_tax_cents=0, note=(note + " · daily prompt 🏷️")[:200],
         )
+        _take_ai_energy(user, engine, note)
         return w.money_cents
     if (w.promptz or 0) + w.money_cents < cost_cents:
+        if is_platform_owner(user):
+            # The owner pays the model bill directly whatever the wallet says, so a
+            # short balance is no reason to refuse them (Corey's call). Logged at
+            # zero so LogZ still shows the run; nothing is taken.
+            Transaction.objects.create(
+                user=user, kind=Transaction.KIND_SPEND, amount_cents=0,
+                dev_tax_cents=0, note=(note + " · owner, balance short, not charged")[:200],
+            )
+            return w.money_cents
         return None
     from_promptz = min(w.promptz or 0, cost_cents)  # PromptZ first
     from_cash = cost_cents - from_promptz
@@ -819,43 +940,28 @@ def charge_ai_usage(user, cost_cents, note="AI usage", count_daily=False):
         user=user, kind=Transaction.KIND_SPEND, amount_cents=-from_cash,
         dev_tax_cents=0, note=(note + tag)[:200],
     )
+    _take_ai_energy(user, engine, note)
     return w.money_cents
 
 
-# ---- VenueZ ----
-class Venue(models.Model):
-    MODE_COLLAB = "collaborative"
-    MODE_PERF = "performance"
-    MODE_CHOICES = [(MODE_COLLAB, "Collaborative"), (MODE_PERF, "Performance")]
+def link_spend(user, ref, since, note_prefix):
+    """Point the spend a request just made at what it bought.
 
-    host = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="venues")
-    title = models.CharField(max_length=120)
-    mode = models.CharField(max_length=16, choices=MODE_CHOICES, default=MODE_COLLAB)
-    vtype = models.CharField(max_length=24, default="party")  # party/openmic/theater/show/custom
-    custom_name = models.CharField(max_length=60, blank=True, default="")
-    host_price_cents = models.PositiveIntegerField(default=0)
-    visitor_pay_cents = models.PositiveIntegerField(default=0)
-    min_attract = models.PositiveSmallIntegerField(default=0)  # 0-10, legacy
-    # All five range gates: {"rating": [lo, hi], "price": [...], "attract": ...,
-    # "age": ..., "km": [None, hi]}. Exclusive — no value for a gated metric
-    # means excluded. min_attract above is kept so old venues keep working.
-    gates = models.JSONField(default=dict, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-
-
-class VenueAttendance(models.Model):
-    venue = models.ForeignKey(Venue, on_delete=models.CASCADE, related_name="attendances")
-    visitor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="venue_attendances")
-    paid_cents = models.PositiveIntegerField(default=0)
-    earned_cents = models.PositiveIntegerField(default=0)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ("venue", "visitor")
-        ordering = ["-created_at"]
+    Billing happens before the thing it pays for exists (nothing is charged for an
+    empty answer), so the ledger row is written first and the reference is added
+    once the take or the piece has an id. Best-effort and narrow: the newest
+    unreferenced spend by this member since `since` whose note starts the same
+    way — a ledger link must never be the reason a paid result fails."""
+    try:
+        t = (Transaction.objects.filter(user=user, kind=Transaction.KIND_SPEND, ref="",
+                                        created_at__gte=since, note__startswith=str(note_prefix)[:40])
+             .order_by("-created_at").first())
+        if t:
+            t.ref = str(ref)[:40]
+            t.save(update_fields=["ref"])
+        return bool(t)
+    except Exception:                                       # pragma: no cover
+        return False
 
 
 # ---- Attractiveness (RateZ) ----
@@ -917,6 +1023,21 @@ def attractiveness_median(user):
     scores = list(AttractivenessRating.objects.filter(target=user).values_list("score", flat=True))
     scores += list(FaceRating.objects.filter(face__owner=user).values_list("score", flat=True))
     return _median(scores)
+
+
+def attractiveness_shown_medians(user_ids):
+    """`attractiveness_medians`, minus anyone who chose not to show theirs.
+
+    `Membership.attractiveness_public` has been a member's switch since RateZ shipped and only
+    the rating endpoint honoured it, so the number still rode every search card and could be
+    filtered on — a hidden score read back by stepping a range one band at a time. A member who
+    hides it has no value here, which an active range treats as "out", and nothing leaks.
+    """
+    ids = list(user_ids)
+    medians = attractiveness_medians(ids)
+    hidden = set(Membership.objects.filter(user_id__in=ids, attractiveness_public=False)
+                 .values_list("user_id", flat=True))
+    return {k: v for k, v in medians.items() if k not in hidden}
 
 
 def attractiveness_medians(user_ids):
@@ -983,6 +1104,11 @@ class Profile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="mcz_profile")
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)  # profile picture
     display_name = models.CharField(max_length=80, blank=True, default="")
+    # Which marketplaces the coach's gear advice links to, a StatZ choice:
+    # [{"store": "amazon"|"ebay", "domain": "amazon.co.uk"}]. Empty means the
+    # default (Amazon US, then eBay US). The stores and domains are a closed list
+    # (coach_upgrades.MARKETS) — a member chooses WHICH of ours, never types a URL.
+    upgrade_markets = models.JSONField(default=list, blank=True)
     # TextField, not CharField(500): the tier char limit runs to 1,500 for
     # Premium and is unlimited for StatZ, so no column width can express it.
     # The cap belongs to the tier and is applied on write, not to the storage.
@@ -1097,6 +1223,10 @@ class Profile(models.Model):
     # 18+ age verification (Stripe Identity). Set by the identity webhook once a
     # government ID confirms the member is 18 or older — gates money betting +
     # adult content. Never trust a self-reported birthday for this.
+    # Opt-in: the AI coach's scores for an instrument count beside listener ratings in the
+    # matching skill rating (royaltyfactor.blended_skill_rating). Off by default — it can lower
+    # a rating as well as raise it, so nobody gets it without choosing it.
+    coach_counts_for_skillz = models.BooleanField(default=False)
     verified_18plus = models.BooleanField(default=False, db_index=True)
     verified_18plus_at = models.DateTimeField(null=True, blank=True)
     # One-time onboarding reward: set when the member finishes the intro flow so
@@ -1257,6 +1387,80 @@ def third_party_ads_allowed(user):
     return not is_minor(user)
 
 
+NO_CROSS_AGE_CONTACT = ("Messages and calls stay between members in the same age group — under 18s with "
+                        "under 18s, adults with adults. Everything else on Music ConnectZ is still open.")
+
+
+def may_contact(a, b):
+    """Whether two members may open a one-to-one channel (a message, a call).
+
+    Not when exactly one of them is a KNOWN minor. This is the platform's ScoutZ rule —
+    no adult-to-minor contact — which the LessonZ code already states and the DM and
+    call paths did not enforce: a stranger of any age could write to a fifteen-year-old
+    by username. It is symmetric on purpose (a minor may not open a channel to an adult
+    either: the harm runs in both directions and a teen is no more able to judge an
+    adult stranger than the reverse), and unknown ages count as adults, matching
+    `is_minor`, which is the one line to tighten if the exposure ever needs to shrink.
+    """
+    return is_minor(a) == is_minor(b)
+
+
+NO_CROSS_AGE_MESSAGE = ("Messages stay between members in the same age group — except inside a collab you have "
+                        "BOTH accepted. Everything else on Music ConnectZ is still open.")
+NO_CROSS_AGE_CALL = ("Calls stay between members in the same age group — except inside a collab you have both "
+                     "accepted, and then only when you are both on StatZ. Messages inside the collab are still open.")
+_DEAL_OVER = ("released", "refunded", "cancelled")
+
+
+def _deal_accepted(deal, user):
+    """Whether `user` has said yes to being on this deal. The person who started it has by
+    starting it; everybody else has when they pressed accept (`accepted_at` on their entry).
+    Being NAMED on a deal is not consent — the initiator names whoever they like."""
+    if deal.initiator_id == user.id:
+        return True
+    for p in deal.participants or []:
+        if str(p.get("username", "")).lower() == user.username.lower():
+            return bool(p.get("accepted_at"))
+    return False
+
+
+def collab_link(a, b):
+    """A live collab both members are on AND have accepted. The one door through which an
+    adult and a minor may write to each other (Corey's call: collabs are open at any age).
+
+    The acceptance is what makes it safe to open: without it an adult could create a deal
+    naming a minor and be able to message them the same minute. A finished, refunded or
+    cancelled deal is not a link — the channel closes with the work. Either side can close
+    it sooner by withdrawing their acceptance, or by blocking (blocks are checked first)."""
+    ids = set(CollabParticipant.objects.filter(user=a).values_list("deal_id", flat=True)) & \
+        set(CollabParticipant.objects.filter(user=b).values_list("deal_id", flat=True))
+    if not ids:
+        return False
+    for deal in CollabDeal.objects.filter(pk__in=ids).exclude(status__in=_DEAL_OVER):
+        if _deal_accepted(deal, a) and _deal_accepted(deal, b):
+            return True
+    return False
+
+
+def may_message(a, b):
+    """may_contact, plus an accepted shared collab."""
+    return may_contact(a, b) or collab_link(a, b)
+
+
+def _paid_statz(user):
+    return membership_for(user).tier in (TIER_STATZ, TIER_DEBUG)
+
+
+def may_call(a, b):
+    """may_contact, plus an accepted shared collab when BOTH members are on paid StatZ
+    (Corey's call). A paid account is an accountable one — a card on file is not a throwaway —
+    and a call is the more intimate channel, so both sides carry that, not just the adult. The
+    free StatZ sample does not count: it is a window anybody can start."""
+    if may_contact(a, b):
+        return True
+    return _paid_statz(a) and _paid_statz(b) and collab_link(a, b)
+
+
 def adult_only_reason(user):
     """Why this surface is closed to them, in words, or "" when it's open."""
     if not is_minor(user):
@@ -1371,7 +1575,12 @@ def haversine_km(lat1, lng1, lat2, lng2):
 
 
 # ---- PostZ (cross-user posts with visibility + restricted-join rewards) ----
-RESTRICTED_JOIN_REWARD_SPINAZ = 300
+# What one engaged, distinct member joining a members-only post pays its author.
+# Corey values a SpinaZ at one cent, so this is the price of a visit in cash terms:
+# 300 was $3.00 minted per person for staying five seconds, and at the per-author
+# daily cap that is $1,500 a day from one account. 150 is $1.50 a head — still the
+# most any single engagement pays, because a member-only room is the scarce thing.
+RESTRICTED_JOIN_REWARD_SPINAZ = 150
 
 # --- Rating-based CollabZ splits.
 #
@@ -1547,6 +1756,16 @@ class Post(models.Model):
     embeds = models.JSONField(default=list, blank=True)
     # Optional scored-take payload (e.g. RapZ/SingZ lab result) for context on the post.
     score = models.JSONField(default=dict, blank=True)
+    # Who may see the coach's read on this post, separately from who may see the
+    # post. "" is what every existing post has and means "whoever can see the
+    # post can see the read" — exactly the behaviour before this column existed,
+    # so adding it moved nothing. "members" is signed-in members only (a public
+    # post whose song anybody can play and whose coach card says "members only"
+    # to everyone else). "private" is the author alone. The read can never be
+    # WIDER than the post: a private post's read is private whatever this says,
+    # which is enforced where the post is served (postz.coach_read_for), not here.
+    SCORE_VIS_CHOICES = [("", "Same as the post"), ("members", "Members only"), ("private", "Only me")]
+    score_visibility = models.CharField(max_length=12, choices=SCORE_VIS_CHOICES, blank=True, default="")
     visibility = models.CharField(max_length=12, choices=VIS_CHOICES, default="public")
     # The composer has always shown a genre picker and the value was discarded
     # on the way in, so every post in the app is genreless and ChartZ has
@@ -1583,6 +1802,8 @@ class Post(models.Model):
     # the author's off switch for the case where it isn't welcome.
     allow_in_playlists = models.BooleanField(default=True)
     skill_cost_cents = models.PositiveIntegerField(default=0)  # combined skill price of what's used
+    # Paid visibility (postz boost): while in the future, this post may lead the feed.
+    boosted_until = models.DateTimeField(null=True, blank=True, db_index=True)
     # Progression tracking: when did this post become eligible for next tier?
     battle_eligible_at = models.DateTimeField(null=True, blank=True)  # when rating count/avg hit threshold
     collab_eligible_at = models.DateTimeField(null=True, blank=True)  # when quality score hit threshold
@@ -1628,6 +1849,29 @@ class PostShare(models.Model):
         unique_together = ("post", "user")
 
 
+class EmbedPlay(models.Model):
+    """One member's listening to one post's embedded player, on one day.
+
+    The count shown as "N plays on Music ConnectZ" is the number of rows with
+    `counted` set. A row exists per (post, member, day) and `seconds` is
+    accumulated from heartbeats clamped to the wall clock (same method as
+    ListenProgress); it counts once `seconds` reaches EMBED_PLAY_MIN_SECONDS.
+    See apps/economy/embedplays.py. `anon_id` is the browser's id, kept only to
+    stop one browser counting twice through two accounts."""
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="embed_plays")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="embed_plays")
+    day = models.DateField()
+    seconds = models.PositiveIntegerField(default=0)
+    counted = models.BooleanField(default=False)
+    anon_id = models.CharField(max_length=40, blank=True, default="")
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("post", "user", "day")
+        indexes = [models.Index(fields=["post", "counted"], name="embedplay_post_counted")]
+
+
 class PostSale(models.Model):
     """A fan paying to support/access a post."""
     post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="sales")
@@ -1653,8 +1897,10 @@ class DailySubmission(models.Model):
 # Post progression thresholds: when PostZ becomes BattleZ/CollabZ eligible
 # Rating count needed for BattleZ (5+ ratings = eligible for competitions)
 BATTLE_RATING_THRESHOLD = 5
-# Average rating needed for CollabZ (tier-gated: Free 8.0, Premium 7.0, StatZ 6.0)
-COLLAB_RATING_THRESHOLD = {"free": 8.0, "premium": 7.0, "statz": 6.0}
+# Average rating needed for CollabZ — ONE bar for everybody (Corey's call). It was
+# 8.0 / 7.0 / 6.0 by tier, which sold a lower quality bar: a rating measures the post,
+# and what the author pays for must never change what counts as good enough.
+COLLAB_RATING_THRESHOLD = 7.0
 
 SUBMISSION_DAILY_CAP = {"free": 5, "premium": 15, "statz": 50}
 
@@ -1662,12 +1908,9 @@ SUBMISSION_DAILY_CAP = {"free": 5, "premium": 15, "statz": 50}
 def post_collab_threshold(post):
     """Rating score needed for this post to become CollabZ-eligible.
 
-    Lower tier = higher bar. StatZ gets easiest access (6.0), Free toughest (8.0).
+    The same for every author, whatever their tier.
     """
-    if not post or not post.author:
-        return 8.0
-    tier = membership_for(post.author).tier
-    return COLLAB_RATING_THRESHOLD.get(tier, 8.0)
+    return COLLAB_RATING_THRESHOLD
 
 
 def post_is_battle_eligible(post):
@@ -1819,6 +2062,27 @@ def spend_spinaz(user, amount, note="", *, app_key="", target=""):
     return Wallet.objects.values_list("spinaz", flat=True).filter(user=user).first()
 
 
+def spend_energy(user, amount, note="", *, app_key="", target=""):
+    """Take `amount` ⚡ off a member, or refuse. Returns the new balance, or None
+    if they could not afford it — `spend_spinaz`'s shape for Energy, for the same
+    reason: one conditional statement the database serialises, so two sends racing
+    on one balance cannot both pass, and the balance cannot go under zero. A
+    refused spend writes no ledger row."""
+    from django.db.models import F
+
+    amount = int(amount)
+    if amount <= 0:
+        return None
+    wallet_for(user)
+    moved = Wallet.objects.filter(user=user, energy__gte=amount).update(
+        energy=F("energy") - amount, updated_at=timezone.now())
+    if not moved:
+        return None
+    log_resource(user, Transaction.RES_ENERGY, -amount, note or "Energy",
+                 app_key=app_key, target=target)
+    return Wallet.objects.values_list("energy", flat=True).filter(user=user).first()
+
+
 def award_spinaz(user, amount, note="", *, app_key="", target=""):
     """Credit SpinAZ to a user's wallet and record it.
 
@@ -1874,9 +2138,22 @@ def log_resource(user, resource, amount, note="", *, app_key="", target="", visi
 # bonus. A member can only ever be referred once, and never by themselves.
 REFERRAL_REWARD_REFERRER_SPINAZ = 300
 REFERRAL_REWARD_JOINEE_SPINAZ = 100
+# The referrer's 300 is the biggest uncapped way to MINT SpinAZ here, and
+# registering is free: an unlimited reward per sign-up is a faucet for anyone
+# willing to make accounts, and every coin it prints dilutes everybody else's.
+# So the referrer is paid for this many referrals in any rolling 30 days; the
+# rest are still recorded, and the invite still works, but earn nothing more.
+REFERRAL_REWARD_MONTHLY_CAP = 10
 
 # Signup welcome bonus — awarded to every new user, on top of any referral bonus
 SIGNUP_WELCOME_SPINAZ = 15
+# ⚡ a new member starts with, so their first messages and comments to strangers
+# are not locked until the first hourly regeneration. Small on purpose: Energy
+# is not convertible to cash or PromptZ, so there is little to farm with it.
+SIGNUP_WELCOME_ENERGY = 10
+# The platform owner's own per-join bonus is a mint too, and anybody can
+# trigger it by registering, so it has a daily ceiling.
+OWNER_JOIN_BONUS_DAILY_CAP = 20
 
 
 class Referral(models.Model):
@@ -1899,12 +2176,22 @@ def record_referral(referrer, joinee):
     if Referral.objects.filter(joinee=joinee).exists():
         return None
     ref = Referral.objects.create(referrer=referrer, joinee=joinee)
-    award_spinaz(referrer, REFERRAL_REWARD_REFERRER_SPINAZ, "referral (referrer)",
-                 app_key="profilez", target="referral-code")
+    # Counted AFTER creating this one, so the cap is exactly "N paid per 30 days".
+    recent = Referral.objects.filter(
+        referrer=referrer, created_at__gte=timezone.now() - timedelta(days=30)).count()
+    paid = recent <= REFERRAL_REWARD_MONTHLY_CAP
+    if paid:
+        award_spinaz(referrer, REFERRAL_REWARD_REFERRER_SPINAZ, "referral (referrer)",
+                     app_key="profilez", target="referral-code")
+    # The joinee is welcomed either way: they did nothing wrong, and it is one
+    # payment per account that can only ever be referred once.
     award_spinaz(joinee, REFERRAL_REWARD_JOINEE_SPINAZ, "referral (welcome)",
                  app_key="profilez", target="referral-code")
     notify(referrer, "referral",
-           f"@{joinee.username} joined via your invite. +{REFERRAL_REWARD_REFERRER_SPINAZ} 🍥 in your balance.",
+           (f"@{joinee.username} joined via your invite. +{REFERRAL_REWARD_REFERRER_SPINAZ} 🍥 in your balance."
+            if paid else
+            f"@{joinee.username} joined via your invite. You've reached {REFERRAL_REWARD_MONTHLY_CAP} paid "
+            f"referrals in 30 days, so there is no 🍥 for this one — the next window opens as the oldest one ages out."),
            actor=joinee, item_id="referral-code")
 
     # ZodiacZ — Cancer brings people home. Fired on the REFERRER, who is the
@@ -2142,6 +2429,68 @@ def notify(user, kind, text, actor=None, item_id=""):
     return Notification.objects.create(user=user, actor=actor, kind=kind, text=text[:280], item_id=item_id or "")
 
 
+# ---- LabelZ: public label groups and e-signed artist agreements ----
+#
+# The frontend (`src/apps/LabelZ.jsx`) has called `GET/POST /api/labelz/` and
+# `/api/labelz/contracts/` since it shipped, and neither route existed: every
+# load of the tab 404'd. `management/commands/appz_usage.py` flagged this as
+# BROKEN rather than quiet for exactly that reason. These two models are the
+# feature the frontend has been waiting for.
+
+
+class Label(models.Model):
+    """A public label group. A member starts one; `LabelContract` below is
+    the signed agreement a label offers an artist — the label itself is just
+    the group and who owns it."""
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="labels_owned")
+    name = models.CharField(max_length=120)
+    bio = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Label<{self.id}> {self.name}"
+
+
+class LabelContract(models.Model):
+    """An e-signed artist agreement offered by a label to an artist. Advances
+    are display text only, never a real transfer — the frontend's own line
+    says advances settle off-platform, and this model holds it to that: there
+    is no SpinaZ or money movement anywhere in this file.
+
+    `doc_sha256` is taken once, at offer time, over exactly what was offered
+    (label, artist, title, terms, advance line) — an audit trail that can
+    prove what a signature was actually put to, even if the label's own
+    name or bio changes later.
+    """
+    STATUS_OFFERED, STATUS_SIGNED, STATUS_DECLINED = "offered", "signed", "declined"
+    STATUS_CHOICES = [
+        (STATUS_OFFERED, "Offered"), (STATUS_SIGNED, "Signed"), (STATUS_DECLINED, "Declined"),
+    ]
+    label = models.ForeignKey(Label, on_delete=models.CASCADE, related_name="contracts")
+    artist = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="label_contracts")
+    title = models.CharField(max_length=200, default="Artist Agreement")
+    terms_text = models.TextField()
+    advance_display = models.CharField(max_length=80, blank=True, default="")
+    doc_sha256 = models.CharField(max_length=64, blank=True, default="")
+    owner_signed_name = models.CharField(max_length=200, blank=True, default="")
+    artist_signed_name = models.CharField(max_length=200, blank=True, default="")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OFFERED)
+    created_at = models.DateTimeField(auto_now_add=True)
+    signed_at = models.DateTimeField(null=True, blank=True)
+    declined_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["artist", "status"]), models.Index(fields=["label", "status"])]
+
+    def __str__(self):
+        return f"LabelContract<{self.id}> {self.label_id}->{self.artist_id} {self.status}"
+
+
 # ---- DupeZ: one person, more than one account ----
 #
 # Two accounts belonging to the same person is not, by itself, misconduct — it
@@ -2227,10 +2576,42 @@ class VoicePrefs(models.Model):
     emoji = models.CharField(max_length=8, default="heavy")
     depth = models.CharField(max_length=8, default="normal")
     slang = models.BooleanField(default=False)
+    # Which voice each surface writes in, when the member has chosen one:
+    # {"coach": "custom:12", "writer": "preset:corey", "occ": "preset:technical"}.
+    # A missing surface follows `style` above, so everything that existed before
+    # this column keeps its voice. The ids are validated where they are read
+    # (voice.resolve), never trusted from here.
+    surface_voices = models.JSONField(default=dict, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"VoicePrefs<{self.user}: {self.style}/{self.emoji}>"
+
+
+class CustomVoice(models.Model):
+    """A voice a StatZ member wrote for themselves, or for a character.
+
+    Everything that shapes the voice is MEMBER-AUTHORED TEXT, so it is handed to
+    a model as data describing a tone and never as instructions (voice.py wraps
+    it and says so). `spec` carries the dials as a JSON map so adding a dial is
+    a code change and not a migration; `personality` is the four-slot PersonalitieZ
+    code, read positionally (personalityz.clean_code). A voice changes how
+    something is WORDED. It never changes a score, a price or a rule, and the
+    four-rule paradigm is appended after it in every prompt.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="custom_voices")
+    name = models.CharField(max_length=60)
+    bio = models.TextField(blank=True, default="")
+    personality = models.CharField(max_length=4, blank=True, default="")
+    spec = models.JSONField(default=dict, blank=True)
+    sample = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
 
 
 def voice_prefs_for(user):
@@ -2857,6 +3238,11 @@ class ItemRating(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="item_ratings")
     item_id = models.CharField(max_length=160, db_index=True)
     score = models.PositiveSmallIntegerField()  # 1-10
+    # Why, in a listener's own words — optional, one line. A human reason beside the
+    # AI's is what makes a rating trusted (Genius is "the reason behind it, written by
+    # people"). Shown ONLY to the person it is about, never to other members and never
+    # on a public card, because it is a stranger's text about somebody's work.
+    reason = models.CharField(max_length=200, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True, null=True)  # window anchor
     updated_at = models.DateTimeField(auto_now=True)
     edited_at = models.DateTimeField(null=True, blank=True)
@@ -2941,6 +3327,17 @@ class MerchPurchase(models.Model):
     price_cents = models.PositiveIntegerField(default=0)
     dev_tax_cents = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
+    # There was no refund/dispute path at all until this: once a purchase
+    # existed there was nowhere for "item misdescribed" or "buyer regrets it"
+    # to go. Corey's call on who eats the fee: the SELLER does — a refund
+    # gives the buyer back the full `price_cents`, not just what the seller
+    # received net of the platform's cut, so the seller is out the tax too.
+    # That is the opposite of `pay_between`'s own split on the way in, which
+    # is why the refund is its own helper rather than `pay_between` run in
+    # reverse.
+    refunded = models.BooleanField(default=False)
+    refunded_at = models.DateTimeField(null=True, blank=True)
+    refund_reason = models.CharField(max_length=200, blank=True, default="")
 
     class Meta:
         ordering = ["-created_at"]
@@ -3548,15 +3945,70 @@ def claim_trial_take(user, token):
     take.save(update_fields=["claimed_by", "claimed_at"])
     if take.app_key == "bodiez":
         _claim_bodiez_trial(user, take)
+    elif take.scored:
+        _claim_coached_trial(user, take)
     return take
+
+
+def _claim_coached_trial(user, take):
+    """A scored trial take becomes the first row of the member's coach history.
+
+    The docstring below used to say the history "reads it back" through `claimed_by`;
+    nothing did, so the take somebody signed up to keep was never shown to them again.
+    It goes through `takescorez.record`, the same writer a member's own take uses, dated
+    when it was actually performed. Best-effort, like the rest of the claim.
+    """
+    try:
+        from .instruments import INSTRUMENTS
+        if take.app_key not in INSTRUMENTS:
+            return None
+        ref = f"trial:{take.pk}"
+        if TakeScore.objects.filter(user=user, ref=ref).exists():
+            return None                     # already in their history: a re-run adds nothing
+        from .takescorez import record
+        row = record(user, take.app_key, take.result or {}, source="trial", ref=ref)
+        if row:
+            TakeScore.objects.filter(pk=row.pk).update(created_at=take.created_at)
+            # The take's XP lands with it, once (the ref check above stops a re-run), so a
+            # new member's first level-up is something they already did.
+            try:
+                from apps.skillz.models import TrainingProfile
+                from .vocalcoach import coach_xp_base
+                r = take.result or {}
+                prof, _ = TrainingProfile.objects.get_or_create(user=user, app_key=take.app_key)
+                prof.add_xp(coach_xp_base(r.get("score_exact", r.get("score"))))
+                prof.save(update_fields=["xp"])
+            except Exception:                               # pragma: no cover
+                pass
+        return row
+    except Exception:                                       # pragma: no cover
+        return None
+
+
+def backfill_trial_history(write=False):
+    """Every take claimed before `_claim_coached_trial` existed, put into its owner's history.
+
+    Returns the takes that were (or, dry, would be) written. Safe to run any number of
+    times: a take whose `trial:<pk>` row exists is skipped, so a second run writes nothing.
+    """
+    from .instruments import INSTRUMENTS
+    owed = []
+    for take in (TrialTake.objects.filter(claimed_by__isnull=False, scored=True, app_key__in=list(INSTRUMENTS))
+                 .select_related("claimed_by").order_by("pk")):
+        if TakeScore.objects.filter(user=take.claimed_by, ref=f"trial:{take.pk}").exists():
+            continue
+        if write and _claim_coached_trial(take.claimed_by, take) is None:
+            continue
+        owed.append(take)
+    return owed
 
 
 def _claim_bodiez_trial(user, take):
     """The exercise a BodieZ trial visitor picked becomes a real routine on
     their new account, in Inbox where every hand-built routine starts.
 
-    SingZ and RapZ's claim already carries the take's SCORE into the new
-    account via `claimed_by` — a member's coach history reads it back. BodieZ
+    A coached take's claim writes a row into the member's coach history
+    (`_claim_coached_trial`). BodieZ
     has no equivalent history row for one arithmetic set, so the thing worth
     keeping is what they were BUILDING: the exercise, reps and weight they
     picked stop being a page that vanishes with the tab and become the first
@@ -4284,7 +4736,7 @@ BADGES = {
         "icon": "badge_founding.png", "name": "Founding Fifty", "emoji": "🏛️", "title": "Founding Fifty", "gifted": False,
         "desc": f"One of the first {FOUNDING_SEATS} members to pay for this.",
         "how": f"Claim a founding seat in MembershipZ — {FOUNDING_SEATS} of them, "
-               "at half price, and when they're gone they're gone.",
+               "at the founding discount, and when they're gone they're gone.",
         # x2, matching Sexy on its own and clearing it once you have also
         # proven an audience (x1.25 -> 2.5). A member who paid $150 for one of
         # fifty scarce seats should not earn LESS than a member the room rated
@@ -4293,7 +4745,7 @@ BADGES = {
         # x1.5 was the first attempt and it did not work: 1.5 x 1.25 = 1.875,
         # still under Sexy's 2.0. The test that pins the ordering caught it.
         "effects": {"energy_multiplier": 2.0},
-        "effect_note": "Double Energy, on top of the half-price seat itself.",
+        "effect_note": "Double Energy, on top of the discounted seat itself.",
         "check": lambda u: membership_for(u).founding,
     },
     # ---- earned ----
@@ -5344,6 +5796,11 @@ class JournalMention(models.Model):
 # the client can't quietly start a new, never-analysed event kind.
 FUNNEL_KINDS = (
     ("landing_view", "Landing page viewed"),
+    # Which landing button sent them to the trial: the headline, the "what you do
+    # now vs here" comparison, or the doors further down. landing_view -> try_view
+    # says how many went; this says what convinced them, which is the question the
+    # comparison exists to answer.
+    ("landing_cta", "Landing button to the trial pressed"),
     ("try_view", "Trial take screen opened"),
     # Between opening the trial and getting a number there is a RECORDER, and
     # for the whole life of this funnel it was one unmeasured step. Thirteen
@@ -6102,6 +6559,10 @@ class BodieZSet(models.Model):
     # arm / ONE leg. A one-arm set at 40 is not a 40 set, so records, ratings
     # and "last time" compare a set only with sets done the same way.
     one_sided = models.CharField(max_length=3, blank=True, default="")
+    # Where the member PUT this set in a typed-in or edited workout (1-based). 0 on a set
+    # logged live, which reads in the order it happened. Without it, dragging an
+    # exercise or a set into a new order saved and came back in creation order.
+    position = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -6432,6 +6893,7 @@ BUCKETS = (
     ("anytime", "Anytime 👐🏼"),
     ("someday", "Someday ❓"),
     ("logbook", "Logbook 🧾"),
+   ("trash", "Trash 🗑️"),
 )
 
 # WHERE a task came from, which is the whole basis of what it may pay.
@@ -6467,6 +6929,14 @@ class LilithTask(models.Model):
     # Where doing it actually happens. goToSpot(app_key, target) on the client.
     app_key = models.CharField(max_length=32, blank=True, default="")
     target = models.CharField(max_length=64, blank=True, default="")
+    # The starter it was made from (lilith_starters.py), "" when the member wrote it.
+    template = models.CharField(max_length=40, blank=True, default="")
+    # When it went to the Trash (bucket == "trash"); emptied for good after TRASH_DAYS. Null otherwise.
+    trashed_at = models.DateTimeField(null=True, blank=True)
+    # A VERIFIED action (lilith_actions.py): Lilith ticks it herself when the platform's own
+    # records show the member did the thing `goal` times since this task was made.
+    action = models.CharField(max_length=24, blank=True, default="")
+    goal = models.PositiveSmallIntegerField(default=1)
     due = models.DateTimeField(null=True, blank=True)
     routine = models.ForeignKey("LilithRoutine", null=True, blank=True,
                                 on_delete=models.SET_NULL, related_name="tasks")
@@ -6491,6 +6961,17 @@ class LilithRoutine(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
                              related_name="lilith_routines")
     title = models.CharField(max_length=140)
+    note = models.TextField(blank=True, default="")
+    # How often it is kept. The streak counts PERIODS in a row (days, ISO weeks, calendar
+    # months), and `last_done` is the date it was last kept within one.
+    CADENCES = (("daily", "Daily"), ("weekly", "Weekly"), ("monthly", "Monthly"))
+    cadence = models.CharField(max_length=8, choices=CADENCES, default="daily")
+    template = models.CharField(max_length=40, blank=True, default="")
+    # A routine in the Trash is out of the ceiling, the sweep and the board, and restorable.
+    trashed_at = models.DateTimeField(null=True, blank=True)
+    # A VERIFIED action: kept by Lilith when the records show `goal` of it in the period.
+    action = models.CharField(max_length=24, blank=True, default="")
+    goal = models.PositiveSmallIntegerField(default=1)
     # Which real action closes it, when there is one. A routine pointing at a
     # platform action is worth more than one pointing at nothing, for the
     # same reason a task is.
@@ -6618,6 +7099,20 @@ class TakeScore(models.Model):
     # recommendation is made of. Stored rather than derived so "what has been
     # weakest lately" is a group-by instead of a scan.
     weakest = models.CharField(max_length=24, blank=True, default="", db_index=True)
+    # The gear and settings advice a member paid for on this take, kept so
+    # re-opening it costs nothing: {markets, items[], references[], summary,
+    # model, cost_cents, at}. Empty until they ask for it — it is opt-in and
+    # priced, and a take that never asked has nothing here.
+    upgrades = models.JSONField(default=dict, blank=True)
+    # The coach's read of this take, kept so the history can SHOW it and carry it
+    # into another app: {verdict, strengths, fixes, practice, exact, hook, feelz}.
+    # Prose and numbers the coach produced — never the lyrics it transcribed, which
+    # are the member's words and were only ever used to score.
+    read = models.JSONField(default=dict, blank=True)
+    # The public share link's token, once one exists. Kept ON the take so sharing
+    # a past session returns the same link every time instead of minting a new
+    # card per press, and so the history can show which takes are already out there.
+    share_token = models.CharField(max_length=32, blank=True, default="")
 
     # What the take was scored AGAINST, so a score is comparable to another.
     # An Elite take at 6 and a Rookie take at 6 are not the same take.
@@ -7294,6 +7789,47 @@ class SentenceWork(models.Model):
         ordering = ["-created_at"]
 
 
+class PunchlineRating(models.Model):
+    """One member's 1-5 rating of one punchline Sentence ConnectZ suggested to them.
+
+    The technique rides on the row so "which KINDS of punchline do members rate
+    highest" is one aggregate, not a join through JSON. The ranking the writer
+    shows is built from these and from nothing else: with too few ratings it
+    says there are none rather than inventing a preference.
+    """
+
+    work = models.ForeignKey(SentenceWork, on_delete=models.CASCADE, related_name="punchline_ratings")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="punchline_ratings")
+    idx = models.PositiveSmallIntegerField()
+    technique = models.CharField(max_length=24, db_index=True)
+    stars = models.PositiveSmallIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("work", "idx", "user")
+
+
+class CoachAgreement(models.Model):
+    """Whether a member agrees with what a coach says about one area of theirs.
+
+    One row per member, instrument and area (a dimension key, or "hook"): "yes,
+    that is the thing to work on" or "no, that's not right". It is the member's
+    own say, kept so the screen can show it back and so how often people agree
+    with a coach's read is something that can be MEASURED rather than assumed —
+    an unscored number is an opinion, and this is the cheapest check on one.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="coach_agreements")
+    app_key = models.CharField(max_length=32)
+    area = models.CharField(max_length=24)
+    agree = models.BooleanField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "app_key", "area")
+
+
 class IntelligenceUse(models.Model):
     """An IntelligenceZ piece a member used in a deal, a battle or a release.
 
@@ -7348,9 +7884,79 @@ class InstrumentalWork(models.Model):
         ordering = ["-created_at"]
 
 
+class GeneratedImage(models.Model):
+    """One image Image ConnectZ made: the prompt that made it and the file it produced.
+
+    A PromptZ spend must leave the member something tangible (Corey's rule) —
+    before this, `GeminiImageView` billed the charge and handed back a base64
+    string with nothing kept, so the image was gone the moment the tab closed
+    unless the member happened to save the data URI themselves. The bytes go
+    through an ordinary `Upload` (SET_NULL, same as MasterWork's file: deleting
+    it from the uploads screen leaves the record saying what was made rather
+    than cascading it away), so it counts toward storage like any other upload
+    and is served, downloaded and shared the same way everything else is.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="generated_images")
+    prompt = models.TextField()
+    upload = models.ForeignKey("Upload", on_delete=models.SET_NULL, null=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class Translation(models.Model):
+    """One batch TranslateZ translated, kept so a paid run isn't lost if the
+    member never gets to sending or posting what it produced.
+
+    `texts`/`translations` are JSON lists in the same order — a batch, not one
+    string, because that's the shape the endpoint has always taken and billed.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="translations")
+    target_lang = models.CharField(max_length=40)
+    texts = models.JSONField(default=list)
+    translations = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class MasterWork(models.Model):
+    """One master Mix ConnectZ made and the member chose to keep.
+
+    The mastering ran on the member's own device, so this is a RECORD, not a
+    job: what was used (`settings`) and what was measured before and after
+    (`before` / `after` — loudness, true peak, width, the band spectrum). The
+    WAV itself is an ordinary `Upload`, sent through the uploads endpoint first
+    so the tier's upload and storage limits apply to it like any other file.
+
+    Both files are SET_NULL: a file deleted from the uploads screen leaves the
+    record saying what the master was, and the screen says the file is gone
+    rather than offering a player that 404s.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="master_works")
+    title = models.CharField(max_length=120)
+    upload = models.ForeignKey("Upload", on_delete=models.SET_NULL, null=True, related_name="+")
+    source_upload = models.ForeignKey("Upload", on_delete=models.SET_NULL, null=True, blank=True,
+                                      related_name="+")
+    settings = models.JSONField(default=dict)
+    before = models.JSONField(default=dict)
+    after = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
 class StatzTrial(models.Model):
-    """One timed StatZ sample per member, ever. The end time is the server's,
-    so the countdown on screen cannot be reset by a reload."""
+    """One timed StatZ sample window per member, re-armed once every 24 hours. The row is
+    the member's LAST window (`started_at`, `ends_at`); the end time is the server's, so the
+    countdown on screen cannot be reset by a reload, and the next window opens a day after
+    the last one started."""
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="statz_trial")
     started_at = models.DateTimeField(auto_now_add=True)
@@ -7408,6 +8014,30 @@ class VideoWork(models.Model):
         ordering = ["-created_at"]
 
 
+class VideoStitch(models.Model):
+    """A music video made of several Video ConnectZ shots joined, with the
+    member's OWN track laid over them. Each shot is an ordinary `VideoWork`
+    (priced, held and refunded as a single clip); this row is the project that
+    joins whatever landed."""
+
+    STATUS_PENDING, STATUS_DONE, STATUS_FAILED = "pending", "done", "failed"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="video_stitches")
+    track = models.ForeignKey("Upload", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    track_start = models.PositiveIntegerField(default=0)
+    aspect = models.CharField(max_length=8, default="16:9")
+    shots = models.ManyToManyField("VideoWork", related_name="stitches", blank=True)
+    shot_order = models.JSONField(default=list, blank=True)   # VideoWork ids, in the order to join
+    status = models.CharField(max_length=8, default=STATUS_PENDING)
+    upload = models.ForeignKey("Upload", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    error = models.CharField(max_length=200, blank=True, default="")
+    claim = models.CharField(max_length=40, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
 class Horoscope(models.Model):
     """One sign's reading for one day — written once, read by everybody with
     that sign. See metricz.py: a reading, never a measurement."""
@@ -7440,7 +8070,33 @@ class ScoreShare(models.Model):
     # code the card's "get yours" link uses. A trial take has nobody to name.
     user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
                              on_delete=models.CASCADE, related_name="score_shares")
+    # The whole read — scores, verdict, strengths, fixes, drill, caveat — exactly
+    # as the coach produced it, kept so that attaching it to a post can PROVE the
+    # server wrote it. A post's coach read is taken from here by token and never
+    # from what a client sends, for the reason this model's docstring gives.
+    payload = models.JSONField(default=dict, blank=True)
+    # How many times the public page was opened. Counted on the JSON read the page
+    # makes (a crawler reading the preview image is not an open), so it is "opened",
+    # and the screen says exactly that — it is the number that tells a member their
+    # share is working, which is the reason to share the next one.
+    views = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+def _share_payload(payload):
+    """What of a coach result is kept on its share row: JSON-safe, and bounded so a
+    runaway reply cannot make a row the size of a document. Per-field caps already
+    apply where the coach whitelists its reply; this is the backstop."""
+    import json
+    try:
+        data = json.loads(json.dumps(payload, default=str))
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    for k in ("share_url", "cost_cents", "claim_token", "claim_hint", "remind", "trial"):
+        data.pop(k, None)   # per-request plumbing, not part of the read
+    return data if len(json.dumps(data)) <= 40_000 else {}
 
 
 def mint_score_share(app_key, payload, user=None, genre=""):
@@ -7455,7 +8111,116 @@ def mint_score_share(app_key, payload, user=None, genre=""):
             token=secrets.token_urlsafe(12)[:16], app_key=str(app_key)[:32],
             score=int(score), verdict=str(payload.get("verdict") or "")[:400],
             genre=str(genre or "")[:60],
-            user=user if getattr(user, "is_authenticated", False) else None)
+            user=user if getattr(user, "is_authenticated", False) else None,
+            payload=_share_payload(payload))
         return row.token
     except Exception:
         return ""
+
+
+class IdentityCheck(models.Model):
+    """One Stripe Identity session and how it ENDED, in words.
+
+    The age check used to leave no trace but a boolean: a pass set it, and every other ending
+    (a blurry photo, an expired licence, a selfie that did not match, a real ID that proved
+    under 18, a DOB that could not be read back) changed nothing and told nobody — so a member
+    who had done it three times could not tell whether it was working. A row per session keeps
+    the outcome and the reason, so the screen can state both and the server can refuse a fourth
+    scan instead of starting (and paying Stripe for) another."""
+    STARTED, PROCESSING, VERIFIED, FAILED, UNDER_18, UNREADABLE, CANCELED = (
+        "started", "processing", "verified", "failed", "under_18", "unreadable", "canceled")
+    OPEN = (STARTED, PROCESSING)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="identity_checks")
+    session_id = models.CharField(max_length=100, unique=True)
+    status = models.CharField(max_length=12, default=STARTED)
+    reason = models.CharField(max_length=60, blank=True, default="")      # Stripe's code, or ours
+    url = models.CharField(max_length=500, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class LookmaxPrefs(models.Model):
+    """Where a StatZ member shops for LookmaxZ — their own marketplaces, in their order.
+
+    The ONLY thing LookmaxZ stores. No photo, no score and no history is kept, for
+    the reason `attractivenessz.py` gives; this is a preference about links, held
+    as JSON because it is read whole and never queried. `lookmaxz.clean_markets`
+    is the one shape, applied on write AND on read, so a row can never serve a
+    template the writer would have refused.
+    """
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name="lookmax_prefs")
+    markets = models.JSONField(default=list, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+# ---- Writing coach ----
+class WriteScore(models.Model):
+    """One written piece the writing coach scored. Keyed like a take: one number per
+    dimension, so the history can show a dimension move. The text is kept (it is the
+    member's own writing, typed into a field that says it is scored and saved) so the
+    history can open it again and the fixer can take it."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="write_scores")
+    kind = models.CharField(max_length=16, default="lyrics")
+    title = models.CharField(max_length=120, blank=True, default="")
+    text = models.TextField()
+    overall = models.FloatField(null=True, blank=True)
+    scores = models.JSONField(default=dict, blank=True)
+    read = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+
+# ---- CharacterZ ----
+class Character(models.Model):
+    """A character: a look (FaceZ) with a personality (PersonalitieZ) and a voice.
+
+    The voice is stored on the character in VoiceZ's own shape (bio, personality,
+    spec dials, sample) and cleaned by voicez.clean_payload, so a character's lines in
+    MangaZ are written from the same description a VoiceZ voice is. It only ever shapes
+    that character's dialogue.
+
+    The look is a drawing, or the member's own face — never another real person's.
+    `look_attested` is the member's say-so, required whenever a look is set.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="characters")
+    name = models.CharField(max_length=60)
+    face = models.ForeignKey(Face, on_delete=models.SET_NULL, null=True, blank=True, related_name="characters")
+    upload = models.ForeignKey(Upload, on_delete=models.SET_NULL, null=True, blank=True, related_name="characters")
+    look_attested = models.BooleanField(default=False)
+    looks = models.CharField(max_length=300, blank=True, default="")
+    bio = models.TextField(blank=True, default="")
+    personality = models.CharField(max_length=4, blank=True, default="")
+    spec = models.JSONField(default=dict, blank=True)
+    sample = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name", "id"]
+
+
+# ---- MangaZ ----
+class MangaPage(models.Model):
+    """One page: the member's idea, their characters, and the panel script the AI wrote
+    (editable before anything is drawn). `panels` is [{n, shot, setting, action,
+    characters, dialogue: [{who, line}], image}] — image filled by the drawing step.
+    Always AI-made, and labelled so wherever it is shown."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="manga_pages")
+    title = models.CharField(max_length=120, blank=True, default="")
+    idea = models.TextField()
+    style = models.CharField(max_length=40, blank=True, default="")
+    character_ids = models.JSONField(default=list, blank=True)
+    panels = models.JSONField(default=list, blank=True)
+    # The whole page drawn as ONE image (page mode), beside or instead of the panels.
+    page_image = models.CharField(max_length=300, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]

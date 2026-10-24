@@ -25,6 +25,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .badgez import public_badge_chip
+from .coachshare import coach_read_for, legacy_score
 from .visibility import redact
 from .models import (
     Post,
@@ -37,12 +38,18 @@ from .models import (
 from .personaz import links_of, personas_of
 
 
-def public_post_dict(p):
+def public_post_dict(p, viewer=None):
     """A shared post as a stranger sees it.
 
     Built field-by-field rather than by stripping the member payload — a
     deny-list quietly leaks whatever gets added to the post later, and this
     response is the one nobody has to log in to read.
+
+    `viewer` is the person opening the link, or None for a crawler and the edge
+    function that builds link previews. It only ever changes ONE thing — the
+    coach's read, which the author may have kept for members — and a signed-in
+    member opening the same link sees what they are entitled to rather than
+    the stranger's locked card.
     """
     from .crosspost import take_state_for
     from .postz import media_slots
@@ -54,6 +61,12 @@ def public_post_dict(p):
     # a query to say whose failure it actually was.
     state = take_state_for([(p, media_slots(p))]).get(p.id) or {}
     missing = bool(state.get("missing"))
+    coach = coach_read_for(p, viewer)
+    if coach["state"] == "shown" and coach.get("public"):
+        # The card image is a public address, so it is only named when a
+        # stranger could fetch it. A member-only read has no image to link.
+        coach["card_image"] = f"/api/economy/postz/{p.id}/coach-card.png"
+        coach["story_image"] = f"/api/economy/postz/{p.id}/coach-card.png?format=story"
     return {
         "id": p.id,
         "author": p.author.username,
@@ -64,7 +77,11 @@ def public_post_dict(p):
         "media_url": p.media_url,
         "is_album": p.is_album,
         "items": p.items or [],
-        "score": p.score or {},
+        # The whole stored read ONLY when `coach` says it is shown — see
+        # coachshare.legacy_score. Beside it, `coach` carries the labelled read
+        # or the locked card, never both an old and a new copy of the number.
+        "score": legacy_score(p, coach),
+        "coach": coach,
         "rating": item_rating_median(f"post:{p.id}"),
         "created_at": p.created_at.isoformat(),
         "take_missing": missing,
@@ -97,6 +114,7 @@ def public_profile_dict(p, request=None):
             "key": persona.get("key", ""),
             "name": persona.get("name", ""),
             "skills": skills,
+            **({"roles": persona["roles"]} if persona.get("roles") else {}),
         })
     # Redacted for the anonymous audience: a member who moved bio or links to
     # "member" must be honoured on the one page a stranger can open, which is
@@ -142,7 +160,13 @@ class PublicPostView(APIView):
         if not can_view_post(p, request.user):
             # 404, not 403 — confirming a private post exists is itself a leak.
             return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
-        return Response(public_post_dict(p))
+        resp = Response(public_post_dict(p, request.user))
+        # The body now depends on WHO is asking (a members-only read is shown to
+        # a member and locked to a stranger), so a shared cache must never hand
+        # one reader's copy to another.
+        resp["Cache-Control"] = "private"
+        resp["Vary"] = "Authorization"
+        return resp
 
 
 class PublicProfileView(APIView):

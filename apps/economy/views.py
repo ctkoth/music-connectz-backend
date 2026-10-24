@@ -264,7 +264,7 @@ class StatsView(APIView):
                 "my_energy": w.energy,
                 "my_spinaz": w.spinaz,
                 "my_promptz": w.promptz,  # prepaid AI credits (persist)
-                # Free daily prompts by tier (free 3 / premium 5 / statz 10) — reset daily, don't stack.
+                # Free daily prompts by tier (models.PROMPT_ALLOWANCE) — reset daily, don't stack.
                 "my_promptz_daily": prompt_allowance,
                 # What one of them is worth. Published because "you have 3 left"
                 # is not the whole price when a dearer engine is billed anyway.
@@ -503,6 +503,7 @@ class FunnelEventView(APIView):
 
     META_SHAPE = {
         "landing_view": {},
+        "landing_cta": {"at": lambda v: v if v in ("hero", "compare", "doors") else None},
         "try_view": {},
         # Which "no" it was. Three completely different situations —
         # the visitor spent today's take, the platform spent the day's, or
@@ -660,6 +661,11 @@ class FunnelSummaryView(APIView):
             return Response({"detail": "Only the platform owner sees this."},
                             status=status.HTTP_403_FORBIDDEN)
         days = min(max(int(request.query_params.get("days") or 30), 1), 90)
+        return Response(self.summary(days))
+
+    def summary(self, days):
+        """The whole funnel for the last `days`, as a dict — what GET serves, and what a
+        shared FunnelZ post is written from, so the two can never disagree."""
         since = timezone.now() - timedelta(days=days)
         # The owner's own browsers (FunnelExclusion) are left out of every
         # count below, retroactively. See FunnelExcludeView.
@@ -710,6 +716,20 @@ class FunnelSummaryView(APIView):
                 "pct": round(100 * got / top, 1) if top else None,
                 "note": note,
             }
+
+        # The PersonalitieZ test is the other no-account door, and it had two plain rows
+        # and no rate. This one is SAME-BROWSER: of the browsers that finished the test,
+        # how many later created an account — which a comparison of two totals cannot
+        # say, since a register_success from somewhere else would count either way.
+        quiz_done = set(rows.filter(kind="quiz_done").values_list("anon_id", flat=True)) - {""}
+        joined = set(rows.filter(kind="register_success").values_list("anon_id", flat=True))
+        quiz_rate = {
+            "key": "quiz_join", "label": "Test finished → account created",
+            "from_kind": "quiz_done", "to_kind": "register_success",
+            "from": len(quiz_done), "to": len(quiz_done & joined),
+            "pct": round(100 * len(quiz_done & joined) / len(quiz_done), 1) if quiz_done else None,
+            "note": "Same browser: finished the PersonalitieZ test, then made an account.",
+        }
 
         headline = [
             _rate("landing_view", "try_view", "Landing → trial opened",
@@ -815,7 +835,7 @@ class FunnelSummaryView(APIView):
             reasons[rk] = sorted(({"why": k, "unique": len(v)} for k, v in seen.items()),
                                  key=lambda r: -r["unique"])
 
-        return Response({
+        return {
             "reasons": reasons,
             "days": days,
             "since": since,
@@ -823,6 +843,9 @@ class FunnelSummaryView(APIView):
             "browsers_excluded": FunnelExclusion.objects.count(),
             "base_kind": base_kind,
             "headline": headline,
+            # Beside the three, not among them: those decide what to work on for the
+            # coach's door; this is the other no-account door, read the same way.
+            "quiz": quiz_rate,
             "steps": steps,
             "sources": sources,
             "devices": devices,
@@ -844,7 +867,7 @@ class FunnelSummaryView(APIView):
             "sources_note": ("Add ?src=<channel> to any link you post. Untagged "
                              "arrivals are counted in the steps above but cannot "
                              "be attributed to a channel."),
-        })
+        }
 
 
 class WalletView(APIView):
@@ -1462,6 +1485,26 @@ def _storage_summary(user, tier):
     }
 
 
+_MEDIA_ID = re.compile(r"/media/(\d+)/")
+
+
+def _posts_by_upload(user):
+    """{upload id: {id, visibility}} for the member's own posts, newest post wins.
+
+    One query: a stored media address is `/api/economy/media/<id>/<name>`, so the id
+    is read out of each post's primary address and every album item's.
+    """
+    out = {}
+    for p in (Post.objects.filter(author=user).only("id", "media_url", "items", "visibility")
+              .order_by("created_at")[:2000]):
+        urls = [p.media_url] + [i.get("url", "") for i in (p.items or []) if isinstance(i, dict)]
+        for url in urls:
+            mt = _MEDIA_ID.search(url or "")
+            if mt:
+                out[int(mt.group(1))] = {"id": p.id, "visibility": p.visibility or "public"}
+    return out
+
+
 class UploadsView(APIView):
     """GET lists the user's uploads + storage summary; POST uploads one file.
 
@@ -1475,7 +1518,15 @@ class UploadsView(APIView):
 
     def get(self, request):
         m = membership_for(request.user)
-        uploads = [_upload_dict(u, request) for u in request.user.uploads.all()[:200]]
+        posted = _posts_by_upload(request.user)
+        uploads = []
+        for u in request.user.uploads.all()[:200]:
+            row = _upload_dict(u, request)
+            # The post this file lives in, if any — that is where its likes, ratings,
+            # comments, shares and other-app doors are. FileZ links to it rather than
+            # running a second social layer on raw files.
+            row["post"] = posted.get(u.pk)
+            uploads.append(row)
         return Response({"uploads": uploads, **_storage_summary(request.user, m.tier)})
 
     def post(self, request):

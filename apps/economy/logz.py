@@ -51,6 +51,7 @@ def _row(t):
         # nobody said — never guessed from the note.
         "app_key": t.app_key,
         "target": t.target,
+        "ref": t.ref,
     }
 
 
@@ -87,6 +88,12 @@ class LogZView(APIView):
         for r in rows:
             r["destinations"] = log_destinations(
                 r, app_key=r.get("app_key", ""), target=r.get("target", ""))
+        # What each spend BOUGHT: the rating, the report and the file, resolved in
+        # a couple of queries for the whole page. A row with no `ref` simply has none.
+        from .logz_outcomes import outcomes_for
+        found = outcomes_for(request.user, rows, request)
+        for r in rows:
+            r["outcome"] = found.get(r.get("ref"))
 
         # Totals per resource across the WHOLE ledger, not just this page — a
         # running total that only counts the rows on screen is a wrong number.

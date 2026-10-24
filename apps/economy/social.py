@@ -7,7 +7,7 @@ that gates venues, mirroring the collab/battle filter.
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import status
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -30,15 +30,13 @@ from .models import (
     item_rating_median,
     SocialComment,
     profile_for,
-    Venue,
-    VenueAttendance,
     attractiveness_median,
     attractiveness_medians,
+    attractiveness_shown_medians,
     overall_median,
     overall_medians,
     face_median,
     membership_for,
-    pay_between,
     profile_age,
     haversine_km,
     Follow,
@@ -47,12 +45,12 @@ from .models import (
     relationship,
     energy_rate_per_hour,
     notify,
+    spend_energy,
     post_interaction_block,
     reward_for_rating,
     Post,
     blocked_user_ids,
     Block,
-    wallet_for,
     Badge,
     badge_effects,
     recheck_badges,
@@ -63,8 +61,7 @@ from .models import (
 )
 from .badgez import worn_badges, worn_badges_by_user
 from .catalog import AVATAR_MAX_MB, limits_for, over_char_limit
-from .gates import GATE_KEYS, clean_gates, failing_gate, member_metrics, refusal
-from .serializers import WalletSerializer
+from .gates import clean_gates, failing_gate, member_metrics
 from .personaz import clean_link, clean_persona, links_of, personas_of
 from .personalityz import (AXES as PERSONALITY_AXES, as_dict as personality_dict,
                            clean_code as clean_personality, filter_reason,
@@ -73,112 +70,6 @@ from .religionz import clean_religion
 from .languagez import clean_languages
 
 User = get_user_model()
-VALID_TYPES = {"party", "openmic", "theater", "show", "custom"}
-
-
-def _venue_dict(v, request):
-    return {
-        "id": v.id,
-        "title": v.title,
-        "mode": v.mode,
-        "vtype": v.vtype,
-        "custom_name": v.custom_name,
-        "host": v.host.username,
-        "mine": v.host_id == request.user.id,
-        "host_price_cents": v.host_price_cents,
-        "visitor_pay_cents": v.visitor_pay_cents,
-        "min_attract": v.min_attract,
-        "gates": v.gates or {},
-        "attending": v.attendances.filter(visitor=request.user).exists(),
-        "created_at": v.created_at,
-    }
-
-
-class VenuesView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        venues = Venue.objects.select_related("host").all()[:200]
-        return Response({"venues": [_venue_dict(v, request) for v in venues]})
-
-    def post(self, request):
-        d = request.data
-        title = str(d.get("title", "")).strip()
-        if not title:
-            return Response({"detail": "title required"}, status=status.HTTP_400_BAD_REQUEST)
-        mode = d.get("mode") if d.get("mode") in (Venue.MODE_COLLAB, Venue.MODE_PERF) else Venue.MODE_COLLAB
-        vtype = d.get("vtype") if d.get("vtype") in VALID_TYPES else "party"
-
-        def cents(key):
-            try:
-                return max(0, int(d.get(key) or 0))
-            except (TypeError, ValueError):
-                return 0
-
-        v = Venue.objects.create(
-            host=request.user, title=title[:120], mode=mode, vtype=vtype,
-            custom_name=str(d.get("custom_name", ""))[:60],
-            host_price_cents=cents("host_price_cents"),
-            visitor_pay_cents=cents("visitor_pay_cents") if mode == Venue.MODE_COLLAB else 0,
-            min_attract=min(10, max(0, cents("min_attract"))),
-            gates=clean_gates(d.get("gates")),
-        )
-        return Response({"venue": _venue_dict(v, request)}, status=status.HTTP_201_CREATED)
-
-
-class VenueJoinView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk):
-        venue = Venue.objects.select_related("host").filter(pk=pk).first()
-        if not venue:
-            return Response({"detail": "venue not found"}, status=status.HTTP_404_NOT_FOUND)
-        if venue.host_id == request.user.id:
-            return Response({"detail": "you can't attend your own venue"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # All five ranges, evaluated exactly as search evaluates them, so what
-        # a host advertises and what the door enforces cannot diverge.
-        if venue.gates:
-            me = profile_for(request.user)
-            host_p = profile_for(venue.host)
-            origin = ((host_p.lat, host_p.lng)
-                      if (host_p.share_location and host_p.lat is not None) else (None, None))
-            failed = failing_gate(member_metrics(me, origin), venue.gates)
-            if failed:
-                return Response(refusal(failed, venue.gates), status=status.HTTP_403_FORBIDDEN)
-
-        # Legacy attractiveness gate — rated visitors below the bar are blocked.
-        if venue.min_attract > 0:
-            med = attractiveness_median(request.user)
-            if med is not None and med < venue.min_attract:
-                return Response(
-                    {"detail": f"needs attractiveness {venue.min_attract}+, yours is {med}"},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-
-        vw = wallet_for(request.user)
-        if vw.money_cents < venue.host_price_cents:
-            return Response({"detail": "insufficient balance to attend"}, status=status.HTTP_402_PAYMENT_REQUIRED)
-
-        with transaction.atomic():
-            # Visitor pays the host (developer tax enforced).
-            pay_between(request.user, venue.host, venue.host_price_cents, note=f"VenueZ: {venue.title} (attend)")
-            earned_net = 0
-            # Collaborative: host also pays the visitor their skill price, if the host can cover it.
-            if venue.mode == Venue.MODE_COLLAB and venue.visitor_pay_cents > 0:
-                hw = wallet_for(venue.host)
-                if hw.money_cents >= venue.visitor_pay_cents:
-                    _dev, earned_net = pay_between(venue.host, request.user, venue.visitor_pay_cents, note=f"VenueZ: {venue.title} (skill payout)")
-            VenueAttendance.objects.update_or_create(
-                venue=venue, visitor=request.user,
-                defaults={"paid_cents": venue.host_price_cents, "earned_cents": earned_net},
-            )
-
-        return Response({
-            "wallet": WalletSerializer(wallet_for(request.user)).data,
-            "paid_cents": venue.host_price_cents,
-            "earned_cents": earned_net,
-        })
 
 
 class AttractivenessView(APIView):
@@ -646,7 +537,7 @@ def _profile_card(p, request=None, badges=None, audience=None, batched=None):
     # not worth a batching call site.
     b = batched or {}
     _attractiveness = (b["attract"].get(p.user_id) if "attract" in b
-                       else attractiveness_median(p.user))
+                       else attractiveness_shown_medians([p.user_id]).get(p.user_id))
     return redact({
         "username": p.user.username,
         "display_name": p.display_name or p.user.username,
@@ -661,11 +552,14 @@ def _profile_card(p, request=None, badges=None, audience=None, batched=None):
         "sign_cn": chinese_zodiac_for(p.birthday),
         "regions": p.regions,
         "nationalities": p.nationalities,
-        # Social ConnectZ shows this as the member's own claimed identity —
-        # "Producer", "Mix Engineer" — the same PersonaZ classes ProfileZ
-        # renders, read through the one repair-on-read helper rather than
-        # `profile.personas` directly (see personaz.py: a mangled row must
-        # not reach a search result any more than it reaches its owner).
+        # Social ConnectZ's directory renders a persona label + city per
+        # card, same as the full profile does — leaving these off the
+        # compact card meant the search list either showed nothing real for
+        # either, or had to fake them (which is how the demo SEED array in
+        # the frontend happened in the first place). personas_of repairs a
+        # mangled row the same way it does everywhere else personas are read
+        # (see personaz.py and the two-writers note in CLAUDE.md).
+        "location": p.location,
         "personas": personas_of(p),
         "sober": p.sober,
         # The code AND the per-axis form, because the profile screen renders
@@ -789,6 +683,27 @@ class SocialView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    def _comment_quote(self, item, user):
+        """What commenting costs THIS member on THIS item, before they press it.
+
+        Your own post is always free (answering your commenters), and so are the
+        first COMMENT_FREE_PER_DAY comments of the day anywhere; after that each
+        costs COMMENT_ENERGY. Edits are never charged."""
+        from datetime import timedelta
+        from django.utils import timezone
+        from .catalog import COMMENT_ENERGY, COMMENT_FREE_PER_DAY
+        own = False
+        if item.startswith("post:"):
+            try:
+                own = Post.objects.filter(pk=int(item.split(":", 1)[1]), author_id=user.id).exists()
+            except ValueError:
+                pass
+        today = timezone.now() - timedelta(hours=24)
+        used = SocialComment.objects.filter(user=user, created_at__gte=today).count()
+        free_left = max(0, COMMENT_FREE_PER_DAY - used)
+        return {"comment_cost_energy": 0 if (own or free_left) else COMMENT_ENERGY,
+                "comment_free_left": free_left, "comment_free_per_day": COMMENT_FREE_PER_DAY}
+
     def _payload(self, item, request):
         ups = Reaction.objects.filter(item_id=item, value=1).count()
         downs = Reaction.objects.filter(item_id=item, value=-1).count()
@@ -837,6 +752,7 @@ class SocialView(APIView):
             "listened_sec": heard.seconds if heard else 0,
             "listen_finished": bool(heard and heard.finished),
             "listen_required_sec": LISTEN_REQUIRED_SEC,
+            **self._comment_quote(item, request.user),
         }
 
     def get(self, request):
@@ -943,7 +859,17 @@ class SocialView(APIView):
             blocked = post_interaction_block(item, request.user, "comment")
             if blocked:
                 return Response(blocked, status=status.HTTP_403_FORBIDDEN)
-            SocialComment.objects.create(user=request.user, item_id=item, body=body)
+            cost = self._comment_quote(item, request.user)["comment_cost_energy"]
+            with transaction.atomic():
+                if cost and spend_energy(request.user, cost, "Comment", app_key="postz",
+                                         target=item) is None:
+                    return Response({
+                        "detail": f"Your free comments for today are used; another costs {cost} ⚡ and you "
+                                  "are out. Nothing was posted or charged. Commenting on your own post is free.",
+                        "insufficient": True, "resource": "energy",
+                        "cost": {"resource": "energy", "amount": cost},
+                    }, status=status.HTTP_402_PAYMENT_REQUIRED)
+                SocialComment.objects.create(user=request.user, item_id=item, body=body)
             self._notify_target(item, "comment", f"@{request.user.username} commented on your post 💬", request.user)
         elif action == "rate":
             try:
@@ -952,6 +878,7 @@ class SocialView(APIView):
             except (TypeError, ValueError):
                 score = 0
                 visibility = "restricted"
+            reason = " ".join(str((request.data or {}).get("reason", "") or "").split())[:200]
             if score == 0:
                 ItemRating.objects.filter(user=request.user, item_id=item).delete()
             elif 1 <= score <= 10:
@@ -960,7 +887,7 @@ class SocialView(APIView):
                     return Response(blocked, status=status.HTTP_403_FORBIDDEN)
                 existing = ItemRating.objects.filter(user=request.user, item_id=item).first()
                 if existing is None:
-                    ItemRating.objects.create(user=request.user, item_id=item, score=score)
+                    ItemRating.objects.create(user=request.user, item_id=item, score=score, reason=reason)
                     # Apply collaboration bonus if rating a post with multiple contributors
                     collab_mult = 1.0
                     post_author = None
@@ -1001,11 +928,20 @@ class SocialView(APIView):
                     if existing.score != score:
                         existing.edit_history = (existing.edit_history or []) + [{"score": existing.score, "at": timezone.now().isoformat()}]
                         existing.score = score
+                        if reason:
+                            existing.reason = reason
                         existing.edited_at = timezone.now()
-                        existing.save(update_fields=["score", "edit_history", "edited_at"])
-                        # Changing your mind has to move the skill ratings it
-                        # fed too, or the two disagree from then on.
-                        self._rate_skills(item, request.user, score)
+                        existing.save(update_fields=["score", "reason", "edit_history", "edited_at"])
+                    elif reason and reason != existing.reason:
+                        # Same score, a reason added or reworded — inside the same window.
+                        existing.reason = reason
+                        existing.save(update_fields=["reason"])
+                    # Changing your mind has to move the skill ratings it fed too, or
+                    # the two disagree from then on. This sat inside the branch above
+                    # (reason-only edits) when the reason field arrived, so a changed
+                    # SCORE stopped reaching the skills; it is idempotent, so it runs
+                    # for every edit rather than being remembered per branch.
+                    self._rate_skills(item, request.user, score)
             else:
                 return Response({"detail": "score must be 1-10 (or 0 to clear)"}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self._payload(item, request))
@@ -1090,10 +1026,11 @@ class ProfileView(APIView):
 
 
 class ProfileAvatarView(APIView):
-    """Upload the current user's profile picture (multipart 'avatar')."""
+    """Set the current user's profile picture: a new file (multipart 'avatar'), or an
+    image already in their FileZ ({upload_id}) — the same checks either way."""
 
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     # A profile picture is displayed at 56–80px. Anything past a few MB is a
     # mistake or an abuse, whatever the member's upload tier allows elsewhere.
@@ -1103,6 +1040,8 @@ class ProfileAvatarView(APIView):
 
     def post(self, request):
         f = request.FILES.get("avatar")
+        if not f and request.data.get("upload_id") not in (None, ""):
+            return self._from_filez(request)
         if not f:
             return Response({"detail": "avatar file required"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1120,6 +1059,35 @@ class ProfileAvatarView(APIView):
 
         p = profile_for(request.user)
         p.avatar = f
+        p.save(update_fields=["avatar", "updated_at"])
+        return Response(_profile_full(p, request))
+
+    def _from_filez(self, request):
+        """An image the member already uploaded, copied into the avatar slot. Only their
+        own file, only an image, under the same size ceiling, and not one storage lost."""
+        import os
+        from django.core.files.base import ContentFile
+        try:
+            pk = int(request.data.get("upload_id"))
+        except (TypeError, ValueError):
+            return Response({"detail": "Pick a file."}, status=status.HTTP_400_BAD_REQUEST)
+        u = request.user.uploads.filter(pk=pk).first()
+        if not u:
+            return Response({"detail": "That file isn't in your FileZ."}, status=status.HTTP_404_NOT_FOUND)
+        if not (u.content_type or "").lower().startswith("image/"):
+            return Response({"detail": "That file isn't an image. Pick a JPG, PNG, WebP or GIF."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if u.size_bytes > self.MAX_MB * 1024 * 1024:
+            return Response({"detail": f"That image is too big for a profile picture — keep it under {self.MAX_MB}MB."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            with u.file.open("rb") as fh:
+                data = fh.read()
+        except Exception:
+            return Response({"detail": "That file couldn't be read from storage."},
+                            status=status.HTTP_410_GONE)
+        p = profile_for(request.user)
+        p.avatar.save(os.path.basename(u.file.name) or f"avatar-{u.pk}", ContentFile(data), save=False)
         p.save(update_fields=["avatar", "updated_at"])
         return Response(_profile_full(p, request))
 
@@ -1174,7 +1142,7 @@ class ProfileRateView(APIView):
             "target": target.username,
             "dimension": dimension,
             "overall": overall_median(target),
-            "attractiveness": attractiveness_median(target),
+            "attractiveness": attractiveness_shown_medians([target.id]).get(target.id),
         })
 
 
@@ -1184,12 +1152,29 @@ class FollowView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    @staticmethod
+    def _follow_quote(me, target):
+        """What following `target` costs `me` right now — quoted on GET so the
+        button can say it. Free: following back, and the first FOLLOW_FREE_PER_DAY
+        new follows in 24 hours."""
+        from datetime import timedelta
+        from django.utils import timezone
+        from .catalog import FOLLOW_ENERGY, FOLLOW_FREE_PER_DAY
+        if Follow.objects.filter(follower=me, following=target).exists():
+            return {"follow_cost_energy": 0, "follow_free_left": None}
+        used = Follow.objects.filter(follower=me, created_at__gte=timezone.now() - timedelta(hours=24)).count()
+        left = max(0, FOLLOW_FREE_PER_DAY - used)
+        back = Follow.objects.filter(follower=target, following=me).exists()
+        return {"follow_cost_energy": 0 if (back or left) else FOLLOW_ENERGY, "follow_free_left": left}
+
     def get(self, request):
         username = (request.query_params.get("username") or "").strip()
         target = User.objects.filter(username=username).first()
         if not target:
             return Response({"detail": "unknown user"}, status=status.HTTP_404_NOT_FOUND)
-        return Response({"username": target.username, **follow_counts(target), "relationship": relationship(request.user, target)})
+        return Response({"username": target.username, **follow_counts(target),
+                         "relationship": relationship(request.user, target),
+                         **self._follow_quote(request.user, target)})
 
     def post(self, request):
         username = str((request.data or {}).get("username", "")).strip()
@@ -1204,7 +1189,17 @@ class FollowView(APIView):
         else:
             if target.id in blocked_user_ids(request.user):
                 return Response({"detail": "You've blocked this user (or they blocked you)."}, status=status.HTTP_403_FORBIDDEN)
-            _, created = Follow.objects.get_or_create(follower=request.user, following=target)
+            cost = self._follow_quote(request.user, target)["follow_cost_energy"]
+            with transaction.atomic():
+                if cost and spend_energy(request.user, cost, f"Follow @{target.username}",
+                                         app_key="social", target=f"profile:{target.username}") is None:
+                    return Response({
+                        "detail": f"Your free follows for today are used; another costs {cost} ⚡ and you are out. "
+                                  "Nothing was charged. Following back someone who follows you is free.",
+                        "insufficient": True, "resource": "energy",
+                        "cost": {"resource": "energy", "amount": cost},
+                    }, status=status.HTTP_402_PAYMENT_REQUIRED)
+                _, created = Follow.objects.get_or_create(follower=request.user, following=target)
             if created:
                 mutual = Follow.objects.filter(follower=target, following=request.user).exists()
                 notify(target, "follow",
@@ -1262,6 +1257,11 @@ class MemberProfileView(APIView):
         return Response(out)
 
 
+VYBEZ_MINOR_REASON = ("VybeZ is for finding someone, and that part of Music ConnectZ is 18+. "
+                      "Collabs, battles, the coach and posting stay open at any age — and you can still "
+                      "find collaborators your own age in CollabZ.")
+
+
 class MembersView(APIView):
     """Search members by multi-select metrics: regions, genders, signs, sober.
 
@@ -1271,6 +1271,14 @@ class MembersView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        # VybeZ is the "find a person" surface, and dating is 18+ (Corey's call; the reasons
+        # are in CLAUDE.md). It names itself with ?vybez=1 so the gate is on the SURFACE, not on
+        # the search: this same endpoint is what CollabZ, BattleZ and MessageZ pick people with,
+        # and a minor choosing a collaborator their own age is not dating. Unknown ages count as
+        # adults, as everywhere else (`is_minor`).
+        if request.query_params.get("vybez") and is_minor(request.user):
+            return Response({"detail": VYBEZ_MINOR_REASON, "adult_only": True}, status=status.HTTP_403_FORBIDDEN)
+
         def multi(key):
             raw = request.query_params.get(key, "")
             return [x for x in raw.split(",") if x]
@@ -1355,6 +1363,12 @@ class MembersView(APIView):
 
         results = []
         qs = list(Profile.objects.exclude(user=request.user).exclude(user_id__in=blocked_user_ids(request.user)).select_related("user", "user__membership")[:500])
+        # Discovery stays inside the age group. This search is how members find each
+        # other (VybeZ is built on it) and it mixed every age: an adult could browse
+        # fifteen-year-olds and the reverse. A known minor sees only known minors; an
+        # adult sees no known minors. Unknown ages count as adults, as everywhere.
+        viewer_minor = profile_is_minor(profile_for(request.user))
+        qs = [p for p in qs if profile_is_minor(p) == viewer_minor]
         # Every card wears its badges, so load them for the whole page in one
         # query. Per-card would be five hundred of them behind one search.
         worn = worn_badges_by_user(p.user_id for p in qs)
@@ -1370,7 +1384,7 @@ class MembersView(APIView):
         # queries and VybeZ fires this search from three text inputs.
         card_ids = [p.user_id for p in qs]
         batched = {
-            "attract": attractiveness_medians(card_ids),
+            "attract": attractiveness_shown_medians(card_ids),
             "overall": overall_medians(card_ids),
             "edges": follow_edges_for(card_ids),
         }

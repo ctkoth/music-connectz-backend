@@ -25,6 +25,7 @@ list, one truth") AND a WorkZ output, so the thing that came out of the sandbox
 can be posted, rated, commented on, or carried into another app like anything
 else here.
 """
+import logging
 import math
 import shlex
 
@@ -32,6 +33,8 @@ from django.conf import settings
 from django.utils import timezone
 
 from .models import TIER_STATZ
+
+log = logging.getLogger(__name__)
 
 # What a run costs, per second of sandbox time. Modal bills real money by the
 # second; this is the member-facing price in Energy, which is the resource
@@ -80,18 +83,31 @@ def configured():
                 and getattr(settings, "MODAL_TOKEN_SECRET", ""))
 
 
-def unavailable_reason():
-    """Why running is off, in words a member can act on. Empty when it's on."""
+# What a MEMBER is told when running is off. One sentence, because a member cannot
+# act on either cause: "set MODAL_TOKEN_ID" and "the `modal` package isn't
+# installed" are instructions to whoever runs the server, and putting them in
+# front of members (the run panel, the spec, the 503, GameZ's build) both
+# confused them and published our configuration. The operator's detail is
+# `operator_reason()`, and it goes to the log.
+MEMBER_REASON = "Running code isn't switched on yet."
+
+
+def operator_reason():
+    """Why running is off, for whoever runs the server. Empty when it's on."""
     if not configured():
-        return ("Running code needs a sandbox, and the sandbox isn't connected yet. "
-                "Set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET on the server and this "
-                "switches on by itself.")
+        return ("The sandbox isn't connected: set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET "
+                "on the server and running switches on by itself.")
     try:
         import modal  # noqa: F401
     except ImportError:
         return ("The sandbox tokens are set but the `modal` package isn't installed "
                 "on the server — add it and redeploy.")
     return ""
+
+
+def unavailable_reason():
+    """Why running is off, in words a member can read. Empty when it's on."""
+    return MEMBER_REASON if operator_reason() else ""
 
 
 def limits_for(tier):
@@ -129,11 +145,13 @@ def run_source(language, source, *, seconds, workdir="/work"):
     if not runner:
         raise SandboxError(f"OCC can't run {language} yet.")
     if not configured():
-        raise SandboxError(unavailable_reason())
+        log.warning("OCC sandbox: %s", operator_reason())
+        raise SandboxError(MEMBER_REASON)
     try:
         import modal
     except ImportError as exc:                                   # pragma: no cover
-        raise SandboxError("The `modal` package isn't installed on the server.") from exc
+        log.warning("OCC sandbox: %s", operator_reason())
+        raise SandboxError(MEMBER_REASON) from exc
 
     path = f"{workdir}/{runner['file']}"
     # The source goes in via a heredoc with a quoted delimiter, so nothing in
@@ -165,7 +183,9 @@ def run_source(language, source, *, seconds, workdir="/work"):
     except Exception as exc:                                     # pragma: no cover
         # Anything from here is "the sandbox didn't happen": no container, bad
         # token, Modal unreachable. Not the member's fault, so not their bill.
-        raise SandboxError(f"The sandbox didn't start: {exc}"[:300]) from exc
+        log.error("OCC sandbox: no result from Modal — %s", str(exc)[:300])
+        raise SandboxError("The sandbox didn't return a result. You weren't charged — "
+                           "try again in a moment.") from exc
 
     elapsed = max(1, int((timezone.now() - started).total_seconds()))
     return {

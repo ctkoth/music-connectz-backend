@@ -78,6 +78,26 @@ class MidiTests(TestCase):
         for k in iz.KEY_NAMES:
             iz.key_signature(k)
 
+    def test_the_flat_spelled_key_gets_the_flat_signature(self):
+        # Eb minor is six FLATS (its relative major is Gb). It was +6, which is
+        # D# minor: the same notes on a keyboard, a different (and unreadable)
+        # key signature in a score.
+        self.assertEqual(iz.key_signature("Eb minor"), (-6, 1))
+        self.assertEqual(iz.key_signature("Gb major"), (-6, 0))
+        # ...and the sharp spellings of the same pitches keep the sharp side.
+        self.assertEqual(iz.key_signature("D# minor"), (6, 1))
+        self.assertEqual(iz.key_signature("F# major"), (6, 0))
+        # The rest of the minors in the list, so the fix moved nothing else.
+        self.assertEqual(iz.key_signature("Bb minor"), (-5, 1))
+        self.assertEqual(iz.key_signature("F# minor"), (3, 1))
+        self.assertEqual(iz.key_signature("C# minor"), (4, 1))
+        self.assertEqual(iz.key_signature("G# minor"), (5, 1))
+
+    def test_the_midi_key_signature_byte_is_six_flats_for_eb_minor(self):
+        tracks = iz.clean_tracks(LOOP, ["drums", "bass"], 4)
+        data = iz.midi_bytes(tracks, 90, "Eb minor", "t")
+        self.assertIn(b"\xff\x59\x02\xfa\x01", data)            # -6 as a signed byte, minor
+
     def test_every_key_has_a_mood_and_twenty_four_exist(self):
         self.assertEqual(len(iz.KEYS), 24)
         self.assertTrue(all(m and t for _, m, t in iz.KEYS))
@@ -159,3 +179,137 @@ class EndpointTests(TestCase):
         self.assertEqual(r.json()["royalty_pct"], 10.0)
         release_deal(deal)
         self.assertEqual(wallet_for(self.user).money_cents, 900)
+
+
+BUDGET = iz.BUDGET_SECONDS
+
+
+@override_settings(OWNER_USERNAMES=["koth"], OWNER_EMAILS=[])
+class BudgetTests(TestCase):
+    """The screen gave up at 30s while the server let the model run 90s and then
+    charged and saved a piece the member had been told cost nothing."""
+
+    def setUp(self):
+        User = get_user_model()
+        User.objects.create_user("koth", "o@e.com", "pw-Long-enough-1")
+        self.user = User.objects.create_user("maker", "m@e.com", "pw-Long-enough-1")
+        self.c = APIClient(); self.c.force_authenticate(self.user)
+
+    def body(self, **kw):
+        return {"genre": "boom bap", "instruments": ["drums", "bass"], "bpm": 90, "key": "A minor", "bars": 4, **kw}
+
+    def test_the_budget_is_published_and_shorter_than_the_old_model_wait(self):
+        d = self.c.get(URL).json()
+        self.assertEqual(d["budget_seconds"], 60)
+        self.assertLess(d["budget_seconds"], 90)
+
+    @patch("apps.economy.instrumentalz._key", return_value="k")
+    @patch("apps.economy.instrumentalz.generate_content")
+    def test_the_model_call_gets_what_is_left_of_the_budget_not_ninety_seconds(self, gen, _):
+        gen.return_value = (reply(LOOP), ["m"])
+        r = self.c.post(URL, self.body(), format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertLessEqual(gen.call_args.kwargs["timeout"], BUDGET)
+
+    @patch("apps.economy.instrumentalz.BUDGET_SECONDS", 0.05)
+    @patch("apps.economy.instrumentalz._key", return_value="k")
+    def test_an_answer_that_arrives_after_the_budget_is_a_504_and_is_not_billed(self, _):
+        import time
+
+        def slow(*a, **k):
+            time.sleep(0.2)
+            return reply(LOOP), ["m"]
+
+        before = Transaction.objects.count()
+        w0 = wallet_for(self.user)
+        with patch("apps.economy.instrumentalz.generate_content", side_effect=slow):
+            r = self.c.post(URL, self.body(), format="json")
+        self.assertEqual(r.status_code, 504, r.content)
+        d = r.json()
+        self.assertTrue(d["timed_out"])
+        self.assertIn("Nothing was charged", d["detail"])
+        self.assertEqual(Transaction.objects.count(), before)
+        self.assertFalse(InstrumentalWork.objects.exists())
+        w1 = wallet_for(self.user)
+        self.assertEqual((w1.money_cents, w1.promptz, w1.prompts_used_today or 0),
+                         (w0.money_cents, w0.promptz, w0.prompts_used_today or 0))
+
+    @patch("apps.economy.instrumentalz._key", return_value="k")
+    def test_an_answer_inside_the_budget_is_billed_as_before(self, _):
+        with patch("apps.economy.instrumentalz.generate_content", return_value=(reply(LOOP), ["m"])):
+            r = self.c.post(URL, self.body(), format="json")
+        self.assertEqual(r.status_code, 201)
+
+
+@override_settings(OWNER_USERNAMES=["koth"], OWNER_EMAILS=[])
+class MissingPartsTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        User.objects.create_user("koth", "o@e.com", "pw-Long-enough-1")
+        self.user = User.objects.create_user("maker", "m@e.com", "pw-Long-enough-1")
+        self.c = APIClient(); self.c.force_authenticate(self.user)
+
+    @patch("apps.economy.instrumentalz._key", return_value="k")
+    def test_a_part_that_was_asked_for_and_not_returned_is_named(self, _):
+        asked = ["drums", "bass", "piano"]                  # LOOP has no piano
+        with patch("apps.economy.instrumentalz.generate_content", return_value=(reply(LOOP), ["m"])):
+            r = self.c.post(URL, {"instruments": asked, "bpm": 90, "key": "A minor", "bars": 4}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        d = r.json()
+        self.assertEqual(d["missing"], ["piano"])
+        self.assertEqual([t["instrument"] for t in d["tracks"]], ["drums", "bass"])
+
+    @patch("apps.economy.instrumentalz._key", return_value="k")
+    def test_a_part_whose_every_note_was_refused_counts_as_missing(self, _):
+        loop = {"tracks": [{"instrument": "drums", "notes": [[36, 0, 0.5, 110]]},
+                           {"instrument": "bass", "notes": [[999, 0, 1, 90]]}]}      # every note invalid
+        with patch("apps.economy.instrumentalz.generate_content", return_value=(reply(loop), ["m"])):
+            r = self.c.post(URL, {"instruments": ["drums", "bass"], "bpm": 90, "key": "A minor", "bars": 4},
+                            format="json")
+        self.assertEqual(r.json()["missing"], ["bass"])
+
+    @patch("apps.economy.instrumentalz._key", return_value="k")
+    def test_nothing_is_missing_when_everything_came_back(self, _):
+        with patch("apps.economy.instrumentalz.generate_content", return_value=(reply(LOOP), ["m"])):
+            r = self.c.post(URL, {"instruments": ["drums", "bass", "lead"], "bpm": 90, "key": "A minor", "bars": 4},
+                            format="json")
+        self.assertEqual(r.json()["missing"], [])
+
+    def test_the_saved_list_says_it_too(self):
+        InstrumentalWork.objects.create(user=self.user, bpm=90, key="C major", instruments=["drums", "pad"],
+                                        tracks=[{"instrument": "drums", "notes": [[36, 0, 1, 100]]}])
+        w = self.c.get(URL).json()["works"][0]
+        self.assertEqual(w["missing"], ["pad"])
+
+
+@override_settings(OWNER_USERNAMES=["koth"], OWNER_EMAILS=[])
+class DownloadAndRoyaltyTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("maker", "m@e.com", "pw-Long-enough-1")
+        self.c = APIClient(); self.c.force_authenticate(self.user)
+
+    def test_a_sharp_in_the_key_survives_into_the_file_name(self):
+        for key, slug in (("F# minor", "f-sharp-minor"), ("C# minor", "c-sharp-minor"), ("A minor", "a-minor")):
+            w = InstrumentalWork.objects.create(user=self.user, bpm=90, key=key,
+                                                tracks=[{"instrument": "bass", "notes": [[36, 0, 1, 100]]}])
+            disp = self.c.get(f"{URL}{w.id}/midi/")["Content-Disposition"]
+            self.assertIn(f"-in-{slug}-at-90-bpm.mid", disp)
+            self.assertNotIn("#", disp)
+
+    def test_f_sharp_minor_and_f_minor_no_longer_share_a_name(self):
+        a = InstrumentalWork.objects.create(user=self.user, bpm=90, key="F# minor", tracks=[])
+        b = InstrumentalWork.objects.create(user=self.user, bpm=90, key="F minor", tracks=[])
+        self.assertNotEqual(self.c.get(f"{URL}{a.id}/midi/")["Content-Disposition"],
+                            self.c.get(f"{URL}{b.id}/midi/")["Content-Disposition"])
+
+    def test_every_work_carries_the_royalty_so_the_client_never_types_a_ten(self):
+        InstrumentalWork.objects.create(user=self.user, bpm=90, key="C major", tracks=[])
+        d = self.c.get(URL).json()
+        self.assertEqual(d["royalty_pct"], iz.ROYALTY_PCT)
+        self.assertEqual(d["works"][0]["royalty_pct"], iz.ROYALTY_PCT)
+
+    @patch("apps.economy.instrumentalz._key", return_value="k")
+    def test_a_fresh_piece_carries_it_too(self, _):
+        with patch("apps.economy.instrumentalz.generate_content", return_value=(reply(LOOP), ["m"])):
+            r = self.c.post(URL, {"instruments": ["drums"], "bpm": 90, "key": "A minor", "bars": 4}, format="json")
+        self.assertEqual(r.json()["royalty_pct"], iz.ROYALTY_PCT)

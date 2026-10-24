@@ -162,7 +162,9 @@ class BuildingWithAContainer(Base):
         resp = self.client.post(f"/api/economy/gamez/{self.game.id}/build/",
                                 {}, format="json")
         self.assertEqual(resp.status_code, 503)
-        self.assertIn("sandbox", resp.json()["detail"].lower())
+        # The member's sentence — no env-var names, which are the operator's (log).
+        self.assertIn("isn't switched on", resp.json()["detail"])
+        self.assertNotIn("MODAL_TOKEN", resp.json()["detail"])
 
     def test_a_sandbox_that_never_started_is_not_billed(self):
         from apps.economy.modal_sandbox import SandboxError

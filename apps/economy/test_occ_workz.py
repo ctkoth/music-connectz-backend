@@ -154,9 +154,10 @@ class PriceUpFrontTests(WorkzBase):
         self.assertEqual(resp.data["energy_charged"], w["share_cost"]["amount"])
         self.assertEqual(wallet_for(self.user).energy, 60)
 
-    def test_an_unpriced_work_is_free_to_share(self):
+    def test_an_unpriced_work_costs_only_the_post_floor_to_share(self):
+        from apps.economy.catalog import POST_ENERGY_FLOOR
         w = self.make(skills_used=["Beat Producer"])   # no rate set
-        self.assertEqual(w["share_cost"]["amount"], 0)
+        self.assertEqual(w["share_cost"]["amount"], POST_ENERGY_FLOOR)
 
 
 class ShareTests(WorkzBase):
@@ -222,6 +223,8 @@ class ShareTests(WorkzBase):
         post_id = self.client.post(f"{WORKZ}{w['id']}/share/", {}, format="json").data["post_id"]
         resp = self.client.post(f"{WORKZ}{w['id']}/unshare/", {}, format="json")
         self.assertEqual(resp.data["unlinked_post"], post_id)
+        # The note says "delete it in PostZ" — so the door goes to PostZ's feed.
+        self.assertEqual((resp.data["open_in"], resp.data["target"]), ("postz", "feed"))
         self.assertFalse(resp.data["shared"])
         # Retracting something others may have rated is a separate decision,
         # made where the ratings are visible.
@@ -298,14 +301,38 @@ class NotADeadEndTests(WorkzBase):
         self.assertIn("distributez", keys)   # audio routes to DistributeZ
         self.assertEqual(w["open_in"], "distributez")
 
-    def test_text_only_work_routes_to_writez_not_a_media_library(self):
+    def test_text_only_work_routes_to_the_writer_not_a_media_library(self):
         w = self.make()
         self.assertEqual(w["export_route"], "document")
-        self.assertEqual(w["open_in"], "writez")
+        # `writez` was never a tab; Sentence ConnectZ is the writer.
+        self.assertEqual(w["open_in"], "sentenceconnectz")
+        row = next(t for t in w["send_to"] if t["key"] == "sentenceconnectz")
+        self.assertEqual(row["target"], "sentencez-write")
+        self.assertEqual(row["label"], "Open in Sentence ConnectZ")
 
-    def test_an_image_routes_to_imagez_even_with_no_media_type(self):
+    def test_an_image_has_no_open_in_door_because_nothing_mounted_takes_one(self):
+        # `imagez` was never a tab either. An honest absence beats a pill that
+        # plays a sound and goes nowhere; Share to PostZ is the door for images.
         w = self.make(image_url="/u/art.png")
-        self.assertEqual(w["open_in"], "imagez")
+        self.assertEqual(w["export_route"], "image")
+        self.assertEqual(w["open_in"], "")
+        keys = {t["key"] for t in w["send_to"]}
+        self.assertIn("postz", keys)
+        self.assertEqual(keys & {"imagez", "writez", "occ", ""}, set())
+
+    def test_code_is_not_offered_back_to_occ(self):
+        # "Open in Occ" from OCC was the dead button.
+        w = self.make(media_type="code")
+        self.assertEqual(w["open_in"], "")
+        self.assertNotIn("occ", {t["key"] for t in w["send_to"]})
+
+    def test_share_to_postz_lands_on_postz_not_on_social(self):
+        w = self.make()
+        postz = next(t for t in w["send_to"] if t["key"] == "postz")
+        self.assertEqual((postz["tab"], postz["target"]), ("postz", "composer"))
+        shared = self.client.post(f"{WORKZ}{w['id']}/share/", {}, format="json").data
+        postz = next(t for t in shared["send_to"] if t["key"] == "postz")
+        self.assertEqual((postz["tab"], postz["target"]), ("postz", "feed"))
 
     def test_a_target_that_needs_a_share_says_so_and_fills_in_after(self):
         w = self.make()
@@ -324,6 +351,8 @@ class NotADeadEndTests(WorkzBase):
         resp = self.client.get(f"/api/economy/postz/{post_id}/occ/")
         self.assertEqual(resp.data["work"]["id"], w["id"])
         self.assertEqual(resp.data["open_in"], "occ")
+        # An anchor the page has — `occ:workz:<id>` named nothing.
+        self.assertEqual(resp.data["target"], "occ-workz")
 
     def test_someone_else_learns_it_was_made_in_occ_but_not_my_prompt(self):
         w = self.make()
@@ -352,3 +381,54 @@ class CollabHandoffTests(WorkzBase):
         }, format="json")
         self.assertEqual(resp.status_code, 201, resp.data)
         self.assertEqual(resp.data["source_post"]["id"], post_id)
+
+
+class KeepingAChatReplyTests(WorkzBase):
+    """"Save to WorkZ" on a chat reply sends the prompt that was asked and the
+    reply that came back, so the member never types either half."""
+
+    def test_a_long_chat_prompt_is_kept_on_a_tier_whose_post_limit_is_short(self):
+        # The chat accepts OCC_MAX_PROMPT_CHARS whatever the tier. Keeping what
+        # was just asked must take the same ceiling, or a Free member is told the
+        # question they just sent is over their limit, with an upgrade attached.
+        as_tier(self.user, TIER_FREE)
+        prompt = "q" * 3000
+        resp = self.client.post(WORKZ, {"tab": "chat", "title": "q", "input_text": prompt,
+                                        "description": "the reply", "media_type": "document"},
+                                format="json")
+        self.assertEqual(resp.status_code, 201, resp.data)
+        self.assertEqual(resp.data["input_text"], prompt)
+        self.assertEqual(resp.data["description"], "the reply")
+        self.assertEqual(resp.data["tab"], "chat")
+
+    def test_the_same_prompt_from_anywhere_else_still_answers_to_the_tier(self):
+        as_tier(self.user, TIER_FREE)
+        resp = self.client.post(WORKZ, {"tab": "console", "title": "q", "input_text": "q" * 3000,
+                                        "description": "x"}, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_the_chat_ceiling_is_the_chats_own(self):
+        from apps.economy.catalog import OCC_MAX_PROMPT_CHARS
+        resp = self.client.post(WORKZ, {"tab": "chat", "title": "q",
+                                        "input_text": "q" * (OCC_MAX_PROMPT_CHARS + 1),
+                                        "description": "x"}, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_an_edited_chat_prompt_keeps_the_chat_ceiling(self):
+        as_tier(self.user, TIER_FREE)
+        w = self.client.post(WORKZ, {"tab": "chat", "title": "q", "input_text": "hi",
+                                     "description": "x"}, format="json").data
+        resp = self.client.patch(f"{WORKZ}{w['id']}/", {"input_text": "q" * 3000}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+    def test_a_kept_reply_can_be_reported_as_occ_item(self):
+        # ReportView takes any item string; `occ:<id>` is the shape Google Play's
+        # "flag AI-generated content" control posts. No prefix list to extend.
+        w = self.client.post(WORKZ, {"tab": "chat", "title": "q", "input_text": "hi",
+                                     "description": "a reply"}, format="json").data
+        resp = self.client.post("/api/economy/report/",
+                                {"item": f"occ:{w['id']}", "reason": "other", "note": "bad"},
+                                format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertTrue(resp.data["reported"])
+        self.assertEqual(resp.data["item"], f"occ:{w['id']}")

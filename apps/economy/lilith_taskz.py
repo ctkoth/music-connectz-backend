@@ -60,11 +60,28 @@ XP_FOR = {"quick": 5, "standard": 10, "deep": 25, "boss": 40, "auto": 0, "statz"
 # Keeping a routine is the one thing here that cannot be faked by typing —
 # you cannot backdate consistency. So it is the biggest payer, and it pays at
 # milestones rather than per tick so it is a habit rather than a wage.
-ROUTINE_MILESTONES = {7: 20, 30: 50, 100: 150}
+ROUTINE_MILESTONES = {7: 20, 30: 50, 100: 150}                # daily (kept under this name: others read it)
 # ⚡ beside the coin at each milestone. Cheap for us, and it hands back the
 # capacity to keep doing the thing that earned it — which is the point of a
 # streak reward rather than a trophy.
 ROUTINE_MILESTONE_ENERGY = {7: 10, 30: 25, 100: 50}
+
+# Weekly and monthly routines count PERIODS, so their rungs are fewer — but the same three payouts.
+# That is deliberate: what cannot be faked is TIME, and 26 weeks or 12 months takes longer than 100
+# days, with far fewer ticks to farm. Each rung is the same 20 / 50 / 150 🍥 (and ⚡) as the daily one.
+CADENCE_MILESTONES = {
+    "daily": ROUTINE_MILESTONES,
+    "weekly": {4: 20, 12: 50, 26: 150},
+    "monthly": {3: 20, 6: 50, 12: 150},
+}
+CADENCE_MILESTONE_ENERGY = {
+    "daily": ROUTINE_MILESTONE_ENERGY,
+    "weekly": {4: 10, 12: 25, 26: 50},
+    "monthly": {3: 10, 6: 25, 12: 50},
+}
+CADENCES = ("daily", "weekly", "monthly")
+PERIOD_NOUN = {"daily": "day", "weekly": "week", "monthly": "month"}
+PERIOD_NOW = {"daily": "today", "weekly": "this week", "monthly": "this month"}
 
 # Three in a day, and every Today task cleared. XP only: both are counts of
 # things already rewarded once, and paying coin again would be paying twice
@@ -76,7 +93,7 @@ CLEAN_SWEEP_XP = 30
 #
 # Energy cannot be cashed out and cannot leave the platform — it is spent
 # HERE, so paying it funds more activity instead of inflating anything. 🍥
-# converts to PromptZ at 10:1 (catalog.SPINAZ_PER_PROMPTZ), which is real
+# converts to PromptZ at the catalog.SPINAZ_PER_PROMPTZ rate, which is real
 # model spend, so every coin has a cost to us. The rule that falls out:
 # **pay ⚡ generously, pay 🍥 carefully.**
 #
@@ -164,9 +181,9 @@ VOICE = {
     "done_one": "Good. That one's closed.",
     "combo": "Three today. You're in it now.",
     "sweep": "Everything you set out to do. Rare, that.",
-    "streak_kept": "Day {days}. You keep showing up.",
+    "streak_kept": "{days} in a row. You keep showing up.",
     "streak_lost": "The run ended. It counted while it lasted — start another.",
-    "milestone": "{days} days. That isn't luck.",
+    "milestone": "{days}. That isn't luck.",
     "sponsor_paid": "{who} made their first collab. You had a hand in that.",
     "capped": "That's today's coin. The XP still counts, and so does tomorrow.",
 }
@@ -207,7 +224,7 @@ def _award_xp(user, xp):
     try:
         from apps.skillz.models import TrainingProfile
         prof, _ = TrainingProfile.objects.get_or_create(user=user, app_key="lilith")
-        prof.xp = (prof.xp or 0) + xp
+        prof.add_xp(xp)
         prof.save(update_fields=["xp"])
     except Exception:
         # A task must complete whether or not the XP lands, the same way
@@ -273,34 +290,167 @@ def _combo_and_sweep(user):
     return out
 
 
-def keep_routine(routine):
+def period_start(d, cadence):
+    """The first day of the period `d` falls in: the day, the ISO week's Monday, the month's 1st."""
+    if cadence == "weekly":
+        return d - timedelta(days=d.weekday())
+    if cadence == "monthly":
+        return d.replace(day=1)
+    return d
+
+
+def previous_period_start(start, cadence):
+    if cadence == "weekly":
+        return start - timedelta(days=7)
+    if cadence == "monthly":
+        return (start - timedelta(days=1)).replace(day=1)
+    return start - timedelta(days=1)
+
+
+def kept_this_period(routine, today=None):
+    today = today or timezone.localdate()
+    c = routine.cadence if routine.cadence in CADENCES else "daily"
+    return bool(routine.last_done and period_start(routine.last_done, c) == period_start(today, c))
+
+
+def _count(n, cadence):
+    return f"{n} {PERIOD_NOUN[cadence]}{'' if n == 1 else 's'}"
+
+
+def _stable_ref(routine, streak):
+    """A reference for a milestone that survives deleting and re-making the routine. The rung is
+    once-for-life per STARTER (or per title for one the member wrote), not once per row — else the
+    way to re-earn 20 🍥 at day seven is to delete the routine and start over."""
+    import hashlib
+    who = routine.template or "t" + hashlib.sha1((routine.title or "").strip().lower().encode()).hexdigest()[:10]
+    return f"ms:{who}:{routine.cadence}:{streak}"[:64]
+
+
+def keep_routine(routine, on=None):
     """Advance a streak, and pay a milestone the first time it is reached.
 
     Consistency is the one thing in this app that cannot be faked by typing —
     you cannot backdate a habit — which is why it is the biggest earner here
-    and why it needs no cap beyond once-each.
+    and why it needs no cap beyond once-each. A streak counts PERIODS in a row:
+    days, ISO weeks (Monday to Sunday) or calendar months, per `routine.cadence`.
+    Keeping a weekly routine twice in one week is one keep, not two.
     """
-    today = timezone.localdate()
-    if routine.last_done == today:
+    cadence = routine.cadence if routine.cadence in CADENCES else "daily"
+    today = on or timezone.localdate()
+    if kept_this_period(routine, today):
         return {"streak": routine.streak, "already": True}
 
-    routine.streak = routine.streak + 1 if routine.last_done == today - timedelta(days=1) else 1
+    now_p = period_start(today, cadence)
+    last_p = period_start(routine.last_done, cadence) if routine.last_done else None
+    routine.streak = routine.streak + 1 if last_p == previous_period_start(now_p, cadence) else 1
     routine.longest = max(routine.longest, routine.streak)
     routine.last_done = today
 
     paid = None
-    reward = ROUTINE_MILESTONES.get(routine.streak)
-    if reward and routine.streak not in (routine.paid_milestones or []):
-        energy = ROUTINE_MILESTONE_ENERGY.get(routine.streak, 0)
-        _pay(routine.user, LilithPayout.KIND_MILESTONE, spinaz=reward, energy=energy,
-             ref=f"routine:{routine.pk}:{routine.streak}")
+    rungs = CADENCE_MILESTONES[cadence]
+    reward = rungs.get(routine.streak)
+    ref = _stable_ref(routine, routine.streak)
+    if reward and routine.streak not in (routine.paid_milestones or []) \
+            and not LilithPayout.objects.filter(user=routine.user, kind=LilithPayout.KIND_MILESTONE, ref=ref).exists():
+        energy = CADENCE_MILESTONE_ENERGY[cadence].get(routine.streak, 0)
+        _pay(routine.user, LilithPayout.KIND_MILESTONE, spinaz=reward, energy=energy, ref=ref)
         routine.paid_milestones = list(routine.paid_milestones or []) + [routine.streak]
-        paid = {"days": routine.streak, "spinaz": reward, "energy": energy,
-                "said": VOICE["milestone"].format(days=routine.streak)}
+        paid = {"days": routine.streak, "periods": routine.streak, "cadence": cadence,
+                "spinaz": reward, "energy": energy,
+                "said": VOICE["milestone"].format(days=_count(routine.streak, cadence))}
 
     routine.save(update_fields=["streak", "longest", "last_done", "paid_milestones"])
-    return {"streak": routine.streak, "longest": routine.longest,
-            "milestone": paid, "said": VOICE["streak_kept"].format(days=routine.streak)}
+    return {"streak": routine.streak, "longest": routine.longest, "cadence": cadence,
+            "milestone": paid, "said": VOICE["streak_kept"].format(days=_count(routine.streak, cadence))}
+
+
+# --------------------------------------------------------------- the trash
+
+TRASH_DAYS = 30
+
+
+def open_tasks(user):
+    """Tasks that are still to do: not done, and not in the Trash. Every ceiling, sweep and count
+    reads this one definition, so a trashed task cannot fill a tier's quota or tick itself."""
+    return LilithTask.objects.filter(user=user, done_at__isnull=True).exclude(bucket="trash")
+
+
+def live_routines(user):
+    return LilithRoutine.objects.filter(user=user, trashed_at__isnull=True)
+
+
+def purge_trash(user):
+    """Empty what has sat in the Trash for TRASH_DAYS. Run on a board read (no cron; idempotent)."""
+    cutoff = timezone.now() - timedelta(days=TRASH_DAYS)
+    LilithTask.objects.filter(user=user, bucket="trash", trashed_at__lt=cutoff).delete()
+    LilithRoutine.objects.filter(user=user, trashed_at__lt=cutoff).delete()
+
+
+# ------------------------------------------- call-to-action: Lilith keeps them
+
+def _progress_label(n, goal, cadence=None):
+    return {"done": n, "goal": goal, "met": n >= goal,
+            "period": PERIOD_NOW.get(cadence, "since you set it")}
+
+
+def sweep_routine(routine):
+    """Keep a verified routine for the member, from the platform's own records.
+
+    Only rows created AFTER the routine existed count (you cannot backdate a habit), and the
+    streak is caught up period by period — so the board not being opened for a week does not
+    break a run the member actually kept. Returns (kept: list of keep_routine results, progress).
+    """
+    from . import lilith_actions as A
+    cadence = routine.cadence if routine.cadence in CADENCES else "daily"
+    goal = max(1, routine.goal or 1)
+    since = routine.created_at
+    dates = [A.localdate(ts) for ts in A.events(routine.user, routine.action, since)]
+    per = {}
+    for d in dates:
+        p = period_start(d, cadence)
+        n, latest = per.get(p, (0, d))
+        per[p] = (n + 1, max(latest, d))
+    last_p = period_start(routine.last_done, cadence) if routine.last_done else None
+    kept = []
+    for p in sorted(per):
+        n, latest = per[p]
+        if n >= goal and (last_p is None or p > last_p):
+            res = keep_routine(routine, on=latest)
+            if not res.get("already"):
+                kept.append(res)
+    now_p = period_start(timezone.localdate(), cadence)
+    return kept, _progress_label(per.get(now_p, (0, None))[0], goal, cadence)
+
+
+def sweep_task(task):
+    """Tick a verified task when the records show the member did it `goal` times since it was made."""
+    from . import lilith_actions as A
+    goal = max(1, task.goal or 1)
+    n = len(A.events(task.user, task.action, task.created_at))
+    if n >= goal and not task.done_at:
+        return complete(task), _progress_label(n, goal)
+    return None, _progress_label(n, goal)
+
+
+def sweep(user):
+    """Run every verified task and routine. Returns (swept, progress): what Lilith just closed,
+    and where each stands. Idempotent, and it never raises — the board must open."""
+    swept, progress = [], {}
+    try:
+        for t in open_tasks(user).exclude(action=""):
+            res, prog = sweep_task(t)
+            progress[("task", t.pk)] = prog
+            if res:
+                swept.append({"kind": "task", "id": t.pk, "title": t.title, **res})
+        for r in live_routines(user).exclude(action=""):
+            kept, prog = sweep_routine(r)
+            progress[("routine", r.pk)] = prog
+            for k in kept:
+                swept.append({"kind": "routine", "id": r.pk, "title": r.title, **k})
+    except Exception:                                          # pragma: no cover
+        import logging
+        logging.getLogger(__name__).exception("lilith sweep failed")
+    return swept, progress
 
 
 # -------------------------------------------------- helping somebody new
@@ -542,11 +692,12 @@ def rewards_table():
         {"key": "sweep", "what": "Clear everything in Today",
          "spinaz": 0, "energy": 0, "xp": CLEAN_SWEEP_XP, "cap": "once a day"},
     ] + [
-        {"key": f"routine_{d}", "what": f"Keep a routine {d} days running",
-         "spinaz": ROUTINE_MILESTONES[d], "energy": ROUTINE_MILESTONE_ENERGY[d],
+        {"key": f"routine_{c}_{d}",
+         "what": f"Keep a {c} routine {d} {PERIOD_NOUN[c]}s running",
+         "spinaz": CADENCE_MILESTONES[c][d], "energy": CADENCE_MILESTONE_ENERGY[c][d],
          "xp": 0, "cap": "once, for life",
          "why": "Consistency is the one thing here nobody can fake by typing."}
-        for d in sorted(ROUTINE_MILESTONES)
+        for c in CADENCES for d in sorted(CADENCE_MILESTONES[c])
     ] + [
         {"key": "collab_beginner",
          "what": "Finish a collab or battle with a member who is still new",
@@ -567,8 +718,14 @@ def rewards_table():
 
 # --------------------------------------------------------------- the board
 
-def _task_dict(t):
-    return {
+def _action_bits(obj, progress):
+    return {"action": obj.action or "", "goal": obj.goal or 1,
+            "verified": bool(obj.action),
+            "progress": (progress or {}).get(("task" if isinstance(obj, LilithTask) else "routine", obj.pk))}
+
+
+def _task_dict(t, progress=None):
+    return {**_action_bits(t, progress),
         "id": t.pk, "title": t.title, "note": t.note, "kind": t.kind,
         "bucket": t.bucket, "source": t.source,
         "app_key": t.app_key, "target": t.target,
@@ -587,17 +744,58 @@ def _task_dict(t):
     }
 
 
-def _routine_dict(r):
-    nxt = min((d for d in sorted(ROUTINE_MILESTONES) if d > r.streak), default=None)
+def _routine_dict(r, progress=None):
+    cadence = r.cadence if r.cadence in CADENCES else "daily"
+    rungs = CADENCE_MILESTONES[cadence]
+    nxt = min((d for d in sorted(rungs) if d > r.streak), default=None)
+    kept = kept_this_period(r)
     return {
-        "id": r.pk, "title": r.title, "streak": r.streak, "longest": r.longest,
+        **_action_bits(r, progress),
+        "id": r.pk, "title": r.title, "note": r.note, "streak": r.streak, "longest": r.longest,
+        "cadence": cadence, "unit": PERIOD_NOUN[cadence], "period_now": PERIOD_NOW[cadence],
         "last_done": r.last_done.isoformat() if r.last_done else None,
         "app_key": r.app_key, "target": r.target,
         "open_in": {"tab": r.app_key, "target": r.target} if r.app_key else None,
-        "done_today": r.last_done == timezone.localdate(),
-        "next_milestone": ({"days": nxt, "spinaz": ROUTINE_MILESTONES[nxt],
-                            "energy": ROUTINE_MILESTONE_ENERGY[nxt],
+        # `done_today` is the older name; it now means "kept in this routine's current period".
+        "done_today": kept, "done_period": kept,
+        "next_milestone": ({"days": nxt, "periods": nxt, "unit": PERIOD_NOUN[cadence],
+                            "spinaz": rungs[nxt],
+                            "energy": CADENCE_MILESTONE_ENERGY[cadence][nxt],
                             "away": nxt - r.streak} if nxt else None),
+    }
+
+
+def _suggested(user, routines):
+    """Routines Lilith thinks this member should have, with the reason. Never raises."""
+    try:
+        from .lilith_suggest import suggest
+        tasks = LilithTask.objects.filter(user=user, done_at__isnull=True).exclude(template="").exclude(bucket="trash")
+        return suggest(user, on_board_routines={r.template for r in routines if r.template},
+                       on_board_tasks=set(tasks.values_list("template", flat=True)))
+    except Exception:                                        # pragma: no cover
+        return []
+
+
+def starters_for(user, tasks, routines):
+    """The ready-made tasks and routines, each marked if it is already on this board. Built from
+    the rows `board` already fetched, so the catalogue costs no extra query."""
+    from . import lilith_starters as ST
+    have_t = {t.template for t in tasks if t.template and not t.done_at}
+    have_r = {r.template for r in routines if r.template}
+    return {
+        "tasks": [{**{k: t[k] for k in ("key", "title", "note", "kind", "bucket", "app_key", "target")},
+                   "verified": bool(t.get("action")), "goal": t.get("goal", 1),
+                   "on_board": t["key"] in have_t,
+                   "pays": {"spinaz": 0, "energy": 0, "xp": XP_FOR.get(t["kind"], 10)}}
+                  for t in ST.TASKS],
+        "routines": [{**{k: r[k] for k in ("key", "title", "note", "cadence", "app_key", "target")},
+                      "verified": bool(r.get("action")), "goal": r.get("goal", 1),
+                      "on_board": r["key"] in have_r,
+                      "milestones": [{"periods": d, "unit": PERIOD_NOUN[r["cadence"]],
+                                      "spinaz": CADENCE_MILESTONES[r["cadence"]][d],
+                                      "energy": CADENCE_MILESTONE_ENERGY[r["cadence"]][d]}
+                                     for d in sorted(CADENCE_MILESTONES[r["cadence"]])]}
+                     for r in ST.ROUTINES],
     }
 
 
@@ -610,25 +808,38 @@ def _greeting():
 
 def board(user):
     from .models import membership_for
+    from . import lilith_actions as A
     tier = membership_for(user).tier
     limits = tier_limits(tier)
+    # Lilith closes what the member has already DONE before drawing the board, so the board is
+    # never behind the records. (A write on a read, deliberately: there is no cron to do it, and
+    # every call is idempotent.)
+    purge_trash(user)
+    swept, progress = sweep(user)
 
     tasks = list(LilithTask.objects.filter(user=user).select_related()[:500])
-    open_tasks = [t for t in tasks if not t.done_at]
+    open_list = [t for t in tasks if not t.done_at and t.bucket != "trash"]
     buckets = {key: [] for key, _ in BUCKETS}
     for t in tasks:
-        buckets.setdefault(t.bucket, []).append(_task_dict(t))
+        buckets.setdefault(t.bucket, []).append(_task_dict(t, progress))
 
-    routines = list(LilithRoutine.objects.filter(user=user))
+    routines = list(live_routines(user))
+    trashed_routines = list(LilithRoutine.objects.filter(user=user, trashed_at__isnull=False))
     since = timezone.now() - timedelta(hours=24)
     return {
-        "said": _greeting() if open_tasks else VOICE["empty"],
+        "said": _greeting() if open_list else VOICE["empty"],
         "tier": tier,
         "limits": limits,
         "buckets": buckets,
         "kinds": [{"key": k, "label": v, "xp": XP_FOR.get(k, 10)} for k, v in KINDS],
         "bucket_labels": [{"key": k, "label": v} for k, v in BUCKETS],
-        "routines": [_routine_dict(r) for r in routines],
+        "routines": [_routine_dict(r, progress) for r in routines],
+        "trash_routines": [{**_routine_dict(r), "trashed_at": r.trashed_at.isoformat()} for r in trashed_routines],
+        "trash_days": TRASH_DAYS,
+        "swept": swept,
+        "actions": A.catalogue(),
+        "suggested": _suggested(user, routines),
+        "starters": starters_for(user, [t for t in tasks if t.bucket != "trash"], routines),
         "rewards": rewards_table(),
         # The caps, as counters rather than rules, so a member can see how
         # much of today's allowance is left before they spend the effort.
@@ -638,7 +849,7 @@ def board(user):
             "done": LilithTask.objects.filter(user=user, done_at__gte=since).count(),
             "combo_at": 3,
         },
-        "at_task_limit": len(open_tasks) >= limits["active_tasks"],
+        "at_task_limit": len(open_list) >= limits["active_tasks"],
         "at_routine_limit": len(routines) >= limits["routines"],
     }
 
@@ -666,6 +877,18 @@ class LilithBoardView(APIView):
         return Response(board(request.user))
 
 
+def _clean_action(d, A):
+    """(action, goal) from a request: only a key the server verifies, goal 1..50, else ("", 1)."""
+    action = str(d.get("action") or "")
+    if action not in A.specs():
+        return "", 1
+    try:
+        goal = int(d.get("goal") or 1)
+    except (TypeError, ValueError):
+        goal = 1
+    return action, max(1, min(50, goal))
+
+
 class LilithTaskListView(APIView):
     """POST /api/economy/lilith/tasks/ — add one."""
     permission_classes = [IsAuthenticated]
@@ -678,7 +901,7 @@ class LilithTaskListView(APIView):
             return Response({"detail": "A task needs a title."}, status=400)
 
         limits = tier_limits(membership_for(request.user).tier)
-        open_now = LilithTask.objects.filter(user=request.user, done_at__isnull=True).count()
+        open_now = open_tasks(request.user).count()
         if open_now >= limits["active_tasks"]:
             # A ladder that says HOW MANY, never whether — and it says what
             # the next rung buys rather than only refusing.
@@ -694,13 +917,20 @@ class LilithTaskListView(APIView):
         # the flag that decides what it pays, and a client that could set it
         # could set its own price.
         source = "platform" if (d.get("app_key") or "").strip() else "self"
+        # A call-to-action: the member picks WHAT from the server's list of verifiable actions,
+        # and the control it opens comes from that list, not from the request.
+        from . import lilith_actions as A
+        action, goal = _clean_action(d, A)
+        app_key, target = str(d.get("app_key") or "")[:32], str(d.get("target") or "")[:64]
+        if action:
+            spec = A.specs()[action]
+            app_key, target, source = spec["app_key"], spec["target"], "platform"
 
         t = LilithTask.objects.create(
             user=request.user, title=title[:140],
             note=str(d.get("note") or "")[:2000],
             kind=kind, bucket=bucket, source=source,
-            app_key=str(d.get("app_key") or "")[:32],
-            target=str(d.get("target") or "")[:64],
+            app_key=app_key, target=target, action=action, goal=goal,
             due=d.get("due") or None,
         )
         return Response(_task_dict(t), status=status.HTTP_201_CREATED)
@@ -727,6 +957,8 @@ class LilithTaskDetailView(APIView):
             fields.append("note")
         if d.get("bucket") in _BUCKET_KEYS:
             t.bucket = d["bucket"]
+            t.trashed_at = timezone.now() if d["bucket"] == "trash" else None
+            fields.append("trashed_at")
             fields.append("bucket")
         if d.get("kind") in _KIND_KEYS:
             t.kind = d["kind"]
@@ -760,6 +992,18 @@ class LilithTaskCompleteView(APIView):
         t = LilithTask.objects.filter(pk=task_id, user=request.user).first()
         if not t:
             return Response({"detail": "No such task."}, status=404)
+        if t.bucket == "trash":
+            return Response({"detail": "It's in the Trash. Move it back first."}, status=400)
+        if t.action and not t.done_at:
+            # Verified: Lilith ticks it herself from the records. A member's own tick would turn a
+            # checked claim into a typed one.
+            res, prog = sweep_task(t)
+            if not res:
+                return Response({"verified": True, "done": False, "progress": prog,
+                                 "detail": f"Lilith ticks this one herself once you've done it — "
+                                           f"{prog['done']} of {prog['goal']} so far."}, status=409)
+            res["task"] = _task_dict(t, {("task", t.pk): prog})
+            return Response(res)
         out = complete(t)
         out["task"] = _task_dict(t)
         out["today"] = {"self_paid": _paid_today(request.user, LilithPayout.KIND_SELF),
@@ -772,11 +1016,15 @@ class LilithRoutineListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        rows = LilithRoutine.objects.filter(user=request.user)
+        rows = live_routines(request.user)
         return Response({"routines": [_routine_dict(r) for r in rows],
                          "milestones": [{"days": d, "spinaz": ROUTINE_MILESTONES[d],
                                          "energy": ROUTINE_MILESTONE_ENERGY[d]}
-                                        for d in sorted(ROUTINE_MILESTONES)]})
+                                        for d in sorted(ROUTINE_MILESTONES)],
+                         "cadences": {c: [{"periods": d, "unit": PERIOD_NOUN[c],
+                                           "spinaz": CADENCE_MILESTONES[c][d],
+                                           "energy": CADENCE_MILESTONE_ENERGY[c][d]}
+                                          for d in sorted(CADENCE_MILESTONES[c])] for c in CADENCES}})
 
     def post(self, request):
         from .models import membership_for
@@ -785,16 +1033,23 @@ class LilithRoutineListView(APIView):
         if not title:
             return Response({"detail": "A routine needs a title."}, status=400)
         limits = tier_limits(membership_for(request.user).tier)
-        if LilithRoutine.objects.filter(user=request.user).count() >= limits["routines"]:
+        if live_routines(request.user).count() >= limits["routines"]:
             return Response({
                 "detail": f"{limits['routines']} routines is this tier's ceiling. "
                           "A tier up raises it.",
                 "at_limit": True, "routines": limits["routines"],
             }, status=status.HTTP_402_PAYMENT_REQUIRED)
+        cadence = d.get("cadence") if d.get("cadence") in CADENCES else "daily"
+        from . import lilith_actions as A
+        action, goal = _clean_action(d, A)
+        app_key, target = str(d.get("app_key") or "")[:32], str(d.get("target") or "")[:64]
+        if action:
+            spec = A.specs()[action]
+            app_key, target = spec["app_key"], spec["target"]
         r = LilithRoutine.objects.create(
-            user=request.user, title=title[:140],
-            app_key=str(d.get("app_key") or "")[:32],
-            target=str(d.get("target") or "")[:64],
+            user=request.user, title=title[:140], cadence=cadence,
+            note=str(d.get("note") or "")[:500], action=action, goal=goal,
+            app_key=app_key, target=target,
         )
         return Response(_routine_dict(r), status=status.HTTP_201_CREATED)
 
@@ -807,6 +1062,18 @@ class LilithRoutineDetailView(APIView):
         r = LilithRoutine.objects.filter(pk=routine_id, user=request.user).first()
         if not r:
             return Response({"detail": "No such routine."}, status=404)
+        if r.trashed_at:
+            return Response({"detail": "It's in the Trash. Move it back first."}, status=400)
+        if r.action:
+            kept, prog = sweep_routine(r)
+            if not kept and not kept_this_period(r):
+                return Response({"verified": True, "kept": False, "progress": prog,
+                                 "detail": f"Lilith keeps this one herself once you've done it — "
+                                           f"{prog['done']} of {prog['goal']} {PERIOD_NOW[r.cadence]} so far."},
+                                status=409)
+            out = kept[-1] if kept else {"streak": r.streak, "already": True}
+            out["routine"] = _routine_dict(r, {("routine", r.pk): prog})
+            return Response(out)
         out = keep_routine(r)
         out["routine"] = _routine_dict(r)
         return Response(out)
@@ -846,3 +1113,194 @@ class LilithSponsorView(APIView):
             "spinaz": SPONSOR_GRADUATION_SPINAZ,
             "energy": SPONSOR_GRADUATION_ENERGY,
         }, status=status.HTTP_201_CREATED)
+
+
+def _coach_for(request, spec, key):
+    from . import lilith_actions as A
+    app = str(request.data.get("app_key") or "")
+    from .lilith_starters import INSTRUMENT_AWARE
+    if key in INSTRUMENT_AWARE and app in A.coaches():
+        return app
+    return spec["app_key"]
+
+
+class LilithStarterAddView(APIView):
+    """POST /api/economy/lilith/starters/ {kind: "task"|"routine", key} — put a starter on my board.
+
+    The same ceilings as adding one by hand, and the content comes ONLY from the server's own list
+    (`lilith_starters`): a client that could name its own app_key here would be naming its own
+    `platform` source, which is the flag that decides what a task pays. Adding one that is already
+    on the board is a no-op that says so, rather than a second copy.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from . import lilith_starters as ST
+        from .models import membership_for
+        kind = str(request.data.get("kind") or "")
+        key = str(request.data.get("key") or "")
+        limits = tier_limits(membership_for(request.user).tier)
+
+        if kind == "task":
+            spec = ST.task_by_key(key)
+            if not spec:
+                return Response({"detail": "No such starter."}, status=404)
+            if open_tasks(request.user).filter(template=key).exists():
+                return Response({"detail": "That one is already on your board.", "already": True}, status=200)
+            back = LilithTask.objects.filter(user=request.user, template=key, bucket="trash").first()
+            if back:                                  # it is in the Trash: bring it back, don't make a second copy
+                back.bucket, back.trashed_at = spec["bucket"], None
+                back.save(update_fields=["bucket", "trashed_at"])
+                return Response({**_task_dict(back), "restored": True}, status=200)
+            if open_tasks(request.user).count() >= limits["active_tasks"]:
+                return Response({"detail": f"{limits['active_tasks']} open tasks is this tier's ceiling. "
+                                           "Finish or archive one, or a tier up raises it.",
+                                 "at_limit": True}, status=status.HTTP_402_PAYMENT_REQUIRED)
+            t = LilithTask.objects.create(
+                user=request.user, title=spec["title"], note=spec["note"], kind=spec["kind"],
+                bucket=spec["bucket"], source="platform", app_key=_coach_for(request, spec, key),
+                target=spec["target"], template=key,
+                action=spec.get("action", ""), goal=spec.get("goal", 1))
+            return Response(_task_dict(t), status=status.HTTP_201_CREATED)
+
+        if kind == "routine":
+            spec = ST.routine_by_key(key)
+            if not spec:
+                return Response({"detail": "No such starter."}, status=404)
+            # The member may keep it on a different rhythm than the starter's own. Only WHICH of the
+            # three, from the closed list: the title, action and goal still come from the server.
+            cadence = str(request.data.get("cadence") or spec["cadence"])
+            if cadence not in CADENCES:
+                return Response({"detail": "Choose daily, weekly or monthly."}, status=400)
+            if live_routines(request.user).filter(template=key).exists():
+                return Response({"detail": "That one is already on your board.", "already": True}, status=200)
+            back = LilithRoutine.objects.filter(user=request.user, template=key, trashed_at__isnull=False).first()
+            if back:
+                back.trashed_at = None
+                back.save(update_fields=["trashed_at"])
+                return Response({**_routine_dict(back), "restored": True}, status=200)
+            if live_routines(request.user).count() >= limits["routines"]:
+                return Response({"detail": f"{limits['routines']} routines is this tier's ceiling. "
+                                           "A tier up raises it.", "at_limit": True},
+                                status=status.HTTP_402_PAYMENT_REQUIRED)
+            r = LilithRoutine.objects.create(
+                user=request.user, title=spec["title"], note=spec["note"], cadence=cadence,
+                app_key=_coach_for(request, spec, key), target=spec["target"], template=key,
+                action=spec.get("action", ""), goal=spec.get("goal", 1))
+            return Response(_routine_dict(r), status=status.HTTP_201_CREATED)
+
+        return Response({"detail": "Say whether it is a task or a routine."}, status=400)
+
+
+class LilithMoveView(APIView):
+    """POST /api/economy/lilith/move/ {kind: "task"|"routine", id, to, bucket?} — move any entry anywhere.
+
+    * a task → any bucket (not the Logbook, which is where DONE things go and only ticking puts them there)
+    * a task → a routine: `to` is "daily" | "weekly" | "monthly"
+    * a routine → a task: `to` is "task" (lands in `bucket`, default Today) — the streak goes with it
+    * a routine → another cadence: `to` is "daily" | "weekly" | "monthly"
+
+    The entry keeps what it points at (`app_key`, `target`) and, if it is a verified call-to-action, its
+    `action` and `goal` — so a verified task becomes a verified routine and back. What does NOT carry is
+    anything that was earned: a finished task cannot be moved (it is history), a routine moved to another
+    cadence restarts its run (a streak of weeks is not a streak of days), and a routine turned into a task
+    loses its streak — the response says so, and the screen asks first. Nothing here pays, and no loop
+    through it pays twice: milestone rungs are once-for-life by their ledger ref, and a task's XP is paid
+    on completion, once per task.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from .models import membership_for
+        d = request.data
+        kind, to = str(d.get("kind") or ""), str(d.get("to") or "")
+        try:
+            pk = int(d.get("id"))
+        except (TypeError, ValueError):
+            return Response({"detail": "Say which entry."}, status=400)
+        limits = tier_limits(membership_for(request.user).tier)
+
+        if kind == "task":
+            t = LilithTask.objects.filter(pk=pk, user=request.user).first()
+            if not t:
+                return Response({"detail": "No such task."}, status=404)
+            if t.done_at:
+                return Response({"detail": "A finished task is history — it stays in the Logbook."}, status=400)
+            if to in _BUCKET_KEYS and to != "logbook":
+                if to != "trash" and t.bucket == "trash" and open_tasks(request.user).count() >= limits["active_tasks"]:
+                    return Response({"detail": f"{limits['active_tasks']} open tasks is this tier's ceiling — "
+                                               "there's no room to bring it back.", "at_limit": True},
+                                    status=status.HTTP_402_PAYMENT_REQUIRED)
+                t.bucket = to
+                t.trashed_at = timezone.now() if to == "trash" else None
+                t.save(update_fields=["bucket", "trashed_at"])
+                return Response({"moved": "trash" if to == "trash" else "bucket", "task": _task_dict(t)})
+            if to in CADENCES:
+                if live_routines(request.user).count() >= limits["routines"]:
+                    return Response({"detail": f"{limits['routines']} routines is this tier's ceiling. "
+                                               "A tier up raises it.", "at_limit": True},
+                                    status=status.HTTP_402_PAYMENT_REQUIRED)
+                r = LilithRoutine.objects.create(
+                    user=request.user, title=t.title, note=(t.note or "")[:500], cadence=to,
+                    app_key=t.app_key, target=t.target, action=t.action, goal=t.goal or 1)
+                t.delete()
+                return Response({"moved": "routine", "routine": _routine_dict(r)}, status=status.HTTP_201_CREATED)
+            return Response({"detail": "Move it to a bucket or to a routine cadence."}, status=400)
+
+        if kind == "routine":
+            r = LilithRoutine.objects.filter(pk=pk, user=request.user).first()
+            if not r:
+                return Response({"detail": "No such routine."}, status=404)
+            if to == "trash":
+                r.trashed_at = timezone.now()
+                r.save(update_fields=["trashed_at"])
+                return Response({"moved": "trash", "routine": _routine_dict(r)})
+            if r.trashed_at and to in CADENCES + ("task",) \
+                    and live_routines(request.user).count() >= limits["routines"] and to != "task":
+                return Response({"detail": f"{limits['routines']} routines is this tier's ceiling — "
+                                           "there's no room to bring it back.", "at_limit": True},
+                                status=status.HTTP_402_PAYMENT_REQUIRED)
+            if to in CADENCES:
+                if to == r.cadence and not r.trashed_at:
+                    return Response({"moved": "same", "routine": _routine_dict(r)})
+                lost = r.streak
+                restored = bool(r.trashed_at)
+                # Same cadence out of the Trash is a plain restore — the run is whatever time made it.
+                reset = to != r.cadence
+                if reset:
+                    r.cadence, r.streak, r.last_done = to, 0, None
+                r.trashed_at = None
+                r.save(update_fields=["cadence", "streak", "last_done", "trashed_at"])
+                return Response({"moved": "restored" if restored and not reset else "cadence",
+                                "streak_reset": reset and bool(lost), "lost_streak": lost if reset else 0,
+                                "routine": _routine_dict(r)})
+            if to == "task":
+                if open_tasks(request.user).count() >= limits["active_tasks"]:
+                    return Response({"detail": f"{limits['active_tasks']} open tasks is this tier's ceiling. "
+                                               "Finish or delete one first.", "at_limit": True},
+                                    status=status.HTTP_402_PAYMENT_REQUIRED)
+                bucket = d.get("bucket") if d.get("bucket") in _BUCKET_KEYS and d.get("bucket") != "logbook" else "today"
+                lost = r.streak
+                t = LilithTask.objects.create(
+                    user=request.user, title=r.title, note=r.note or "", kind="standard", bucket=bucket,
+                    source="platform" if r.app_key else "self", app_key=r.app_key, target=r.target,
+                    action=r.action, goal=r.goal or 1)
+                r.delete()
+                return Response({"moved": "task", "lost_streak": lost, "task": _task_dict(t)},
+                                status=status.HTTP_201_CREATED)
+            return Response({"detail": "Move it to another cadence, or to a task."}, status=400)
+
+        return Response({"detail": "Say whether it is a task or a routine."}, status=400)
+
+
+class LilithTrashView(APIView):
+    """DELETE /api/economy/lilith/trash/ — empty the Trash for good (tasks and routines).
+
+    Anything older than TRASH_DAYS goes on its own; this is the member doing it sooner. Irreversible,
+    so the screen asks first and the response says how many went."""
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        t, _ = LilithTask.objects.filter(user=request.user, bucket="trash").delete()
+        r, _ = LilithRoutine.objects.filter(user=request.user, trashed_at__isnull=False).delete()
+        return Response({"deleted": {"tasks": t, "routines": r}})

@@ -203,22 +203,25 @@ VISIBILITY_CHOICES = [
 
 
 def get_user_tier(user) -> str:
-    """Defensive tier lookup (free/premium/statz). Falls back to 'free'."""
-    try:  # pragma: no cover - platform dependent
-        from apps.common.tiergate import get_tier as _t
+    """The real tier (free/premium/statz), read from the platform's own
+    Membership — never the StatZ free-sample tier. `statz_trial.DRIVERS`
+    already lists `lessonz` as `sampled: False`: "Setting a lesson StatZ-only
+    changes what OTHER members can see; it must not flip back under them
+    when an hour ends." The same reasoning holds for CallZ exclusivity here.
 
-        return (_t(user) or "free").lower()
-    except Exception:
-        pass
-    try:  # pragma: no cover
-        from apps.common.models import UserFlags
+    This used to try `apps.common.tiergate.get_tier` and `apps.common.models.
+    UserFlags` first, both inside bare `except Exception: pass` — neither
+    module has ever existed in this codebase, so both always raised
+    ImportError and every call silently fell through to the hardcoded
+    `"free"` at the bottom. That meant CallZ-exclusive offers refused
+    EVERY member, StatZ included ("CallZ lessons are StatZ-exclusive" to a
+    StatZ member), and a Premium/StatZ-only LessonPost was invisible to the
+    people who paid to see it — both looked like intentional gates and were
+    actually a dead import nobody noticed because the except swallowed it.
+    """
+    from apps.economy.models import membership_for
 
-        f = UserFlags.objects.filter(user=user).first()
-        if f and getattr(f, "tier", None):
-            return str(f.tier).lower()
-    except Exception:
-        pass
-    return "free"
+    return membership_for(user).tier
 
 
 class LessonPost(models.Model):

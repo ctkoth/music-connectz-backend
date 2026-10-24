@@ -136,7 +136,11 @@ class SingZCoachTests(TestCase):
     @patch("apps.economy.vocalcoach._key", return_value="test-key")
     @patch("apps.economy.gemini.requests.post", return_value=fake_gemini({**GOOD, "score": 47}))
     def test_a_wild_score_is_clamped_to_ten(self, _post, _k):
-        self.assertEqual(self.client.post(URL, {"take": take()}, format="multipart").data["score"], 10)
+        # The model's own wild 47 is clamped and kept for audit; the shown
+        # overall is now computed from the dimensions (strength_weighted).
+        d = self.client.post(URL, {"take": take()}, format="multipart").data
+        self.assertEqual(d["model_score"], 10)
+        self.assertEqual(d["score"], 7)
 
 
 class CoachPriceTests(TestCase):
@@ -624,6 +628,20 @@ class TheFailureSaysWhichFailureItWasTests(TestCase):
                 resp = self.send(code)
                 self.assertEqual(resp.status_code, 502)
                 self.assertIn(phrase, resp.data["detail"].lower())
+
+    def test_a_bad_key_that_answers_400_does_not_blame_the_take(self):
+        # Found by running the app with a fake key: Google answers 400 "API key
+        # not valid", and the screen told the member their take's format was
+        # wrong. A key problem is ours, and the take was fine.
+        bad = fake_gemini(status_code=400)
+        bad.text = '{"error": {"code": 400, "message": "API key not valid. Please pass a valid API key.", "status": "INVALID_ARGUMENT"}}'
+        with patch("apps.economy.vocalcoach._key", return_value="k"), \
+             patch("apps.economy.gemini.requests.get", return_value=fake_list_models([])), \
+             patch("apps.economy.gemini.requests.post", return_value=bad):
+            resp = self.client.post(URL, {"take": take()}, format="multipart")
+        self.assertEqual(resp.status_code, 502)
+        self.assertIn("key", resp.data["detail"].lower())
+        self.assertNotIn("format", resp.data["detail"].lower())
 
     def test_the_status_and_what_we_sent_come_back_for_diagnosis(self):
         resp = self.send(429)
@@ -1610,3 +1628,223 @@ class CoachXPAwardTests(TestCase):
             self.assertEqual(events.count(), 1)
             event = events.first()
             self.assertEqual(event.xp_awarded, 1)
+
+
+class StrengthWeightedOverallTests(TestCase):
+    def test_evidence_takes(self):
+        from apps.economy.vocalcoach import strength_weighted as sw
+        self.assertGreaterEqual(sw({"a": 6, "b": 6, "c": 6, "d": 5, "e": 7}), 6)
+        self.assertGreaterEqual(sw({"a": 7, "b": 7, "c": 7, "d": 8, "e": 7}), 7)
+
+    def test_never_below_mean_and_monotonic(self):
+        from apps.economy.vocalcoach import strength_weighted as sw
+        base = [6, 6, 6, 5, 7]
+        for i in range(5):
+            up = list(base); up[i] += 1
+            self.assertGreaterEqual(sw(dict(enumerate(up))), sw(dict(enumerate(base))))
+        self.assertGreaterEqual(sw(dict(enumerate([3, 9, 9, 9, 9]))), 8)
+        self.assertEqual(sw({}), None)
+
+    def test_weakest_moves_it_least(self):
+        from apps.economy.vocalcoach import strength_weighted as sw
+        a = sw({0: 10, 1: 8, 2: 6, 3: 4, 4: 2}) - sw({0: 10, 1: 8, 2: 6, 3: 4, 4: 1})
+        b = sw({0: 10, 1: 8, 2: 6, 3: 4, 4: 2}) - sw({0: 9, 1: 8, 2: 6, 3: 4, 4: 2})
+        self.assertLessEqual(a, b)
+
+    def _run(self, payload, **kw):
+        import json as _json
+        from apps.economy.vocalcoach import score_take
+        fake = type("R", (), {"status_code": 200, "json": lambda self: {"candidates": [
+            {"content": {"parts": [{"text": _json.dumps(payload)}]}}]}})()
+        with patch("apps.economy.vocalcoach._key", return_value="k"), \
+             patch("apps.economy.gemini.requests.post", return_value=fake):
+            return score_take("rapz", SimpleUploadedFile("t.mp3", b"x"), "audio/mpeg",
+                              genre="Trap", target=None, difficulty="builder", **kw)
+
+    def test_server_overall_keeps_model_score_and_excludes_style(self):
+        out, err = self._run({"score": 6, "scores": {"flow": 6, "timing": 6, "breath": 6,
+                              "clarity": 5, "delivery": 7, "style_match": 10}})
+        self.assertIsNone(err)
+        self.assertEqual(out["model_score"], 6)
+        self.assertEqual(out["score"], 6)
+        self.assertIn("strongest", out["score_rule"])
+
+    def test_unscorable_stays_unscorable(self):
+        out, _ = self._run({"unscorable": "TV noise", "score": None, "scores": {}})
+        self.assertIsNone(out["score"])
+
+    def test_listeners_only_from_real_distinct_non_author_ratings(self):
+        from apps.economy.models import ItemRating, Post
+        from apps.economy.vocalcoach import listeners_for
+        author = User.objects.create_user("au", "au@e.com", "pw12345678")
+        post = Post.objects.create(author=author, title="t")
+        for i in range(2):
+            u = User.objects.create_user(f"r{i}", f"r{i}@e.com", "pw12345678")
+            ItemRating.objects.create(user=u, item_id=f"post:{post.id}", score=9)
+        ItemRating.objects.create(user=author, item_id=f"post:{post.id}", score=10)
+        self.assertIsNone(listeners_for(post))
+        u = User.objects.create_user("r9", "r9@e.com", "pw12345678")
+        ItemRating.objects.create(user=u, item_id=f"post:{post.id}", score=10)
+        self.assertEqual(listeners_for(post)["count"], 3)
+        self.assertIsNone(listeners_for(None))
+
+
+class UsualSettingsAndExactScoreTests(TestCase):
+    def test_exact_score_leans_on_strengths_and_stays_between_mean_and_best(self):
+        from apps.economy.vocalcoach import strength_weighted_exact as ex
+        vals = {"a": 7, "b": 6, "c": 6, "d": 5, "e": 4}
+        x = ex(vals)
+        self.assertGreaterEqual(x, sum(vals.values()) / 5)
+        self.assertLessEqual(x, 7)
+        self.assertEqual(round(x, 1), x)
+        self.assertIsNone(ex({}))
+
+    def test_usual_is_the_latest_take_that_named_each_field(self):
+        from django.contrib.auth import get_user_model
+        from apps.economy.models import TakeScore
+        from apps.economy.vocalcoach import usual_settings
+        u = get_user_model().objects.create_user("usualx", password="pw-12345-xyz")
+        self.assertEqual(usual_settings(u, "rapz"), {})
+        TakeScore.objects.create(user=u, app_key="rapz", genre="Drill", style="Lyrical",
+                                 target="tenor", difficulty="starter")
+        TakeScore.objects.create(user=u, app_key="rapz", genre="R&B", style="",
+                                 target="baritone", difficulty="builder")
+        got = usual_settings(u, "rapz")
+        self.assertEqual(got, {"genre": "R&B", "target": "baritone",
+                               "style": "Lyrical", "difficulty": "builder"})
+        self.assertEqual(usual_settings(u, "singz"), {})
+
+
+class UsualTopTests(TestCase):
+    def test_a_habit_needs_65_percent_and_five_takes(self):
+        from django.contrib.auth import get_user_model
+        from apps.economy.models import TakeScore
+        from apps.economy.vocalcoach import usual_top
+        u = get_user_model().objects.create_user("topx", password="pw-12345-xyz")
+        for g in ["Drill"] * 4:
+            TakeScore.objects.create(user=u, app_key="rapz", genre=g)
+        self.assertEqual(usual_top(u, "rapz"), {})            # only 4 takes
+        TakeScore.objects.create(user=u, app_key="rapz", genre="Drill")
+        TakeScore.objects.create(user=u, app_key="rapz", genre="Trap")
+        top = usual_top(u, "rapz")["genre"]                   # 5 of 6 = 83%
+        self.assertEqual((top["value"], top["n"]), ("Drill", 6))
+        for g in ["Trap"] * 4:
+            TakeScore.objects.create(user=u, app_key="rapz", genre=g)
+        self.assertNotIn("genre", usual_top(u, "rapz"))       # 5 of 10 = 50%
+
+
+class HabitBeatsOneOffTests(TestCase):
+    def test_a_habit_is_the_default_over_a_one_off_last_take(self):
+        from django.contrib.auth import get_user_model
+        from apps.economy.models import TakeScore
+        from apps.economy.vocalcoach import usual_settings
+        u = get_user_model().objects.create_user("habitx", password="pw-12345-xyz")
+        for _ in range(9):
+            TakeScore.objects.create(user=u, app_key="rapz", genre="Drill")
+        TakeScore.objects.create(user=u, app_key="rapz", genre="Trap")   # most recent
+        self.assertEqual(usual_settings(u, "rapz")["genre"], "Drill")
+
+
+class PracticeWhatWhyHowTests(TestCase):
+    def test_clean_practice_whitelists_and_caps(self):
+        from apps.economy.vocalcoach import clean_practice
+        self.assertEqual(clean_practice(None), [])
+        got = clean_practice([{"what": "Slow scales", "why": "pitch", "how": "10 min", "x": 1},
+                              {"why": "no what"}, "junk", {"what": "B"}, {"what": "C"}, {"what": "D"}])
+        self.assertEqual(got[0], {"what": "Slow scales", "why": "pitch", "how": "10 min"})
+        self.assertEqual(len(got), 3)
+
+    def test_prompt_asks_for_practice(self):
+        from apps.economy.instruments import prompt_for
+        self.assertIn('"practice"', prompt_for("rapz", "Trap", None, "builder"))
+
+
+class HookIsRatedApartTests(StrengthWeightedOverallTests):
+    """Same harness as the overall tests: a stubbed Gemini reply."""
+
+    def test_hook_is_served_and_counted_in_the_overall(self):
+        base = {"score": 6, "scores": {"flow": 6, "timing": 6, "breath": 6, "clarity": 6,
+                                        "delivery": 6, "style_match": 6},
+                "song_score": 7, "song_why": "ok", "verdict": "v", "strengths": ["s"],
+                "fixes": ["f"], "next_drill": "d"}
+        hi, _ = self._run({**base, "hook_score": 10, "hook_why": "sticks"})
+        lo, _ = self._run({**base, "hook_score": 2, "hook_why": "flat"})
+        none, _ = self._run(base)
+        self.assertEqual((hi["hook_score"], hi["hook_why"]), (10, "sticks"))
+        self.assertTrue(hi["hook_counted"])
+        self.assertFalse(none["hook_counted"])
+        self.assertGreater(hi["score_exact"], lo["score_exact"])   # it moves the number
+        self.assertGreater(hi["score_exact"], none["score_exact"])  # a great chorus lifts it
+        self.assertLessEqual(lo["score_exact"], none["score_exact"])  # a weak one never lifts it
+
+    def test_no_hook_is_none_not_zero(self):
+        out, _ = self._run({"score": 6, "scores": {"flow": 6}, "verdict": "v",
+                            "strengths": ["s"], "fixes": ["f"], "next_drill": "d"})
+        self.assertIsNone(out["hook_score"])
+
+
+class FeelzCountsInOverallTests(StrengthWeightedOverallTests):
+    BASE = {"score": 6, "scores": {"flow": 6, "timing": 6, "breath": 6, "clarity": 6,
+                                    "delivery": 6, "style_match": 6},
+            "verdict": "v", "strengths": ["s"], "fixes": ["f"], "next_drill": "d"}
+
+    def test_feelz_is_served_counted_and_moves_the_overall(self):
+        hi, _ = self._run({**self.BASE, "feelz_score": 10, "feelz_emotion": "grief",
+                           "feelz_why": "raw"})
+        none, _ = self._run(self.BASE)
+        self.assertEqual((hi["feelz_score"], hi["feelz_emotion"]), (10, "grief"))
+        self.assertTrue(hi["feelz_counted"])
+        self.assertFalse(none["feelz_counted"])
+        self.assertIsNone(none["feelz_score"])
+        self.assertGreater(hi["score_exact"], none["score_exact"])
+
+    def test_a_ten_over_sixes_lands_between_the_mean_and_the_ten(self):
+        from apps.economy.vocalcoach import strength_weighted_exact as ex
+        x = ex({"a": 6, "b": 6, "c": 6, "d": 6, "e": 6, "hookz": 10, "feelz": 10})
+        self.assertGreater(x, 6)
+        self.assertLess(x, 10)
+
+
+class KeepThisTakeTests(SingZCoachTests):
+    """Opt-in, per take: the recording is kept only when the member says so."""
+
+    def _send(self, **extra):
+        return self.client.post(URL, {"take": take(), "genre": "R&B", "range": "tenor",
+                                      "difficulty": "builder", **extra}, format="multipart")
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
+    def test_by_default_the_recording_is_not_stored(self, _post, _k):
+        from apps.economy.models import Upload
+        r = self._send()
+        self.assertFalse(r.data["kept"])
+        self.assertEqual(Upload.objects.filter(user=self.user).count(), 0)
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
+    def test_ticking_keep_stores_it_as_a_normal_upload_the_history_can_open(self, _post, _k):
+        from apps.economy.models import TakeScore, Upload
+        r = self._send(keep="1")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertTrue(r.data["kept"])
+        up = Upload.objects.get(user=self.user)
+        self.assertEqual(up.size_bytes, 1000)                       # counts against their storage
+        self.assertEqual(up.file.read(), b"0" * 1000)               # the whole take, from the start
+        row = TakeScore.objects.get(user=self.user)
+        self.assertEqual(row.upload_id, up.id)
+        hist = self.client.get("/api/singz/progress/").data["takes"][0]
+        self.assertTrue(hist["file"]["kept"])
+        self.assertTrue(hist["file"]["url"])
+
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
+    def test_a_take_that_does_not_fit_is_still_scored_and_the_member_is_told_why(self, _post, _k):
+        from apps.economy.models import Upload
+        self._tier("free")
+        with patch("apps.economy.takekeep.storage_used_bytes", return_value=10 ** 12):
+            r = self._send(keep="1")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["score"], 7)                         # the coaching is unaffected
+        self.assertFalse(r.data["kept"])
+        self.assertIn("still scored", r.data["kept_note"])
+        self.assertEqual(Upload.objects.filter(user=self.user).count(), 0)

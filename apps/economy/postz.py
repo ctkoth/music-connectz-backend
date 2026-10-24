@@ -15,7 +15,9 @@ from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Sum, When
 from django.utils import timezone
 
-from .catalog import edit_window_for
+from .catalog import (BOOST_ENERGY, BOOST_HOURS, BOOST_MAX_AHEAD_HOURS, BOOST_SLOTS,
+                      POST_ENERGY_FLOOR, edit_window_for)
+from .coachshare import clean_visibility, coach_read_for, for_new_post, legacy_score
 from .crosspost import coach_cap, coach_price, destinations_for, take_state_for
 from .gates import clean_gates, failing_gate, member_metrics, refusal
 from .models import (
@@ -46,11 +48,13 @@ from .models import (
     split_cents,
     submission_cap_for,
     submissions_used_today,
+    spend_energy,
     wallet_for,
     post_collab_threshold,
     post_is_battle_eligible,
     post_is_collab_eligible,
 )
+from .embedplays import play_count, plays_for
 from .personaz import personas_of
 from .views import credit_owner
 
@@ -147,7 +151,8 @@ def clean_post_price(value):
 
 
 def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_UNSET,
-               cap=None, shares=None, joins=None, rating=_UNSET, bought=_UNSET):
+               cap=None, shares=None, joins=None, rating=_UNSET, bought=_UNSET,
+               plays=None):
     vibe = up - down
     media = media_slots(p)
     if take_state is _UNSET:
@@ -158,6 +163,10 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
     take_missing = bool((take_state or {}).get("missing"))
     n_collabs = p.collab_deals.count() if collabs is None else collabs
     flagged = down >= HIDE_FLAG_MIN_DOWN and down >= up * HIDE_FLAG_RATIO
+    # What THIS viewer may see of the coach's read. Decided in one place
+    # (coachshare.coach_read_for), costs no query, and is the only thing that
+    # may put read content into this dict — `score` below is derived from it.
+    coach = coach_read_for(p, request.user)
     return {
         "id": p.id,
         "author": p.author.username,
@@ -174,6 +183,9 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
         "is_album": p.is_album,
         "items": p.items or [],
         "embeds": p.embeds or [],
+        # Listens counted on Music ConnectZ from the embedded SoundCloud player
+        # (embedplays.py) — never SoundCloud's own number. 0 = say nothing.
+        "mcz_plays": play_count(p) if plays is None else plays,
         # One of each, resolved for the client so it renders every attachment
         # rather than only the primary one.
         "media": media,
@@ -186,7 +198,11 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
         # player and leaves the ones that still work alone.
         "take_kind": (take_state or {}).get("kind", "") if take_missing else "",
         "slots": list(MEDIA_SLOTS),
-        "score": p.score or {},
+        # The legacy key: the whole stored read, but only when `coach` says it
+        # is shown. A viewer the read was refused gets nothing in either place.
+        "score": legacy_score(p, coach),
+        # {state: none|locked|shown, read?, reason?, visibility? (author only)}
+        "coach": coach,
         "genre": p.genre,
         # A flag beside the genre, never instead of it — a freestyle Trap verse
         # is still Trap, and ChartZ must still be able to slice it as Trap.
@@ -246,6 +262,9 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
         "joins": (p.joins.count() if p.visibility == "restricted" else 0) if joins is None else joins,
         "shares": p.shares.count() if shares is None else shares,
         "up": up, "down": down, "vibe": vibe, "flagged": flagged,
+        "boosted": bool(p.boosted_until and p.boosted_until > timezone.now()),
+        "boost_cost_energy": BOOST_ENERGY,
+        "boosted_until": p.boosted_until.isoformat() if p.boosted_until else None,
         "rating": item_rating_median(f"post:{p.id}") if rating is _UNSET else rating,
         "created_at": p.created_at.isoformat(),
         "edited_at": p.edited_at.isoformat() if p.edited_at else None,
@@ -321,7 +340,7 @@ def skill_prices(user):
     return out
 
 
-def post_cost_cents(user, skills_used):
+def post_cost_cents(user, skills_used, floor=None):
     """What posting this costs: the combined price of the skills that went in.
 
     Computed HERE, from the member's own rates, never taken from the request.
@@ -346,7 +365,46 @@ def post_cost_cents(user, skills_used):
     off = badge_effects(user).get("post_discount_pct", 0)
     if off and total:
         total = max(0, total - int(total * off / 100))
+    # Every POST costs at least the floor. Submissions that refuse when short
+    # (battles, collabs, venues) pass floor=0: a floor there would be a wall.
+    floor = POST_ENERGY_FLOOR if floor is None else floor
+    if total < floor:
+        lines.append({"skill": "Posting", "cents": floor - total})
+        total = floor
     return total, lines
+
+
+HABIT_SHARE = 0.65      # the remembered-choices bar: a skill is a habit at 65% of posts
+HABIT_MIN_POSTS = 5
+
+
+def suggest_skills(user):
+    """(skills, source) a new post of this member's would most likely list.
+
+    Same rule as every remembered field: if at least HABIT_MIN_POSTS recent
+    posts exist, a skill used in HABIT_SHARE of them is a habit and they are all
+    suggested — so a producer / mix engineer / artist who does everything alone
+    gets the whole stack, because every one of their posts lists it. Below that
+    bar the LAST post's skills win. With no history at all, their declared
+    (priced) skills are the default. It only suggests: the member edits the list
+    before publishing, and the price follows the list.
+    """
+    recent = [list(sk) for sk in
+              Post.objects.filter(author=user).order_by("-created_at")
+              .values_list("skills_used", flat=True)[:30]
+              if isinstance(sk, list) and sk]
+    if len(recent) >= HABIT_MIN_POSTS:
+        counts = {}
+        for sk in recent:
+            for name in set(str(x).strip()[:80] for x in sk if str(x).strip()):
+                counts[name] = counts.get(name, 0) + 1
+        habit = [n for n, c in counts.items() if c / len(recent) >= HABIT_SHARE]
+        if habit:
+            order = {str(x).strip()[:80]: i for i, x in enumerate(recent[0])}
+            return sorted(habit, key=lambda n: order.get(n, 999))[:40], "habit"
+    if recent:
+        return [str(x).strip()[:80] for x in recent[0] if str(x).strip()][:40], "last"
+    return list(skill_prices(user))[:40], "declared"
 
 
 def skills_from(d, key="skills"):
@@ -377,7 +435,7 @@ def charge_skill_energy(user, skills):
     Returns (info, refusal). `refusal` is a (payload, status) pair or None,
     matching `create_post`'s error shape.
     """
-    cost, lines = post_cost_cents(user, skills)
+    cost, lines = post_cost_cents(user, skills, floor=0)
     if not cost:
         return {"energy_cost": 0, "energy_charged": 0}, None
 
@@ -414,6 +472,13 @@ def create_post(user, d):
     title = str(d.get("title", "")).strip()[:160]
     if not title:
         return None, {}, ({"detail": "title required"}, status.HTTP_400_BAD_REQUEST)
+    # A coach read posted WITH the song, and who may see it. Checked before
+    # anything below is charged: a token that is not the member's own refuses
+    # the whole post and costs nothing, and the read itself costs nothing extra
+    # (it was paid for when the coach gave it).
+    coach_score, score_vis, coach_err = for_new_post(user, d)
+    if coach_err:
+        return None, {}, (coach_err, status.HTTP_400_BAD_REQUEST)
     vis = str(d.get("visibility", "public")).lower()
     if vis not in {"public", "restricted", "private"}:
         vis = "public"
@@ -425,6 +490,8 @@ def create_post(user, d):
     media_url = str(d.get("media_url", "")).strip()[:500]
     media_type = str(d.get("media_type", "")).strip()[:24]
     score = d.get("score") if isinstance(d.get("score"), dict) else {}
+    if coach_score:
+        score = coach_score        # the server's copy of the read, never a body's
     items = clean_items(d.get("items"))
     # An album is asked for, never inferred from the count. Otherwise a track
     # posted with its cover art became "an album" of two.
@@ -458,12 +525,15 @@ def create_post(user, d):
     if charged:
         w.energy -= charged
         w.save(update_fields=["energy", "updated_at"])
+        from .models import Transaction, log_resource
+        log_resource(user, Transaction.RES_ENERGY, -charged, f"Post: {title[:60]}",
+                     app_key="postz", target="postz:compose")
     p = Post.objects.create(
         author=user, title=title,
         description=str(d.get("description", ""))[:4000],
         links=d.get("links") or [], media_type=media_type, media_url=media_url,
         is_album=is_album, items=items,
-        score=score, visibility=vis, skill_cost_cents=cost,
+        score=score, score_visibility=score_vis, visibility=vis, skill_cost_cents=cost,
         genre=str(d.get("genre", ""))[:40],
         freestyle=freestyle,
         skills_used=skills,
@@ -492,6 +562,71 @@ def create_post(user, d):
         try_award(user, "post_with_skills", stretch=len(skills) >= 3)
 
     return p, {"energy_charged": charged, "energy": w.energy}, None
+
+
+class VisibilityRefused(Exception):
+    def __init__(self, payload, status):
+        super().__init__(payload.get("detail", ""))
+        self.payload, self.status = payload, status
+
+
+def change_visibility(user, p, new_vis, *, share_private_track=False, strict_funds=False,
+                      backdate_to=None):
+    """THE one way a post's visibility changes (PostZ edit and the SoundCloud
+    library manager both come through here).
+
+    Leaving private is the first moment a post can reach anybody, so that is
+    where the shortfall of its skill cost is charged (imports owe nothing: no
+    skills). A track private on SoundCloud needs `share_private_track`.
+    `strict_funds` refuses (402) instead of taking what is there, for batches.
+    `backdate_to` only ever moves created_at EARLIER, never later, so it cannot
+    bump a post or re-earn the fresh-post royalty boost.
+    Returns {"was", "now", "charged", "owed", "backdated"}.
+    """
+    with transaction.atomic():
+        row = Post.objects.select_for_update().get(pk=p.pk)
+        p.visibility, p.skill_cost_cents = row.visibility, row.skill_cost_cents
+        was = p.visibility
+        leaving = was == "private" and new_vis != "private"
+        if leaving:
+            from .soundcloud_import import has_private_track
+            if has_private_track(p) and not share_private_track:
+                raise VisibilityRefused({
+                    "detail": "This track is private on SoundCloud. Publishing shares its secret "
+                              "link with everyone who can see the post.",
+                    "needs_confirm": "share_private_track",
+                }, status.HTTP_409_CONFLICT)
+        charged = owed = 0
+        fields = ["visibility"]
+        if leaving:
+            cost, _lines = post_cost_cents(user, p.skills_used)
+            owed = max(0, cost - p.skill_cost_cents)
+            if owed:
+                Wallet.objects.get_or_create(user=user)
+                w = Wallet.objects.select_for_update().get(user=user)
+                have = max(0, w.energy or 0)
+                if strict_funds and have < owed:
+                    raise VisibilityRefused({
+                        "detail": f"Publishing this costs {owed} \u26a1 more and you have {have}. Nothing was charged.",
+                        "insufficient": True, "energy_needed": owed, "energy_available": have,
+                    }, status.HTTP_402_PAYMENT_REQUIRED)
+                charged = min(owed, have)
+                if charged:
+                    w.energy = have - charged
+                    w.save(update_fields=["energy", "updated_at"])
+                    p.skill_cost_cents += charged
+                    fields.append("skill_cost_cents")
+                    log_resource(user, Transaction.RES_ENERGY, -charged,
+                                 note=f"Published '{p.title}' (post #{p.id})"[:200],
+                                 app_key="postz", target=f"postz:{p.id}")
+        p.visibility = new_vis
+        p.save(update_fields=fields)
+        backdated = False
+        if leaving and backdate_to and backdate_to < p.created_at:
+            Post.objects.filter(pk=p.pk).update(created_at=backdate_to)
+            p.created_at = backdate_to
+            backdated = True
+    return {"was": was, "now": new_vis, "charged": charged, "owed": owed, "backdated": backdated}
 
 
 class PostCostView(APIView):
@@ -532,6 +667,65 @@ class SubmissionsView(APIView):
         cap = submission_cap_for(request.user)
         used = submissions_used_today(request.user)
         return Response({"used": used, "cap": cap, "remaining": max(0, cap - used)})
+
+
+def _boost_state(post, user):
+    """What boosting this post would do right now, said before it is pressed."""
+    now = timezone.now()
+    until = post.boosted_until if post.boosted_until and post.boosted_until > now else None
+    base = until or now
+    new_until = base + timedelta(hours=BOOST_HOURS)
+    ahead = (new_until - now).total_seconds() / 3600
+    why = ""
+    if post.author_id != user.id:
+        why = "You can only boost your own post."
+    elif post.visibility not in ("public", ""):
+        why = "Only a public post can be boosted: a private or members-only post is not in the open feed."
+    elif ahead > BOOST_MAX_AHEAD_HOURS:
+        why = f"It is already boosted for more than {BOOST_MAX_AHEAD_HOURS - BOOST_HOURS} hours. Come back when that is nearly up."
+    return {"cost_energy": BOOST_ENERGY, "hours": BOOST_HOURS, "slots": BOOST_SLOTS,
+            "boosted_until": until.isoformat() if until else None,
+            "new_until": new_until.isoformat(), "allowed": not why, "why_not": why,
+            "energy": max(0, wallet_for(user).energy or 0),
+            "what_you_get": f"A place near the top of the feed for {BOOST_HOURS} hours, labelled Boosted. "
+                            "It buys visibility only: it does not change ratings, plays or royalties. "
+                            f"At most {BOOST_SLOTS} boosted posts lead the feed at once."}
+
+
+class PostBoostView(APIView):
+    """GET /postz/<id>/boost/ — the price and whether it can be bought. POST — boost it."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        post = Post.objects.filter(pk=pk).first()
+        if not post or (post.author_id != request.user.id and post.visibility not in ("public", "")):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(_boost_state(post, request.user))
+
+    def post(self, request, pk):
+        post = Post.objects.filter(pk=pk, author=request.user).first()
+        if not post:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        st = _boost_state(post, request.user)
+        if not st["allowed"]:
+            return Response({"detail": st["why_not"], **st}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            if spend_energy(request.user, BOOST_ENERGY, f"Boost: {post.title[:60]}",
+                            app_key="postz", target=f"post:{post.id}") is None:
+                have = st["energy"]
+                return Response({
+                    "detail": f"Boosting costs {BOOST_ENERGY} \u26a1 and you have {have}. Nothing was charged.",
+                    "insufficient": True, "resource": "energy",
+                    "cost": {"resource": "energy", "amount": BOOST_ENERGY},
+                    "energy_needed": BOOST_ENERGY, "energy_available": have,
+                    "energy_short": BOOST_ENERGY - have,
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+            Post.objects.filter(pk=post.pk).update(boosted_until=timezone.now() + (
+                (post.boosted_until - timezone.now() if post.boosted_until and post.boosted_until > timezone.now()
+                 else timedelta(0)) + timedelta(hours=BOOST_HOURS)))
+        post.refresh_from_db()
+        return Response({**_boost_state(post, request.user), "boosted": True})
 
 
 class PostsView(APIView):
@@ -600,13 +794,15 @@ class PostsView(APIView):
                      .values_list("post_id").annotate(n=Count("id")))
         ratings = item_rating_medians([f"post:{i}" for i in ids])
         bought = _bought_ids(request, ids)
+        plays = plays_for(visible)
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
                             collabs=deals.get(p.id, 0), price=price, cap=cap,
                             take_state=sizes.get(p.id),
                             shares=shares.get(p.id, 0),
                             joins=joins.get(p.id, 0) if p.visibility == "restricted" else 0,
                             rating=ratings.get(f"post:{p.id}"),
-                            bought=p.id in bought)
+                            bought=p.id in bought,
+                            plays=plays.get(p.id, 0))
                  for p in visible]
 
         now = timezone.now()
@@ -624,12 +820,26 @@ class PostsView(APIView):
             posts.sort(key=lambda d: (d["rating"] or 0, d["vibe"]), reverse=True)
         else:  # hot
             posts.sort(key=lambda d: hot(d, by_id[d["id"]]), reverse=True)
+        # Paid placement: up to BOOST_SLOTS active boosted posts lead, most recently
+        # boosted first, and every one says so on its card. The rest keep their place.
+        live = sorted((d for d in posts if d["boosted"] and not d["flagged"]),
+                      key=lambda d: d["boosted_until"], reverse=True)[:BOOST_SLOTS]
+        if live:
+            lead = {d["id"] for d in live}
+            posts = live + [d for d in posts if d["id"] not in lead]
         from .ratez import rating_reward
         return Response({"posts": posts[:100], "sort": sort,
                          "rating_reward": rating_reward(request.user)})
 
     def post(self, request):
         d = request.data
+        # A body never supplies the coach's read. `score` is what a post shows as
+        # "the coach gave this 9/10", so a number typed into a request would be
+        # a forged one — a read is attached from the member's own ScoreShare by
+        # `coach_token` (create_post) or postz/<id>/coach/. Server-built callers
+        # of create_post (OCC's provenance) still pass their own `score`.
+        if "score" in d:
+            d = {k: v for k, v in d.items() if k != "score"}
         # Edit an existing post (author only, within the tier's edit window).
         edit_id = d.get("edit_id")
         if edit_id is not None:
@@ -665,6 +875,25 @@ class PostsView(APIView):
         if not p:
             return Response({"detail": "post not found"}, status=status.HTTP_404_NOT_FOUND)
         mine = p.author_id == request.user.id
+        if "score_visibility" in d:
+            # Who may see the coach's read: a setting about a score, held to no
+            # edit window. The AUTHOR's alone — the platform owner may fix a
+            # broken media link on anyone's post, but who gets to see somebody's
+            # score is their privacy, not a repair.
+            if not mine:
+                return Response({"detail": "Only the member who published this can change who "
+                                           "sees its coach read."},
+                                status=status.HTTP_403_FORBIDDEN)
+            new_cv, bad = clean_visibility(d["score_visibility"])
+            if bad or new_cv is None:
+                return Response({"detail": bad or "Choose who sees the coach's read."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            p.score_visibility = new_cv
+            p.save(update_fields=["score_visibility"])
+            # Handled; what is left of the request is judged as if it were not there.
+            d = {k: v for k, v in d.items() if k != "score_visibility"}
+            if len(d) <= 1:            # edit_id alone
+                return Response(_post_dict(p, request))
         # Playlist consent is a SETTING, not content, so it is not held to the
         # tier's edit window. Locking an author out of withdrawing their work
         # four minutes after posting would make the switch useless.
@@ -693,42 +922,12 @@ class PostsView(APIView):
             # than defaulting to "public" the way creation does: a typo here
             # should never be the thing that publishes a draft.
             new_vis = str(d.get("visibility") or "").strip().lower()
-            # A track that is private on SoundCloud plays through its SECRET
-            # link. Publishing the post hands that link to everybody who can
-            # see it, so it is asked, not assumed — the member kept that track
-            # private somewhere else, on purpose.
-            if new_vis in dict(Post.VIS_CHOICES) and new_vis != "private" and p.visibility == "private":
-                from .soundcloud_import import has_private_track
-                if has_private_track(p) and not d.get("share_private_track"):
-                    return Response({
-                        "detail": "This track is private on SoundCloud. Publishing shares its secret "
-                                  "link with everyone who can see the post.",
-                        "needs_confirm": "share_private_track",
-                    }, status=status.HTTP_409_CONFLICT)
             if new_vis in dict(Post.VIS_CHOICES):
-                was_private = p.visibility == "private"
-                p.visibility = new_vis
-                vfields = ["visibility"]
-                # Going private -> anything else is the moment a post can
-                # first reach anybody. soundcloud_import.py's own promise is
-                # that "the normal cost of a post applies when they publish
-                # one" — imports are created with skill_cost_cents=0 because
-                # nothing was charged at import, so this charges the
-                # SHORTFALL between what the post's current skills_used would
-                # cost today and what has already been charged. A normal
-                # private post (charged in full at creation) has no shortfall
-                # and is never charged twice for the same skills.
-                if was_private and new_vis != "private":
-                    cost, _lines = post_cost_cents(request.user, p.skills_used)
-                    owed = max(0, cost - p.skill_cost_cents)
-                    if owed:
-                        w = wallet_for(request.user)
-                        charged = min(owed, max(0, w.energy))
-                        w.energy -= charged
-                        w.save(update_fields=["energy", "updated_at"])
-                        p.skill_cost_cents += charged
-                        vfields.append("skill_cost_cents")
-                p.save(update_fields=vfields)
+                try:
+                    change_visibility(request.user, p, new_vis,
+                                      share_private_track=bool(d.get("share_private_track")))
+                except VisibilityRefused as refused:
+                    return Response(refused.payload, status=refused.status)
             # edit_id + visibility (+ the private-track confirmation): nothing
             # else to do. Counting the confirmation would push a plain publish
             # into the content-edit path and its edit window.
@@ -1098,6 +1297,7 @@ class DiscoveryFeedView(APIView):
                      .values_list("post_id").annotate(n=Count("id")))
         ratings = item_rating_medians([f"post:{i}" for i in ids])
         bought = _bought_ids(request, ids)
+        plays = plays_for(recommendations)
 
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
                             collabs=deals.get(p.id, 0), price=price, cap=cap,
@@ -1105,7 +1305,8 @@ class DiscoveryFeedView(APIView):
                             shares=shares.get(p.id, 0),
                             joins=joins.get(p.id, 0) if p.visibility == "restricted" else 0,
                             rating=ratings.get(f"post:{p.id}"),
-                            bought=p.id in bought)
+                            bought=p.id in bought,
+                            plays=plays.get(p.id, 0))
                  for p in recommendations]
 
         return Response({

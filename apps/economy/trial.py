@@ -101,6 +101,22 @@ def trial_state(ip, anon_id=""):
     return today, browser_done, ip_over
 
 
+from .retake import offer as remind_offer  # noqa: E402
+
+
+def example_for(app_key):
+    """The owner's most recent shared take on this coach, as its public card, or None."""
+    from .models import ScoreShare
+    from .scoreshare import share_dict
+    for row in (ScoreShare.objects.select_related("user")
+                .filter(app_key=app_key, user__is_superuser=True).order_by("-created_at")[:10]):
+        p = row.payload or {}
+        if p.get("progress") or p.get("recap"):
+            continue                       # a climb or a month is not "what one take gets"
+        return share_dict(row)
+    return None
+
+
 class TrialCoachView(APIView):
     """GET what the trial offers and whether it's available; POST one take.
 
@@ -173,9 +189,24 @@ class TrialCoachView(APIView):
             "rates_mix": rates_mix(self.app_key),
             "mix_scores": MIX_SCORE if rates_mix(self.app_key) else {},
             "caveat": profile["caveat"],
+            # What a score looks like, before anybody performs for one: a real card, never
+            # a made-up one. Only the OWNER's own shared takes — featuring a member's card
+            # on the front door is a use they never agreed to, anonymised or not. None when
+            # the owner has shared nothing on this coach; the screen then shows nothing.
+            "example": example_for(self.app_key),
+            # Whether the "email me the score" field may render BEFORE the take is sent.
+            "remind": remind_offer(),
         })
 
     def post(self, request):
+        if str(request.data.get("reference", "")).lower() in ("1", "true", "yes", "on"):
+            # The one free take is a stranger's own performance. Spending it on
+            # somebody else's song would use up the only thing they came for.
+            return Response(
+                {"detail": "Listening to someone else's track needs an account — the free take "
+                           "here is for your own performance. Make an account and try both.",
+                 "reference_needs_account": True},
+                status=status.HTTP_403_FORBIDDEN)
         ip = client_ip(request)
         anon_id = client_anon_id(request)
         today, mine, ip_over = trial_state(ip, anon_id)
@@ -251,8 +282,14 @@ class TrialCoachView(APIView):
             anon_id=anon_id, result=payload,
             scored=payload.get("score") is not None,
         )
-        from .retake import offer as remind_offer, rearm_for
+        from .retake import arm as remind_arm, rearm_for
         rearm_for(take)
+        # The address typed BEFORE sending: the score goes out the moment it exists, so
+        # closing the tab during the wait no longer loses it. Never fails the take.
+        emailed = None
+        if take.scored and str(data.get("email") or "").strip():
+            body, _code = remind_arm(take, data.get("email"), anon_id)
+            emailed = body
         from .models import mint_score_share
         share = mint_score_share(self.app_key, payload, genre=data.get("genre", ""))
         return Response({
@@ -270,8 +307,26 @@ class TrialCoachView(APIView):
             # The way back, for somebody not ready to make an account: email
             # the score and a retake reminder. `ready: false` renders nothing.
             "remind": remind_offer() if payload.get("score") is not None else None,
+            "emailed": emailed,
+            # The gain of joining, stated after they have had the value: what this exact
+            # take would have been as a Free member. The trial itself spends nothing.
+            "as_member": _as_member(payload),
         }, status=status.HTTP_201_CREATED)
 
+
+
+def _as_member(payload):
+    from .models import AI_ENERGY_TIER_FACTOR, PROMPT_ALLOWANCE
+    from .vocalcoach import coach_xp_base
+    import math
+    if payload.get("score") is None:
+        return None
+    return {
+        "daily_prompts": PROMPT_ALLOWANCE.get("free"),
+        "energy": max(1, math.ceil(1 * AI_ENERGY_TIER_FACTOR.get("free", 1.0))),
+        "xp": coach_xp_base(payload.get("score_exact", payload.get("score"))),
+        "kept": True,
+    }
 
 class TrialTakeDetailView(APIView):
     """GET /api/trial/<token>/ — read a trial take back.
@@ -376,7 +431,7 @@ class PublicTiersView(APIView):
         from .models import (ENERGY_FLOOR_PER_HOUR, PROMPT_ALLOWANCE,
                              REFERRAL_REWARD_JOINEE_SPINAZ,
                              REFERRAL_REWARD_REFERRER_SPINAZ,
-                             SIGNUP_WELCOME_SPINAZ, founding_status)
+                             SIGNUP_WELCOME_ENERGY, SIGNUP_WELCOME_SPINAZ, REFERRAL_REWARD_MONTHLY_CAP, founding_status)
 
         ladder = tier_ladder()
         founding = founding_status()
@@ -440,7 +495,12 @@ class PublicTiersView(APIView):
             # rule's other half, and the half that gets forgotten.
             "join": {
                 "welcome_spinaz": SIGNUP_WELCOME_SPINAZ,
+                "welcome_energy": SIGNUP_WELCOME_ENERGY,
                 "referrer_spinaz": REFERRAL_REWARD_REFERRER_SPINAZ,
                 "joinee_spinaz": REFERRAL_REWARD_JOINEE_SPINAZ,
+                # The ceiling on that reward, stated with it: 300 for every invite
+                # is not what is on offer, and a gain found out to be capped after
+                # the fact is the price-found-by-paying-it failure in reverse.
+                "referrer_monthly_cap": REFERRAL_REWARD_MONTHLY_CAP,
             },
         })

@@ -121,7 +121,7 @@ UNLIMITED_CHARS = 10 ** 9
 # cannot add more (`social.links_over_cap`).
 TIER_LIMITS = {
     TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500, "embeds_per_post": 3,
-                "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 5, "profile_links": 25},
+                "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 10, "profile_links": 25},
     TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 15,
                    "widgets_open": 12, "custom_groups": 5, "soundcloud_import": 25, "profile_links": 100},
     # StatZ writes without a character cap (Corey's call). It was 5,000 for a
@@ -292,6 +292,18 @@ WRITER_BRIEF_CHARS = {
 }
 
 
+# VoiceZ: how many voices of their own a member may keep. A recommendation,
+# Corey's to move. Presets (Corey / Standard / Technical) are every tier's;
+# MAKING and USING a custom voice is StatZ's, a capability on top of one
+# everybody already has. A lapse pauses voices and never erases them, and a
+# member over a ceiling keeps everything they wrote.
+CUSTOM_VOICE_LIMITS = {TIER_FREE: 0, TIER_PREMIUM: 0, TIER_STATZ: 20, TIER_DEBUG: 20}
+
+
+def custom_voice_limit(tier):
+    return CUSTOM_VOICE_LIMITS.get(tier, 0)
+
+
 def writer_brief_chars(tier):
     return WRITER_BRIEF_CHARS.get(tier, WRITER_BRIEF_CHARS[TIER_FREE])
 
@@ -300,6 +312,56 @@ def over_writer_brief(text, tier):
     """The cap a Sentence ConnectZ brief broke for this tier, or None if it fits."""
     cap = writer_brief_chars(tier)
     return None if len(text or "") <= cap else cap
+
+
+# Mix ConnectZ — how much compression a master may use, per tier.
+#
+# The mastering itself runs on the member's own device (a JS engine measures
+# BS.1770 loudness, true peak and the spectrum, then EQs, compresses, limits and
+# dithers), so a master costs the platform nothing and a tier cannot be paying
+# for compute here. What the ladder sells is HOW MUCH of the heavy end a member
+# reaches — Corey's call: compression for Premium, the heaviest for StatZ — and
+# never WHETHER: Free still gets automatic glue compression at low and medium,
+# because a "master" with no dynamics control is not a master, and a free tier
+# that could not finish a song would be a door out rather than a step on a ladder.
+#
+# * `intensities` — the presets the member may pick, lightest first. `max` is the
+#   heaviest compression on offer (fastest attack, steepest ratio, the most
+#   limiting) and is labelled "Heaviest" on screen (MASTERING_INTENSITY_LABELS);
+#   it is a sound some genres want and most masters should not have.
+# * `manual_glue` — whether the member may set the glue compressor's amount by
+#   hand rather than taking the intensity's own.
+# * `glue_db_max` — the most gain reduction, in dB, the glue compressor may apply:
+#   automatically on Free, by hand above it.
+#
+# A recommendation like every number here, and Corey's to move. The engine
+# masters at whatever intensity it is handed, so the client reads this ladder
+# from the server (/api/economy/mixz/) and never decides it.
+MASTERING = {
+    TIER_FREE: {"intensities": ["low", "medium"], "manual_glue": False, "glue_db_max": 2},
+    TIER_PREMIUM: {"intensities": ["low", "medium", "high"], "manual_glue": True, "glue_db_max": 4},
+    TIER_STATZ: {"intensities": ["low", "medium", "high", "max"], "manual_glue": True, "glue_db_max": 8},
+    TIER_DEBUG: {"intensities": ["low", "medium", "high", "max"], "manual_glue": True, "glue_db_max": 8},
+}
+
+# The screen's words for each intensity, served so no client retypes them.
+MASTERING_INTENSITY_LABELS = {"low": "Low", "medium": "Medium", "high": "High", "max": "Heaviest"}
+
+
+def mastering_for(tier):
+    """{intensities, manual_glue, glue_db_max} for this tier — a copy, so a
+    caller editing it cannot move the ladder."""
+    row = MASTERING.get(tier, MASTERING[TIER_FREE])
+    return {"intensities": list(row["intensities"]), "manual_glue": row["manual_glue"],
+            "glue_db_max": row["glue_db_max"]}
+
+
+def mastering_ladder():
+    """Every public tier's mastering row, lightest first, so a screen can say what
+    a tier up would add without typing it."""
+    from .models import TIER_CHOICES
+    labels = dict(TIER_CHOICES)
+    return [{"tier": t, "label": labels.get(t, t), **mastering_for(t)} for t in PUBLIC_TIERS]
 
 
 def chars_unlimited(tier):
@@ -398,10 +460,16 @@ PLAYLIST_RECENCY_BOOST_MULTIPLIER = 1.5 # fresh content earns 50% more
 # curricula so it costs the least to serve.
 # Per-message minimum to cover the model (pass-through, no markup). Corey GPT is
 # deliberately the cheapest voice.
+# Corey's rule: ONE task costs ONE PromptZ, whatever engine ran it. A task that
+# genuinely combines several (a stitched video: one clip per shot) is charged one
+# PromptZ for every task in it. This is below the provider's real cost on the dearer
+# engines, so it is a subsidy by design; the daily prompts (3/5/10) still come first.
+AI_TASK_PROMPTZ = 1
+
 AI_MODEL_COSTS = {
-    "corey-gpt": 1,
-    "standard": 3,
-    "technical": 3,
+    "corey-gpt": AI_TASK_PROMPTZ,
+    "standard": AI_TASK_PROMPTZ,
+    "technical": AI_TASK_PROMPTZ,
 }
 
 
@@ -431,9 +499,17 @@ STATZ_PLANS = {
     "month": {"mode": "subscription", "cents": STATZ_MONTH_CENTS, "interval": "month", "kind": "statz_sub"},
 }
 
-# Founding StatZ: the first 50 members get StatZ at half price — as a one-time
+# Founding StatZ: the first 50 members get StatZ at a discount — as a one-time
 # lifetime seat, or grandfathered founding rates by year / month. Derived from
-# the StatZ prices above so the discount is always genuinely half.
+# the StatZ prices above so the discount is always exactly what it says.
+#
+# 30% off, down from 50% (Corey's call): at half price a founding member who used
+# every daily AI run cost more in model spend (~$8.25/mo) than the seat brought in
+# after Stripe ($6-7/mo). At 30% the yearly seat nets ~$8.47/mo and the monthly
+# ~$9.90. Seats already sold keep the price they paid — every checkout fixes its own
+# amount at Stripe, and the terms promise "we don't raise it underneath you".
+# The lifetime seat is one payment against a cost that never stops, so at full use
+# it is paid off after ~2 years whatever its price; it is capped at 50 with the rest.
 #
 # Half of StatZ must still cost more than Premium at every interval, or the
 # first 50 pay less for more. At Premium $10 it did not ($7.50 < $10) and the
@@ -442,11 +518,11 @@ STATZ_PLANS = {
 # decides — move a price and it says whether the founding seats still fit.
 FOUNDING_TIER = TIER_STATZ
 FOUNDING_LIMIT = 50
-FOUNDING_DISCOUNT = 0.50              # first 50 pay half
-_half = lambda cents: int(cents * (1 - FOUNDING_DISCOUNT))
-FOUNDING_PRICE_CENTS = _half(LIFETIME_PRICE_CENTS)   # $150 lifetime
-FOUNDING_YEAR_CENTS = _half(STATZ_YEAR_CENTS)        # $75/yr
-FOUNDING_MONTH_CENTS = _half(STATZ_MONTH_CENTS)      # $7.50/mo
+FOUNDING_DISCOUNT = 0.30              # first 50 pay 70%
+_founding = lambda cents: int(round(cents * (1 - FOUNDING_DISCOUNT)))
+FOUNDING_PRICE_CENTS = _founding(LIFETIME_PRICE_CENTS)   # $210 lifetime
+FOUNDING_YEAR_CENTS = _founding(STATZ_YEAR_CENTS)        # $105/yr
+FOUNDING_MONTH_CENTS = _founding(STATZ_MONTH_CENTS)      # $10.50/mo
 FOUNDING_PLANS = {
     "lifetime": {"mode": "payment", "cents": FOUNDING_PRICE_CENTS, "interval": None, "kind": "lifetime"},
     "year": {"mode": "subscription", "cents": FOUNDING_YEAR_CENTS, "interval": "year", "kind": "founding_sub"},
@@ -511,7 +587,7 @@ def ai_cost(model):
 AI_MODELS = {
     "haiku": {
         "id": "claude-haiku-4-5", "name": "Haiku", "emoji": "⚡",
-        "tier": TIER_FREE, "cost_cents": 2,
+        "tier": TIER_FREE, "cost_cents": AI_TASK_PROMPTZ,
         "in_cents_mtok": 100, "out_cents_mtok": 500,       # $1 / $5
         # Haiku 4.5 predates both controls and returns 400 for either. Declared
         # per model rather than assumed, because "every model takes effort" is
@@ -523,7 +599,7 @@ AI_MODELS = {
     },
     "sonnet": {
         "id": "claude-sonnet-5", "name": "Sonnet", "emoji": "🎼",
-        "tier": TIER_PREMIUM, "cost_cents": 5,
+        "tier": TIER_PREMIUM, "cost_cents": AI_TASK_PROMPTZ,
         # List price, not the introductory rate. The intro expires and a price
         # built on it would quietly start losing money on the day it does.
         "in_cents_mtok": 300, "out_cents_mtok": 1500,      # $3 / $15
@@ -532,14 +608,14 @@ AI_MODELS = {
     },
     "opus": {
         "id": "claude-opus-5", "name": "Opus", "emoji": "🎹",
-        "tier": TIER_PREMIUM, "cost_cents": 8,
+        "tier": TIER_STATZ, "cost_cents": AI_TASK_PROMPTZ,
         "in_cents_mtok": 500, "out_cents_mtok": 2500,      # $5 / $25
         "effort": True, "task_budget": True,
         "blurb": "Flagship. Long-horizon work, code, and anything that has to be right.",
     },
     "fable": {
         "id": "claude-fable-5", "name": "Fable", "emoji": "📖",
-        "tier": TIER_STATZ, "cost_cents": 15,
+        "tier": TIER_STATZ, "cost_cents": AI_TASK_PROMPTZ,
         "in_cents_mtok": 1000, "out_cents_mtok": 5000,     # $10 / $50
         "effort": True, "task_budget": True,
         "blurb": "The most capable model there is. The hardest problems, at the highest price.",
@@ -566,7 +642,7 @@ PROMPTZ_BONUS = 1.25
 # pass-through pricing a loss: sell at 0.8c, owe Anthropic 1c.
 PROMPTZ_CENTS_PER_UNIT = 1 / PROMPTZ_BONUS
 
-# SpinaZ buy PromptZ, at ten to one.
+# SpinaZ buy PromptZ, at a thousand to one (Corey's call, as an inflation sink).
 #
 # Before this, PromptZ could be bought with CASH and nothing else — so every
 # free way to earn on this platform (rating, referring, AdZ, OfferZ, finishing
@@ -581,7 +657,64 @@ PROMPTZ_CENTS_PER_UNIT = 1 / PROMPTZ_BONUS
 # OnboardZ is 15 🏷️, about seven Haiku runs, a genuine welcome and not a
 # living. Cash stays the fast lane and the subscription stays the shortcut.
 # What changes is that a member without either is no longer stuck.
-SPINAZ_PER_PROMPTZ = 10
+#
+# THEN MOVED to 1000:1, on purpose, by Corey: "cost prompts 1000 spinaz, make it
+# expensive, that's economics". 🍥 is minted by ratings, referrals, ads and the
+# zodiac bonuses and has no other sink, so a cheap conversion lets supply pile up
+# unspent; a dear one makes prompts a long-run sink that soaks it back up. The
+# cost, stated plainly so it can be reversed: at 1000 the door is shut for
+# anyone who just arrived (150 🍥 from OnboardZ is 0.15 of a prompt), so the
+# daily FREE allowance, the subscription and cash are now the real ways to AI
+# and this is the long-game one. A tier still says how much, never whether —
+# the free allowance is what keeps that true.
+SPINAZ_PER_PROMPTZ = 1000
+
+# ⚡ to open a conversation with someone you have no history with. A tier never
+# changes it (how MUCH, never whether): free regeneration is at least
+# ENERGY_FLOOR_PER_HOUR, so a first message is always reachable.
+DM_COLD_ENERGY = 2
+
+# ⚡ to call someone out to a 1v1 (refunded if they decline), and the comment
+# allowance: a few a day are free, then each comment on someone else's post
+# costs one. Replying on your own post is always free.
+BATTLE_CALLOUT_ENERGY = 2
+COMMENT_FREE_PER_DAY = 3
+COMMENT_ENERGY = 1
+
+# Following notifies the person followed, so mass-following is a spam route:
+# FOLLOW_FREE_PER_DAY a day are free, then each new follow costs FOLLOW_ENERGY.
+# Following back someone who already follows you is always free.
+FOLLOW_FREE_PER_DAY = 10
+FOLLOW_ENERGY = 1
+
+# Hosting an open battle puts a listing in everyone's BattleZ.
+BATTLE_HOST_ENERGY = 1
+
+# Every post costs at least this much ⚡, whatever skills went into it. A post with
+# no priced skill used to be free, so the cheapest thing to do was also the thing
+# nothing paid for. Not a wall: a post still goes through with less than this.
+POST_ENERGY_FLOOR = 1
+
+# Boosting a post: ⚡ buys a day near the top of the feed for a PUBLIC post of
+# yours. It buys visibility only - never ratings, plays or royalties - and it is
+# labelled "Boosted" on the card. At most BOOST_SLOTS boosted posts lead the feed
+# at once (the most recently boosted), so paying cannot bury everything else.
+BOOST_ENERGY = 40
+BOOST_HOURS = 24
+BOOST_MAX_AHEAD_HOURS = 72
+BOOST_SLOTS = 3
+
+# ⚡ to coach a POST from PostZ (the post door; a freshly recorded take stays
+# PromptZ-only). Corey: ten times the prompt cost, by tier. The base is 10 x
+# AI_TASK_PROMPTZ and each tier multiplies it by how much more it regenerates
+# (ENERGY_FLOOR_PER_HOUR 2 / 6 / 20 an hour = x1 / x3 / x10), so it is felt at every
+# tier and never a wall: the tier buys how MUCH regenerates, not whether it runs.
+COACH_POST_ENERGY_BASE = 10 * AI_TASK_PROMPTZ
+#
+# Then made FLAT (Corey's call): scaled by tier, a StatZ member saw a price ten times a
+# Free member's for the same action, which reads as paying more for paying more. The
+# same 10 ⚡ is fewer hours of regeneration on a higher tier, which is the benefit.
+COACH_POST_ENERGY = {t: COACH_POST_ENERGY_BASE for t in ("free", "premium", "statz", "debug")}
 
 # What an agent run is CHARGED, as a multiple of what it COST to serve.
 #

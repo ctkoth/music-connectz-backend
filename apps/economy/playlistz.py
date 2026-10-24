@@ -671,8 +671,22 @@ def accrue_playlist_royalties_for_date(target_date):
         accrual_count += 1
 
     from .postsplit import post_shares
+    from . import royaltyfactor as rf
+    adjusted_posts = 0
     for post_id, (post, cents, plays) in per_post.items():
-        for who, share, _basis in post_shares(post, cents):
+        # Corey's formula, (median − 5) × 10%: the post's own rating scales the pot, then each
+        # credited person's rating in the skill they brought scales their share (never twice — a
+        # deal's rated split already carries each person's rating). Neutral until enough
+        # outsiders have rated.
+        pf = rf.post_factor(post)
+        if pf["factor"] != 1.0 and cents > 0:
+            cents = max(1, round(cents * pf["factor"]))
+            adjusted_posts += 1
+        for who, share, basis in post_shares(post, cents):
+            if share > 0 and basis != "rating":
+                h = rf.skill_haircut(post, who)
+                if h != 1.0:
+                    share = max(1, round(share * h))
             if share <= 0:
                 continue
             row = accruals_by_creator.setdefault(who.id, {"total_cents": 0, "plays": 0, "posts": set()})
@@ -742,4 +756,5 @@ def accrue_playlist_royalties_for_date(target_date):
         "accruals": accrual_count,
         "creators": created_count,
         "total_cents": total_cents,
+        "rating_adjusted_posts": adjusted_posts,
     }
