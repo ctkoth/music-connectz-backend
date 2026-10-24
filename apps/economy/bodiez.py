@@ -711,6 +711,61 @@ class BodieZRoutineCopyView(APIView):
         return Response(_routine_dict(r), status=status.HTTP_201_CREATED)
 
 
+SHARE_SALT = "bodiez.routine.share"
+SHARE_DAYS = 30
+
+
+class BodieZRoutineShareView(APIView):
+    """POST /api/economy/bodiez/routines/{id}/share/ — a code another member can
+    paste to get their own copy. It is a signed, expiring token naming ONE
+    routine (no table, nothing to clean up); it grants a read of that routine and
+    nothing else, and the owner changing or deleting it later changes or ends what
+    the code gives. Free at every tier: sharing a plan is not a resource move."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, routine_id):
+        from django.core import signing
+        r = BodieZRoutine.objects.filter(id=routine_id, user=request.user).first()
+        if r is None:
+            return Response({"detail": "Routine not found."}, status=status.HTTP_404_NOT_FOUND)
+        code = signing.dumps({"r": r.id}, salt=SHARE_SALT)
+        return Response({"code": code, "expires_in_days": SHARE_DAYS, "title": r.title})
+
+
+class BodieZRoutineRedeemView(APIView):
+    """POST /api/economy/bodiez/routines/redeem/ {code} — copy a shared routine
+    into the caller's own list as theirs. Only LIBRARY exercises travel: another
+    member's custom lifts are private to them, so they are left out and the count
+    is said rather than silently shrinking the routine."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from django.core import signing
+        code = str((request.data or {}).get("code") or "").strip()
+        try:
+            data = signing.loads(code, salt=SHARE_SALT, max_age=SHARE_DAYS * 86400)
+        except signing.BadSignature:
+            return Response({"detail": "That code isn't valid, or it expired. Ask for a new one."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        src = BodieZRoutine.objects.filter(id=data.get("r")).first()
+        if src is None:
+            return Response({"detail": "The member who shared this has since deleted it."},
+                            status=status.HTTP_404_NOT_FOUND)
+        rows = [e for e in (src.exercises or []) if isinstance(e, dict)]
+        ok = set(BodieZExercise.objects.library().filter(
+            id__in=[e.get("exercise_id") for e in rows if isinstance(e.get("exercise_id"), int)]
+        ).values_list("id", flat=True))
+        kept = [dict(e) for e in rows if e.get("exercise_id") in ok]
+        for i, e in enumerate(kept):
+            e["order"] = i
+        r = BodieZRoutine.objects.create(
+            user=request.user, title=src.title[:80], description=src.description, exercises=kept,
+            bucket="inbox", goal=src.goal, source="member")
+        out = _routine_dict(r)
+        out["left_out"] = len(rows) - len(kept)
+        return Response(out, status=status.HTTP_201_CREATED)
+
+
 # The trial's "Build a week" flow computes the split client-side — the same
 # pure `pickForDay` lookup the real app's SplitBuilder already runs, no AI,
 # no server round trip, so a stranger can preview all 1-6 days for free
