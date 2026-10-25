@@ -7927,6 +7927,9 @@ class GeneratedImage(models.Model):
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="generated_images")
     prompt = models.TextField()
+    # imagez.KINDS key — what the picture is FOR (profile_pic, song_cover, header…);
+    # blank for a free-form one and for everything made before kinds existed.
+    kind = models.CharField(max_length=20, blank=True, default="")
     upload = models.ForeignKey("Upload", on_delete=models.SET_NULL, null=True, related_name="+")
     created_at = models.DateTimeField(auto_now_add=True)
 

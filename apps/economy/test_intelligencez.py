@@ -90,16 +90,12 @@ class ShapeTests(HubBase):
             "imageconnectz": "imageconnectz.png"})
         self.assertEqual([apps[k]["emoji"] for k in ORDER], ["✍️", "👁️", "🎹", "🎚️", "🎬", "🙂", "🖼️"])
         self.assertEqual(apps["mixconnectz"]["label"], "Mix ConnectZ")
-        self.assertEqual(apps["imageconnectz"]["desc"], "Not built yet.")
+        self.assertIn("album", apps["imageconnectz"]["desc"])
 
-    def test_everything_is_built_but_image_and_only_the_built_have_a_tab(self):
+    def test_every_app_is_built_and_has_its_tab(self):
         for a in self.get()["apps"]:
-            if a["key"] == "imageconnectz":
-                self.assertFalse(a["built"])
-                self.assertEqual(a["tab"], "", "a door to a screen that cannot do the thing is worse than none")
-            else:
-                self.assertTrue(a["built"], a["key"])
-                self.assertEqual(a["tab"], a["key"])
+            self.assertTrue(a["built"], a["key"])
+            self.assertEqual(a["tab"], a["key"])
 
     def test_which_apps_the_standalone_carries(self):
         got = {a["key"]: a["in_app"] for a in self.get()["apps"]}
@@ -125,9 +121,7 @@ class ShapeTests(HubBase):
         for key, row in by_tab.items():
             self.assertTrue(hub[key]["built"], key)
             self.assertTrue(row["built"], key)
-        unbuilt = [a for a in logicz["apps"] if not a["built"]]
-        self.assertEqual([a["name"] for a in unbuilt], ["Image ConnectZ"])
-        self.assertEqual(unbuilt[0]["tab"], "")
+        self.assertEqual([a["name"] for a in logicz["apps"] if not a["built"]], [])
         self.assertEqual(set(by_tab), {a["key"] for a in self.get()["apps"] if a["built"]})
 
 
@@ -205,10 +199,11 @@ class PriceTests(HubBase):
         with mock.patch.dict(os.environ, {"VIDEO_CONNECTZ_CENTS": "725"}):
             self.assertEqual(self.app("videoconnectz")["price"]["cost_cents"], 725)
 
-    def test_mix_is_a_device_job_facez_is_free_and_image_has_no_price(self):
+    def test_mix_is_a_device_job_facez_is_free_and_image_is_never_free_today(self):
         self.assertEqual(self.app("mixconnectz")["price"], {"kind": "device"})
         self.assertEqual(self.app("facez")["price"], {"kind": "free"})
-        self.assertIsNone(self.app("imageconnectz")["price"])
+        # A picture is never covered by the daily free prompts, so it is a fixed price.
+        self.assertEqual(self.app("imageconnectz")["price"]["kind"], "fixed")
 
     def test_the_hub_charges_nothing(self):
         from apps.economy.models import Transaction
@@ -229,7 +224,7 @@ class ConfiguredTests(HubBase):
         for k in ("sentenceconnectz", "instrumentalconnectz", "videoconnectz"):
             self.assertTrue(apps[k], k)
 
-    def test_mix_and_facez_need_no_key_and_image_is_not_there_to_configure(self):
+    def test_mix_and_facez_need_no_key_and_image_follows_the_gemini_key(self):
         with mock.patch.object(intelligencez, "_key", return_value=""):
             apps = {a["key"]: a["configured"] for a in self.get()["apps"]}
         self.assertTrue(apps["mixconnectz"])

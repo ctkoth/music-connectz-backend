@@ -137,7 +137,7 @@ LOGICZ_TABS = [
     # place which exist, which are switched on or what each costs. `tab` points at
     # the app's own tab: sentenceconnectz, instrumentalconnectz, mixconnectz,
     # videoconnectz and facez are mounted by the frontend alongside this tab in the
-    # same release. Image ConnectZ has no screen, so it says so and links nowhere.
+    # same release.
     {"key": "intelligencez", "name": "IntelligenceZ", "emoji": "🧠", "icon": "intelligencez.png",
      "desc": "The apps that make things for you — written, composed, mastered, "
              "rendered. The price is on each one before you open it.",
@@ -164,7 +164,9 @@ LOGICZ_TABS = [
               "first frame.", True, tab="videoconnectz"),
          _app("FaceZ", "🙂", "The photos Video ConnectZ can start from.",
               True, tab="facez"),
-         _app("Image ConnectZ", "🖼️", "Not built yet.", False),
+         _app("Image ConnectZ", "🖼️",
+              "Pictures made by AI for a use: profile picture, avatar, song and album "
+              "covers, banners, wallpapers, thumbnails, flyers and merch.", True, tab="imageconnectz"),
      ]},
     {"key": "keyconnectz", "name": "KeyConnectZ", "emoji": "⌨️", "icon": "keyconnectz.png",
      "desc": "The keyboard. Premium buys the wallpaper; everybody gets to be understood.",
