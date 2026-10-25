@@ -673,6 +673,33 @@ def _post_author_id(item):
         return None
 
 
+# Item kinds the social layer KNOWS, each resolved to the thing it names and its owner.
+# The endpoint has always taken any string, and rating pays the rater — so an invented
+# id was paid like a real one. A kind added here must point at something that exists,
+# and its owner is the one notified (and may not like or rate their own). Kinds that
+# predate this (post, battle, playlist, comment...) keep their old handling for now; the
+# audit's plan is to move each in here as it gets its bar.
+def _score_owner(ref):
+    from .models import ScoreShare
+    share = ScoreShare.objects.filter(token=ref).select_related("user").first()
+    return (share is not None), (share.user if share else None)
+
+
+ITEM_KINDS = {
+    "score": {"label": "take", "resolve": _score_owner},
+}
+
+
+def item_kind(item):
+    """(spec, exists, owner) for a registered kind; (None, None, None) otherwise."""
+    kind, _, ref = str(item or "").partition(":")
+    spec = ITEM_KINDS.get(kind)
+    if not spec or not ref:
+        return None, None, None
+    exists, owner = spec["resolve"](ref)
+    return spec, exists, owner
+
+
 class SocialView(APIView):
     """Cross-user reactions + comments for any item.
 
@@ -777,6 +804,11 @@ class SocialView(APIView):
 
     def _notify_target(self, item, kind, text, actor):
         """If the item is a post, tell its author about the interaction."""
+        spec, exists, owner = item_kind(item)
+        if spec:
+            if exists and owner is not None and owner.id != actor.id:
+                notify(owner, kind, text.replace("your post", f"your {spec['label']}"), actor=actor, item_id=item)
+            return
         if not item.startswith("post:"):
             return
         try:
@@ -800,6 +832,15 @@ class SocialView(APIView):
             return Response({"item": item, "listened_sec": row.seconds,
                              "finished": row.finished,
                              "listen_required_sec": LISTEN_REQUIRED_SEC})
+        spec, exists, owner = item_kind(item)
+        if spec and action in ("react", "comment", "rate"):
+            if not exists:
+                return Response({"detail": "That isn't here any more."}, status=status.HTTP_404_NOT_FOUND)
+            wants = (request.data or {}).get("value", (request.data or {}).get("score", 0))
+            if (owner is not None and owner.id == request.user.id and action in ("react", "rate")
+                    and (request.data or {}).get("comment_id") is None and str(wants) not in ("0", "")):
+                return Response({"detail": f"You can't like or rate your own {spec['label']}. "
+                                           "Others can, from the link."}, status=status.HTTP_403_FORBIDDEN)
         if action == "react":
             try:
                 value = int((request.data or {}).get("value", 0))
