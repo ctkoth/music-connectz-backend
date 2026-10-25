@@ -2001,13 +2001,27 @@ offered to somebody who cannot do it. `test_bodiez_access` fails if a library
 row has no known position, or a muscle a seated member can reach has nothing
 for them (Glutes had no exercise at all until migration 0177).
 
-**The muscle "Coach rating" is progress, never effort.** `muscle_coach_ratings`
-compares each lift's latest finished session (best est. 1RM, or best reps for
-bodyweight) with the member's own earlier best: up ≥102% = 10, held = 6, down
-<90% = 3, averaged per muscle; `None` until a lift has two comparable
-sessions. Arithmetic, not a model, like the rest of the Coach. Sets and
-sessions are NOT in it — `volume_score` already measures turning up and says
-so, and a rating that rose with attendance would break the substance rule.
+**The Thorough rating — a lift, a routine and a muscle, 1 to 10 (Corey's call).**
+"Thorough" is the word for every rating here (see COREY_VOICE.txt, PART 8b).
+It replaced a progress-only 10/6/3 that said whether a lift went up and nothing
+about how completely it was trained. Read off FINISHED sessions in the last 28
+days, arithmetic and not a model: **days trained** vs 8 (40%), **working sets a
+week** vs a target (35%; 6 for a lift, the bodymap's 10 for a muscle) and, once
+a lift has two sessions, **up/held/down against the member's own earlier best**
+(25%, dropped and the rest re-weighted before then so a new lift is not marked
+down for having no history). `thoroughness()` is the one formula.
+- A **lift** is rated from its own sessions; a **muscle** from every session that
+  touched it; a **routine** is the mean of its lifts' ratings with a lift never
+  logged in the window counting as 1, so a routine half done reads as half done.
+  `None`, never 0, when nothing in scope was logged in the window.
+- **The substance rule, said out loud:** days and sets are effort and this number
+  now includes them. That is a deliberate reversal of the earlier "never from how
+  much was done". It is why the label says *thorough* (how completely it is
+  trained) and never "good" or "strong", why the caveat is on the same card, and
+  why the progress part stays: a muscle hit daily that goes nowhere cannot reach 10.
+- Routines carry `coach_rating` / `coach_why` / `coach_exercises` on
+  `GET bodiez/routines/`; muscles carry them on `bodymap/` with each lift's own
+  `rating`.
 
 Migration 0177 also wired seven clips that were uploaded to `ctkoth/mcz-media`
 but pointed at by nothing. Their filenames contain spaces, so `demo_url` is
