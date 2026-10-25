@@ -66,3 +66,35 @@ class InspirationTests(TestCase):
         r = self._post(reply={"closeness": None})
         self.assertEqual(r.status_code, 502)
         self.assertEqual(wallet_for(self.u).money_cents, w0)
+
+
+class InspirationElsewhereTests(TestCase):
+    def setUp(self):
+        self.c = APIClient()
+        self.u = User.objects.create_user("j", "j@e.com", "pw12345678")
+        self.c.force_authenticate(self.u)
+        w = wallet_for(self.u); w.money_cents = 10000; w.save()
+
+    def test_instrumental_setup_is_validated(self):
+        from apps.economy.instrumentalz import clean_inspiration
+        out = clean_inspiration({"bpm": 999, "key": "Zz", "instruments": ["drums", "kazoo"], "bars": 5,
+                                 "brief": "b"})
+        self.assertEqual((out["bpm"], out["key"], out["instruments"], out["bars"]), (200, "", ["drums"], 4))
+        self.assertIsNone(clean_inspiration({"bpm": 90, "instruments": ["kazoo"]}))
+
+    def test_instrumental_inspiration_endpoint(self):
+        reply = {"unscorable": None, "genre": "trap", "bpm": 140, "key": "A minor",
+                 "instruments": ["drums", "bass"], "bars": 8, "brief": "dark", "feel": "f"}
+        with patch("apps.economy.instrumentalz._key", return_value="k"), \
+             patch("apps.economy.vocalcoach._key", return_value="k"), \
+             patch("apps.economy.gemini.requests.post", return_value=fake_gemini(reply)):
+            r = self.c.post("/api/economy/instrumentalz/inspiration/",
+                            {"reference": f("r.wav"), "lyrics": "my words"}, format="multipart")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["bpm"], 140)
+
+    def test_image_inspiration_needs_a_picture(self):
+        with patch("apps.economy.gemini._key", return_value="k"):
+            r = self.c.post("/api/economy/gemini/image/", {"prompt": "cover", "inspiration": "1"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("inspiration_note", self.c.get("/api/economy/gemini/image/").json())

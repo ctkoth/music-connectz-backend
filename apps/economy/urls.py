@@ -80,7 +80,7 @@ from .viewz import ViewBeatView, ViewCountsView, ViewMineView, ViewPostResultsVi
 from .metricz import HoroscopeView, MetricZView, SubstanceScaleView
 from .videoz import VideoDetailView, VideoView
 from .videostitch import VideoStitchDetailView, VideoStitchView
-from .instrumentalz import InstrumentalMidiView, InstrumentalMoodView, InstrumentalView
+from .instrumentalz import InstrumentalInspirationView, InstrumentalMidiView, InstrumentalMoodView, InstrumentalView
 from .intelligencez import IntelligenceHubView
 from .skillzhub import SkillZHubView
 from .mixz import MixDetailView, MixView
@@ -253,6 +253,7 @@ urlpatterns = [
     path("metricz/<str:kind>/", MetricZView.as_view(), name="economy-metricz"),
     path("horoscope/<str:sign>/", HoroscopeView.as_view(), name="economy-horoscope"),
     path("instrumentalz/", InstrumentalView.as_view(), name="economy-instrumentalz"),
+    path("instrumentalz/inspiration/", InstrumentalInspirationView.as_view(), name="economy-instrumentalz-inspiration"),
     path("instrumentalz/moods/", InstrumentalMoodView.as_view(), name="economy-instrumentalz-moods"),
     path("instrumentalz/<int:pk>/midi/", InstrumentalMidiView.as_view(), name="economy-instrumentalz-midi"),
     # Mix ConnectZ — mastering that runs on the member's device; this keeps the
