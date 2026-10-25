@@ -213,6 +213,16 @@ CREDIT_OUTCOMES = {
         "outcomes": ["tangible", "shareable", "braggable"],
         "lands_in": ["gamez", "postz"],
         "free_way": {"label": "Energy regenerates hourly.", "tab": "gamez"}},
+    "matchref": {
+        "resource": "promptz", "label": "Match a reference",
+        "buys": "What separates your take from a song you want to sound like: closeness by dimension, EQ by ear, "
+                "how-to, and the direction of its lyrics. Nothing is saved as your score.",
+        "outcomes": ["understandable", "learnable"],
+        "lands_in": ["singz", "rapz", "sentenceconnectz"],
+        "ephemeral_reason": "Deliberately nothing is kept: a gap to somebody else's record is not a measurement "
+                            "of the member, the reference is never stored, and a saved comparison score could be "
+                            "raised by copying a record. What it buys is the direction to take away.",
+        "free_way": {"label": "A daily free prompt covers a run; a failed run is not charged.", "tab": "singz"}},
     "messages_view": {
         "resource": "energy", "label": "Starting a conversation",
         "buys": "A first message to someone you have no history with, delivered to their inbox and by email.",

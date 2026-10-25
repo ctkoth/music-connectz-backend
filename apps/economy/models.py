@@ -1889,6 +1889,8 @@ class DailySubmission(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="daily_submissions")
     day = models.DateField()
     count = models.PositiveIntegerField(default=0)
+    # Extra submissions bought with ⚡ for THIS day only (see postz buy-more).
+    bonus = models.PositiveIntegerField(default=0)
 
     class Meta:
         unique_together = ("user", "day")
@@ -1952,7 +1954,9 @@ def check_post_progression(post):
 
 def submission_cap_for(user):
     tier = membership_for(user).tier if user and user.is_authenticated else "free"
-    return SUBMISSION_DAILY_CAP.get(tier, SUBMISSION_DAILY_CAP["free"])
+    base = SUBMISSION_DAILY_CAP.get(tier, SUBMISSION_DAILY_CAP["free"])
+    row = DailySubmission.objects.filter(user=user, day=timezone.localdate()).first() if user and user.is_authenticated else None
+    return base + (row.bonus if row else 0)
 
 
 def submissions_used_today(user):

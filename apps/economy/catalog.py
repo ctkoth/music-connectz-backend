@@ -704,6 +704,18 @@ BOOST_HOURS = 24
 BOOST_MAX_AHEAD_HOURS = 72
 BOOST_SLOTS = 3
 
+# More submissions today, bought with ⚡: a pack adds SUBMISSION_PACK to today's cap
+# only (it does not carry over), at most SUBMISSION_PACKS_MAX packs a day, so the cap
+# still does its job of stopping a flood while letting someone with ⚡ to spare keep going.
+SUBMISSION_PACK = 5
+SUBMISSION_PACK_ENERGY = 30
+SUBMISSION_PACKS_MAX = 4
+
+# Coaching a freshly recorded take also costs a little ⚡: about an hour of the tier's
+# own regeneration. Unlike the post door it NEVER refuses: it takes what is there, so
+# the core coach loop is not gated by Energy.
+COACH_TAKE_ENERGY = {"free": 2, "premium": 6, "statz": 20, "debug": 20}
+
 # ⚡ to coach a POST from PostZ (the post door; a freshly recorded take stays
 # PromptZ-only). Corey: ten times the prompt cost, by tier. The base is 10 x
 # AI_TASK_PROMPTZ and each tier multiplies it by how much more it regenerates

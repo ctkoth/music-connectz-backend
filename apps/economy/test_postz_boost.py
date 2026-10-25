@@ -103,3 +103,36 @@ class BoostTests(TestCase):
         Post.objects.filter(pk=self.p.pk).update(boosted_until=timezone.now() - timedelta(minutes=1))
         d = next(x for x in self.c.get(FEED).json()["posts"] if x["id"] == self.p.id)
         self.assertFalse(d["boosted"])
+
+
+class BuyMoreSubmissionsTests(TestCase):
+    def setUp(self):
+        from apps.economy.catalog import (SUBMISSION_PACK, SUBMISSION_PACK_ENERGY, SUBMISSION_PACKS_MAX)
+        self.pack, self.cost, self.max = SUBMISSION_PACK, SUBMISSION_PACK_ENERGY, SUBMISSION_PACKS_MAX
+        self.u = User.objects.create_user("maker", "m@e.com", "pw-Long-enough-1")
+        self.c = APIClient(); self.c.force_authenticate(self.u)
+        Wallet.objects.update_or_create(user=self.u, defaults={"energy": self.cost * (self.max + 2)})
+
+    def test_the_price_is_quoted_and_a_pack_raises_todays_cap_only(self):
+        from apps.economy.models import submission_cap_for
+        before = submission_cap_for(self.u)
+        q = self.c.get("/api/economy/submissions/").json()
+        self.assertEqual((q["buy"]["pack"], q["buy"]["cost_energy"]), (self.pack, self.cost))
+        r = self.c.post("/api/economy/submissions/", {}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(submission_cap_for(self.u), before + self.pack)
+        self.assertEqual(wallet_for(self.u).energy, self.cost * (self.max + 1))
+
+    def test_it_stops_at_the_daily_pack_limit_without_charging(self):
+        for _ in range(self.max):
+            self.assertEqual(self.c.post("/api/economy/submissions/", {}, format="json").status_code, 200)
+        energy = wallet_for(self.u).energy
+        self.assertEqual(self.c.post("/api/economy/submissions/", {}, format="json").status_code, 400)
+        self.assertEqual(wallet_for(self.u).energy, energy)
+
+    def test_without_the_energy_nothing_is_added(self):
+        from apps.economy.models import submission_cap_for
+        Wallet.objects.filter(user=self.u).update(energy=self.cost - 1)
+        before = submission_cap_for(self.u)
+        self.assertEqual(self.c.post("/api/economy/submissions/", {}, format="json").status_code, 402)
+        self.assertEqual(submission_cap_for(self.u), before)
