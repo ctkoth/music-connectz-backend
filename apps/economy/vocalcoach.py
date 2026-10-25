@@ -1381,6 +1381,11 @@ class SingZCoachView(APIView):
                "take_score_id": getattr(_row, "pk", None),
                "listener_reasons": listener_reasons(post),
                "kept": bool(_kept), "kept_note": _kept_note}
+        if _kept is not None and getattr(_kept, "pk", None):
+            # So the take can be sent on to another app WITH its recording (SendTo).
+            from .media import stable_media_url
+            out["kept_upload_id"] = _kept.pk
+            out["kept_url"] = stable_media_url(_kept, request) or ""
         # A shareable card for this take, minted from the coach's own answer.
         from .models import mint_score_share
         from .challengez import challenge_tag

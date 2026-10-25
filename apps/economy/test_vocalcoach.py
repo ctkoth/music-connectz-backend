@@ -1827,6 +1827,8 @@ class KeepThisTakeTests(SingZCoachTests):
         r = self._send(keep="1")
         self.assertEqual(r.status_code, 200, r.content)
         self.assertTrue(r.data["kept"])
+        self.assertTrue(r.data["kept_upload_id"])  # so SendTo can carry the recording
+        self.assertIn("/api/economy/media/", r.data["kept_url"])
         up = Upload.objects.get(user=self.user)
         self.assertEqual(up.size_bytes, 1000)                       # counts against their storage
         self.assertEqual(up.file.read(), b"0" * 1000)               # the whole take, from the start
