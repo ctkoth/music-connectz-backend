@@ -1099,6 +1099,33 @@ class BodieZSessionWriteView(APIView):
                            extra_inputs={"bodiez_session": sess.pk})
 
 
+class BodieZSessionAICoachView(BodieZSessionWriteView):
+    """/api/economy/bodiez/sessions/<id>/ai-coach/ — the AI coach reads a finished workout.
+
+    "Coach" means the AI coach everywhere in this app; this is BodieZ's door to it. Same writer,
+    price and "a failed run is not charged" as `write/`, from the session's own logged sets. The
+    voice it is read aloud in is the member's choice through /coachvoice/ (Premium samples any
+    voice, StatZ saves one); this endpoint only produces the words."""
+
+    def get(self, request, session_id):
+        resp = super().get(request, session_id)
+        if resp.status_code == 200:
+            resp.data = {"cost": resp.data["cost"], "kind": "workout_read"}
+        return resp
+
+    def post(self, request, session_id):
+        sess = self._session(request, session_id)
+        if not sess:
+            return Response({"detail": "Session not found, or still in progress."},
+                            status=status.HTTP_404_NOT_FOUND)
+        from .sentencez import write_piece
+        summary = session_summary(sess)
+        title = summary.get("routine_title") or "ad-hoc"
+        return write_piece(request.user, "workout_read", workout_topic(summary),
+                           spend_note=f"AI coach — BodieZ workout ({title})",
+                           extra_inputs={"bodiez_session": sess.pk})
+
+
 MAX_PAST_SETS = 100
 MAX_PAST_DAYS = 365 * 5
 
