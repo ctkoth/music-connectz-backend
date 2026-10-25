@@ -18,6 +18,7 @@ from .mangaz import MangaPageView, MangaPagesView, MangaPanelDrawView
 from .statshare import FunnelShareView, ViewShareView
 from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
+from .streamlink import StreamLinkView
 from .rulez import RulezView
 from .personalityz import PersonalityAxesView, PersonalityTestView
 from .religionz import ReligionsView
@@ -505,6 +506,7 @@ urlpatterns = [
     # WidgetZ — a link that opens on the screen instead of taking the member
     # off it. GET is the policy (who may frame a page, what a visit pays);
     # POST resolves one link into the widget it becomes.
+    path("streamlink/", StreamLinkView.as_view(), name="economy-streamlink"),
     path("widgetz/", WidgetZView.as_view(), name="economy-widgetz"),
     path("widgetz/open/", WidgetOpenView.as_view(), name="economy-widgetz-open"),
     # The house rules, in one place so no screen retypes one. Open logged-out:
