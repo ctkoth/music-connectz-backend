@@ -563,6 +563,8 @@ Delivery is the biggest lever on FEELZ, so when you give tips lead with delivery
 
 "mix_tips" is separate, and is about the MIX, not the performance: when the vocal is hard to make out or to feel because of how it sits in the mix - buried under the instrumental, muddy low-mids, harsh or sibilant top, too dry or too washy, uneven level - give up to three: "what" to change in the mix, "why" it hides the words or the feeling, and "how" to do it (a starting EQ region to cut or lift, compression guidance, vocal level against the beat, a de-esser, how much reverb or delay), plus "helps": clarity, feelz or both. Name the moment it is worst. Only what you can actually hear; if the vocal sits well, or there is no instrumental or mix to speak of, return an empty list.
 
+"score_notes" gives EVERY skill you scored its own reason and its own tip - the reason is what you heard that earned the number, the tip is one change that would raise it. A skill you could not judge (null) gets no note.
+
 "practice" is up to three exercises, one for each of your fixes, worst first: what to do, why it fixes THAT problem in THIS take, and how to run it. Specific to what you heard - never generic advice. Every drill must be physically possible for one person in one session and must not contradict itself: never "full volume" with "whisper", never "voice off" with "rap" or "sing", never two tempos or two settings for the same step. Rate each drill's "sense" 0-100 - how clearly a member could follow it exactly as written and how directly it targets the problem - and leave out any you would rate under 90.
 
 Return ONLY valid JSON, no markdown fence, in exactly this shape:
@@ -570,6 +572,7 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "unscorable": <null, or a short sentence: what you heard, and what to send instead>,
   "score": <overall 1-10 integer, or null if unscorable>,
   "scores": {{{shape}}},
+  "score_notes": {{"<every key you scored above>": {{"why": "<what in THIS take earned that number, naming the moment if you can>", "tip": "<one concrete change that would raise it on the next take>"}}}},
   "now": "<their current qualities, in that voice>",
   "goal": "<what they're aiming at next, and how they'll know they got there>",{range_field}
   "style_fit": "<how it sits against the style or genre they picked>",

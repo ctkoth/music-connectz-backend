@@ -159,6 +159,9 @@ def read_of(payload):
             out[k] = str(payload[k])[:n]
     if isinstance(payload.get("song_score"), (int, float)):
         out["song_score"] = payload["song_score"]
+    if isinstance(payload.get("score_notes"), dict) and payload["score_notes"]:
+        from .vocalcoach import clean_score_notes
+        out["score_notes"] = clean_score_notes(payload["score_notes"], set(payload["score_notes"]))
     if payload.get("feelz_emotion"):
         out["feelz_emotion"] = str(payload["feelz_emotion"])[:60]
     # The reasons travel with the numbers: a HookZ or FeelZ with no sentence beside it is the

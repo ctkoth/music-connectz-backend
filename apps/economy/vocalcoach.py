@@ -274,6 +274,20 @@ REFERENCE_NOTICE = ("Use music you have the right to analyse. This is a private 
 PRACTICE_SENSE_MIN = 90
 
 
+def clean_score_notes(raw, scored_keys):
+    """{key: {why, tip}} for scored keys only; both fields capped, an empty pair dropped."""
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    for k, v in raw.items():
+        if k not in scored_keys or not isinstance(v, dict):
+            continue
+        why, tip = str(v.get("why", "")).strip()[:300], str(v.get("tip", "")).strip()[:300]
+        if why or tip:
+            out[k] = {"why": why, "tip": tip}
+    return out
+
+
 def clean_practice(raw):
     """[{what, why, how}] — at most three, each field capped, `what` required, and
     any drill rated under PRACTICE_SENSE_MIN for sense left out."""
@@ -779,6 +793,9 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         # model invents never reaches the screen; an item with no `what` is
         # dropped, and the screen falls back to `next_drill` when none survive.
         "practice": clean_practice(parsed.get("practice")),
+        # Every scored skill's reason and tip. Only for keys that were actually
+        # scored: a note on a skill with no number would be advice about nothing.
+        "score_notes": clean_score_notes(parsed.get("score_notes"), {k for k, v in perf.items() if v is not None}),
     }
     if reference:
         # Somebody else's recording: nothing here is advice to the listener.

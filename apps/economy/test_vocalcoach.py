@@ -1850,3 +1850,15 @@ class KeepThisTakeTests(SingZCoachTests):
         self.assertFalse(r.data["kept"])
         self.assertIn("still scored", r.data["kept_note"])
         self.assertEqual(Upload.objects.filter(user=self.user).count(), 0)
+
+
+class EverySkillGetsAReasonAndATipTests(TestCase):
+    def test_notes_are_kept_only_for_scored_skills(self):
+        from apps.economy.vocalcoach import clean_score_notes
+        raw = {"flow": {"why": "locked at 0:12", "tip": "keep it"}, "breath": {"why": "x", "tip": "y"},
+               "invented": {"why": "z"}, "timing": {"why": "", "tip": ""}}
+        self.assertEqual(clean_score_notes(raw, {"flow", "timing"}), {"flow": {"why": "locked at 0:12", "tip": "keep it"}})
+
+    def test_the_prompt_asks_for_a_note_per_skill(self):
+        from apps.economy.instruments import prompt_for
+        self.assertIn('"score_notes"', prompt_for("rapz", genre="", target="", difficulty=""))
