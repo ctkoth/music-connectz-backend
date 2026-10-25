@@ -33,7 +33,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import COACH_POST_ENERGY, ai_cost
+from .catalog import COACH_POST_ENERGY, COACH_TAKE_ENERGY, ai_cost
 from .deadline import (COACH_BUDGET_SECONDS, COACH_THINK_RESERVE_SECONDS, Deadline,
                        Expired)
 from .instruments import (DIFFICULTIES, LYRIC_SCORE, MIX_SCORE, WIT_SCORE, clean_extras, rates_wit, profile_for_app,
@@ -1024,6 +1024,12 @@ def coach_xp_base(rating):
         return COACH_XP_FOR_TURNING_UP
     return COACH_XP_FOR_TURNING_UP + max(0, round((r - 5) * 10))
 
+def coach_take_energy(user):
+    """⚡ a freshly recorded take costs, by tier. Never refuses: it takes what is there."""
+    from .models import membership_for
+    return COACH_TAKE_ENERGY.get(membership_for(user).tier, COACH_TAKE_ENERGY["free"])
+
+
 class SingZCoachView(APIView):
     """The Boss Take coach for any InstrumentZ app.
 
@@ -1089,6 +1095,8 @@ class SingZCoachView(APIView):
             "charged_on_failure": False,
             # What coaching a POST also costs in ⚡ (a fresh recording costs none).
             "post_energy_cost": coach_post_energy(request.user),
+            # And a freshly recorded take: a smaller ⚡ cost that never blocks the coach.
+            "take_energy_cost": coach_take_energy(request.user),
             # THIS member's ceiling, and whose it is — the coach's judgement or
             # their tier's own upload limit, whichever binds them first. This
             # flag was a hardcoded False, which was safe only while the coach's
@@ -1382,6 +1390,14 @@ class SingZCoachView(APIView):
         if energy_cost:
             spend_energy(request.user, energy_cost, f"Coach a post — {post.title[:50]}",
                          app_key=self.app_key, target=f"post:{post.id}")
+        elif post is None and stored is None:
+            # A freshly recorded take: take what is there, up to the price. Never a wall.
+            want = coach_take_energy(request.user)
+            have = max(0, wallet_for(request.user).energy or 0)
+            energy_cost = min(want, have)
+            if energy_cost:
+                spend_energy(request.user, energy_cost, f"Coach a take — {self.app_key}",
+                             app_key=self.app_key, target=f"{self.app_key}:coach")
         # Keep it. Until this line every score this app has ever produced was
         # handed to the browser and dropped, which is why the blueprint's
         # whole intelligence layer — goal bridge, difficulty adjustment, range
