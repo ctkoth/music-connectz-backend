@@ -6691,6 +6691,34 @@ class BodieZRecoveryLog(models.Model):
         return f"{self.user} — soreness {self.soreness}, fatigue {self.fatigue}"
 
 
+class BodieZAIRead(models.Model):
+    """One paid AI read in BodieZ, kept so the member can reopen and export it.
+
+    `read` is the AI reading a session, routine or muscle from the LOGS; `form`
+    is the AI watching one video of one set. Only the result is kept — the video
+    is sent for the read and never stored (bodiez_ai.py). A spend that was not
+    charged (an unreadable video) writes no row.
+    """
+    KIND_CHOICES = (("read", "Log read"), ("form", "Form check"))
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="bodiez_ai_reads")
+    kind = models.CharField(max_length=8, choices=KIND_CHOICES)
+    scope = models.CharField(max_length=10, blank=True, default="")   # session|routine|muscle
+    ref = models.CharField(max_length=40, blank=True, default="")     # its id, or the muscle key
+    title = models.CharField(max_length=120)
+    exercise = models.ForeignKey(BodieZExercise, null=True, blank=True,
+                                 on_delete=models.SET_NULL, related_name="+")
+    result = models.JSONField(default=dict)
+    charged_cents = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.user} — {self.kind}: {self.title}"
+
+
 class TakeAnalysis(models.Model):
     upload = models.OneToOneField(Upload, on_delete=models.CASCADE, related_name="analysis")
     detected_notes = models.JSONField(default=list, help_text="[{note, freq, cents_off, timestamp}]")

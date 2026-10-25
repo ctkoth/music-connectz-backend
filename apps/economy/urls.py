@@ -1,5 +1,6 @@
 from django.urls import path, re_path
 
+from .bodiez_ai_view import BodieZAIDetailView, BodieZAIFormView, BodieZAIReadView, BodieZAIView
 from .directz_app import (DirectZCopyrightView, DirectZWorksView,
                           DirectZRateView)
 from .media import MediaFileView
@@ -599,6 +600,10 @@ urlpatterns = [
     path("bodiez/stepz/coach/", BodieZStepCoachView.as_view(), name="economy-bodiez-stepz-coach"),
     path("bodiez/recovery/", BodieZRecoveryView.as_view(), name="economy-bodiez-recovery"),
     path("bodiez/trial/", BodieZTrialView.as_view(), name="economy-bodiez-trial"),
+    path("bodiez/ai/", BodieZAIView.as_view(), name="economy-bodiez-ai"),
+    path("bodiez/ai/read/", BodieZAIReadView.as_view(), name="economy-bodiez-ai-read"),
+    path("bodiez/ai/form/", BodieZAIFormView.as_view(), name="economy-bodiez-ai-form"),
+    path("bodiez/ai/<int:read_id>/", BodieZAIDetailView.as_view(), name="economy-bodiez-ai-detail"),
     path("offerz/funnel/", FunnelOffersView.as_view(), name="economy-funnel-offers"),
     path("offerz/funnel/redeem/", FunnelOfferRedeemView.as_view(),
          name="economy-funnel-offer-redeem"),
