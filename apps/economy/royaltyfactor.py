@@ -117,6 +117,38 @@ def opted_in(user):
     return bool(getattr(profile_for(user), "coach_counts_for_skillz", False))
 
 
+def battle_coach_reading(user, battle):
+    """The AI coach's reading of a contestant's performance in THIS battle, or None.
+
+    Only for a member who opted in (the same switch as skill ratings), and only takes made since
+    the battle was created, so an old take cannot carry a new fight. One battle take is one
+    performance, so it needs 1 take, not MIN_COACH_TAKES. A freestyle/cypher reads RapZ; a plain
+    battle reads the coach the member used most in that window."""
+    if not opted_in(user):
+        return None
+    from django.db.models import Count
+    from .models import TakeScore
+    rows = TakeScore.objects.filter(user=user, overall__isnull=False, created_at__gte=battle.created_at)
+    if getattr(battle, "kind", "") in ("freestyle", "cypher"):
+        app_key = "rapz"
+    else:
+        top = rows.values("app_key").annotate(n=Count("id")).order_by("-n").first()
+        app_key = top["app_key"] if top else None
+    if not app_key:
+        return None
+    scores = list(rows.filter(app_key=app_key).order_by("-created_at").values_list("overall", flat=True)[:COACH_WINDOW])
+    if not scores:
+        return None
+    return {"app_key": app_key, "takes": len(scores), "median": _median(scores)}
+
+
+def blend_with_coach(human_scores, coach_median):
+    """Listener scores plus the coach's COACH_VOTES votes; the listeners stay the majority."""
+    if coach_median is None:
+        return _median(human_scores) if human_scores else None
+    return round((sum(human_scores) + coach_median * COACH_VOTES) / (len(human_scores) + COACH_VOTES), 1)
+
+
 def blended_skill_rating(user, skill):
     """(rating, detail) — listener ratings, plus the coach's reading when the member opted in
     and the skill has a coach. `detail` says what went into the number, so a screen never
@@ -163,6 +195,8 @@ COACH_OPT_IN_NOTE = (
     f"Your AI coach scores for an instrument can count toward the matching skill rating, as {COACH_VOTES} "
     f"votes beside the ratings listeners give your tracks (the median of your last {COACH_WINDOW} takes, "
     f"once you have {MIN_COACH_TAKES}). That rating moves what your share of a track's royalties is. "
+    "It also counts in a battle: your AI coach's reading of the take you made in it joins the judges' "
+    "ratings the same way, and it can change who wins. "
     "It cuts both ways: a strong run of takes can raise it and a weak one can lower it. Listener ratings "
     "stay the majority, and you can switch it off any time.")
 
