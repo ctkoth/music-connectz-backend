@@ -41,6 +41,7 @@ MOUNTED_TABS = frozenset({
     "callz", "gamez", "soundz", "metz", "tunerz", "chordz", "drumz", "journalz",
     "habitz", "lilith", "bodiez", "collabz", "venuez", "battlez", "labelz",
     "groupz", "bugz", "dawz", "funnelz", "dupez", "iconz",
+    "filez", "characterz", "mangaz",
 })
 
 # The data-tour anchors on OCC's own screen (OCC.jsx and components/occ/).
@@ -92,11 +93,13 @@ class EveryRouteIsATabTheClientMounts(TestCase):
 
     def test_the_tabs_that_have_a_screen_are_the_ones_marked_built(self):
         built = {t["key"] for t in OCC_TABS if t["built"]}
-        # The seven the audit found advertising a screen OCC does not have.
-        for key in ("editor", "console", "filez", "gitz", "tellz", "search", "characterz"):
+        # The audit found seven advertising a screen OCC did not have. FileZ and
+        # CharacterZ have mounted tabs of their own since, so they open those —
+        # the same shape as LogZ and CallZ below; the other five still have none.
+        for key in ("editor", "console", "gitz", "tellz", "search"):
             self.assertNotIn(key, built, key)
         # CallZ and GameZ are mounted tabs and were missing a door.
-        for key in ("callz", "gamez", "taskz", "workz", "settings", "logz"):
+        for key in ("callz", "gamez", "taskz", "workz", "settings", "logz", "filez", "characterz"):
             self.assertIn(key, built, key)
 
 
