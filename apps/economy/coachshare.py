@@ -74,8 +74,8 @@ ONLY_AUTHOR = "Only the member who published this can change its coach read."
 # whatever the coach adds to its answer later.
 _NUMBERS = ("score", "song_score")
 _TEXT = ("verdict", "now", "goal", "range_profile", "style_fit", "song_why",
-         "lyrics_read", "lyrics_note", "mix_note", "next_drill")
-_LISTS = ("strengths", "fixes")
+         "lyrics_read", "lyrics_note", "wit_note", "mix_note", "next_drill")
+_LISTS = ("strengths", "fixes", "rated_extras", "counted_extras")
 _FLAGS = ("rated_lyrics", "rated_mix")
 _TEXT = _TEXT + ("hook_why", "feelz_why", "feelz_emotion")
 _NUMBERS = _NUMBERS + ("hook_score", "feelz_score", "score_exact")
@@ -142,7 +142,8 @@ def legacy_score(post, coach):
 def _labels(stored):
     app_key = str(stored.get("app_key")).lower()
     return scores_for(app_key, lyrics=bool(stored.get("rated_lyrics")),
-                      mix=bool(stored.get("rated_mix")))
+                      mix=bool(stored.get("rated_mix")),
+                      extras=tuple(stored.get("rated_extras") or ()))
 
 
 def read_view(stored):

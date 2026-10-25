@@ -73,7 +73,7 @@ from .breathz import BreathZView
 from .challengez import ChallengeView
 from .whyz import WhyZView
 from .credit_outcomes import CreditOutcomesView
-from .sentencez import PunchlineRateView, SentenceRoyaltyView, SentenceView
+from .sentencez import PunchlineRateView, SentenceInspirationView, SentenceRoyaltyView, SentenceView
 from .statz_trial import StatzTrialView
 from .superset import BodieZPairView
 from .viewz import ViewBeatView, ViewCountsView, ViewMineView, ViewPostResultsView, ViewStartView, ViewTimelineView
@@ -268,6 +268,7 @@ urlpatterns = [
     path("intelligence/targets/", IntelligenceTargetsView.as_view(), name="economy-intelligence-targets"),
     path("intelligence/uses/", IntelligenceUsesView.as_view(), name="economy-intelligence-uses"),
     path("intelligence/uses/<int:pk>/", IntelligenceUseDetailView.as_view(), name="economy-intelligence-use"),
+    path("sentencez/inspiration/", SentenceInspirationView.as_view(), name="economy-sentencez-inspiration"),
     path("sentencez/<int:pk>/royalty/", SentenceRoyaltyView.as_view(), name="economy-sentencez-royalty"),
     path("sentencez/<int:pk>/punchline/<int:idx>/rate/", PunchlineRateView.as_view(), name="economy-sentencez-punchline-rate"),
     path("keyz/", KeyboardView.as_view(), name="economy-keyz"),

@@ -21,6 +21,7 @@ is that measurement and lives here so the thing that wrote the text and the
 thing that prices it can never disagree about what the original was.
 """
 import difflib
+import json
 import logging
 import os
 import re
@@ -182,6 +183,13 @@ FIXERS = {
                        "callback": "Callback", "time_jump": "Time jump", "other": "Other"},
         "core": "A story beat moves the verse from where it is to somewhere the listener wants to follow.",
         "hint": "Paste the verse that wanders. You get five beats, each with why it moves the story."},
+    "depth": {
+        "dim": "feelz", "label": "Depth (FeelZ)", "emoji": "💗", "noun": "lines with more depth", "one": "line",
+        "techniques": {"vulnerable": "Vulnerability", "specific_memory": "Specific memory", "stakes": "Real stakes",
+                       "contrast": "Contrast", "restraint": "Restraint", "turn_inward": "Turn inward", "other": "Other"},
+        "core": "Depth is a line that costs the writer something: a specific, true moment instead of a general feeling.",
+        "hint": ("Paste the bars that say a feeling without earning it. You get five lines with more depth, "
+                 "each with why it hits harder.")},
     "freshangles": {
         "dim": "freshness", "label": "Fresh angles", "emoji": "💡", "noun": "fresh angles", "one": "angle",
         "techniques": {"pov": "Unexpected point of view", "specific": "Specific detail", "reversal": "Reversal",
@@ -695,6 +703,7 @@ class SentenceView(APIView):
             "fix_min_ratings": MIN_RATINGS_TO_RANK,
             "fixers": {k: {"dim": f["dim"], "label": f["label"]} for k, f in FIXERS.items()},
             "rhyme_max": 4,
+            "inspiration_note": INSPIRATION_NOTE,
             "hashtag_max": HASHTAG_MAX,
             "works": [_work_dict(w, request.user) for w in works],
         })
@@ -751,3 +760,101 @@ class PunchlineRateView(APIView):
             work=work, user=request.user, idx=idx,
             defaults={"stars": stars, "technique": str(items[idx].get("technique") or "other")[:24]})
         return Response({"items": fixer_items(work, request.user)})
+
+
+# ---- Inspiration: how a song you admire does the thing you are fixing ------
+
+INSPIRATION_NOTE = ("Use music you have the right to analyse. The coach listens to a song you admire and describes "
+                    "HOW it does this technique — never its words. That direction is added to your brief; you still "
+                    "press Write (priced separately) and the lines are new and yours. The song isn't kept.")
+
+
+def inspiration_prompt(kind):
+    spec = KINDS[kind]
+    core = FIXERS[kind]["core"] if kind in FIXERS else spec.get("ask", kind)
+    return (f"You are given a reference song. A writer wants to get better at: {spec['label']}. {core}\n"
+            "Describe HOW this song does it - the habits, moves and structure - as an instruction the writer "
+            "can follow in their OWN words. NEVER quote, reproduce or paraphrase line-by-line any of the song's "
+            "lyrics, and do not name the artist. If there are no words to hear, say so.\n"
+            'Reply with JSON only: {"unscorable": <null or one sentence>, "direction": "<3-5 sentences>", '
+            '"moves": ["<short technique name>", ...]}')
+
+
+def clean_direction(parsed):
+    if not isinstance(parsed, dict):
+        return None
+    d = str(parsed.get("direction", "")).strip()[:900]
+    if not d:
+        return None
+    moves = [str(m).strip()[:60] for m in (parsed.get("moves") or []) if str(m).strip()][:6]
+    return {"direction": d, "moves": moves}
+
+
+class SentenceInspirationView(APIView):
+    """POST reference song + kind → a direction to add to the brief. Nothing written, nothing kept."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from . import vocalcoach as vc
+        f = request.FILES.get("reference")
+        kind = str(request.data.get("kind", ""))
+        if kind not in KINDS or KINDS[kind].get("personas"):
+            return Response({"detail": "Pick a kind to take inspiration for."}, status=status.HTTP_400_BAD_REQUEST)
+        if not f or f.size == 0:
+            return Response({"detail": "Pick the song you admire."}, status=status.HTTP_400_BAD_REQUEST)
+        ct = (getattr(f, "content_type", "") or "").lower()
+        mime = vc.gemini_mime(ct) if ct.startswith(("audio/", "video/")) else None
+        if not mime:
+            return Response({"detail": "Use an m4a, mp3, wav, ogg or mp4 file."}, status=status.HTTP_400_BAD_REQUEST)
+        cap_mb, is_tier = vc.cap_for(request.user)
+        if f.size > cap_mb * 1024 * 1024:
+            return Response({"detail": f"That file is {f.size / (1024 * 1024):.0f}MB. " + vc.cap_why(cap_mb, is_tier)},
+                            status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+        key = _key()
+        if not key:
+            return Response({"detail": "Sentence ConnectZ isn't switched on."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        cost = ai_cost("standard")
+        _, _, daily_left = daily_prompt_state(request.user)
+        if cost and not daily_left and not can_afford_ai(request.user, cost):
+            return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
+        deadline = Deadline(BUDGET_SECONDS * 2)
+        cleanup = None
+        try:
+            part, cleanup, why = vc._media_part(f, mime, vc._size_of(f), deadline=deadline)
+            if why:
+                return Response({"detail": f"Couldn't take that file — {why}. Nothing was charged."},
+                                status=status.HTTP_502_BAD_GATEWAY)
+            body = {"contents": [{"parts": [{"text": inspiration_prompt(kind)}, part]}],
+                    "generationConfig": {"temperature": 0.3}}
+            resp, _ = generate_content("text", body, key=key, timeout=deadline.remaining(cap=120),
+                                       env_vars=("GEMINI_AUDIO_MODEL",), label="Sentence Inspiration")
+        except Expired as e:
+            return Response({"detail": f"Taking longer than it should — {e.message}. Nothing was charged.",
+                             "timed_out": True}, status=status.HTTP_504_GATEWAY_TIMEOUT)
+        except requests.RequestException:
+            return Response({"detail": "Couldn't reach the coach. Nothing was charged — try again."},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        finally:
+            if cleanup:
+                try:
+                    cleanup()
+                except Exception:  # pragma: no cover
+                    logger.exception("Sentence Inspiration: cleanup failed")
+        text = _text_of(resp) if resp is not None and resp.status_code == 200 else ""
+        m = re.search(r"\{.*\}", text or "", re.S)
+        try:
+            parsed = json.loads(m.group(0)) if m else None
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict) and str(parsed.get("unscorable") or "").strip():
+            return Response({"unscorable": str(parsed["unscorable"]).strip()[:300], "cost_cents": 0})
+        out = clean_direction(parsed)
+        if not out:
+            return Response({"detail": "The coach's answer wasn't usable. Nothing was charged — try again."},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        charged = _bill(request.user, f"Sentence ConnectZ Inspiration ({kind}) — AI", count_daily=True)
+        if charged is None:
+            return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
+        return Response({**out, "kind": kind, "cost_cents": charged, "saved": False})

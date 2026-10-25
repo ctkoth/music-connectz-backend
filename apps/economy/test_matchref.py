@@ -98,3 +98,64 @@ class InspirationElsewhereTests(TestCase):
             r = self.c.post("/api/economy/gemini/image/", {"prompt": "cover", "inspiration": "1"}, format="json")
         self.assertEqual(r.status_code, 400)
         self.assertIn("inspiration_note", self.c.get("/api/economy/gemini/image/").json())
+
+
+class SentenceInspirationTests(TestCase):
+    def setUp(self):
+        self.c = APIClient()
+        self.u = User.objects.create_user("k", "k@e.com", "pw12345678")
+        self.c.force_authenticate(self.u)
+        w = wallet_for(self.u); w.money_cents = 10000; w.save()
+
+    def test_depth_fixer_exists_and_finds_feelz(self):
+        from apps.economy import sentencez
+        self.assertEqual(sentencez.FIXER_FOR_DIM["feelz"], "depth")
+
+    def test_direction_for_a_fixer(self):
+        reply = {"unscorable": None, "direction": "Setup then twist; plain words.", "moves": ["reversal"]}
+        with patch("apps.economy.sentencez._key", return_value="k"), \
+             patch("apps.economy.vocalcoach._key", return_value="k"), \
+             patch("apps.economy.gemini.requests.post", return_value=fake_gemini(reply)):
+            r = self.c.post("/api/economy/sentencez/inspiration/",
+                            {"reference": f("r.wav"), "kind": "punchlines"}, format="multipart")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["moves"], ["reversal"])
+
+    def test_refuses_a_contract_kind_and_missing_song(self):
+        self.assertEqual(self.c.post("/api/economy/sentencez/inspiration/", {"kind": "punchlines"},
+                                     format="multipart").status_code, 400)
+        self.assertEqual(self.c.post("/api/economy/sentencez/inspiration/",
+                                     {"reference": f("r.wav"), "kind": "contract"},
+                                     format="multipart").status_code, 400)
+
+
+class WitDepthTests(TestCase):
+    def test_opt_in_only_where_there_are_words(self):
+        from apps.economy.instruments import prompt_for, scores_for
+        self.assertNotIn("wit", scores_for("rapz"))
+        self.assertIn("wit", scores_for("rapz", extras=("wit",)))
+        self.assertNotIn("wit", scores_for("drumz", extras=("wit",)))
+        self.assertIn('"depth"', prompt_for("singz", "pop", "x", "builder", extras=("depth",)))
+        self.assertNotIn("wit_note", prompt_for("singz", "pop", "x", "builder"))
+
+    def test_counted_only_when_opted_in(self):
+        from apps.economy import vocalcoach as vc
+        from apps.economy.instruments import scores_for
+        base = {k: 6 for k in scores_for("rapz")}
+        good = {**GOODISH, "scores": {**base, "wit": 10, "depth": 10}, "wit_note": "n"}
+        def run(counted):
+            with patch("apps.economy.vocalcoach._key", return_value="k"), \
+                 patch("apps.economy.gemini.requests.post", return_value=fake_gemini(good)):
+                out, err = vc.score_take("rapz", f("t.wav"), "audio/wav", genre="trap", target=None,
+                                         difficulty="builder", think=False,
+                                         extras=("wit", "depth"), counted=counted)
+            self.assertIsNone(err)
+            return out
+        beside, inside = run(()), run(("wit",))
+        self.assertEqual(beside["scores"]["wit"], 10)
+        self.assertEqual(beside["counted_extras"], [])
+        self.assertEqual(inside["counted_extras"], ["wit"])
+        self.assertGreater(inside["score_exact"], beside["score_exact"])
+
+
+from apps.economy.test_vocalcoach import GOOD as GOODISH  # noqa: E402

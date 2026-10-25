@@ -40,7 +40,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from .instruments import profile_for_app, scores_for
+from .instruments import WIT_KEYS, profile_for_app, scores_for
 from .models import CoachAgreement, InstrumentProfile, TakeScore
 
 # A dimension at or under this, out of the coach's 1-10, is a low. Not a
@@ -208,7 +208,8 @@ def record(user, app_key, payload, *, difficulty="", genre="", target="",
         # five would drop it on the floor — the coach would show a Writing
         # chip and the history would never have heard of it.
         dims = scores_for(app_key, lyrics=bool(payload.get("rated_lyrics")),
-                          mix=bool(payload.get("rated_mix")))
+                          mix=bool(payload.get("rated_mix")),
+                          extras=tuple(payload.get("rated_extras") or ()))
         # Whitelisted against the instrument's own dimensions, so a key the
         # model invents cannot reach the column — the same guard the payload
         # itself already passes through in `score_take`.
@@ -375,7 +376,7 @@ def weakest(user, app_key):
     # Every dimension this member has actually been scored on, writing
     # included — a weak spot the coach can name but the history cannot is a
     # weak spot nobody can act on.
-    dims = scores_for(app_key, lyrics=True)
+    dims = scores_for(app_key, lyrics=True, extras=tuple(WIT_KEYS))
     sums = {}
     for t in takes:
         for k, v in (t.scores or {}).items():
@@ -396,7 +397,7 @@ def trend(user, app_key, days=RECENT_DAYS):
     a dimension that moved from one take to one take has not moved.
     """
     takes = sorted(_recent(user, app_key, days=days), key=lambda t: t.created_at)
-    dims = scores_for(app_key, lyrics=True)
+    dims = scores_for(app_key, lyrics=True, extras=tuple(WIT_KEYS))
     if len(takes) < MIN_TAKES * 2:
         return {"rows": [], "why": f"{len(takes)} of {MIN_TAKES * 2} takes. A trend "
                                    "drawn through fewer is a line through two dots."}
@@ -939,7 +940,7 @@ def recap(user, app_key):
     takes = _recent(user, app_key, days=RECAP_DAYS, limit=500)
     if len(takes) < MIN_TAKES:
         return None
-    dims = scores_for(app_key, lyrics=True)
+    dims = scores_for(app_key, lyrics=True, extras=tuple(WIT_KEYS))
     overalls = [t.overall for t in takes if t.overall is not None]
     sums = {}
     for t in takes:
@@ -990,7 +991,7 @@ def coaching(user, app_key, price=None):
             alerts.append({**r, "text": f"{move}. Down over the same stretch — a bad week or something that "
                                         "changed? The drill below is the quick way back."})
     takes = _recent(user, app_key, days=RECENT_DAYS)
-    dims = scores_for(app_key, lyrics=True)
+    dims = scores_for(app_key, lyrics=True, extras=tuple(WIT_KEYS))
     sums = {}
     for t in takes:
         for k, v in (t.scores or {}).items():
@@ -1044,7 +1045,7 @@ def coaching(user, app_key, price=None):
 # header the browser cannot send.
 
 def _labels(app_key):
-    return dict(scores_for(app_key, lyrics=True, mix=True))
+    return dict(scores_for(app_key, lyrics=True, mix=True, extras=tuple(WIT_KEYS)))
 
 
 def take_report_text(take, label, labels=None):
@@ -1499,7 +1500,7 @@ class AgreeView(APIView):
     def post(self, request):
         d = request.data or {}
         area = str(d.get("area", "")).strip()
-        valid = set(scores_for(self.app_key, lyrics=True)) | {"hook"}
+        valid = set(scores_for(self.app_key, lyrics=True, extras=tuple(WIT_KEYS))) | {"hook"}
         if area not in valid or not isinstance(d.get("agree"), bool):
             return Response({"detail": "Say which area, and yes or no."}, status=status.HTTP_400_BAD_REQUEST)
         CoachAgreement.objects.update_or_create(
