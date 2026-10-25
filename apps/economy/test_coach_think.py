@@ -370,3 +370,37 @@ class MarketsTests(TestCase):
     def test_a_lapsed_statz_member_falls_back_to_default(self):
         p = profile_for(self.user); p.upgrade_markets = [{"store": "amazon", "domain": "amazon.de"}]; p.save()
         self.assertEqual(coach_upgrades.markets_for(self.user), coach_upgrades.DEFAULT_MARKETS)
+
+
+class DrillsMustMakeSenseTests(TestCase):
+    """Corey's screenshot: 'Rap the first verse at full volume whispering only the
+    consonants without your voice turned on'. A drill nobody can follow is dropped."""
+    NONSENSE = {"what": "Consonant bite", "why": "w",
+                "how": "Rap at full volume whispering only the consonants without your voice turned on",
+                "sense": 40}
+    GOOD_DRILL = {"what": "Consonant bite", "why": "w",
+                  "how": "Whisper the verse at half tempo, hitting every final consonant; twice, then full voice",
+                  "sense": 95}
+
+    def test_the_listener_drill_under_ninety_is_dropped(self):
+        from apps.economy.vocalcoach import clean_practice
+        out = clean_practice([self.NONSENSE, self.GOOD_DRILL, {"what": "old reply, no rating"}])
+        self.assertEqual([p["how"][:7] for p in out], ["Whisper", ""])
+
+    def test_the_logic_pass_drops_unrated_and_low_drills_and_never_restores_the_draft(self):
+        from apps.economy.coach_think import validate, apply
+        data = dict(GOOD, practice=[self.NONSENSE, {"what": "x", "why": "", "how": ""}])
+        merged = validate(data, PAYLOAD)
+        self.assertEqual(merged["practice"], [])
+        p = dict(PAYLOAD, practice=[self.NONSENSE])
+        with patch("apps.economy.coach_think.run", return_value=(merged, {"used": True})):
+            apply("singz", p, user=None, genre="", target="", difficulty="", style="",
+                  deadline=None, trial=False)
+        self.assertEqual(p["practice"], [])
+        self.assertEqual(p["listener_notes"]["practice"], [self.NONSENSE])
+
+    def test_both_prompts_carry_the_rule(self):
+        from apps.economy.coach_think import LOGIC_RULES
+        from apps.economy.instruments import prompt_for
+        self.assertIn("MUST MAKE SENSE", LOGIC_RULES)
+        self.assertIn('"sense"', prompt_for("rapz", genre="", target="", difficulty=""))

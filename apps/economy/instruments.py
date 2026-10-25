@@ -563,7 +563,7 @@ Delivery is the biggest lever on FEELZ, so when you give tips lead with delivery
 
 "mix_tips" is separate, and is about the MIX, not the performance: when the vocal is hard to make out or to feel because of how it sits in the mix - buried under the instrumental, muddy low-mids, harsh or sibilant top, too dry or too washy, uneven level - give up to three: "what" to change in the mix, "why" it hides the words or the feeling, and "how" to do it (a starting EQ region to cut or lift, compression guidance, vocal level against the beat, a de-esser, how much reverb or delay), plus "helps": clarity, feelz or both. Name the moment it is worst. Only what you can actually hear; if the vocal sits well, or there is no instrumental or mix to speak of, return an empty list.
 
-"practice" is up to three exercises, one for each of your fixes, worst first: what to do, why it fixes THAT problem in THIS take, and how to run it. Specific to what you heard - never generic advice.
+"practice" is up to three exercises, one for each of your fixes, worst first: what to do, why it fixes THAT problem in THIS take, and how to run it. Specific to what you heard - never generic advice. Every drill must be physically possible for one person in one session and must not contradict itself: never "full volume" with "whisper", never "voice off" with "rap" or "sing", never two tempos or two settings for the same step. Rate each drill's "sense" 0-100 - how clearly a member could follow it exactly as written and how directly it targets the problem - and leave out any you would rate under 90.
 
 Return ONLY valid JSON, no markdown fence, in exactly this shape:
 {{
@@ -588,7 +588,7 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "strengths": ["<what genuinely worked, named specifically - AT LEAST ONE, always>", "..."],
   "fixes": ["<the moment it goes wrong, and the fix — the two that matter most, worst first>", "..."],
   "next_drill": "<one drill to run before the next take: what to do, how many reps>",
-  "practice": [{{"what": "<the drill, concretely - one exercise>", "why": "<which problem in THIS take it fixes, and why this exercise fixes it>", "how": "<the steps: tempo or setting, reps or minutes, and how they will know it worked>"}}, ...]{weak_notes_field}
+  "practice": [{{"what": "<the drill, concretely - one exercise>", "why": "<which problem in THIS take it fixes, and why this exercise fixes it>", "how": "<the steps: tempo or setting, reps or minutes, and how they will know it worked>", "sense": <0-100>}}, ...]{weak_notes_field}
 }}"""
 
 

@@ -267,8 +267,16 @@ REFERENCE_NOTICE = ("Use music you have the right to analyse. This is a private 
                     "The file is used for this analysis only and isn't kept.")
 
 
+# A drill a member cannot follow as written is worse than none: "rap at full volume
+# whispering, with your voice off" reads as a coach that was not listening. Both the
+# listener and the logic pass rate each drill's sense 0-100, and under this it is dropped.
+# A drill with no rating (older replies) is kept rather than guessed about.
+PRACTICE_SENSE_MIN = 90
+
+
 def clean_practice(raw):
-    """[{what, why, how}] — at most three, each field capped, `what` required."""
+    """[{what, why, how}] — at most three, each field capped, `what` required, and
+    any drill rated under PRACTICE_SENSE_MIN for sense left out."""
     out = []
     if not isinstance(raw, list):
         return out
@@ -279,6 +287,9 @@ def clean_practice(raw):
             continue
         what = str(item.get("what", "")).strip()[:200]
         if not what:
+            continue
+        sense = item.get("sense")
+        if isinstance(sense, (int, float)) and not isinstance(sense, bool) and sense < PRACTICE_SENSE_MIN:
             continue
         out.append({"what": what,
                     "why": str(item.get("why", "")).strip()[:300],
