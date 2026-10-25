@@ -288,6 +288,15 @@ def draw_image(key, parts, timeout=90):
     return None, None
 
 
+INSPIRATION_IMAGE_NOTE = ("Inspiration: pick a cover you love and the new one borrows its style, palette, "
+                          "lighting and mood — never its people, text, logos or artwork. The picture is used "
+                          "for this one image and isn't kept.")
+INSPIRATION_WRAP = (
+    "The attached image is INSPIRATION ONLY. Take from it the colour palette, lighting, composition, texture, "
+    "mood and general style. Do NOT copy it, trace it, or reproduce any person, face, logo, lettering, brand or "
+    "recognisable artwork from it. Make a new, original picture for this request: ")
+
+
 class GeminiImageView(APIView):
     """GET: images you've made. POST { prompt } → a generated image, kept."""
 
@@ -295,7 +304,10 @@ class GeminiImageView(APIView):
 
     def get(self, request):
         works = GeneratedImage.objects.filter(user=request.user).select_related("upload")[:30]
-        return Response({"images": [_image_dict(w, request) for w in works]})
+        _, _, daily_left = daily_prompt_state(request.user)
+        return Response({"images": [_image_dict(w, request) for w in works],
+                         "cost_cents": ai_cost("standard"), "free_today": daily_left > 0,
+                         "inspiration_note": INSPIRATION_IMAGE_NOTE})
 
     def post(self, request):
         prompt = str((request.data or {}).get("prompt", "")).strip()
@@ -312,7 +324,11 @@ class GeminiImageView(APIView):
         model = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image-preview")
         # Optional reference image (a data URL) — the output is generated to
         # resemble it (e.g. a cover/portrait drawn from the member's FaceZ photo).
-        parts = [{"text": prompt}]
+        inspiration = str((request.data or {}).get("inspiration", "")).lower() in ("1", "true", "yes", "on")
+        if inspiration and not (request.data or {}).get("reference"):
+            return Response({"detail": "Pick a picture for Inspiration first.", "image": None},
+                            status=status.HTTP_400_BAD_REQUEST)
+        parts = [{"text": (INSPIRATION_WRAP + prompt) if inspiration else prompt}]
         reference = (request.data or {}).get("reference")
         if isinstance(reference, str) and reference.startswith("data:") and "," in reference:
             header, b64 = reference.split(",", 1)

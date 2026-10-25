@@ -92,7 +92,10 @@ OCC_TABS = [
      "builds": "mistakez"},
     {"key": "habitz", "built": True, "open_in": "habitz", "target": "", "icon": "habitz.png", "name": "HabitZ", "emoji": "🎂", "needs": TIER_FREE,
      "desc": "Something you repeat, noticed and kept.", "builds": "habitz"},
-    {"key": "characterz", "built": False, "icon": "characterz.png", "name": "CharacterZ", "emoji": "🤔", "needs": TIER_PREMIUM,
+    # Built: CharacterZ is a mounted tab now (and MangaZ draws with its cast), so
+    # "not built" here was the LogicZ failure — a stale flag telling members not
+    # to look for something that is right there.
+    {"key": "characterz", "built": True, "open_in": "characterz", "target": "", "icon": "characterz.png", "name": "CharacterZ", "emoji": "🤔", "needs": TIER_PREMIUM,
      # Not "MBTI characters". This dict is served to members by `tabs_for`,
      # so it was the second place on the platform publishing somebody else's
      # trademark — while `personalityz.py`'s own docstring says in as many
@@ -117,7 +120,8 @@ OCC_TABS = [
      "builds": "logz"},
     {"key": "pickconnectz", "built": False, "icon": "pickconz.png", "name": "Pick ConnectZ", "emoji": "📌", "needs": TIER_FREE,
      "desc": "Pin your favourites to the footer.", "builds": "pickconnectz"},
-    {"key": "filez", "built": False, "icon": "filez.png", "name": "FileZ", "emoji": "📁", "needs": TIER_FREE,
+    # Built: FileZ is a mounted tab (every upload, with its storage), so this door opens it.
+    {"key": "filez", "built": True, "open_in": "filez", "target": "", "icon": "filez.png", "name": "FileZ", "emoji": "📁", "needs": TIER_FREE,
      "desc": "Files and uploads.", "builds": "filez"},
     {"key": "gitz", "built": False, "icon": "gitz.png", "name": "GitZ", "emoji": "🔀", "needs": required_tier("gitz"),
      "desc": "Branches, commits and pushes — every one of them a TaskZ task.",

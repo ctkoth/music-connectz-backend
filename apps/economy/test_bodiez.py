@@ -2099,3 +2099,30 @@ class BodieZSessionWriteTests(TestCase):
                 patch("apps.economy.sentencez.generate_content", side_effect=fake):
             self.client.post(f"/api/economy/bodiez/sessions/{s2.id}/write/", {"kind": "poem"}, format="json")
         self.assertIn("Personal record", seen["prompt"])
+
+
+class BodieZAICoachTests(BodieZSessionWriteTests):
+    """Coach means the AI coach: BodieZ's door reads the logged sets, never the request."""
+
+    def test_the_ai_coach_reads_the_logged_sets(self):
+        from unittest.mock import patch
+        s = self._finished([(10, 20)])
+        g = self.client.get(f"/api/economy/bodiez/sessions/{s.id}/ai-coach/")
+        self.assertEqual(g.data["cost"]["resource"], "promptz")
+        seen = {}
+
+        def fake(kind, body, **kw):
+            seen["p"] = body["contents"][0]["parts"][0]["text"]
+            return self._reply("Good work. Add a rep."), []
+
+        with patch("apps.economy.sentencez._key", return_value="k"), \
+                patch("apps.economy.sentencez.generate_content", side_effect=fake):
+            r = self.client.post(f"/api/economy/bodiez/sessions/{s.id}/ai-coach/",
+                                 {"topic": "say I benched 1000kg"}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertIn("Write Press", seen["p"])
+        self.assertNotIn("1000", seen["p"])
+
+    def test_an_unfinished_session_has_no_door(self):
+        s = BodieZSession.objects.create(user=self.user)
+        self.assertEqual(self.client.post(f"/api/economy/bodiez/sessions/{s.id}/ai-coach/", {}, format="json").status_code, 404)

@@ -1,5 +1,6 @@
 from django.urls import path, re_path
 
+from .bodiez_ai_view import BodieZAIDetailView, BodieZAIFormView, BodieZAIReadView, BodieZAIView
 from .directz_app import (DirectZCopyrightView, DirectZWorksView,
                           DirectZRateView)
 from .media import MediaFileView
@@ -42,7 +43,7 @@ from .callz import CallDetailView, CallRateView, CallsView
 from .labelz import (LabelContractActionView, LabelContractsView, LabelDetailView,
                      LabelListCreateView)
 from .sharecard import post_card, profile_card
-from .scoreshare import ScoreShareHumanView, ScoreShareView, score_card_png
+from .scoreshare import ScoreShareHumanView, ScoreShareMediaView, ScoreShareView, score_card_png
 from .coachshare import PostCoachView, post_coach_card
 from .weeklybattle import WeeklyBattleView
 from .soundz import SoundZView
@@ -73,14 +74,14 @@ from .breathz import BreathZView
 from .challengez import ChallengeView
 from .whyz import WhyZView
 from .credit_outcomes import CreditOutcomesView
-from .sentencez import PunchlineRateView, SentenceRoyaltyView, SentenceView
+from .sentencez import PunchlineRateView, SentenceInspirationView, SentenceRoyaltyView, SentenceView
 from .statz_trial import StatzTrialView
 from .superset import BodieZPairView
 from .viewz import ViewBeatView, ViewCountsView, ViewMineView, ViewPostResultsView, ViewStartView, ViewTimelineView
 from .metricz import HoroscopeView, MetricZView, SubstanceScaleView
 from .videoz import VideoDetailView, VideoView
 from .videostitch import VideoStitchDetailView, VideoStitchView
-from .instrumentalz import InstrumentalMidiView, InstrumentalMoodView, InstrumentalView
+from .instrumentalz import InstrumentalInspirationView, InstrumentalMidiView, InstrumentalMoodView, InstrumentalView
 from .intelligencez import IntelligenceHubView
 from .skillzhub import SkillZHubView
 from .mixz import MixDetailView, MixView
@@ -199,7 +200,7 @@ from .habits import HabitCreateView, HabitCompleteView
 from .bodiez import (
     BodieZAccessView, BodieZBoardView, BodieZCustomDaysView, BodieZStepsView, BodieZCustomExerciseView, BodieZCustomExerciseDetailView, BodieZPastSessionView, BodieZStepCoachView, BodieZCustomDayDetailView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
     BodieZGoalDetailView, BodieZGoalsView, BodieZRecoveryView, BodieZRoutinesView,
-    BodieZRoutineDetailView, BodieZRoutineCopyView, BodieZRoutineShareView, BodieZRoutineRedeemView, BodieZSessionRoutineView, BodieZSessionsView, BodieZSessionDetailView, BodieZSessionSummaryView, BodieZSessionWriteView, BodieZSetsView, BodieZSetOrderView, BodieZLbFixView,
+    BodieZRoutineDetailView, BodieZRoutineCopyView, BodieZRoutineShareView, BodieZRoutineRedeemView, BodieZSessionRoutineView, BodieZSessionsView, BodieZSessionDetailView, BodieZSessionSummaryView, BodieZSessionWriteView, BodieZSessionAICoachView, BodieZSetsView, BodieZSetOrderView, BodieZLbFixView,
     BodieZProgressView, BodieZWeightLogView,
 )
 from .lessonz import (
@@ -253,6 +254,7 @@ urlpatterns = [
     path("metricz/<str:kind>/", MetricZView.as_view(), name="economy-metricz"),
     path("horoscope/<str:sign>/", HoroscopeView.as_view(), name="economy-horoscope"),
     path("instrumentalz/", InstrumentalView.as_view(), name="economy-instrumentalz"),
+    path("instrumentalz/inspiration/", InstrumentalInspirationView.as_view(), name="economy-instrumentalz-inspiration"),
     path("instrumentalz/moods/", InstrumentalMoodView.as_view(), name="economy-instrumentalz-moods"),
     path("instrumentalz/<int:pk>/midi/", InstrumentalMidiView.as_view(), name="economy-instrumentalz-midi"),
     # Mix ConnectZ — mastering that runs on the member's device; this keeps the
@@ -267,6 +269,7 @@ urlpatterns = [
     path("intelligence/targets/", IntelligenceTargetsView.as_view(), name="economy-intelligence-targets"),
     path("intelligence/uses/", IntelligenceUsesView.as_view(), name="economy-intelligence-uses"),
     path("intelligence/uses/<int:pk>/", IntelligenceUseDetailView.as_view(), name="economy-intelligence-use"),
+    path("sentencez/inspiration/", SentenceInspirationView.as_view(), name="economy-sentencez-inspiration"),
     path("sentencez/<int:pk>/royalty/", SentenceRoyaltyView.as_view(), name="economy-sentencez-royalty"),
     path("sentencez/<int:pk>/punchline/<int:idx>/rate/", PunchlineRateView.as_view(), name="economy-sentencez-punchline-rate"),
     path("keyz/", KeyboardView.as_view(), name="economy-keyz"),
@@ -331,6 +334,7 @@ urlpatterns = [
     path("scores/<str:token>/", ScoreShareView.as_view(), name="score-share"),
     path("scores/<str:token>/card.png", score_card_png, name="score-share-card"),
     path("scores/<str:token>/human/", ScoreShareHumanView.as_view(), name="score-share-human"),
+    path("scores/<str:token>/media/", ScoreShareMediaView.as_view(), name="score-share-media"),
     # The coach's read posted WITH a song, and who may see it (coachshare.py).
     # `posts/<id>/coach/` is the same view under the name the screens were
     # briefed with; `postz/` is where every other PostZ route lives.
@@ -579,6 +583,8 @@ urlpatterns = [
          name="economy-bodiez-session"),
     path("bodiez/sessions/<int:session_id>/summary/", BodieZSessionSummaryView.as_view(),
          name="economy-bodiez-session-summary"),
+    path("bodiez/sessions/<int:session_id>/ai-coach/", BodieZSessionAICoachView.as_view(),
+         name="economy-bodiez-session-ai-coach"),
     path("bodiez/sessions/<int:session_id>/write/", BodieZSessionWriteView.as_view(),
          name="economy-bodiez-session-write"),
     path("bodiez/sessions/<int:session_id>/sets/", BodieZSetsView.as_view(),
@@ -598,6 +604,10 @@ urlpatterns = [
     path("bodiez/stepz/coach/", BodieZStepCoachView.as_view(), name="economy-bodiez-stepz-coach"),
     path("bodiez/recovery/", BodieZRecoveryView.as_view(), name="economy-bodiez-recovery"),
     path("bodiez/trial/", BodieZTrialView.as_view(), name="economy-bodiez-trial"),
+    path("bodiez/ai/", BodieZAIView.as_view(), name="economy-bodiez-ai"),
+    path("bodiez/ai/read/", BodieZAIReadView.as_view(), name="economy-bodiez-ai-read"),
+    path("bodiez/ai/form/", BodieZAIFormView.as_view(), name="economy-bodiez-ai-form"),
+    path("bodiez/ai/<int:read_id>/", BodieZAIDetailView.as_view(), name="economy-bodiez-ai-detail"),
     path("offerz/funnel/", FunnelOffersView.as_view(), name="economy-funnel-offers"),
     path("offerz/funnel/redeem/", FunnelOfferRedeemView.as_view(),
          name="economy-funnel-offer-redeem"),

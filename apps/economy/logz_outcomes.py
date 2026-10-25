@@ -13,7 +13,7 @@ showing a dead link. (Keeping every take would change what the privacy policy
 promises and what storage costs; that is a decision for the owner, not a default.)
 """
 from .media import stable_media_url
-from .instruments import scores_for
+from .instruments import WIT_KEYS, scores_for
 from .models import SentenceWork, TakeScore
 
 NOT_KEPT = ("This take was scored, not kept — the coach listens and the recording isn't stored unless you "
@@ -39,7 +39,7 @@ def _take(t, request):
     # observation it filed under that dimension. A number with nothing beside it
     # is the "score with no description" this app does not ship.
     try:
-        labels = dict(scores_for(t.app_key, lyrics=True))
+        labels = dict(scores_for(t.app_key, lyrics=True, extras=WIT_KEYS))
     except Exception:                                       # pragma: no cover
         labels = {}
     heard = ((t.upgrades or {}).get("context") or {}).get("heard") or []

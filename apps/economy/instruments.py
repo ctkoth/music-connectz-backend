@@ -179,6 +179,45 @@ LYRIC_SCORE = {
     "freshness": "Freshness 💡",
 }
 
+# Wit 🃏 and Depth ⚓ — two OPT-IN writing scores for RapZ and SingZ, each asked
+# for on its own and each with its own second opt-in: whether it counts toward
+# the overall. Default is beside the overall, never inside it, so a member who
+# only wants to see them does not have their headline number moved. Wit is the
+# cleverness of the turn (wordplay, double meaning, the line that makes you grin);
+# Depth is how much a line costs the writer (a specific true moment instead of a
+# general feeling). Neither is Punchlines or FeelZ re-scored: Punchlines marks the
+# craft of the setup/payoff, FeelZ marks how the whole take moves a listener.
+#
+# Rhyme scheme, wordplay, metaphors and imagery join them as the same kind of
+# variable: pick any, each on its own, each with its own "count in overall".
+# Rhyme and imagery are also inside the full writing bundle (`LYRIC_SCORE`), where
+# they count as before; picked alone here they sit beside the overall unless opted in.
+WIT_SCORE = {
+    "wit": "Wit 🃏",
+    "depth": "Depth ⚓",
+    "rhyme": LYRIC_SCORE["rhyme"],
+    "wordplay": "Wordplay 🔤",
+    "metaphor": "Metaphors 🪞",
+    "imagery": LYRIC_SCORE["imagery"],
+}
+
+
+WIT_KEYS = tuple(WIT_SCORE)
+
+
+def rates_wit(app_key):
+    """Only where there are words, like the writing scores."""
+    return rates_lyrics(app_key)
+
+
+def clean_extras(extras, app_key):
+    """The opted-in Wit/Depth keys, in a fixed order, or () when the coach has no words."""
+    if not rates_wit(app_key) or not extras:
+        return ()
+    want = set(extras)
+    return tuple(k for k in WIT_SCORE if k in want)
+
+
 # Style Match 🎭 — the blueprint lists it among RapZ's CORE scores and it has
 # only ever been served as prose (`style_fit`), so nothing could trend it, no
 # drill could be recommended from it, and the history could not say whether
@@ -262,23 +301,25 @@ def rates_lyrics(app_key):
     return bool(profile_for_app(app_key).get("lyrics"))
 
 
-def scores_for(app_key, *, lyrics=False, mix=False):
+def scores_for(app_key, *, lyrics=False, mix=False, extras=()):
     """The dimensions this take will be scored on. One place, so the prompt,
     the whitelist that filters the model's answer, and the row that stores it
     can never disagree about how many there are."""
     p = profile_for_app(app_key)
     return {**p["scores"], **STYLE_SCORE,
             **(LYRIC_SCORE if (lyrics and rates_lyrics(app_key)) else {}),
-            **(MIX_SCORE if (mix and rates_mix(app_key)) else {})}
+            **(MIX_SCORE if (mix and rates_mix(app_key)) else {}),
+            **{k: WIT_SCORE[k] for k in clean_extras(extras, app_key)}}
 
 
 def prompt_for(app_key, genre, target, difficulty, style=None, lyrics=False, mix=False,
-               listeners=None):
+               listeners=None, extras=()):
     """The coaching prompt, in this instrument's own terms."""
     p = profile_for_app(app_key)
     lyrics = bool(lyrics) and rates_lyrics(app_key)
     mix = bool(mix) and rates_mix(app_key)
-    keys = list(scores_for(app_key, lyrics=lyrics, mix=mix))
+    extras = clean_extras(extras, app_key)
+    keys = list(scores_for(app_key, lyrics=lyrics, mix=mix, extras=extras))
     shape = ", ".join(f'"{k}": <1-10>' for k in keys)
     target_line = f"\n- {p['range_label']}: {target}" if p["range_label"] else ""
     style_line = (f"\n- {p['style_label']}: {style}"
@@ -361,6 +402,29 @@ is written well. You are a coach, not a censor.""" if lyrics else "")
     lyric_fields = ('\n  "lyrics_read": "<the words you caught, and roughly how much of it - or say you could not make them out>",'
                     '\n  "lyrics_note": "<what the writing does, quoting the line you mean>",'
                     if lyrics else "")
+
+    wit_lines = {
+        "wit": ('- "wit": cleverness of the turn - wordplay, double meanings, a line that makes a '
+                'listener grin or rewind. Judge what you can HEAR; quote the best one.'),
+        "depth": ('- "depth": how much a line costs the writer - a specific, true moment instead of a '
+                  'general feeling. "the kitchen light still on at 4am" has depth; "life is hard" does not.'),
+        "rhyme": ('- "rhyme": the rhyme SCHEME - density, where the rhymes land, internal and multisyllabic '
+                  'rhymes, and whether it stays interesting or settles into one slot every bar.'),
+        "wordplay": ('- "wordplay": puns, homophones, double entendre, flipped phrases and switch-ups - '
+                     'language played with on purpose. Quote the best one.'),
+        "metaphor": ('- "metaphor": comparisons that carry meaning - are they fresh, consistent, and do they '
+                     'say something a plain statement could not? A dead cliche scores low.'),
+        "imagery": ('- "imagery": concrete and specific against vague and general - what the listener can '
+                    'see, hear or touch in the lines.')}
+    wit_ask = (("""
+
+**EXTRA WRITING SCORES (wit, depth, rhyme scheme, wordplay, metaphors, imagery) — they asked for these, so score only the ones named, on the words you can actually make out.**
+""" + "\n".join(wit_lines[k] for k in extras) + """
+If the delivery is too buried to catch the words, score these null and say so in "wit_note" - never review \
+words you did not hear. None is a re-score of Punchlines or FeelZ. A style that does not ask for it gets \
+null, not a low number: a null is "not what this is for", a 3 is an accusation. Craft only - not subject \
+matter, opinions or swearing.""") if extras else "")
+    wit_fields = ('\n  "wit_note": "<what the Wit/Depth scores rest on, quoting the line you mean>",' if extras else "")
 
     # Production, only when they asked for it. Deliberately the LAST section so
     # it cannot colour the performance judgement above it.
@@ -549,7 +613,7 @@ number and not coaching:
 - "now": what this take actually IS right now — their current qualities, in \
 {p['label']}'s own terms, the honest read a stranger would give it.
 - "goal": what they are aiming at from here, pitched at "{difficulty}" and at \
-{aim}. Concrete enough to know when they have hit it.{range_ask}{style_ask}{style_scale}{lyric_ask}{mix_ask}{weak_notes_section}
+{aim}. Concrete enough to know when they have hit it.{range_ask}{style_ask}{style_scale}{lyric_ask}{wit_ask}{mix_ask}{weak_notes_section}
 
 "hook_score" rates the HOOK on its own - in this app a chorus IS a hook (as is any refrain or repeated tag line), so rate the chorus, not the verses: a take can have a strong hook inside a rough performance and the reverse, so judge it by itself - do not let the verses colour it. The server counts it as one part of the overall, so do not fold it into your own overall either. Null when there is no hook - a scale, a warm-up or an exercise has none.
 
@@ -585,7 +649,7 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "feelz_why": "<one sentence: what makes it move you or not - the voice, the pacing, the honesty, the space it leaves>",
   "feelz_cause": "<performance|mix|recording|both, or null when FEELZ is 7 or higher>",
   "feelz_tips": [{{"kind": "<delivery|diction|projection|phrasing|dynamics|pacing|intention|gear|room>", "what": "<only when FEELZ is 6 or lower: the specific moment and change>", "why": "<how it holds the feeling back>", "how": "<steps to try next take>"}}, ...],
-  "mix_tips": [{{"helps": "<clarity|feelz|both>", "what": "<the mix change>", "why": "<what it is hiding>", "how": "<how to do it>"}}, ...],{lyric_fields}{mix_fields}
+  "mix_tips": [{{"helps": "<clarity|feelz|both>", "what": "<the mix change>", "why": "<what it is hiding>", "how": "<how to do it>"}}, ...],{lyric_fields}{wit_fields}{mix_fields}
   "heard": [{{"t": "<m:ss, or empty if unsure>", "what": "<one plain sentence: what is audible>", "dim": "<one score key above, or other>", "confidence": <1-3>}}, ...],
   "verdict": "<one sentence in that voice, what this take actually is>",
   "strengths": ["<what genuinely worked, named specifically - AT LEAST ONE, always>", "..."],

@@ -288,6 +288,7 @@ class InstrumentalView(APIView):
             "daily_allowance": allowance,
             "can_run": bool(_key()) and (free or can_afford_ai(request.user, cost)),
             "mood_search": can_search_mood(request.user),
+            "inspiration_note": INSPIRATION_NOTE,
             "royalty_pct": ROYALTY_PCT,
             "royalty_rule": (f"Using one in DistributeZ, CollabZ or BattleZ pays K-Oth {ROYALTY_PCT}% "
                              "of what you earn from it."),
@@ -396,3 +397,115 @@ class InstrumentalMidiView(APIView):
         slug = re.sub(r"[^a-z0-9]+", "-", title.lower().replace("#", " sharp ")).strip("-")[:60] or "instrumental"
         resp["Content-Disposition"] = f'attachment; filename="{slug}.mid"'
         return resp
+
+
+# ---- Inspiration: a song you want your instrumental to feel like ----------
+
+INSPIRATION_NOTE = ("Use music you have the right to analyse. The coach listens to the song to suggest a "
+                    "setup — genre, tempo, key, instruments and a brief. It does NOT copy the melody or "
+                    "chords: you still compose a new, original loop, which is priced separately. The song "
+                    "isn't kept.")
+
+
+def inspiration_prompt(lyrics=""):
+    kinds = ", ".join(f'"{k}"' for k in INSTRUMENTS)
+    keys = ", ".join(f'"{k}"' for k in KEY_NAMES)
+    return (
+        "You are given a reference song. Describe the SETUP someone would need to write an ORIGINAL "
+        "instrumental with the same feel. Do not transcribe or reproduce its melody, chords or lyrics.\n"
+        + ("The instrumental must also sit well under these lyrics (the member's own): pick a tempo, key "
+           "mood and arrangement density with room for the words, matching their line length and mood.\n"
+           f"LYRICS:\n{lyrics}\n" if lyrics else "")
+        + "Reply with JSON only, exactly:\n"
+        '{"unscorable": <null, or one sentence if there is no music to hear>, "genre": "<short>", '
+        f'"bpm": <integer {BPM_MIN}-{BPM_MAX}>, "key": "<one of: {keys}>", '
+        f'"instruments": [<ids from: {kinds}>], "bars": <4 or 8>, '
+        '"brief": "<2-3 sentences for the composer: feel, groove, space, dynamics - in your own words>", '
+        '"feel": "<one sentence: what the reference does that this setup borrows>", '
+        '"fits_lyrics": "<one sentence on how it leaves room for the lyrics, or empty>"}'
+    )
+
+
+def clean_inspiration(parsed):
+    if not isinstance(parsed, dict):
+        return None
+    try:
+        bpm = max(BPM_MIN, min(BPM_MAX, int(round(float(parsed.get("bpm"))))))
+    except (TypeError, ValueError):
+        return None
+    key = str(parsed.get("key", "")).strip()
+    if key not in KEY_NAMES:
+        key = ""
+    ins = [i for i in dict.fromkeys(parsed.get("instruments") or []) if i in INSTRUMENTS][:MAX_TRACKS]
+    if not ins:
+        return None
+    bars = parsed.get("bars")
+    return {"genre": str(parsed.get("genre", "")).strip()[:60], "bpm": bpm, "key": key,
+            "instruments": ins, "bars": bars if bars in BARS else 4,
+            "brief": str(parsed.get("brief", "")).strip()[:600],
+            "feel": str(parsed.get("feel", "")).strip()[:300],
+            "fits_lyrics": str(parsed.get("fits_lyrics", "")).strip()[:300]}
+
+
+class InstrumentalInspirationView(APIView):
+    """POST a reference song (+ optional lyrics) → a suggested setup. Nothing composed, nothing kept."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from rest_framework.parsers import FormParser, MultiPartParser
+        from . import vocalcoach as vc
+        f = request.FILES.get("reference")
+        if not f or f.size == 0:
+            return Response({"detail": "Pick the song you want it to feel like."}, status=status.HTTP_400_BAD_REQUEST)
+        ct = (getattr(f, "content_type", "") or "").lower()
+        mime = vc.gemini_mime(ct) if ct.startswith(("audio/", "video/")) else None
+        if not mime:
+            return Response({"detail": "Use an m4a, mp3, wav, ogg or mp4 file."}, status=status.HTTP_400_BAD_REQUEST)
+        cap_mb, is_tier = vc.cap_for(request.user)
+        if f.size > cap_mb * 1024 * 1024:
+            return Response({"detail": f"That file is {f.size / (1024 * 1024):.0f}MB. " + vc.cap_why(cap_mb, is_tier)},
+                            status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+        lyrics = str(request.data.get("lyrics", "")).strip()[:4000]
+        api_key = _key()
+        if not api_key:
+            return Response({"detail": "Instrumental ConnectZ isn't switched on."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        cost = ai_cost("standard")
+        _, _, daily_left = daily_prompt_state(request.user)
+        if cost and not daily_left and not can_afford_ai(request.user, cost):
+            return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
+        deadline = Deadline(BUDGET_SECONDS * 2)
+        cleanup = None
+        try:
+            part, cleanup, why = vc._media_part(f, mime, vc._size_of(f), deadline=deadline)
+            if why:
+                return Response({"detail": f"Couldn't take that file — {why}. Nothing was charged."},
+                                status=status.HTTP_502_BAD_GATEWAY)
+            body = {"contents": [{"parts": [{"text": inspiration_prompt(lyrics)}, part]}],
+                    "generationConfig": {"temperature": 0.3}}
+            resp, _ = generate_content("text", body, key=api_key, timeout=deadline.remaining(cap=120),
+                                       env_vars=("GEMINI_AUDIO_MODEL",), label="Instrumental Inspiration")
+        except Expired as e:
+            return Response({"detail": f"Taking longer than it should — {e.message}. Nothing was charged.",
+                             "timed_out": True}, status=status.HTTP_504_GATEWAY_TIMEOUT)
+        except requests.RequestException:
+            return Response({"detail": "Couldn't reach the coach. Nothing was charged — try again."},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        finally:
+            if cleanup:
+                try:
+                    cleanup()
+                except Exception:  # pragma: no cover
+                    logger.exception("Instrumental Inspiration: cleanup failed")
+        parsed = _first_json(_text_of(resp)) if resp is not None and resp.status_code == 200 else None
+        if isinstance(parsed, dict) and str(parsed.get("unscorable") or "").strip():
+            return Response({"unscorable": str(parsed["unscorable"]).strip()[:300], "cost_cents": 0})
+        out = clean_inspiration(parsed)
+        if not out:
+            return Response({"detail": "The coach's answer wasn't usable. Nothing was charged — try again."},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        charged = _bill(request.user, "Instrumental ConnectZ Inspiration — AI", count_daily=True)
+        if charged is None:
+            return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
+        return Response({**out, "cost_cents": charged, "saved": False})

@@ -188,7 +188,8 @@ def build_input(app_key, payload, *, genre, target, difficulty, style, history, 
     """The TEXT-ONLY user turn. No audio, ever."""
     prof = profile_for_app(app_key)
     dims = scores_for(app_key, lyrics=bool(payload.get("rated_lyrics")),
-                      mix=bool(payload.get("rated_mix")))
+                      mix=bool(payload.get("rated_mix")),
+                      extras=tuple(payload.get("rated_extras") or ()))
     scores = [{"key": k, "label": dims.get(k, k), "score": v}
               for k, v in (payload.get("scores") or {}).items()]
     heard = [{"id": f"h{i + 1}", "time": h["t"] or None, "what": h["what"],

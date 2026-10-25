@@ -157,3 +157,27 @@ class CoachCountsForSkillzTests(TestCase):
         self.c.post("/api/economy/skillz-coach/", {"enabled": True}, format="json")
         row = next(s for s in skills_of(User.objects.get(pk=self.u.pk)) if s["skill"] == "Vocalist")
         self.assertTrue(row["coach"]["used"])
+
+
+class BattleCoachTests(TestCase):
+    def _battle(self):
+        from .models import Battle, BattleEntry
+        a, b = mk("ba"), mk("bb")
+        bt = Battle.objects.create(host=a, opponent=b, title="t", mode="1v1", status="open", kind="freestyle")
+        ea = BattleEntry.objects.create(battle=bt, user=a, title="a")
+        eb = BattleEntry.objects.create(battle=bt, user=b, title="b")
+        for u in [mk(f"j{i}") for i in range(3)]:
+            ItemRating.objects.create(user=u, item_id=ea.item_key, score=6)
+            ItemRating.objects.create(user=u, item_id=eb.item_key, score=7)
+        return bt, a, b
+
+    def test_opt_in_coach_can_flip_the_winner(self):
+        from .battlez import scoreboard
+        bt, a, b = self._battle()
+        self.assertEqual(scoreboard(bt)["host"]["median"], 6)
+        TakeScore.objects.create(user=a, app_key="rapz", overall=10)
+        self.assertEqual(scoreboard(bt)["host"]["median"], 6)          # not opted in: nothing changes
+        p = profile_for(a); p.coach_counts_for_skillz = True; p.save()
+        board = scoreboard(bt)
+        self.assertGreater(board["host"]["median"], board["opponent"]["median"])
+        self.assertEqual(board["host"]["coach"]["takes"], 1)

@@ -48,6 +48,11 @@ except Exception:  # pragma: no cover - never take the deploy down
     SingZCoachView = None
 
 try:
+    from apps.economy.matchref import MatchReferenceView
+except Exception:  # pragma: no cover - never take the deploy down
+    MatchReferenceView = None
+
+try:
     from apps.economy.coach_upgrades import CoachUpgradesView
 except Exception:  # pragma: no cover - never take the deploy down
     CoachUpgradesView = None
@@ -201,6 +206,9 @@ urlpatterns = [
          name=f"{key}-coach-upgrades")
     for key in INSTRUMENT_APP_KEYS
 ] if CoachUpgradesView else []) + ([
+    path(f"api/{key}/match/", MatchReferenceView.as_view(app_key=key), name=f"{key}-match")
+    for key in INSTRUMENT_APP_KEYS
+] if MatchReferenceView else []) + ([
     # The coach's memory. Bound per instrument beside the coach itself so a new
     # instrument gets its history screen without a second list to keep in step
     # — the gap `test_instrument_routes` exists to catch.
