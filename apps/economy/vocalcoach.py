@@ -217,6 +217,9 @@ def _media_part(f, mime, size, deadline=None):
     the ceiling from 14MB to gigabytes. Returns (part, cleanup, error) with
     exactly one of part/error set.
     """
+    # A YouTube link travels as its URL: Gemini fetches it, nothing is downloaded.
+    if getattr(f, "youtube_uri", None):
+        return {"file_data": {"file_uri": f.youtube_uri}}, None, None
     if size <= INLINE_MAX_MB * 1024 * 1024:
         return ({"inline_data": {"mime_type": mime,
                                  "data": base64.b64encode(f.read()).decode()}},
@@ -1152,7 +1155,7 @@ class SingZCoachView(APIView):
             return Response({"detail": "A reference listen is an upload of somebody else's "
                                        "track. Your own posts and journal go through My take."},
                             status=status.HTTP_400_BAD_REQUEST)
-        post = stored = None
+        post = stored = linked = None
         f = request.FILES.get("take")
         if f:
             content_type = (getattr(f, "content_type", "") or "").lower()
@@ -1166,6 +1169,10 @@ class SingZCoachView(APIView):
                     return err
             if post is None and stored is None:
                 stored, f, content_type, err = self._take_from_upload(request)
+                if err:
+                    return err
+            if post is None and stored is None and not f:
+                linked, f, content_type, err = self._take_from_link(request)
                 if err:
                     return err
         if post is not None:
@@ -1323,6 +1330,8 @@ class SingZCoachView(APIView):
         note = f"{profile_for_app(self.app_key)['label']} Boss Take — AI Coach"
         if stored is not None:
             note += f" — {stored['kind']} #{stored['id']}"
+        elif linked:
+            note += f" — link ({linked['kind']})"
         from django.utils import timezone as _tz
         _t0 = _tz.now()
         charged = _bill(request.user, note=note, count_daily=True)
@@ -1339,7 +1348,7 @@ class SingZCoachView(APIView):
         # (one that came from a post or a journal entry is already stored there).
         from . import takekeep
         _kept, _kept_note = (takekeep.keep_take(request.user, f)
-                             if takekeep.wants_keep(data.get("keep")) and stored is None and not getattr(f, "instance", None)
+                             if takekeep.wants_keep(data.get("keep")) and stored is None and not linked and not getattr(f, "instance", None)
                              else (None, ""))
         _row = takescorez.record(
             request.user, self.app_key, payload,
@@ -1389,6 +1398,8 @@ class SingZCoachView(APIView):
                 _row.save(update_fields=["share_token"])
             except Exception:                                # pragma: no cover
                 pass
+        if linked:
+            out.update({"source": "link", "link_kind": linked["kind"], "media_url": linked["url"]})
         if stored is not None and post is None and stored.get("kind") == "upload":
             # From FileZ (any app's Doors bar): the way back is the file itself.
             out.update({"source": "upload", "upload_id": stored["id"],
@@ -1529,6 +1540,30 @@ class SingZCoachView(APIView):
         # that is the slot it fills.
         content_type = (upload.content_type or "").lower() or f"{kind}/webm"
         return post, upload.file, content_type, None
+
+    def _take_from_link(self, request):
+        """(linked, file, content_type, error) for a pasted link (`media_url`).
+
+        The fourth door, same coach, same price, same "a failed run is not
+        charged". What a link can give is `medialink.classify`'s call; a link
+        is never kept (a YouTube video is not ours to store, and a fetched file
+        is the member's to attach if they want it kept)."""
+        from . import medialink
+        raw = request.data.get("media_url")
+        if raw in (None, ""):
+            return None, None, "", None
+        kind, val = medialink.classify(raw)
+        if kind in ("bad", "refused"):
+            return None, None, "", Response({"detail": val, "link_refused": kind == "refused"},
+                                            status=status.HTTP_400_BAD_REQUEST)
+        if kind == "youtube":
+            return {"kind": "youtube", "url": val}, medialink.YouTubeTake(val), "video/mp4", None
+        cap_mb, _is_tier = cap_for(request.user)
+        f, ctype, why = medialink.fetch_file(val, cap_mb * 1024 * 1024)
+        if why:
+            return None, None, "", Response({"detail": why + " Nothing was charged."},
+                                            status=status.HTTP_400_BAD_REQUEST)
+        return {"kind": "file", "url": val}, f, ctype, None
 
     def _take_from_upload(self, request):
         """(stored, file, content_type, error) for one of the member's own uploads.
