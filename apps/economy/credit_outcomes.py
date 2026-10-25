@@ -63,6 +63,15 @@ CREDIT_OUTCOMES = {
         "outcomes": ["understandable", "learnable", "shareable", "braggable", "tangible"],
         "lands_in": ["singz", "rapz", "postz", "messagez", "journalz", "sentenceconnectz"],
         "free_way": COACH_FREE},
+    "matchref": {
+        "resource": "promptz", "label": "Match a reference",
+        "buys": "Your take heard against a song you want to sound like: what separates them, in "
+                "dimensions, EQ by ear, how-to and lyric direction (never their words). Nothing is kept.",
+        "outcomes": ["learnable", "understandable"],
+        "lands_in": ["singz", "rapz", "sentenceconnectz"],
+        "ephemeral_reason": "The reference is somebody else's record, so it is never stored, and a gap to "
+                            "it is not a measurement of you; the read is shown once to act on.",
+        "free_way": COACH_FREE},
     "coach_upgrades": {
         "resource": "promptz", "label": "Gear and settings advice",
         "buys": "Named gear and settings advice tied to the reasons in one take.",
