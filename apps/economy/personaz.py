@@ -204,6 +204,7 @@ _ROLES = {
         ("🎨", "Graphic Designer", {"graphic_design", "photoshop", "indesign", "coreldraw", "affinity", "canva",
                                     "any_design_skill", "any_design_software", "asset_production"}),
         ("🎯", "UI/UX Designer", {"figma", "ui_ux", "sketch"}),
+        ("💿", "Cover Artist", {"cover_art_design"}),
         ("🔤", "Typographer", {"typography"}),
         ("🏷️", "Brand Designer", {"brand_identity"}),
         ("🌈", "Colour Specialist", {"color_theory"}),
