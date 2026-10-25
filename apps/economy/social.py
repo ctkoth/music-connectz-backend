@@ -14,7 +14,7 @@ from rest_framework.views import APIView
 
 from .audience import Audience
 from .visibility import can_see, redact
-from .models import (
+from .models import (RATING_REWARD_ENERGY, 
     apply_post_rating,
     public_name,
     AttractivenessRating,
@@ -779,6 +779,8 @@ class SocialView(APIView):
             "listened_sec": heard.seconds if heard else 0,
             "listen_finished": bool(heard and heard.finished),
             "listen_required_sec": LISTEN_REQUIRED_SEC,
+            # The gain half, before the press: what a first rating pays the rater.
+            "rating_reward_energy": RATING_REWARD_ENERGY,
             **self._comment_quote(item, request.user),
         }
 
