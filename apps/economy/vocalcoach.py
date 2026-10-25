@@ -36,7 +36,7 @@ from rest_framework.views import APIView
 from .catalog import COACH_POST_ENERGY, ai_cost
 from .deadline import (COACH_BUDGET_SECONDS, COACH_THINK_RESERVE_SECONDS, Deadline,
                        Expired)
-from .instruments import (DIFFICULTIES, LYRIC_SCORE, MIX_SCORE, profile_for_app,
+from .instruments import (DIFFICULTIES, LYRIC_SCORE, MIX_SCORE, WIT_SCORE, clean_extras, rates_wit, profile_for_app,
                           prompt_for, reference_prompt_for, rates_lyrics, rates_mix,
                           scores_for)
 from .gemini import _bill, _key, generate_content
@@ -447,7 +447,7 @@ def listener_reasons(post, limit=5):
 
 def score_take(app_key, f, content_type, *, genre, target, difficulty, style=None,
                user=None, lyrics=False, mix=False, deadline=None, listeners=None,
-               think=True, reference=False):
+               think=True, reference=False, extras=(), counted=()):
     """Send one take to the model. Returns (payload, error) — exactly one is None.
 
     `reference=True` is a REFERENCE LISTEN: somebody else's recording, read
@@ -484,6 +484,8 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     # interface rather than by getting better, which is the substance rule
     # inverted.
     mix = bool(mix) and rates_mix(app_key) and not reference
+    extras = () if reference else clean_extras(extras, app_key)
+    counted = tuple(k for k in extras if k in set(counted or ()))
     if reference:
         think = False
         listeners = None
@@ -498,6 +500,7 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         lyrics=lyrics,
         mix=mix,
         listeners=listeners,
+        extras=extras,
     )
     # The house voice for the PROSE inside the scored fields, from the member's
     # own row — the short form, not the full preamble. `prompt_for` states the
@@ -673,10 +676,14 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
                       status.HTTP_502_BAD_GATEWAY)
 
     perf = {k: _clamp((parsed.get("scores") or {}).get(k))
-            for k in scores_for(app_key, lyrics=lyrics, mix=mix)}
+            for k in scores_for(app_key, lyrics=lyrics, mix=mix, extras=extras)}
     model_score = _clamp(parsed.get("score"))
     # Performance dimensions only: style_match is closeness, not quality.
-    perf_only = {k: v for k, v in perf.items() if k != "style_match"}
+    # Wit and Depth sit BESIDE the overall unless the member opted that score in.
+    # (Rhyme and imagery keep counting when the full writing bundle was asked for.)
+    perf_only = {k: v for k, v in perf.items()
+                 if k != "style_match"
+                 and (k not in WIT_SCORE or k in counted or (lyrics and k in LYRIC_SCORE))}
     # HookZ counts as one more strength-weighted part of the overall (Corey's
     # call): a chorus that lands is part of a take that works. It joins only when
     # the model found a chorus to judge — a missing hook is absent, never a 0.
@@ -727,6 +734,10 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         "scores": perf,
         "rated_lyrics": lyrics,
         "rated_mix": mix,
+        # Which of Wit / Depth were asked for, and which of those are INSIDE `score`.
+        "rated_extras": list(extras),
+        "counted_extras": [k for k in counted if perf.get(k) is not None],
+        **({"wit_note": str(parsed.get("wit_note", ""))[:800]} if extras else {}),
         # A scored take is explicitly NOT unscorable, so the client reads one
         # key either way rather than inferring it from a missing score.
         "unscorable": "",
@@ -1092,6 +1103,9 @@ class SingZCoachView(APIView):
             # the chip the screen draws is the one the model was asked for.
             "rates_lyrics": rates_lyrics(self.app_key),
             "lyric_scores": LYRIC_SCORE if rates_lyrics(self.app_key) else {},
+            # Wit / Depth: opt-in scores, each with its own "count in overall" opt-in.
+            "rates_wit": rates_wit(self.app_key),
+            "wit_scores": WIT_SCORE if rates_wit(self.app_key) else {},
             # The mix toggle, published the same way and for the same reason:
             # the screen must not keep its own copy of which dimensions exist.
             "rates_mix": rates_mix(self.app_key),
@@ -1265,6 +1279,8 @@ class SingZCoachView(APIView):
                 difficulty=data.get("difficulty"), style=data.get("style"),
                 lyrics=str(data.get("rate_lyrics", "")).lower() in ("1", "true", "yes", "on"),
                 mix=str(data.get("rate_mix", "")).lower() in ("1", "true", "yes", "on"),
+                extras=[k for k in WIT_SCORE if str(data.get(f"rate_{k}", "")).lower() in ("1", "true", "yes", "on")],
+                counted=[k for k in WIT_SCORE if str(data.get(f"count_{k}", "")).lower() in ("1", "true", "yes", "on")],
                 # Only the voice the prose comes back in. The rubric is the
                 # same one the logged-out trial is scored on.
                 user=request.user,

@@ -74,14 +74,14 @@ from .breathz import BreathZView
 from .challengez import ChallengeView
 from .whyz import WhyZView
 from .credit_outcomes import CreditOutcomesView
-from .sentencez import PunchlineRateView, SentenceRoyaltyView, SentenceView
+from .sentencez import PunchlineRateView, SentenceInspirationView, SentenceRoyaltyView, SentenceView
 from .statz_trial import StatzTrialView
 from .superset import BodieZPairView
 from .viewz import ViewBeatView, ViewCountsView, ViewMineView, ViewPostResultsView, ViewStartView, ViewTimelineView
 from .metricz import HoroscopeView, MetricZView, SubstanceScaleView
 from .videoz import VideoDetailView, VideoView
 from .videostitch import VideoStitchDetailView, VideoStitchView
-from .instrumentalz import InstrumentalMidiView, InstrumentalMoodView, InstrumentalView
+from .instrumentalz import InstrumentalInspirationView, InstrumentalMidiView, InstrumentalMoodView, InstrumentalView
 from .intelligencez import IntelligenceHubView
 from .skillzhub import SkillZHubView
 from .mixz import MixDetailView, MixView
@@ -254,6 +254,7 @@ urlpatterns = [
     path("metricz/<str:kind>/", MetricZView.as_view(), name="economy-metricz"),
     path("horoscope/<str:sign>/", HoroscopeView.as_view(), name="economy-horoscope"),
     path("instrumentalz/", InstrumentalView.as_view(), name="economy-instrumentalz"),
+    path("instrumentalz/inspiration/", InstrumentalInspirationView.as_view(), name="economy-instrumentalz-inspiration"),
     path("instrumentalz/moods/", InstrumentalMoodView.as_view(), name="economy-instrumentalz-moods"),
     path("instrumentalz/<int:pk>/midi/", InstrumentalMidiView.as_view(), name="economy-instrumentalz-midi"),
     # Mix ConnectZ — mastering that runs on the member's device; this keeps the
@@ -268,6 +269,7 @@ urlpatterns = [
     path("intelligence/targets/", IntelligenceTargetsView.as_view(), name="economy-intelligence-targets"),
     path("intelligence/uses/", IntelligenceUsesView.as_view(), name="economy-intelligence-uses"),
     path("intelligence/uses/<int:pk>/", IntelligenceUseDetailView.as_view(), name="economy-intelligence-use"),
+    path("sentencez/inspiration/", SentenceInspirationView.as_view(), name="economy-sentencez-inspiration"),
     path("sentencez/<int:pk>/royalty/", SentenceRoyaltyView.as_view(), name="economy-sentencez-royalty"),
     path("sentencez/<int:pk>/punchline/<int:idx>/rate/", PunchlineRateView.as_view(), name="economy-sentencez-punchline-rate"),
     path("keyz/", KeyboardView.as_view(), name="economy-keyz"),

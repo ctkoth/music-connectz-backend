@@ -57,7 +57,7 @@ from rest_framework.views import APIView
 from .coach_think import COACH_THINK_MODEL, classify, has_key, usage_cents
 from .corey_voice import REGISTER_ACADEMIC, corey_prompt
 from .deadline import Deadline
-from .instruments import profile_for_app, scores_for
+from .instruments import WIT_KEYS, profile_for_app, scores_for
 
 logger = logging.getLogger(__name__)
 
@@ -297,7 +297,7 @@ def _system():
 
 def _context(take, user):
     prof = profile_for_app(take.app_key)
-    dims = scores_for(take.app_key, lyrics=True, mix=True)
+    dims = scores_for(take.app_key, lyrics=True, mix=True, extras=tuple(WIT_KEYS))
     ctx = (take.upgrades or {}).get("context") or {}
     return json.dumps({
         "instrument": prof["label"], "performer": prof.get("performer"),

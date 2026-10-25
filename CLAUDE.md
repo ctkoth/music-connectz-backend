@@ -2657,3 +2657,12 @@ post's read card, and `render_card` draws "HookZ 8 · FeelZ 4 · longing" — nu
 a challenge already on it survives. Cards are cached a day, so a refilled one reaches the picture on the next day's fetch.
 **Not shared, on purpose:** the take's file (only a post can carry a kept recording), the transcribed lyrics (never stored), and the
 member's listener reasons (the performer's alone).
+
+## Inspiration: your take against a song you want to sound like
+
+`matchref.py`, `POST /api/<key>/match/` on every coach (named Inspiration, first for RapZ). Two files: the take and a
+reference; the reference is never kept (no Upload row, Files API copy deleted) and nothing is saved as the member's — no
+TakeScore, share, XP or rating, because a gap to someone's record is not a measurement of the member. `closeness` is how
+near the SOUND is, never good/bad. EQ regions are server-owned (`EQ_REGIONS`) and said to be heard, not measured. Lyrics
+come back as a DIRECTION for Sentence ConnectZ, never the reference's words (prompt forbids quoting). One standard AI
+price, stated on GET before the button; a failed run is not charged. Never run against Google (CI has no key).
