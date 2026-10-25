@@ -147,6 +147,12 @@ CREDIT_OUTCOMES = {
                             "history. A repeated biometric-adjacent rating held over time is its own "
                             "privacy risk that a stateless call does not create.",
         "no_free_way": "It reads one photo with a model; the daily free allowance is the free way in."},
+    "bodiez_ai_view": {
+        "resource": "promptz", "label": "BodieZ AI coach",
+        "buys": "An AI read of a workout, routine or muscle from your logs (what's working, what to change, your next session), or a form check that watches one video of a set and scores it with cues.",
+        "outcomes": ["tangible", "understandable", "learnable"],
+        "lands_in": ["bodiez"],
+        "free_way": {"label": "Every lift, muscle and routine already has a free Thorough rating, and a daily free prompt covers a read.", "tab": "bodiez"}},
     "lookmaxz_view": {
         "resource": "promptz", "label": "LookZMaxZ reading",
         "buys": "A sector-by-sector read of how a photo presents (face, skin, teeth, styling) with what to change and where to shop for it.",
