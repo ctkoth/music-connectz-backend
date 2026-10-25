@@ -42,7 +42,7 @@ from .callz import CallDetailView, CallRateView, CallsView
 from .labelz import (LabelContractActionView, LabelContractsView, LabelDetailView,
                      LabelListCreateView)
 from .sharecard import post_card, profile_card
-from .scoreshare import ScoreShareHumanView, ScoreShareView, score_card_png
+from .scoreshare import ScoreShareHumanView, ScoreShareMediaView, ScoreShareView, score_card_png
 from .coachshare import PostCoachView, post_coach_card
 from .weeklybattle import WeeklyBattleView
 from .soundz import SoundZView
@@ -331,6 +331,7 @@ urlpatterns = [
     path("scores/<str:token>/", ScoreShareView.as_view(), name="score-share"),
     path("scores/<str:token>/card.png", score_card_png, name="score-share-card"),
     path("scores/<str:token>/human/", ScoreShareHumanView.as_view(), name="score-share-human"),
+    path("scores/<str:token>/media/", ScoreShareMediaView.as_view(), name="score-share-media"),
     # The coach's read posted WITH a song, and who may see it (coachshare.py).
     # `posts/<id>/coach/` is the same view under the name the screens were
     # briefed with; `postz/` is where every other PostZ route lives.

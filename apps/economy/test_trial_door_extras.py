@@ -29,6 +29,41 @@ class ExampleIsTheOwnersOwnTests(TestCase):
         self.assertEqual((ex["token"], ex["username"], ex["score"]), ("own", "koth", 7))
 
 
+class ExampleCanBeHeardTests(TestCase):
+    """The example plays the real recording when the owner kept it, so a stranger can hear
+    what earned the number before performing — and the card alone otherwise."""
+
+    def setUp(self):
+        from django.core.files.base import ContentFile
+        from apps.economy.models import TakeScore, Upload
+        self.owner = User.objects.create_superuser(username="koth", password="hunter2hunter2", email="o@x.com")
+        self.TakeScore, self.Upload, self.ContentFile = TakeScore, Upload, ContentFile
+
+    def kept(self, token, missing=False):
+        from django.utils import timezone
+        up = self.Upload(user=self.owner, name=f"{token}.webm", size_bytes=3, content_type="audio/webm",
+                         missing_since=timezone.now() if missing else None)
+        up.file.save(f"{token}.webm", self.ContentFile(b"abc"), save=False); up.save()
+        self.TakeScore.objects.create(user=self.owner, app_key="rapz", overall=7, share_token=token, upload=up)
+        return up
+
+    def test_a_kept_take_is_preferred_and_playable(self):
+        ScoreShare.objects.create(token="newer", app_key="rapz", score=8, user=self.owner, verdict="no audio")
+        ScoreShare.objects.create(token="heard", app_key="rapz", score=7, user=self.owner, verdict="kept")
+        up = self.kept("heard")
+        ex = APIClient().get("/api/rapz/trial/").data["example"]
+        self.assertEqual(ex["token"], "heard")
+        self.assertEqual(ex["audio_kind"], "audio")
+        self.assertTrue(ex["audio"].endswith(f"/api/economy/media/{up.id}/{up.file.name.rsplit('/', 1)[-1]}"))
+
+    def test_a_lost_file_is_not_offered_and_the_card_still_shows(self):
+        ScoreShare.objects.create(token="gone", app_key="rapz", score=7, user=self.owner, verdict="lost")
+        self.kept("gone", missing=True)
+        ex = APIClient().get("/api/rapz/trial/").data["example"]
+        self.assertEqual(ex["token"], "gone")
+        self.assertNotIn("audio", ex)
+
+
 @SMTP
 class EmailBeforeSendingTests(TestCase):
     def send(self, score, email):
