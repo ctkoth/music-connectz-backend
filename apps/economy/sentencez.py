@@ -226,6 +226,11 @@ KINDS.update({
                      "if it names none. A title, then the poem"),
              "hint": "What is it about? Name a form or a feeling if you have one.",
              "style_label": "Form or mood (optional)"},
+    "workout_read": {"label": "AI coach's read", "emoji": "🤖", "plain": True, "no_invention": True,
+                     "ask": ("a short coaching read of the workout in the facts: what went well, the one thing "
+                             "to change next time, and a concrete target for the next session. Speak to the "
+                             "lifter as 'you', plain and encouraging, under 150 words, no headings"),
+                     "hint": "Read from your logged sets.", "style_label": "Focus (optional)"},
     "bio": {"label": "Bio", "emoji": "🙋", "plain": True, "no_invention": True,
             "ask": ("a short bio of about 100 words in the third person, written for the place the "
                     "request names, or for a general profile if it names none"),
@@ -250,7 +255,7 @@ for _k, _h in _HINTS.items():
 # The order a screen lists them in: what most people came to write first, the
 # persona-gated agreements last so a member without the persona is not shown
 # two locked doors before anything they can use.
-_ORDER = ("resume", "cover_letter", "lyrics", *FIXERS, "poem", "bio", "caption", "post", "essay", "contract", "royalties")
+_ORDER = ("resume", "cover_letter", "lyrics", *FIXERS, "poem", "bio", "workout_read", "caption", "post", "essay", "contract", "royalties")
 assert set(_ORDER) == set(KINDS), "a kind was added without being placed in _ORDER"
 KINDS = {k: KINDS[k] for k in _ORDER}
 

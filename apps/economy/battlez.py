@@ -419,7 +419,14 @@ def scoreboard(battle):
         scores = list(ItemRating.objects.filter(item_id=entry.item_key)
                       .values_list("score", flat=True))
         median = item_rating_median(entry.item_key)
+        # Opt-in: the AI coach's reading joins the judges' scores. Qualifying stays on the HUMAN
+        # judge count, so a coach can never stand in for the room.
+        from .royaltyfactor import battle_coach_reading, blend_with_coach
+        coach = battle_coach_reading(user, battle)
+        if coach and scores:
+            median = blend_with_coach(scores, coach["median"])
         out[key] = {
+            "coach": coach if (coach and scores) else None,
             "username": user.username,
             "median": median,
             "count": len(scores),
