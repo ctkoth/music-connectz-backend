@@ -42,7 +42,7 @@ from .callz import CallDetailView, CallRateView, CallsView
 from .labelz import (LabelContractActionView, LabelContractsView, LabelDetailView,
                      LabelListCreateView)
 from .sharecard import post_card, profile_card
-from .scoreshare import ScoreShareHumanView, ScoreShareView, score_card_png
+from .scoreshare import ScoreShareHumanView, ScoreShareMediaView, ScoreShareView, score_card_png
 from .coachshare import PostCoachView, post_coach_card
 from .weeklybattle import WeeklyBattleView
 from .soundz import SoundZView
@@ -199,7 +199,7 @@ from .habits import HabitCreateView, HabitCompleteView
 from .bodiez import (
     BodieZAccessView, BodieZBoardView, BodieZCustomDaysView, BodieZStepsView, BodieZCustomExerciseView, BodieZCustomExerciseDetailView, BodieZPastSessionView, BodieZStepCoachView, BodieZCustomDayDetailView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
     BodieZGoalDetailView, BodieZGoalsView, BodieZRecoveryView, BodieZRoutinesView,
-    BodieZRoutineDetailView, BodieZRoutineCopyView, BodieZSessionRoutineView, BodieZSessionsView, BodieZSessionDetailView, BodieZSessionSummaryView, BodieZSessionWriteView, BodieZSessionAICoachView, BodieZSetsView, BodieZSetOrderView, BodieZLbFixView,
+    BodieZRoutineDetailView, BodieZRoutineCopyView, BodieZRoutineShareView, BodieZRoutineRedeemView, BodieZSessionRoutineView, BodieZSessionsView, BodieZSessionDetailView, BodieZSessionSummaryView, BodieZSessionWriteView, BodieZSessionAICoachView, BodieZSetsView, BodieZSetOrderView, BodieZLbFixView,
     BodieZProgressView, BodieZWeightLogView,
 )
 from .lessonz import (
@@ -331,6 +331,7 @@ urlpatterns = [
     path("scores/<str:token>/", ScoreShareView.as_view(), name="score-share"),
     path("scores/<str:token>/card.png", score_card_png, name="score-share-card"),
     path("scores/<str:token>/human/", ScoreShareHumanView.as_view(), name="score-share-human"),
+    path("scores/<str:token>/media/", ScoreShareMediaView.as_view(), name="score-share-media"),
     # The coach's read posted WITH a song, and who may see it (coachshare.py).
     # `posts/<id>/coach/` is the same view under the name the screens were
     # briefed with; `postz/` is where every other PostZ route lives.
@@ -564,6 +565,9 @@ urlpatterns = [
          name="economy-bodiez-custom-day"),
     path("bodiez/pair/", BodieZPairView.as_view(), name="economy-bodiez-pair"),
     path("bodiez/routines/", BodieZRoutinesView.as_view(), name="economy-bodiez-routines"),
+    path("bodiez/routines/redeem/", BodieZRoutineRedeemView.as_view(), name="economy-bodiez-routine-redeem"),
+    path("bodiez/routines/<int:routine_id>/share/", BodieZRoutineShareView.as_view(),
+         name="economy-bodiez-routine-share"),
     path("bodiez/routines/<int:routine_id>/copy/", BodieZRoutineCopyView.as_view(),
          name="economy-bodiez-routine-copy"),
     path("bodiez/sessions/<int:session_id>/routine/", BodieZSessionRoutineView.as_view(),

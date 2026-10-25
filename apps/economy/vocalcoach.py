@@ -1368,6 +1368,12 @@ class SingZCoachView(APIView):
         _share = mint_score_share(self.app_key, {**payload, **({"challenge": _tag} if _tag else {})},
                                   user=request.user, genre=genre)
         out["share_url"] = f"/s/{_share}" if _share else ""
+        # Tie the card to the take it came from, so a card the member lets play
+        # (scoreshare.share_media) can find the kept recording behind it, and the
+        # history's Share reuses this link rather than minting a second one.
+        if _share and _row is not None and not getattr(_row, "share_token", ""):
+            from .models import TakeScore
+            TakeScore.objects.filter(pk=_row.pk, share_token="").update(share_token=_share)
         # Teach it (6+) or learn it from someone (below 5): from the number the member was shown.
         from . import takelessons
         _exact = payload.get("score_exact")

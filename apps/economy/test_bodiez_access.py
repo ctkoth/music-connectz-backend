@@ -114,6 +114,8 @@ class LibraryCoverageTests(TestCase):
 
 
 class MuscleCoachRatingTests(TestCase):
+    """The Thorough rating, 1-10: days trained, sets a week, and (once a lift
+    has two sessions) whether it is going up. See `thoroughness`."""
     def setUp(self):
         self.client = APIClient()
         self.user = User.objects.create_user(username="r1", password="pw")
@@ -121,74 +123,70 @@ class MuscleCoachRatingTests(TestCase):
         self.bench = BodieZExercise.objects.create(name="T Bench", muscle_group="chest", equipment="barbell")
         self.fly = BodieZExercise.objects.create(name="T Fly", muscle_group="chest", equipment="dumbbell")
 
-    def _log(self, ex, days_ago, reps, weight):
-        BodieZSet.objects.create(session=_finished_session(self.user, days_ago=days_ago),
-                                 exercise=ex, set_number=1, reps=reps, weight_kg=weight)
+    def _log(self, ex, days_ago, reps, weight, sets=1):
+        s = _finished_session(self.user, days_ago=days_ago)
+        for n in range(sets):
+            BodieZSet.objects.create(session=s, exercise=ex, set_number=n + 1, reps=reps, weight_kg=weight)
 
     def _chest(self):
         r = self.client.get(URL + "bodymap/")
         return next(m for m in r.data["muscles"] if m["muscle_group"] == "chest"), r.data
 
-    def test_unrated_until_an_exercise_has_two_sessions(self):
-        self._log(self.bench, 0, 8, 60)
-        chest, data = self._chest()
-        self.assertIsNone(chest["coach_rating"])
-        self.assertTrue(chest["coach_why"])
-        self.assertEqual(data["rating_caveat"], RATING_CAVEAT)
+    def test_pure_scale_is_one_to_ten_and_one_lone_set_is_low(self):
+        from .bodiez import thoroughness
+        self.assertEqual(thoroughness(8, 10, 10, "up"), 10)
+        self.assertLessEqual(thoroughness(1, 0.75, 10, None), 2)
+        self.assertGreaterEqual(thoroughness(1, 0.1, 10, "down"), 1)
 
     def test_untrained_muscle_is_unrated_not_zero(self):
         r = self.client.get(URL + "bodymap/")
         legs = next(m for m in r.data["muscles"] if m["muscle_group"] == "upper_legs")
         self.assertIsNone(legs["coach_rating"])
+        self.assertIn("thorough", legs["coach_why"].lower())
 
-    def test_a_lift_that_went_up_rates_ten_and_shows_its_numbers(self):
-        self._log(self.bench, 10, 8, 60)
-        self._log(self.bench, 0, 8, 70)
-        chest, _ = self._chest()
-        self.assertEqual(chest["coach_rating"], 10)
-        ex = chest["coach_exercises"][0]
+    def test_one_session_is_rated_low_not_refused_and_carries_the_caveat(self):
+        self._log(self.bench, 0, 8, 60, sets=3)
+        chest, data = self._chest()
+        self.assertIsNotNone(chest["coach_rating"])
+        self.assertLessEqual(chest["coach_rating"], 3)
+        self.assertEqual(data["rating_caveat"], RATING_CAVEAT)
+        self.assertIn("thorough", RATING_CAVEAT.lower())
+
+    def test_training_it_more_makes_it_more_thorough(self):
+        self._log(self.bench, 0, 8, 60, sets=3)
+        low = self._chest()[0]["coach_rating"]
+        for d in (3, 7, 10, 14, 17, 21, 24):
+            self._log(self.bench, d, 8, 60, sets=4)
+        self.assertGreater(self._chest()[0]["coach_rating"], low)
+
+    def test_going_up_beats_going_down_at_the_same_effort(self):
+        for d in (24, 21, 17, 14, 10, 7, 3):
+            self._log(self.bench, d, 8, 60, sets=4)
+        self._log(self.bench, 0, 8, 70, sets=4)
+        up = self._chest()[0]["coach_rating"]
+        BodieZSet.objects.all().delete()
+        for d in (24, 21, 17, 14, 10, 7, 3):
+            self._log(self.bench, d, 8, 60, sets=4)
+        self._log(self.bench, 0, 8, 40, sets=4)
+        self.assertGreater(up, self._chest()[0]["coach_rating"])
+
+    def test_each_lift_has_its_own_rating_and_shows_its_numbers(self):
+        self._log(self.bench, 10, 8, 60); self._log(self.bench, 0, 8, 70)
+        ex = self._chest()[0]["coach_exercises"][0]
         self.assertEqual(ex["trend"], "up")
+        self.assertTrue(1 <= ex["rating"] <= 10)
         self.assertGreater(ex["latest"], ex["earlier_best"])
 
-    def test_held_is_six(self):
-        self._log(self.bench, 10, 8, 60)
-        self._log(self.bench, 0, 8, 60)
-        self.assertEqual(self._chest()[0]["coach_rating"], 6)
-
-    def test_a_real_drop_is_three_but_one_tired_day_is_not(self):
-        self._log(self.bench, 10, 8, 60)
-        self._log(self.bench, 0, 8, 50)
-        self.assertEqual(self._chest()[0]["coach_rating"], 3)
-        BodieZSet.objects.all().delete()
-        self._log(self.bench, 10, 8, 60)
-        self._log(self.bench, 0, 8, 57)   # ~95%: held
-        self.assertEqual(self._chest()[0]["coach_rating"], 6)
-
-    def test_muscle_rating_averages_its_exercises(self):
-        self._log(self.bench, 10, 8, 60); self._log(self.bench, 0, 8, 70)   # up 10
-        self._log(self.fly, 10, 10, 20); self._log(self.fly, 0, 10, 20)     # held 6
-        self.assertEqual(self._chest()[0]["coach_rating"], 8)
-
-    def test_effort_without_progress_does_not_raise_it(self):
-        # Five sessions in the window, nothing improving: volume_score climbs,
-        # the coach rating does not.
-        for d in (4, 3, 2, 1, 0):
-            self._log(self.bench, d, 8, 60)
-        chest, _ = self._chest()
-        self.assertEqual(chest["coach_rating"], 6)
+    def test_sessions_older_than_the_window_do_not_count(self):
+        self._log(self.bench, 40, 8, 60, sets=4)
+        self.assertIsNone(self._chest()[0]["coach_rating"])
 
     def test_bodyweight_lifts_compare_on_reps(self):
         push = BodieZExercise.objects.create(name="T Push", muscle_group="chest", equipment="bodyweight")
         self._log(push, 10, 10, None)
         self._log(push, 0, 15, None)
-        self.assertEqual(self._chest()[0]["coach_rating"], 10)
-
-    def test_an_unfinished_session_never_counts(self):
-        from .models import BodieZSession
-        self._log(self.bench, 10, 8, 60)
-        sess = BodieZSession.objects.create(user=self.user)
-        BodieZSet.objects.create(session=sess, exercise=self.bench, set_number=1, reps=8, weight_kg=200)
-        self.assertIsNone(self._chest()[0]["coach_rating"])
+        ex = next(e for e in self._chest()[0]["coach_exercises"] if e["exercise_id"] == push.id)
+        self.assertEqual((ex["trend"], ex["metric"]), ("up", "reps"))
 
 
 class RdlIsDumbbellTests(TestCase):

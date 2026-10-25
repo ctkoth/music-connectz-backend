@@ -104,17 +104,34 @@ def trial_state(ip, anon_id=""):
 from .retake import offer as remind_offer  # noqa: E402
 
 
-def example_for(app_key):
-    """The owner's most recent shared take on this coach, as its public card, or None."""
-    from .models import ScoreShare
+def example_for(app_key, request=None):
+    """The owner's shared take on this coach, as its public card, or None.
+
+    A take whose recording was KEPT (and is still on disk) is preferred, and its
+    address rides along as `audio`, so a stranger can hear what earned the number
+    before performing for one of their own — the closest honest thing to trying
+    the coach without recording: a real take, really scored, never a made-up one.
+    Only the owner's own takes, as before: a member's take on the front door is a
+    use they never agreed to.
+    """
+    from .media import stable_media_url
+    from .models import ScoreShare, TakeScore
     from .scoreshare import share_dict
-    for row in (ScoreShare.objects.select_related("user")
-                .filter(app_key=app_key, user__is_superuser=True).order_by("-created_at")[:10]):
-        p = row.payload or {}
-        if p.get("progress") or p.get("recap"):
-            continue                       # a climb or a month is not "what one take gets"
-        return share_dict(row)
-    return None
+    rows = [r for r in (ScoreShare.objects.select_related("user")
+                        .filter(app_key=app_key, user__is_superuser=True).order_by("-created_at")[:10])
+            if not ((r.payload or {}).get("progress") or (r.payload or {}).get("recap"))]
+    if not rows:
+        return None
+    kept = {t.share_token: t.upload for t in (TakeScore.objects.select_related("upload")
+            .filter(share_token__in=[r.token for r in rows], upload__isnull=False,
+                    upload__missing_since__isnull=True))}
+    pick = next((r for r in rows if r.token in kept), rows[0])
+    out = share_dict(pick)
+    up = kept.get(pick.token)
+    if up is not None:
+        out["audio"] = stable_media_url(up, request)
+        out["audio_kind"] = "video" if (up.content_type or "").startswith("video/") else "audio"
+    return out
 
 
 class TrialCoachView(APIView):
@@ -193,7 +210,7 @@ class TrialCoachView(APIView):
             # a made-up one. Only the OWNER's own shared takes — featuring a member's card
             # on the front door is a use they never agreed to, anonymised or not. None when
             # the owner has shared nothing on this coach; the screen then shows nothing.
-            "example": example_for(self.app_key),
+            "example": example_for(self.app_key, request),
             # Whether the "email me the score" field may render BEFORE the take is sent.
             "remind": remind_offer(),
         })

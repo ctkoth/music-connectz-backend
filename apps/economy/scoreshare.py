@@ -148,7 +148,64 @@ class ScoreShareView(APIView):
             ScoreShare.objects.filter(pk=row.pk).update(views=F("views") + 1)
         except Exception:                                   # pragma: no cover
             pass
-        return Response(share_dict(row))
+        return Response({**share_dict(row), **share_media(row, request)})
+
+
+def playable_upload(row):
+    """The kept recording behind a share, or None: the member's OWN take, scored with
+    a file (kept, or the post it came from), and the file still on disk. A trial take
+    has none — a stranger's take is never stored — so its card never plays."""
+    if not row.user_id:
+        return None
+    from .models import TakeScore
+    take = (TakeScore.objects.select_related("upload")
+            .filter(share_token=row.token, user_id=row.user_id, upload__isnull=False,
+                    upload__missing_since__isnull=True).first())
+    return take.upload if take else None
+
+
+def share_media(row, request=None):
+    """`audio` / `audio_kind` for the public card — only when the member CHOSE to let
+    it play there (`payload["media"]`). The score page is public by link, so the
+    recording reaching it is the member's decision per card, never a default."""
+    if not (row.payload or {}).get("media"):
+        return {}
+    up = playable_upload(row)
+    if up is None:
+        return {}
+    from .media import stable_media_url
+    return {"audio": stable_media_url(up, request),
+            "audio_kind": "video" if (up.content_type or "").startswith("video/") else "audio"}
+
+
+class ScoreShareMediaView(APIView):
+    """GET / POST /api/economy/scores/<token>/media/ {play} — whether this card plays
+    the take's recording. The member's alone, reversible, and refused with the reason
+    when there is no kept recording to play."""
+    from rest_framework.permissions import IsAuthenticated as _Auth
+    permission_classes = [_Auth]
+
+    def get(self, request, token):
+        row = ScoreShare.objects.filter(token=token, user=request.user).first()
+        if not row:
+            return Response({"detail": "Not found."}, status=404)
+        return Response({"play": bool((row.payload or {}).get("media")),
+                         "available": playable_upload(row) is not None})
+
+    def post(self, request, token):
+        row = ScoreShare.objects.filter(token=token, user=request.user).first()
+        if not row:
+            return Response({"detail": "Not found."}, status=404)
+        play = (request.data or {}).get("play")
+        if not isinstance(play, bool):
+            return Response({"detail": "Say yes or no."}, status=400)
+        if play and playable_upload(row) is None:
+            return Response({"detail": "This take's recording wasn't kept, so there's nothing for the card to "
+                                       "play. Tick Keep this take before you send your next one."},
+                            status=400)
+        row.payload = {**(row.payload or {}), "media": play}
+        row.save(update_fields=["payload"])
+        return Response({"play": play, "available": True, **share_media(row, request)})
 
 
 class ScoreShareHumanView(APIView):
