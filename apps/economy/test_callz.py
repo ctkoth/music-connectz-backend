@@ -316,3 +316,44 @@ class EveryTierCanCallTests(TestCase):
         self.assertEqual(r.data["minutes_left"], 0)
         self.assertEqual(r.data["daily_minutes"], mins)
         self.assertIn(str(mins), r.data["detail"])
+
+
+class CallASkillTests(TestCase):
+    """Any skill can be priced by the hour, and the caller can ring about any of them."""
+
+    def setUp(self):
+        self.caller = tier(User.objects.create_user("caller", "c@e.com", PW), TIER_STATZ)
+        self.callee = User.objects.create_user("callee", "e@e.com", PW)
+        p = profile_for(self.callee)
+        p.personas = [
+            {"key": "producer", "name": "Producer", "skills": [
+                {"name": "Mixing", "rate_cents": 6000},                       # $60/hr  -> 100c/min
+                {"name": "Rapping", "rate_cents": 3000}]},                    # $30/hr  ->  50c/min
+            {"key": "ghostwriter", "name": "Ghost Writer", "skills": [
+                {"name": "Lyrics", "rate_cents": 900, "rate_unit": "work"}]}]  # per work: no call rate
+        p.save(update_fields=["personas"])
+        fund(self.caller, 100_00)
+        self.c = APIClient(); self.c.force_authenticate(self.caller)
+
+    def test_the_quote_lists_every_hourly_skill_cheapest_first_and_never_a_per_work_price(self):
+        d = self.c.get("/api/economy/callz/rate/callee/").data
+        self.assertEqual([s["name"] for s in d["skills"]], ["Rapping", "Mixing"])
+        self.assertEqual([s["per_min_cents"] for s in d["skills"]], [50, 100])
+        self.assertEqual(d["rate_cents_per_min"], 50)                       # default = cheapest
+
+    def test_ringing_about_a_skill_uses_that_skills_rate_and_snapshots_it(self):
+        r = self.c.post("/api/economy/callz/", {"username": "callee", "skill": "mixing",
+                                                "offer_sdp": "O"}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(Call.objects.get(pk=r.data["id"]).rate_cents_per_min, 100)
+
+    def test_a_skill_that_is_not_hourly_is_refused_with_the_real_options(self):
+        r = self.c.post("/api/economy/callz/", {"username": "callee", "skill": "Lyrics",
+                                                "offer_sdp": "O"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual([s["name"] for s in r.data["skills"]], ["Rapping", "Mixing"])
+        self.assertFalse(Call.objects.exists())                             # nothing rang, nothing held
+
+    def test_no_skill_named_rings_at_the_cheapest_as_before(self):
+        r = self.c.post("/api/economy/callz/", {"username": "callee", "offer_sdp": "O"}, format="json")
+        self.assertEqual(Call.objects.get(pk=r.data["id"]).rate_cents_per_min, 50)
