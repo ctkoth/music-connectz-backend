@@ -59,6 +59,11 @@ def _clean_tag_list(value):
     return out
 
 
+def clean_tags(value):
+    """`_clean_tag_list`, for callers outside this module (a character's hobbies)."""
+    return _clean_tag_list(value)
+
+
 def _clean_keys(value, table):
     """The keys in `value` that are on `table`, once each, in order."""
     if not isinstance(value, list):

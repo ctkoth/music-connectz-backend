@@ -2695,6 +2695,10 @@ the intuition is kept and the claim is not:
 - **A brand is a thing a member likes.** It unlocks nothing, is shared with nobody and
   is not an ad-targeting profile. If that ever changes, the privacy policy changes first.
 
-Not built, deliberately: CharacterZ has no interests or hobbies field (no `Character`
-column holds one), so there is nothing to pick them *along with* yet — adding one is a
-migration and Corey's call. The picker lives in a persona's bio and interests editor.
+CharacterZ has hobbies too (`Character.hobbies`, migration 0223, a JSON list). They are
+short tags bounded like a persona's interests (`characterz.clean_hobbies`, 20 of 40
+characters, repeats folded), declared by the member, and `prompt_block` hands them to the
+dialogue writer as flavour inside the same defanged data block as the rest of the
+character — a hobby cannot close the block. A character gets the interests picker only:
+no brands and no strengths, which are claims about a real member's own work. The persona
+picker lives in a persona's bio and interests editor.
