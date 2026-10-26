@@ -62,7 +62,7 @@ from .models import (
 from .badgez import worn_badges, worn_badges_by_user
 from .catalog import AVATAR_MAX_MB, limits_for, over_char_limit
 from .gates import clean_gates, failing_gate, member_metrics
-from .personaz import clean_link, clean_persona, links_of, personas_of
+from .personaz import clean_link, clean_persona, links_of, personas_of, rate_unit_of
 from .personalityz import (AXES as PERSONALITY_AXES, as_dict as personality_dict,
                            clean_code as clean_personality, filter_reason,
                            matches as personality_matches, wanted_from)
@@ -491,7 +491,8 @@ def profile_skill_rate(p, pick=min):
     rates = []
     for persona in personas_of(p):
         for s in (persona.get("skills") or []):
-            if isinstance(s, dict) and s.get("rate_cents"):
+            # Only HOURLY prices: a per-work price is not comparable with a rate per hour.
+            if isinstance(s, dict) and s.get("rate_cents") and rate_unit_of(s) == "hour":
                 try:
                     rates.append(int(s["rate_cents"]))
                 except (TypeError, ValueError):

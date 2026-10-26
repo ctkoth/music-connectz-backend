@@ -35,7 +35,7 @@ from .models import (
     can_view_post,
     item_rating_median,
 )
-from .personaz import links_of, personas_of
+from .personaz import links_of, personas_of, rate_unit_of
 
 
 def public_post_dict(p, viewer=None):
@@ -109,6 +109,7 @@ def public_profile_dict(p, request=None):
                 entry = {"name": s["name"]}
                 if s.get("rate_cents"):
                     entry["rate_cents"] = s["rate_cents"]
+                    entry["rate_unit"] = rate_unit_of(s)
                 skills.append(entry)
         personas.append({
             "key": persona.get("key", ""),

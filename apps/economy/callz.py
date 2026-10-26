@@ -111,7 +111,32 @@ DEFAULT_RATE_CENTS_PER_MIN = 0
 ICE_SERVERS = [{"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]}]
 
 
-def rate_per_min_cents(user):
+def hourly_skills(user):
+    """Every skill this member prices PER HOUR, cheapest first: [{name, per_hour_cents, per_min_cents}].
+
+    A call is time, so only an hourly price can set its rate (a price per finished work is not a
+    rate). Any skill can be hourly — the unit is the member's choice — and each one is a way to
+    be called, so the caller sees them all rather than being handed only the cheapest."""
+    from .models import profile_for
+    from .personaz import personas_of, rate_unit_of
+    best = {}
+    for persona in personas_of(profile_for(user)):
+        for s in (persona.get("skills") or []):
+            if not isinstance(s, dict) or rate_unit_of(s) != "hour":
+                continue
+            name = str(s.get("name") or "").strip()
+            try:
+                cents = int(s.get("rate_cents") or 0)
+            except (TypeError, ValueError):
+                cents = 0
+            if name and cents > 0:
+                best[name] = min(cents, best.get(name, cents))
+    rows = [{"name": n, "per_hour_cents": c, "per_min_cents": max(1, math.ceil(c / 60))}
+            for n, c in best.items()]
+    return sorted(rows, key=lambda r: (r["per_hour_cents"], r["name"]))
+
+
+def rate_per_min_cents(user, skill=None):
     """What one minute with this member costs, in cents.
 
     Derived from their cheapest priced skill per hour — `profile_skill_rate`
@@ -119,6 +144,12 @@ def rate_per_min_cents(user):
     this person" and the honest answer is their cheapest skill, not their
     dearest. Rounded UP to the cent so a rate can never round to nothing.
     """
+    if skill:
+        # The caller chose which skill they are calling about; its hourly price is the rate.
+        for row in hourly_skills(user):
+            if row["name"].lower() == str(skill).strip().lower():
+                return row["per_min_cents"]
+        return None            # not one of their hourly skills — the caller decides what to do
     per_hour = profile_skill_rate(profile_for(user))
     if not per_hour:
         return DEFAULT_RATE_CENTS_PER_MIN
@@ -254,10 +285,14 @@ class CallRateView(APIView):
         rate = rate_per_min_cents(other)
         w = wallet_for(request.user)
         tier = membership_for(request.user).tier
+        skills = hourly_skills(other)
         affordable_minutes = (w.money_cents // rate) if rate else None
         return Response({
             "username": other.username,
             "rate_cents_per_min": rate,
+            # Every skill they price by the hour, cheapest first. The default call is the cheapest
+            # (rate_cents_per_min above); naming one in the ring request calls about that skill.
+            "skills": skills,
             "free": rate == 0,
             "your_money_cents": w.money_cents,
             # None means "as long as you like" — they have not priced a skill.
@@ -340,7 +375,13 @@ class CallsView(APIView):
         if Call.objects.filter(callee=other, status=Call.STATUS_LIVE).exists():
             return Response({"detail": f"{other.username} is on another call."},
                             status=status.HTTP_409_CONFLICT)
-        rate = rate_per_min_cents(other)
+        chosen = str(d.get("skill") or "").strip()
+        rate = rate_per_min_cents(other, chosen or None)
+        if rate is None:
+            return Response({"detail": f"{other.username} doesn't price {chosen} by the hour, so there is no "
+                                       "call rate for it. Pick one of their hourly skills.",
+                             "skills": hourly_skills(other)},
+                            status=status.HTTP_400_BAD_REQUEST)
         w = wallet_for(request.user)
         # Refuse before it rings rather than after they pick up. Being cut off
         # mid-sentence for money is worse than being told the price first.

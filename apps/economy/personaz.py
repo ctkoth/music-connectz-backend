@@ -93,6 +93,17 @@ def _recover(text):
     return None
 
 
+RATE_HOUR, RATE_WORK = "hour", "work"
+RATE_UNITS = (RATE_HOUR, RATE_WORK)
+
+
+def rate_unit_of(skill):
+    """"work" or "hour" — what a skill's `rate_cents` is a price per. Anything else is hourly."""
+    if isinstance(skill, dict) and str(skill.get("rate_unit") or "").lower() == RATE_WORK:
+        return RATE_WORK
+    return RATE_HOUR
+
+
 def clean_persona(raw):
     """Normalize one PersonaZ entry, keeping its skills and their start dates.
 
@@ -142,6 +153,11 @@ def clean_persona(raw):
         except (TypeError, ValueError):
             rate = 0
         entry = {"name": name}
+        # What the price is FOR: an hour of the member's time, or one finished piece of work.
+        # Hourly is the default and is not stored, so every price written before this existed
+        # keeps meaning what it always meant.
+        if rate and str(s.get("rate_unit") or "").lower() == RATE_WORK:
+            entry["rate_unit"] = RATE_WORK
         if periods:
             entry["periods"] = periods
         else:
