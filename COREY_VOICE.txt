@@ -260,8 +260,11 @@ A "!" may mark exactly two things:
 
 Everything else keeps the full stop:
 
-  * Once per reply, once per screen, once per page. A second one means the
-    first wasn't marking anything.
+  * Corey's range: AT MOST once a paragraph, AT THE LEAST once a page. The
+    ceiling stops it being a rhythm; the floor stops a page that reports a
+    real win from reading like a limit. The floor only applies where there is
+    something true to mark — a page with no event and no free gain gets none,
+    because a mark invented to meet a minimum is the thing the rule forbids.
   * Never stacked ("!!"), never "?!", never with a wall of emoji.
   * Never on a fix, a refusal, an error, a price, a deletion, or a safety or
     legal line. A cost that arrives with a "!" is a bill with a smile on it.
@@ -280,6 +283,33 @@ with punctuation on it.
 
 Where it is wired: voice.BANG_RULE (every model prompt, once) and
 voice.BANG_RULE_SHORT (the structured surfaces). Nothing retypes it.
+
+
+--------------------------------------------------------------------------------
+2.9  AN EMOJI CAN BE THE WORD, WHEN THERE'S NO ROOM TO SAY IT
+--------------------------------------------------------------------------------
+Taught by Corey, with the site description as the worked example:
+
+    A Gamified👾 way to make a 💲professional portfolio📑 of your 🎶 related work
+
+  * The emoji is attached to the word it labels, with no space on that side:
+    Gamified👾, 💲professional, portfolio📑. It can sit before or after.
+  * An emoji can TAKE THE PLACE of a word. "Your 🎶 related work" has no
+    "music" in it; the note is the word, so it keeps its own spaces.
+  * An open slot is allowed instead of a list. The first draft ended
+    "related work❓" because there are 11 personas (eleven, when this was
+    written) and a line that named them all would stop being a line. The ❓
+    meant: whatever kind of work yours is. The list belongs to the persona
+    picker in ProfileZ, one tap away, not to the headline.
+    The final line dropped the ❓ because 🎶 already does that job; the slot
+    stays available for a line that needs one.
+
+THE COST, SAID OUT LOUD: an emoji standing in for a word is invisible to
+anything that can't render it. A crawler, a link unfurler and a screen reader
+all lose the word "music". So the word stays somewhere on the same surface —
+on the site, the page title says Music ConnectZ and the no-JS page spells out
+"your music-related work" — and an emoji stands in only where the word is
+still elsewhere in view.
 
 
 ================================================================================
@@ -450,8 +480,9 @@ VOICE
   [ ] Is the scar named, with its number or symptom?
   [ ] Is it "member", not "user"?
   [ ] Any "Oops" or "Something went wrong"? Remove them.
-  [ ] Any "!"? Is it ONE, on something that already happened or is free right
-      now, and not on a fix, a price, a refusal or a promise? (2.8)
+  [ ] Any "!"? At most one a paragraph, at least one a page that has a real
+      win or free gain, and never on a fix, a price, a refusal or a promise?
+      (2.8)
 
 
 ================================================================================

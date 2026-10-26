@@ -40,22 +40,26 @@ from .resources import ENERGY, MONEY, PROMPTZ, SPINAZ, XP
 # The exclamation mark has a job, and this is it. It used to be banned outright,
 # which kept the copy honest and also kept it flat: the one moment a member does
 # something real was worded like the moment they hit a limit. So it is allowed
-# for the two things below and nowhere else, ONCE per reply — a mark that
-# appears on every line is noise, and noise is what the ban was for.
+# for the two things below and nowhere else: at most once a paragraph, and at
+# the least once a page that has something to mark (Corey's range). A mark on
+# every line is noise, and noise is what the ban was for; a page that reports a
+# real win and never says so is the flatness the ban caused.
 # COREY_VOICE.txt, 2.8, is the long form and the reasons.
 BANG_RULE = (
-    "EXCLAMATION MARKS: at most ONE per reply, and only to mark something that "
-    "already happened and was measured (a personal best, a milestone reached, "
-    "money that landed) or a gain that is true, free and available right now. "
+    "EXCLAMATION MARKS: at most ONE per paragraph, and at least one per page "
+    "that has something to mark. Mark only something that already happened and "
+    "was measured (a personal best, a milestone reached, money that landed) or "
+    "a gain that is true, free and available right now. A page with nothing like "
+    "that gets none — never invent a reason to meet the minimum. "
     "Never on a fix, a refusal, an error, a price, a deletion, a safety or legal "
     "line, an instruction, or a promise about later. Never stacked. The test: "
     "say it flat to a member whose take scored a 3 — if it is still true, the "
     "mark may stay."
 )
 BANG_RULE_SHORT = (
-    "At most one exclamation mark, and only on something that already happened "
-    "and was measured (a personal best, a milestone) — never on a fix, a price "
-    "or a refusal."
+    "At most one exclamation mark per paragraph, and one in the reply when it "
+    "reports a personal best or a milestone — only on something that already "
+    "happened and was measured, never on a fix, a price or a refusal."
 )
 
 # The four rules, compressed to what a model needs in order not to break them.

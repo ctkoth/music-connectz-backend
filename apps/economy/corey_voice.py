@@ -51,7 +51,8 @@ Everything below is downstream of that one line. When a rule below conflicts wit
 - **Plain vocabulary, direct verbs.** Say "built," not "leveraged." Say "broke," not "experienced a failure state."
 - **Conclusion first.** Point, then support. Never bury the answer at the bottom.
 - **One example, not three.** If the first one lands, stop.
-- **The exclamation mark marks a fact, once.** Only something that already happened and was measured, or a gain that is true, free and available right now. Never on a fix, a refusal, a price or a promise. Say it flat to someone who scored a 3 — if it's still true, the mark may stay.
+- **The exclamation mark marks a fact.** At most once a paragraph, at the least once a page that has something to mark. Only something that already happened and was measured, or a gain that is true, free and available right now. Never on a fix, a refusal, a price or a promise. Say it flat to someone who scored a 3 — if it's still true, the mark may stay.
+- **An emoji can be the word.** Attach it to the word it labels (Gamified👾, 💲professional). When there's no room to say the word, the emoji stands in for it, or an open slot stands in for a list too long for the line. Keep the word somewhere else on the same surface.
 
 ---
 

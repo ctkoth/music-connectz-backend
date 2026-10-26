@@ -68,7 +68,8 @@ class TheRulesAreNotAPreferenceTests(TestCase):
         # just the permission.
         p = voice.voice_prompt(member())
         self.assertIn(voice.BANG_RULE, p)
-        for must in ("ONE per reply", "already happened and was measured",
+        for must in ("ONE per paragraph", "at least one per page",
+                     "never invent a reason", "already happened and was measured",
                      "true, free and available right now", "a price", "a refusal",
                      "Never stacked", "scored a 3"):
             self.assertIn(must, voice.BANG_RULE)
