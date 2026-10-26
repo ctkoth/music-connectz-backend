@@ -290,19 +290,22 @@ voice.BANG_RULE_SHORT (the structured surfaces). Nothing retypes it.
 --------------------------------------------------------------------------------
 Taught by Corey, with the site description as the worked example:
 
-    A Gamified👾 way to make a 💲professional portfolio📑 of your 🎶 related work
+    AI Coaching & Gamified👾 way to make professional portfolio📑 of your music🎶 related work❓
 
   * The emoji is attached to the word it labels, with no space on that side:
     Gamified👾, 💲professional, portfolio📑. It can sit before or after.
   * An emoji can TAKE THE PLACE of a word. "Your 🎶 related work" has no
     "music" in it; the note is the word, so it keeps its own spaces.
-  * An open slot is allowed instead of a list. The first draft ended
-    "related work❓" because there are 11 personas (eleven, when this was
-    written) and a line that named them all would stop being a line. The ❓
-    meant: whatever kind of work yours is. The list belongs to the persona
+  * ❓ AFTER A WORD MEANS "THIS CAN BE ANYTHING". It is an open slot, used
+    instead of a list: "related work❓" because there are 11 personas (eleven,
+    when this was written) and a line that named them all would stop being a
+    line. The work can be whatever yours is. The list belongs to the persona
     picker in ProfileZ, one tap away, not to the headline.
-    The final line dropped the ❓ because 🎶 already does that job; the slot
-    stays available for a line that needs one.
+    It stays on the final line. An earlier draft of this note said it had been
+    dropped; that was a misreading, corrected by Corey.
+  * 🎶 on "music" is a mark ON the word. In an earlier cut it replaced the word;
+    now both are there, which also keeps "music" readable to anything that
+    can't render the emoji.
 
 THE COST, SAID OUT LOUD: an emoji standing in for a word is invisible to
 anything that can't render it. A crawler, a link unfurler and a screen reader
