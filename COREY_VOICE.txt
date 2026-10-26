@@ -174,7 +174,7 @@ and nothing said so".
 2.4  SECOND PERSON, PLAIN WORDS, MEMBER-SIDE
 --------------------------------------------------------------------------------
 Member copy talks to the member about their own work. No product-speak, no
-apology theatre, no "oops", no exclamation marks.
+apology theatre, no "oops". Exclamation marks have one job, in 2.8 — nowhere else.
 
     "Record one take — mic or camera — or upload audio or video, and have it
      scored. You'll get what actually worked, what to fix, and a drill to run
@@ -236,6 +236,50 @@ When a number appears in prose, say where it came from and what could move it:
      Files API first and read by URI, which takes 2GB a file, free. So the number
      is no longer 'what fits in a request' — it is a judgement about what one
      take IS, and it can move without anyone re-deriving base64 overhead."
+
+
+--------------------------------------------------------------------------------
+2.8  THE EXCLAMATION MARK HAS ONE JOB
+--------------------------------------------------------------------------------
+It was banned outright, which kept the copy honest and also flat: the moment a
+member does something real was worded exactly like the moment they hit a limit.
+A ban that can't tell those apart is a ban on the wrong thing. The thing to
+ban is a "!" that adds energy to a claim. The thing to allow is a "!" that
+marks a fact.
+
+A "!" may mark exactly two things:
+
+  1. SOMETHING THAT ALREADY HAPPENED AND WAS MEASURED. A personal best, a
+     milestone rung reached, money that landed. The member did it and the
+     server can show the row.
+         "That's a personal best — 8.1 on flow, up from 7.4!"
+         "Seven days in a row — the 20 🍥 rung is yours!"
+  2. A GAIN THAT IS TRUE, FREE AND AVAILABLE RIGHT NOW. Not "limited", not
+     "soon", not "founding" — available, today, to the person reading.
+         "Free scored take, no account!"
+
+Everything else keeps the full stop:
+
+  * Once per reply, once per screen, once per page. A second one means the
+    first wasn't marking anything.
+  * Never stacked ("!!"), never "?!", never with a wall of emoji.
+  * Never on a fix, a refusal, an error, a price, a deletion, or a safety or
+    legal line. A cost that arrives with a "!" is a bill with a smile on it.
+  * Never on an instruction ("Join now!") or a promise about later ("You'll
+    love it!"). Neither has happened, so there's nothing for it to mark.
+  * Never on a sale. A deadline, a count of what's left, a "was $50" — that
+    is FunnelZ rule 2 and 3, and a "!" doesn't make a fake one true.
+  * Never in a code comment, a commit message or a CLAUDE.md section. Nobody
+    there did anything the mark could celebrate.
+
+THE TEST: say the sentence flat to a member whose take scored a 3. If it is
+still true — "Free scored take, no account" is — the mark may stay. If saying
+it to them would be cruel or false ("Great take!"), the mark was inflating a
+number, and a number that is inflated is the substance rule's failure case
+with punctuation on it.
+
+Where it is wired: voice.BANG_RULE (every model prompt, once) and
+voice.BANG_RULE_SHORT (the structured surfaces). Nothing retypes it.
 
 
 ================================================================================
@@ -405,7 +449,9 @@ VOICE
   [ ] Does every non-obvious line say WHY, including the rejected alternative?
   [ ] Is the scar named, with its number or symptom?
   [ ] Is it "member", not "user"?
-  [ ] Any "Oops", "Something went wrong", or exclamation marks? Remove them.
+  [ ] Any "Oops" or "Something went wrong"? Remove them.
+  [ ] Any "!"? Is it ONE, on something that already happened or is free right
+      now, and not on a fix, a price, a refusal or a promise? (2.8)
 
 
 ================================================================================
