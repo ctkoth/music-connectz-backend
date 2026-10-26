@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("economy", "0222_submission_bonus"),
+        ("economy", "0223_character_hobbies"),
     ]
 
     operations = [
