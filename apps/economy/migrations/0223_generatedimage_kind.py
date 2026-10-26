@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("economy", "0221_bodiez_ai_read"),
+        ("economy", "0222_submission_bonus"),
     ]
 
     operations = [
