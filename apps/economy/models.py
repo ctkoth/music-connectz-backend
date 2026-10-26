@@ -8230,6 +8230,9 @@ class Character(models.Model):
     personality = models.CharField(max_length=4, blank=True, default="")
     spec = models.JSONField(default=dict, blank=True)
     sample = models.TextField(blank=True, default="")
+    # What this character likes doing, as short tags the member typed or picked
+    # (characterz.clean_hobbies). Declared flavour for dialogue, never scored.
+    hobbies = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -125,6 +125,13 @@ class EndpointTests(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("dexterous", {x["key"] for x in r.data["suggestions"]})
 
+    def test_scan_with_a_blank_persona_still_finds_interests(self):
+        # A character's hobbies picker has no persona, only a name that may be empty.
+        r = client_for(member()).post("/api/economy/interestz/scan/", {
+            "text": "always sketching and collecting pedals", "persona": {"key": "", "name": "", "skills": []}}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual({x["key"] for x in r.data["interests"]}, {"drawing", "gear"})
+
     def test_scan_for_a_persona_that_does_not_exist_says_where_to_add_it(self):
         r = client_for(member()).post("/api/economy/interestz/scan/", {"text": "drawing", "persona_key": "ghost"}, format="json")
         self.assertEqual(r.status_code, 404)
