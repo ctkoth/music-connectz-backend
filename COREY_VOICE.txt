@@ -299,7 +299,9 @@ Taught by Corey, with the site description as the worked example:
   * ❓ AFTER A WORD MEANS "THIS CAN BE ANYTHING". It is an open slot, used
     instead of a list: "related work❓" because there are 11 personas (eleven,
     when this was written) and a line that named them all would stop being a
-    line. The work can be whatever yours is. The list belongs to the persona
+    line. Every member brings a different kind of work from the next — a
+    producer's is not a videographer's — so the slot is open for each of them
+    to fill with their own. The list belongs to the persona
     picker in ProfileZ, one tap away, not to the headline.
     It stays on the final line. An earlier draft of this note said it had been
     dropped; that was a misreading, corrected by Corey.
