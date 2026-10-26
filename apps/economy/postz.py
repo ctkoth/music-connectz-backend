@@ -324,7 +324,10 @@ def one_of_each(items):
 
 
 def skill_prices(user):
-    """{skill name: rate_cents} from the member's own PersonaZ skills."""
+    """{skill name: price_cents} from the member's own PersonaZ skills.
+
+    Every price still counts here whatever its unit, so nobody's costs moved when the unit
+    arrived; `skill_price_units` says what each one is per, and the quote carries it."""
     from .models import profile_for
     out = {}
     for persona in personas_of(profile_for(user)):
@@ -341,6 +344,18 @@ def skill_prices(user):
     return out
 
 
+def skill_price_units(user):
+    """{skill name: "hour" | "work"} for the priced skills — what each price is PER."""
+    from .models import profile_for
+    from .personaz import rate_unit_of
+    out = {}
+    for persona in personas_of(profile_for(user)):
+        for s in (persona.get("skills") or []):
+            if isinstance(s, dict) and s.get("name") and int(s.get("rate_cents") or 0) > 0:
+                out.setdefault(str(s["name"]).strip(), rate_unit_of(s))
+    return out
+
+
 def post_cost_cents(user, skills_used, floor=None):
     """What posting this costs: the combined price of the skills that went in.
 
@@ -353,12 +368,16 @@ def post_cost_cents(user, skills_used, floor=None):
     rather than discovered by pressing it.
     """
     prices = skill_prices(user)
+    units = skill_price_units(user)
     lines, total = [], 0
     for name in (skills_used or [])[:40]:
         if not isinstance(name, str):
             continue
         cents = prices.get(name.strip(), 0)
-        lines.append({"skill": name.strip(), "cents": cents})
+        line = {"skill": name.strip(), "cents": cents}
+        if cents:
+            line["unit"] = units.get(name.strip(), "hour")      # said beside the price, never assumed
+        lines.append(line)
         total += cents
     # BadgeZ reads here, where the price is decided — the Gifted badge's
     # discount would be a sticker anywhere else.

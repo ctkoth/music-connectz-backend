@@ -281,3 +281,45 @@ class CollabGateTests(TestCase):
         }, format="json")
         self.assertEqual(resp.status_code, 201, resp.content)
         self.assertEqual(resp.data["gates"], {})
+
+
+class RateUnitTests(TestCase):
+    """A skill's price is per HOUR (the default) or per WORK, and the two are never mixed up."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("unitz", "unitz@e.com", "pw-Long-enough-1")
+
+    def _set(self, skills):
+        from .personaz import clean_persona
+        p = profile_for(self.user)
+        p.personas = [clean_persona({"key": "m", "name": "M", "skills": skills})]
+        p.save()
+        return p
+
+    def test_hourly_is_the_default_and_is_not_stored(self):
+        p = self._set([{"name": "Mixing", "rate_cents": 5000}])
+        self.assertNotIn("rate_unit", p.personas[0]["skills"][0])
+
+    def test_per_work_is_kept_and_junk_falls_back_to_hourly(self):
+        p = self._set([{"name": "A", "rate_cents": 900, "rate_unit": "work"},
+                       {"name": "B", "rate_cents": 900, "rate_unit": "banana"},
+                       {"name": "C", "rate_unit": "work"}])           # no price -> no unit
+        a, b, c = p.personas[0]["skills"]
+        self.assertEqual(a["rate_unit"], "work")
+        self.assertNotIn("rate_unit", b)
+        self.assertNotIn("rate_unit", c)
+
+    def test_every_price_still_counts_in_a_post_and_the_quote_names_its_unit(self):
+        from .postz import post_cost_cents, skill_prices
+        self._set([{"name": "Mixing", "rate_cents": 5000},
+                   {"name": "Cover", "rate_cents": 700, "rate_unit": "work"}])
+        self.assertEqual(skill_prices(self.user), {"Mixing": 5000, "Cover": 700})   # nobody's cost moved
+        _, lines = post_cost_cents(self.user, ["Mixing", "Cover"], floor=0)
+        units = {l["skill"]: l["unit"] for l in lines}
+        self.assertEqual(units, {"Mixing": "hour", "Cover": "work"})
+
+    def test_a_per_work_price_is_not_an_hourly_rate(self):
+        from .social import profile_skill_rate
+        p = self._set([{"name": "Mixing", "rate_cents": 5000},
+                       {"name": "Cover", "rate_cents": 700, "rate_unit": "work"}])
+        self.assertEqual(profile_skill_rate(p), 5000)
