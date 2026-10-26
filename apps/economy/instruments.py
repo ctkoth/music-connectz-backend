@@ -199,7 +199,19 @@ WIT_SCORE = {
     "wordplay": "Wordplay 🔤",
     "metaphor": "Metaphors 🪞",
     "imagery": LYRIC_SCORE["imagery"],
+    # How clearly the WRITING says what it means. Not diction or audibility: those are a
+    # rapper's Clarity 🔍 and the mix's Balance, and this one is judged on the words alone.
+    "lyric_clarity": "Lyric Clarity 🔍",
+    # How broadly a piece would land on first hearing. REACH, not quality: a niche or
+    # experimental piece scores low without being worse, so it is offered on every coach
+    # (words or no words), always sits beside the overall, and can never be counted in it.
+    "mainstream": "Mainstream Appeal 📻",
 }
+
+# Offered on every coach, not only the ones with words.
+ANYWHERE_EXTRAS = ("mainstream",)
+# Never inside the overall, whatever the member ticks: appeal is not skill.
+NEVER_COUNTED_EXTRAS = ("mainstream",)
 
 
 WIT_KEYS = tuple(WIT_SCORE)
@@ -212,10 +224,16 @@ def rates_wit(app_key):
 
 def clean_extras(extras, app_key):
     """The opted-in Wit/Depth keys, in a fixed order, or () when the coach has no words."""
-    if not rates_wit(app_key) or not extras:
+    if not extras:
         return ()
     want = set(extras)
-    return tuple(k for k in WIT_SCORE if k in want)
+    offered = WIT_SCORE if rates_wit(app_key) else {k: WIT_SCORE[k] for k in ANYWHERE_EXTRAS}
+    return tuple(k for k in offered if k in want)
+
+
+def extras_offered(app_key):
+    """{key: label} the member can opt into on this coach — the screen reads this, never a list."""
+    return dict(WIT_SCORE) if rates_wit(app_key) else {k: WIT_SCORE[k] for k in ANYWHERE_EXTRAS}
 
 
 # Style Match 🎭 — the blueprint lists it among RapZ's CORE scores and it has
@@ -415,13 +433,23 @@ is written well. You are a coach, not a censor.""" if lyrics else "")
         "metaphor": ('- "metaphor": comparisons that carry meaning - are they fresh, consistent, and do they '
                      'say something a plain statement could not? A dead cliche scores low.'),
         "imagery": ('- "imagery": concrete and specific against vague and general - what the listener can '
-                    'see, hear or touch in the lines.')}
+                    'see, hear or touch in the lines.'),
+        "lyric_clarity": ('- "lyric_clarity": how clearly the WRITING says what it means - can a listener '
+                          'follow who, what and where from the words alone, and are the lines specific '
+                          'where they need to be? Deliberate ambiguity is not a fault when it is deliberate. '
+                          'Not how audible the vocal is - that is judged elsewhere.'),
+        "mainstream": ('- "mainstream": how broadly this would land with an ordinary listener on first '
+                       'hearing - a hook that sticks, a structure and sound people already know how to '
+                       'enjoy, approachable words, a length and energy that radio, playlists and short '
+                       'video suit. This is REACH, not quality: an excellent experimental or niche piece '
+                       'scores low here and that is not a criticism. Judge the piece, not the genre\'s '
+                       'size, and never mark a style down for being what it is.')}
     wit_ask = (("""
 
-**EXTRA WRITING SCORES (wit, depth, rhyme scheme, wordplay, metaphors, imagery) — they asked for these, so score only the ones named, on the words you can actually make out.**
+**EXTRA SCORES (wit, depth, rhyme scheme, wordplay, metaphors, imagery, lyric clarity, mainstream appeal) — they asked for these, so score only the ones named. The writing ones rest on the words you can actually make out; mainstream appeal rests on the whole piece.**
 """ + "\n".join(wit_lines[k] for k in extras) + """
-If the delivery is too buried to catch the words, score these null and say so in "wit_note" - never review \
-words you did not hear. None is a re-score of Punchlines or FeelZ. A style that does not ask for it gets \
+If the delivery is too buried to catch the words, score the WRITING ones null and say so in "wit_note" - never \
+review words you did not hear. None is a re-score of Punchlines or FeelZ. A style that does not ask for it gets \
 null, not a low number: a null is "not what this is for", a 3 is an accusation. Craft only - not subject \
 matter, opinions or swearing.""") if extras else "")
     wit_fields = ('\n  "wit_note": "<what the Wit/Depth scores rest on, quoting the line you mean>",' if extras else "")

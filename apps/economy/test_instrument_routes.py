@@ -95,3 +95,29 @@ class ANewlyMountedCoachActuallyAnswersTests(TestCase):
     def test_guitarz_skillz_profile_answers_for_a_real_member(self):
         r = self.c.get("/api/guitarz/skillz/profile/")
         self.assertEqual(r.status_code, 200, r.data)
+
+
+class ExtraScoreReachTests(TestCase):
+    """Lyric Clarity needs words; Mainstream Appeal is reach on any coach and never counts in the overall."""
+
+    def test_mainstream_is_offered_everywhere_and_the_writing_ones_only_where_there_are_words(self):
+        from apps.economy.instruments import clean_extras, extras_offered
+        asked = ["mainstream", "wit", "lyric_clarity"]
+        self.assertEqual(clean_extras(asked, "drumz"), ("mainstream",))
+        self.assertEqual(set(clean_extras(asked, "rapz")), {"mainstream", "wit", "lyric_clarity"})
+        self.assertEqual(list(extras_offered("drumz")), ["mainstream"])
+        for k in ("wit", "wordplay", "rhyme", "lyric_clarity", "mainstream"):
+            self.assertIn(k, extras_offered("singz"))
+
+    def test_the_prompt_defines_each_one_it_was_asked_for(self):
+        from apps.economy.instruments import prompt_for
+        p = prompt_for("rapz", "Trap", "Baritone", "medium", extras=("lyric_clarity", "mainstream"))
+        self.assertIn('"lyric_clarity"', p)
+        self.assertIn("REACH, not quality", p)
+        self.assertNotIn('- "wit":', p)                       # only what was named
+        drum = prompt_for("drumz", "Trap", "", "medium", extras=("mainstream",))
+        self.assertIn('"mainstream"', drum)
+
+    def test_mainstream_can_never_be_counted_in_the_overall(self):
+        from apps.economy.instruments import NEVER_COUNTED_EXTRAS
+        self.assertIn("mainstream", NEVER_COUNTED_EXTRAS)
