@@ -252,6 +252,47 @@ GOALS = {
 }
 
 
+# A routine with no goal still has an intensity: the reps it asks for. Heavy,
+# low-rep work needs near-full recovery and light high-rep work does not, which is
+# the same relationship GOALS above already encodes (3-5 reps rests 180s, 8-12
+# rests 75s, 15-20 rests 45s), so this reads the plan's own reps against it rather
+# than inventing a second scale. Each row is (highest reps it covers, rest, label).
+# A recommendation, Corey's to move: the band edges are a judgement drawn through
+# the published goal numbers, not a citation of their own, and the screen says the
+# rest is a target the member can change.
+REST_BY_REPS = (
+    (5, 180, "Heavy"),
+    (8, 120, "Strong"),
+    (12, 75, "Moderate"),
+    (15, 60, "Light"),
+    (1000, 45, "Endurance"),
+)
+
+
+def rest_for_plan(exercises, goal=""):
+    """The rest a session should ask for, and why — or None when the plan names
+    neither a goal nor any reps (an ad-hoc session has no intensity to read).
+
+    A goal wins: it is the member's stated intent and carries a citation. Without
+    one the MEDIAN of the plan's own planned reps decides (a median, so one
+    20-rep finisher does not turn a heavy day's rest into a light one)."""
+    g = GOALS.get(goal)
+    if g:
+        return {"seconds": g["rest_seconds"], "basis": "goal", "label": g["label"],
+                "why": (f"{g['label']}: {g['sets']} sets of {g['reps_low']}-{g['reps_high']} "
+                        f"rests {g['rest_seconds']}s between sets.")}
+    reps = sorted(int(e["reps"]) for e in (exercises or [])
+                  if isinstance(e, dict) and str(e.get("reps") or "").isdigit() and int(e["reps"]) > 0)
+    if not reps:
+        return None
+    mid = reps[len(reps) // 2] if len(reps) % 2 else (reps[len(reps) // 2 - 1] + reps[len(reps) // 2]) // 2
+    for top, seconds, label in REST_BY_REPS:
+        if mid <= top:
+            return {"seconds": seconds, "basis": "reps", "label": label,
+                    "why": f"{label} work: your plan asks for about {mid} reps a set, which rests {seconds}s."}
+    return None
+
+
 # One split per training-day count, 1 through 6 — what "Build a Routine"
 # had NEVER offered: a member could only ever get one routine, one exercise
 # per muscle group, whatever they clicked. Asked outright "does this cover
@@ -412,6 +453,9 @@ def _session_dict(sess, sets=None):
         "routine_id": sess.routine_id,
         "routine_title": sess.routine.title if sess.routine_id and sess.routine else None,
         "routine_goal": sess.routine.goal if sess.routine_id and sess.routine else "",
+        # What the plan's intensity says to rest between sets; None for an ad-hoc session.
+        "rest": (rest_for_plan(sess.routine.exercises, sess.routine.goal)
+                 if sess.routine_id and sess.routine else None),
         "started_at": sess.started_at.isoformat(),
         "ended_at": sess.ended_at.isoformat() if sess.ended_at else None,
         "backfilled": sess.backfilled,

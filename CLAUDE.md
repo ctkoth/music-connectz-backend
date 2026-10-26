@@ -2118,6 +2118,21 @@ fails after a green merge. `test_migration_graph` now fails on more than one lea
 Run `makemigrations --check` after pulling main, before pushing — the fix is
 `makemigrations --merge`.
 
+## BodieZ rest: the plan's intensity sets it, and the server says why
+
+`bodiez.rest_for_plan(exercises, goal)` is the one rule for how long a session asks
+for between sets, and `_session_dict` serves it as `rest` `{seconds, basis, label, why}`
+(None for an ad-hoc session — no plan, no intensity, and a guess would be the
+substance rule's failure). A routine's **goal wins** (it is the member's stated intent
+and carries a citation: strength 180s, muscle gain 75s, toning 45s, slimming 30s).
+With no goal, the **median of the plan's own planned reps** is read against
+`REST_BY_REPS` (<=5: 180s, <=8: 120s, <=12: 75s, <=15: 60s, more: 45s) — a median so
+one 20-rep finisher does not turn a heavy day light. The bands are drawn through the
+goal numbers rather than a second scale, and `test_bodiez_rest` fails if they drift
+more than 45s from any goal. **A recommendation, Corey's to move:** the band edges are
+a judgement, not a citation of their own; the screen calls the result a target the
+member can change. The client never retypes any of it.
+
 ## RoutineZ: where a routine came from never decides whether it can change
 
 `BodieZRoutine.source` (`member` / `coach` / `session` / `trial`) is a LABEL
