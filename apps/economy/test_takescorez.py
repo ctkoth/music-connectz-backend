@@ -652,7 +652,9 @@ class CoachingBoardTests(TestCase):
         for dim in LYRIC_SCORE:
             self.assertIn(dim, FIXER_FOR_DIM, f"{dim} is scored but no writer fixes it")
         for kind, f in FIXERS.items():
-            self.assertTrue(f["dim"] in LYRIC_SCORE or f["dim"] == "hook", kind)
+            # HookZ and FeelZ are scored beside the writing bundle; the hooks writer and the
+            # depth writer (which lifts a FeelZ that says a feeling without earning it) aim at them.
+            self.assertTrue(f["dim"] in LYRIC_SCORE or f["dim"] in ("hook", "feelz"), kind)
             self.assertIn("other", f["techniques"])
             self.assertLessEqual(len(kind), 16)                   # SentenceWork.kind is varchar(16)
 

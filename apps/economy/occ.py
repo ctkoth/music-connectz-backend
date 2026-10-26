@@ -16,6 +16,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .occ_guard import media_route, repo_attempt
 from .catalog import (
     AI_MODELS,
     AI_MODEL_ORDER,
@@ -229,6 +230,14 @@ class OccChatView(APIView):
                 status=status.HTTP_400_BAD_REQUEST)
         if not prompt:
             return Response({"detail": "prompt is required."}, status=status.HTTP_400_BAD_REQUEST)
+        refused = repo_attempt(request.user, prompt, "chat")
+        if refused:
+            return Response({"detail": refused, "flagged": True}, status=status.HTTP_403_FORBIDDEN)
+        if not data.get("force") and "anyway" not in prompt.lower():
+            routed = media_route(prompt)
+            if routed:
+                return Response({"routed": routed, "text": routed["why"], "reply": routed["why"], "charged": False,
+                                 "open_in": routed["tab"], "target": ""})
         # `model` is a VOICE (corey-gpt / standard / technical), not an engine.
         # It is this message's dial and nothing more: when the request does not
         # send one, the member's own stored VoiceZ voice applies. It used to
