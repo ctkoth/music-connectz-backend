@@ -34,6 +34,8 @@ import ast
 import json
 from urllib.parse import urlparse
 
+from .interestz_table import BRANDS, TRAITS
+
 
 # Bio/interests/pet peeves — bounded the same way `skills` already is
 # (`[:100]`, `[:80]` per name), so a persona row cannot be grown into a
@@ -55,6 +57,13 @@ def _clean_tag_list(value):
         if tag:
             out.append(tag)
     return out
+
+
+def _clean_keys(value, table):
+    """The keys in `value` that are on `table`, once each, in order."""
+    if not isinstance(value, list):
+        return []
+    return [k for k in dict.fromkeys(str(x) for x in value[:MAX_TAGS * 2]) if k in table][:MAX_TAGS]
 
 
 def _recover(text):
@@ -155,6 +164,18 @@ def clean_persona(raw):
     pet_peeves = _clean_tag_list(raw.get("pet_peeves"))
     if pet_peeves:
         out["pet_peeves"] = pet_peeves
+
+    # Brands and strengths the member PICKED (interestz.py). Closed lists, so a
+    # key that isn't on one is dropped, and both are declared rather than
+    # measured: nothing may read `declared_strengths` as a measurement. The
+    # `declared_` prefix is also what lets a test find every reader, which a
+    # bare word (the coach has its own) could not.
+    brands = _clean_keys(raw.get("declared_brands"), BRANDS)
+    if brands:
+        out["declared_brands"] = brands
+    strengths = _clean_keys(raw.get("declared_strengths"), TRAITS)
+    if strengths:
+        out["declared_strengths"] = strengths
 
     return out
 

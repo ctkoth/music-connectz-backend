@@ -35,6 +35,7 @@ from .lilith_taskz import (LilithBoardView, LilithMoveView, LilithStarterAddView
                            LilithTaskListView)
 from .karmaz import KarmaRewardsView
 from .signbonus import SignBonusView
+from .interestz import InterestCatalogView, InterestSaveView, InterestScanView
 from .voice import VoiceZView
 from .voicez import VoiceDetailView, VoicePreviewView, VoicesView
 from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView, DupeZVerifyView,
@@ -526,6 +527,9 @@ urlpatterns = [
     # PersonalitieZ axes — one list, read by the profile toggles, every
     # member search filter, and VybeZ.
     path("personalityz/", PersonalityAxesView.as_view(), name="economy-personalityz"),
+    path("interestz/", InterestCatalogView.as_view(), name="economy-interestz"),
+    path("interestz/scan/", InterestScanView.as_view(), name="economy-interestz-scan"),
+    path("interestz/save/", InterestSaveView.as_view(), name="economy-interestz-save"),
     # The questionnaire, open logged-out like the trial take.
     path("personalityz/test/", PersonalityTestView.as_view(), name="economy-personalityz-test"),
     # ReligionZ — the closed list of 50, read by the profile picker and every

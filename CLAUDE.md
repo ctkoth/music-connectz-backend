@@ -2666,3 +2666,35 @@ TakeScore, share, XP or rating, because a gap to someone's record is not a measu
 near the SOUND is, never good/bad. EQ regions are server-owned (`EQ_REGIONS`) and said to be heard, not measured. Lyrics
 come back as a DIRECTION for Sentence ConnectZ, never the reference's words (prompt forbids quoting). One standard AI
 price, stated on GET before the button; a failed run is not charged. Never run against Google (CI has no key).
+
+## Interests, brands and strengths: intuition is allowed, as a suggestion with its reason
+
+Corey asked for VoiceZ to pick up the brands and interests a member mentions in
+speech, and for the app to be intuitive about what they imply — a designer who
+draws is probably dexterous, a designer who does song covers is probably creative
+and observant. The obvious version breaks the substance rule in its first line:
+a trait derived from a hobby is "a number derived from activity and presented as a
+fact about a person", which `personaz` and PersonalitieZ both refuse by name. So
+the intuition is kept and the claim is not:
+
+- **`interestz_table.RULES` IS the intuition.** Every suggestion is one row — who,
+  which interests, which trait, and the reason in a sentence. It is read before the
+  member decides and can be argued with and changed by a person. No model guesses a
+  trait from a pile of interests; that would be a conclusion with no reason behind it.
+- **A strength is a suggestion until the member says "that's me".** Then it is theirs
+  (`declared_strengths` on the persona, a closed list), shown as declared, and
+  **nothing reads it as a measurement** — no rating, skill level, median, price or
+  search rank. `test_interestz` fails if a second module reads `declared_*`.
+- **The scan is a closed list.** Words are matched against `INTERESTS` and `BRANDS`,
+  so sensitive territory (health, faith, politics, orientation) cannot be picked out
+  of a transcript: the list can only find what is on it.
+- **Speech arrives as text.** The keyboard's voice-clip door (`keyz/transcribe/`,
+  already metered and priced before the mic) turns a clip into words; `interestz/scan/`
+  reads those words and writes nothing. The transcript is not stored — only what the
+  member picks. That adds no audio path and nothing new to disclose about speech.
+- **A brand is a thing a member likes.** It unlocks nothing, is shared with nobody and
+  is not an ad-targeting profile. If that ever changes, the privacy policy changes first.
+
+Not built, deliberately: CharacterZ has no interests or hobbies field (no `Character`
+column holds one), so there is nothing to pick them *along with* yet — adding one is a
+migration and Corey's call. The picker lives in a persona's bio and interests editor.
