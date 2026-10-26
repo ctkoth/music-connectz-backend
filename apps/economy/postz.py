@@ -15,7 +15,7 @@ from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Sum, When
 from django.utils import timezone
 
-from .catalog import (BOOST_ENERGY, BOOST_HOURS, BOOST_MAX_AHEAD_HOURS, BOOST_SLOTS,
+from .catalog import (SUBMISSION_PACK, SUBMISSION_PACK_ENERGY, SUBMISSION_PACKS_MAX, BOOST_ENERGY, BOOST_HOURS, BOOST_MAX_AHEAD_HOURS, BOOST_SLOTS,
                       POST_ENERGY_FLOOR, edit_window_for)
 from .coachshare import clean_visibility, coach_read_for, for_new_post, legacy_score
 from .crosspost import coach_cap, coach_price, destinations_for, take_state_for
@@ -25,6 +25,7 @@ from .models import (
     Wallet,
     POST_COMMENT_UNLOCK_SEC,
     POST_RATE_UNLOCK_SEC,
+    DailySubmission,
     Post,
     PostJoin,
     PostShare,
@@ -515,7 +516,7 @@ def create_post(user, d):
         used = submissions_used_today(user)
         if used >= cap:
             return None, {}, (
-                {"detail": f"Daily submission limit reached ({used}/{cap}). Upgrade for more.",
+                {"detail": f"Daily submission limit reached ({used}/{cap}). Upgrade for more, or add {SUBMISSION_PACK} for {SUBMISSION_PACK_ENERGY} \u26a1.",
                  "used": used, "cap": cap},
                 status.HTTP_429_TOO_MANY_REQUESTS,
             )
@@ -663,10 +664,42 @@ class SubmissionsView(APIView):
 
     permission_classes = [IsAuthenticated]
 
+    def _state(self, user):
+        cap = submission_cap_for(user)
+        used = submissions_used_today(user)
+        row = DailySubmission.objects.filter(user=user, day=timezone.localdate()).first()
+        packs = (row.bonus // SUBMISSION_PACK) if row else 0
+        return {"used": used, "cap": cap, "remaining": max(0, cap - used),
+                # What more costs, said before it is pressed: a pack adds to TODAY only.
+                "buy": {"pack": SUBMISSION_PACK, "cost_energy": SUBMISSION_PACK_ENERGY,
+                        "packs_left": max(0, SUBMISSION_PACKS_MAX - packs),
+                        "energy": max(0, wallet_for(user).energy or 0)}}
+
     def get(self, request):
-        cap = submission_cap_for(request.user)
-        used = submissions_used_today(request.user)
-        return Response({"used": used, "cap": cap, "remaining": max(0, cap - used)})
+        return Response(self._state(request.user))
+
+    def post(self, request):
+        """Buy one pack of extra submissions for today."""
+        user = request.user
+        with transaction.atomic():
+            row, _ = DailySubmission.objects.select_for_update().get_or_create(user=user, day=timezone.localdate())
+            if row.bonus // SUBMISSION_PACK >= SUBMISSION_PACKS_MAX:
+                return Response({"detail": f"You have already added the most extra submissions allowed today "
+                                           f"({SUBMISSION_PACK * SUBMISSION_PACKS_MAX}). Nothing was charged.",
+                                 **self._state(user)}, status=status.HTTP_400_BAD_REQUEST)
+            if spend_energy(user, SUBMISSION_PACK_ENERGY, f"{SUBMISSION_PACK} more submissions today",
+                            app_key="postz", target="postz:submissions") is None:
+                have = max(0, wallet_for(user).energy or 0)
+                return Response({
+                    "detail": f"{SUBMISSION_PACK} more submissions cost {SUBMISSION_PACK_ENERGY} \u26a1 and you have {have}. Nothing was charged.",
+                    "insufficient": True, "resource": "energy",
+                    "cost": {"resource": "energy", "amount": SUBMISSION_PACK_ENERGY},
+                    "energy_needed": SUBMISSION_PACK_ENERGY, "energy_available": have,
+                    "energy_short": SUBMISSION_PACK_ENERGY - have,
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+            row.bonus += SUBMISSION_PACK
+            row.save(update_fields=["bonus"])
+        return Response({**self._state(user), "bought": SUBMISSION_PACK})
 
 
 def _boost_state(post, user):
