@@ -11,6 +11,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .occ_guard import media_route, repo_attempt
 from .catalog import (
     AI_MODELS,
     OCC_MAX_PROMPT_CHARS,
@@ -96,6 +97,15 @@ class OccAgentView(APIView):
                            "project's files are read by OCC, not pasted in.",
                  "limits": occ_file_limits(membership_for(request.user).tier)},
                 status=status.HTTP_400_BAD_REQUEST)
+
+        refused = repo_attempt(request.user, prompt, "agent")
+        if refused:
+            return Response({"detail": refused, "flagged": True}, status=status.HTTP_403_FORBIDDEN)
+        if not data.get("force") and "anyway" not in prompt.lower():
+            routed = media_route(prompt)
+            if routed:
+                return Response({"routed": routed, "text": routed["why"], "reply": routed["why"], "charged": False,
+                                 "open_in": routed["tab"], "target": ""})
 
         st = agent_status(request.user, str(data.get("project") or "main"))
         if not st["affordable"]:

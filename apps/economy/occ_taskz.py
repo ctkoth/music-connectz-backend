@@ -34,6 +34,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .occ_guard import repo_attempt
 from .models import (
     OccTask,
     notify,
@@ -267,6 +268,10 @@ class OccTasksView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        refused = repo_attempt(request.user, " ".join(str(d.get(k, "") or "") for k in
+                                                      ("git_repo", "title", "what", "how", "detail")), "taskz")
+        if refused:
+            return Response({"detail": refused, "flagged": True}, status=status.HTTP_403_FORBIDDEN)
         task = OccTask.objects.create(
             user=request.user, title=title[:200], kind=kind,
             status=(OccTask.STATUS_SUGGESTED if suggested else OccTask.STATUS_QUEUED),
