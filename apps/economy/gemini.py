@@ -299,6 +299,33 @@ INSPIRATION_WRAP = (
     "recognisable artwork from it. Make a new, original picture for this request: ")
 
 
+def self_faces(user):
+    """The member's FaceZ photos that may stand for THEM: theirs, not tagged as anyone else."""
+    from django.db.models import Q
+    from .models import Face
+    return Face.objects.filter(owner=user).exclude(image="").filter(Q(tagged__isnull=True) | Q(tagged=user))
+
+
+_FACE_MIME = {".png": "image/png", ".webp": "image/webp", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+
+
+def face_reference(user, face_id):
+    """(data URL, None) for one of the member's own faces, or (None, why)."""
+    try:
+        face = self_faces(user).filter(pk=int(face_id)).first()
+    except (TypeError, ValueError):
+        face = None
+    if not face:
+        return None, "Only your own FaceZ photo of yourself can be used — not one tagged as somebody else."
+    try:
+        with face.image.open("rb") as fh:
+            raw = fh.read()
+    except Exception:
+        return None, "That FaceZ photo couldn't be read from storage. Pick another or upload one."
+    ext = os.path.splitext(face.image.name)[1].lower()
+    return f"data:{_FACE_MIME.get(ext, 'image/jpeg')};base64,{base64.b64encode(raw).decode()}", None
+
+
 class GeminiImageView(APIView):
     """GET: images you've made. POST { prompt } → a generated image, kept."""
 
@@ -315,7 +342,11 @@ class GeminiImageView(APIView):
                          "cost_note": "Pictures aren't covered by the daily free prompts. A run that fails isn't charged.",
                          "daily_prompts": allowance, "daily_prompts_left": daily_left,
                          "configured": bool(_key()),
-                         "inspiration_note": INSPIRATION_IMAGE_NOTE, **imagez.catalogue()})
+                         "inspiration_note": INSPIRATION_IMAGE_NOTE, **imagez.catalogue(),
+                         # Saved FaceZ photos the member may use as their own likeness: theirs, and
+                         # not tagged as somebody else.
+                         "faces": [{"id": f.id, "name": f.name, "url": request.build_absolute_uri(f.image.url)}
+                                   for f in self_faces(request.user)[:30]]})
 
     def post(self, request):
         data = request.data or {}
@@ -333,6 +364,11 @@ class GeminiImageView(APIView):
             if str(data.get("confirm_self", "")).lower() not in ("1", "true", "yes", "on"):
                 return Response({"detail": "Confirm the photo is of you. " + imagez.LIKENESS_NOTE},
                                 status=status.HTTP_400_BAD_REQUEST)
+            if data.get("face_id") not in (None, ""):
+                ref, why = face_reference(request.user, data.get("face_id"))
+                if why:
+                    return Response({"detail": why}, status=status.HTTP_400_BAD_REQUEST)
+                data = {**data, "reference": ref}
             if not data.get("reference"):
                 return Response({"detail": "Pick your photo first."}, status=status.HTTP_400_BAD_REQUEST)
         key = _key()
@@ -356,7 +392,7 @@ class GeminiImageView(APIView):
         wrap = INSPIRATION_WRAP if inspiration else imagez.LIKENESS_WRAP if likeness else ""
         parts = [{"text": wrap + framed}]
         aspect = imagez.KINDS.get(kind, {}).get("aspect")
-        reference = (request.data or {}).get("reference")
+        reference = data.get("reference")
         if isinstance(reference, str) and reference.startswith("data:") and "," in reference:
             header, b64 = reference.split(",", 1)
             ref_mime = header.split(";")[0].split(":")[-1] or "image/jpeg"

@@ -47,6 +47,12 @@ KINDS = {
         "brief": ("Square album cover art with a cohesive concept, rich detail that rewards a closer look, "
                   "and a strong silhouette at thumbnail size."),
         "door": "post"},
+    "promo": {
+        "label": "Promotional picture", "emoji": "📸", "aspect": "4:5", "likeness": True, "words": True,
+        "use": "A press or promo shot for a release, a show or yourself — posts, EPKs, VenueZ.",
+        "brief": ("A promotional picture of the artist: polished and press-ready, a strong pose or moment, "
+                  "lighting and setting that say what the music sounds like."),
+        "door": "post"},
     "playlist_cover": {
         "label": "Playlist cover", "emoji": "📃", "aspect": "1:1", "words": True,
         "use": "A cover for a PlaylistZ or streaming playlist.",
@@ -122,8 +128,8 @@ MOODS = {
     "romantic": "Romantic", "playful": "Playful", "epic": "Epic",
 }
 
-LIKENESS_NOTE = ("Your photo keeps your face in it. Only use a photo of yourself — "
-                 "for anyone else's look, use Inspiration, which borrows style and never a person.")
+LIKENESS_NOTE = ("Your photo keeps your face in it — pick one you saved in FaceZ or upload one. Only use a "
+                 "photo of yourself; for anyone else's look, use Inspiration, which borrows style and never a person.")
 WORDS_NOTE = "Image models often misspell words in a picture. Check any text before you post or print it."
 TEXT_MAX = 60
 COLOURS_MAX = 80
