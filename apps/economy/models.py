@@ -1777,6 +1777,10 @@ class Post(models.Model):
     # their own genre. Putting it in the genre list would have forced a choice
     # between the two and split the tag across every family in it.
     freestyle = models.BooleanField(default=False)
+    # CoverZ / RemixeZ: {id, kind: cover|remix, title, author} snapshot of the post this one is made
+    # from. A snapshot, not a join, so the feed pays no extra query and the credit survives the
+    # original being deleted. Empty for ordinary posts.
+    derived = models.JSONField(default=dict, blank=True)
     # Which skills went into it — 2.2 required this on every example, and it is
     # what makes a post matchable to the people who have those skills and
     # priceable against their rates. A post without it is a file with a caption.

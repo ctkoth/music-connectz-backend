@@ -36,3 +36,28 @@ class GenreFilterTests(TestCase):
     def test_any_wanted_genre_passes_and_undeclared_never_does(self):
         got = self._names("metal,hip hop") & {"metalhead", "rapper", "nogenre"}
         self.assertEqual(got, {"metalhead", "rapper"})
+
+
+class DerivedPostTests(TestCase):
+    def setUp(self):
+        from .models import Post
+        self.Post = Post
+        self.a, self.b = mk("origauth"), mk("coverer")
+        self.orig = Post.objects.create(author=self.a, title="Song", visibility="public")
+        self.c = APIClient(); self.c.force_authenticate(self.b)
+
+    def _post(self, derived):
+        return self.c.post("/api/economy/postz/", {"title": "My cover", "derived": derived}, format="json")
+
+    def test_a_cover_carries_credit_to_the_original(self):
+        r = self._post({"id": self.orig.id, "kind": "cover"})
+        self.assertIn(r.status_code, (200, 201), r.data)
+        p = self.Post.objects.get(author=self.b)
+        self.assertEqual(p.derived, {"id": self.orig.id, "kind": "cover", "title": "Song", "author": "origauth"})
+
+    def test_private_own_or_unknown_originals_are_refused(self):
+        priv = self.Post.objects.create(author=self.a, title="P", visibility="private")
+        mine = self.Post.objects.create(author=self.b, title="M", visibility="public")
+        for d in ({"id": priv.id, "kind": "remix"}, {"id": mine.id, "kind": "remix"},
+                  {"id": 99999, "kind": "remix"}, {"id": self.orig.id, "kind": "steal"}):
+            self.assertEqual(self._post(d).status_code, 400, d)
