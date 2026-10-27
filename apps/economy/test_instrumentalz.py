@@ -313,3 +313,69 @@ class DownloadAndRoyaltyTests(TestCase):
         with patch("apps.economy.instrumentalz.generate_content", return_value=(reply(LOOP), ["m"])):
             r = self.c.post(URL, {"instruments": ["drums"], "bpm": 90, "key": "A minor", "bars": 4}, format="json")
         self.assertEqual(r.json()["royalty_pct"], iz.ROYALTY_PCT)
+
+
+class InstrumentMixLevelsTests(TestCase):
+    """The coach sets a level per instrument; Premium can change; StatZ can change and keep."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from apps.economy.models import InstrumentalWork, membership_for
+        self.User = get_user_model()
+        self.u = self.User.objects.create_user("mixer", "m@e.com", "pw-Long-enough-1")
+        self.work = InstrumentalWork.objects.create(
+            user=self.u, genre="trap", instruments=["drums", "pad"], bpm=90, key="C major", bars=4,
+            tracks=[{"instrument": "drums", "gain": 0.9, "notes": [[36, 0, 1, 100]]},
+                    {"instrument": "pad", "gain": 0.5, "notes": [[60, 0, 4, 100]]}])
+        self.c = APIClient(); self.c.force_authenticate(self.u)
+        self.membership_for = membership_for
+
+    def _tier(self, t):
+        m = self.membership_for(self.u); m.tier = t; m.save()
+
+    def test_the_coach_gain_is_validated_with_a_role_fallback(self):
+        from apps.economy.instrumentalz import clean_tracks
+        out = clean_tracks({"tracks": [
+            {"instrument": "drums", "gain": 7, "notes": [[36, 0, 1, 100]]},
+            {"instrument": "pad", "gain": "loud", "notes": [[60, 0, 1, 100]]}]}, ["drums", "pad"], 4)
+        self.assertEqual({t["instrument"]: t["gain"] for t in out}, {"drums": 1.0, "pad": 0.5})
+
+    def test_rights_follow_the_tier(self):
+        from apps.economy.instrumentalz import mix_rights
+        self._tier("free");    self.assertEqual(mix_rights(self.u), {"can_change": False, "can_keep": False})
+        self._tier("premium"); self.assertEqual(mix_rights(self.u), {"can_change": True, "can_keep": False})
+        self._tier("statz");   self.assertEqual(mix_rights(self.u), {"can_change": True, "can_keep": True})
+
+    def test_the_list_says_each_levels_and_what_the_member_may_do(self):
+        self._tier("premium")
+        w = self.c.get("/api/economy/instrumentalz/").data["works"][0]
+        self.assertEqual(w["mix"]["gains"], {"drums": 0.9, "pad": 0.5})
+        self.assertTrue(w["mix"]["can_change"]); self.assertFalse(w["mix"]["can_keep"])
+
+    def test_only_statz_keeps_levels_and_the_others_are_told_why(self):
+        for t in ("free", "premium"):
+            self._tier(t)
+            r = self.c.patch(f"/api/economy/instrumentalz/{self.work.id}/mix/", {"gains": {"pad": 0.1}}, format="json")
+            self.assertEqual(r.status_code, 403, t)
+        self.work.refresh_from_db()
+        self.assertEqual({x["instrument"]: x["gain"] for x in self.work.tracks}, {"drums": 0.9, "pad": 0.5})
+        self._tier("statz")
+        r = self.c.patch(f"/api/economy/instrumentalz/{self.work.id}/mix/", {"gains": {"pad": 0.2, "bogus": 1}}, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.work.refresh_from_db()
+        self.assertEqual({x["instrument"]: x["gain"] for x in self.work.tracks}, {"drums": 0.9, "pad": 0.2})
+
+    def test_the_download_scales_velocity_by_the_level_and_premium_can_name_a_version(self):
+        from apps.economy.instrumentalz import midi_bytes
+        title = "trap in C major at 90 BPM"                                  # what the download names itself
+        base = midi_bytes(self.work.tracks, 90, "C major", title)
+        louder = midi_bytes([{**t, "gain": 1.0} for t in self.work.tracks], 90, "C major", title)
+        self.assertNotEqual(base, louder)                                   # the pad at 0.5 is quieter
+        self._tier("free")
+        a = self.c.get(f"/api/economy/instrumentalz/{self.work.id}/midi/?gains=pad:0").content
+        self.assertEqual(a, base)                                           # free cannot name a version
+        self._tier("premium")
+        b = self.c.get(f"/api/economy/instrumentalz/{self.work.id}/midi/?gains=pad:1,drums:1").content
+        self.assertEqual(b, louder)
+        self.work.refresh_from_db()
+        self.assertEqual({x["instrument"]: x["gain"] for x in self.work.tracks}, {"drums": 0.9, "pad": 0.5})  # not kept

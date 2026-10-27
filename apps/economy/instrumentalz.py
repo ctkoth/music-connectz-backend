@@ -150,12 +150,14 @@ def prompt_for(genre, instruments, bpm, key, bars, brief="", priorities=None):
         + (priorities_clause("instrumental", priorities).lstrip("\n") + "\n" if priorities else "")
         + f"Write one part for each of these instruments: {parts}.\n"
         "Reply with JSON only, shaped exactly like:\n"
-        '{"tracks": [{"instrument": "<one of the ids above>", '
+        '{"tracks": [{"instrument": "<one of the ids above>", "gain": <0-1>, '
         '"notes": [[pitch, start_beat, length_beats, velocity], ...]}]}\n'
         f"pitch is a MIDI note number 0-127; start_beat is from 0 to {bars * 4} (quarter-note beats, "
         "decimals allowed); velocity 1-127. Stay in the key. For drums use General MIDI drum notes "
         "(36 kick, 38 snare, 42 closed hat, 46 open hat, 49 crash). Make the bass lock with the kick, "
-        "give the harmony real chord movement, and make the loop repeat seamlessly."
+        "give the harmony real chord movement, and make the loop repeat seamlessly. "
+        "\"gain\" is the level a professional mix engineer would set that part at in the finished mix, "
+        "0 (silent) to 1 (full): keep the drums and bass forward, the lead present, pads and strings behind."
     )
 
 
@@ -166,6 +168,47 @@ def _first_json(raw):
         return json.loads(m.group(0) if m else raw)
     except (ValueError, AttributeError):
         return None
+
+
+# Where a part sits in a finished mix when the coach did not say. Drums and bass forward, the lead
+# present, the beds behind. Used only as a fallback for a missing or unreadable gain.
+ROLE_GAIN = {"drums": 0.9, "bass": 0.85, "synth_bass": 0.85, "lead": 0.8, "electric_guitar": 0.75,
+             "piano": 0.75, "epiano": 0.7, "acoustic_guitar": 0.7, "brass": 0.7, "organ": 0.6,
+             "strings": 0.6, "choir": 0.5, "pad": 0.5}
+
+
+def clean_gain(value, inst):
+    """0-1, two places. The coach's own number when it is one; else the part's usual place."""
+    try:
+        return round(max(0.0, min(1.0, float(value))), 2)
+    except (TypeError, ValueError):
+        return ROLE_GAIN.get(inst, 0.75)
+
+
+def gain_of(track):
+    """A stored track's level. Pieces made before gains existed play as composed (1.0)."""
+    return clean_gain(track.get("gain", 1.0), track.get("instrument"))
+
+
+def mix_rights(user):
+    """What this member may do with the levels. The coach sets them for everybody; Premium can
+    change them (to hear or download a version); StatZ can change them AND keep them."""
+    from .models import TIER_DEBUG, TIER_PREMIUM, TIER_STATZ
+    tier = membership_for(user).tier
+    return {"can_change": tier in (TIER_PREMIUM, TIER_STATZ, TIER_DEBUG),
+            "can_keep": tier in (TIER_STATZ, TIER_DEBUG)}
+
+
+def clean_gains(raw):
+    """{instrument: 0-1} from a request, keeping only known instruments."""
+    if not isinstance(raw, dict):
+        return {}
+    return {k: clean_gain(v, k) for k, v in raw.items() if k in INSTRUMENTS}
+
+
+def with_mix(work_dict, user):
+    return {**work_dict, "mix": {"gains": {t["instrument"]: gain_of(t) for t in work_dict["tracks"]},
+                                 **mix_rights(user)}}
 
 
 def clean_tracks(data, instruments, bars):
@@ -188,7 +231,8 @@ def clean_tracks(data, instruments, bars):
                 continue
             notes.append([pitch, round(start, 3), round(min(length, beats - start), 3), max(1, min(127, vel))])
         if notes:
-            out.append({"instrument": inst, "notes": sorted(notes, key=lambda x: x[1])})
+            out.append({"instrument": inst, "gain": clean_gain(t.get("gain"), inst),
+                        "notes": sorted(notes, key=lambda x: x[1])})
         if len(out) >= MAX_TRACKS:
             break
     return out
@@ -216,7 +260,7 @@ def _track(events):
     return _chunk(b"MTrk", data + b"\x00\xff\x2f\x00")
 
 
-def midi_bytes(tracks, bpm, key, title=""):
+def midi_bytes(tracks, bpm, key, title="", gains=None):
     """A format-1 Standard MIDI File: a tempo track, then one track per part."""
     sf, mi = key_signature(key)
     tempo = int(60_000_000 / bpm)
@@ -238,7 +282,9 @@ def midi_bytes(tracks, bpm, key, title=""):
         evs.append((0, b"\xff\x03" + _vlq(len(label)) + label))
         if not drums:
             evs.append((0, bytes([0xC0 | channel, INSTRUMENTS[t["instrument"]]["program"]])))
+        g = (gains or {}).get(t["instrument"], gain_of(t))
         for pitch, start, length, vel in t["notes"]:
+            vel = max(1, min(127, round(vel * g)))
             on = int(start * TPB)
             off = max(on + 1, int((start + length) * TPB))
             evs.append((on, bytes([0x90 | channel, pitch, vel])))
@@ -295,7 +341,7 @@ class InstrumentalView(APIView):
             "royalty_pct": ROYALTY_PCT,
             "royalty_rule": (f"Using one in DistributeZ, CollabZ or BattleZ pays K-Oth {ROYALTY_PCT}% "
                              "of what you earn from it."),
-            "works": [_work_dict(w) for w in InstrumentalWork.objects.filter(user=request.user)[:20]],
+            "works": [with_mix(_work_dict(w), request.user) for w in InstrumentalWork.objects.filter(user=request.user)[:20]],
         })
 
     def post(self, request):
@@ -374,7 +420,7 @@ class InstrumentalView(APIView):
                             status=status.HTTP_402_PAYMENT_REQUIRED)
         work = InstrumentalWork.objects.create(user=request.user, genre=genre, instruments=instruments,
                                                bpm=bpm, key=key, bars=bars, brief=brief, tracks=tracks)
-        return Response({**_work_dict(work), "charged_cents": charged}, status=status.HTTP_201_CREATED)
+        return Response({**with_mix(_work_dict(work), request.user), "charged_cents": charged}, status=status.HTTP_201_CREATED)
 
 
 class InstrumentalMoodView(APIView):
@@ -400,7 +446,14 @@ class InstrumentalMidiView(APIView):
         if not w:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         title = f"{w.genre or 'Instrumental'} in {w.key} at {w.bpm} BPM"
-        resp = HttpResponse(midi_bytes(w.tracks, w.bpm, w.key, title), content_type="audio/midi")
+        # Levels in a download: the coach's (or, for StatZ, the saved ones) by default. A member
+        # who may change them can name a version in the URL (?gains=drums:0.9,bass:0.6) without
+        # keeping it; anybody else gets the piece as it was mixed for them.
+        gains = None
+        raw = request.query_params.get("gains", "")
+        if raw and mix_rights(request.user)["can_change"]:
+            gains = clean_gains({p.split(":")[0]: p.split(":")[1] for p in raw.split(",") if p.count(":") == 1})
+        resp = HttpResponse(midi_bytes(w.tracks, w.bpm, w.key, title, gains), content_type="audio/midi")
         # "#" would be dropped as punctuation and F# minor would download as
         # "f-minor", the name of a different key. Spell the sharp out first.
         slug = re.sub(r"[^a-z0-9]+", "-", title.lower().replace("#", " sharp ")).strip("-")[:60] or "instrumental"
@@ -518,3 +571,31 @@ class InstrumentalInspirationView(APIView):
             return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
                             status=status.HTTP_402_PAYMENT_REQUIRED)
         return Response({**out, "cost_cents": charged, "saved": False})
+
+
+class InstrumentalMixView(APIView):
+    """PATCH instrumentalz/<id>/mix/ {gains} — keep a version of the levels. StatZ only.
+
+    The coach sets the levels when the piece is made, for everybody. Premium can change them to
+    hear or download a version (nothing is stored); only StatZ keeps one, because a kept mix is a
+    saved preference — listed in `statz_trial.DRIVERS` as not part of the free sample."""
+
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        w = InstrumentalWork.objects.filter(pk=pk, user=request.user).first()
+        if not w:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        rights = mix_rights(request.user)
+        if not rights["can_keep"]:
+            return Response({"detail": ("Keeping your own levels is StatZ. " if rights["can_change"] else
+                                        "Changing the levels is Premium, and keeping them is StatZ. ")
+                                       + "The coach's levels stay as they were.", **rights},
+                            status=status.HTTP_403_FORBIDDEN)
+        gains = clean_gains((request.data or {}).get("gains"))
+        if not gains:
+            return Response({"detail": "Send the levels as {instrument: 0-1}."}, status=status.HTTP_400_BAD_REQUEST)
+        tracks = [{**t, "gain": gains.get(t["instrument"], gain_of(t))} for t in w.tracks]
+        w.tracks = tracks
+        w.save(update_fields=["tracks"])
+        return Response(with_mix(_work_dict(w), request.user))
