@@ -31,7 +31,7 @@ from .retake import RetakeRemindView, RetakeStopView
 from .bodiez_trial import BodieZTrialView
 from .offerz_engine import (FunnelCatalogView, FunnelOfferRedeemView,
                             FunnelOffersView)
-from .lilith_taskz import (LilithBoardView, LilithMoveView, LilithStarterAddView, LilithTrashView, LilithRoutineDetailView,
+from .lilith_taskz import (LilithBoardView, LilithBudgetView, LilithGoAheadView, LilithMoveView, LilithStarterAddView, LilithTrashView, LilithRoutineDetailView,
                            LilithRoutineListView, LilithSponsorView,
                            LilithTaskCompleteView, LilithTaskDetailView,
                            LilithTaskListView)
@@ -565,6 +565,8 @@ urlpatterns = [
     path("lilith/tasks/", LilithTaskListView.as_view(), name="economy-lilith-tasks"),
     path("lilith/starters/", LilithStarterAddView.as_view(), name="economy-lilith-starters"),
     path("lilith/move/", LilithMoveView.as_view(), name="economy-lilith-move"),
+    path("lilith/budget/", LilithBudgetView.as_view(), name="economy-lilith-budget"),
+    path("lilith/tasks/<int:task_id>/goahead/", LilithGoAheadView.as_view(), name="economy-lilith-goahead"),
     path("lilith/trash/", LilithTrashView.as_view(), name="economy-lilith-trash"),
     path("lilith/tasks/<int:task_id>/", LilithTaskDetailView.as_view(),
          name="economy-lilith-task"),

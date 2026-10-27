@@ -214,3 +214,31 @@ class BudgetBankUnlinkView(APIView):
     def delete(self, request, pk):
         n, _ = BudgetBank.objects.filter(pk=pk, user=request.user).delete()
         return Response(status=status.HTTP_204_NO_CONTENT if n else status.HTTP_404_NOT_FOUND)
+
+
+def afford(user, cost_cents, category="", first=None, month_data=None):
+    """BudgetZ's go-ahead for one purchase: {affordable, reason, left_cents, category_left_cents}.
+
+    Affordable means the month's money in, minus what is already out, covers it AND, if the member set
+    a limit for that category, it fits under the limit. It never guesses: a month with nothing in it is
+    "no go-ahead", because a budget that approves things with no income entered is decoration. Nothing
+    is spent or reserved by asking."""
+    d = month_data or summary(user, first or _month(None))
+    cost = int(cost_cents or 0)
+    left = d["left_cents"]
+    cat = next((c for c in d["categories"] if c["category"] == category), None) if category else None
+    cat_left = (cat["limit_cents"] - cat["spent_cents"]) if cat and cat["limit_cents"] is not None else None
+    out = {"cost_cents": cost, "left_cents": left, "category_left_cents": cat_left,
+           "category": category, "month": d["month"]}
+    if cost <= 0:
+        return {**out, "affordable": True, "reason": "It costs nothing."}
+    if d["income_cents"] <= 0:
+        return {**out, "affordable": False,
+                "reason": "BudgetZ has no money in for this month, so there is nothing to say yes with."}
+    if cost > left:
+        return {**out, "affordable": False, "reason": f"It costs ${cost / 100:.2f} and ${max(left, 0) / 100:.2f} is left this month."}
+    if cat_left is not None and cost > cat_left:
+        return {**out, "affordable": False,
+                "reason": f"It fits the month but not your {category} limit (${max(cat_left, 0) / 100:.2f} left of it)."}
+    return {**out, "affordable": True,
+            "reason": f"${cost / 100:.2f} of ${left / 100:.2f} left this month" + (f", inside your {category} limit." if cat_left is not None else ".")}

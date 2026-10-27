@@ -6996,6 +6996,10 @@ class LilithTask(models.Model):
     action = models.CharField(max_length=24, blank=True, default="")
     goal = models.PositiveSmallIntegerField(default=1)
     due = models.DateTimeField(null=True, blank=True)
+    # An upgrade that costs real money (a mic, a plugin, studio time). BudgetZ says whether it is
+    # affordable THIS month and Lilith may then bring it to Today; nothing is spent or reserved.
+    cost_cents = models.PositiveIntegerField(default=0)
+    budget_category = models.CharField(max_length=40, blank=True, default="")
     routine = models.ForeignKey("LilithRoutine", null=True, blank=True,
                                 on_delete=models.SET_NULL, related_name="tasks")
     done_at = models.DateTimeField(null=True, blank=True, db_index=True)
