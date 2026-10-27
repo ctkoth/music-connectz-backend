@@ -27,6 +27,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .priorities import clause as priorities_clause
 from .catalog import ai_cost, over_char_limit
 from .deadline import Deadline, Expired
 from .gemini import _bill, _key, generate_content
@@ -138,13 +139,14 @@ def key_signature(key):
     return sf, 1 if minor else 0
 
 
-def prompt_for(genre, instruments, bpm, key, bars, brief=""):
+def prompt_for(genre, instruments, bpm, key, bars, brief="", priorities=None):
     mood = dict((k, m) for k, m, _ in KEYS)[key]
     parts = ", ".join(f'"{i}" ({INSTRUMENTS[i]["label"]})' for i in instruments)
     return (
         f"Compose an original {bars}-bar instrumental loop in 4/4 at {bpm} BPM, key of {key}, "
         f"genre: {genre or 'any'}. Mood of the key: {mood}\n"
         + (f"Brief from the artist: {brief}\n" if brief else "")
+        + (priorities_clause("instrumental", priorities).lstrip("\n") + "\n" if priorities else "")
         + f"Write one part for each of these instruments: {parts}.\n"
         "Reply with JSON only, shaped exactly like:\n"
         '{"tracks": [{"instrument": "<one of the ids above>", '
@@ -330,7 +332,7 @@ class InstrumentalView(APIView):
             return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
                             status=status.HTTP_402_PAYMENT_REQUIRED)
 
-        body = {"contents": [{"parts": [{"text": prompt_for(genre, instruments, bpm, key, bars, brief)}]}],
+        body = {"contents": [{"parts": [{"text": prompt_for(genre, instruments, bpm, key, bars, brief, d.get("priorities"))}]}],
                 "generationConfig": {"temperature": 0.9, "responseMimeType": "application/json"}}
         try:
             deadline.check("the request was still being prepared when the time ran out")

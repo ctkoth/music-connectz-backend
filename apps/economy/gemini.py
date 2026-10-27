@@ -23,6 +23,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .priorities import clause as priorities_clause
 from . import imagez
 from .catalog import ai_cost
 from .media import stable_media_url
@@ -388,7 +389,7 @@ class GeminiImageView(APIView):
                             status=status.HTTP_400_BAD_REQUEST)
         if likeness:
             inspiration = False
-        framed = imagez.build_prompt(prompt, kind, style, mood, colours, words)
+        framed = imagez.build_prompt(prompt, kind, style, mood, colours, words) + priorities_clause("image", (request.data or {}).get("priorities"))
         wrap = INSPIRATION_WRAP if inspiration else imagez.LIKENESS_WRAP if likeness else ""
         parts = [{"text": wrap + framed}]
         aspect = imagez.KINDS.get(kind, {}).get("aspect")

@@ -37,6 +37,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .priorities import clause as priorities_clause
 from .gemini import BASE, _key
 from .catalog import over_char_limit
 from .models import (Face, Transaction, Upload, VideoWork, is_platform_owner, membership_for,
@@ -305,7 +306,7 @@ class VideoView(APIView):
             face = Face.objects.filter(pk=d.get("face_id"), owner=request.user).first()
             if not face:
                 return Response({"detail": "Only your own FaceZ photos can be used."}, status=status.HTTP_400_BAD_REQUEST)
-        work, refusal = start_render(request.user, kind, prompt, aspect, face)
+        work, refusal = start_render(request.user, kind, prompt + priorities_clause("video", d.get("priorities")), aspect, face)
         if refusal is not None:
             return refusal
         return Response(_work_dict(work, request), status=status.HTTP_201_CREATED)
