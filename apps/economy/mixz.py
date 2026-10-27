@@ -53,6 +53,11 @@ COST_LINE = "Free — mastered on your device. Nothing is uploaded unless you sa
 INTENSITIES = tuple(MASTERING_INTENSITY_LABELS)
 MONO_BASS = ("auto", "on", "off")
 BIT_DEPTHS = (16, 24, 32)
+EXPORT_FORMATS = ("wav", "mp3")
+MP3_KBPS = (128, 192, 256, 320)
+# The rates a master may be exported at: the two conversions offered, plus any
+# file's own rate left as it was (which is the common case and is any value).
+EXPORT_RATES = range(8000, 192_001)
 SLUG_MAX = 24
 BANDS_MAX = 40
 # The most glue any tier is offered. Read off the ladder rather than typed, so
@@ -129,6 +134,24 @@ def clean_settings(raw):
         out["bitDepth"] = depth
     if isinstance(raw.get("dither"), bool):
         out["dither"] = raw["dither"]
+    # A loudness set by hand ("custom" target), and DynamicZ: punch and multiband.
+    lufs = _num(raw.get("lufs"), -20, -7, 1)
+    if lufs is not None:
+        out["lufs"] = lufs
+    punch = _int(raw.get("punch"), -50, 50)
+    if punch is not None:
+        out["punch"] = punch
+    if isinstance(raw.get("multiband"), bool):
+        out["multiband"] = raw["multiband"]
+    # How it was delivered, so a revision can be delivered the same way.
+    if raw.get("format") in EXPORT_FORMATS:
+        out["format"] = raw["format"]
+    kbps = _int(raw.get("kbps"), 0, 1000)
+    if kbps in MP3_KBPS:
+        out["kbps"] = kbps
+    rate = _int(raw.get("exportRate"), 0, 768_000)
+    if rate in EXPORT_RATES:
+        out["exportRate"] = rate
     if isinstance(raw.get("reference"), bool):
         # Whether a reference track was matched — never the reference itself.
         out["reference"] = raw["reference"]

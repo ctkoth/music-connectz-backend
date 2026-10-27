@@ -268,6 +268,21 @@ class SaveTests(TestCase):
         self.assertEqual(r.status_code, 201)
         self.assertEqual(r.json()["settings"]["intensity"], "max")
 
+    def test_dynamicz_loudness_and_delivery_are_kept_for_a_revision(self):
+        r = self.post(settings={"target": "custom", "lufs": -11.5, "punch": 30, "multiband": True,
+                                "format": "mp3", "kbps": 320, "exportRate": 48000})
+        self.assertEqual(r.status_code, 201, r.content)
+        s = r.json()["settings"]
+        self.assertEqual((s["target"], s["lufs"], s["punch"], s["multiband"]), ("custom", -11.5, 30, True))
+        self.assertEqual((s["format"], s["kbps"], s["exportRate"]), ("mp3", 320, 48000))
+
+    def test_dynamicz_junk_is_clamped_or_dropped(self):
+        s = mixz.clean_settings({"lufs": 3, "punch": 900, "multiband": "yes", "format": "flac",
+                                 "kbps": 999, "exportRate": "fast"})
+        self.assertEqual((s["lufs"], s["punch"]), (-7.0, 50))
+        for k in ("multiband", "format", "kbps", "exportRate"):
+            self.assertNotIn(k, s)
+
     def test_junk_in_the_json_is_cleaned_not_stored(self):
         raw = json.dumps({
             "upload_id": self.up.id,

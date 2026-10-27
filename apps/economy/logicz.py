@@ -156,8 +156,8 @@ LOGICZ_TABS = [
          # Runs entirely on the member's device, so it is free at every tier;
          # the tier buys how heavy the compression may go, never whether.
          _app("Mix ConnectZ", "🎚️",
-              "Master a finished song on your device — loudness, tone, width and "
-              "peaks, measured. Free; the tier sets how heavy the compression goes.",
+              "Master a finished song on your device — loudness, tone, width, "
+              "DynamicZ (punch and multiband) and peaks, measured; WAV or MP3. Free; the tier sets how heavy the compression goes.",
               True, tab="mixconnectz"),
          _app("Video ConnectZ", "🎬",
               "Short AI video clips from a prompt, with an optional photo as the "

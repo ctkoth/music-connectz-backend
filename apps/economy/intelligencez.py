@@ -76,7 +76,7 @@ APPS = [
     ("instrumentalconnectz", "Instrumental ConnectZ", "🎹", "instrumentalconnectz.png",
      "AI-composed MIDI loops by genre, instruments, BPM and key.", True),
     ("mixconnectz", "Mix ConnectZ", "🎚️", "mixconnectz.png",
-     "Master a finished song on your device — loudness, tone, width and peaks, measured.", True),
+     "Master a finished song on your device — loudness, tone, width, DynamicZ and peaks, measured; WAV or MP3.", True),
     ("videoconnectz", "Video ConnectZ", "🎬", "videoconnectz.png",
      "Short AI video clips from a prompt, with an optional photo as the first frame.", True),
     ("facez", "FaceZ", "🙂", "facez.png",

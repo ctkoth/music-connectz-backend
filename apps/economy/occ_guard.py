@@ -70,7 +70,7 @@ ROUTES = [
      "composes MIDI by genre, instruments, BPM and key."),
     ("mixconnectz", "Mix ConnectZ",
      r"master(ing)?|mixdown|mix (of )?(my|a|the|this) (song|track)",
-     "masters a finished song on your device — loudness, tone, width and peaks."),
+     "masters a finished song on your device — loudness, tone, width, punch and peaks — and hands it back as WAV or MP3."),
     ("sentenceconnectz", "Sentence ConnectZ",
      r"lyrics|verse|chorus|hook|song|poem|essay|caption|social media post|bio|resume|cover letter"
      r"|artist contract|contract|royalt(y|ies) agreement",
