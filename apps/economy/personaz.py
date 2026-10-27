@@ -104,6 +104,26 @@ def rate_unit_of(skill):
     return RATE_HOUR
 
 
+SKILL_GENRES_MAX = 8
+
+
+def clean_skill_genres(raw):
+    """['Trap', 'Drill'] from whatever arrived: strings only, trimmed, no markup, unique, a few."""
+    if not isinstance(raw, (list, tuple)):
+        return []
+    out, seen = [], set()
+    for g in raw:
+        if not isinstance(g, str):
+            continue
+        g = " ".join(g.replace("<", " ").replace(">", " ").split())[:40]
+        if g and g.lower() not in seen:
+            seen.add(g.lower())
+            out.append(g)
+        if len(out) >= SKILL_GENRES_MAX:
+            break
+    return out
+
+
 def clean_persona(raw):
     """Normalize one PersonaZ entry, keeping its skills and their start dates.
 
@@ -166,6 +186,13 @@ def clean_persona(raw):
                 entry["start"] = start
         if rate:
             entry["rate_cents"] = rate
+        # The genres this skill is practised in - the same names every genre picker offers
+        # ("Rapping" in Trap and Drill). Free-form tags, not a closed list: the picker's list
+        # lives in the client, and a member who works in a genre we have not listed should not
+        # be refused for it. Short, de-duplicated, plain text.
+        genres = clean_skill_genres(s.get("genres"))
+        if genres:
+            entry["genres"] = genres
         skills.append(entry)
 
     key = str(raw.get("key") or raw.get("name") or "")[:60]

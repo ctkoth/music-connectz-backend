@@ -104,6 +104,11 @@ class PrioritiesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response({"scale": SCALE, "writing_kinds": list(WRITING_KINDS), "media": {
+        from . import refinput
+        return Response({"scale": SCALE, "writing_kinds": list(WRITING_KINDS),
+                         # The reference a member may start from, stated before a file is picked.
+                         "reference": {"max_mb": refinput.MAX_BYTES // (1024 * 1024),
+                                       "accept": sorted(refinput.AUDIO | refinput.IMAGE)},
+                         "media": {
             m: [{"key": k, "label": lab, "means": means} for k, (lab, means) in t.items()]
             for m, t in VARIABLES.items()}})

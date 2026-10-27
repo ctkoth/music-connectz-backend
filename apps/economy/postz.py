@@ -177,6 +177,7 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
         "contributors": p.contributors or [],
         "co_owned": bool(p.contributors),
         "title": p.title,
+        "derived": p.derived or None,
         "description": p.description,
         "links": p.links,
         "media_type": p.media_type,
@@ -479,6 +480,28 @@ def charge_skill_energy(user, skills):
     return {"energy_cost": cost, "energy_charged": cost, "energy": w.energy}, None
 
 
+DERIVED_KINDS = ("cover", "remix")
+
+
+def clean_derived(user, raw):
+    """({snapshot}, error). A cover or remix names a PUBLIC post by someone else — credit is the one
+    thing it always carries. Nothing is paid to the original here: a royalty split is Corey's call,
+    and the screen says so rather than implying one."""
+    if not raw:
+        return {}, ""
+    if not isinstance(raw, dict) or raw.get("kind") not in DERIVED_KINDS:
+        return {}, "A cover or remix must say which: cover or remix."
+    try:
+        orig = Post.objects.select_related("author").filter(pk=int(raw.get("id"))).first()
+    except (TypeError, ValueError):
+        orig = None
+    if not orig or orig.visibility != "public":
+        return {}, "That original isn't a public post, so it can't be covered or remixed."
+    if orig.author_id == user.id:
+        return {}, "That's your own post — post it as new work instead."
+    return {"id": orig.id, "kind": raw["kind"], "title": orig.title[:160], "author": orig.author.username}, ""
+
+
 def create_post(user, d):
     """Make a post from a PostZ payload. Returns (post, info, error).
 
@@ -548,8 +571,11 @@ def create_post(user, d):
         from .models import Transaction, log_resource
         log_resource(user, Transaction.RES_ENERGY, -charged, f"Post: {title[:60]}",
                      app_key="postz", target="postz:compose")
+    derived, derr = clean_derived(user, d.get("derived"))
+    if derr:
+        return None, {}, ({"detail": derr}, status.HTTP_400_BAD_REQUEST)
     p = Post.objects.create(
-        author=user, title=title,
+        author=user, title=title, derived=derived,
         description=str(d.get("description", ""))[:4000],
         links=d.get("links") or [], media_type=media_type, media_url=media_url,
         is_album=is_album, items=items,

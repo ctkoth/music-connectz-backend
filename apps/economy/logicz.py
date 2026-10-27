@@ -59,8 +59,8 @@ LOGICZ_TABS = [
      "desc": "PostZ is for show. This is where it becomes work — escrowed, so a "
              "stranger can take the first deal without either of you praying.",
      "apps": [
-         _app("CoverZ", "🫴🏼", "Covers of songs, redraws of existing art.", False),
-         _app("RemixeZ", "🔄", "Remixing posts and songs.", False),
+         _app("CoverZ", "🫴🏼", "Covers of songs, redraws of existing art — credited to the original.", True, tab="postz"),
+         _app("RemixeZ", "🔄", "Remixing posts and songs — credited to the original.", True, tab="postz"),
      ]},
     {"key": "battlez", "name": "BattleZ", "emoji": "🪖", "icon": "battlez.png",
      "desc": "One post against another. Verified 18+ can bet money on themselves; "

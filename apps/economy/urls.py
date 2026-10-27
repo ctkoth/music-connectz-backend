@@ -8,6 +8,8 @@ from .questz import QuestBoardView, QuestClaimView
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
 from .embedplays import EmbedPlayView
+from .budgetz import (BudgetBankLinkView, BudgetBankSessionView, BudgetBankSyncView, BudgetBankUnlinkView,
+                      BudgetLimitView, BudgetLineView, BudgetView)
 from .postz import (PostBoostView, PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView, PostProgressionView, DiscoveryFeedView, PostSaleView)
 from .publicz import PublicPostView, PublicProfileView
@@ -29,7 +31,7 @@ from .retake import RetakeRemindView, RetakeStopView
 from .bodiez_trial import BodieZTrialView
 from .offerz_engine import (FunnelCatalogView, FunnelOfferRedeemView,
                             FunnelOffersView)
-from .lilith_taskz import (LilithBoardView, LilithMoveView, LilithStarterAddView, LilithTrashView, LilithRoutineDetailView,
+from .lilith_taskz import (LilithBoardView, LilithBudgetView, LilithGoAheadView, LilithMoveView, LilithStarterAddView, LilithTrashView, LilithRoutineDetailView,
                            LilithRoutineListView, LilithSponsorView,
                            LilithTaskCompleteView, LilithTaskDetailView,
                            LilithTaskListView)
@@ -83,7 +85,7 @@ from .viewz import ViewBeatView, ViewCountsView, ViewMineView, ViewPostResultsVi
 from .metricz import HoroscopeView, MetricZView, SubstanceScaleView
 from .videoz import VideoDetailView, VideoView
 from .videostitch import VideoStitchDetailView, VideoStitchView
-from .instrumentalz import InstrumentalInspirationView, InstrumentalMidiView, InstrumentalMoodView, InstrumentalView
+from .instrumentalz import InstrumentalAIPresetView, InstrumentalApplyPresetView, InstrumentalInspirationView, InstrumentalMidiView, InstrumentalMixPresetsView, InstrumentalMixSheetView, InstrumentalMixView, InstrumentalMoodView, InstrumentalView
 from .intelligencez import IntelligenceHubView
 from .skillzhub import SkillZHubView
 from .mixz import MixDetailView, MixView
@@ -259,6 +261,11 @@ urlpatterns = [
     path("instrumentalz/inspiration/", InstrumentalInspirationView.as_view(), name="economy-instrumentalz-inspiration"),
     path("instrumentalz/moods/", InstrumentalMoodView.as_view(), name="economy-instrumentalz-moods"),
     path("instrumentalz/<int:pk>/midi/", InstrumentalMidiView.as_view(), name="economy-instrumentalz-midi"),
+    path("instrumentalz/mixpresets/", InstrumentalMixPresetsView.as_view(), name="economy-instrumentalz-mixpresets"),
+    path("instrumentalz/mixpresets/ai/", InstrumentalAIPresetView.as_view(), name="economy-instrumentalz-aipreset"),
+    path("instrumentalz/<int:pk>/preset/", InstrumentalApplyPresetView.as_view(), name="economy-instrumentalz-preset"),
+    path("instrumentalz/<int:pk>/mix/", InstrumentalMixView.as_view(), name="economy-instrumentalz-mix"),
+    path("instrumentalz/<int:pk>/mixsheet/", InstrumentalMixSheetView.as_view(), name="economy-instrumentalz-mixsheet"),
     # Mix ConnectZ — mastering that runs on the member's device; this keeps the
     # ladder and the masters they chose to save. The hub is IntelligenceZ's front
     # door: every app in it, its price before it is opened, and recent pieces.
@@ -448,6 +455,13 @@ urlpatterns = [
     path("ratez/", RatezView.as_view(), name="economy-ratez"),
     path("ratez/kinds/", RatingKindsView.as_view(), name="economy-ratez-kinds"),
     path("ratez/queue/", RateQueueView.as_view(), name="economy-ratez-queue"),
+    path("budgetz/", BudgetView.as_view(), name="economy-budgetz"),
+    path("budgetz/line/<int:pk>/", BudgetLineView.as_view(), name="economy-budgetz-line"),
+    path("budgetz/limit/", BudgetLimitView.as_view(), name="economy-budgetz-limit"),
+    path("budgetz/bank/session/", BudgetBankSessionView.as_view(), name="economy-budgetz-session"),
+    path("budgetz/bank/link/", BudgetBankLinkView.as_view(), name="economy-budgetz-link"),
+    path("budgetz/bank/sync/", BudgetBankSyncView.as_view(), name="economy-budgetz-sync"),
+    path("budgetz/bank/<int:pk>/", BudgetBankUnlinkView.as_view(), name="economy-budgetz-unlink"),
     path("postz/", PostsView.as_view(), name="economy-postz"),
     # Personalized discovery feed based on taste affinity and listening behavior.
     path("postz/discover/", DiscoveryFeedView.as_view(), name="economy-postz-discover"),
@@ -551,6 +565,8 @@ urlpatterns = [
     path("lilith/tasks/", LilithTaskListView.as_view(), name="economy-lilith-tasks"),
     path("lilith/starters/", LilithStarterAddView.as_view(), name="economy-lilith-starters"),
     path("lilith/move/", LilithMoveView.as_view(), name="economy-lilith-move"),
+    path("lilith/budget/", LilithBudgetView.as_view(), name="economy-lilith-budget"),
+    path("lilith/tasks/<int:task_id>/goahead/", LilithGoAheadView.as_view(), name="economy-lilith-goahead"),
     path("lilith/trash/", LilithTrashView.as_view(), name="economy-lilith-trash"),
     path("lilith/tasks/<int:task_id>/", LilithTaskDetailView.as_view(),
          name="economy-lilith-task"),

@@ -27,6 +27,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import refinput
 from .priorities import clause as priorities_clause
 from .catalog import ai_cost, over_char_limit
 from .deadline import Deadline, Expired
@@ -149,12 +150,17 @@ def prompt_for(genre, instruments, bpm, key, bars, brief="", priorities=None):
         + (priorities_clause("instrumental", priorities).lstrip("\n") + "\n" if priorities else "")
         + f"Write one part for each of these instruments: {parts}.\n"
         "Reply with JSON only, shaped exactly like:\n"
-        '{"tracks": [{"instrument": "<one of the ids above>", '
+        '{"tracks": [{"instrument": "<one of the ids above>", "gain": <0-1>, "pan": <-1 to 1>, "space": <0-1>, '
+        '"compress": <0-1>, "tone": {"low": <dB>, "mid": <dB>, "high": <dB>}, '
         '"notes": [[pitch, start_beat, length_beats, velocity], ...]}]}\n'
         f"pitch is a MIDI note number 0-127; start_beat is from 0 to {bars * 4} (quarter-note beats, "
         "decimals allowed); velocity 1-127. Stay in the key. For drums use General MIDI drum notes "
         "(36 kick, 38 snare, 42 closed hat, 46 open hat, 49 crash). Make the bass lock with the kick, "
-        "give the harmony real chord movement, and make the loop repeat seamlessly."
+        "give the harmony real chord movement, and make the loop repeat seamlessly. "
+        "Also mix it as a professional engineer would, per part: \"gain\" the level 0 (silent) to 1 (full), "
+        "\"pan\" -1 (left) to 1 (right), \"space\" 0 (dry, up front) to 1 (deep in a room), \"compress\" 0 (none) to 1 "
+        "(heavy), and \"tone\" low/mid/high EQ in dB (-6 to 6). Drums and bass forward and centred, the lead "
+        "present, pads and strings behind and wide, parts that share a range panned apart."
     )
 
 
@@ -165,6 +171,16 @@ def _first_json(raw):
         return json.loads(m.group(0) if m else raw)
     except (ValueError, AttributeError):
         return None
+
+
+from . import instrumental_mix as mixmod
+from .instrumental_mix import rights as mix_rights
+
+
+def with_mix(work_dict, user):
+    """The piece plus its mix per instrument and what THIS member may do with it."""
+    return {**work_dict, "mix": {"params": {t["instrument"]: mixmod.mix_of(t) for t in work_dict["tracks"]},
+                                 **mix_rights(user)}}
 
 
 def clean_tracks(data, instruments, bars):
@@ -187,7 +203,8 @@ def clean_tracks(data, instruments, bars):
                 continue
             notes.append([pitch, round(start, 3), round(min(length, beats - start), 3), max(1, min(127, vel))])
         if notes:
-            out.append({"instrument": inst, "notes": sorted(notes, key=lambda x: x[1])})
+            out.append({"instrument": inst, **mixmod.store(mixmod.fill(t, inst)),
+                        "notes": sorted(notes, key=lambda x: x[1])})
         if len(out) >= MAX_TRACKS:
             break
     return out
@@ -215,7 +232,7 @@ def _track(events):
     return _chunk(b"MTrk", data + b"\x00\xff\x2f\x00")
 
 
-def midi_bytes(tracks, bpm, key, title=""):
+def midi_bytes(tracks, bpm, key, title="", mix=None):
     """A format-1 Standard MIDI File: a tempo track, then one track per part."""
     sf, mi = key_signature(key)
     tempo = int(60_000_000 / bpm)
@@ -237,7 +254,15 @@ def midi_bytes(tracks, bpm, key, title=""):
         evs.append((0, b"\xff\x03" + _vlq(len(label)) + label))
         if not drums:
             evs.append((0, bytes([0xC0 | channel, INSTRUMENTS[t["instrument"]]["program"]])))
+        # The track's own mix, over which a named version (Premium+) can lay changes. A parameter the
+        # track never had stays out of the file, so a piece made before the mix existed downloads as it was.
+        override = (mix or {}).get(t["instrument"], {})
+        m = {**mixmod.mix_of(t), **override}
+        present = set(mixmod.flat(t)) | set(override)
+        for cc, val in mixmod.midi_cc(m, present):
+            evs.append((0, bytes([0xB0 | channel, cc, max(0, min(127, val))])))
         for pitch, start, length, vel in t["notes"]:
+            vel = max(1, min(127, round(vel * m["gain"])))
             on = int(start * TPB)
             off = max(on + 1, int((start + length) * TPB))
             evs.append((on, bytes([0x90 | channel, pitch, vel])))
@@ -294,7 +319,7 @@ class InstrumentalView(APIView):
             "royalty_pct": ROYALTY_PCT,
             "royalty_rule": (f"Using one in DistributeZ, CollabZ or BattleZ pays K-Oth {ROYALTY_PCT}% "
                              "of what you earn from it."),
-            "works": [_work_dict(w) for w in InstrumentalWork.objects.filter(user=request.user)[:20]],
+            "works": [with_mix(_work_dict(w), request.user) for w in InstrumentalWork.objects.filter(user=request.user)[:20]],
         })
 
     def post(self, request):
@@ -320,6 +345,10 @@ class InstrumentalView(APIView):
             return Response({"detail": f"BPM between {BPM_MIN} and {BPM_MAX}."}, status=status.HTTP_400_BAD_REQUEST)
         if bars not in BARS:
             return Response({"detail": "4 or 8 bars."}, status=status.HTTP_400_BAD_REQUEST)
+        # A sound or picture to start from: validated before anything is priced.
+        ref, ref_problem = refinput.parse(d.get("reference"))
+        if ref_problem:
+            return Response({"detail": ref_problem}, status=status.HTTP_400_BAD_REQUEST)
 
         api_key = _key()
         if not api_key:
@@ -332,7 +361,9 @@ class InstrumentalView(APIView):
             return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
                             status=status.HTTP_402_PAYMENT_REQUIRED)
 
-        body = {"contents": [{"parts": [{"text": prompt_for(genre, instruments, bpm, key, bars, brief, d.get("priorities"))}]}],
+        body = {"contents": [{"parts": [{"text": prompt_for(genre, instruments, bpm, key, bars, brief, d.get("priorities"))
+                                         + refinput.guard(ref)},
+                                        *([refinput.part(ref)] if ref else [])]}],
                 "generationConfig": {"temperature": 0.9, "responseMimeType": "application/json"}}
         try:
             deadline.check("the request was still being prepared when the time ran out")
@@ -367,7 +398,7 @@ class InstrumentalView(APIView):
                             status=status.HTTP_402_PAYMENT_REQUIRED)
         work = InstrumentalWork.objects.create(user=request.user, genre=genre, instruments=instruments,
                                                bpm=bpm, key=key, bars=bars, brief=brief, tracks=tracks)
-        return Response({**_work_dict(work), "charged_cents": charged}, status=status.HTTP_201_CREATED)
+        return Response({**with_mix(_work_dict(work), request.user), "charged_cents": charged}, status=status.HTTP_201_CREATED)
 
 
 class InstrumentalMoodView(APIView):
@@ -393,7 +424,17 @@ class InstrumentalMidiView(APIView):
         if not w:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         title = f"{w.genre or 'Instrumental'} in {w.key} at {w.bpm} BPM"
-        resp = HttpResponse(midi_bytes(w.tracks, w.bpm, w.key, title), content_type="audio/midi")
+        # The mix in a download: the coach's (or, for StatZ, the kept one) by default. A member who may
+        # change it can name a version in the URL (?mix=<json>) without keeping it; anybody else gets the
+        # piece as it was mixed for them.
+        version = None
+        raw = request.query_params.get("mix", "")
+        if raw and mix_rights(request.user)["can_change"]:
+            try:
+                version = mixmod.clean_mix(json.loads(raw), [t["instrument"] for t in w.tracks])
+            except ValueError:
+                version = None
+        resp = HttpResponse(midi_bytes(w.tracks, w.bpm, w.key, title, version), content_type="audio/midi")
         # "#" would be dropped as punctuation and F# minor would download as
         # "f-minor", the name of a different key. Spell the sharp out first.
         slug = re.sub(r"[^a-z0-9]+", "-", title.lower().replace("#", " sharp ")).strip("-")[:60] or "instrumental"
@@ -511,3 +552,166 @@ class InstrumentalInspirationView(APIView):
             return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
                             status=status.HTTP_402_PAYMENT_REQUIRED)
         return Response({**out, "cost_cents": charged, "saved": False})
+
+
+class InstrumentalMixView(APIView):
+    """PATCH instrumentalz/<id>/mix/ {mix: {instrument: {gain, pan, space, compress, low, mid, high}}} —
+    keep a version of the mix. StatZ only.
+
+    The coach sets the mix when the piece is made, for everybody. Premium can change it to hear or
+    download a version (nothing is stored); only StatZ keeps one, because a kept mix is a saved
+    preference — listed in `statz_trial.DRIVERS` as not part of the free sample."""
+
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        w = InstrumentalWork.objects.filter(pk=pk, user=request.user).first()
+        if not w:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        rights = mix_rights(request.user)
+        if not rights["can_keep"]:
+            return Response({"detail": ("Keeping your own mix is StatZ. " if rights["can_change"] else
+                                        "Changing the mix is Premium, and keeping it is StatZ. ")
+                                       + "The coach's mix stays as it was.", **rights},
+                            status=status.HTTP_403_FORBIDDEN)
+        changes = mixmod.clean_mix((request.data or {}).get("mix"), [t["instrument"] for t in w.tracks])
+        if not changes:
+            return Response({"detail": "Send the mix as {instrument: {gain, pan, space, compress, low, mid, high}}."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        tracks = []
+        for t in w.tracks:
+            merged = {**mixmod.mix_of(t), **changes.get(t["instrument"], {})}
+            tracks.append({**t, **mixmod.store(merged)})
+        w.tracks = tracks
+        w.save(update_fields=["tracks"])
+        return Response(with_mix(_work_dict(w), request.user))
+
+
+class InstrumentalMixSheetView(APIView):
+    """GET instrumentalz/<id>/mixsheet/ — the mix as plain text for whoever mixes it (every tier).
+
+    EQ and compression cannot ride in a MIDI file, so this is how they leave the app. It reads the
+    stored mix (the coach's, or the one StatZ kept) and says they are starting points."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        w = InstrumentalWork.objects.filter(pk=pk, user=request.user).first()
+        if not w:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        labels = {k: v["label"] for k, v in INSTRUMENTS.items()}
+        text = mixmod.sheet(w.tracks, labels)
+        return Response({"filename": f"mix-sheet-{w.id}.txt", "content_type": "text/plain", "text": text})
+
+
+# --- mix presets: by genre (read by all, applied by Premium, kept by StatZ) and AI presets by type ---
+from . import mix_presets as presets  # noqa: E402
+from .models import AIPreset  # noqa: E402
+
+
+def _preset_rights(user):
+    r = mix_rights(user)
+    return {**r, "can_ai": r["can_keep"]}
+
+
+def _ai_row(p):
+    return {"id": p.id, "kind": p.kind, "note": p.note, "nudges": p.nudges}
+
+
+class InstrumentalMixPresetsView(APIView):
+    """GET instrumentalz/mixpresets/ — the genre presets (everybody), the member's own AI presets
+    (StatZ), what they may do and what an AI preset costs BEFORE it is asked for."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        r = _preset_rights(request.user)
+        _, _, daily_left = daily_prompt_state(request.user)
+        return Response({"genres": presets.listing(), **r,
+                         "mine": [_ai_row(p) for p in AIPreset.objects.filter(user=request.user)[:50]] if r["can_ai"] else [],
+                         "ai_cost_cents": ai_cost("standard"), "daily_remaining": daily_left,
+                         "note": "Presets are starting points — they nudge each part from its usual place."})
+
+
+class InstrumentalApplyPresetView(APIView):
+    """POST instrumentalz/<id>/preset/ {genre | ai_id, keep?} — a preset applied to a piece.
+
+    Premium gets the mix back to hear or download; nothing is stored. StatZ may also keep it."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        w = InstrumentalWork.objects.filter(pk=pk, user=request.user).first()
+        if not w:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        r = _preset_rights(request.user)
+        if not r["can_change"]:
+            return Response({"detail": "Applying a mix preset is Premium, and keeping it is StatZ. The coach's mix stays as it was.", **r},
+                            status=status.HTTP_403_FORBIDDEN)
+        insts = [t["instrument"] for t in w.tracks]
+        ai_id = request.data.get("ai_id")
+        if ai_id:
+            row = AIPreset.objects.filter(pk=ai_id, user=request.user).first() if r["can_ai"] else None
+            mix = presets.apply_nudges(insts, row.nudges) if row else None
+        else:
+            mix = presets.for_genre(request.data.get("genre"), insts)
+        if not mix:
+            return Response({"detail": "That preset isn't one we have."}, status=status.HTTP_400_BAD_REQUEST)
+        keep = bool(request.data.get("keep"))
+        if keep and not r["can_keep"]:
+            return Response({"detail": "Keeping a mix is StatZ. You can still hear and download this one.", **r},
+                            status=status.HTTP_403_FORBIDDEN)
+        if keep:
+            w.tracks = [{**t, **mixmod.store(mix[t["instrument"]])} for t in w.tracks]
+            w.save(update_fields=["tracks"])
+            return Response({**with_mix(_work_dict(w), request.user), "kept": True})
+        return Response({"mix": {"params": mix, **r}, "kept": False})
+
+
+def ai_preset_prompt(kind):
+    return ("You set a mix preset for the TYPE of music named below. Reply with JSON only: "
+            '{"nudges": {"drums": {...}, "bass": {...}, "lead": {...}, "chords": {...}}, "note": "one sentence why"}. '
+            "Each group maps any of gain, pan, space, compress, low, mid, high to a SMALL change from the part's usual "
+            "place (gain/pan/space/compress within ±0.3, low/mid/high within ±3 dB). These are starting points, not "
+            "measurements. Type: " + json.dumps(kind[:40]))
+
+
+class InstrumentalAIPresetView(APIView):
+    """POST instrumentalz/mixpresets/ai/ {kind} — StatZ: the coach writes a preset for a type of music
+    and it is saved to their library. Charged only after a usable answer; a failed run is free."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not _preset_rights(request.user)["can_ai"]:
+            return Response({"detail": "AI presets by type are StatZ."}, status=status.HTTP_403_FORBIDDEN)
+        kind = " ".join(str(request.data.get("kind", "")).replace("<", " ").replace(">", " ").split())[:40]
+        if not kind:
+            return Response({"detail": "Name the type of music."}, status=status.HTTP_400_BAD_REQUEST)
+        api_key = _key()
+        if not api_key:
+            return Response({"detail": "Instrumental ConnectZ isn't switched on."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        cost = ai_cost("standard")
+        _, _, daily_left = daily_prompt_state(request.user)
+        if cost and not daily_left and not can_afford_ai(request.user, cost):
+            return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
+        try:
+            resp, _ = generate_content("text", {"contents": [{"parts": [{"text": ai_preset_prompt(kind)}]}],
+                                                "generationConfig": {"temperature": 0.3}},
+                                       key=api_key, timeout=60, label="Instrumental AI preset")
+        except requests.RequestException:
+            return Response({"detail": "Couldn't reach the coach. Nothing was charged — try again."},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        parsed = _first_json(_text_of(resp)) if resp is not None and resp.status_code == 200 else None
+        nudges = presets.clean_nudges((parsed or {}).get("nudges") if isinstance(parsed, dict) else None)
+        if not nudges:
+            return Response({"detail": "The coach's answer wasn't usable. Nothing was charged — try again."},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        charged = _bill(request.user, "Instrumental ConnectZ AI preset", count_daily=True)
+        if charged is None:
+            return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
+        row = AIPreset.objects.create(user=request.user, kind=kind, nudges=nudges,
+                                      note=str((parsed or {}).get("note", ""))[:300])
+        return Response({**_ai_row(row), "cost_cents": charged}, status=status.HTTP_201_CREATED)

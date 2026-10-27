@@ -1245,6 +1245,8 @@ class Profile(models.Model):
     genres = models.JSONField(default=list, blank=True)
     influences = models.JSONField(default=list, blank=True)
     gear = models.JSONField(default=list, blank=True)
+    # Structured inventory: [{name, kind, where, note}] — what an artist or studio actually uses.
+    inventory = models.JSONField(default=list, blank=True)
     label = models.CharField(max_length=100, blank=True, default="")
     timezone = models.CharField(max_length=48, blank=True, default="")
     pinned_post_id = models.PositiveIntegerField(null=True, blank=True)
@@ -1777,6 +1779,10 @@ class Post(models.Model):
     # their own genre. Putting it in the genre list would have forced a choice
     # between the two and split the tag across every family in it.
     freestyle = models.BooleanField(default=False)
+    # CoverZ / RemixeZ: {id, kind: cover|remix, title, author} snapshot of the post this one is made
+    # from. A snapshot, not a join, so the feed pays no extra query and the credit survives the
+    # original being deleted. Empty for ordinary posts.
+    derived = models.JSONField(default=dict, blank=True)
     # Which skills went into it — 2.2 required this on every example, and it is
     # what makes a post matchable to the people who have those skills and
     # priceable against their rates. A post without it is a file with a caption.
@@ -6990,6 +6996,10 @@ class LilithTask(models.Model):
     action = models.CharField(max_length=24, blank=True, default="")
     goal = models.PositiveSmallIntegerField(default=1)
     due = models.DateTimeField(null=True, blank=True)
+    # An upgrade that costs real money (a mic, a plugin, studio time). BudgetZ says whether it is
+    # affordable THIS month and Lilith may then bring it to Today; nothing is spent or reserved.
+    cost_cents = models.PositiveIntegerField(default=0)
+    budget_category = models.CharField(max_length=40, blank=True, default="")
     routine = models.ForeignKey("LilithRoutine", null=True, blank=True,
                                 on_delete=models.SET_NULL, related_name="tasks")
     done_at = models.DateTimeField(null=True, blank=True, db_index=True)
@@ -7930,6 +7940,62 @@ class InstrumentalWork(models.Model):
     bars = models.PositiveSmallIntegerField(default=4)
     brief = models.TextField(blank=True, default="")
     tracks = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class BudgetLine(models.Model):
+    """One income or expense in BudgetZ — typed by the member, or imported from a bank they linked
+    (StatZ). `ext_id` is the bank's own id so a re-import never doubles a line."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="budget_lines")
+    kind = models.CharField(max_length=8, default="expense")      # income | expense
+    category = models.CharField(max_length=40, default="Other")
+    amount_cents = models.PositiveIntegerField()
+    on = models.DateField()
+    note = models.CharField(max_length=120, blank=True, default="")
+    source = models.CharField(max_length=8, default="manual")     # manual | bank
+    ext_id = models.CharField(max_length=80, blank=True, default="")
+
+    class Meta:
+        ordering = ["-on", "-id"]
+        indexes = [models.Index(fields=["user", "on"])]
+
+
+class BudgetLimit(models.Model):
+    """A member's monthly limit for one category."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="budget_limits")
+    category = models.CharField(max_length=40)
+    monthly_cents = models.PositiveIntegerField()
+
+    class Meta:
+        unique_together = ("user", "category")
+
+
+class BudgetBank(models.Model):
+    """A bank account a StatZ member linked through Stripe Financial Connections. Only Stripe's
+    account id and a display label are kept — no credentials ever reach this server."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="budget_banks")
+    stripe_account = models.CharField(max_length=80)
+    label = models.CharField(max_length=80, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "stripe_account")
+
+
+class AIPreset(models.Model):
+    """A StatZ member's saved mix preset for a TYPE of music (a genre or a mood): nudges per part
+    group, written by the AI coach from the type they named. Theirs to keep, rename and reuse."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ai_presets")
+    kind = models.CharField(max_length=40)
+    nudges = models.JSONField(default=dict)
+    note = models.CharField(max_length=300, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
