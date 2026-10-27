@@ -32,6 +32,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import refinput
 from .priorities import clause as priorities_clause
 from .catalog import UNLIMITED_CHARS as UNLIMITED_BRIEF
 from .catalog import WRITER_BRIEF_CHARS, ai_cost, over_writer_brief, writer_brief_chars
@@ -579,13 +580,18 @@ def _work_dict(w, user=None):
 
 
 def write_piece(user, kind, topic, genre="", majority=None, minority=None, *, spend_note=None, extra_inputs=None,
-                hashtags=None, priorities=None):
+                hashtags=None, priorities=None, reference=None):
     """Write ONE piece for `user` and bill it, or answer why not — the whole of what
     pressing Write does, so that every door into the writer (the screen, a past take's
     promo post) is the same run with the same price, the same "a failed run is not
     charged" and the same saved SentenceWork. `kind` and `topic` are already validated
     by the caller; everything else is checked here."""
     deadline = Deadline(BUDGET_SECONDS)
+    # A sound or picture to start from: checked before anything is priced, so a bad file is a
+    # sentence and no charge. Only the craft kinds take one.
+    ref, ref_problem = refinput.parse(reference if kind in PRIORITY_KINDS else None)
+    if ref_problem:
+        return Response({"detail": ref_problem}, status=status.HTTP_400_BAD_REQUEST)
     need = KINDS[kind].get("personas")
     if need and not (persona_keys(user) & set(need)):
         return Response({"detail": f"{KINDS[kind]['label']}s are written for members with the "
@@ -610,7 +616,8 @@ def write_piece(user, kind, topic, genre="", majority=None, minority=None, *, sp
                                                         owner=bool(is_owner_candidate(user)),
                                                         voice=resolve(user, "writer"),
                                                         hashtags=hashtags if kind in HASHTAG_KINDS else None)
-                                      + priorities_clause("writing", priorities)}]}],
+                                      + priorities_clause("writing", priorities) + refinput.guard(ref)},
+                                     *([refinput.part(ref)] if ref else [])]}],
             "generationConfig": {"temperature": 0.9}}
     try:
         deadline.check("the request was still being prepared when the time ran out")
@@ -731,7 +738,8 @@ class SentenceView(APIView):
         minority = _int(d.get("minority"), 0, 4) if kind == "lyrics" else None
         return write_piece(request.user, kind, topic, genre, majority, minority,
                            hashtags=clean_hashtags(d.get("hashtags")) if kind in HASHTAG_KINDS else None,
-                           priorities=d.get("priorities") if kind in PRIORITY_KINDS else None)
+                           priorities=d.get("priorities") if kind in PRIORITY_KINDS else None,
+                           reference=d.get("reference") if kind in PRIORITY_KINDS else None)
 
 
 class SentenceRoyaltyView(APIView):

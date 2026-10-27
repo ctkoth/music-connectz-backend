@@ -27,6 +27,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import refinput
 from .priorities import clause as priorities_clause
 from .catalog import ai_cost, over_char_limit
 from .deadline import Deadline, Expired
@@ -320,6 +321,10 @@ class InstrumentalView(APIView):
             return Response({"detail": f"BPM between {BPM_MIN} and {BPM_MAX}."}, status=status.HTTP_400_BAD_REQUEST)
         if bars not in BARS:
             return Response({"detail": "4 or 8 bars."}, status=status.HTTP_400_BAD_REQUEST)
+        # A sound or picture to start from: validated before anything is priced.
+        ref, ref_problem = refinput.parse(d.get("reference"))
+        if ref_problem:
+            return Response({"detail": ref_problem}, status=status.HTTP_400_BAD_REQUEST)
 
         api_key = _key()
         if not api_key:
@@ -332,7 +337,9 @@ class InstrumentalView(APIView):
             return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
                             status=status.HTTP_402_PAYMENT_REQUIRED)
 
-        body = {"contents": [{"parts": [{"text": prompt_for(genre, instruments, bpm, key, bars, brief, d.get("priorities"))}]}],
+        body = {"contents": [{"parts": [{"text": prompt_for(genre, instruments, bpm, key, bars, brief, d.get("priorities"))
+                                         + refinput.guard(ref)},
+                                        *([refinput.part(ref)] if ref else [])]}],
                 "generationConfig": {"temperature": 0.9, "responseMimeType": "application/json"}}
         try:
             deadline.check("the request was still being prepared when the time ran out")
