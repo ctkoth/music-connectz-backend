@@ -1293,6 +1293,9 @@ def session_summary(sess):
     return {
         "session_id": sess.id,
         "routine_title": sess.routine.title if sess.routine_id and sess.routine else None,
+        # So the ended-session card can offer "Improve this routine" and land on THAT routine. None for a custom
+        # session, and after the routine is deleted (SET_NULL) — the card then offers nothing rather than a dead door.
+        "routine_id": sess.routine_id if sess.routine_id and sess.routine else None,
         "started_at": sess.started_at.isoformat(),
         "ended_at": sess.ended_at.isoformat() if sess.ended_at else None,
         "backfilled": sess.backfilled,

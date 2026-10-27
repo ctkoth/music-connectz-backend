@@ -1570,6 +1570,16 @@ class BodieZSessionSummaryTests(TestCase):
         self.assertEqual(vol[0]["value_kg"], 400.0)
         self.assertEqual(vol[0]["previous_kg"], 200.0)
 
+    def test_the_summary_names_the_routine_so_the_card_can_land_on_it(self):
+        push = BodieZRoutine.objects.create(user=self.user, title="Push day", exercises=[])
+        s = BodieZSession.objects.create(user=self.user, routine=push)
+        self.client.post(f"/api/economy/bodiez/sessions/{s.id}/sets/", {"exercise_id": self.press.id, "reps": 8, "weight_kg": 20}, format="json")
+        sm = self.client.patch(f"/api/economy/bodiez/sessions/{s.id}/", {"finish": True}, format="json").data["summary"]
+        self.assertEqual(sm["routine_id"], push.id)
+        push.delete()                                                # the routine goes: no dead door is offered
+        self.assertIsNone(self.client.get(f"/api/economy/bodiez/sessions/{s.id}/summary/").data["routine_id"])
+        self.assertIsNone(self._finish([(self.press, 10, 20)])["routine_id"])      # a custom session has none
+
     def test_summary_names_the_members_coaches_and_is_reopenable(self):
         from .models import StudentRelationship
         coach = User.objects.create_user(username="coachy", password="pw")

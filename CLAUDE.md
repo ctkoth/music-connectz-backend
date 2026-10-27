@@ -2804,3 +2804,6 @@ the routine AS WRITTEN against rules that are written down, each shown passed or
 - **Found on the way:** the board (`routines/` cards are drawn from `bodiez/board/`) never carried `coach_rating`, so the Thorough
   line on a routine card read "not rated yet" for everybody. Both ratings ride the board now, in a constant number of queries.
 - Never feeds a skill level, leaderboard, price or anything else — it only labels a routine.
+
+`session_summary` carries `routine_id` (None for a custom session, and None once the routine is deleted) so the ended-session card can
+offer "Improve this routine" and LAND on that routine; a routine that no longer exists offers nothing rather than a dead door.
