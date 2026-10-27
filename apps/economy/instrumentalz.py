@@ -150,14 +150,17 @@ def prompt_for(genre, instruments, bpm, key, bars, brief="", priorities=None):
         + (priorities_clause("instrumental", priorities).lstrip("\n") + "\n" if priorities else "")
         + f"Write one part for each of these instruments: {parts}.\n"
         "Reply with JSON only, shaped exactly like:\n"
-        '{"tracks": [{"instrument": "<one of the ids above>", "gain": <0-1>, '
+        '{"tracks": [{"instrument": "<one of the ids above>", "gain": <0-1>, "pan": <-1 to 1>, "space": <0-1>, '
+        '"compress": <0-1>, "tone": {"low": <dB>, "mid": <dB>, "high": <dB>}, '
         '"notes": [[pitch, start_beat, length_beats, velocity], ...]}]}\n'
         f"pitch is a MIDI note number 0-127; start_beat is from 0 to {bars * 4} (quarter-note beats, "
         "decimals allowed); velocity 1-127. Stay in the key. For drums use General MIDI drum notes "
         "(36 kick, 38 snare, 42 closed hat, 46 open hat, 49 crash). Make the bass lock with the kick, "
         "give the harmony real chord movement, and make the loop repeat seamlessly. "
-        "\"gain\" is the level a professional mix engineer would set that part at in the finished mix, "
-        "0 (silent) to 1 (full): keep the drums and bass forward, the lead present, pads and strings behind."
+        "Also mix it as a professional engineer would, per part: \"gain\" the level 0 (silent) to 1 (full), "
+        "\"pan\" -1 (left) to 1 (right), \"space\" 0 (dry, up front) to 1 (deep in a room), \"compress\" 0 (none) to 1 "
+        "(heavy), and \"tone\" low/mid/high EQ in dB (-6 to 6). Drums and bass forward and centred, the lead "
+        "present, pads and strings behind and wide, parts that share a range panned apart."
     )
 
 
@@ -170,44 +173,13 @@ def _first_json(raw):
         return None
 
 
-# Where a part sits in a finished mix when the coach did not say. Drums and bass forward, the lead
-# present, the beds behind. Used only as a fallback for a missing or unreadable gain.
-ROLE_GAIN = {"drums": 0.9, "bass": 0.85, "synth_bass": 0.85, "lead": 0.8, "electric_guitar": 0.75,
-             "piano": 0.75, "epiano": 0.7, "acoustic_guitar": 0.7, "brass": 0.7, "organ": 0.6,
-             "strings": 0.6, "choir": 0.5, "pad": 0.5}
-
-
-def clean_gain(value, inst):
-    """0-1, two places. The coach's own number when it is one; else the part's usual place."""
-    try:
-        return round(max(0.0, min(1.0, float(value))), 2)
-    except (TypeError, ValueError):
-        return ROLE_GAIN.get(inst, 0.75)
-
-
-def gain_of(track):
-    """A stored track's level. Pieces made before gains existed play as composed (1.0)."""
-    return clean_gain(track.get("gain", 1.0), track.get("instrument"))
-
-
-def mix_rights(user):
-    """What this member may do with the levels. The coach sets them for everybody; Premium can
-    change them (to hear or download a version); StatZ can change them AND keep them."""
-    from .models import TIER_DEBUG, TIER_PREMIUM, TIER_STATZ
-    tier = membership_for(user).tier
-    return {"can_change": tier in (TIER_PREMIUM, TIER_STATZ, TIER_DEBUG),
-            "can_keep": tier in (TIER_STATZ, TIER_DEBUG)}
-
-
-def clean_gains(raw):
-    """{instrument: 0-1} from a request, keeping only known instruments."""
-    if not isinstance(raw, dict):
-        return {}
-    return {k: clean_gain(v, k) for k, v in raw.items() if k in INSTRUMENTS}
+from . import instrumental_mix as mixmod
+from .instrumental_mix import rights as mix_rights
 
 
 def with_mix(work_dict, user):
-    return {**work_dict, "mix": {"gains": {t["instrument"]: gain_of(t) for t in work_dict["tracks"]},
+    """The piece plus its mix per instrument and what THIS member may do with it."""
+    return {**work_dict, "mix": {"params": {t["instrument"]: mixmod.mix_of(t) for t in work_dict["tracks"]},
                                  **mix_rights(user)}}
 
 
@@ -231,7 +203,7 @@ def clean_tracks(data, instruments, bars):
                 continue
             notes.append([pitch, round(start, 3), round(min(length, beats - start), 3), max(1, min(127, vel))])
         if notes:
-            out.append({"instrument": inst, "gain": clean_gain(t.get("gain"), inst),
+            out.append({"instrument": inst, **mixmod.store(mixmod.fill(t, inst)),
                         "notes": sorted(notes, key=lambda x: x[1])})
         if len(out) >= MAX_TRACKS:
             break
@@ -260,7 +232,7 @@ def _track(events):
     return _chunk(b"MTrk", data + b"\x00\xff\x2f\x00")
 
 
-def midi_bytes(tracks, bpm, key, title="", gains=None):
+def midi_bytes(tracks, bpm, key, title="", mix=None):
     """A format-1 Standard MIDI File: a tempo track, then one track per part."""
     sf, mi = key_signature(key)
     tempo = int(60_000_000 / bpm)
@@ -282,9 +254,15 @@ def midi_bytes(tracks, bpm, key, title="", gains=None):
         evs.append((0, b"\xff\x03" + _vlq(len(label)) + label))
         if not drums:
             evs.append((0, bytes([0xC0 | channel, INSTRUMENTS[t["instrument"]]["program"]])))
-        g = (gains or {}).get(t["instrument"], gain_of(t))
+        # The track's own mix, over which a named version (Premium+) can lay changes. A parameter the
+        # track never had stays out of the file, so a piece made before the mix existed downloads as it was.
+        override = (mix or {}).get(t["instrument"], {})
+        m = {**mixmod.mix_of(t), **override}
+        present = set(mixmod.flat(t)) | set(override)
+        for cc, val in mixmod.midi_cc(m, present):
+            evs.append((0, bytes([0xB0 | channel, cc, max(0, min(127, val))])))
         for pitch, start, length, vel in t["notes"]:
-            vel = max(1, min(127, round(vel * g)))
+            vel = max(1, min(127, round(vel * m["gain"])))
             on = int(start * TPB)
             off = max(on + 1, int((start + length) * TPB))
             evs.append((on, bytes([0x90 | channel, pitch, vel])))
@@ -446,14 +424,17 @@ class InstrumentalMidiView(APIView):
         if not w:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         title = f"{w.genre or 'Instrumental'} in {w.key} at {w.bpm} BPM"
-        # Levels in a download: the coach's (or, for StatZ, the saved ones) by default. A member
-        # who may change them can name a version in the URL (?gains=drums:0.9,bass:0.6) without
-        # keeping it; anybody else gets the piece as it was mixed for them.
-        gains = None
-        raw = request.query_params.get("gains", "")
+        # The mix in a download: the coach's (or, for StatZ, the kept one) by default. A member who may
+        # change it can name a version in the URL (?mix=<json>) without keeping it; anybody else gets the
+        # piece as it was mixed for them.
+        version = None
+        raw = request.query_params.get("mix", "")
         if raw and mix_rights(request.user)["can_change"]:
-            gains = clean_gains({p.split(":")[0]: p.split(":")[1] for p in raw.split(",") if p.count(":") == 1})
-        resp = HttpResponse(midi_bytes(w.tracks, w.bpm, w.key, title, gains), content_type="audio/midi")
+            try:
+                version = mixmod.clean_mix(json.loads(raw), [t["instrument"] for t in w.tracks])
+            except ValueError:
+                version = None
+        resp = HttpResponse(midi_bytes(w.tracks, w.bpm, w.key, title, version), content_type="audio/midi")
         # "#" would be dropped as punctuation and F# minor would download as
         # "f-minor", the name of a different key. Spell the sharp out first.
         slug = re.sub(r"[^a-z0-9]+", "-", title.lower().replace("#", " sharp ")).strip("-")[:60] or "instrumental"
@@ -574,11 +555,12 @@ class InstrumentalInspirationView(APIView):
 
 
 class InstrumentalMixView(APIView):
-    """PATCH instrumentalz/<id>/mix/ {gains} — keep a version of the levels. StatZ only.
+    """PATCH instrumentalz/<id>/mix/ {mix: {instrument: {gain, pan, space, compress, low, mid, high}}} —
+    keep a version of the mix. StatZ only.
 
-    The coach sets the levels when the piece is made, for everybody. Premium can change them to
-    hear or download a version (nothing is stored); only StatZ keeps one, because a kept mix is a
-    saved preference — listed in `statz_trial.DRIVERS` as not part of the free sample."""
+    The coach sets the mix when the piece is made, for everybody. Premium can change it to hear or
+    download a version (nothing is stored); only StatZ keeps one, because a kept mix is a saved
+    preference — listed in `statz_trial.DRIVERS` as not part of the free sample."""
 
     permission_classes = [IsAuthenticated]
 
@@ -588,14 +570,35 @@ class InstrumentalMixView(APIView):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         rights = mix_rights(request.user)
         if not rights["can_keep"]:
-            return Response({"detail": ("Keeping your own levels is StatZ. " if rights["can_change"] else
-                                        "Changing the levels is Premium, and keeping them is StatZ. ")
-                                       + "The coach's levels stay as they were.", **rights},
+            return Response({"detail": ("Keeping your own mix is StatZ. " if rights["can_change"] else
+                                        "Changing the mix is Premium, and keeping it is StatZ. ")
+                                       + "The coach's mix stays as it was.", **rights},
                             status=status.HTTP_403_FORBIDDEN)
-        gains = clean_gains((request.data or {}).get("gains"))
-        if not gains:
-            return Response({"detail": "Send the levels as {instrument: 0-1}."}, status=status.HTTP_400_BAD_REQUEST)
-        tracks = [{**t, "gain": gains.get(t["instrument"], gain_of(t))} for t in w.tracks]
+        changes = mixmod.clean_mix((request.data or {}).get("mix"), [t["instrument"] for t in w.tracks])
+        if not changes:
+            return Response({"detail": "Send the mix as {instrument: {gain, pan, space, compress, low, mid, high}}."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        tracks = []
+        for t in w.tracks:
+            merged = {**mixmod.mix_of(t), **changes.get(t["instrument"], {})}
+            tracks.append({**t, **mixmod.store(merged)})
         w.tracks = tracks
         w.save(update_fields=["tracks"])
         return Response(with_mix(_work_dict(w), request.user))
+
+
+class InstrumentalMixSheetView(APIView):
+    """GET instrumentalz/<id>/mixsheet/ — the mix as plain text for whoever mixes it (every tier).
+
+    EQ and compression cannot ride in a MIDI file, so this is how they leave the app. It reads the
+    stored mix (the coach's, or the one StatZ kept) and says they are starting points."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        w = InstrumentalWork.objects.filter(pk=pk, user=request.user).first()
+        if not w:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        labels = {k: v["label"] for k, v in INSTRUMENTS.items()}
+        text = mixmod.sheet(w.tracks, labels)
+        return Response({"filename": f"mix-sheet-{w.id}.txt", "content_type": "text/plain", "text": text})

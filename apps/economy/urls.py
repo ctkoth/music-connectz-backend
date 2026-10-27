@@ -83,7 +83,7 @@ from .viewz import ViewBeatView, ViewCountsView, ViewMineView, ViewPostResultsVi
 from .metricz import HoroscopeView, MetricZView, SubstanceScaleView
 from .videoz import VideoDetailView, VideoView
 from .videostitch import VideoStitchDetailView, VideoStitchView
-from .instrumentalz import InstrumentalInspirationView, InstrumentalMidiView, InstrumentalMixView, InstrumentalMoodView, InstrumentalView
+from .instrumentalz import InstrumentalInspirationView, InstrumentalMidiView, InstrumentalMixSheetView, InstrumentalMixView, InstrumentalMoodView, InstrumentalView
 from .intelligencez import IntelligenceHubView
 from .skillzhub import SkillZHubView
 from .mixz import MixDetailView, MixView
@@ -260,6 +260,7 @@ urlpatterns = [
     path("instrumentalz/moods/", InstrumentalMoodView.as_view(), name="economy-instrumentalz-moods"),
     path("instrumentalz/<int:pk>/midi/", InstrumentalMidiView.as_view(), name="economy-instrumentalz-midi"),
     path("instrumentalz/<int:pk>/mix/", InstrumentalMixView.as_view(), name="economy-instrumentalz-mix"),
+    path("instrumentalz/<int:pk>/mixsheet/", InstrumentalMixSheetView.as_view(), name="economy-instrumentalz-mixsheet"),
     # Mix ConnectZ — mastering that runs on the member's device; this keeps the
     # ladder and the masters they chose to save. The hub is IntelligenceZ's front
     # door: every app in it, its price before it is opened, and recent pieces.
