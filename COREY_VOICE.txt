@@ -564,6 +564,70 @@ Rules for using it:
   literal, and his own example above.)
 
 ================================================================================
+PART 9 — IMAGERY: NAMES WITH A Z, AND THE EMOJI AS THE PICTURE
+================================================================================
+
+Corey's voice is not only sentences. Half of what a member reads is a NAME and
+an IMAGE, and both follow rules as fixed as the reversal in 2.1.
+
+--------------------------------------------------------------------------------
+9.1  A Z WHERE AN S WOULD BE
+--------------------------------------------------------------------------------
+Apps, badges, lists and anything plural take a Z: SingZ, BattleZ, VybeZ,
+InventoryZ, High NoteZ, Hot BarZ, Royal RatingZ, Cut RoyaltieZ. The Z is lit in
+the accent colour on every neon tile and medal (`wordmark()` in both icon
+generators), so the brand is the last letter of the word.
+
+  * The Z replaces the plural or the final s — it is never bolted onto a word
+    that has no s in it. "Deep PocketZ", not "DeepZ Pocket".
+  * One exception, by Corey's call: THOROUGH has no Z. It is the word for every
+    rating (8b), and a rating word stays plain so it reads as a measurement,
+    not a brand.
+  * Names are short enough to sit under a 36px tile: two words, about 13
+    characters at most. Longer, and the wordmark shrinks until nobody reads it.
+
+--------------------------------------------------------------------------------
+9.2  THE NAME IS AN IMAGE BEFORE IT IS A LABEL
+--------------------------------------------------------------------------------
+A good name puts a picture in the head that is TRUE of the thing:
+
+    High NoteZ    a singer hitting it          (3 SingZ takes scored 8+)
+    Deep PocketZ  a drummer sitting in the groove
+    Golden BowZ   a violin, lit
+    Royal RatingZ the room crowning a track    (a royalty boost it earned)
+    Cut RoyaltieZ scissors on a payout         (a royalty cut it earned)
+
+The test is the substance rule wearing a picture: does the image describe what
+the member DID? "Legendary" over a rating of 8 is earned; "Legendary" over a
+signup is decoration with a crown on it.
+
+--------------------------------------------------------------------------------
+9.3  THE EMOJI IS THE PICTURE, AND IT SITS ON THE WORD
+--------------------------------------------------------------------------------
+From 2.9: an emoji attaches to the word it labels, or stands in for it when
+there is no room — never decoration scattered beside a sentence.
+
+  * Every badge, tab and rung has ONE emoji that is its picture: 💯 Thorough,
+    🥈 Decent, 🥇 Legendary, 🌟 Supreme, 💎 Perfect, 🎤 High NoteZ, 🎒 InventoryZ.
+    One, not three. A row of emoji is a wall, and a wall says nothing.
+  * The emoji IS the placeholder art. Until Corey draws a piece, his emoji sits
+    inside a neon frame (a hexagon for a badge, a rounded tile for an app) and
+    the screen is finished, not waiting. His art replaces the frame, never the
+    other way round.
+  * Resource emoji are not imagery, they are currency: ⚡ 🍥 🏷️ 💵 ⭐ always
+    mean exactly one thing and are imported, never retyped (Rule 1).
+  * A penalty gets an image that says what happened (✂️ a cut), never a shaming
+    one. The picture describes the record, not the member.
+
+--------------------------------------------------------------------------------
+9.4  NEON, ONE BOX OF PENS
+--------------------------------------------------------------------------------
+The look is neon on near-black: cyan, pink, purple, gold, ember, emerald, and
+nothing else (the palette in tools/make-neon-icons.mjs). Heavy strokes, one
+glow, the Z lit in the accent. A set is a set because it draws from one box of
+pens — a new icon is a glyph and a colour, never a redraw of the frame.
+
+================================================================================
 PART 8 — THE ONE-PARAGRAPH SUMMARY
 ================================================================================
 
@@ -573,6 +637,7 @@ Never leave anyone on a screen with nowhere to go. When something fails, say
 which failure it was and what to do next. Write every comment for the person
 who will want to delete the line, and every commit message as the sentence that
 would have prevented the bug. Name your own broken parts, keep them named, and
-say what it would take to fix them.
+say what it would take to fix them. Name things with a Z and a true picture,
+and let one emoji be the image until the art is drawn.
 
 ================================================================================
