@@ -475,10 +475,14 @@ class TemporaryBadgesTests(BadgeBase):
         self.assertTrue(Badge.objects.filter(user=self.user, key="collaborator").exists())
 
     def test_only_the_median_badges_are_temporary(self):
-        # Plus the Thorough ladder, which tracks a 28-day window (thoroughz.py).
+        # Plus the windowed ones: the Thorough ladder (28 days of sessions), a
+        # coach badge per coach (30 days of takes) and the royalty pair (a
+        # live median) — badgez_wave.py, thoroughz.py.
         from .thoroughz import KEYS
+        from .badgez_wave import COACH_BADGES
         temp = {k for k, s in BADGES.items() if s.get("temporary")}
-        self.assertEqual(temp, {"gifted", "sexy", *KEYS})
+        self.assertEqual(temp, {"gifted", "sexy", *KEYS, *(b[0] for b in COACH_BADGES.values()),
+                                "royal_ratingz", "cut_royaltiez"})
 
     def test_a_row_says_whether_it_can_lapse(self):
         # The condition has to be MET, not just the badge granted: reading the

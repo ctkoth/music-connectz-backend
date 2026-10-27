@@ -136,7 +136,7 @@ from .venuez import (VenueBookView, VenueBookingCancelView, VenueQuoteView,
 from .collab_post import CollabNeedsView, CollabPostView
 from .payouts import PayoutConnectView, PayoutRefreshView, PayoutsView
 from .ai_models import AiModelView
-from .badgez import BadgeGiftView, BadgezView
+from .badgez import BadgeGiftView, BadgeHoldersView, BadgezView
 from .thoroughz import ThoroughZView
 from .inventoryz import InventoryView
 from .bugz import BugTriageView, BugzView
@@ -456,6 +456,7 @@ urlpatterns = [
     path("bugz/", BugzView.as_view(), name="economy-bugz"),
     path("bugz/<int:pk>/", BugTriageView.as_view(), name="economy-bugz-triage"),
     path("badgez/gift/", BadgeGiftView.as_view(), name="economy-badgez-gift"),
+    path("badgez/holders/", BadgeHoldersView.as_view(), name="economy-badgez-holders"),
     path("ratez/", RatezView.as_view(), name="economy-ratez"),
     path("ratez/kinds/", RatingKindsView.as_view(), name="economy-ratez-kinds"),
     path("ratez/queue/", RateQueueView.as_view(), name="economy-ratez-queue"),

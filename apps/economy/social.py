@@ -1517,8 +1517,12 @@ class MembersView(APIView):
         if origin[0] is not None:
             results.sort(key=lambda c: (c.get("distance_km") is None, c.get("distance_km") or 0))
         else:
-            from .models import Badge
-            boosted = set(Badge.objects.filter(key="sexy", visible=True)
+            # Any badge whose effect is a discovery boost, read off the effect
+            # rather than the key "sexy", so the next badge to carry it works
+            # without a second edit here. Visible badges only, as before.
+            from .models import BADGES, Badge
+            boost_keys = [k for k, sp in BADGES.items() if sp.get("effects", {}).get("social_boost")]
+            boosted = set(Badge.objects.filter(key__in=boost_keys, visible=True)
                           .values_list("user__username", flat=True))
             results.sort(key=lambda c: c.get("username") not in boosted)
         return Response({

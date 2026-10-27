@@ -884,10 +884,15 @@ AI_ENERGY_TIER_FACTOR = {"free": 1.0, "premium": 0.5, "statz": 0.25, "debug": 0.
 
 
 def ai_energy_cost(user, engine=None, tier=None):
+    """The ⚡ one AI run takes from this member — the number the screen prices the
+    run at AND the number `_take_ai_energy` takes, so a coach badge's discount
+    (`ai_energy_off_pct`, badgez_wave.py) is on the button, not discovered after."""
     import math
+    from .badgez_wave import AI_ENERGY_OFF_CAP
     tier = tier or membership_for(user).tier
     base = AI_ENERGY_BASE.get(str(engine or "").lower(), 1)
-    return max(1, math.ceil(base * AI_ENERGY_TIER_FACTOR.get(tier, 1.0)))
+    off = min(AI_ENERGY_OFF_CAP, int(badge_effects(user).get("ai_energy_off_pct", 0) or 0)) if user else 0
+    return max(1, math.ceil(base * AI_ENERGY_TIER_FACTOR.get(tier, 1.0) * (100 - off) / 100))
 
 
 def _take_ai_energy(user, engine, note):
@@ -1970,7 +1975,10 @@ def submission_cap_for(user):
     tier = membership_for(user).tier if user and user.is_authenticated else "free"
     base = SUBMISSION_DAILY_CAP.get(tier, SUBMISSION_DAILY_CAP["free"])
     row = DailySubmission.objects.filter(user=user, day=timezone.localdate()).first() if user and user.is_authenticated else None
-    return base + (row.bonus if row else 0)
+    # Collaborator's +5. The badge said so from the day it shipped and this line
+    # did not exist, so the cap a Collaborator hit was everybody else's.
+    badge = int(badge_effects(user).get("submission_bonus", 0) or 0) if user and user.is_authenticated else 0
+    return base + (row.bonus if row else 0) + badge
 
 
 def submissions_used_today(user):
@@ -4785,8 +4793,11 @@ BADGES = {
         "name": "Collaborator", "emoji": "🤝", "title": "Collaborator", "gifted": False,
         "desc": "Ten pieces of work shipped with other people on them.",
         "how": "Be credited on 10 posts that came out of a CollabZ deal.",
-        "effects": {"submission_bonus": 5, "needs_priority": True},
-        "effect_note": "+5 submissions a day, and your open needs list first.",
+        # "Your open needs list first" was half this note and nothing read it:
+        # there is no platform-wide needs list for it to sort, only each deal's
+        # own. The half that is real is the one that stays.
+        "effects": {"submission_bonus": 5},
+        "effect_note": "+5 submissions a day.",
         "check": lambda u: _shipped_collabs(u) >= 10,
     },
     "straight_shooter": {
@@ -4926,7 +4937,7 @@ BADGES = {
     # faking, and this one only shows effort.
     "thorough": {
         "name": "Thorough", "emoji": "💯", "title": "Thorough 💯", "gifted": False,
-        "temporary": True, "ladder": "thorough",
+        "temporary": True, "ladder": "thorough", "icon": "badge_thorough.png",
         "desc": "You train thoroughly: a Thorough rating above 5.",
         "how": "Hold a Thorough rating of 6 across at least 3 lifts, from finished BodieZ sessions in the last 28 days.",
         "effects": {"achievement": True},
@@ -4935,7 +4946,7 @@ BADGES = {
     },
     "decent": {
         "name": "Decent", "emoji": "🥈", "title": "Decent 🥈", "gifted": False,
-        "temporary": True, "ladder": "thorough",
+        "temporary": True, "ladder": "thorough", "icon": "badge_decent.png",
         "desc": "A Thorough rating of 7.",
         "how": "Hold a Thorough rating of 7 across at least 3 lifts in the last 28 days.",
         "effects": {"achievement": True},
@@ -4944,7 +4955,7 @@ BADGES = {
     },
     "legendary": {
         "name": "Legendary", "emoji": "🥇", "title": "Legendary 🥇", "gifted": False,
-        "temporary": True, "ladder": "thorough",
+        "temporary": True, "ladder": "thorough", "icon": "badge_legendary.png",
         "desc": "A Thorough rating of 8.",
         "how": "Hold a Thorough rating of 8 across at least 3 lifts in the last 28 days.",
         "effects": {"achievement": True},
@@ -4953,7 +4964,7 @@ BADGES = {
     },
     "supreme": {
         "name": "Supreme", "emoji": "🌟", "title": "Supreme 🌟", "gifted": False,
-        "temporary": True, "ladder": "thorough",
+        "temporary": True, "ladder": "thorough", "icon": "badge_supreme.png",
         "desc": "A Thorough rating of 9.",
         "how": "Hold a Thorough rating of 9 across at least 3 lifts in the last 28 days.",
         "effects": {"achievement": True},
@@ -4962,7 +4973,7 @@ BADGES = {
     },
     "perfect": {
         "name": "Perfect", "emoji": "💎", "title": "Perfect 💎", "gifted": False,
-        "temporary": True, "ladder": "thorough",
+        "temporary": True, "ladder": "thorough", "icon": "badge_perfect.png",
         "desc": "A Thorough rating of 10.",
         "how": "Hold a Thorough rating of 10 across at least 3 lifts in the last 28 days.",
         "effects": {"achievement": True},
@@ -4970,6 +4981,12 @@ BADGES = {
         "check": lambda u: _thorough_is(u, "perfect"),
     },
 }
+
+# Wave one: a badge per coach, and the royalty pair (badgez_wave.py). Kept in its
+# own module so the reasoning for each sits beside it; registered here so every
+# reader of BADGES — the catalogue, recheck, worn chips — sees one list.
+from .badgez_wave import specs as _wave_specs  # noqa: E402
+BADGES.update(_wave_specs())
 
 
 class Badge(models.Model):
@@ -5025,10 +5042,17 @@ def badge_effects(user):
 
 def grant_badge(user, key, by=None):
     """Give a badge. Returns (badge, created)."""
+    spec = BADGES.get(key, {})
+    # A penalty is hidden from other members until its holder chooses to show
+    # it: an achievement is a disclosure, and a penalty is a louder one.
     badge, created = Badge.objects.get_or_create(
-        user=user, key=key, defaults={"awarded_by": by})
+        user=user, key=key, defaults={"awarded_by": by, "visible": not spec.get("penalty")})
+    if created and spec.get("penalty"):
+        notify(user, "badge",
+               f"{spec.get('emoji', '🏅')} {spec.get('name', key)} applies to you — {spec.get('how', '')}".strip(),
+               actor=by)
+        return badge, created
     if created:
-        spec = BADGES.get(key, {})
         # A badge granting a tier applies it immediately — a tier that only
         # takes effect on the next unrelated save is a promise with a delay
         # nobody explained.
@@ -5038,6 +5062,11 @@ def grant_badge(user, key, by=None):
             if m.tier != tier:
                 m.tier = tier
                 m.save(update_fields=["tier", "updated_at"])
+        # Bug Hunter's +50 🏷️, once, when the badge lands. The badge promised it
+        # and nothing paid it.
+        grant = int(spec.get("effects", {}).get("promptz_grant", 0) or 0)
+        if grant:
+            award_promptz(user, grant, f"{spec.get('name', key)} badge", app_key="badgez")
         notify(user, "badge",
                f"{spec.get('emoji', '🏅')} You earned {spec.get('name', key)} — "
                f"{spec.get('effect_note', '')}".strip(), actor=by)
@@ -5063,6 +5092,9 @@ def revoke_badge(user, key, quiet=False):
         p.save(update_fields=["badge_title", "updated_at"])
     if quiet:
         return True
+    if spec.get("penalty"):
+        notify(user, "badge", f"{spec.get('emoji', '🏅')} {spec.get('name', key)} has lifted.")
+        return True
     notify(user, "badge",
            f"{spec.get('emoji', '🏅')} {spec.get('name', key)} has lapsed — "
            f"{spec.get('how', '')} Earn it back and it returns by itself.".strip())
@@ -5080,7 +5112,9 @@ def recheck_badges(user):
     Permanent badges are never revoked here. A shipped collab or a founding
     seat is a thing that HAPPENED; no later state undoes it.
     """
-    user._thorough_key = None      # one fresh reading per recheck, never a stale one
+    # One fresh reading per recheck, never a stale one from an earlier call.
+    for attr in ("_thorough_key", "_hot_counts", "_royalty_reading"):
+        setattr(user, attr, None)
     have = {b.key for b in Badge.objects.filter(user=user)}
     won, lost = [], []
     verdicts = {}

@@ -76,6 +76,18 @@ def _locked_wallet(user):
     return Wallet.objects.select_for_update().get(user=user)
 
 
+def stake_for(deal, user):
+    """The good-faith stake THIS member puts up to fund their share.
+
+    Straight Shooter waives it ("your record is the stake") — the badge said so
+    from the day it shipped and the fund view took the full stake anyway. Read
+    here so the card and the Fund button state the same number the fund takes."""
+    stake = int(deal.stake_spinaz or 0)
+    if stake and user is not None and badge_effects(user).get("stake_waived"):
+        return 0
+    return stake
+
+
 def deal_dict(deal, me=None, days_cache=None, marks=None):
     # Thorough marks by name (thoroughz.py). A list hands in one batch; without
     # one, they are remembered in the same shared cache the escrow window uses
@@ -99,6 +111,10 @@ def deal_dict(deal, me=None, days_cache=None, marks=None):
         "currency": deal.currency,
         "status": deal.status,
         "stake_spinaz": deal.stake_spinaz,
+        # What the viewer would put up — 0 for a Straight Shooter — and why.
+        **({"my_stake": stake_for(deal, me),
+            "stake_waived": bool(deal.stake_spinaz) and stake_for(deal, me) == 0}
+           if me is not None and any(p.get("username") == me.username for p in (deal.participants or [])) else {}),
         "gates": deal.gates or {},
         # The work itself, in the PostZ format.
         "description": deal.description,
@@ -727,7 +743,7 @@ class CollabFundView(APIView):
             if entry.get("funded"):
                 return Response(deal_dict(deal, request.user))  # idempotent
             pays = int(entry.get("pays_cents") or 0)
-            stake = int(deal.stake_spinaz or 0)
+            stake = stake_for(deal, request.user)
             w = _locked_wallet(request.user)
             if deal.currency == CollabDeal.CURRENCY_MONEY:
                 if w.money_cents < pays:

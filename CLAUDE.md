@@ -2844,7 +2844,7 @@ last 28 days — `bodiez.lift_thoroughness`, the one formula, never re-scored he
   time**; `recheck_badges` evaluates every check first and a rung given up while still on the ladder is revoked QUIETLY —
   climbing is not announced as a lapse.
 - **Temporary**: the window is 28 days, so the mark must be able to fall. It moves when a session FINISHES (hook in the
-  session PATCH, swallowed) and `manage.py refresh_thorough` (hourly cron, holders only) takes down a mark nobody trained for.
+  session PATCH, swallowed) and `manage.py refresh_badges` (hourly cron, holders of any temporary badge) takes down a mark nobody trained for.
 - **`MIN_LIFTS` (3)** distinct lifts in the window or no rating: one lift trained hard is real and narrow, and "Perfect"
   for it would say more than the evidence does. Cost: a member who only ever does one lift gets no badge.
 - **Pays nothing** (`effects: {"achievement": True}`, tested). It is effort plus a progress leg — a badge may reward that;
@@ -2872,3 +2872,26 @@ or https only, so nothing typed becomes a `javascript:` URL on someone else's sc
   (`test_inventoryz` fails if another module names a `gear:` key). Three queries however many pieces.
 - `GET /api/economy/inventoryz/?username=` carries `rating_reward` (the gain, before the rating) for a viewer and
   `edit_in` / `rename_note` for the owner. The flat 100-piece ceiling is the existing one, kept flat on purpose.
+
+## BadgeZ wave one: a badge per coach, royalties said out loud, and five stickers made real
+
+`apps/economy/badgez_wave.py`, registered into `models.BADGES`. Named in Corey's voice — a Z where an s would be (High
+NoteZ, Hot BarZ, Royal RatingZ, Cut RoyaltieZ) — except Thorough, which he wants plain. His emoji are the placeholders,
+worn inside a neon medal (`tools/make-neon-badges.mjs`, frontend) until his `badgez.<name>.jpg` art is committed.
+
+- **The audit found five effects promised on screen and read by nothing**: Collaborator's +5 submissions and "needs list
+  first", Straight Shooter's waived stake, the discovery boost (read by the hardcoded key "sexy") and Bug Hunter's +50 🏷️.
+  All real now (`submission_cap_for`, `collab.stake_for`, `MembersView` reads the effect, `grant_badge` pays the grant
+  once) except needs-first, which had no list to sort and was dropped from the note. **`test_badgez_wave` fails when any
+  badge effect has no reader outside the catalogue** — a badge that only looks nice is a sticker.
+- **A badge per coach (all eleven)**, temporary: `HOT_TAKES` (3) takes the coach scored `HOT_SCORE`+ (8) inside
+  `HOT_DAYS` (30). The coach LISTENED, so nobody gets one without the takes getting good. The perk is
+  `ai_energy_off_pct` (−10% ⚡ per AI run each, capped at −50%), applied inside `ai_energy_cost` — the same function that
+  prices the run on screen — so the discount is on the button. It lands on the take that earns it (`takescorez.record`).
+- **The royalty pair reflects the formula, never a second copy of it.** Royal RatingZ 💰 while a track's factor is ≥1.2;
+  Cut RoyaltieZ ✂️ while one is under 1.0 — five-plus OUTSIDE raters, read in two queries for the member's last 50 posts.
+- **A penalty (`penalty: True`) is hidden by default, worded as applying, and "lifted" when it goes.** It must come out of
+  a record somebody ELSE settled. No-show and dispute penalties are NOT here: nothing records a no-show, and a dispute is
+  opened by one side of a deal — a penalty either could fire would be a weapon one member aims at another.
+- **Tapping a medal opens everybody wearing it** — `GET /api/economy/badgez/holders/?key=`, visible badges only.
+- `manage.py refresh_badges` (was `refresh_thorough`) re-checks holders of ANY temporary badge hourly.

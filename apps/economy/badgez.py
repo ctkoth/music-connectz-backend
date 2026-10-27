@@ -245,3 +245,36 @@ class BadgeGiftView(APIView):
             "tier": membership_for(target).tier,
             "effects": badge_effects(target),
         }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+HOLDERS_CAP = 100
+
+
+class BadgeHoldersView(APIView):
+    """GET /api/economy/badgez/holders/?key= — everybody wearing this badge.
+
+    A badge on somebody's card is a door, not a sticker: tapping it shows who
+    else holds it and what it does (Corey: "shows other items with the same
+    badge"). Only badges their holders chose to SHOW are listed — the same
+    `visible` switch every card reads, so a hidden badge, and every penalty
+    (hidden until its holder shows it), leaks nowhere.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        key = str(request.query_params.get("key") or "")[:40]
+        spec = BADGES.get(key)
+        if not spec:
+            return Response({"detail": "No such badge."}, status=status.HTTP_404_NOT_FOUND)
+        rows = (Badge.objects.filter(key=key, visible=True).select_related("user")
+                .order_by("-awarded_at")[:HOLDERS_CAP])
+        mine = Badge.objects.filter(key=key, user=request.user).first()
+        return Response({
+            "badge": {"key": key, **{f: spec.get(f, "") for f in
+                                     ("name", "emoji", "icon", "title", "desc", "how", "effect_note")},
+                      "temporary": spec.get("temporary", False), "penalty": spec.get("penalty", False)},
+            "holders": [{"username": b.user.username, "since": b.awarded_at.isoformat()} for b in rows],
+            "count": Badge.objects.filter(key=key, visible=True).count(),
+            "mine": ({"held": True, "visible": mine.visible} if mine else {"held": False}),
+        })

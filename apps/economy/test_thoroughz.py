@@ -109,7 +109,7 @@ class EarningIt(TestCase):
     def test_the_sweep_takes_down_a_lapsed_mark(self):
         from django.core.management import call_command
         grant_badge(self.u, "supreme")
-        call_command("refresh_thorough", stdout=open("/dev/null", "w"))
+        call_command("refresh_badges", stdout=open("/dev/null", "w"))
         self.assertFalse(Badge.objects.filter(user=self.u, key="supreme").exists())
 
 
