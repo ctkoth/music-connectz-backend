@@ -23,6 +23,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .thoroughz import marks_by_username, marks_for_deals
 from .models import (
     RATING_SPLIT_MIN_RATERS,
     Battle,
@@ -75,8 +76,24 @@ def _locked_wallet(user):
     return Wallet.objects.select_for_update().get(user=user)
 
 
-def deal_dict(deal, me=None, days_cache=None):
+def deal_dict(deal, me=None, days_cache=None, marks=None):
+    # Thorough marks by name (thoroughz.py). A list hands in one batch; without
+    # one, they are remembered in the same shared cache the escrow window uses
+    # (under ("thorough", name), which no username key can collide with), so a
+    # caller walking a list card by card asks once per new name, not per card.
+    if marks is None:
+        names = {deal.initiator.username, *[c.get("username") for c in (deal.participants or [])
+                                            if isinstance(c, dict) and c.get("username")]}
+        store = days_cache if days_cache is not None else {}
+        missing = [n for n in names if ("thorough", n) not in store]
+        if missing:
+            found = marks_by_username(missing)
+            store.update({("thorough", n): found.get(n) for n in missing})
+        marks = {n: store[("thorough", n)] for n in names if store[("thorough", n)]}
     return {
+        "marks": {u: marks[u] for u in
+                  {deal.initiator.username, *[c.get("username") for c in (deal.participants or [])
+                                              if isinstance(c, dict)]} if u in marks},
         "id": deal.id,
         "title": deal.title,
         "currency": deal.currency,
@@ -487,7 +504,9 @@ class CollabDealsView(APIView):
                  .distinct()
                  .order_by("-created_at")[:200])
         days = {}   # one badge read per payer across the whole list, not per card
-        out = [deal_dict(maybe_auto_release(d), me, days) for d in deals]
+        deals = list(deals)
+        marks = marks_for_deals(deals)
+        out = [deal_dict(maybe_auto_release(d), me, days, marks) for d in deals]
         return Response({"deals": out})
 
     # Atomic because the ⚡ charge locks the wallet, and select_for_update
@@ -872,10 +891,11 @@ class PostCollabsView(APIView):
                    or d.initiator_id == me.id
                    or any(p.get("username") == me.username for p in d.participants)]
         days = {}
+        marks = marks_for_deals(visible)
         return Response({
             "post": post.title,
             "post_id": post.id,
-            "deals": [deal_dict(d, me, days) for d in visible],
+            "deals": [deal_dict(d, me, days, marks) for d in visible],
         })
 
 

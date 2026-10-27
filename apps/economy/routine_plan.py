@@ -104,14 +104,19 @@ def plan(rows, goal_key, lib, goals):
         add("reps", None, "This routine has no goal, so there is no rep range to check it against.")
         add("sets", None, "This routine has no goal, so there is no set count to check it against.")
 
-    # order — compound before isolation, among the lifts the declared table knows
+    # order — compound before isolation, among the lifts the declared table knows. A superset PAIR is one unit (its two lifts
+    # are done back to back), so it counts as a big lift if either is one: a push-pull pair of a curl and a row is not "a
+    # curl before a row". Everything else is its own unit, so with no supersets this is lift against lift.
     known = [(r, mechanic_of(_name(lib, r))) for r in rows]
     seen_iso, misplaced = None, []
-    for r, mech in known:
-        if mech == "isolation" and seen_iso is None:
-            seen_iso = r
-        elif mech == "compound" and seen_iso is not None:
-            misplaced.append((r, seen_iso))
+    for block in _blocks(rows):
+        mechs = [mechanic_of(_name(lib, r)) for r in block]
+        comp = next((r for r, m in zip(block, mechs) if m == "compound"), None)
+        if comp is not None:
+            if seen_iso is not None:
+                misplaced.append((comp, seen_iso))
+        elif mechs and all(m == "isolation" for m in mechs) and seen_iso is None:
+            seen_iso = block[0]
     has = {m for _, m in known}
     if "compound" in has and "isolation" in has:
         add("order", not misplaced,

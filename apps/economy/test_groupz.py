@@ -564,7 +564,10 @@ class PartnerZEscrowBenefitTests(TestCase):
         with CaptureQueriesContext(connection) as ctx:
             rows = [self.deal_dict(d, self.payer, cache) for d in deals]
         self.assertTrue(all(r["auto_release_partnerz"] for r in rows))
-        self.assertLessEqual(len(ctx.captured_queries), 4,
+        # 4 for the escrow window and PartnerZ, +1 for the Thorough marks of
+        # everyone on the deals (thoroughz.marks_by_username) — one read for the
+        # whole list, remembered in the same cache, never one per card.
+        self.assertLessEqual(len(ctx.captured_queries), 5,
                              f"{len(ctx.captured_queries)} queries for 6 deals — per-card read")
 
 

@@ -302,7 +302,8 @@ def _links_ceiling(p):
     return {"links_limit": max(tier_cap, len(links_of(p))), "links_tier_cap": tier_cap}
 
 
-INVENTORY_KINDS = ("instrument", "microphone", "interface", "monitors", "outboard", "software", "controller", "other")
+INVENTORY_KINDS = ("instrument", "microphone", "interface", "monitors", "outboard", "software", "controller",
+                   "clothing", "other")
 INVENTORY_WHERE = ("home", "studio", "stage")
 INVENTORY_MAX = 100
 
@@ -322,8 +323,14 @@ def clean_inventory(value):
         seen.add(name.lower())
         kind = x.get("kind") if x.get("kind") in INVENTORY_KINDS else "other"
         where = x.get("where") if x.get("where") in INVENTORY_WHERE else "home"
-        out.append({"name": name, "kind": kind, "where": where,
-                    "note": " ".join(str(x.get("note", "")).split())[:120]})
+        row = {"name": name, "kind": kind, "where": where,
+               "note": " ".join(str(x.get("note", "")).split())[:120]}
+        # A photo is optional and only ever one we host or an https image, so a
+        # member cannot put a javascript: or data: URL on somebody else's screen.
+        photo = str(x.get("photo") or "").strip()[:500]
+        if photo.startswith("/api/economy/media/") or photo.startswith("https://"):
+            row["photo"] = photo
+        out.append(row)
         if len(out) >= INVENTORY_MAX:
             break
     return out

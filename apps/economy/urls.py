@@ -137,6 +137,8 @@ from .collab_post import CollabNeedsView, CollabPostView
 from .payouts import PayoutConnectView, PayoutRefreshView, PayoutsView
 from .ai_models import AiModelView
 from .badgez import BadgeGiftView, BadgezView
+from .thoroughz import ThoroughZView
+from .inventoryz import InventoryView
 from .bugz import BugTriageView, BugzView
 from .logicz import LogicZView
 from .ratez import RateQueueView, RatezView, RatingKindsView
@@ -449,6 +451,8 @@ urlpatterns = [
     path("logicz/", LogicZView.as_view(), name="economy-logicz"),
     path("ai/models/", AiModelView.as_view(), name="economy-ai-models"),
     path("badgez/", BadgezView.as_view(), name="economy-badgez"),
+    path("thoroughz/", ThoroughZView.as_view(), name="economy-thoroughz"),
+    path("inventoryz/", InventoryView.as_view(), name="economy-inventoryz"),
     path("bugz/", BugzView.as_view(), name="economy-bugz"),
     path("bugz/<int:pk>/", BugTriageView.as_view(), name="economy-bugz-triage"),
     path("badgez/gift/", BadgeGiftView.as_view(), name="economy-badgez-gift"),

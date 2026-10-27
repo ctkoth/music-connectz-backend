@@ -77,6 +77,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import routine_plan
+from . import superset as superset_mod
 from .models import (BODIEZ_BUCKETS, BODIEZ_DAY_TAGS, BODIEZ_GOAL_KINDS, BodieZAccess,
                      BodieZCustomDay, BodieZExercise, BodieZGoal, BodieZRecoveryLog, BodieZRoutine, BodieZStepLog, BodieZSession, BodieZSet,
                      BodieZWeightLog, StudentRelationship)
@@ -434,6 +435,7 @@ def _session_dict(sess, sets=None):
         "ended_at": sess.ended_at.isoformat() if sess.ended_at else None,
         "backfilled": sess.backfilled,
         "notes": sess.notes,
+        "superset_pairs": list(sess.superset_pairs or []),
         "sets": [_set_dict(s) for s in sets],
     }
 
@@ -719,16 +721,25 @@ class BodieZRoutinesView(APIView):
         source = source if source in CLIENT_SOURCES else "member"
         # A routine the PLANNER made is built to its own checks: big lifts first, reps and sets inside the goal's
         # range. What it changed is returned, so the screen can say why instead of the order simply being different.
-        polished = []
+        polished, pair_info = [], None
         if source == "coach" and exercises:
+            pair_changes = []
+            mode = request.data.get("pair_mode") or ""
+            if mode:
+                # Compound + isolation, or push + pull — the same two the Planner offers when improving, and the same gate
+                # (StatZ or the free hour). Pairing first so the Planner's fix then brings any partner it ADDED inside the goal.
+                exercises, pair_changes, pair_info = _pair_for_plan(request, exercises, mode)
             lib = _plan_lib(request.user, [exercises])
             exercises, polished = routine_plan.polish(exercises, goal, lib, GOALS)
+            polished = pair_changes + polished
         routine = BodieZRoutine.objects.create(user=request.user, title=title, exercises=exercises,
                                                 bucket=bucket, day_tag=day_tag, description=description,
                                                 goal=goal, custom_day=custom_day or None, source=source)
         d = _routine_dict(routine)
         d["plan"] = _plan_of(routine, routine.goal, _plan_lib(request.user, [routine]))
         d["polished"] = polished
+        if pair_info is not None:
+            d["pair"] = pair_info
         return Response(d, status=status.HTTP_201_CREATED)
 
 
@@ -965,6 +976,36 @@ class BodieZRoutineDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+def _pair_for_plan(request, rows, mode):
+    """(rows, changes, info) — the Coach's pairing applied to a routine's rows BEFORE the Planner's own fix.
+
+    Pairing first, polishing after: a partner the Coach ADDS comes with the pairing engine's own reps and sets, and the
+    polish then brings them inside the goal's range and keeps big lifts first, so a routine that gains a superset does not
+    lose its Plan for it. Choosing the partner is StatZ's (or the free hour's) exactly as `bodiez/pair/` says — a member
+    without it gets the reason and the upgrade door, and the routine is polished without pairing; nothing is refused, and
+    linking two lifts by hand stays free at every tier.
+    """
+    from .statz_trial import UPGRADE, has_statz
+    if mode not in superset_mod.MODES:
+        return rows, [], {"blocked": True, "detail": f"pair_mode must be one of {sorted(superset_mod.MODES)}."}
+    if not has_statz(request.user):
+        return rows, [], {"blocked": True, "mode": mode, "upgrade": UPGRADE,
+                          "detail": "Pairing is a StatZ feature. You can still link two lifts by hand."}
+    library = list(BodieZExercise.objects.visible(request.user))
+    access = BodieZAccess.objects.filter(user=request.user).first()
+    equipment = request.data.get("equipment") or []
+    result = superset_mod.pair_rows(rows, library, mode, add=bool(request.data.get("add", True)),
+                                    equipment=[str(e) for e in equipment] if isinstance(equipment, list) else [],
+                                    is_accessible=lambda ex: accessible(ex, access))
+    names = {e.id: e.name for e in library}
+    label = superset_mod.MODES[mode]["label"]
+    changes = [{"kind": "superset", "what": f"Paired {names[p['exercise_ids'][0]]} with {names[p['exercise_ids'][1]]} — {label}."}
+               for p in result["pairs"]]
+    changes += [{"kind": "added", "what": f"Added {names[i]} as a partner (new to this routine)."} for i in result["added"]]
+    return result["exercises"], changes, {"mode": mode, "pairs": result["pairs"], "added": result["added"],
+                                          "left_single": result["left_single"]}
+
+
 class BodieZRoutinePlanView(APIView):
     """POST /api/economy/bodiez/routines/plan/ — the Plan rating of a list of lifts, and the Planner's fix for it.
 
@@ -1000,10 +1041,17 @@ class BodieZRoutinePlanView(APIView):
         if base is not None:
             out["compare"] = routine_plan.compare(_plan_of(base, base.goal, lib), here)
         if request.data.get("polish"):
-            fixed, changes = routine_plan.polish(rows, goal, lib, GOALS)
+            work, pair_changes, pair_info = rows, [], None
+            mode = request.data.get("pair_mode") or ""
+            if mode:
+                work, pair_changes, pair_info = _pair_for_plan(request, rows, mode)
+                lib = _plan_lib(request.user, [work, *([base] if base else [])])
+            fixed, changes = routine_plan.polish(work, goal, lib, GOALS)
             after = _plan_of(fixed, goal, lib)
-            out["polished"] = {"exercises": fixed, "changes": changes, "plan": after,
+            out["polished"] = {"exercises": fixed, "changes": pair_changes + changes, "plan": after,
                                "compare": routine_plan.compare(_plan_of(base, base.goal, lib) if base else here, after)}
+            if pair_info is not None:
+                out["polished"]["pair"] = pair_info
         return Response(out)
 
 
@@ -1162,6 +1210,41 @@ class BodieZSessionLogView(APIView):
         })
 
 
+def _report(sess, sets):
+    """What the member did against what the routine said, and how they rested — FACTS from the logged sets, nothing graded.
+
+    `completion_pct` is sets done on the routine's lifts over the routine's planned sets (a lift done more than planned
+    counts as planned, extras are reported apart), read against the routine AS IT IS NOW — a routine edited since cannot be
+    replayed, which is why `vs_last` carries `routine_changed`. None for a custom session: with no plan there is nothing to
+    have completed. It is effort, not skill, and is never named or used as a rating (CLAUDE.md: XP and badges may reward effort;
+    ratings and skill levels may not). Rest is the server-measured gap between sets against the goal's own prescription.
+    """
+    routine = sess.routine if sess.routine_id and sess.routine else None
+    done = defaultdict(int)
+    for x in sets:
+        done[x.exercise_id] += 1
+    rested = [x.rest_seconds for x in sets if x.rest_seconds is not None]
+    out = {"sets_done": len(sets), "sets_completed": None, "completion_pct": None, "sets_planned": None,
+           "lifts_planned": None, "lifts_done": None, "extra_sets": None,
+           "avg_rest_seconds": round(sum(rested) / len(rested)) if rested else None, "rest_sets": len(rested),
+           "rest_target_seconds": None}
+    if routine:
+        planned = defaultdict(int)
+        for e in routine.exercises or []:
+            if isinstance(e, dict) and e.get("exercise_id"):
+                planned[e["exercise_id"]] += max(0, int(e.get("sets") or 0))
+        total = sum(planned.values())
+        if total:
+            got = sum(min(done.get(i, 0), n) for i, n in planned.items())
+            out.update(completion_pct=round(100 * got / total), sets_completed=got, sets_planned=total, lifts_planned=len(planned),
+                       lifts_done=sum(1 for i in planned if done.get(i)),
+                       extra_sets=sum(n for i, n in done.items() if i not in planned))
+        goal = GOALS.get(routine.goal)
+        if goal:
+            out["rest_target_seconds"] = goal["rest_seconds"]
+    return out
+
+
 def _vs_last(sess, sets, total, exercises, vol):
     """What changed since the member's previous finished session, or None when there is none.
 
@@ -1214,6 +1297,8 @@ def _vs_last(sess, sets, total, exercises, vol):
             "volume_delta_kg": round(e["volume_kg"] - old["volume_kg"], 2),
         }
 
+    ref_report = _report(ref, ref_sets)
+    now_report = _report(sess, sets)
     ref_vol = vol(ref_sets)
     now_dur = None if sess.backfilled or not sess.ended_at else int((sess.ended_at - sess.started_at).total_seconds())
     then_dur = None if ref.backfilled else int((ref.ended_at - ref.started_at).total_seconds())
@@ -1229,6 +1314,12 @@ def _vs_last(sess, sets, total, exercises, vol):
         "reps": sum(x.reps for x in ref_sets), "reps_delta": sum(x.reps for x in sets) - sum(x.reps for x in ref_sets),
         "duration_delta_seconds": now_dur - then_dur if now_dur is not None and then_dur is not None else None,
         "not_repeated": sorted(v["name"] for k, v in ref_stats.items() if k not in seen),
+        "report": ref_report,
+        "completion_delta": (now_report["completion_pct"] - ref_report["completion_pct"]
+                             if now_report["completion_pct"] is not None and ref_report["completion_pct"] is not None else None),
+        # The same routine, edited since that session: its lifts and sets may not be the ones then, so the comparison says so.
+        "routine_changed": bool(sess.routine_id and ref.routine_id == sess.routine_id and sess.routine
+                                and sess.routine.updated_at > ref.started_at),
     }
 
 
@@ -1306,6 +1397,8 @@ def session_summary(sess):
         "exercises": sorted(exercises, key=lambda e: e["name"]),
         "records": records, "firsts": sorted(firsts),
         "vs_last": vs_last,
+        "report": _report(sess, sets),
+        "superset_pairs": list(sess.superset_pairs or []),
         "coaches": coaches,
     }
 
@@ -1536,12 +1629,16 @@ class BodieZPastSessionView(APIView):
         clean, problem = clean_set_rows(request.user, raw)
         if problem:
             return Response({"detail": problem}, status=status.HTTP_400_BAD_REQUEST)
+        pairs, problem = clean_pairs(request.data.get("superset_pairs"), request.user)
+        if problem:
+            return Response({"detail": problem}, status=status.HTTP_400_BAD_REQUEST)
+        pairs = prune_pairs(pairs, {ex.id for _, ex, *_ in clean})
 
         # Today: now. Any other day: noon, so the date survives a timezone.
         when = (timezone.now() if day == today else
                 timezone.make_aware(datetime.combine(day, datetime.min.time().replace(hour=12))))
         sess = BodieZSession.objects.create(user=request.user, ended_at=when, backfilled=True, routine=routine,
-                                            notes=str(request.data.get("notes") or "")[:2000])
+                                            notes=str(request.data.get("notes") or "")[:2000], superset_pairs=pairs)
         # started_at is auto_now_add; set the real date after create.
         BodieZSession.objects.filter(id=sess.id).update(started_at=when)
         sess.refresh_from_db()
@@ -1592,18 +1689,121 @@ class BodieZSessionDetailView(APIView):
                 when = timezone.make_aware(datetime.combine(day, datetime.min.time().replace(hour=12)))
                 BodieZSession.objects.filter(id=sess.id).update(started_at=when, ended_at=when)
                 sess.refresh_from_db()
+        if "superset_pairs" in request.data:
+            pairs, problem = clean_pairs(request.data.get("superset_pairs"), request.user)
+            if problem:
+                return Response({"detail": problem}, status=status.HTTP_400_BAD_REQUEST)
+            # A finished workout can only pair lifts it actually contains; a live one may pair a lift it has not logged yet.
+            sess.superset_pairs = (prune_pairs(pairs, set(sess.sets.values_list("exercise_id", flat=True)))
+                                   if sess.ended_at else pairs)
         if request.data.get("finish"):
             if sess.ended_at:
                 return Response({"detail": "Session already finished."}, status=status.HTTP_400_BAD_REQUEST)
             sess.ended_at = timezone.now()
+            # A superset needs both lifts done: one that was planned and never logged ends with the session.
+            sess.superset_pairs = prune_pairs(sess.superset_pairs, set(sess.sets.values_list("exercise_id", flat=True)))
         notes = request.data.get("notes")
         if notes is not None:
             sess.notes = notes
         sess.save()
+        if request.data.get("finish"):
+            # The Thorough ladder moves when a session finishes, so the mark is
+            # right the moment the work is done. Swallowed: a badge must never
+            # fail a finished workout.
+            try:
+                from .models import recheck_badges
+                recheck_badges(request.user)
+            except Exception:
+                pass
         out = _session_dict(sess)
         if sess.ended_at:
             out["summary"] = session_summary(sess)
         return Response(out)
+
+
+MAX_PAIRS = 20
+
+
+def clean_pairs(raw, user):
+    """([[a, b], ...], "") or (None, why) — the supersets a member made while logging, ANY two lifts.
+
+    Exactly two distinct lifts per pair, each lift in at most one pair, and every id a lift this member may use.
+    Nothing is inferred and nothing is dropped silently: a bad list is refused with the reason, so a pair is never
+    half-kept. (`prune_pairs` is the one place a pair is dropped on purpose.)
+    """
+    if raw in (None, ""):
+        return [], ""
+    if not isinstance(raw, list) or len(raw) > MAX_PAIRS:
+        return None, f"superset_pairs must be a list of up to {MAX_PAIRS} pairs."
+    out, used = [], set()
+    for p in raw:
+        if not isinstance(p, (list, tuple)) or len(p) != 2:
+            return None, "A superset is exactly two lifts."
+        try:
+            a, b = int(p[0]), int(p[1])
+        except (TypeError, ValueError):
+            return None, "A superset names its lifts by id."
+        if a == b:
+            return None, "A lift can't be a superset with itself."
+        if a in used or b in used:
+            return None, "A lift can be in only one superset."
+        used |= {a, b}
+        out.append([a, b])
+    valid = set(BodieZExercise.objects.visible(user).filter(id__in=used).values_list("id", flat=True))
+    if used - valid:
+        return None, f"Unknown exercise id(s): {sorted(used - valid)}"
+    return out, ""
+
+
+def prune_pairs(pairs, present):
+    """Keep the pairs whose two lifts are both still in the workout — an edit that removes a lift ends its superset."""
+    return [list(p) for p in (pairs or []) if len(p) == 2 and p[0] in present and p[1] in present]
+
+
+def pair_session_rows(rows, pairs):
+    """Routine rows with each pair made adjacent and grouped: the second lift moves to sit directly below the first.
+
+    The same shape the designer's "Superset with…" makes (`supersets.js pairWith`): any pair either lift was already in
+    comes apart first, its other half stays where it was as a single, and every surviving pair is relabelled A, B, C… in
+    routine order. A pair naming a lift that is not in `rows` is skipped.
+    """
+    rows = [dict(r) for r in rows]
+    for a, b in pairs or []:
+        ia = next((i for i, r in enumerate(rows) if r.get("exercise_id") == a), None)
+        ib = next((i for i, r in enumerate(rows) if r.get("exercise_id") == b), None)
+        if ia is None or ib is None or ia == ib:
+            continue
+        freed = {ia, ib}
+        for k in (ia, ib):
+            g = rows[k].get("group")
+            if g:
+                freed |= {i for i, r in enumerate(rows) if r.get("group") == g}
+        for k in freed:
+            rows[k].pop("group", None)
+        moved = rows.pop(ib)
+        at = ia - 1 if ib < ia else ia
+        rows.insert(at + 1, moved)
+        rows[at]["group"] = rows[at + 1]["group"] = "_"
+    rows = superset_mod._relabel(superset_mod.valid_groups(rows))
+    for i, r in enumerate(rows):
+        r["order"] = i
+    return rows
+
+
+def merge_session_into_routine(routine_rows, session_rows, pairs):
+    """The routine, updated from what was actually done — in the routine's own order, never reshuffled.
+
+    A lift done gets the session's sets, reps and top-set weight; a lift in the routine that was NOT done is kept exactly
+    as it was (a skipped lift is not a deleted one); a lift done that the routine did not have is added at the end.
+    Supersets made in the session are applied on top.
+    """
+    done = {r["exercise_id"]: r for r in session_rows}
+    out = []
+    for r in routine_rows or []:
+        s = done.pop(r.get("exercise_id"), None)
+        out.append({**r, "sets": s["sets"], "reps": s["reps"], "weight_kg": s["weight_kg"]} if s else dict(r))
+    out += [dict(r) for r in done.values()]
+    return pair_session_rows(out, pairs)
 
 
 def routine_from_session(sess):
@@ -1619,13 +1819,18 @@ def routine_from_session(sess):
         top = max(ss, key=lambda x: (x.weight_kg if x.weight_kg is not None else Decimal(-1), x.reps))
         rows.append({"exercise_id": ex_id, "order": i, "sets": len(ss), "reps": top.reps,
                      "weight_kg": float(top.weight_kg) if top.weight_kg is not None else None})
-    return rows
+    # Supersets made while logging come with it: the routine's own adjacent pairs, not a note that they happened.
+    return pair_session_rows(rows, sess.superset_pairs) if sess.superset_pairs else rows
 
 
 class BodieZSessionRoutineView(APIView):
     """POST /api/economy/bodiez/sessions/{id}/routine/ — save a logged
     workout as a new routine. The workout is untouched; the routine is a new
-    row in Inbox that the designer edits like any other."""
+    row in Inbox that the designer edits like any other.
+
+    `{"update": <routine id>}` instead UPDATES the routine this workout was started from, from what was done
+    (`merge_session_into_routine`): lifts done take the session's sets, reps and top-set weight, lifts skipped are kept
+    as they were, and the response says how the routine's Plan moved and why (the same `plan_change` an edit returns)."""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, session_id):
@@ -1636,6 +1841,20 @@ class BodieZSessionRoutineView(APIView):
         if not rows:
             return Response({"detail": "That workout has no sets to build a routine from."},
                             status=status.HTTP_400_BAD_REQUEST)
+        if request.data.get("update") not in (None, ""):
+            routine = sess.routine if sess.routine_id and str(sess.routine_id) == str(request.data.get("update")) else None
+            if routine is None:
+                return Response({"detail": "Only the routine this workout was started from can be updated from it."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            old_rows = list(routine.exercises or [])
+            routine.exercises = merge_session_into_routine(old_rows, rows, sess.superset_pairs)
+            routine.save()
+            lib = _plan_lib(request.user, [old_rows, routine])
+            d = _routine_dict(routine)
+            d["plan"] = _plan_of(routine, routine.goal, lib)
+            d["plan_change"] = routine_plan.compare(_plan_of(old_rows, routine.goal, lib), d["plan"])
+            d["updated"] = True
+            return Response(d)
         day = timezone.localtime(sess.started_at).date().isoformat()
         base = sess.routine.title if sess.routine_id and sess.routine else "Workout"
         title = str(request.data.get("title") or f"{base} — {day}").strip()[:80]
@@ -1726,6 +1945,9 @@ class BodieZSetsView(APIView):
                 row.save(update_fields=["exercise", "set_number", "reps", "weight_kg", "one_sided",
                                         "rest_seconds", "converted_from_lb", "position"])
             BodieZSet.objects.filter(id__in=list(existing.keys() - kept)).delete()
+            # A lift taken out of the workout takes its superset with it.
+            sess.superset_pairs = prune_pairs(sess.superset_pairs, {ex.id for _, ex, *_ in clean})
+            sess.save(update_fields=["superset_pairs"])
         out = _session_dict(sess)
         out["summary"] = session_summary(sess)
         return Response(out)

@@ -1664,6 +1664,14 @@ def post_interaction_block(item_id, user, kind):
                 return {"detail": "You're on this deal — you can't rate its contributors."}
         return None
 
+    # gear:<owner>:<piece> — a piece of somebody's InventoryZ. Your own kit is
+    # rated by other people or not at all (inventoryz.py).
+    if kind == "rate" and item_id.startswith("gear:"):
+        from .inventoryz import owner_of
+        if owner_of(item_id) == getattr(user, "id", None):
+            return {"detail": "That's your own gear — other members rate it."}
+        return None
+
     # battle:<id>:entry:<id> — a battle is decided by people who are NOT in
     # it. Rating your own take used to be accepted, which let one entrant
     # supply a judge of their own; in a 1v1 neither contestant may score the
@@ -4700,6 +4708,12 @@ def _translations_done(user):
     return KeyTranslation.objects.filter(user=user).count()
 
 
+def _thorough_is(user, key):
+    """True when the member is on this rung of the Thorough ladder right now."""
+    from . import thoroughz
+    return thoroughz.badge_key_for(user) == key
+
+
 BADGES = {
     # ---- gifted ----
     # This badge shipped claiming `dev_tax_share: 1.0` and
@@ -4903,6 +4917,58 @@ BADGES = {
         "effect_note": "Achievement unlocked.",
         "check": lambda u: _check_multi_craft(u),
     },
+    # ---- the Thorough ladder (thoroughz.py) ----
+    # Five rungs, one held at a time: each check is true at its own rating only,
+    # TEMPORARY so the mark falls when the 28-day window empties, and `ladder`
+    # so stepping onto the next rung is not announced as the last one lapsing.
+    # Emoji are Corey's placeholders; `icon` stays empty until his art lands.
+    # No effect on Energy, SpinaZ or price: a rating that paid would be worth
+    # faking, and this one only shows effort.
+    "thorough": {
+        "name": "Thorough", "emoji": "💯", "title": "Thorough 💯", "gifted": False,
+        "temporary": True, "ladder": "thorough",
+        "desc": "You train thoroughly: a Thorough rating above 5.",
+        "how": "Hold a Thorough rating of 6 across at least 3 lifts, from finished BodieZ sessions in the last 28 days.",
+        "effects": {"achievement": True},
+        "effect_note": "A mark of effort — no payout. It lapses if the 28 days go quiet.",
+        "check": lambda u: _thorough_is(u, "thorough"),
+    },
+    "decent": {
+        "name": "Decent", "emoji": "🥈", "title": "Decent 🥈", "gifted": False,
+        "temporary": True, "ladder": "thorough",
+        "desc": "A Thorough rating of 7.",
+        "how": "Hold a Thorough rating of 7 across at least 3 lifts in the last 28 days.",
+        "effects": {"achievement": True},
+        "effect_note": "A mark of effort — no payout. It lapses if the 28 days go quiet.",
+        "check": lambda u: _thorough_is(u, "decent"),
+    },
+    "legendary": {
+        "name": "Legendary", "emoji": "🥇", "title": "Legendary 🥇", "gifted": False,
+        "temporary": True, "ladder": "thorough",
+        "desc": "A Thorough rating of 8.",
+        "how": "Hold a Thorough rating of 8 across at least 3 lifts in the last 28 days.",
+        "effects": {"achievement": True},
+        "effect_note": "A mark of effort — no payout. It lapses if the 28 days go quiet.",
+        "check": lambda u: _thorough_is(u, "legendary"),
+    },
+    "supreme": {
+        "name": "Supreme", "emoji": "🌟", "title": "Supreme 🌟", "gifted": False,
+        "temporary": True, "ladder": "thorough",
+        "desc": "A Thorough rating of 9.",
+        "how": "Hold a Thorough rating of 9 across at least 3 lifts in the last 28 days.",
+        "effects": {"achievement": True},
+        "effect_note": "A mark of effort — no payout. It lapses if the 28 days go quiet.",
+        "check": lambda u: _thorough_is(u, "supreme"),
+    },
+    "perfect": {
+        "name": "Perfect", "emoji": "💎", "title": "Perfect 💎", "gifted": False,
+        "temporary": True, "ladder": "thorough",
+        "desc": "A Thorough rating of 10.",
+        "how": "Hold a Thorough rating of 10 across at least 3 lifts in the last 28 days.",
+        "effects": {"achievement": True},
+        "effect_note": "A mark of effort — no payout. It lapses if the 28 days go quiet.",
+        "check": lambda u: _thorough_is(u, "perfect"),
+    },
 }
 
 
@@ -4978,7 +5044,7 @@ def grant_badge(user, key, by=None):
     return badge, created
 
 
-def revoke_badge(user, key):
+def revoke_badge(user, key, quiet=False):
     """Take a temporary badge back, and say so.
 
     Losing a badge in silence is worse than never holding one: the member's
@@ -4995,6 +5061,8 @@ def revoke_badge(user, key):
     if p.badge_title and p.badge_title == spec.get("title"):
         p.badge_title = ""
         p.save(update_fields=["badge_title", "updated_at"])
+    if quiet:
+        return True
     notify(user, "badge",
            f"{spec.get('emoji', '🏅')} {spec.get('name', key)} has lapsed — "
            f"{spec.get('how', '')} Earn it back and it returns by itself.".strip())
@@ -5012,21 +5080,28 @@ def recheck_badges(user):
     Permanent badges are never revoked here. A shipped collab or a founding
     seat is a thing that HAPPENED; no later state undoes it.
     """
+    user._thorough_key = None      # one fresh reading per recheck, never a stale one
     have = {b.key for b in Badge.objects.filter(user=user)}
     won, lost = [], []
+    verdicts = {}
     for key, spec in BADGES.items():
         check = spec.get("check")
         if not check:
             continue
         try:
-            passes = bool(check(user))
+            verdicts[key] = bool(check(user))
         except Exception:      # a broken check must never block a page load
             continue
+    # A ladder holds one rung: when the member is still on SOME rung of it, a
+    # rung given up was stepped past, not lost, and is not announced as lapsed.
+    on_ladder = {BADGES[k]["ladder"] for k, v in verdicts.items() if v and BADGES[k].get("ladder")}
+    for key, passes in verdicts.items():
+        spec = BADGES[key]
         if passes and key not in have:
             grant_badge(user, key)
             won.append(key)
         elif not passes and key in have and spec.get("temporary"):
-            if revoke_badge(user, key):
+            if revoke_badge(user, key, quiet=spec.get("ladder") in on_ladder):
                 lost.append(key)
     return won
 
@@ -6560,6 +6635,11 @@ class BodieZSession(models.Model):
     # nothing the server MEASURES (rest between sets, how long it took) exists
     # for it, and it is never shown as if it did.
     backfilled = models.BooleanField(default=False)
+    # Lifts the member did back to back, as [[exercise_id, exercise_id], ...] — ANY two lifts of the session, because
+    # a logged workout has no "adjacent rows" the way a routine does (a lift's sets can be spread across the session).
+    # Cleaned on every write (`bodiez.clean_pairs`): two distinct lifts, each in at most one pair. Saving the session as
+    # a routine turns these into the routine's own adjacent `group` pairs, so a superset made while logging is not lost.
+    superset_pairs = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ("-started_at",)

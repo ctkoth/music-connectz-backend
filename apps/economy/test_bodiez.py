@@ -2025,6 +2025,251 @@ class RoutinePlanTests(TestCase):
         self.assertEqual(self.client.post(url, {"exercises": [self.r(self.bench)], "goal": "bogus"}, format="json").status_code, 400)
 
 
+class SessionSupersetTests(TestCase):
+    """Supersets made while logging or editing a session — ANY two lifts — and kept when it is saved to RoutineZ."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="ss1", password="pw")
+        self.client.force_authenticate(user=self.user)
+        lib = BodieZExercise.objects.library()
+        self.bench, self.row, self.curl, self.fly = (lib.get(name=n) for n in ("Bench Press", "Barbell Row", "Bicep Curl", "Dumbbell Fly"))
+
+    def live(self, lifts, routine=None):
+        s = BodieZSession.objects.create(user=self.user, routine=routine)
+        for ex, reps, w in lifts:
+            self.client.post(f"/api/economy/bodiez/sessions/{s.id}/sets/", {"exercise_id": ex.id, "reps": reps, "weight_kg": w}, format="json")
+        return s
+
+    def patch(self, s, **body):
+        return self.client.patch(f"/api/economy/bodiez/sessions/{s.id}/", body, format="json")
+
+    # ---- the pairs themselves ----
+    def test_any_two_lifts_can_be_a_superset_not_just_neighbours(self):
+        s = self.live([(self.bench, 8, 40), (self.row, 8, 40), (self.curl, 10, 15), (self.fly, 10, 10)])
+        r = self.patch(s, superset_pairs=[[self.bench.id, self.curl.id]])        # a lift apart, with another lift between
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["superset_pairs"], [[self.bench.id, self.curl.id]])
+
+    def test_a_pair_is_two_distinct_lifts_each_in_at_most_one_pair(self):
+        s = self.live([(self.bench, 8, 40)])
+        for bad in ([[self.bench.id, self.bench.id]], [[self.bench.id]], [[self.bench.id, self.row.id], [self.row.id, self.curl.id]],
+                    [[self.bench.id, 999999]], "nope", [["a", "b"]]):
+            self.assertEqual(self.patch(s, superset_pairs=bad).status_code, 400, bad)
+        self.assertEqual(self.patch(s, superset_pairs=[]).status_code, 200)
+
+    def test_a_live_session_may_pair_a_lift_it_has_not_logged_yet_and_finishing_ends_that_pair(self):
+        s = self.live([(self.bench, 8, 40)])
+        self.assertEqual(self.patch(s, superset_pairs=[[self.bench.id, self.fly.id]]).status_code, 200)
+        done = self.patch(s, finish=True)
+        self.assertEqual(done.data["superset_pairs"], [])                       # the fly was never done
+        self.assertEqual(done.data["summary"]["superset_pairs"], [])
+
+    def test_a_finished_session_only_keeps_pairs_of_lifts_it_contains(self):
+        s = self.live([(self.bench, 8, 40), (self.row, 8, 40)])
+        self.patch(s, finish=True)
+        r = self.patch(s, superset_pairs=[[self.bench.id, self.row.id], [self.curl.id, self.fly.id]])
+        self.assertEqual(r.data["superset_pairs"], [[self.bench.id, self.row.id]])
+
+    def test_editing_a_lift_out_of_the_workout_ends_its_superset(self):
+        s = self.live([(self.bench, 8, 40), (self.row, 8, 40)])
+        self.patch(s, finish=True)
+        self.patch(s, superset_pairs=[[self.bench.id, self.row.id]])
+        r = self.client.put(f"/api/economy/bodiez/sessions/{s.id}/sets/", {"sets": [{"exercise_id": self.bench.id, "reps": 8, "weight_kg": 40}]}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data["superset_pairs"], [])
+
+    def test_a_past_workout_can_be_logged_with_its_supersets(self):
+        sets = [{"exercise_id": e.id, "reps": 8, "weight_kg": 20} for e in (self.bench, self.curl)]
+        r = self.client.post("/api/economy/bodiez/sessions/past/", {"date": timezone.localdate().isoformat(), "sets": sets,
+                             "superset_pairs": [[self.bench.id, self.curl.id], [self.row.id, self.fly.id]]}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data["superset_pairs"], [[self.bench.id, self.curl.id]])      # the pair of lifts not in it is dropped
+
+    # ---- saved to RoutineZ ----
+    def test_a_superset_made_while_logging_is_the_routines_own_adjacent_pair(self):
+        s = self.live([(self.bench, 8, 40), (self.row, 8, 40), (self.curl, 10, 15)])
+        self.patch(s, superset_pairs=[[self.bench.id, self.curl.id]])
+        self.patch(s, finish=True)
+        r = self.client.post(f"/api/economy/bodiez/sessions/{s.id}/routine/", {"title": "Mine"}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        ids = [e["exercise_id"] for e in r.data["exercises"]]
+        self.assertEqual(ids, [self.bench.id, self.curl.id, self.row.id])               # the curl moved up beside the bench
+        self.assertEqual([e.get("group") for e in r.data["exercises"]], ["A", "A", None])
+        self.assertEqual([e["order"] for e in r.data["exercises"]], [0, 1, 2])
+
+    def test_no_supersets_means_the_routine_is_exactly_what_it_was_before(self):
+        s = self.live([(self.bench, 8, 40), (self.row, 8, 40)])
+        self.patch(s, finish=True)
+        r = self.client.post(f"/api/economy/bodiez/sessions/{s.id}/routine/", {}, format="json")
+        self.assertEqual([e["exercise_id"] for e in r.data["exercises"]], [self.bench.id, self.row.id])
+        self.assertTrue(all("group" not in e for e in r.data["exercises"]))
+
+    def test_updating_the_routine_from_a_session_keeps_its_order_and_what_was_skipped_and_says_how_the_plan_moved(self):
+        routine = BodieZRoutine.objects.create(user=self.user, title="Push", goal="muscle_gain", exercises=[
+            {"exercise_id": self.bench.id, "order": 0, "sets": 4, "reps": 8, "weight_kg": 40.0},
+            {"exercise_id": self.row.id, "order": 1, "sets": 4, "reps": 8, "weight_kg": 40.0},
+            {"exercise_id": self.curl.id, "order": 2, "sets": 4, "reps": 10, "weight_kg": 10.0}])
+        s = self.live([(self.bench, 8, 45), (self.bench, 6, 50), (self.fly, 10, 12)], routine=routine)   # row and curl skipped; fly new
+        self.patch(s, superset_pairs=[[self.bench.id, self.fly.id]])
+        self.patch(s, finish=True)
+        r = self.client.post(f"/api/economy/bodiez/sessions/{s.id}/routine/", {"update": routine.id}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        got = {e["exercise_id"]: e for e in r.data["exercises"]}
+        self.assertEqual((got[self.bench.id]["sets"], got[self.bench.id]["reps"], got[self.bench.id]["weight_kg"]), (2, 6, 50.0))   # the TOP set
+        self.assertEqual(got[self.row.id]["sets"], 4)                                    # skipped, not deleted
+        self.assertEqual(got[self.curl.id]["weight_kg"], 10.0)
+        self.assertIn(self.fly.id, got)                                                  # done, not in the routine: added
+        self.assertEqual(got[self.bench.id]["group"], got[self.fly.id]["group"])         # the superset from the session
+        self.assertTrue(r.data["updated"])
+        self.assertIn("plan_change", r.data)
+        self.assertEqual(BodieZRoutine.objects.filter(user=self.user).count(), 1)         # updated in place, not copied
+
+    def test_only_the_routine_the_workout_came_from_can_be_updated(self):
+        other = BodieZRoutine.objects.create(user=self.user, title="Other", exercises=[])
+        s = self.live([(self.bench, 8, 40)])
+        self.patch(s, finish=True)
+        r = self.client.post(f"/api/economy/bodiez/sessions/{s.id}/routine/", {"update": other.id}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    # ---- the end-of-session report ----
+    def routine(self, **kw):
+        return BodieZRoutine.objects.create(user=self.user, title="Push", goal="muscle_gain", exercises=[
+            {"exercise_id": self.bench.id, "order": 0, "sets": 4, "reps": 8},
+            {"exercise_id": self.row.id, "order": 1, "sets": 4, "reps": 8}], **kw)
+
+    def finish(self, s):
+        return self.patch(s, finish=True).data["summary"]
+
+    def test_completion_is_sets_done_over_sets_planned_and_extras_are_reported_apart(self):
+        s = self.live([(self.bench, 8, 40)] * 4 + [(self.row, 8, 40)] * 2 + [(self.curl, 10, 10)], routine=self.routine())
+        rep = self.finish(s)["report"]
+        self.assertEqual((rep["sets_planned"], rep["completion_pct"], rep["lifts_planned"], rep["lifts_done"], rep["extra_sets"]), (8, 75, 2, 2, 1))
+        self.assertEqual(rep["sets_completed"], 6)                                  # 4 + 2 on the plan; the curl is an extra
+
+    def test_doing_more_sets_than_planned_does_not_inflate_completion(self):
+        s = self.live([(self.bench, 8, 40)] * 7 + [(self.row, 8, 40)] * 4, routine=self.routine())
+        self.assertEqual(self.finish(s)["report"]["completion_pct"], 100)
+
+    def test_a_custom_session_has_no_completion_not_a_made_up_one(self):
+        s = self.live([(self.bench, 8, 40)])
+        rep = self.finish(s)["report"]
+        self.assertIsNone(rep["completion_pct"]); self.assertIsNone(rep["sets_planned"]); self.assertEqual(rep["sets_done"], 1)
+
+    def test_rest_is_the_measured_average_against_the_goals_own_target(self):
+        s = self.live([(self.bench, 8, 40)] * 3, routine=self.routine())
+        for x, rest in zip(s.sets.order_by("id"), (None, 60, 100)):
+            BodieZSet.objects.filter(id=x.id).update(rest_seconds=rest)
+        rep = self.finish(s)["report"]
+        self.assertEqual((rep["avg_rest_seconds"], rep["rest_sets"], rep["rest_target_seconds"]), (80, 2, 75))
+        self.assertIsNone(self.finish(self.live([(self.bench, 8, 40)]))["report"]["rest_target_seconds"])
+
+    def test_the_last_session_of_the_same_routine_carries_its_own_report_and_the_change(self):
+        routine = self.routine()
+        first = self.live([(self.bench, 8, 40)] * 2 + [(self.row, 8, 40)] * 2, routine=routine)      # 4 of 8 = 50%
+        self.finish(first)
+        BodieZSession.objects.filter(id=first.id).update(started_at=timezone.now() - timedelta(days=3))
+        second = self.live([(self.bench, 8, 40)] * 4 + [(self.row, 8, 40)] * 3, routine=routine)     # 7 of 8 = 88%
+        vs = self.finish(second)["vs_last"]
+        self.assertEqual(vs["report"]["completion_pct"], 50)
+        self.assertEqual(vs["completion_delta"], 38)
+
+    def test_a_routine_edited_since_the_last_session_says_so(self):
+        routine = self.routine()
+        first = self.live([(self.bench, 8, 40)], routine=routine)
+        self.finish(first)
+        BodieZSession.objects.filter(id=first.id).update(started_at=timezone.now() - timedelta(days=3))
+        BodieZRoutine.objects.filter(id=routine.id).update(updated_at=timezone.now() - timedelta(days=1))       # edited after that session
+        second = self.live([(self.bench, 8, 40)], routine=routine)
+        self.assertTrue(self.finish(second)["vs_last"]["routine_changed"])
+        third = self.live([(self.bench, 8, 40)], routine=routine)
+        BodieZRoutine.objects.filter(id=routine.id).update(updated_at=timezone.now() - timedelta(days=10))      # untouched
+        self.assertFalse(self.finish(third)["vs_last"]["routine_changed"])
+
+    # ---- pairing when improving a routine ----
+    def plan_post(self, rows, **extra):
+        return self.client.post("/api/economy/bodiez/routines/plan/", {"exercises": rows, "goal": "muscle_gain", "polish": True, **extra}, format="json")
+
+    def rows(self):
+        return [{"exercise_id": e.id, "order": i, "sets": 4, "reps": 8, "weight_kg": None} for i, e in enumerate((self.bench, self.row))]
+
+    def test_pairing_is_offered_when_improving_but_is_the_statz_part_and_says_so_without_it(self):
+        r = self.plan_post(self.rows(), pair_mode="push_pull")
+        self.assertEqual(r.status_code, 200, r.data)
+        pair = r.data["polished"]["pair"]
+        self.assertTrue(pair["blocked"])
+        self.assertIn("StatZ", pair["detail"])
+        self.assertIn("upgrade", pair)
+        self.assertTrue(all("group" not in e for e in r.data["polished"]["exercises"]))   # polished, not paired, not refused
+
+    def test_with_statz_the_planner_pairs_then_fixes_and_says_what_it_did(self):
+        from .models import membership_for
+        m = membership_for(self.user); m.tier = "statz"; m.save()
+        r = self.plan_post(self.rows(), pair_mode="push_pull")
+        self.assertEqual(r.status_code, 200, r.data)
+        pol = r.data["polished"]
+        self.assertFalse(pol.get("pair", {}).get("blocked"))
+        groups = [e.get("group") for e in pol["exercises"]]
+        self.assertEqual(groups[:2], ["A", "A"])                                          # bench + row: push + pull
+        self.assertTrue(any(c["kind"] == "superset" for c in pol["changes"]))
+        self.assertEqual(pol["plan"]["score"], 10.0)                                      # a pair does not cost the routine its Plan
+
+    def test_a_compound_isolation_pair_keeps_the_big_lift_first_and_the_plan(self):
+        from .models import membership_for
+        m = membership_for(self.user); m.tier = "statz"; m.save()
+        rows = [{"exercise_id": e.id, "order": i, "sets": 4, "reps": 8} for i, e in enumerate((self.fly, self.bench))]
+        pol = self.plan_post(rows, pair_mode="compound_isolation").data["polished"]
+        names = [BodieZExercise.objects.get(id=e["exercise_id"]).name for e in pol["exercises"]]
+        self.assertEqual(names[0], "Bench Press")
+        self.assertTrue(self.client and pol["plan"]["checks"])
+        order = next(c for c in pol["plan"]["checks"] if c["key"] == "order")
+        self.assertIn(order["ok"], (True, None))
+
+    def test_creating_a_routine_can_pair_it_the_same_way_and_with_the_same_gate(self):
+        from .models import membership_for
+        body = {"title": "Upper", "goal": "muscle_gain", "source": "coach", "pair_mode": "push_pull",
+                "exercises": [{"exercise_id": e.id, "order": i, "sets": 4, "reps": 8} for i, e in enumerate((self.bench, self.row))]}
+        blocked = self.client.post("/api/economy/bodiez/routines/", body, format="json")
+        self.assertEqual(blocked.status_code, 201, blocked.data)                          # created, just not paired
+        self.assertTrue(blocked.data["pair"]["blocked"])
+        self.assertTrue(all("group" not in e for e in blocked.data["exercises"]))
+        m = membership_for(self.user); m.tier = "statz"; m.save()
+        paired = self.client.post("/api/economy/bodiez/routines/", body, format="json")
+        self.assertEqual([e.get("group") for e in paired.data["exercises"]], ["A", "A"])
+        self.assertTrue(any(c["kind"] == "superset" for c in paired.data["polished"]))
+        self.assertEqual(paired.data["plan"]["score"], 10.0)
+
+    def test_a_hand_made_routine_is_never_paired_by_the_planner_even_if_asked(self):
+        from .models import membership_for
+        m = membership_for(self.user); m.tier = "statz"; m.save()
+        r = self.client.post("/api/economy/bodiez/routines/", {"title": "Mine", "source": "member", "pair_mode": "push_pull",
+                             "exercises": [{"exercise_id": e.id, "order": i, "sets": 4, "reps": 8} for i, e in enumerate((self.bench, self.row))]}, format="json")
+        self.assertTrue(all("group" not in e for e in r.data["exercises"]))
+        self.assertNotIn("pair", r.data)
+
+    def test_an_unknown_pair_mode_is_refused_politely_and_does_not_break_the_fix(self):
+        r = self.plan_post(self.rows(), pair_mode="bogus")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.data["polished"]["pair"]["blocked"])
+
+    def test_a_pair_is_judged_as_one_unit_by_the_order_check(self):
+        from . import routine_plan
+        from .bodiez import GOALS
+        rows = [{"exercise_id": self.curl.id, "sets": 4, "reps": 10, "group": "A"}, {"exercise_id": self.row.id, "sets": 4, "reps": 8, "group": "A"}]
+        lib = {e.id: {"name": e.name, "accessible": True} for e in (self.curl, self.row)}
+        order = lambda r: next(c for c in routine_plan.plan(r, "muscle_gain", lib, GOALS)["checks"] if c["key"] == "order")
+        self.assertTrue(order(rows)["ok"])                                               # a curl+row pair is one unit with a big lift in it
+        self.assertFalse(order([{k: v for k, v in r.items() if k != "group"} for r in rows])["ok"])   # the same two lifts unpaired: curl before row
+
+    def test_the_session_dict_and_summary_carry_the_pairs(self):
+        s = self.live([(self.bench, 8, 40), (self.row, 8, 40)])
+        self.patch(s, superset_pairs=[[self.bench.id, self.row.id]])
+        done = self.patch(s, finish=True).data
+        again = self.client.get(f"/api/economy/bodiez/sessions/{s.id}/summary/").data
+        self.assertEqual(done["superset_pairs"], [[self.bench.id, self.row.id]])
+        self.assertEqual(again["superset_pairs"], [[self.bench.id, self.row.id]])
+
+
 class BodieZLbFixTests(TestCase):
     def setUp(self):
         from .bodiez import LB_SWITCH_AT

@@ -21,6 +21,7 @@ for the same reason: a price the counterparty can set is not a price.
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from .thoroughz import marks_by_username
 from .models import VenueBooking, VenueEvent, award_spinaz, spend_spinaz, wallet_for
 from .postz import charge_skill_energy, post_cost_cents, skill_price_units, skill_prices, skills_from
 from .gates import clean_gates, describe, failing_gate, member_metrics
@@ -310,7 +311,7 @@ def booking_dict(b, viewer):
     }
 
 
-def event_dict(event, viewer):
+def event_dict(event, viewer, marks=None):
     """One venue, and everything a member needs BEFORE committing to it."""
     settle_spinaz(event)
     if event.starts_at <= timezone.now():
@@ -321,9 +322,12 @@ def event_dict(event, viewer):
     ok, why = can_book(viewer, event)
     mine = event.host_id == viewer.id
     my = event.bookings.filter(visitor=viewer).first()
+    if marks is None:
+        marks = marks_by_username([event.host.username])
     return {
         "id": event.id,
         "host": event.host.username,
+        "host_mark": marks.get(event.host.username),
         "mine": mine,
         "kind": event.kind,
         "category": event.category,
@@ -387,11 +391,13 @@ class VenueListView(APIView):
         rows = rows.select_related("host").prefetch_related("bookings__visitor")[:100]
         mine = mine.select_related("host").prefetch_related("bookings__visitor")[:100]
         seen, out = set(), []
-        for e in list(rows) + list(mine):
+        everything = list(rows) + list(mine)
+        marks = marks_by_username({e.host.username for e in everything})
+        for e in everything:
             if e.id in seen:
                 continue
             seen.add(e.id)
-            out.append(event_dict(e, request.user))
+            out.append(event_dict(e, request.user, marks))
         return Response({"venues": out})
 
     def post(self, request):

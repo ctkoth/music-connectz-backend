@@ -69,7 +69,7 @@ DRIVERS = [
     {"key": "mood_search", "sampled": True, "modules": ["instrumentalz"]},
     {"key": "page_widgets", "sampled": True, "modules": ["widgetz"]},
     {"key": "advanced_horoscope", "sampled": True, "modules": ["metricz"]},
-    {"key": "coach_pairing", "sampled": True, "modules": ["superset"]},
+    {"key": "coach_pairing", "sampled": True, "modules": ["superset", "bodiez"]},
     {"key": "rest_alerts", "sampled": True, "modules": []},
     {"key": "viewz_tracks", "sampled": True, "modules": ["viewz"]},
     {"key": "instrumental_mix", "sampled": False, "modules": ["instrumentalz"],

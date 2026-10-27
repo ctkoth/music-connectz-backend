@@ -2807,3 +2807,68 @@ the routine AS WRITTEN against rules that are written down, each shown passed or
 
 `session_summary` carries `routine_id` (None for a custom session, and None once the routine is deleted) so the ended-session card can
 offer "Improve this routine" and LAND on that routine; a routine that no longer exists offers nothing rather than a dead door.
+
+## Supersets while logging, the end-of-session report, and pairing when creating or improving
+
+- **A session's supersets are PAIRS of lift ids** (`BodieZSession.superset_pairs`, migration 0230), ANY two lifts, because a logged workout has no
+  adjacent rows the way a routine does. `clean_pairs` is the rule (two distinct lifts, each in at most one pair, every id a lift this member may
+  use — refused with the reason, never half-kept); `prune_pairs` is the one place a pair is dropped on purpose: a live session may pair a lift it
+  has not logged yet, finishing ends that pair, and taking a lift out of a finished workout takes its superset with it.
+- **Saving a session as a routine keeps them** (`pair_session_rows`): the second lift moves to sit directly under the first and the pair gets the
+  routine's own `group` letter — what the designer's "Superset with…" makes. With no pairs the routine is exactly what it was before.
+- **`POST sessions/<id>/routine/ {"update": id}` updates the routine the workout came from** (`merge_session_into_routine`): lifts done take the
+  session's sets, reps and TOP-set weight; lifts SKIPPED are kept as they were (skipped is not deleted); lifts done that the routine lacked are
+  added; the routine's own order is never reshuffled; the session's supersets apply on top. Only the session's own routine can be updated from it.
+  The answer is the same `plan_change` an edit returns, so "Plan stays 10" / "7.5 → 10" says how it moved.
+- **`report` on the summary is FACTS, not a score** (`_report`): `completion_pct` = sets done on the routine's lifts ÷ sets it planned (a lift
+  done more than planned counts as planned; extras are reported apart), against the routine AS IT IS NOW; None for a custom session, which has no
+  plan to complete. Rest = the server-measured gap between sets against the goal's own `rest_seconds`. It is effort, never named or used as a
+  rating (XP and badges may reward effort; ratings and skill levels may not), and the screen says so beside it. `vs_last.report`,
+  `completion_delta` and **`routine_changed`** (the routine was edited after that session, so the comparison says its lifts may differ) make "compare
+  with the last session of the same / edited routine" literal.
+- **Pairing when creating or improving**: `pair_mode` (`compound_isolation` | `push_pull`) on `POST routines/` (source `coach` only — a hand-made
+  routine is never rearranged), on `POST routines/plan/` with `polish`, and in Fit to equipment. Same two pairings, same gate as `bodiez/pair/` (the
+  Coach CHOOSING is StatZ's or the free hour's; hand-linking stays free); a member without it gets `pair: {blocked, detail, upgrade}` and the routine is still
+  built or polished, never refused. Pairing runs BEFORE the Planner's fix, so a partner it ADDS is brought inside the goal's range and the Plan survives.
+- **The Plan's `order` check judges a superset pair as one unit** (a pair with a big lift in it is a big lift), so a push-pull pair of a curl and a row is not
+  "a curl before a row".
+
+## Thorough 💯: a badge ladder on the Thorough rating, worn on posts, collabs and venues
+
+`apps/economy/thoroughz.py`. Corey's rungs on a member's Thorough rating (the mean of each lift's Thorough rating over the
+last 28 days — `bodiez.lift_thoroughness`, the one formula, never re-scored here): **6 💯 Thorough** (anything above 5),
+**7 🥈 Decent, 8 🥇 Legendary, 9 🌟 Supreme, 10 💎 Perfect**. The emoji are his placeholders; `icon` stays empty until art.
+
+- **They are BADGES** (five keys in `models.BADGES`, `ladder: "thorough"`), so the per-badge privacy switch, the member card's
+  worn badges, titles and lapse notices all come for free. Each check is true at its own rung only, so **one is held at a
+  time**; `recheck_badges` evaluates every check first and a rung given up while still on the ladder is revoked QUIETLY —
+  climbing is not announced as a lapse.
+- **Temporary**: the window is 28 days, so the mark must be able to fall. It moves when a session FINISHES (hook in the
+  session PATCH, swallowed) and `manage.py refresh_thorough` (hourly cron, holders only) takes down a mark nobody trained for.
+- **`MIN_LIFTS` (3)** distinct lifts in the window or no rating: one lift trained hard is real and narrow, and "Perfect"
+  for it would say more than the evidence does. Cost: a member who only ever does one lift gets no badge.
+- **Pays nothing** (`effects: {"achievement": True}`, tested). It is effort plus a progress leg — a badge may reward that;
+  a rating that paid would be worth faking.
+- **Worn on UGC**: posts carry `author_mark` + `contributor_marks`, deals `marks` {username: mark}, venues `host_mark`.
+  Each is ONE batch per list (`marks_for_posts` / `marks_for_deals` / `marks_by_username`, two queries) and two for a single
+  row; the feed's query count is pinned flat. Only `visible=True` badges are read, so a hidden badge leaks nowhere.
+- **The group** is `GET /api/economy/thoroughz/`: "Thorough 💯", members by rung, the group's newest viewable posts on top,
+  and the caller's own rating, rung and what the next one takes. It is derived from the badge, not a GroupZ list anybody keeps.
+
+## InventoryZ: the profile inventory, rated piece by piece and in total
+
+Corey asked for an inventory on ProfileZ where members post equipment, instruments and clothes and get rated on each and
+in total. **The inventory already existed** (`Profile.inventory`, `social.clean_inventory`, edited in profile fields,
+searchable in GenreZ), so `apps/economy/inventoryz.py` adds ratings on top and nothing else — a second place to list gear
+would be two lists that disagree. `clean_inventory` gained a `clothing` kind and an optional `photo` (our own media address
+or https only, so nothing typed becomes a `javascript:` URL on someone else's screen).
+
+- **A piece is rated through the one rating path** (`social/rate/`) on `gear:<owner id>:<slug of name>`: same scale, edit
+  window, rater reward and cap as a post. The name is the identity because the cleaner folds repeats; **renaming starts its
+  ratings again**, and the editor says so. `post_interaction_block` refuses the owner rating their own kit.
+- **Individual** = median + count per piece, None until rated. **Total** = median of every rating across the CURRENT pieces,
+  None until `TOTAL_MIN_RATINGS` (3). A removed piece's ratings are not shown or counted.
+- **It is taste, not measurement**, and `RATING_NOTE` says so on screen: it never feeds a skill, royalty, price or search rank
+  (`test_inventoryz` fails if another module names a `gear:` key). Three queries however many pieces.
+- `GET /api/economy/inventoryz/?username=` carries `rating_reward` (the gain, before the rating) for a viewer and
+  `edit_in` / `rename_note` for the owner. The flat 100-piece ceiling is the existing one, kept flat on purpose.

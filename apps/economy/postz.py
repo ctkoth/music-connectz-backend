@@ -19,6 +19,7 @@ from .catalog import (SUBMISSION_PACK, SUBMISSION_PACK_ENERGY, SUBMISSION_PACKS_
                       POST_ENERGY_FLOOR, edit_window_for)
 from .coachshare import clean_visibility, coach_read_for, for_new_post, legacy_score
 from .crosspost import coach_cap, coach_price, destinations_for, take_state_for
+from .thoroughz import marks_for_posts
 from .gates import clean_gates, failing_gate, member_metrics, refusal
 from .models import (
     CollabDeal,
@@ -153,8 +154,13 @@ def clean_post_price(value):
 
 def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_UNSET,
                cap=None, shares=None, joins=None, rating=_UNSET, bought=_UNSET,
-               plays=None):
+               plays=None, marks=_UNSET):
     vibe = up - down
+    # Thorough marks (thoroughz.py): the author's and any credited
+    # contributor's, by name. A list passes them in one batch; a single post
+    # costs the two queries here.
+    if marks is _UNSET:
+        marks = marks_for_posts([p])
     media = media_slots(p)
     if take_state is _UNSET:
         take_state = take_state_for([(p, media)]).get(p.id)
@@ -171,6 +177,10 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
     return {
         "id": p.id,
         "author": p.author.username,
+        "author_mark": marks.get(p.author.username),
+        "contributor_marks": {c["username"]: marks[c["username"]]
+                              for c in (p.contributors or [])
+                              if isinstance(c, dict) and c.get("username") in marks},
         # True for everyone credited, not just whoever pressed post — a
         # collab post belongs to all of them.
         "mine": owns_post(p, request.user),
@@ -873,7 +883,9 @@ class PostsView(APIView):
         ratings = item_rating_medians([f"post:{i}" for i in ids])
         bought = _bought_ids(request, ids)
         plays = plays_for(visible)
+        marks = marks_for_posts(visible)
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
+                            marks=marks,
                             collabs=deals.get(p.id, 0), price=price, cap=cap,
                             take_state=sizes.get(p.id),
                             shares=shares.get(p.id, 0),
@@ -1376,8 +1388,10 @@ class DiscoveryFeedView(APIView):
         ratings = item_rating_medians([f"post:{i}" for i in ids])
         bought = _bought_ids(request, ids)
         plays = plays_for(recommendations)
+        marks = marks_for_posts(recommendations)
 
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
+                            marks=marks,
                             collabs=deals.get(p.id, 0), price=price, cap=cap,
                             take_state=sizes.get(p.id),
                             shares=shares.get(p.id, 0),

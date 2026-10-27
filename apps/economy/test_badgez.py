@@ -475,8 +475,10 @@ class TemporaryBadgesTests(BadgeBase):
         self.assertTrue(Badge.objects.filter(user=self.user, key="collaborator").exists())
 
     def test_only_the_median_badges_are_temporary(self):
+        # Plus the Thorough ladder, which tracks a 28-day window (thoroughz.py).
+        from .thoroughz import KEYS
         temp = {k for k, s in BADGES.items() if s.get("temporary")}
-        self.assertEqual(temp, {"gifted", "sexy"})
+        self.assertEqual(temp, {"gifted", "sexy", *KEYS})
 
     def test_a_row_says_whether_it_can_lapse(self):
         # The condition has to be MET, not just the badge granted: reading the
