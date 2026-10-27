@@ -6,7 +6,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from apps.economy import matchref, models as m
+from apps.economy import matchref, models as m, vocalcoach as vc
 from apps.economy.instruments import scores_for
 from apps.economy.models import wallet_for
 from apps.economy.test_vocalcoach import fake_gemini
@@ -66,6 +66,141 @@ class InspirationTests(TestCase):
         r = self._post(reply={"closeness": None})
         self.assertEqual(r.status_code, 502)
         self.assertEqual(wallet_for(self.u).money_cents, w0)
+
+
+class InspirationFromPostsTests(TestCase):
+    """Either side can already be on the platform — a post, a FileZ upload — through the coach's own
+    lookups, so view rights and ownership are the coach's rules. A post costs ⚡ once."""
+
+    def setUp(self):
+        self.c = APIClient()
+        self.me = User.objects.create_user("me", "me@e.com", "pw12345678")
+        self.famous = User.objects.create_user("famous", "f@e.com", "pw12345678")
+        self.c.force_authenticate(self.me)
+        w = wallet_for(self.me); w.money_cents = 10000; w.energy = 1000; w.save()
+        self.cost = vc.coach_post_energy(self.me)
+
+    def stored_post(self, owner, title="Song", visibility="public"):
+        up = m.Upload.objects.create(
+            user=owner, name=f"{title}.wav", size_bytes=600, content_type="audio/wav",
+            file=SimpleUploadedFile(f"{title}.wav", b"RIFFxxxxWAVE" * 50, content_type="audio/wav"))
+        post = m.Post.objects.create(author=owner, title=title, media_type="audio",
+                                     media_url=up.file.url, visibility=visibility)
+        return post, up
+
+    def run_match(self, data, reply=REPLY):
+        with patch("apps.economy.matchref._key", return_value="k"), \
+             patch("apps.economy.vocalcoach._key", return_value="k"), \
+             patch("apps.economy.gemini.requests.post", return_value=fake_gemini(reply)) as call:
+            r = self.c.post("/api/rapz/match/", data, format="multipart")
+        self.last_call = call
+        return r
+
+    def energy(self):
+        return wallet_for(self.me).energy
+
+    def baseline(self):
+        """The ⚡ every AI run already takes (`_take_ai_energy`), learned from a file-vs-file run so the
+        post cost is measured on top of it rather than assumed to be the whole difference."""
+        r = self.run_match({"take": f("b.wav"), "reference": f("c.wav")})
+        self.assertEqual(r.status_code, 200, r.content)
+        spent = 1000 - self.energy()
+        w = wallet_for(self.me); w.energy = 1000; w.save()
+        return spent
+
+    def test_the_price_of_a_post_is_stated_before_the_button(self):
+        j = self.c.get("/api/rapz/match/").json()
+        self.assertEqual(j["post_energy_cost"], self.cost)
+        self.assertIn(f"{self.cost} ⚡", j["post_note"])
+        self.assertIn("post", j["reference_sources"])
+        self.assertNotIn("journal", j["reference_sources"])
+
+    def test_a_famous_example_is_any_post_you_may_view(self):
+        base = self.baseline()
+        ref, _ = self.stored_post(self.famous, "Famous")
+        r = self.run_match({"take": f("t.wav"), "reference_post_id": ref.id})
+        self.assertEqual(r.status_code, 200, r.content)
+        j = r.json()
+        self.assertEqual(j["sources"]["reference"], {"kind": "post", "id": ref.id, "title": "Famous", "author": "famous"})
+        self.assertEqual(j["sources"]["take"]["kind"], "file")
+        self.assertEqual(j["energy_cost"], self.cost)
+        self.assertEqual(1000 - self.energy(), base + self.cost)
+
+    def test_nothing_is_written_on_the_post_that_was_used(self):
+        ref, _ = self.stored_post(self.famous, "Famous")
+        before = m.Post.objects.get(pk=ref.pk).score
+        self.run_match({"take": f("t.wav"), "reference_post_id": ref.id})
+        self.assertEqual(m.Post.objects.get(pk=ref.pk).score, before)
+        self.assertEqual(m.Upload.objects.count(), 1)           # no copy of the reference was kept
+
+    def test_your_own_rapz_post_can_be_the_take(self):
+        base = self.baseline()
+        mine, _ = self.stored_post(self.me, "My verse")
+        r = self.run_match({"take_post_id": mine.id, "reference": f("r.wav")})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["sources"]["take"]["title"], "My verse")
+        self.assertEqual(1000 - self.energy(), base + self.cost)
+
+    def test_two_posts_cost_the_energy_once(self):
+        base = self.baseline()
+        mine, _ = self.stored_post(self.me, "Mine")
+        ref, _ = self.stored_post(self.famous, "Famous")
+        r = self.run_match({"take_post_id": mine.id, "reference_post_id": ref.id})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(1000 - self.energy(), base + self.cost)       # once, not twice
+
+    def test_files_cost_no_post_energy(self):
+        r = self.run_match({"take": f("t.wav"), "reference": f("r.wav")})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["energy_cost"], 0)
+
+    def test_a_post_you_may_not_view_is_refused_and_nothing_runs(self):
+        hidden, _ = self.stored_post(self.famous, "Private", visibility="private")
+        r = self.run_match({"take": f("t.wav"), "reference_post_id": hidden.id})
+        self.assertEqual(r.status_code, 403)
+        self.last_call.assert_not_called()
+        self.assertEqual(self.energy(), 1000)
+
+    def test_not_enough_energy_says_so_before_the_model_runs(self):
+        ref, _ = self.stored_post(self.famous)
+        w = wallet_for(self.me); w.energy = self.cost - 1; w.save()
+        r = self.run_match({"take": f("t.wav"), "reference_post_id": ref.id})
+        self.assertEqual(r.status_code, 402)
+        self.assertEqual(r.json()["resource"], "energy")
+        self.last_call.assert_not_called()
+
+    def test_a_failed_comparison_costs_no_energy(self):
+        ref, _ = self.stored_post(self.famous)
+        r = self.run_match({"take": f("t.wav"), "reference_post_id": ref.id}, reply={"closeness": None})
+        self.assertEqual(r.status_code, 502)
+        self.assertEqual(self.energy(), 1000)
+
+    def test_the_same_post_on_both_sides_is_refused(self):
+        mine, _ = self.stored_post(self.me)
+        r = self.run_match({"take_post_id": mine.id, "reference_post_id": mine.id})
+        self.assertEqual(r.status_code, 400)
+
+    def test_a_filez_upload_of_your_own_works_and_costs_no_post_energy(self):
+        _, up = self.stored_post(self.me, "Mine")
+        r = self.run_match({"take_upload_id": up.id, "reference": f("r.wav")})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["sources"]["take"]["kind"], "upload")
+        self.assertEqual(r.json()["energy_cost"], 0)
+
+    def test_somebody_elses_upload_is_not_reachable_by_id(self):
+        _, theirs = self.stored_post(self.famous, "Theirs")
+        r = self.run_match({"take": f("t.wav"), "reference_upload_id": theirs.id})
+        self.assertEqual(r.status_code, 404)
+
+    def test_a_recording_gone_from_storage_is_a_410_and_is_written_down(self):
+        ref, up = self.stored_post(self.famous, "Gone")
+        up.file.delete(save=False)
+        r = self.run_match({"take": f("t.wav"), "reference_post_id": ref.id})
+        self.assertEqual(r.status_code, 410, r.content)
+        self.assertTrue(r.json()["take_missing"])
+        self.assertIsNotNone(m.Upload.objects.get(pk=up.pk).missing_since)
+        self.assertEqual(self.energy(), 1000)
+        self.assertEqual(wallet_for(self.me).money_cents, 10000)
 
 
 class InspirationElsewhereTests(TestCase):

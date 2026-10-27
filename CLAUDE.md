@@ -2702,3 +2702,43 @@ dialogue writer as flavour inside the same defanged data block as the rest of th
 character — a hobby cannot close the block. A character gets the interests picker only:
 no brands and no strengths, which are claims about a real member's own work. The persona
 picker lives in a persona's bio and interests editor.
+
+## A finished session says what changed since the last one
+
+`session_summary` carries `vs_last` (`bodiez._vs_last`): the same totals for the member's previous
+finished session, the signed change in volume (with a percent), sets, reps and — only when BOTH lengths
+were measured — duration, and per exercise `top_delta_kg` / `volume_delta_kg` on its row of `exercises`.
+Arithmetic over logged sets and nothing else.
+
+- **Like with like.** A routine is compared with the last run of the SAME routine (`basis: "routine"`);
+  a routine with no earlier run, or an ad-hoc session, with the last session that had anything logged
+  (`basis: "last"`). Push day against a leg day would be noise, and the screen says which it did.
+- **None, never a made-up number.** No earlier session → `vs_last` is None ("starting mark"). Last
+  time's volume 0 (all bodyweight) → no percent. A lift done last time and skipped now is named in
+  `not_repeated`; one new this time has no `vs_last` row. A workout typed in afterwards has no
+  duration to compare.
+- **A drop is not "worse".** Lighter can be a deload; the screen shows direction and does not colour it
+  as a failure. Only a RECORD (heaviest, most reps at a weight, biggest session) gets the trophy, and
+  those are unchanged — they compare with every earlier session, not only the last.
+
+## Inspiration: either side can already be on the platform
+
+`matchref.MatchReferenceView` takes, per side, a file OR an id: the take as `take_post_id` /
+`take_upload_id` / `take_journal_id`, the reference as `reference_post_id` / `reference_upload_id`. They
+go through the coach's own `_take_from_post` / `_take_from_upload` / `_take_from_journal` (via `_Fields`,
+which presents the prefixed fields as the plain ones), so view rights (`can_view_post`), own-uploads-only,
+size-from-the-row and the "recording is gone" 410 are the coach's rules and not a second copy of them.
+
+- **The reference can be ANY post the member may view** — that is the "famous example". It is read for
+  the comparison and never kept (no `Upload` row, Files API copy deleted), nothing is written on the
+  post (`_save_to_post` is not called) and its author is not notified. The response names the post and
+  its author in `sources`; nothing else about it is sent.
+- **A post on either side costs `coach_post_energy` ⚡, once.** Same figure as coaching a post, served
+  on GET (`post_energy_cost`, `post_note`) so the screen states it before the button, checked BEFORE the
+  model runs (402 with the shortfall), spent only after a usable result. Files, FileZ uploads and
+  journal entries cost no ⚡. **A recommendation, Corey's to move:** without it Inspiration would be a
+  ⚡-free way to put other people's posts in front of a model, which the post-coach deliberately is not.
+  Every AI run still takes its usual small ⚡ (`_take_ai_energy`) on top.
+- A journal entry is take-only: a diary page is not "another artist's finished record". The same post
+  on both sides is a 400.
+- **Never run against Google** (CI has no key), like the rest of the coach's transport.

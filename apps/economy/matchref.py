@@ -11,6 +11,18 @@ Rules that hold it, each one the repo's existing rule applied here:
   request's own temporary file, never an `Upload` row, never in a quota, never
   served back, and any Files API copy is deleted. The member must have the right
   to analyse it (`REFERENCE_NOTICE` is shown beside the control).
+* **Either side can already be on the platform.** The take: a file, one of the member's
+  own posts (a RapZ submission, say), a FileZ upload from whichever app made it, or a
+  journal recording. The reference: a file, ANY post the member is allowed to view (the
+  famous example, or another member's track), or one of their own uploads. Every one of
+  those goes through the coach's own lookups (`_take_from_post`, `_take_from_upload`,
+  `_take_from_journal`), so view rights, ownership and size-from-the-row are the rules the
+  coach already enforces and not a second copy of them. Nothing is ever written onto
+  someone else's post, and a post's file is read for this comparison only.
+* **Using a post costs what coaching a post costs** (`vocalcoach.coach_post_energy`, ⚡) — ONCE,
+  however many of the two sides are posts. Stated on the control before it is pressed,
+  checked before the model runs, spent only after a usable result. A file, a FileZ upload
+  or a journal entry costs no ⚡.
 * **Nothing is saved as the member's.** No TakeScore, no share card, no SkillZ
   XP, no skill rating: a gap to somebody else's record is not a measurement of
   the member, and a number the member could raise by copying a record would be
@@ -40,7 +52,7 @@ from .catalog import ai_cost
 from .deadline import COACH_BUDGET_SECONDS, Deadline, Expired
 from .gemini import _bill, _key, generate_content
 from .instruments import profile_for_app, scores_for
-from .models import can_afford_ai, daily_prompt_state
+from .models import can_afford_ai, daily_prompt_state, mark_upload_missing, spend_energy, wallet_for
 from . import vocalcoach as vc
 
 logger = logging.getLogger(__name__)
@@ -61,6 +73,8 @@ NOTICE = ("Use music you have the right to analyse. The reference is read for th
           "the file isn't kept. Your take isn't saved either unless you keep it elsewhere.")
 EQ_NOTE = ("EQ notes are what the coach HEARD, not a measured spectrum — check them "
            "against your own meters and ears before you cut or boost.")
+POST_NOTE = ("Using a post as either side costs {cost} ⚡ once. Nothing is written on the post "
+             "and its file is read for this comparison only.")
 LYRIC_NOTE = ("This describes how the reference writes — never its words. Rewrite your "
               "own lines in Sentence ConnectZ with it.")
 
@@ -154,6 +168,83 @@ def clean_reply(parsed, app_key):
     }
 
 
+class _Slot:
+    """One side of the comparison, resolved to something the coach can read.
+
+    `file` is open for reading when `stored` (closed by `close()`); `post` is set only when
+    the side came from a post, because that is what costs ⚡ and what the result names.
+    """
+    def __init__(self, file, ctype, post=None, stored=None):
+        self.file, self.ctype, self.post, self.stored = file, ctype, post, stored
+        self.mime = vc.gemini_mime(ctype)
+
+    @property
+    def uploaded(self):
+        return self.stored is None and self.post is None
+
+    @property
+    def title(self):
+        if self.post is not None:
+            return self.post.title
+        return (self.stored or {}).get("title") or ""
+
+    def opened(self):
+        if not self.uploaded:
+            self.file.open("rb")
+
+    def close(self):
+        if not self.uploaded:
+            try:
+                self.file.close()
+            except Exception:                            # pragma: no cover
+                pass
+
+    def describe(self):
+        """What the screen is told this side was. A post names its author — it is theirs and
+        the member can already see it; nothing else about it is sent."""
+        if self.post is not None:
+            return {"kind": "post", "id": self.post.id, "title": self.post.title,
+                    "author": self.post.author.username}
+        if self.stored is not None:
+            return {"kind": self.stored["kind"], "id": self.stored["id"], "title": self.stored.get("title", "")}
+        return {"kind": "file", "title": getattr(self.file, "name", "") or ""}
+
+
+class _Fields:
+    """The coach's lookups read plain `post_id` / `upload_id` / `journal_id`. Inspiration has TWO
+    slots, so each slot's prefixed fields (`take_post_id`, `reference_post_id`…) are presented to
+    those same lookups rather than copying their checks."""
+    NAMES = ("post_id", "upload_id", "journal_id")
+
+    def __init__(self, request, prefix):
+        self.user = request.user
+        self.data = {n: request.data.get(f"{prefix}{n}") for n in self.NAMES}
+
+
+def _resolve(request, name, doors):
+    """(slot, error_response) for 'take' or 'reference'. `doors` is the ids this side accepts."""
+    f = request.FILES.get(name)
+    if f:
+        return _Slot(f, (getattr(f, "content_type", "") or "").lower()), None
+    given = [d for d in doors if request.data.get(f"{name}_{d}") not in (None, "")]
+    if not given:
+        return None, None
+    coach = vc.SingZCoachView()
+    fields = _Fields(request, f"{name}_")
+    if "post_id" in given:
+        post, f, ctype, err = coach._take_from_post(fields)
+        return (None, err) if err else (_Slot(f, ctype, post=post), None)
+    if "upload_id" in given:
+        stored, f, ctype, err = coach._take_from_upload(fields)
+        return (None, err) if err else (_Slot(f, ctype, stored=stored), None)
+    stored, f, ctype, err = coach._take_from_journal(fields)
+    return (None, err) if err else (_Slot(f, ctype, stored=stored), None)
+
+
+TAKE_DOORS = ("post_id", "upload_id", "journal_id")
+REFERENCE_DOORS = ("post_id", "upload_id")      # a diary page is not "another artist's finished record"
+
+
 class MatchReferenceView(APIView):
     """GET = the price and the rules before anything is sent; POST = the comparison."""
     permission_classes = [IsAuthenticated]
@@ -173,35 +264,64 @@ class MatchReferenceView(APIView):
             "rates_lyrics": bool(profile.get("lyrics")),
             "notice": NOTICE, "eq_note": EQ_NOTE, "lyric_note": LYRIC_NOTE,
             "configured": bool(_key()),
+            # Said before the button: a post on either side costs this once; the rest cost none.
+            "post_energy_cost": vc.coach_post_energy(request.user),
+            "post_note": POST_NOTE.format(cost=vc.coach_post_energy(request.user)),
+            "take_sources": ["file", "post", "upload", "journal"],
+            "reference_sources": ["file", "post", "upload"],
         })
 
     def post(self, request):
         limited = vc.coach_rate_limit_check(request.user)
         if limited:
             return limited
-        take, ref = request.FILES.get("take"), request.FILES.get("reference")
+        take, err = _resolve(request, "take", TAKE_DOORS)
+        if err:
+            return err
+        ref, err = _resolve(request, "reference", REFERENCE_DOORS)
+        if err:
+            return err
         if not take or not ref:
             return Response({"detail": "Send both: your take and the reference track."},
                             status=status.HTTP_400_BAD_REQUEST)
-        kinds = []
-        for f in (take, ref):
-            ct = (getattr(f, "content_type", "") or "").lower()
-            if not ct.startswith(("audio/", "video/")):
-                return Response({"detail": "Both files must be audio or video."},
+        if take.post is not None and ref.post is not None and take.post.id == ref.post.id:
+            return Response({"detail": "That's the same post on both sides — pick a different reference."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        for side in (take, ref):
+            if not side.ctype.startswith(("audio/", "video/")):
+                return Response({"detail": "Both must be audio or video."},
                                 status=status.HTTP_400_BAD_REQUEST)
-            if not vc.gemini_mime(ct):
-                return Response({"detail": f"The coach can't read {ct}. Use m4a, mp3, wav, ogg or mp4."},
+            if not side.mime:
+                return Response({"detail": f"The coach can't read {side.ctype}. Use m4a, mp3, wav, ogg or mp4."},
                                 status=status.HTTP_400_BAD_REQUEST)
-            kinds.append(vc.gemini_mime(ct))
         cap_mb, cap_is_tier = vc.cap_for(request.user)
-        for f in (take, ref):
-            if f.size > cap_mb * 1024 * 1024:
-                return Response({"detail": f"That file is {f.size / (1024 * 1024):.0f}MB. "
-                                           + vc.cap_why(cap_mb, cap_is_tier), "max_mb": cap_mb},
-                                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
-            if f.size == 0:
-                return Response({"detail": "One of those files is empty."},
-                                status=status.HTTP_400_BAD_REQUEST)
+        for side in (take, ref):
+            # Only an uploaded file is measured here. A stored one was measured from its
+            # database row by the lookup (a FieldFile's .size is a storage call that raises
+            # when the file has gone), and an empty one is caught once it is opened below.
+            if side.uploaded:
+                if side.file.size > cap_mb * 1024 * 1024:
+                    return Response({"detail": f"That file is {side.file.size / (1024 * 1024):.0f}MB. "
+                                               + vc.cap_why(cap_mb, cap_is_tier), "max_mb": cap_mb},
+                                    status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+                if side.file.size == 0:
+                    return Response({"detail": "One of those files is empty."},
+                                    status=status.HTTP_400_BAD_REQUEST)
+        # A post on either side costs ⚡ — once. Checked BEFORE the model runs so nobody waits
+        # on a comparison they cannot pay for; spent only after a usable result.
+        post_sides = [x for x in (take, ref) if x.post is not None]
+        energy_cost = vc.coach_post_energy(request.user) if post_sides else 0
+        if energy_cost:
+            have = max(0, wallet_for(request.user).energy or 0)
+            if have < energy_cost:
+                return Response({
+                    "detail": f"Using a post costs {energy_cost} ⚡ and you have {have}. Nothing was run "
+                              "or charged. A file or a FileZ upload on both sides costs no ⚡.",
+                    "insufficient": True, "resource": "energy",
+                    "cost": {"resource": "energy", "amount": energy_cost},
+                    "energy_needed": energy_cost, "energy_available": have,
+                    "energy_short": energy_cost - have,
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
         if not _key():
             return Response({"detail": "The coach isn't configured — set GEMINI_API_KEY on the backend."},
                             status=status.HTTP_503_SERVICE_UNAVAILABLE)
@@ -216,8 +336,13 @@ class MatchReferenceView(APIView):
         cleanups = []
         try:
             parts = []
-            for f, mime in zip((take, ref), kinds):
-                part, cleanup, why = vc._media_part(f, mime, vc._size_of(f), deadline=deadline)
+            for side in (take, ref):
+                side.opened()
+                size = vc._size_of(side.file)
+                if size == 0:
+                    return Response({"detail": f"\"{side.title or 'One of those files'}\" is empty. "
+                                               "Nothing was charged."}, status=status.HTTP_400_BAD_REQUEST)
+                part, cleanup, why = vc._media_part(side.file, side.mime, size, deadline=deadline)
                 if cleanup:
                     cleanups.append(cleanup)
                 if why:
@@ -243,9 +368,21 @@ class MatchReferenceView(APIView):
                             status=status.HTTP_502_BAD_GATEWAY)
         except Exception:
             logger.exception("%s match: files could not be read", self.app_key)
+            # A stored side whose file has gone from storage: say so as a fact about the
+            # FILE (410), write it down for the next member, and charge nothing.
+            gone = [x for x in (take, ref) if not x.uploaded]
+            for x in gone:
+                mark_upload_missing(getattr(x.file, "instance", None))
+            if gone:
+                where = ", ".join(f'"{x.title}"' for x in gone if x.title) or "one of those"
+                return Response({"detail": f"The recording on {where} isn't on the server any more, so "
+                                           "there's nothing to compare. Nothing was charged.",
+                                 "take_missing": True}, status=status.HTTP_410_GONE)
             return Response({"detail": "The coach couldn't read those files. Nothing was charged."},
                             status=status.HTTP_400_BAD_REQUEST)
         finally:
+            take.close()
+            ref.close()
             for c in cleanups:
                 try:
                     c()
@@ -271,6 +408,11 @@ class MatchReferenceView(APIView):
                             status=status.HTTP_502_BAD_GATEWAY)
         charged = _bill(request.user, note=f"{profile_for_app(self.app_key)['label']} Inspiration — AI",
                         count_daily=True)
+        if energy_cost:
+            spend_energy(request.user, energy_cost,
+                         f"Inspiration with a post — {(post_sides[0].title or 'post')[:50]}",
+                         app_key=self.app_key, target=f"post:{post_sides[0].post.id}")
         return Response({**out, "match": True, "reference": True, "saved": False, "feature": LABEL,
-                         "cost_cents": charged, "eq_note": EQ_NOTE, "lyric_note": LYRIC_NOTE,
-                         "genre": genre})
+                         "cost_cents": charged, "energy_cost": energy_cost,
+                         "eq_note": EQ_NOTE, "lyric_note": LYRIC_NOTE, "genre": genre,
+                         "sources": {"take": take.describe(), "reference": ref.describe()}})
