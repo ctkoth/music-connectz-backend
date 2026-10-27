@@ -19,6 +19,15 @@ Rules that hold it, each one the repo's existing rule applied here:
   `_take_from_journal`), so view rights, ownership and size-from-the-row are the rules the
   coach already enforces and not a second copy of them. Nothing is ever written onto
   someone else's post, and a post's file is read for this comparison only.
+* **A YouTube link can be either side; Spotify and SoundCloud links cannot, and the screen says
+  so BEFORE the press.** The coach hears audio, and only YouTube can be handed to the model by
+  address (Gemini watches a public video itself — nothing is downloaded here). Spotify and
+  SoundCloud serve a player and never the audio, so there is nothing to hear; "reviewing" a
+  song from its title would be invented detail, which is the substance rule's failure case. The
+  link is parsed by `widgetz` (the same parser a link widget uses) and REBUILT from the video id,
+  so nothing the member typed reaches the model but that id and a start time. Only a
+  `LINK_WINDOW_SECONDS` window is read — a whole album upload would otherwise be the price of
+  one comparison.
 * **Using a post costs what coaching a post costs** (`vocalcoach.coach_post_energy`, ⚡) — ONCE,
   however many of the two sides are posts. Stated on the control before it is pressed,
   checked before the model runs, spent only after a usable result. A file, a FileZ upload
@@ -40,6 +49,8 @@ Rules that hold it, each one the repo's existing rule applied here:
   before it is pressed (`GET`), billed only after a usable parse.
 """
 import logging
+import re
+from urllib.parse import parse_qs, urlparse
 
 import requests
 from rest_framework import status
@@ -73,6 +84,15 @@ NOTICE = ("Use music you have the right to analyse. The reference is read for th
           "the file isn't kept. Your take isn't saved either unless you keep it elsewhere.")
 EQ_NOTE = ("EQ notes are what the coach HEARD, not a measured spectrum — check them "
            "against your own meters and ears before you cut or boost.")
+# What a link can be, said before it is pressed. Served on GET; the screen retypes none of it.
+LINK_WINDOW_SECONDS = 240
+LINK_NOTE = ("A YouTube link works: the coach watches a public video from the address, and reads "
+             f"the first {LINK_WINDOW_SECONDS // 60} minutes (or from the time in the link, like ?t=80). "
+             "It has to be public — not private, age-restricted or removed.")
+LINK_NO = ("The coach can't listen to {label} links: {label} gives out a player, never the audio, so "
+           "there is nothing to hear and the coach won't guess from the title. Upload the file, pick a "
+           "post, or use a YouTube link.")
+NOT_A_LINK = ("That isn't a link the coach can listen to. Paste a YouTube link, or upload the file.")
 POST_NOTE = ("Using a post as either side costs {cost} ⚡ once. Nothing is written on the post "
              "and its file is read for this comparison only.")
 LYRIC_NOTE = ("This describes how the reference writes — never its words. Rewrite your "
@@ -171,29 +191,37 @@ def clean_reply(parsed, app_key):
 class _Slot:
     """One side of the comparison, resolved to something the coach can read.
 
-    `file` is open for reading when `stored` (closed by `close()`); `post` is set only when
-    the side came from a post, because that is what costs ⚡ and what the result names.
+    `file` is open for reading when it is a stored file (closed by `close()`); `post` is set only when
+    the side came from a post, because that is what costs ⚡ and what the result names; `link` is a
+    YouTube address the model reads itself, with nothing for us to open or close.
     """
-    def __init__(self, file, ctype, post=None, stored=None):
-        self.file, self.ctype, self.post, self.stored = file, ctype, post, stored
+    def __init__(self, file, ctype, post=None, stored=None, link=None):
+        self.file, self.ctype, self.post, self.stored, self.link = file, ctype, post, stored, link
         self.mime = vc.gemini_mime(ctype)
 
     @property
     def uploaded(self):
-        return self.stored is None and self.post is None
+        return self.file is not None and self.stored is None and self.post is None and self.link is None
+
+    @property
+    def on_disk(self):
+        """A file that is already stored here (post, FileZ, journal) — opened and closed by us."""
+        return self.file is not None and not self.uploaded
 
     @property
     def title(self):
         if self.post is not None:
             return self.post.title
+        if self.link is not None:
+            return self.link["title"]
         return (self.stored or {}).get("title") or ""
 
     def opened(self):
-        if not self.uploaded:
+        if self.on_disk:
             self.file.open("rb")
 
     def close(self):
-        if not self.uploaded:
+        if self.on_disk:
             try:
                 self.file.close()
             except Exception:                            # pragma: no cover
@@ -205,9 +233,58 @@ class _Slot:
         if self.post is not None:
             return {"kind": "post", "id": self.post.id, "title": self.post.title,
                     "author": self.post.author.username}
+        if self.link is not None:
+            return {"kind": "link", "provider": self.link["provider"], "title": self.link["title"],
+                    "url": self.link["url"], "start_seconds": self.link["start"]}
         if self.stored is not None:
             return {"kind": self.stored["kind"], "id": self.stored["id"], "title": self.stored.get("title", "")}
         return {"kind": "file", "title": getattr(self.file, "name", "") or ""}
+
+
+_VIDEO_ID = re.compile(r"/embed/([A-Za-z0-9_-]{11})(?:$|[/?])")
+_T = re.compile(r"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$")
+
+
+def _start_seconds(url):
+    """Where in the video a pasted link starts: `?t=80`, `?t=1m20s` or `?start=80`. 0 when absent or odd."""
+    try:
+        q = parse_qs(urlparse(url).query or "")
+    except ValueError:
+        return 0
+    raw = ((q.get("t") or q.get("start") or [""])[0] or "").strip().lower()
+    m = _T.match(raw) if raw else None
+    if not m or not any(m.groups()):
+        return 0
+    h, mi, sec = (int(g or 0) for g in m.groups())
+    return min(h * 3600 + mi * 60 + sec, 6 * 3600)
+
+
+def classify_link(url):
+    """(slot_link, None) for a YouTube video the coach can watch, else (None, refusal sentence).
+
+    Reuses `widgetz._player_for` — the parser that already decides which links are players — and then
+    rebuilds the address from the video id alone. `youtube.com.evil.example` and a link with junk
+    appended never reach this far with anything but the id.
+    """
+    from . import widgetz
+    url = str(url or "").strip()[:500]
+    if not url.lower().startswith(("http://", "https://")):
+        return None, NOT_A_LINK
+    spec = widgetz._player_for(url)
+    if not spec:
+        return None, NOT_A_LINK
+    if spec["provider"] != "youtube":
+        return None, LINK_NO.format(label=spec["label"])
+    m = _VIDEO_ID.search(spec["src"] + "/")
+    if not m:
+        return None, NOT_A_LINK
+    vid, start = m.group(1), _start_seconds(url)
+    canonical = f"https://www.youtube.com/watch?v={vid}"
+    return {"provider": "youtube", "id": vid, "url": canonical, "start": start,
+            "title": f"YouTube video {vid}",
+            "part": {"file_data": {"file_uri": canonical},
+                     "video_metadata": {"start_offset": f"{start}s",
+                                        "end_offset": f"{start + LINK_WINDOW_SECONDS}s"}}}, None
 
 
 class _Fields:
@@ -228,7 +305,14 @@ def _resolve(request, name, doors):
         return _Slot(f, (getattr(f, "content_type", "") or "").lower()), None
     given = [d for d in doors if request.data.get(f"{name}_{d}") not in (None, "")]
     if not given:
-        return None, None
+        link_url = request.data.get(f"{name}_url")
+        if link_url in (None, ""):
+            return None, None
+        link, why = classify_link(link_url)
+        if why:
+            return None, Response({"detail": why, "link_unsupported": True, "side": name},
+                                  status=status.HTTP_400_BAD_REQUEST)
+        return _Slot(None, "video/mp4", link=link), None
     coach = vc.SingZCoachView()
     fields = _Fields(request, f"{name}_")
     if "post_id" in given:
@@ -267,8 +351,16 @@ class MatchReferenceView(APIView):
             # Said before the button: a post on either side costs this once; the rest cost none.
             "post_energy_cost": vc.coach_post_energy(request.user),
             "post_note": POST_NOTE.format(cost=vc.coach_post_energy(request.user)),
-            "take_sources": ["file", "post", "upload", "journal"],
-            "reference_sources": ["file", "post", "upload"],
+            "take_sources": ["file", "post", "upload", "journal", "link"],
+            "reference_sources": ["file", "post", "upload", "link"],
+            # Which links work, said before one is pasted. Only YouTube can be heard.
+            "link_window_seconds": LINK_WINDOW_SECONDS,
+            "link_note": LINK_NOTE,
+            "link_sources": [
+                {"provider": "youtube", "label": "YouTube", "ok": True, "note": LINK_NOTE},
+                {"provider": "spotify", "label": "Spotify", "ok": False, "why": LINK_NO.format(label="Spotify")},
+                {"provider": "soundcloud", "label": "SoundCloud", "ok": False, "why": LINK_NO.format(label="SoundCloud")},
+            ],
         })
 
     def post(self, request):
@@ -337,6 +429,9 @@ class MatchReferenceView(APIView):
         try:
             parts = []
             for side in (take, ref):
+                if side.link is not None:
+                    parts.append(side.link["part"])
+                    continue
                 side.opened()
                 size = vc._size_of(side.file)
                 if size == 0:
@@ -349,7 +444,10 @@ class MatchReferenceView(APIView):
                     return Response({"detail": f"The coach couldn't take that one — {why}. Nothing was charged."},
                                     status=status.HTTP_502_BAD_GATEWAY)
                 parts.append(part)
-            body = {"contents": [{"parts": [{"text": _prompt(self.app_key, genre)},
+            sections = [f"{n.upper()} is a {LINK_WINDOW_SECONDS // 60}-minute section of a video, starting at "
+                        f"{x.link['start'] // 60}:{x.link['start'] % 60:02d}. Judge only that section."
+                        for n, x in (("the member's take", take), ("the reference", ref)) if x.link is not None]
+            body = {"contents": [{"parts": [{"text": _prompt(self.app_key, genre) + ("\n\n" + " ".join(sections) if sections else "")},
                                             {"text": "MEMBER'S TAKE:"}, parts[0],
                                             {"text": "REFERENCE TRACK:"}, parts[1]]}],
                     "generationConfig": {"temperature": vc.COACH_TEMPERATURE}}
@@ -370,7 +468,7 @@ class MatchReferenceView(APIView):
             logger.exception("%s match: files could not be read", self.app_key)
             # A stored side whose file has gone from storage: say so as a fact about the
             # FILE (410), write it down for the next member, and charge nothing.
-            gone = [x for x in (take, ref) if not x.uploaded]
+            gone = [x for x in (take, ref) if x.on_disk]
             for x in gone:
                 mark_upload_missing(getattr(x.file, "instance", None))
             if gone:
@@ -391,6 +489,10 @@ class MatchReferenceView(APIView):
 
         if resp.status_code != 200:
             logger.error("%s match: Gemini %s — %s", self.app_key, resp.status_code, resp.text[:300])
+            if take.link is not None or ref.link is not None:
+                return Response({"detail": "The coach couldn't open that YouTube video. It has to be public — not "
+                                           "private, age-restricted or removed. Nothing was charged.",
+                                 "link_unreachable": True}, status=status.HTTP_502_BAD_GATEWAY)
             return Response({"detail": "The coach couldn't read those files right now. Nothing was charged."},
                             status=status.HTTP_502_BAD_GATEWAY)
         try:

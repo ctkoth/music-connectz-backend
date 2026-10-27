@@ -2742,3 +2742,21 @@ size-from-the-row and the "recording is gone" 410 are the coach's rules and not 
 - A journal entry is take-only: a diary page is not "another artist's finished record". The same post
   on both sides is a 400.
 - **Never run against Google** (CI has no key), like the rest of the coach's transport.
+
+### Inspiration links: YouTube can be heard, Spotify and SoundCloud cannot
+
+Either side may be `take_url` / `reference_url`. Only a **YouTube** link works: Gemini watches a public video
+from its address (`file_data.file_uri` + `video_metadata`), so nothing is downloaded or stored here, and
+`classify_link` rebuilds the address from the 11-character id alone (reusing `widgetz._player_for`, so
+lookalike hosts and appended junk never reach the model). The coach reads `LINK_WINDOW_SECONDS` (4 min) from
+the link's `?t=` / `?start=` (default 0) — a whole album upload must not be the price of one comparison —
+and is told it is hearing a section.
+
+**Spotify and SoundCloud are refused up front, with the reason, and nothing runs.** They serve a player and never
+the audio, so there is nothing to hear; having the model "review" a song from its title would be invented detail,
+which is the substance rule's failure case. `GET` publishes `link_sources` (the sentence per provider) and
+`link_note` so the screen says it as the member pastes, not after the press. A link costs no ⚡ (only a post does).
+A video Gemini cannot open (private, age-restricted, removed) answers 502 `link_unreachable`, uncharged.
+
+**Never run against Google** — the YouTube-URL input is Gemini's preview feature and CI has no key, so the request
+shape is pinned by tests and unverified live. Check it once with a real key before relying on it.
