@@ -1263,6 +1263,16 @@ VYBEZ_MINOR_REASON = ("VybeZ is for finding someone, and that part of Music Conn
                       "find collaborators your own age in CollabZ.")
 
 
+def member_genres(p):
+    """Every genre a member has declared, lower-cased: the profile's own list plus each persona skill's."""
+    out = {str(g).strip().lower() for g in (p.genres or []) if isinstance(g, str)}
+    for persona in personas_of(p):
+        for sk in persona.get("skills") or []:
+            if isinstance(sk, dict):
+                out |= {str(g).strip().lower() for g in (sk.get("genres") or []) if isinstance(g, str)}
+    return out
+
+
 class MembersView(APIView):
     """Search members by multi-select metrics: regions, genders, signs, sober.
 
@@ -1299,6 +1309,9 @@ class MembersView(APIView):
         # level — "can we talk at all" is the search question; the level
         # itself is for the card to show, not for this to gate on.
         languages = multi("languages")
+        # GenreZ: ?genres=hip hop,metal — a member passes if ANY wanted genre is one
+        # they declared on their profile or on a skill of a persona. Declared, never inferred.
+        genres_wanted = {g.strip().lower() for g in multi("genres")}
         # SubstanceZ multi-select: substance keys the searcher wants sober-friendly.
         # A member passes if, on every selected substance, they are NOT active
         # ("use"/"sometimes"). Undeclared counts as sober-friendly.
@@ -1414,6 +1427,8 @@ class MembersView(APIView):
                 # concluding there are no Introverts here.
                 if not personality_dict(p.personality).keys() >= personality_wanted.keys():
                     personality_undeclared += 1
+                continue
+            if genres_wanted and not genres_wanted & member_genres(p):
                 continue
             if persona_keys and not persona_keys & {str(x.get("key") or "") for x in personas_of(p)}:
                 continue
