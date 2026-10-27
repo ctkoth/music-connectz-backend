@@ -124,7 +124,9 @@ class GatesAreReadNotRetyped(TestCase):
         self.assertEqual(toggles["automation"]["needs"], required_tier("automationz"))
         self.assertEqual(toggles["suggestionz"]["needs"], required_tier("suggestionz"))
         for lang in OCC_LANGUAGES:
-            want = required_tier("occ_cpp") if lang["key"] in ("cpp", "c") else required_tier("occ_games")
+            feature = ("occ_cpp" if lang["key"] in ("cpp", "c") else
+                       "occ_games" if lang["key"] in ("python", "javascript", "typescript") else "occ_games_medium")
+            want = required_tier(feature)
             self.assertEqual(lang["needs"], want, lang["key"])
 
 

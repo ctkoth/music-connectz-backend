@@ -153,27 +153,75 @@ OCC_TOGGLES = [
 # than typed on seventeen rows — a second copy of a gate is how the tab grid
 # came to call LogZ Premium.
 _GAMES = required_tier("occ_games")
+_MEDIUM = required_tier("occ_games_medium")
 _CPP = required_tier("occ_cpp")
 OCC_LANGUAGES = [
+    # The three a basic game is built in: they run in a browser or the sandbox,
+    # which is what a one-screen game needs and nothing more.
     {"key": "python", "name": "Python", "needs": _GAMES},
     {"key": "javascript", "name": "JavaScript", "needs": _GAMES},
     {"key": "typescript", "name": "TypeScript", "needs": _GAMES},
-    {"key": "csharp", "name": "C# (Unity)", "needs": _GAMES},
-    {"key": "gdscript", "name": "GDScript (Godot)", "needs": _GAMES},
-    {"key": "lua", "name": "Lua", "needs": _GAMES},
-    {"key": "java", "name": "Java", "needs": _GAMES},
-    {"key": "kotlin", "name": "Kotlin", "needs": _GAMES},
-    {"key": "swift", "name": "Swift", "needs": _GAMES},
-    {"key": "go", "name": "Go", "needs": _GAMES},
-    {"key": "rust", "name": "Rust", "needs": _GAMES},
-    {"key": "ruby", "name": "Ruby", "needs": _GAMES},
-    {"key": "php", "name": "PHP", "needs": _GAMES},
-    {"key": "haxe", "name": "Haxe", "needs": _GAMES},
-    {"key": "gml", "name": "GML (GameMaker)", "needs": _GAMES},
+    {"key": "csharp", "name": "C# (Unity)", "needs": _MEDIUM},
+    {"key": "gdscript", "name": "GDScript (Godot)", "needs": _MEDIUM},
+    {"key": "lua", "name": "Lua", "needs": _MEDIUM},
+    {"key": "java", "name": "Java", "needs": _MEDIUM},
+    {"key": "kotlin", "name": "Kotlin", "needs": _MEDIUM},
+    {"key": "swift", "name": "Swift", "needs": _MEDIUM},
+    {"key": "go", "name": "Go", "needs": _MEDIUM},
+    {"key": "rust", "name": "Rust", "needs": _MEDIUM},
+    {"key": "ruby", "name": "Ruby", "needs": _MEDIUM},
+    {"key": "php", "name": "PHP", "needs": _MEDIUM},
+    {"key": "haxe", "name": "Haxe", "needs": _MEDIUM},
+    {"key": "gml", "name": "GML (GameMaker)", "needs": _MEDIUM},
     # Unreal is reserved for StatZ, which is what makes C++ the StatZ language.
     {"key": "cpp", "name": "C++ (Unreal)", "needs": _CPP},
     {"key": "c", "name": "C", "needs": _CPP},
 ]
+
+# What a game may be at each level (Corey's call: Free basic, Premium medium, StatZ
+# advanced). The level is SCOPE — how much of a game OCC builds — never whether a
+# member may build one. OCC is told the member's level on every run (`game_note`),
+# and asked for more it builds that level's version and says what the next adds.
+GAME_LEVELS = [
+    {"key": "basic", "label": "Basic", "needs": _GAMES,
+     "scope": ("One screen, simple controls (keys or taps), shapes or simple sprites, a score "
+               "and a restart. One file of a few hundred lines that runs in a browser."),
+     "examples": "Snake, Pong, a clicker, a one-level platformer",
+     "languages": "Python, JavaScript, TypeScript"},
+    {"key": "medium", "label": "Medium", "needs": _MEDIUM,
+     "scope": ("Several levels or rooms, sprite animation, sound, a start menu, a saved high "
+               "score and enemies that move in patterns. A few files, in any engine but Unreal."),
+     "examples": "a multi-level platformer, a top-down shooter, a rhythm game",
+     "languages": "Every language except C and C++"},
+    {"key": "advanced", "label": "Advanced", "needs": _CPP,
+     "scope": ("Many scenes and systems: physics, enemies with states, inventory or progression, "
+               "procedural levels or a level editor, controller support, and Unreal in C++."),
+     "examples": "a roguelike, a physics puzzler with an editor, a 3D level in Unreal",
+     "languages": "Every language, Unreal (C++) included"},
+]
+
+
+def game_levels_for(tier):
+    """Every level, each marked allowed or not, plus the key of the member's own."""
+    rows = [{**lv, "allowed": tier_at_least(tier, lv["needs"])} for lv in GAME_LEVELS]
+    mine = ([r["key"] for r in rows if r["allowed"]] or ["basic"])[-1]
+    return rows, mine
+
+
+_TIER_NAME = {TIER_FREE: "Free", TIER_PREMIUM: "Premium", TIER_STATZ: "StatZ"}
+
+
+def game_note(tier):
+    """The line OCC is given so a game it writes fits the member's level."""
+    rows, mine = game_levels_for(tier)
+    lv = next(r for r in rows if r["key"] == mine)
+    nxt = next((r for r in rows if not r["allowed"]), None)
+    more = (f" If they ask for more than that, build the {lv['label'].lower()} version and say in one "
+            f"sentence that {nxt['label'].lower()} games (like {nxt['examples']}) "
+            f"need {_TIER_NAME.get(nxt['needs'], nxt['needs'])}.") if nxt else ""
+    return (f"\n\nIf the member asks you to build a game, their level is {lv['label']}: "
+            f"{lv['scope']} Languages: {lv['languages']}.{more}")
+
 
 def languages_with_run_status():
     """OCC_LANGUAGES, each marked with whether the sandbox can actually run it.

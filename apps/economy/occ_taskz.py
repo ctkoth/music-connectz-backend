@@ -44,6 +44,7 @@ from .models import (
 )
 from .occ_suggest import can_reverse, reverse
 from .occ_spec import (
+    game_levels_for,
     EXPORT_ROUTES,
     GAME_GENRES,
     OCC_IMAGE_EXPORTS,
@@ -118,6 +119,8 @@ class OccSpecView(APIView):
                         for t in OCC_TOGGLES],
             "languages": allowed_langs,
             "languages_locked": locked_langs,
+            "game_levels": game_levels_for(tier)[0],
+            "game_level": game_levels_for(tier)[1],
             "game_genres": [{"key": k, "name": n, "emoji": e, "subgenres": subs}
                             for k, n, e, subs in GAME_GENRES],
             "image_exports": OCC_IMAGE_EXPORTS,

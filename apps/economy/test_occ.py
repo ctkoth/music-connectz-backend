@@ -74,9 +74,36 @@ class LanguageGateTests(TestCase):
         self.assertEqual(locked, [])
         self.assertIn("cpp", {l["key"] for l in allowed})
 
-    def test_free_gets_none_of_them(self):
+    def test_free_builds_basic_games_in_the_browser_languages(self):
         allowed, _ = languages_for(TIER_FREE)
-        self.assertEqual(allowed, [])
+        self.assertEqual({l["key"] for l in allowed}, {"python", "javascript", "typescript"})
+
+
+class GameLevelTests(TestCase):
+    """Free basic, Premium medium, StatZ advanced: the level is how much of a game
+    OCC builds, never whether a member may build one."""
+
+    def test_each_tier_has_its_level(self):
+        from apps.economy.occ_spec import game_levels_for
+        self.assertEqual(game_levels_for(TIER_FREE)[1], "basic")
+        self.assertEqual(game_levels_for(TIER_PREMIUM)[1], "medium")
+        self.assertEqual(game_levels_for(TIER_STATZ)[1], "advanced")
+        rows, _ = game_levels_for(TIER_FREE)
+        self.assertEqual([r["allowed"] for r in rows], [True, False, False])   # locked, not hidden
+
+    def test_occ_is_told_the_level_and_what_the_next_needs(self):
+        from apps.economy.occ_spec import game_note
+        self.assertIn("level is Basic", game_note(TIER_FREE))
+        self.assertIn("need Premium", game_note(TIER_FREE))
+        self.assertIn("need StatZ", game_note(TIER_PREMIUM))
+        self.assertNotIn(" need ", game_note(TIER_STATZ))
+
+    def test_the_spec_serves_the_levels(self):
+        c = APIClient()
+        c.force_authenticate(User.objects.create_user("gamer", "g@e.com", PW))
+        d = c.get("/api/economy/occ/spec/").data
+        self.assertEqual(d["game_level"], "basic")
+        self.assertEqual([lv["key"] for lv in d["game_levels"]], ["basic", "medium", "advanced"])
 
 
 class SpecTests(TestCase):
