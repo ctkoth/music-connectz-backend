@@ -61,3 +61,27 @@ class DerivedPostTests(TestCase):
         for d in ({"id": priv.id, "kind": "remix"}, {"id": mine.id, "kind": "remix"},
                   {"id": 99999, "kind": "remix"}, {"id": self.orig.id, "kind": "steal"}):
             self.assertEqual(self._post(d).status_code, 400, d)
+
+
+class InventoryTests(TestCase):
+    def setUp(self):
+        self.a = mk("studioowner"); self.b = mk("finder")
+        self.ca = APIClient(); self.ca.force_authenticate(self.a)
+        self.cb = APIClient(); self.cb.force_authenticate(self.b)
+
+    def test_it_is_cleaned_and_saved_and_searchable_by_name_fragment(self):
+        r = self.ca.post("/api/economy/profile/", {"inventory": [
+            {"name": "Neumann U87", "kind": "microphone", "where": "studio"},
+            {"name": "neumann u87", "kind": "microphone"},              # a repeat folds
+            {"name": "<b>SSL</b> bus comp", "kind": "weird", "where": "moon"},
+            {"name": ""}, "junk"]}, format="json")
+        self.assertEqual(r.status_code, 200, getattr(r, "data", None))
+        inv = profile_for(self.a).inventory
+        self.assertEqual(len(inv), 2)
+        self.assertEqual(inv[0]["name"], "Neumann U87")
+        self.assertNotIn("<", inv[1]["name"])
+        self.assertEqual((inv[1]["kind"], inv[1]["where"]), ("other", "home"))
+        got = {m["username"] for m in self.cb.get("/api/economy/members/?gear=u87").data["members"]}
+        self.assertIn("studioowner", got)
+        none = {m["username"] for m in self.cb.get("/api/economy/members/?gear=sm58").data["members"]}
+        self.assertNotIn("studioowner", none)

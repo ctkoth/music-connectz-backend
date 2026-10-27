@@ -1245,6 +1245,8 @@ class Profile(models.Model):
     genres = models.JSONField(default=list, blank=True)
     influences = models.JSONField(default=list, blank=True)
     gear = models.JSONField(default=list, blank=True)
+    # Structured inventory: [{name, kind, where, note}] — what an artist or studio actually uses.
+    inventory = models.JSONField(default=list, blank=True)
     label = models.CharField(max_length=100, blank=True, default="")
     timezone = models.CharField(max_length=48, blank=True, default="")
     pinned_post_id = models.PositiveIntegerField(null=True, blank=True)

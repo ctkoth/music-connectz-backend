@@ -133,7 +133,7 @@ def public_profile_dict(p, request=None):
         # The work-facing popular-site fields. Timezone stays off the
         # logged-out card: it narrows where somebody lives for no hiring gain.
         "pronouns": p.pronouns, "headline": p.headline, "genres": p.genres or [],
-        "influences": p.influences or [], "gear": p.gear or [], "label": p.label,
+        "influences": p.influences or [], "gear": p.gear or [], "inventory": p.inventory or [], "label": p.label,
         "cover_url": cover_abs(p.cover_url, request),
         "pinned_post": _pinned(p),
         # BadgeZ travels with the card. A shared profile is somebody's proof
