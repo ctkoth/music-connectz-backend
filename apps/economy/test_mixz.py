@@ -482,3 +482,14 @@ class AccountDeletionTests(TestCase):
         self.assertFalse(MasterWork.objects.exists())
         for n in names:
             self.assertFalse(default_storage.exists(n), n)
+
+
+
+class TheVocalSettingsAreKeptAndTheFileIsNot(TestCase):
+    def test_vocal_lift_and_level_are_bounded_and_kept(self):
+        s = mixz.clean_settings({"vocal": 99, "vocalLevel": -40, "vocalFile": True, "vocalChannels": [1, 2]})
+        self.assertEqual(s["vocal"], 6)
+        self.assertEqual(s["vocalLevel"], -12)
+        self.assertTrue(s["vocalFile"])
+        self.assertNotIn("vocalChannels", s)
+        self.assertEqual(mixz.clean_settings({"vocal": "auto"})["vocal"], "auto")

@@ -761,7 +761,13 @@ class SocialView(APIView):
         # a member must never be left waiting on a cron nobody is watching.
         # `manage.py settle_comment_karma` is the sweep for comments nobody
         # happens to open.
-        karmaz.settle_visible(rows, post_author_id=_post_author_id(item))
+        author_id = _post_author_id(item)
+        karmaz.settle_visible(rows, post_author_id=author_id)
+        # SuperfanZ 🫶 (superfanz.py): the artist's top fans, as this viewer may
+        # see them. Their comments pin first — the one perk the status carries,
+        # and attention is what a fan wants from an artist anyway.
+        from .superfanz import top_ids
+        fans = top_ids(author_id, request.user) if author_id else set()
         # Two queries for the whole list rather than two per comment. A
         # hundred comments must not be two hundred lookups on a feed read,
         # which is the rule the feed's own query-count test already holds.
@@ -778,9 +784,12 @@ class SocialView(APIView):
              "my_vote": my_votes.get(c.id, 0),
              # What it earned, once settled. Zero after settling is a real
              # answer ("nobody voted it up"); null means not settled yet.
-             "karma_energy": c.karma_energy if c.karma_settled_at else None}
+             "karma_energy": c.karma_energy if c.karma_settled_at else None,
+             "superfan": c.user_id in fans}
             for c in rows
         ]
+        # Stable: superfans first, everyone else in the order they already had.
+        comments.sort(key=lambda c: not c["superfan"])
         my_r = ItemRating.objects.filter(user=request.user, item_id=item).first()
         heard = ListenProgress.objects.filter(user=request.user, item_id=item).first()
         return {

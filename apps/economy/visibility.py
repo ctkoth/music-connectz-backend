@@ -74,6 +74,11 @@ DEFAULTS = {
     # because the stored value is identical).
     "substances": MEMBER,
 
+    # Whether you appear on artists' SuperfanZ lists (superfanz.py). Members by
+    # default — the list exists to be seen by the artist and their room — and
+    # private takes you off every list, though you still see your own standing.
+    "superfan": MEMBER,
+
     # Served to nobody but the member today. `birthday` is the date itself —
     # `age` above is the band, and they are separate fields on purpose, because
     # "people may know roughly how old I am" and "people may know the day I was

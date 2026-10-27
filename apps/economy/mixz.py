@@ -152,6 +152,20 @@ def clean_settings(raw):
     rate = _int(raw.get("exportRate"), 0, 768_000)
     if rate in EXPORT_RATES:
         out["exportRate"] = rate
+    # Raising a vocal that sat too low: the lift on the centre of the mix, and a
+    # separate vocal file's level against the beat. Whether a vocal file was
+    # mixed in is kept; the file never is, the same rule as the reference.
+    if raw.get("vocal") == "auto":
+        out["vocal"] = "auto"           # measured on each master, the default
+    else:
+        vocal = _num(raw.get("vocal"), 0, 6, 1)
+        if vocal is not None:
+            out["vocal"] = vocal
+    level = _num(raw.get("vocalLevel"), -12, 12, 1)
+    if level is not None:
+        out["vocalLevel"] = level
+    if isinstance(raw.get("vocalFile"), bool):
+        out["vocalFile"] = raw["vocalFile"]
     if isinstance(raw.get("reference"), bool):
         # Whether a reference track was matched — never the reference itself.
         out["reference"] = raw["reference"]

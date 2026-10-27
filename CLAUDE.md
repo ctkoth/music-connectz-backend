@@ -2895,3 +2895,23 @@ worn inside a neon medal (`tools/make-neon-badges.mjs`, frontend) until his `bad
   opened by one side of a deal — a penalty either could fire would be a weapon one member aims at another.
 - **Tapping a medal opens everybody wearing it** — `GET /api/economy/badgez/holders/?key=`, visible badges only.
 - `manage.py refresh_badges` (was `refresh_thorough`) re-checks holders of ANY temporary badge hourly.
+
+## SuperfanZ 🫶: an artist's top fans, counted from what they did, paying nothing
+
+`apps/economy/superfanz.py`, `GET /api/economy/superfanz/?username=`. Badges say who is good; nothing said who is
+THEIRS. An artist's top `TOP` (3) fans over `WINDOW_DAYS` (30), from acts on that artist's posts: a play heard to the end
+1, a rating 2, a comment 2, a share 3, with `MIN_POINTS` (5) before anybody counts.
+
+- **Pays nothing**, so a second account farming fan status buys nothing. The one perk is attention: **a superfan's comments
+  pin first on that artist's posts** (`SocialView._payload` reads `top_ids`, each comment carries `superfan`).
+- **A fan can leave every list**: `superfan` is a VisibilitieZ field (members by default); private hides them everywhere and
+  they still see their own standing (`you`: points, superfan, `to_top`).
+- **The age wall, blocks and missing profiles**: a viewer sees fans in their own age group only; blocks either way drop a fan;
+  a fan with no Profile row yet (made lazily) takes every default rather than being skipped — the bug the first test found.
+- Points are cached 10 minutes per artist (five queries to build). It is a count of acts, never a rating of a person.
+
+## Mix ConnectZ raises a vocal that sits too low (VocalZ)
+
+The engine is the frontend's (`src/mastering/master.js`); this repo keeps the settings a saved master remembers.
+`mixz.clean_settings` keeps `vocal` (`"auto"` or 0–6 dB), `vocalLevel` (±12 dB) and `vocalFile` (whether a separate vocal
+was mixed in — never the file, the same rule as the reference).
