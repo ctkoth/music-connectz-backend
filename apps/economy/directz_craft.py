@@ -59,6 +59,30 @@ CRAFT_SCORES = {
     "story": "Storytelling",
 }
 
+# Options a member can add to the rating. NOT part of the five above: they sit beside the overall,
+# are asked for only when picked, and never move it. Imagery is what the picture puts in the
+# viewer's head (framing is how a shot is built); Mainstream Appeal is REACH - how broadly the
+# piece would land - and a niche or experimental video scores low without being worse.
+CRAFT_EXTRAS = {
+    "imagery": "Imagery",
+    "mainstream": "Mainstream Appeal",
+}
+_EXTRA_ASK = {
+    "imagery": ('- "imagery": what the picture puts in the viewer\'s head - concrete, specific, '
+                'memorable images and symbols that earn their place. Not framing, which is how a '
+                'shot is built.'),
+    "mainstream": ('- "mainstream": how broadly this would land with an ordinary viewer on first '
+                   'watching. This is REACH, not quality: an excellent niche or experimental video '
+                   'scores low here and that is not a criticism.'),
+}
+
+
+def clean_extras(extras):
+    """The asked-for options, in a fixed order, dropping anything not on the list."""
+    want = set(extras or ())
+    return tuple(k for k in CRAFT_EXTRAS if k in want)
+
+
 PROMPT = """You are a film and video craft critic rating a piece of work for \
 DirectZ, a collaborative video app for musicians. Watch the video and judge what \
 is actually on screen.
@@ -67,14 +91,14 @@ This is a {fmt} ({length}) filed under the genre "{genre}".
 
 Rate ONLY what you can see and hear. Do not reward length, ambition, or how many \
 people were involved — you cannot see those and they are not craft. A simple \
-video executed well beats an elaborate one executed badly.
+video executed well beats an elaborate one executed badly.{extra_ask}
 
 Reply with ONLY a JSON object, no prose around it:
 {{
   "score": <overall 1-10>,
   "scores": {{"framing": <1-10>, "editing": <1-10>, "lighting": <1-10>,
              "sound": <1-10>, "story": <1-10>}},
-  "verdict": "<one or two sentences on what this video is and how well it is made>",
+{extra_shape}  "verdict": "<one or two sentences on what this video is and how well it is made>",
   "strengths": ["<what genuinely works, specific to this video>"],
   "fixes": ["<what to do differently next time, specific and actionable>"]
 }}"""
@@ -119,7 +143,7 @@ def too_big(size_bytes):
     return bool(size_bytes) and size_bytes > INLINE_MAX_MB * 1024 * 1024
 
 
-def rate_video(fileobj, content_type, *, fmt="reelz", genre="", length=""):
+def rate_video(fileobj, content_type, *, fmt="reelz", genre="", length="", extras=()):
     """Watch one video and score its craft. Returns (payload, reason).
 
     Exactly one is None. `reason` is a short phrase for logs and for the work's
@@ -138,8 +162,12 @@ def rate_video(fileobj, content_type, *, fmt="reelz", genre="", length=""):
     if not mime:
         return None, f"the rater can't read {content_type or 'that format'}"
 
+    extras = clean_extras(extras)
+    extra_ask = ("\n\nThey also asked for these OPTIONAL scores, which sit beside the overall and "
+                 "do not change it:\n" + "\n".join(_EXTRA_ASK[k] for k in extras)) if extras else ""
+    extra_shape = ('  "extras": {' + ", ".join(f'"{k}": <1-10>' for k in extras) + '},\n') if extras else ""
     prompt = PROMPT.format(fmt=fmt, length=length or "unspecified length",
-                           genre=genre or "unspecified")
+                           genre=genre or "unspecified", extra_ask=extra_ask, extra_shape=extra_shape)
     # Read the video ONCE — the chain may try more than one model, and a file
     # object read twice sends the second attempt nothing.
     body = {"contents": [{"parts": [
@@ -189,6 +217,8 @@ def rate_video(fileobj, content_type, *, fmt="reelz", genre="", length=""):
     return {
         "score": _clamp(parsed.get("score")),
         "scores": {k: _clamp((parsed.get("scores") or {}).get(k)) for k in CRAFT_SCORES},
+        # Only the options that were asked for, never a made-up 0 for one that was not.
+        **({"extras": {k: _clamp((parsed.get("extras") or {}).get(k)) for k in extras}} if extras else {}),
         "verdict": str(parsed.get("verdict", ""))[:400],
         "strengths": listy(parsed.get("strengths")),
         "fixes": listy(parsed.get("fixes")),

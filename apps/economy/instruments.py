@@ -206,10 +206,14 @@ WIT_SCORE = {
     # experimental piece scores low without being worse, so it is offered on every coach
     # (words or no words), always sits beside the overall, and can never be counted in it.
     "mainstream": "Mainstream Appeal 📻",
+    # Imagery for the EAR: how vividly the sound itself paints a scene or a mood - texture, space,
+    # a motif you can picture. The words' imagery is "imagery" above and needs words; this does not,
+    # so an instrumental, a drum groove or a hummed idea can be asked it too.
+    "sound_imagery": "Sound Imagery 🎧",
 }
 
 # Offered on every coach, not only the ones with words.
-ANYWHERE_EXTRAS = ("mainstream",)
+ANYWHERE_EXTRAS = ("mainstream", "sound_imagery")
 # Never inside the overall, whatever the member ticks: appeal is not skill.
 NEVER_COUNTED_EXTRAS = ("mainstream",)
 
@@ -438,6 +442,9 @@ is written well. You are a coach, not a censor.""" if lyrics else "")
                           'follow who, what and where from the words alone, and are the lines specific '
                           'where they need to be? Deliberate ambiguity is not a fault when it is deliberate. '
                           'Not how audible the vocal is - that is judged elsewhere.'),
+        "sound_imagery": ('- "sound_imagery": how vividly the SOUND paints a scene or a mood - texture, '
+                          'space, a motif or a sound you can picture. Judge what you hear, not what the '
+                          'words say; a plain, honest sound is a low number, not a bad one.'),
         "mainstream": ('- "mainstream": how broadly this would land with an ordinary listener on first '
                        'hearing - a hook that sticks, a structure and sound people already know how to '
                        'enjoy, approachable words, a length and energy that radio, playlists and short '
@@ -446,7 +453,7 @@ is written well. You are a coach, not a censor.""" if lyrics else "")
                        'size, and never mark a style down for being what it is.')}
     wit_ask = (("""
 
-**EXTRA SCORES (wit, depth, rhyme scheme, wordplay, metaphors, imagery, lyric clarity, mainstream appeal) — they asked for these, so score only the ones named. The writing ones rest on the words you can actually make out; mainstream appeal rests on the whole piece.**
+**EXTRA SCORES (wit, depth, rhyme scheme, wordplay, metaphors, imagery, lyric clarity, sound imagery, mainstream appeal) — they asked for these, so score only the ones named. The writing ones rest on the words you can actually make out; sound imagery and mainstream appeal rest on the whole piece.**
 """ + "\n".join(wit_lines[k] for k in extras) + """
 If the delivery is too buried to catch the words, score the WRITING ones null and say so in "wit_note" - never \
 review words you did not hear. None is a re-score of Punchlines or FeelZ. A style that does not ask for it gets \

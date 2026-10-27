@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .copyrightz import CLAIMS, summary as copyright_summary
-from .directz_craft import CRAFT_SCORES
+from .directz_craft import CRAFT_EXTRAS, CRAFT_SCORES, clean_extras
 from .models import (
     DirectZWork,
     DirectZRating,
@@ -193,7 +193,7 @@ def _apply_copyright_check(work, user):
     work.save(update_fields=["copyright", "copyright_state"])
 
 
-def _apply_craft_rating(work, user):
+def _apply_craft_rating(work, user, extras=()):
     """Watch the work's video and store the score, or store why we couldn't.
 
     Never raises: a rating that fails is a work with no rating, not a failed
@@ -235,7 +235,8 @@ def _apply_craft_rating(work, user):
             payload, why = rate_video(
                 upload.file, upload.content_type,
                 fmt=work.fmt, genre=work.genre,
-                length=f"{work.duration_sec}s" if work.duration_sec else "")
+                length=f"{work.duration_sec}s" if work.duration_sec else "",
+                extras=extras)
         except Exception:                                    # pragma: no cover
             logger.exception("DirectZ craft: rating %s failed", work.pk)
             payload, why = None, "the rater couldn't read that file"
@@ -288,6 +289,7 @@ def _work_dict(w, request):
         # story — so a member can see it was earned rather than assigned.
         "craft": w.craft or {},
         "craft_scores": CRAFT_SCORES,
+        "craft_extras": CRAFT_EXTRAS,
         # Why there is no rating, when there isn't. The screen shows this
         # instead of a number rather than beside one.
         "rating_note": w.rating_note,
@@ -327,6 +329,8 @@ class DirectZWorksView(APIView):
             "craft": {
                 **craft_price(request.user),
                 "scores": CRAFT_SCORES,
+                # Options a member can add, beside the five and never inside the overall.
+                "extras": CRAFT_EXTRAS,
                 "note": ("A craft rating sends your video to a model that watches "
                          "it and scores framing, editing, lighting, sound and "
                          "storytelling. A video it can't read isn't charged."),
@@ -379,7 +383,7 @@ class DirectZWorksView(APIView):
         # quietly become a paid action. A member who wants one asks for one,
         # having been shown the price by the GET above.
         if d.get("craft_rating"):
-            _apply_craft_rating(w, request.user)
+            _apply_craft_rating(w, request.user, extras=clean_extras(d.get("craft_extras")))
         else:
             w.rating_note = "no craft rating asked for"
             w.save(update_fields=["rating_note"])

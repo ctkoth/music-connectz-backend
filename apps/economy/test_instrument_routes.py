@@ -105,7 +105,7 @@ class ExtraScoreReachTests(TestCase):
         asked = ["mainstream", "wit", "lyric_clarity"]
         self.assertEqual(clean_extras(asked, "drumz"), ("mainstream",))
         self.assertEqual(set(clean_extras(asked, "rapz")), {"mainstream", "wit", "lyric_clarity"})
-        self.assertEqual(list(extras_offered("drumz")), ["mainstream"])
+        self.assertEqual(list(extras_offered("drumz")), ["mainstream", "sound_imagery"])
         for k in ("wit", "wordplay", "rhyme", "lyric_clarity", "mainstream"):
             self.assertIn(k, extras_offered("singz"))
 
@@ -121,3 +121,23 @@ class ExtraScoreReachTests(TestCase):
     def test_mainstream_can_never_be_counted_in_the_overall(self):
         from apps.economy.instruments import NEVER_COUNTED_EXTRAS
         self.assertIn("mainstream", NEVER_COUNTED_EXTRAS)
+
+
+class ImageryAcrossMediaTests(TestCase):
+    """Imagery in lyrics (words), in audio (sound) and in video (picture)."""
+
+    def test_the_words_imagery_needs_words_and_the_sound_imagery_does_not(self):
+        from apps.economy.instruments import clean_extras
+        self.assertEqual(clean_extras(["imagery", "sound_imagery"], "drumz"), ("sound_imagery",))
+        self.assertEqual(set(clean_extras(["imagery", "sound_imagery"], "rapz")), {"imagery", "sound_imagery"})
+
+    def test_sound_imagery_is_defined_in_the_prompt_and_stays_out_of_the_overall(self):
+        from apps.economy.instruments import NEVER_COUNTED_EXTRAS, prompt_for
+        self.assertIn('"sound_imagery"', prompt_for("drumz", "Trap", "", "medium", extras=("sound_imagery",)))
+        # Counted-in-overall is the member's choice for the writing scores; sound imagery follows them.
+        self.assertNotIn("sound_imagery", NEVER_COUNTED_EXTRAS)
+
+    def test_video_imagery_is_an_option_beside_the_five_not_one_of_them(self):
+        from apps.economy import directz_craft
+        self.assertIn("imagery", directz_craft.CRAFT_EXTRAS)
+        self.assertNotIn("imagery", directz_craft.CRAFT_SCORES)
