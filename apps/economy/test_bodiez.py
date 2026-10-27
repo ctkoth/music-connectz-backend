@@ -1667,6 +1667,128 @@ class BodieZSessionSummaryTests(TestCase):
         self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
 
 
+class BodieZSessionLogTests(TestCase):
+    """SessionZ's list: every finished session, paged, searchable, with totals and 'check this' notes."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username="log1", password="pw")
+        self.client.force_authenticate(user=self.user)
+        self.press = BodieZExercise.objects.create(name="Log Press", muscle_group="chest", equipment="dumbbell")
+        self.squat = BodieZExercise.objects.create(name="Log Squat", muscle_group="upper_legs", equipment="barbell")
+
+    def session(self, rows, days_ago=1, hours=1, routine=None, live=True, user=None):
+        s = BodieZSession.objects.create(user=user or self.user, routine=routine, backfilled=not live)
+        BodieZSession.objects.filter(id=s.id).update(
+            started_at=timezone.now() - timedelta(days=days_ago),
+            ended_at=timezone.now() - timedelta(days=days_ago) + timedelta(hours=hours))
+        for i, (ex, reps, w) in enumerate(rows, 1):
+            BodieZSet.objects.create(session=s, exercise=ex, set_number=i, reps=reps, weight_kg=w)
+        return s
+
+    def get(self, **params):
+        return self.client.get("/api/economy/bodiez/sessions/log/", params)
+
+    def test_lists_every_finished_session_newest_first_not_just_fifty(self):
+        for d in range(1, 61):
+            self.session([(self.press, 10, 20)], days_ago=d)
+        BodieZSession.objects.create(user=self.user)                  # an open one is not "past"
+        r = self.get(limit=100)
+        self.assertEqual(r.data["total"], 60)
+        self.assertEqual(len(r.data["sessions"]), 60)
+        starts = [x["started_at"] for x in r.data["sessions"]]
+        self.assertEqual(starts, sorted(starts, reverse=True))
+
+    def test_paging_walks_the_whole_list_without_repeats(self):
+        for d in range(1, 8):
+            self.session([(self.press, 10, 20)], days_ago=d)
+        seen, offset = [], 0
+        while True:
+            r = self.get(limit=3, offset=offset)
+            seen += [x["id"] for x in r.data["sessions"]]
+            if not r.data["has_more"]:
+                break
+            offset += 3
+        self.assertEqual(len(seen), 7)
+        self.assertEqual(len(set(seen)), 7)
+
+    def test_each_row_carries_its_own_totals_and_is_editable_as_is(self):
+        self.session([(self.press, 10, 20), (self.press, 8, 20)])
+        row = self.get().data["sessions"][0]
+        self.assertEqual((row["volume_kg"], row["reps"]), (360.0, 18))
+        self.assertEqual(row["duration_seconds"], 3600)
+        self.assertEqual(len(row["sets"]), 2)
+        self.assertIn("id", row["sets"][0])               # PastWorkout's editor needs set ids to keep rest times
+
+    def test_lifetime_totals(self):
+        self.session([(self.press, 10, 20)]); self.session([(self.squat, 5, 100)], days_ago=2)
+        t = self.get().data["totals"]
+        self.assertEqual((t["sessions"], t["sets"], t["volume_kg"]), (2, 2, 700.0))
+
+    def test_search_finds_a_lift_or_a_routine_title(self):
+        routine = BodieZRoutine.objects.create(user=self.user, title="Leg day", exercises=[])
+        self.session([(self.press, 10, 20)], days_ago=1)
+        self.session([(self.squat, 5, 100)], days_ago=2, routine=routine)
+        self.assertEqual([x["routine_title"] for x in self.get(q="leg").data["sessions"]], ["Leg day"])
+        self.assertEqual(self.get(q="press").data["total"], 1)
+        self.assertEqual(self.get(q="nothing like this").data["total"], 0)
+
+    def test_dates_bound_the_list_and_a_bad_date_is_refused(self):
+        self.session([(self.press, 10, 20)], days_ago=40)
+        self.session([(self.press, 10, 20)], days_ago=3)
+        since = (timezone.localdate() - timedelta(days=10)).isoformat()
+        self.assertEqual(self.get(since=since).data["total"], 1)
+        self.assertEqual(self.get(until=since).data["total"], 1)
+        self.assertEqual(self.get(since="last week").status_code, 400)
+
+    def test_an_empty_session_and_one_left_open_are_flagged_with_a_reason(self):
+        self.session([])                                           # nothing logged
+        self.session([(self.press, 10, 20)], hours=9, days_ago=2)  # live, ran nine hours
+        self.session([(self.press, 10, 20)], hours=9, days_ago=3, live=False)   # typed in: no measured length
+        self.session([(self.press, 10, 20)], hours=1, days_ago=4)  # fine
+        notes = [x["check"] for x in self.get().data["sessions"]]
+        self.assertEqual(sum(1 for n in notes if n), 2)
+        self.assertTrue(any("Nothing was logged" in n[0] for n in notes if n))
+        self.assertTrue(any("9:00" in n[0] and "left open" in n[0] for n in notes if n))
+        only = self.get(check=1).data
+        self.assertEqual(only["total"], 2)
+        self.assertEqual(len(only["sessions"]), 2)
+
+    def test_one_session_by_id_and_never_somebody_elses(self):
+        mine = self.session([(self.press, 10, 20)])
+        other = User.objects.create_user(username="log3", password="pw")
+        theirs = self.session([(self.press, 10, 20)], user=other)
+        self.assertEqual([x["id"] for x in self.get(id=mine.id).data["sessions"]], [mine.id])
+        self.assertEqual(self.get(id=theirs.id).data["total"], 0)
+        self.assertEqual(self.get(id="x").status_code, 400)
+
+    def test_only_your_own_sessions(self):
+        other = User.objects.create_user(username="log2", password="pw")
+        self.session([(self.press, 10, 20)], user=other)
+        r = self.get()
+        self.assertEqual(r.data["total"], 0)
+        self.assertEqual(r.data["totals"]["sessions"], 0)
+
+    def test_the_cost_of_the_list_does_not_grow_with_the_number_of_sessions(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        for d in range(1, 4):
+            self.session([(self.press, 10, 20), (self.squat, 5, 80)], days_ago=d)
+        with CaptureQueriesContext(connection) as few:
+            self.get(limit=100)
+        for d in range(4, 24):
+            self.session([(self.press, 10, 20), (self.squat, 5, 80)], days_ago=d)
+        with CaptureQueriesContext(connection) as many:
+            self.get(limit=100)
+        self.assertEqual(len(few), len(many))
+
+    def test_a_session_edited_here_shows_the_change_on_the_next_read(self):
+        s = self.session([(self.press, 10, 20)])
+        sets = [{"exercise_id": self.press.id, "reps": 10, "weight_kg": 30, "one_sided": ""}]
+        self.assertEqual(self.client.put(f"/api/economy/bodiez/sessions/{s.id}/sets/", {"sets": sets}, format="json").status_code, 200)
+        self.assertEqual(self.get().data["sessions"][0]["volume_kg"], 300.0)
+
+
 class BodieZLbFixTests(TestCase):
     def setUp(self):
         from .bodiez import LB_SWITCH_AT

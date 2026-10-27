@@ -2760,3 +2760,20 @@ A video Gemini cannot open (private, age-restricted, removed) answers 502 `link_
 
 **Never run against Google** — the YouTube-URL input is Gemini's preview feature and CI has no key, so the request
 shape is pinned by tests and unverified live. Check it once with a real key before relying on it.
+
+## SessionZ: every past session, editable, with the ones that need a look said plainly
+
+`GET /api/economy/bodiez/sessions/log/` (`BodieZSessionLogView`) is every FINISHED session, newest first, paged
+(`limit` ≤ 100, `offset`), searchable (`q`: a routine's title or a lift's name), bounded by `since` / `until`
+(YYYY-MM-DD), fetchable singly (`id`), with lifetime `totals`. The plain `sessions/` list stays the newest 50 with
+the open one mixed in, because Today needs exactly that; SessionZ is where somebody goes to find a log from last
+spring, so this one has no ceiling. Each row is the editable session (sets with ids, so an edit keeps measured rest)
+plus its own `volume_kg` / `reps` / `duration_seconds` and `check`. Yours only, by the query; the cost is constant in
+the number of sessions (a test pins it).
+
+- **`check` is facts about the row, worded for the member, never a correction.** Nothing logged → "add what you did,
+  or delete it". A LIVE session that ran ≥ `LEFT_OPEN_HOURS` (4) → "probably left open, so the length may not be the
+  workout's; the sets are what count". A workout typed in afterwards has no measured length, so it is never flagged for
+  one. `check=1` narrows the list to these. The fix stays the member's.
+- Editing and deleting use the endpoints that already existed (`sessions/<id>/sets/` PUT, `sessions/<id>/` PATCH and
+  DELETE); this only lists. An edit recounts records, BodyMap and goals, as before.

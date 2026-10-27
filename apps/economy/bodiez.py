@@ -69,7 +69,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Count, Max
+from django.db.models import Count, ExpressionWrapper, F, DecimalField, Max, Q, Sum
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -983,6 +983,100 @@ class BodieZSessionsView(APIView):
                              status=status.HTTP_409_CONFLICT)
         sess = BodieZSession.objects.create(user=request.user, routine=routine)
         return Response(_session_dict(sess), status=status.HTTP_201_CREATED)
+
+
+# A live session that ran this long was almost certainly left open (a phone put down, a tab forgotten),
+# so its measured duration is not the workout's. Said as a question, never "corrected".
+LEFT_OPEN_HOURS = 4
+LOG_PAGE = 25
+LOG_PAGE_MAX = 100
+
+
+def _check_notes(sess, sets, duration):
+    """Why a past session is worth a second look, in words the member can act on — [] when nothing is.
+
+    Facts about the row only (nothing logged; a measured length that no workout has), never a guess at
+    what the workout "should" have been, so the fix stays the member's.
+    """
+    notes = []
+    if not sets:
+        notes.append("Nothing was logged. Add what you did, or delete it.")
+    if duration is not None and duration >= LEFT_OPEN_HOURS * 3600:
+        h, m = divmod(duration // 60, 60)
+        notes.append(f"This ran for {h}:{m:02d} — it was probably left open, so the length may not be "
+                     "the workout's. The sets are what count.")
+    return notes
+
+
+def _log_row(sess, sets):
+    """A past session as SessionZ lists it: the editable session plus its own totals and any check."""
+    d = _session_dict(sess, sets)
+    rows = d["sets"]
+    volume = sum(x["weight_kg"] * x["reps"] for x in rows if x["weight_kg"] is not None)
+    duration = (None if sess.backfilled or not sess.ended_at
+                else int((sess.ended_at - sess.started_at).total_seconds()))
+    d.update({"volume_kg": round(volume, 2), "reps": sum(x["reps"] for x in rows),
+              "duration_seconds": duration, "check": _check_notes(sess, rows, duration)})
+    return d
+
+
+class BodieZSessionLogView(APIView):
+    """GET /api/economy/bodiez/sessions/log/ — EVERY finished session, newest first, paged.
+
+    The plain sessions list is the newest 50 with the open one mixed in (Today needs that). SessionZ
+    is where somebody goes to find a log from last spring and fix it, so this one has no ceiling: it
+    pages (`limit`, `offset`), fetches one (`id`), searches (`q`: a routine's title or a lift's name) and bounds by date
+    (`since`, `until`, YYYY-MM-DD), and carries lifetime `totals` so the screen can say how much there
+    is. `check=1` narrows to the sessions worth a second look. Yours only, by the query.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        qs = BodieZSession.objects.filter(user=request.user, ended_at__isnull=False)
+        p = request.query_params
+        # One row by id: an edited session refreshes in place, and "Edit this workout" can open a
+        # session that is not on the first page. Still yours only, by the query above.
+        if p.get("id"):
+            try:
+                qs = qs.filter(pk=int(p.get("id")))
+            except ValueError:
+                return Response({"detail": "id must be a number."}, status=status.HTTP_400_BAD_REQUEST)
+        q = (p.get("q") or "").strip()[:80]
+        if q:
+            qs = qs.filter(Q(routine__title__icontains=q) | Q(sets__exercise__name__icontains=q)).distinct()
+        for key, lookup in (("since", "started_at__date__gte"), ("until", "started_at__date__lte")):
+            raw = (p.get(key) or "").strip()
+            if raw:
+                try:
+                    qs = qs.filter(**{lookup: date.fromisoformat(raw[:10])})
+                except ValueError:
+                    return Response({"detail": f"{key} must be YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            limit = max(1, min(int(p.get("limit") or LOG_PAGE), LOG_PAGE_MAX))
+            offset = max(0, int(p.get("offset") or 0))
+        except ValueError:
+            return Response({"detail": "limit and offset must be numbers."}, status=status.HTTP_400_BAD_REQUEST)
+
+        only_check = p.get("check") in ("1", "true")
+        base = qs.select_related("routine").prefetch_related("sets__exercise")
+        if only_check:
+            # A check is computed from the sets, so it cannot be a column filter. Page through the
+            # whole (filtered) set in Python — bounded by one member's own sessions.
+            rows = [r for r in (_log_row(s, list(s.sets.all())) for s in base) if r["check"]]
+            total, page = len(rows), rows[offset:offset + limit]
+        else:
+            total = qs.count()
+            page = [_log_row(s, list(s.sets.all())) for s in base[offset:offset + limit]]
+
+        mine = BodieZSet.objects.filter(session__user=request.user, session__ended_at__isnull=False)
+        agg = mine.aggregate(sets=Count("id"), volume=Sum(ExpressionWrapper(
+            F("weight_kg") * F("reps"), output_field=DecimalField(max_digits=18, decimal_places=2))))
+        return Response({
+            "sessions": page, "total": total, "offset": offset, "limit": limit,
+            "has_more": offset + len(page) < total,
+            "totals": {"sessions": BodieZSession.objects.filter(user=request.user, ended_at__isnull=False).count(),
+                       "sets": agg["sets"] or 0, "volume_kg": round(float(agg["volume"] or 0), 2)},
+        })
 
 
 def _vs_last(sess, sets, total, exercises, vol):
