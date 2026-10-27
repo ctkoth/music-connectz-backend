@@ -368,7 +368,7 @@ def _int(v, lo, hi):
 HASHTAG_KINDS = ("post", "caption")
 # The kinds where the lyric/writing dials apply: made things with craft to weigh, not documents
 # that make claims about a person (a resume is not "more wordplay").
-PRIORITY_KINDS = ("lyrics", "poem", "caption", "post")
+from .priorities import WRITING_KINDS as PRIORITY_KINDS
 HASHTAG_MAX = 30
 _TAG = re.compile(r"#\w+", re.UNICODE)
 

@@ -18,6 +18,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+# The writer kinds that have craft to weigh - made things, not documents that make claims about a
+# person (a resume is not "more wordplay").
+WRITING_KINDS = ("lyrics", "poem", "caption", "post")
+
 MIN, MAX = 0, 5
 SCALE = {"min": MIN, "max": MAX,
          "labels": {"0": "Don't care", "1": "A little", "3": "Matters", "5": "Matters most"}}
@@ -100,6 +104,6 @@ class PrioritiesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response({"scale": SCALE, "media": {
+        return Response({"scale": SCALE, "writing_kinds": list(WRITING_KINDS), "media": {
             m: [{"key": k, "label": lab, "means": means} for k, (lab, means) in t.items()]
             for m, t in VARIABLES.items()}})
