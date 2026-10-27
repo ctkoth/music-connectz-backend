@@ -36,7 +36,7 @@ from rest_framework.views import APIView
 from .catalog import COACH_POST_ENERGY, COACH_TAKE_ENERGY, ai_cost
 from .deadline import (COACH_BUDGET_SECONDS, COACH_THINK_RESERVE_SECONDS, Deadline,
                        Expired)
-from .instruments import (DIFFICULTIES, LYRIC_SCORE, MIX_SCORE, WIT_SCORE, clean_extras, rates_wit, profile_for_app,
+from .instruments import (DIFFICULTIES, LYRIC_SCORE, MIX_SCORE, NEVER_COUNTED_EXTRAS, WIT_SCORE, clean_extras, extras_offered, rates_wit, profile_for_app,
                           prompt_for, reference_prompt_for, rates_lyrics, rates_mix,
                           scores_for)
 from .gemini import _bill, _key, generate_content
@@ -485,7 +485,7 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     # inverted.
     mix = bool(mix) and rates_mix(app_key) and not reference
     extras = () if reference else clean_extras(extras, app_key)
-    counted = tuple(k for k in extras if k in set(counted or ()))
+    counted = tuple(k for k in extras if k in set(counted or ()) and k not in NEVER_COUNTED_EXTRAS)
     if reference:
         think = False
         listeners = None
@@ -1113,7 +1113,8 @@ class SingZCoachView(APIView):
             "lyric_scores": LYRIC_SCORE if rates_lyrics(self.app_key) else {},
             # Wit / Depth: opt-in scores, each with its own "count in overall" opt-in.
             "rates_wit": rates_wit(self.app_key),
-            "wit_scores": WIT_SCORE if rates_wit(self.app_key) else {},
+            "wit_scores": extras_offered(self.app_key),
+            "wit_never_counted": list(NEVER_COUNTED_EXTRAS),
             # The mix toggle, published the same way and for the same reason:
             # the screen must not keep its own copy of which dimensions exist.
             "rates_mix": rates_mix(self.app_key),

@@ -181,3 +181,58 @@ class BattleCoachTests(TestCase):
         board = scoreboard(bt)
         self.assertGreater(board["host"]["median"], board["opponent"]["median"])
         self.assertEqual(board["host"]["coach"]["takes"], 1)
+
+
+class GhostWriterSkillTests(TestCase):
+    """Lyrics for a sung or rapped track are rated under the form they served, not as a performance."""
+
+    def _post(self, skills_used, slot="text"):
+        a, w = mk("gwauthor"), mk("gwriter")
+        post = Post.objects.create(author=a, title="t", visibility="public", skills_used=skills_used,
+                                   contributors=[{"username": "gwauthor", "slot": "audio"},
+                                                 {"username": "gwriter", "slot": slot}])
+        return post, a, w
+
+    def test_a_ghostwriter_on_a_rap_is_credited_for_writing_rapping(self):
+        from .models import skills_for_post
+        post, a, w = self._post(["Rapping"])
+        pairs = {(u.username, s) for u, s in skills_for_post(post)}
+        self.assertIn(("gwriter", "Ghost Writer · Rapping"), pairs)
+        self.assertIn(("gwauthor", "Independent Artist"), pairs)            # the performer is unchanged
+        self.assertNotIn(("gwriter", "Rapping"), pairs)                     # never rated AS the rapper
+
+    def test_with_no_performance_skill_it_stays_plain_ghost_writer(self):
+        from .models import skills_for_post
+        post, a, w = self._post(["Poetry"])
+        self.assertIn(("gwriter", "Ghost Writer"), {(u.username, s) for u, s in skills_for_post(post)})
+
+    def test_only_the_text_slot_is_a_ghostwriter(self):
+        from .models import skills_for_post
+        post, a, w = self._post(["Rapping"], slot="video")
+        self.assertIn(("gwriter", "Videographer"), {(u.username, s) for u, s in skills_for_post(post)})
+
+
+class RoyaltiesNeverOweTests(TestCase):
+    """Corey: (median − 5) × 10% on top of the base. A 4 or lower earns LESS, never owes."""
+
+    def test_every_rating_is_a_positive_factor_and_four_or_less_is_below_the_base(self):
+        for m in range(1, 5):
+            self.assertGreater(rf.curve(m), 0, m)
+            self.assertLess(rf.curve(m), 1.0, m)
+        self.assertEqual(rf.curve(5), 1.0)
+        self.assertGreater(rf.curve(6), 1.0)
+
+    def test_no_median_however_wild_goes_below_the_floor(self):
+        for m in (-50, 0, 0.5, 1):
+            self.assertEqual(rf.curve(m), rf.LOWEST)
+        self.assertGreater(rf.LOWEST, 0)
+
+    def test_a_low_rated_track_never_writes_a_negative_royalty_row(self):
+        t = BadRatingsEarnLessTests("test_better_rated_earns_more_and_worse_rated_earns_less_than_unrated")
+        t.setUp()
+        a = mk("lowauth")
+        t._run((a, "low", 1, 6))
+        from .models import RoyaltyEntry
+        rows = list(RoyaltyEntry.objects.filter(user=a))
+        self.assertTrue(rows)
+        self.assertTrue(all(r.amount_cents > 0 and r.tax_cents >= 0 for r in rows))

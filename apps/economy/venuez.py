@@ -22,7 +22,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from .models import VenueBooking, VenueEvent, award_spinaz, spend_spinaz, wallet_for
-from .postz import charge_skill_energy, post_cost_cents, skill_prices, skills_from
+from .postz import charge_skill_energy, post_cost_cents, skill_price_units, skill_prices, skills_from
 from .gates import clean_gates, describe, failing_gate, member_metrics
 
 
@@ -67,16 +67,25 @@ def quote_for(event, visitor, skills=None, hours=None):
         }
 
     rates = skill_prices(provider)
-    lines, subtotal, unpriced = [], 0, []
+    units = skill_price_units(provider)
+    lines, subtotal, per_work, unpriced = [], 0, 0, []
     for name in names:
         cents = rates.get(name.strip(), 0)
         if not cents:
             unpriced.append(name.strip())
-        lines.append({"skill": name.strip(), "cents": cents})
-        subtotal += cents
+        unit = units.get(name.strip(), "hour")
+        lines.append({"skill": name.strip(), "cents": cents, **({"unit": unit} if cents else {})})
+        if unit == "work" and cents:
+            per_work += cents          # a price per finished work is charged once, not per hour
+        else:
+            subtotal += cents
 
-    # Per hour multiplies; an agreed total is the total however long it runs.
-    amount = subtotal * hours if event.basis == VenueEvent.BASIS_HOUR else subtotal
+    # An hourly event multiplies the hourly prices by the hours; a price set PER WORK is charged
+    # once however long the room runs. An agreed total is the total either way.
+    if event.basis == VenueEvent.BASIS_HOUR:
+        amount = subtotal * hours + per_work
+    else:
+        amount = subtotal + per_work
 
     host_pays = event.kind == VenueEvent.KIND_SESSION
     return {
@@ -84,6 +93,7 @@ def quote_for(event, visitor, skills=None, hours=None):
         "free": False,
         "amount_cents": amount,
         "hourly_cents": subtotal,
+        "work_cents": per_work,
         "hours": hours,
         "basis": event.basis,
         # Said as sides, not usernames, so the client can render it before a

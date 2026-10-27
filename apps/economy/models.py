@@ -5245,6 +5245,24 @@ def skill_rating_median(user, skill):
     return scores[n // 2] if n % 2 else round((scores[n // 2 - 1] + scores[n // 2]) / 2, 1)
 
 
+GHOST_WRITER = "Ghost Writer"
+
+
+def ghost_writer_skill(post):
+    """The skill a ghostwriter on this post is rated and paid under.
+
+    Lyrics written for a sung or rapped track are credited as writing FOR that performance —
+    "Ghost Writer · Rapping" — so the rating they earn is for the words, in the form they served,
+    and never for a performance they did not give. A post with no performance skill (a poem, a
+    script, a caption) keeps plain "Ghost Writer". Falls back, never invents: the performance skill
+    is only read off what the post itself declares."""
+    from .royaltyfactor import coach_skill_key
+    for s in (post.skills_used or [])[:40]:
+        if isinstance(s, str) and s.strip() and coach_skill_key(s):
+            return f"{GHOST_WRITER} \u00b7 {s.strip()}"[:60]
+    return GHOST_WRITER
+
+
 def skills_for_post(post):
     """[(user, skill)] — who gets rated for what when this post is rated.
 
@@ -5262,6 +5280,8 @@ def skills_for_post(post):
         for c in contributors:
             u = User.objects.filter(username=c.get("username")).first()
             skill = slot_skill.get(c.get("slot") or "")
+            if skill == GHOST_WRITER:
+                skill = ghost_writer_skill(post)
             if u and skill:
                 pairs.append((u, skill))
         return pairs

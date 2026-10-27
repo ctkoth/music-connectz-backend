@@ -32,6 +32,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .priorities import clause as priorities_clause
 from .catalog import UNLIMITED_CHARS as UNLIMITED_BRIEF
 from .catalog import WRITER_BRIEF_CHARS, ai_cost, over_writer_brief, writer_brief_chars
 from .deadline import Deadline, Expired
@@ -365,6 +366,9 @@ def _int(v, lo, hi):
 
 
 HASHTAG_KINDS = ("post", "caption")
+# The kinds where the lyric/writing dials apply: made things with craft to weigh, not documents
+# that make claims about a person (a resume is not "more wordplay").
+from .priorities import WRITING_KINDS as PRIORITY_KINDS
 HASHTAG_MAX = 30
 _TAG = re.compile(r"#\w+", re.UNICODE)
 
@@ -575,7 +579,7 @@ def _work_dict(w, user=None):
 
 
 def write_piece(user, kind, topic, genre="", majority=None, minority=None, *, spend_note=None, extra_inputs=None,
-                hashtags=None):
+                hashtags=None, priorities=None):
     """Write ONE piece for `user` and bill it, or answer why not — the whole of what
     pressing Write does, so that every door into the writer (the screen, a past take's
     promo post) is the same run with the same price, the same "a failed run is not
@@ -605,7 +609,8 @@ def write_piece(user, kind, topic, genre="", majority=None, minority=None, *, sp
     body = {"contents": [{"parts": [{"text": prompt_for(kind, topic, genre, majority, minority,
                                                         owner=bool(is_owner_candidate(user)),
                                                         voice=resolve(user, "writer"),
-                                                        hashtags=hashtags if kind in HASHTAG_KINDS else None)}]}],
+                                                        hashtags=hashtags if kind in HASHTAG_KINDS else None)
+                                      + priorities_clause("writing", priorities)}]}],
             "generationConfig": {"temperature": 0.9}}
     try:
         deadline.check("the request was still being prepared when the time ran out")
@@ -725,7 +730,8 @@ class SentenceView(APIView):
         majority = _int(d.get("majority"), 0, 4) if kind == "lyrics" else None
         minority = _int(d.get("minority"), 0, 4) if kind == "lyrics" else None
         return write_piece(request.user, kind, topic, genre, majority, minority,
-                           hashtags=clean_hashtags(d.get("hashtags")) if kind in HASHTAG_KINDS else None)
+                           hashtags=clean_hashtags(d.get("hashtags")) if kind in HASHTAG_KINDS else None,
+                           priorities=d.get("priorities") if kind in PRIORITY_KINDS else None)
 
 
 class SentenceRoyaltyView(APIView):

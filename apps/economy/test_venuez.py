@@ -86,6 +86,22 @@ class TheRule(TestCase):
                     basis=VenueEvent.BASIS_TOTAL, hours=5)
         self.assertEqual(venuez.quote_for(ev, self.visitor)["amount_cents"], 5000)
 
+    def test_a_price_per_work_is_charged_once_not_per_hour(self):
+        """Hourly prices multiply by the hours; a per-work price is one price however long the room runs."""
+        p = profile_for(self.host)
+        p.personas = [{"key": "main", "name": "Main", "skills": [
+            {"name": "Mixing", "rate_cents": 5000},                              # per hour (default)
+            {"name": "Cover", "rate_cents": 700, "rate_unit": "work"}]}]         # per work
+        p.save()
+        ev = _event(self.host, VenueEvent.KIND_PERFORMANCE, skills=["Mixing", "Cover"], hours=3)
+        q = venuez.quote_for(ev, self.visitor)
+        self.assertEqual(q["amount_cents"], 5000 * 3 + 700)
+        self.assertEqual((q["hourly_cents"], q["work_cents"]), (5000, 700))
+        self.assertEqual({l["skill"]: l["unit"] for l in q["lines"]}, {"Mixing": "hour", "Cover": "work"})
+        total = _event(self.host, VenueEvent.KIND_PERFORMANCE, skills=["Mixing", "Cover"],
+                       basis=VenueEvent.BASIS_TOTAL, hours=3)
+        self.assertEqual(venuez.quote_for(total, self.visitor)["amount_cents"], 5000 + 700)
+
     def test_an_unpriced_skill_is_named_not_hidden(self):
         """Silently dropping it reads as a discount and surprises somebody."""
         ev = _event(self.host, VenueEvent.KIND_PERFORMANCE,

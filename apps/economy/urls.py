@@ -48,6 +48,7 @@ from .scoreshare import ScoreShareHumanView, ScoreShareMediaView, ScoreShareView
 from .coachshare import PostCoachView, post_coach_card
 from .weeklybattle import WeeklyBattleView
 from .soundz import SoundZView
+from .priorities import PrioritiesView
 from .coachvoice import CoachVoiceView, CoachSpeakView
 from .coach_upgrades import CoachMarketsView
 from .dawz import DawZView
@@ -516,6 +517,7 @@ urlpatterns = [
     # the one about how many accounts a person gets is needed on the signup
     # form, which is the one screen where nobody is signed in yet.
     path("rulez/", RulezView.as_view(), name="economy-rulez"),
+    path("priorities/", PrioritiesView.as_view(), name="economy-priorities"),
     # Logged-out: which coaches a stranger can reach without an account.
     path("trialdoorz/", TrialDoorsView.as_view(), name="economy-trial-doors"),
     # Public funnel headline stats for non-authenticated trial visitors.

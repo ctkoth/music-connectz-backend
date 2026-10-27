@@ -404,3 +404,48 @@ class TheOldFormulaIsGoneTests(TestCase):
         d = directz_display_rating(work)
         self.assertIsNone(d["rating"])
         self.assertIsNone(d["source"])
+
+
+class CraftOptionsTests(TestCase):
+    """Imagery and Mainstream Appeal are options: asked for, shown beside the five, never inside the overall."""
+
+    def test_the_five_stay_the_five_and_the_options_are_separate(self):
+        from apps.economy.directz_craft import CRAFT_EXTRAS
+        self.assertEqual(set(CRAFT_SCORES), {"framing", "editing", "lighting", "sound", "story"})
+        self.assertEqual(set(CRAFT_EXTRAS), {"imagery", "mainstream"})
+        self.assertFalse(set(CRAFT_EXTRAS) & set(CRAFT_SCORES))
+
+    def test_junk_options_are_dropped_and_order_is_fixed(self):
+        from apps.economy.directz_craft import clean_extras
+        self.assertEqual(clean_extras(["mainstream", "nonsense", "imagery"]), ("imagery", "mainstream"))
+        self.assertEqual(clean_extras(None), ())
+
+    def test_only_the_asked_for_options_reach_the_prompt_and_the_result(self):
+        captured = {}
+
+        def fake(kind, body, **kw):
+            captured["prompt"] = body["contents"][0]["parts"][0]["text"]
+            class R:
+                status_code = 200
+                text = ""
+                def json(self_):
+                    import json as j
+                    return {"candidates": [{"content": {"parts": [{"text": j.dumps({
+                        "score": 6, "scores": {k: 6 for k in CRAFT_SCORES},
+                        "extras": {"imagery": 8}, "verdict": "v", "strengths": [], "fixes": []})}]}}]}
+            return R(), []
+
+        import io
+        with patch.object(directz_craft, "_key", return_value="k"), \
+                patch.object(directz_craft, "generate_content", side_effect=fake):
+            payload, why = directz_craft.rate_video(io.BytesIO(b"x" * 10), "video/mp4",
+                                                    extras=("imagery",))
+        self.assertIsNone(why)
+        self.assertEqual(payload["extras"], {"imagery": 8})
+        self.assertEqual(payload["score"], 6)                       # the overall is the model's, untouched
+        self.assertIn('"imagery": <1-10>', captured["prompt"])
+        self.assertNotIn('"mainstream": <1-10>', captured["prompt"])
+        with patch.object(directz_craft, "_key", return_value="k"), \
+                patch.object(directz_craft, "generate_content", side_effect=fake):
+            plain, _ = directz_craft.rate_video(io.BytesIO(b"x" * 10), "video/mp4")
+        self.assertNotIn("extras", plain)                          # none asked, none invented
