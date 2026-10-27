@@ -7940,6 +7940,48 @@ class InstrumentalWork(models.Model):
         ordering = ["-created_at"]
 
 
+class BudgetLine(models.Model):
+    """One income or expense in BudgetZ — typed by the member, or imported from a bank they linked
+    (StatZ). `ext_id` is the bank's own id so a re-import never doubles a line."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="budget_lines")
+    kind = models.CharField(max_length=8, default="expense")      # income | expense
+    category = models.CharField(max_length=40, default="Other")
+    amount_cents = models.PositiveIntegerField()
+    on = models.DateField()
+    note = models.CharField(max_length=120, blank=True, default="")
+    source = models.CharField(max_length=8, default="manual")     # manual | bank
+    ext_id = models.CharField(max_length=80, blank=True, default="")
+
+    class Meta:
+        ordering = ["-on", "-id"]
+        indexes = [models.Index(fields=["user", "on"])]
+
+
+class BudgetLimit(models.Model):
+    """A member's monthly limit for one category."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="budget_limits")
+    category = models.CharField(max_length=40)
+    monthly_cents = models.PositiveIntegerField()
+
+    class Meta:
+        unique_together = ("user", "category")
+
+
+class BudgetBank(models.Model):
+    """A bank account a StatZ member linked through Stripe Financial Connections. Only Stripe's
+    account id and a display label are kept — no credentials ever reach this server."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="budget_banks")
+    stripe_account = models.CharField(max_length=80)
+    label = models.CharField(max_length=80, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "stripe_account")
+
+
 class AIPreset(models.Model):
     """A StatZ member's saved mix preset for a TYPE of music (a genre or a mood): nudges per part
     group, written by the AI coach from the type they named. Theirs to keep, rename and reuse."""

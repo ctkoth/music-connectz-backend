@@ -76,6 +76,8 @@ DRIVERS = [
      "why_not": "A kept set of levels is a saved preference on a stored piece — a sample that left one behind would be a permanent grant wearing a timer."},
     {"key": "mix_presets", "sampled": False, "modules": ["mix_presets"],
      "why_not": "Keeping a preset's mix and a saved library of AI presets are saved preferences — a sample that left them behind would be a permanent grant wearing a timer."},
+    {"key": "budget_bank", "sampled": False, "modules": ["budgetz"],
+     "why_not": "A linked bank is a standing connection that keeps importing — a sample that left one behind would be a permanent grant wearing a timer."},
     {"key": "coach_voices", "sampled": False, "modules": ["coachvoice"],
      "why_not": "Saving a coach voice is a standing preference — a sample that left one behind would be a permanent grant wearing a timer."},
     {"key": "custom_voices", "sampled": False, "modules": ["voicez"],

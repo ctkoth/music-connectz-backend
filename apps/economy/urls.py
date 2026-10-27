@@ -8,6 +8,8 @@ from .questz import QuestBoardView, QuestClaimView
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
 from .embedplays import EmbedPlayView
+from .budgetz import (BudgetBankLinkView, BudgetBankSessionView, BudgetBankSyncView, BudgetBankUnlinkView,
+                      BudgetLimitView, BudgetLineView, BudgetView)
 from .postz import (PostBoostView, PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView, PostProgressionView, DiscoveryFeedView, PostSaleView)
 from .publicz import PublicPostView, PublicProfileView
@@ -453,6 +455,13 @@ urlpatterns = [
     path("ratez/", RatezView.as_view(), name="economy-ratez"),
     path("ratez/kinds/", RatingKindsView.as_view(), name="economy-ratez-kinds"),
     path("ratez/queue/", RateQueueView.as_view(), name="economy-ratez-queue"),
+    path("budgetz/", BudgetView.as_view(), name="economy-budgetz"),
+    path("budgetz/line/<int:pk>/", BudgetLineView.as_view(), name="economy-budgetz-line"),
+    path("budgetz/limit/", BudgetLimitView.as_view(), name="economy-budgetz-limit"),
+    path("budgetz/bank/session/", BudgetBankSessionView.as_view(), name="economy-budgetz-session"),
+    path("budgetz/bank/link/", BudgetBankLinkView.as_view(), name="economy-budgetz-link"),
+    path("budgetz/bank/sync/", BudgetBankSyncView.as_view(), name="economy-budgetz-sync"),
+    path("budgetz/bank/<int:pk>/", BudgetBankUnlinkView.as_view(), name="economy-budgetz-unlink"),
     path("postz/", PostsView.as_view(), name="economy-postz"),
     # Personalized discovery feed based on taste affinity and listening behavior.
     path("postz/discover/", DiscoveryFeedView.as_view(), name="economy-postz-discover"),
