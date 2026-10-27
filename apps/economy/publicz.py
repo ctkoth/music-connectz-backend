@@ -110,6 +110,8 @@ def public_profile_dict(p, request=None):
                 if s.get("rate_cents"):
                     entry["rate_cents"] = s["rate_cents"]
                     entry["rate_unit"] = rate_unit_of(s)
+                if s.get("genres"):
+                    entry["genres"] = s["genres"]
                 skills.append(entry)
         personas.append({
             "key": persona.get("key", ""),

@@ -323,3 +323,26 @@ class RateUnitTests(TestCase):
         p = self._set([{"name": "Mixing", "rate_cents": 5000},
                        {"name": "Cover", "rate_cents": 700, "rate_unit": "work"}])
         self.assertEqual(profile_skill_rate(p), 5000)
+
+
+class SkillGenreTests(TestCase):
+    """A skill can carry the same genres every picker offers: plain, short, unique, a few."""
+
+    def test_genres_are_cleaned_and_kept_on_the_skill(self):
+        from .personaz import clean_persona
+        p = clean_persona({"key": "m", "name": "M", "skills": [
+            {"name": "Rapping", "genres": ["Trap", " drill ", "trap", "<b>Boom Bap</b>", 5, None, "x" * 80]}]})
+        g = p["skills"][0]["genres"]
+        self.assertEqual(g[:2], ["Trap", "drill"])                        # trimmed, in the order given
+        self.assertIn("Trap", g)
+        self.assertNotIn("<", "".join(g))
+        self.assertEqual(len([x for x in g if x.lower() == "trap"]), 1)
+        self.assertTrue(all(len(x) <= 40 for x in g))
+
+    def test_no_genres_means_no_key_and_a_cap(self):
+        from .personaz import SKILL_GENRES_MAX, clean_persona
+        none = clean_persona({"key": "m", "name": "M", "skills": [{"name": "Mixing"}]})["skills"][0]
+        self.assertNotIn("genres", none)
+        many = clean_persona({"key": "m", "name": "M", "skills": [
+            {"name": "Mixing", "genres": [f"G{i}" for i in range(30)]}]})["skills"][0]["genres"]
+        self.assertEqual(len(many), SKILL_GENRES_MAX)
