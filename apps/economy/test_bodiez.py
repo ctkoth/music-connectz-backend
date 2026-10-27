@@ -1579,6 +1579,87 @@ class BodieZSessionSummaryTests(TestCase):
         again = self.client.get(f"/api/economy/bodiez/sessions/{s['session_id']}/summary/")
         self.assertEqual(again.data["volume_kg"], 200.0)
 
+    # ---- change since the last session ----
+
+    def test_first_ever_session_has_nothing_to_compare_to(self):
+        self.assertIsNone(self._finish([(self.press, 10, 20)])["vs_last"])
+
+    def test_change_from_last_session_is_plain_arithmetic(self):
+        self._past([(self.press, 10, 20), (self.press, 10, 20)])           # 400
+        s = self._finish([(self.press, 10, 25), (self.press, 10, 25)])     # 500
+        v = s["vs_last"]
+        self.assertEqual((v["volume_kg"], v["volume_delta_kg"], v["volume_delta_pct"]), (400.0, 100.0, 25.0))
+        self.assertEqual((v["sets_delta"], v["reps_delta"]), (0, 0))
+        press = s["exercises"][0]["vs_last"]
+        self.assertEqual((press["previous_top_kg"], press["top_delta_kg"], press["volume_delta_kg"]), (20.0, 5.0, 100.0))
+
+    def test_a_lighter_session_is_a_negative_change_not_hidden(self):
+        self._past([(self.press, 10, 30)])
+        v = self._finish([(self.press, 10, 20)])["vs_last"]
+        self.assertEqual((v["volume_delta_kg"], v["volume_delta_pct"]), (-100.0, -33.3))
+
+    def _past_for(self, routine, w, days_ago):
+        s = BodieZSession.objects.create(user=self.user, routine=routine)
+        BodieZSession.objects.filter(id=s.id).update(
+            started_at=timezone.now() - timedelta(days=days_ago),
+            ended_at=timezone.now() - timedelta(days=days_ago) + timedelta(hours=1))
+        BodieZSet.objects.create(session=s, exercise=self.press, set_number=1, reps=10, weight_kg=w)
+
+    def test_a_routine_is_compared_with_its_own_last_time_not_a_different_day(self):
+        push = BodieZRoutine.objects.create(user=self.user, title="Push day", exercises=[])
+        legs = BodieZRoutine.objects.create(user=self.user, title="Leg day", exercises=[])
+        self._past_for(push, 20, days_ago=6)      # 200 kg
+        self._past_for(legs, 100, days_ago=2)     # 1000 kg, and the MORE recent one
+        s = BodieZSession.objects.create(user=self.user, routine=push)
+        self.client.post(f"/api/economy/bodiez/sessions/{s.id}/sets/",
+                         {"exercise_id": self.press.id, "reps": 10, "weight_kg": 22}, format="json")
+        v = self.client.patch(f"/api/economy/bodiez/sessions/{s.id}/", {"finish": True}, format="json").data["summary"]["vs_last"]
+        self.assertEqual(v["basis"], "routine")
+        self.assertEqual(v["routine_title"], "Push day")
+        self.assertEqual(v["volume_kg"], 200.0)   # last PUSH day, not the leg day
+
+    def test_a_routine_with_no_earlier_run_falls_back_to_the_last_session_and_says_so(self):
+        push = BodieZRoutine.objects.create(user=self.user, title="Push day", exercises=[])
+        self._past([(self.press, 10, 20)])
+        s = BodieZSession.objects.create(user=self.user, routine=push)
+        self.client.post(f"/api/economy/bodiez/sessions/{s.id}/sets/",
+                         {"exercise_id": self.press.id, "reps": 10, "weight_kg": 20}, format="json")
+        v = self.client.patch(f"/api/economy/bodiez/sessions/{s.id}/", {"finish": True}, format="json").data["summary"]["vs_last"]
+        self.assertEqual(v["basis"], "last")
+
+    def test_a_lift_skipped_this_time_is_named(self):
+        self._past([(self.press, 10, 20), (self.pushup, 20, None)])
+        s = self._finish([(self.press, 10, 20)])
+        self.assertEqual(s["vs_last"]["not_repeated"], ["Test Pushup"])
+
+    def test_a_lift_new_this_time_has_no_change_row(self):
+        self._past([(self.press, 10, 20)])
+        s = self._finish([(self.press, 10, 20), (self.pushup, 20, None)])
+        by_name = {e["name"]: e for e in s["exercises"]}
+        self.assertIn("vs_last", by_name["Test Press"])
+        self.assertNotIn("vs_last", by_name["Test Pushup"])
+
+    def test_bodyweight_only_last_time_gives_no_percentage(self):
+        self._past([(self.pushup, 20, None)])
+        v = self._finish([(self.press, 10, 20)])["vs_last"]
+        self.assertIsNone(v["volume_delta_pct"])
+        self.assertEqual(v["volume_delta_kg"], 200.0)
+
+    def test_duration_change_only_when_both_lengths_were_measured(self):
+        self._past([(self.press, 10, 20)])                       # measured: one hour
+        v = self._finish([(self.press, 10, 20)])["vs_last"]
+        self.assertIsNotNone(v["duration_delta_seconds"])        # both live
+        BodieZSession.objects.update(backfilled=True)            # the earlier one was typed in afterwards
+        v = self.client.get(f"/api/economy/bodiez/sessions/"
+                            f"{BodieZSession.objects.order_by('-started_at').first().id}/summary/").data["vs_last"]
+        self.assertIsNone(v["duration_delta_seconds"])           # not measured, not invented
+
+    def test_the_reopened_summary_carries_the_same_comparison(self):
+        self._past([(self.press, 10, 20)])
+        s = self._finish([(self.press, 10, 30)])
+        again = self.client.get(f"/api/economy/bodiez/sessions/{s['session_id']}/summary/").data
+        self.assertEqual(again["vs_last"]["volume_delta_kg"], 100.0)
+
     def test_someone_elses_summary_is_not_found(self):
         other = User.objects.create_user(username="sum2", password="pw")
         s = BodieZSession.objects.create(user=other)

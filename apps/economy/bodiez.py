@@ -985,6 +985,76 @@ class BodieZSessionsView(APIView):
         return Response(_session_dict(sess), status=status.HTTP_201_CREATED)
 
 
+def _vs_last(sess, sets, total, exercises, vol):
+    """What changed since the member's previous finished session, or None when there is none.
+
+    The previous session is the last one of the SAME ROUTINE when this was a routine
+    (Push day against last Push day — comparing it to a leg day would be noise), else
+    the most recent finished session with anything logged. `basis` says which, so the
+    screen never implies a like-for-like it did not have.
+
+    Arithmetic over logged sets and nothing else, so it can be wrong only if a set is.
+    Each exercise that appears in both gets its own change, attached to its row in
+    `exercises` as `vs_last`; an exercise done last time and skipped now is named in
+    `not_repeated` rather than quietly absent. A percentage is None when last time's
+    volume was zero (a bodyweight-only session has no weight to be a percentage OF).
+    """
+    prior = (BodieZSession.objects
+             .filter(user=sess.user, ended_at__isnull=False, started_at__lt=sess.started_at,
+                     sets__isnull=False)
+             .exclude(pk=sess.pk).distinct().order_by("-started_at"))
+    ref, basis = None, "last"
+    if sess.routine_id:
+        ref = prior.filter(routine_id=sess.routine_id).first()
+        basis = "routine"
+    if ref is None:
+        ref, basis = prior.first(), "last"
+    if ref is None:
+        return None
+
+    ref_sets = list(ref.sets.select_related("exercise"))
+    ref_by = defaultdict(list)
+    for x in ref_sets:
+        ref_by[_lane(x)].append(x)
+    ref_stats = {}
+    for lane, ss in ref_by.items():
+        ws = [float(x.weight_kg) for x in ss if x.weight_kg is not None]
+        ref_stats[lane] = {"name": _lane_name(ss[0].exercise.name, lane[1]), "volume_kg": vol(ss),
+                           "top_weight_kg": max(ws) if ws else None}
+
+    seen = set()
+    for e in exercises:
+        lane = (e["exercise_id"], e["one_sided"])
+        old = ref_stats.get(lane)
+        if not old:
+            continue
+        seen.add(lane)
+        e["vs_last"] = {
+            "previous_top_kg": old["top_weight_kg"],
+            "top_delta_kg": (round(e["top_weight_kg"] - old["top_weight_kg"], 2)
+                             if e["top_weight_kg"] is not None and old["top_weight_kg"] is not None else None),
+            "previous_volume_kg": round(old["volume_kg"], 2),
+            "volume_delta_kg": round(e["volume_kg"] - old["volume_kg"], 2),
+        }
+
+    ref_vol = vol(ref_sets)
+    now_dur = None if sess.backfilled or not sess.ended_at else int((sess.ended_at - sess.started_at).total_seconds())
+    then_dur = None if ref.backfilled else int((ref.ended_at - ref.started_at).total_seconds())
+    return {
+        "session_id": ref.id,
+        "started_at": ref.started_at.isoformat(),
+        "routine_title": ref.routine.title if ref.routine_id and ref.routine else None,
+        "basis": basis,
+        "volume_kg": round(ref_vol, 2),
+        "volume_delta_kg": round(total - ref_vol, 2),
+        "volume_delta_pct": round(100 * (total - ref_vol) / ref_vol, 1) if ref_vol else None,
+        "sets": len(ref_sets), "sets_delta": len(sets) - len(ref_sets),
+        "reps": sum(x.reps for x in ref_sets), "reps_delta": sum(x.reps for x in sets) - sum(x.reps for x in ref_sets),
+        "duration_delta_seconds": now_dur - then_dur if now_dur is not None and then_dur is not None else None,
+        "not_repeated": sorted(v["name"] for k, v in ref_stats.items() if k not in seen),
+    }
+
+
 def session_summary(sess):
     """What a finished session added up to, and what it beat.
 
@@ -1039,6 +1109,7 @@ def session_summary(sess):
         records.append({"kind": "session_volume", "value_kg": round(total, 2),
                         "previous_kg": round(max(past.values()), 2)})
 
+    vs_last = _vs_last(sess, sets, total, exercises, vol)
     end = sess.ended_at or timezone.now()
     coaches = list(StudentRelationship.objects.filter(student=sess.user)
                    .values_list("coach__username", flat=True))
@@ -1054,6 +1125,7 @@ def session_summary(sess):
         "volume_kg": round(total, 2),
         "exercises": sorted(exercises, key=lambda e: e["name"]),
         "records": records, "firsts": sorted(firsts),
+        "vs_last": vs_last,
         "coaches": coaches,
     }
 
