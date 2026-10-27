@@ -602,3 +602,116 @@ class InstrumentalMixSheetView(APIView):
         labels = {k: v["label"] for k, v in INSTRUMENTS.items()}
         text = mixmod.sheet(w.tracks, labels)
         return Response({"filename": f"mix-sheet-{w.id}.txt", "content_type": "text/plain", "text": text})
+
+
+# --- mix presets: by genre (read by all, applied by Premium, kept by StatZ) and AI presets by type ---
+from . import mix_presets as presets  # noqa: E402
+from .models import AIPreset  # noqa: E402
+
+
+def _preset_rights(user):
+    r = mix_rights(user)
+    return {**r, "can_ai": r["can_keep"]}
+
+
+def _ai_row(p):
+    return {"id": p.id, "kind": p.kind, "note": p.note, "nudges": p.nudges}
+
+
+class InstrumentalMixPresetsView(APIView):
+    """GET instrumentalz/mixpresets/ — the genre presets (everybody), the member's own AI presets
+    (StatZ), what they may do and what an AI preset costs BEFORE it is asked for."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        r = _preset_rights(request.user)
+        _, _, daily_left = daily_prompt_state(request.user)
+        return Response({"genres": presets.listing(), **r,
+                         "mine": [_ai_row(p) for p in AIPreset.objects.filter(user=request.user)[:50]] if r["can_ai"] else [],
+                         "ai_cost_cents": ai_cost("standard"), "daily_remaining": daily_left,
+                         "note": "Presets are starting points — they nudge each part from its usual place."})
+
+
+class InstrumentalApplyPresetView(APIView):
+    """POST instrumentalz/<id>/preset/ {genre | ai_id, keep?} — a preset applied to a piece.
+
+    Premium gets the mix back to hear or download; nothing is stored. StatZ may also keep it."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        w = InstrumentalWork.objects.filter(pk=pk, user=request.user).first()
+        if not w:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        r = _preset_rights(request.user)
+        if not r["can_change"]:
+            return Response({"detail": "Applying a mix preset is Premium, and keeping it is StatZ. The coach's mix stays as it was.", **r},
+                            status=status.HTTP_403_FORBIDDEN)
+        insts = [t["instrument"] for t in w.tracks]
+        ai_id = request.data.get("ai_id")
+        if ai_id:
+            row = AIPreset.objects.filter(pk=ai_id, user=request.user).first() if r["can_ai"] else None
+            mix = presets.apply_nudges(insts, row.nudges) if row else None
+        else:
+            mix = presets.for_genre(request.data.get("genre"), insts)
+        if not mix:
+            return Response({"detail": "That preset isn't one we have."}, status=status.HTTP_400_BAD_REQUEST)
+        keep = bool(request.data.get("keep"))
+        if keep and not r["can_keep"]:
+            return Response({"detail": "Keeping a mix is StatZ. You can still hear and download this one.", **r},
+                            status=status.HTTP_403_FORBIDDEN)
+        if keep:
+            w.tracks = [{**t, **mixmod.store(mix[t["instrument"]])} for t in w.tracks]
+            w.save(update_fields=["tracks"])
+            return Response({**with_mix(_work_dict(w), request.user), "kept": True})
+        return Response({"mix": {"params": mix, **r}, "kept": False})
+
+
+def ai_preset_prompt(kind):
+    return ("You set a mix preset for the TYPE of music named below. Reply with JSON only: "
+            '{"nudges": {"drums": {...}, "bass": {...}, "lead": {...}, "chords": {...}}, "note": "one sentence why"}. '
+            "Each group maps any of gain, pan, space, compress, low, mid, high to a SMALL change from the part's usual "
+            "place (gain/pan/space/compress within ±0.3, low/mid/high within ±3 dB). These are starting points, not "
+            "measurements. Type: " + json.dumps(kind[:40]))
+
+
+class InstrumentalAIPresetView(APIView):
+    """POST instrumentalz/mixpresets/ai/ {kind} — StatZ: the coach writes a preset for a type of music
+    and it is saved to their library. Charged only after a usable answer; a failed run is free."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not _preset_rights(request.user)["can_ai"]:
+            return Response({"detail": "AI presets by type are StatZ."}, status=status.HTTP_403_FORBIDDEN)
+        kind = " ".join(str(request.data.get("kind", "")).replace("<", " ").replace(">", " ").split())[:40]
+        if not kind:
+            return Response({"detail": "Name the type of music."}, status=status.HTTP_400_BAD_REQUEST)
+        api_key = _key()
+        if not api_key:
+            return Response({"detail": "Instrumental ConnectZ isn't switched on."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        cost = ai_cost("standard")
+        _, _, daily_left = daily_prompt_state(request.user)
+        if cost and not daily_left and not can_afford_ai(request.user, cost):
+            return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
+        try:
+            resp, _ = generate_content("text", {"contents": [{"parts": [{"text": ai_preset_prompt(kind)}]}],
+                                                "generationConfig": {"temperature": 0.3}},
+                                       key=api_key, timeout=60, label="Instrumental AI preset")
+        except requests.RequestException:
+            return Response({"detail": "Couldn't reach the coach. Nothing was charged — try again."},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        parsed = _first_json(_text_of(resp)) if resp is not None and resp.status_code == 200 else None
+        nudges = presets.clean_nudges((parsed or {}).get("nudges") if isinstance(parsed, dict) else None)
+        if not nudges:
+            return Response({"detail": "The coach's answer wasn't usable. Nothing was charged — try again."},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        charged = _bill(request.user, "Instrumental ConnectZ AI preset", count_daily=True)
+        if charged is None:
+            return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": cost},
+                            status=status.HTTP_402_PAYMENT_REQUIRED)
+        row = AIPreset.objects.create(user=request.user, kind=kind, nudges=nudges,
+                                      note=str((parsed or {}).get("note", ""))[:300])
+        return Response({**_ai_row(row), "cost_cents": charged}, status=status.HTTP_201_CREATED)

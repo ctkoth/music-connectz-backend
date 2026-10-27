@@ -7936,6 +7936,20 @@ class InstrumentalWork(models.Model):
         ordering = ["-created_at"]
 
 
+class AIPreset(models.Model):
+    """A StatZ member's saved mix preset for a TYPE of music (a genre or a mood): nudges per part
+    group, written by the AI coach from the type they named. Theirs to keep, rename and reuse."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ai_presets")
+    kind = models.CharField(max_length=40)
+    nudges = models.JSONField(default=dict)
+    note = models.CharField(max_length=300, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
 class GeneratedImage(models.Model):
     """One image Image ConnectZ made: the prompt that made it and the file it produced.
 

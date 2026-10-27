@@ -408,3 +408,43 @@ class InstrumentMixTests(TestCase):
             self.assertIn("starting points", d["text"])
             self.assertIn("Compression:", d["text"])
             self.assertIn("DRUMS", d["text"])
+
+
+class MixPresetTests(InstrumentMixTests):
+    """Genre presets nudge each part from its usual place; Premium hears, StatZ keeps; AI presets are StatZ's."""
+
+    def test_everybody_reads_the_list_but_free_cannot_apply(self):
+        r = self.c.get("/api/economy/instrumentalz/mixpresets/")
+        self.assertIn("hip hop", {g["key"] for g in r.data["genres"]})
+        self.assertEqual(r.data["mine"], [])
+        r = self.c.post(f"/api/economy/instrumentalz/{self.work.id}/preset/", {"genre": "trap"}, format="json")
+        self.assertEqual(r.status_code, 403)
+
+    def test_premium_hears_it_and_nothing_is_stored(self):
+        self._tier("premium")
+        before = [dict(t) for t in InstrumentalWork.objects.get(pk=self.work.id).tracks]
+        r = self.c.post(f"/api/economy/instrumentalz/{self.work.id}/preset/", {"genre": "trap"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.data["kept"])
+        self.assertGreater(r.data["mix"]["params"]["drums"]["compress"], 0.6)
+        self.assertEqual(InstrumentalWork.objects.get(pk=self.work.id).tracks, before)
+        r = self.c.post(f"/api/economy/instrumentalz/{self.work.id}/preset/", {"genre": "trap", "keep": True}, format="json")
+        self.assertEqual(r.status_code, 403)
+
+    def test_statz_keeps_it(self):
+        self._tier("statz")
+        r = self.c.post(f"/api/economy/instrumentalz/{self.work.id}/preset/", {"genre": "lofi", "keep": True}, format="json")
+        self.assertTrue(r.data["kept"])
+        self.work.refresh_from_db()
+        self.assertLess(self.work.tracks[0]["tone"]["high"], 0)
+
+    def test_unknown_genre_is_refused_and_ai_presets_are_statz_only(self):
+        self._tier("statz")
+        self.assertEqual(self.c.post(f"/api/economy/instrumentalz/{self.work.id}/preset/", {"genre": "nope"}, format="json").status_code, 400)
+        self._tier("premium")
+        self.assertEqual(self.c.post("/api/economy/instrumentalz/mixpresets/ai/", {"kind": "dreamy"}, format="json").status_code, 403)
+
+    def test_nudges_are_bounded(self):
+        from . import mix_presets as mp
+        out = mp.clean_nudges({"drums": {"gain": 99, "bogus": 1}, "evil": {"gain": 1}})
+        self.assertEqual(out, {"drums": {"gain": 0.5}})
