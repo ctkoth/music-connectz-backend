@@ -76,6 +76,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import routine_plan
 from .models import (BODIEZ_BUCKETS, BODIEZ_DAY_TAGS, BODIEZ_GOAL_KINDS, BodieZAccess,
                      BodieZCustomDay, BodieZExercise, BodieZGoal, BodieZRecoveryLog, BodieZRoutine, BodieZStepLog, BodieZSession, BodieZSet,
                      BodieZWeightLog, StudentRelationship)
@@ -320,6 +321,23 @@ def _routine_dict(r):
             "goal": r.goal, "source": r.source,
             "scheduled_for": r.scheduled_for.isoformat() if r.scheduled_for else None,
             "updated_at": r.updated_at.isoformat()}
+
+
+def _plan_lib(user, routines_or_rows):
+    """{exercise id: {name, accessible}} for every lift named — ONE exercise query and one access read, however many
+    routines are asked about, so listing every routine does not pay per routine."""
+    ids = set()
+    for item in routines_or_rows:
+        rows = item.exercises if hasattr(item, "exercises") else item
+        ids.update(e.get("exercise_id") for e in (rows or []) if isinstance(e, dict) and e.get("exercise_id"))
+    access = BodieZAccess.objects.filter(user=user).first()
+    return {e.id: {"name": e.name, "accessible": accessible(e, access)}
+            for e in BodieZExercise.objects.visible(user).filter(id__in=ids)}
+
+
+def _plan_of(routine_or_rows, goal, lib):
+    rows = routine_or_rows.exercises if hasattr(routine_or_rows, "exercises") else routine_or_rows
+    return routine_plan.plan(rows, goal, lib, GOALS)
 
 
 # Until this moment the weight box was labelled kg for everyone, so a US
@@ -654,12 +672,14 @@ class BodieZRoutinesView(APIView):
     def get(self, request):
         rows = list(BodieZRoutine.objects.filter(user=request.user))
         rated = routine_coach_ratings(request.user, rows)
+        lib = _plan_lib(request.user, rows)
         out = []
         for r in rows:
             d = _routine_dict(r)
             d.update(rated[r.id])
+            d["plan"] = _plan_of(r, r.goal, lib)
             out.append(d)
-        return Response({"routines": out, "rating_caveat": RATING_CAVEAT})
+        return Response({"routines": out, "rating_caveat": RATING_CAVEAT, "plan_caveat": routine_plan.PLAN_CAVEAT})
 
     def post(self, request):
         # Cut to the column: SQLite ignores varchar length and Postgres does
@@ -697,10 +717,19 @@ class BodieZRoutinesView(APIView):
         # server paths that actually do those things.
         source = request.data.get("source")
         source = source if source in CLIENT_SOURCES else "member"
+        # A routine the PLANNER made is built to its own checks: big lifts first, reps and sets inside the goal's
+        # range. What it changed is returned, so the screen can say why instead of the order simply being different.
+        polished = []
+        if source == "coach" and exercises:
+            lib = _plan_lib(request.user, [exercises])
+            exercises, polished = routine_plan.polish(exercises, goal, lib, GOALS)
         routine = BodieZRoutine.objects.create(user=request.user, title=title, exercises=exercises,
                                                 bucket=bucket, day_tag=day_tag, description=description,
                                                 goal=goal, custom_day=custom_day or None, source=source)
-        return Response(_routine_dict(routine), status=status.HTTP_201_CREATED)
+        d = _routine_dict(routine)
+        d["plan"] = _plan_of(routine, routine.goal, _plan_lib(request.user, [routine]))
+        d["polished"] = polished
+        return Response(d, status=status.HTTP_201_CREATED)
 
 
 CLIENT_SOURCES = {"member", "coach"}
@@ -863,6 +892,7 @@ class BodieZRoutineDetailView(APIView):
         routine = self._get(request, routine_id)
         if not routine:
             return Response({"detail": "Routine not found."}, status=status.HTTP_404_NOT_FOUND)
+        old_rows, old_goal = list(routine.exercises or []), routine.goal
         title = request.data.get("title")
         if title is not None:
             title = str(title).strip()[:80]
@@ -919,7 +949,13 @@ class BodieZRoutineDetailView(APIView):
                     return Response({"detail": "scheduled_for must be YYYY-MM-DD."},
                                      status=status.HTTP_400_BAD_REQUEST)
         routine.save()
-        return Response(_routine_dict(routine))
+        d = _routine_dict(routine)
+        lib = _plan_lib(request.user, [old_rows, routine])
+        d["plan"] = _plan_of(routine, routine.goal, lib)
+        # An edit says how the Plan moved and which check moved it (None when nothing about the plan changed).
+        if routine.exercises != old_rows or routine.goal != old_goal:
+            d["plan_change"] = routine_plan.compare(_plan_of(old_rows, old_goal, lib), d["plan"])
+        return Response(d)
 
     def delete(self, request, routine_id):
         routine = self._get(request, routine_id)
@@ -927,6 +963,48 @@ class BodieZRoutineDetailView(APIView):
             return Response({"detail": "Routine not found."}, status=status.HTTP_404_NOT_FOUND)
         routine.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class BodieZRoutinePlanView(APIView):
+    """POST /api/economy/bodiez/routines/plan/ — the Plan rating of a list of lifts, and the Planner's fix for it.
+
+    Read-only and stateless: nothing is saved, so a screen can show "Plan 7.5 → 10, because…" BEFORE the member presses
+    save (Fit to equipment does). `exercises` + `goal` are judged as given; `polish: true` also returns the Planner's
+    fixed list (order, reps, sets), the plain-words `changes`, and `compare` against the list as it was. `compare_to` is
+    one of the member's own routines to measure the change against (yours only, by the query).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        rows = request.data.get("exercises")
+        if not isinstance(rows, list) or len(rows) > 100:
+            return Response({"detail": "exercises must be a list of up to 100 lifts."}, status=status.HTTP_400_BAD_REQUEST)
+        rows = [e for e in rows if isinstance(e, dict) and e.get("exercise_id")]
+        goal = request.data.get("goal") or ""
+        if goal and goal not in GOALS:
+            return Response({"detail": f"goal must be one of {sorted(GOALS)}, or blank."}, status=status.HTTP_400_BAD_REQUEST)
+        base = None
+        if request.data.get("compare_to") not in (None, ""):
+            try:
+                base = BodieZRoutine.objects.filter(user=request.user, id=int(request.data.get("compare_to"))).first()
+            except (TypeError, ValueError):
+                base = None
+            if base is None:
+                return Response({"detail": "Routine not found."}, status=status.HTTP_404_NOT_FOUND)
+        lib = _plan_lib(request.user, [rows, *([base] if base else [])])
+        unknown = [e["exercise_id"] for e in rows if e["exercise_id"] not in lib]
+        if unknown:
+            return Response({"detail": f"Unknown exercise id(s): {unknown}"}, status=status.HTTP_400_BAD_REQUEST)
+        here = _plan_of(rows, goal, lib)
+        out = {"plan": here, "caveat": routine_plan.PLAN_CAVEAT}
+        if base is not None:
+            out["compare"] = routine_plan.compare(_plan_of(base, base.goal, lib), here)
+        if request.data.get("polish"):
+            fixed, changes = routine_plan.polish(rows, goal, lib, GOALS)
+            after = _plan_of(fixed, goal, lib)
+            out["polished"] = {"exercises": fixed, "changes": changes, "plan": after,
+                               "compare": routine_plan.compare(_plan_of(base, base.goal, lib) if base else here, after)}
+        return Response(out)
 
 
 class BodieZBoardView(APIView):
@@ -939,11 +1017,16 @@ class BodieZBoardView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        rows = BodieZRoutine.objects.filter(user=request.user)
+        rows = list(BodieZRoutine.objects.filter(user=request.user))
+        # The cards are drawn from THIS list, and it carried neither rating: the Thorough line on a routine card read
+        # `r.coach_rating` off data that never had it, so it said "not rated yet" for everybody. Both ratings ride here now.
+        rated = routine_coach_ratings(request.user, rows)
+        lib = _plan_lib(request.user, rows)
         buckets = {k: [] for k, _ in BODIEZ_BUCKETS}
         for r in rows:
-            buckets[r.bucket].append(_routine_dict(r))
+            buckets[r.bucket].append({**_routine_dict(r), **rated[r.id], "plan": _plan_of(r, r.goal, lib)})
         return Response({
+            "plan_caveat": routine_plan.PLAN_CAVEAT, "rating_caveat": RATING_CAVEAT,
             "buckets": buckets,
             # Labels come from the server for the same reason Lilith's do —
             # a client that split BODIEZ_BUCKETS itself would be the second

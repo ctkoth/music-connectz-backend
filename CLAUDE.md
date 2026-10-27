@@ -2777,3 +2777,30 @@ the number of sessions (a test pins it).
   one. `check=1` narrows the list to these. The fix stays the member's.
 - Editing and deleting use the endpoints that already existed (`sessions/<id>/sets/` PUT, `sessions/<id>/` PATCH and
   DELETE); this only lists. An edit recounts records, BodyMap and goals, as before.
+
+## The Plan rating: a coach-made routine is built to its checks — it is NOT stamped a 10
+
+Corey asked that a routine the coach makes or edits get a 10, and that an edit show how the score changes and why.
+Taken literally that is the substance rule's exact failure: the routine rating that exists, **Thorough**
+(`bodiez.thoroughness`), is read off sessions the member actually trained and is None until there are some, and a flat 10
+stamped on a plan nobody has trained is a number that measures nothing — *could a member get a good one without getting
+good?* So the two asks are met with a DIFFERENT number about a different thing (`routine_plan.py`): the **Plan** rating,
+the routine AS WRITTEN against rules that are written down, each shown passed or failed with the lift that decided it.
+
+- **Five checks, score = 10 × passed ÷ judged (one decimal):** `reps` and `sets` inside the goal's range (`GOALS`, each with its
+  citation; sets within ±1), `order` (compound before isolation, from `superset_table`'s declared mechanic — the app's own
+  rule, said to be uncited), `access` (the server's own `accessible` flag) and `repeats`. A check that cannot be judged (no goal,
+  nothing to compare) is LEFT OUT, never passed; an empty routine has no score, not a 10 and not a 0.
+- **The Planner builds to the checks, so its routines read 10.** `source: "coach"` on create runs `polish` (big lifts first;
+  reps and sets to the NEAREST edge of the goal's range — the smallest change that passes, never a number of the Planner's
+  choosing) and returns what it changed in `polished`. A routine made by hand is scored as written and never rearranged.
+  That a coach-made routine usually reads 10 is a statement of what it was built to, not of how good it is for anyone — said
+  in the caveat served with it (`PLAN_CAVEAT`), which also says Thorough is the other number and where it comes from.
+- **An edit says how the score moved and why.** `PATCH` returns `plan_change` ({before, after, change, checks[{label, was, now, why}]},
+  `why` naming the lift); `POST routines/plan/` is the same arithmetic read-only, so Fit to equipment and "Let the Planner fix this"
+  show "Plan 7.5 → 10, because Bench Press: 3 → 8 reps…" BEFORE anything is saved, and `polish: true` returns the Planner's list.
+- **Only what the Planner can fix, it fixes** (order, reps, sets). `access` and `repeats` are the member's to resolve: reported
+  as "still yours to fix", never silently deleted or swapped. Weights and every other field are untouched.
+- **Found on the way:** the board (`routines/` cards are drawn from `bodiez/board/`) never carried `coach_rating`, so the Thorough
+  line on a routine card read "not rated yet" for everybody. Both ratings ride the board now, in a constant number of queries.
+- Never feeds a skill level, leaderboard, price or anything else — it only labels a routine.
