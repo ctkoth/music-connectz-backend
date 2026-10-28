@@ -10,6 +10,7 @@ from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
 from .embedplays import EmbedPlayView
 from .budgetz import (BudgetBankLinkView, BudgetBankSessionView, BudgetBankSyncView, BudgetBankUnlinkView,
                       BudgetLimitView, BudgetLineView, BudgetView)
+from .derivedroyalty import DerivedTermsView
 from .postz import (PostBoostView, PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView, PostProgressionView, DiscoveryFeedView, PostSaleView)
 from .publicz import PublicPostView, PublicProfileView
@@ -470,6 +471,7 @@ urlpatterns = [
     path("budgetz/bank/link/", BudgetBankLinkView.as_view(), name="economy-budgetz-link"),
     path("budgetz/bank/sync/", BudgetBankSyncView.as_view(), name="economy-budgetz-sync"),
     path("budgetz/bank/<int:pk>/", BudgetBankUnlinkView.as_view(), name="economy-budgetz-unlink"),
+    path("derivedz/", DerivedTermsView.as_view(), name="economy-derivedz"),
     path("postz/", PostsView.as_view(), name="economy-postz"),
     # Personalized discovery feed based on taste affinity and listening behavior.
     path("postz/discover/", DiscoveryFeedView.as_view(), name="economy-postz-discover"),

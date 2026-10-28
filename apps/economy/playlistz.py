@@ -672,7 +672,9 @@ def accrue_playlist_royalties_for_date(target_date):
 
     from .postsplit import post_shares
     from . import royaltyfactor as rf
+    from .derivedroyalty import original_cut
     adjusted_posts = 0
+    originals = {}
     for post_id, (post, cents, plays) in per_post.items():
         # Corey's formula, (median − 5) × 10%: the post's own rating scales the pot, then each
         # credited person's rating in the skill they brought scales their share (never twice — a
@@ -682,6 +684,14 @@ def accrue_playlist_royalties_for_date(target_date):
         if pf["factor"] != 1.0 and cents > 0:
             cents = max(1, round(cents * pf["factor"]))
             adjusted_posts += 1
+        # CoverZ / RemixeZ: the original author's cut comes off the pot first (after the rating factor),
+        # and the derivative's own people split what is left. A split of earned money, never new money.
+        orig, cut = original_cut(post, cents, originals)
+        if orig is not None:
+            cents -= cut
+            row = accruals_by_creator.setdefault(orig.id, {"total_cents": 0, "plays": 0, "posts": set()})
+            row["total_cents"] += cut
+            row["posts"].add(post_id)
         for who, share, basis in post_shares(post, cents):
             if share > 0 and basis != "rating":
                 h = rf.skill_haircut(post, who)
