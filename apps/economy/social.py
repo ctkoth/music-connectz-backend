@@ -330,6 +330,11 @@ def clean_inventory(value):
         photo = str(x.get("photo") or "").strip()[:500]
         if photo.startswith("/api/economy/media/") or photo.startswith("https://"):
             row["photo"] = photo
+        # What it is worth, the member's way: an exact price OR a 1-10 $ level
+        # (1 the cheapest thing they own, 10 the dearest). One or the other, never
+        # both — two numbers that disagree about one guitar would be worse than none.
+        from .inventoryz import clean_value
+        row.update(clean_value(x))
         out.append(row)
         if len(out) >= INVENTORY_MAX:
             break
@@ -566,6 +571,7 @@ def _profile_card(p, request=None, badges=None, audience=None, batched=None):
     `badges` lets a listing pass in rows it has already loaded in bulk; left
     alone, the card fetches its own.
     """
+    from .inventoryz import inventory_shown
     m = getattr(p.user, "membership", None)
     # Built whole, then redacted in one pass — see `visibility.redact`. Doing it
     # per key here would mean a field added below is exposed until somebody
@@ -615,7 +621,9 @@ def _profile_card(p, request=None, badges=None, audience=None, batched=None):
         "religion": p.religion,
         "languages": p.languages,
         "pronouns": p.pronouns, "headline": p.headline, "genres": p.genres,
-        "influences": p.influences, "gear": p.gear, "inventory": p.inventory or [], "label": p.label,
+        "influences": p.influences, "gear": p.gear, "label": p.label,
+        # What each piece is WORTH is its own setting (inventory_value); the pieces are not.
+        "inventory": inventory_shown(p, viewer, audience),
         "timezone": p.timezone, "cover_url": cover_abs(p.cover_url, request),
         # Only on a single card (batched is None) — the member search would
         # pay one query per row for it.

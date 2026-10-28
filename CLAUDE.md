@@ -2915,3 +2915,33 @@ THEIRS. An artist's top `TOP` (3) fans over `WINDOW_DAYS` (30), from acts on tha
 The engine is the frontend's (`src/mastering/master.js`); this repo keeps the settings a saved master remembers.
 `mixz.clean_settings` keeps `vocal` (`"auto"` or 0–6 dB), `vocalLevel` (±12 dB) and `vocalFile` (whether a separate vocal
 was mixed in — never the file, the same rule as the reference).
+
+## VideoZ: the editor is the frontend's; this repo holds one StatZ row
+
+VideoZ (frontend `src/apps/VideoZ.jsx`, `src/videoedit/`) is a multitrack editor that runs on
+the member's device — nothing renders here, and an export reaches the server only as an ordinary
+`uploads/` POST when the member presses Save, under the tier's storage caps. **Lip-sync** (a photo's
+mouth following a voice) is StatZ: `statz_trial.FEATURES` / `DRIVERS` row `lipsync`, sampled, with
+no server module because the gate is client-side like `rest_alerts` — it spends nothing of ours, and
+a video exported during the sample is the member's, like a routine the Coach paired. It follows the
+SOUND (loudness and tone), not the words: there is no speech or face model, and the screen says so.
+Real AI lip-matching would need a provider, a key and a price — Corey's call, not built.
+
+## InVenTorieZ: worth and an AI read, on the inventory that already exists
+
+`inventoryz.py` grew two things, both on `Profile.inventory` rather than a second list:
+
+- **Worth** (`clean_value`, called from `social.clean_inventory`): `price_cents` OR `price_level` 1-10, never
+  both (an exact price wins). A level is the member's own ranking, so `value_summary` adds prices and counts
+  levels beside them. Who sees it is `visibility` field `inventory_value`, MEMBER by default — a price list
+  beside "kept at home" on the logged-out page is a burglar's shopping list. Every reader that serves
+  someone else goes through `inventory_shown` (the member card, `publicz`, the inventory view); a fourth
+  reader that reads `p.inventory` directly leaks prices.
+- **The AI's read** (`ai_rate`, `InventoryAIView`): Gemini looks at the OWNER'S OWN uploaded photos (never a
+  typed address, never someone else's upload — `_photo_bytes`) and rates condition, care and fit for purpose
+  (wardrobe: put-together). The prompt forbids price, authenticity, sound and comments on people; a piece
+  with no photo is never rated, because rating a name would invent the thing measured. One price per run
+  (up to 8 pieces, plus the kit together), charged only when something came back rated. Readings are KEPT
+  in `InventoryAIRating` (about a thing, not a person — unlike LookZMaxZ) and hidden until the owner shows
+  them; a newer photo marks a reading as older. Like member ratings, it never moves a skill, price, royalty
+  or rank. Never run against Google (CI has no key).

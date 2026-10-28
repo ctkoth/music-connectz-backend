@@ -79,6 +79,11 @@ DEFAULTS = {
     # private takes you off every list, though you still see your own standing.
     "superfan": MEMBER,
 
+    # What a member's gear and clothes are WORTH (InVenTorieZ). Members only by
+    # default, never the logged-out page: a price list beside "kept at home" is a
+    # shopping list for a burglar, and the inventory itself is already public.
+    "inventory_value": MEMBER,
+
     # Served to nobody but the member today. `birthday` is the date itself —
     # `age` above is the band, and they are separate fields on purpose, because
     # "people may know roughly how old I am" and "people may know the day I was

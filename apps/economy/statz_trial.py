@@ -51,6 +51,10 @@ FEATURES = [
     # ViewZ: who viewed a post by name and every visit as a track on a clock, with what
     # each viewer did. It is a READ of what already happened, so it switches off cleanly.
     {"key": "viewz_tracks", "label": "Who viewed your posts, as DAW tracks", "tab": "viewz", "target": "viewz-tracks"},
+    # VideoZ: a photo's mouth moving with a voice. It runs on the member's device and
+    # spends nothing of ours, so the gate is client-side (like rest_alerts) and a
+    # video exported during the sample is the member's, like a routine the Coach paired.
+    {"key": "lipsync", "label": "Lip-sync a photo to a voice in VideoZ", "tab": "videoz", "target": "videoz-lipsync"},
 ]
 
 # THE AUDIT: every place StatZ is the difference, and whether the daily sample covers it.
@@ -72,6 +76,7 @@ DRIVERS = [
     {"key": "coach_pairing", "sampled": True, "modules": ["superset", "bodiez"]},
     {"key": "rest_alerts", "sampled": True, "modules": []},
     {"key": "viewz_tracks", "sampled": True, "modules": ["viewz"]},
+    {"key": "lipsync", "sampled": True, "modules": []},
     {"key": "instrumental_mix", "sampled": False, "modules": ["instrumentalz"],
      "why_not": "A kept set of levels is a saved preference on a stored piece — a sample that left one behind would be a permanent grant wearing a timer."},
     {"key": "mix_presets", "sampled": False, "modules": [],

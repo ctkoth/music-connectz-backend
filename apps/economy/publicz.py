@@ -19,6 +19,7 @@ The rule here is narrow on purpose:
   author's; neither is reachable without a session, which is what
   `can_view_post` already says.
 """
+from .inventoryz import inventory_shown
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -133,7 +134,9 @@ def public_profile_dict(p, request=None):
         # The work-facing popular-site fields. Timezone stays off the
         # logged-out card: it narrows where somebody lives for no hiring gain.
         "pronouns": p.pronouns, "headline": p.headline, "genres": p.genres or [],
-        "influences": p.influences or [], "gear": p.gear or [], "inventory": p.inventory or [], "label": p.label,
+        "influences": p.influences or [], "gear": p.gear or [], "label": p.label,
+        # Logged out, so only an owner who set "what it's worth" to Public shows prices here.
+        "inventory": inventory_shown(p, None), 
         "cover_url": cover_abs(p.cover_url, request),
         "pinned_post": _pinned(p),
         # BadgeZ travels with the card. A shared profile is somebody's proof

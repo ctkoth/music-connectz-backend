@@ -8462,3 +8462,27 @@ class MangaPage(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class InventoryAIRating(models.Model):
+    """The AI's read of one InVenTorieZ piece — or, with `item` "*", of the whole set.
+
+    Kept because the member paid for it and it is theirs to show: unlike a looks
+    reading (`attractivenessz.py`), a rating of a guitar is about a guitar. It is
+    keyed by the piece's NAME slug, like member ratings (`inventoryz.item_key`), so
+    renaming a piece starts it again, and `photo` remembers which photo was read
+    so a reading of an older photo is said to be one. `shown` is the owner's
+    choice: hidden until they put it on their inventory, so nobody runs a rating
+    and has it on display before they have seen it.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="inventory_ai_ratings")
+    item = models.CharField(max_length=60)
+    score = models.PositiveSmallIntegerField()
+    why = models.CharField(max_length=300, blank=True, default="")
+    photo = models.CharField(max_length=500, blank=True, default="")
+    shown = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "item")

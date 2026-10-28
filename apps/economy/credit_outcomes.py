@@ -160,6 +160,12 @@ CREDIT_OUTCOMES = {
         "outcomes": ["tangible", "understandable", "learnable"],
         "lands_in": ["bodiez"],
         "free_way": {"label": "Every lift, muscle and routine already has a free Thorough rating, and a daily free prompt covers a read.", "tab": "bodiez"}},
+    "inventoryz": {
+        "resource": "promptz", "label": "InVenTorieZ AI rating",
+        "buys": "A 1-10 rating of each pictured piece of gear or clothing, and of the whole kit together, with the reason — kept, and shown on your InVenTorieZ when you choose.",
+        "outcomes": ["tangible", "understandable", "braggable", "shareable"],
+        "lands_in": ["profilez"],
+        "free_way": {"label": "Other members rate your pieces for free, 1 to 10, and a daily free prompt covers a run.", "tab": "profilez"}},
     "lookmaxz_view": {
         "resource": "promptz", "label": "LookZMaxZ reading",
         "buys": "A sector-by-sector read of how a photo presents (face, skin, teeth, styling) with what to change and where to shop for it.",
