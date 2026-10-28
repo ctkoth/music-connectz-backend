@@ -1,4 +1,4 @@
-"""Video ConnectZ Develop mode: StatZ plans each shot by hearing the member's own
+"""Video ConnectZ Direct (internally `develop`): StatZ plans each shot by hearing the member's own
 track, on the server's own slot clock, and a failed plan is not charged."""
 import json
 import tempfile

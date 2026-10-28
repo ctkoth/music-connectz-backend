@@ -1,14 +1,17 @@
-"""Video ConnectZ, Develop and Direct modes (StatZ): every shot of a music video
+"""Video ConnectZ Direct (StatZ): every shot of a music video
 picked to go with the song — its lyrics, or its mood.
 
-* **Develop** — the member picks each shot from the coach's options.
-* **Direct** — the coach picks each shot itself, and says why (Corey's name for it).
+Corey renamed the feature from Develop to Direct; it has two ways to pick, under the internal
+keys `develop` and `direct` (kept so a stored choice and the endpoint never move):
+
+* **I pick** (`develop`) — the member picks each shot from the coach's options.
+* **The coach picks** (`direct`) — the coach picks each shot itself, and says why.
   Same run and same price: the coach always marks the option it would pick, and
-  Direct mode is the screen applying those picks. Every pick stays editable, so
-  Direct is a starting point the member can overrule, never a lock.
+  "the coach picks" is the screen applying those picks. Every pick stays editable, so
+  it is a starting point the member can overrule, never a lock.
 
 The stitched music video (`videostitch.py`) joins 2-4 shots over the member's own
-track, each shot written by hand. Develop mode is the planning step in front of
+track, each shot written by hand. Direct is the planning step in front of
 it: the model LISTENS to the part of the track the video will play, and for every
 shot's slot of the song says what it hears there and offers three shots that go
 with it. The member picks one per slot, or writes their own, and the shots go
@@ -48,6 +51,7 @@ from rest_framework.views import APIView
 from . import vocalcoach as vc
 from .catalog import ai_cost
 from .deadline import COACH_BUDGET_SECONDS, Deadline, Expired
+from . import refinput
 from .gemini import _bill, _key, generate_content
 from .models import Upload, can_afford_ai, daily_prompt_state, mark_upload_missing
 from .statz_trial import UPGRADE, has_statz
@@ -57,9 +61,9 @@ from .videoz import CLIP_SECONDS
 logger = logging.getLogger(__name__)
 
 FEATURE = "video_develop"
-LABEL = "Develop & Direct"
-MODES = {"develop": "Develop — you pick each shot from the coach's options",
-         "direct": "Direct — the coach picks every shot, and you can change any of them"}
+LABEL = "Direct"
+MODES = {"develop": "You pick each shot from the coach's options",
+         "direct": "The coach picks every shot, and you can change any of them"}
 LYRICS_MAX = 4000
 MOOD_MAX = 200
 OPTIONS = 3
@@ -68,7 +72,7 @@ WHAT_IT_DOES = ("The AI listens to the part of your track the video plays and, f
                 f"{CLIP_SECONDS} seconds of it, says what it hears and offers {OPTIONS} shots that go with "
                 "the lyric there, the mood or the beat — each with why. You pick one per shot, or write "
                 "your own, then make the video as usual.")
-LOCKED = ("Develop and Direct — the AI planning each shot to fit your song — are StatZ features. Writing the "
+LOCKED = ("Direct — the AI planning each shot to fit your song — is a StatZ feature. Writing the "
           "shots yourself is open to everyone.")
 
 
@@ -152,7 +156,7 @@ def clean_plan(parsed, slots):
 
 
 class VideoDevelopView(APIView):
-    """GET: whether Develop mode is open to you, and what one plan costs. POST: plan the shots."""
+    """GET: whether Direct is open to you, and what one plan costs. POST: plan the shots."""
 
     permission_classes = [IsAuthenticated]
 
@@ -195,6 +199,9 @@ class VideoDevelopView(APIView):
             return Response({"detail": f"Lyrics go up to {LYRICS_MAX:,} characters — paste the part the video plays."},
                             status=status.HTTP_400_BAD_REQUEST)
         mood, look = _txt(d.get("mood"), MOOD_MAX), _txt(d.get("look"), 300)
+        ref, problem = refinput.parse(d.get("reference"))
+        if problem:
+            return Response({"detail": f"{problem} Nothing was charged."}, status=status.HTTP_400_BAD_REQUEST)
         from .videoz import KINDS
         kind_ask = KINDS["music"]["ask"]
 
@@ -204,7 +211,7 @@ class VideoDevelopView(APIView):
             return Response({"detail": "Not enough PromptZ / balance to plan the shots.", "cost_cents": cost},
                             status=status.HTTP_402_PAYMENT_REQUIRED)
         if not _key():
-            return Response({"detail": "Develop mode isn't switched on yet. Nothing was charged."},
+            return Response({"detail": "Direct isn't switched on yet. Nothing was charged."},
                             status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         slots = slots_for(start, n)
@@ -229,7 +236,8 @@ class VideoDevelopView(APIView):
             if why:
                 return Response({"detail": f"The AI couldn't take that track — {why}. Nothing was charged."},
                                 status=status.HTTP_502_BAD_GATEWAY)
-            body = {"contents": [{"parts": [{"text": prompt_for(slots, lyrics, mood, look, kind_ask)}, part]}],
+            body = {"contents": [{"parts": [{"text": prompt_for(slots, lyrics, mood, look, kind_ask) + refinput.guard(ref)},
+                                            part, *([refinput.part(ref)] if ref else [])]}],
                     "generationConfig": {"temperature": 0.7}}
             deadline.check("the track was still uploading when the time ran out")
             resp, _ = generate_content("text", body, key=_key(), timeout=deadline.remaining(cap=120),
@@ -267,6 +275,6 @@ class VideoDevelopView(APIView):
         if not plan:
             return Response({"detail": "The AI's plan didn't come back usable. Nothing was charged."},
                             status=status.HTTP_502_BAD_GATEWAY)
-        charged = _bill(user, note="Video ConnectZ Develop mode — AI", count_daily=True)
+        charged = _bill(user, note="Video ConnectZ Direct — AI", count_daily=True)
         return Response({**plan, "cost_cents": charged, "track_id": track.id, "track_start": start,
                          "clip_seconds": CLIP_SECONDS, "saved": False})

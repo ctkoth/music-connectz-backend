@@ -99,16 +99,24 @@ def clause(medium, raw):
         "other instruction above.")
 
 
+# Said beside every inspiration picker, before a file is chosen.
+REFERENCE_NOTE = ("Inspiration only: the maker takes its mood, energy and feel, never its melody, words, "
+                  "faces or likeness. It isn't kept, and it doesn't change the price.")
+
+
 class PrioritiesView(APIView):
     """GET /api/economy/priorities/ — the variables per medium and the scale. Read, never retyped."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         from . import refinput
+        from .sentencez import REFERENCE_KINDS
         return Response({"scale": SCALE, "writing_kinds": list(WRITING_KINDS),
                          # The reference a member may start from, stated before a file is picked.
                          "reference": {"max_mb": refinput.MAX_BYTES // (1024 * 1024),
-                                       "accept": sorted(refinput.AUDIO | refinput.IMAGE)},
+                                       "accept": sorted(refinput.AUDIO | refinput.IMAGE),
+                                       "writer_kinds": list(REFERENCE_KINDS),
+                                       "note": REFERENCE_NOTE},
                          "media": {
             m: [{"key": k, "label": lab, "means": means} for k, (lab, means) in t.items()]
             for m, t in VARIABLES.items()}})

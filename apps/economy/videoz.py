@@ -37,6 +37,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import refinput
 from .priorities import clause as priorities_clause
 from .gemini import BASE, _key
 from .catalog import over_char_limit
@@ -306,7 +307,22 @@ class VideoView(APIView):
             face = Face.objects.filter(pk=d.get("face_id"), owner=request.user).first()
             if not face:
                 return Response({"detail": "Only your own FaceZ photos can be used."}, status=status.HTTP_400_BAD_REQUEST)
-        work, refusal = start_render(request.user, kind, prompt + priorities_clause("video", d.get("priorities")), aspect, face)
+        # A sound or picture to take the feel from — read into words first, because Veo takes a
+        # picture only as the first frame, which would copy it. Checked before the price is held.
+        ref, problem = refinput.parse(d.get("reference"))
+        if problem:
+            return Response({"detail": problem}, status=status.HTTP_400_BAD_REQUEST)
+        if ref and not is_platform_owner(request.user):
+            # The read is unbilled, so it never runs for somebody who could not pay for the render.
+            w = wallet_for(request.user)
+            if (w.promptz or 0) + w.money_cents < price_cents():
+                return Response({"detail": "Not enough PromptZ or balance for a video.", "price_cents": price_cents()},
+                                status=status.HTTP_402_PAYMENT_REQUIRED)
+        words, problem = refinput.describe(ref, _key()) if ref and _key() else ("", None)
+        if problem:
+            return Response({"detail": problem}, status=status.HTTP_502_BAD_GATEWAY)
+        work, refusal = start_render(request.user, kind, prompt + refinput.video_line(words)
+                                     + priorities_clause("video", d.get("priorities")), aspect, face)
         if refusal is not None:
             return refusal
         return Response(_work_dict(work, request), status=status.HTTP_201_CREATED)

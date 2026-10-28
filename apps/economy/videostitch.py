@@ -37,6 +37,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import refinput
 from .catalog import over_char_limit
 from .media import stable_media_url
 from .models import (Face, Upload, VideoStitch, VideoWork, is_platform_owner, membership_for,
@@ -231,6 +232,9 @@ class VideoStitchView(APIView):
             face = Face.objects.filter(pk=d.get("face_id"), owner=user).first()
             if not face:
                 return Response({"detail": "Only your own FaceZ photos can be used."}, status=status.HTTP_400_BAD_REQUEST)
+        ref, problem = refinput.parse(d.get("reference"))
+        if problem:
+            return Response({"detail": problem}, status=status.HTTP_400_BAD_REQUEST)
         if not ffmpeg_exe():
             return Response({"detail": "Joining shots isn't available on the server yet. Nothing was charged."},
                             status=status.HTTP_503_SERVICE_UNAVAILABLE)
@@ -240,9 +244,13 @@ class VideoStitchView(APIView):
         if not is_platform_owner(user) and (w.promptz or 0) + w.money_cents < total:
             return Response({"detail": f"Not enough PromptZ or balance for {len(shots)} shots.",
                              "price_cents": total}, status=status.HTTP_402_PAYMENT_REQUIRED)
+        # Read once and carried by every shot, so the shots share one feel.
+        words, problem = refinput.describe(ref, _key()) if ref and _key() else ("", None)
+        if problem:
+            return Response({"detail": problem}, status=status.HTTP_502_BAD_GATEWAY)
         started = []
         for i, text in enumerate(shots, 1):
-            prompt = f"{look + '. ' if look else ''}Shot {i} of {len(shots)}: {text}"
+            prompt = f"{look + '. ' if look else ''}Shot {i} of {len(shots)}: {text}{refinput.video_line(words)}"
             work, refusal = start_render(user, "music", prompt, aspect, face)
             if refusal is not None:
                 for done in started:                        # all or nothing at the start

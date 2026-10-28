@@ -270,6 +270,10 @@ assert set(_ORDER) == set(KINDS), "a kind was added without being placed in _ORD
 KINDS = {k: KINDS[k] for k in _ORDER}
 
 LEGAL_KINDS = {k for k, v in KINDS.items() if v.get("personas")}
+# Every kind but the legal ones may start from a sound or a picture. A contract's terms are the
+# whole of it and it has no "feel" to borrow; a reference there could only pull terms from
+# somebody else's paper, which the inspiration rule forbids anyway.
+REFERENCE_KINDS = tuple(k for k in KINDS if k not in LEGAL_KINDS)
 LEGAL_NOTE = ("A starting draft, not legal advice. Have a lawyer read it before anybody signs, "
               "and fill every [BRACKETED] blank.")
 # For the documents that claim a history. The writer was told to use only what the
@@ -588,8 +592,8 @@ def write_piece(user, kind, topic, genre="", majority=None, minority=None, *, sp
     by the caller; everything else is checked here."""
     deadline = Deadline(BUDGET_SECONDS)
     # A sound or picture to start from: checked before anything is priced, so a bad file is a
-    # sentence and no charge. Only the craft kinds take one.
-    ref, ref_problem = refinput.parse(reference if kind in PRIORITY_KINDS else None)
+    # sentence and no charge. Every kind but a legal draft takes one.
+    ref, ref_problem = refinput.parse(reference if kind in REFERENCE_KINDS else None)
     if ref_problem:
         return Response({"detail": ref_problem}, status=status.HTTP_400_BAD_REQUEST)
     need = KINDS[kind].get("personas")
@@ -739,7 +743,7 @@ class SentenceView(APIView):
         return write_piece(request.user, kind, topic, genre, majority, minority,
                            hashtags=clean_hashtags(d.get("hashtags")) if kind in HASHTAG_KINDS else None,
                            priorities=d.get("priorities") if kind in PRIORITY_KINDS else None,
-                           reference=d.get("reference") if kind in PRIORITY_KINDS else None)
+                           reference=d.get("reference") if kind in REFERENCE_KINDS else None)
 
 
 class SentenceRoyaltyView(APIView):

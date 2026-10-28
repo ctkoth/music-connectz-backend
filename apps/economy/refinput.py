@@ -1,8 +1,10 @@
 """A sound or a picture as the starting point for a maker — the "any medium" prompt, step one.
 
 Corey: members should be able to give the makers any medium, or a combination, not only words.
-This is the first slice: an AUDIO clip or a PICTURE, optional, alongside the words, for the
-writer and the instrumental maker. The video and image makers already take a picture.
+An AUDIO clip or a PICTURE, optional, alongside the words: the writer (every kind but a legal
+draft), the instrumental maker, MangaZ's script, Video ConnectZ's Direct plan, and the
+video renders — where it is first read into a look-and-feel line (`describe`), because Veo takes a
+picture only as the first frame. The image maker and LookZMaxZ have their own.
 
 Four rules, each from something else in this codebase:
 
@@ -65,3 +67,42 @@ def part(ref):
 
 def guard(ref):
     return GUARD.format(kind=ref["kind"]) if ref else ""
+
+
+DESCRIBE = (
+    "A video maker attached this {kind} as INSPIRATION for a new music video. In one or two "
+    "sentences (under 60 words), describe only the feel a shot could borrow from it: mood, colour "
+    "palette, light, pace, energy, setting. Never name a person, a brand, an artist, a song or a "
+    "copyrighted work; never describe a face or a body; never quote words. Plain text, no preamble.")
+DESCRIBE_FAILED = ("The inspiration couldn't be read into a direction for the video. Nothing was "
+                   "charged — try another file, or leave it off.")
+
+
+def describe(ref, key, timeout=30):
+    """(words, None) or (None, sentence): a reference turned into a look-and-feel line.
+
+    For the makers that cannot take a reference as a part — Veo reads a picture as the FIRST
+    FRAME, which would copy it rather than be inspired by it. The words are ours to cap and
+    the guard still goes beside them in the prompt. The call is not billed: it is a tiny text
+    read inside a render whose own price is already stated."""
+    import requests
+    from .gemini import generate_content
+    if not ref:
+        return "", None
+    body = {"contents": [{"parts": [{"text": DESCRIBE.format(kind=ref["kind"])}, part(ref)]}],
+            "generationConfig": {"temperature": 0.4}}
+    try:
+        resp, _ = generate_content("text", body, key=key, timeout=timeout, label="inspiration")
+        text = "".join(str(x.get("text", "")) for x in resp.json()["candidates"][0]["content"]["parts"])
+    except (requests.RequestException, KeyError, IndexError, TypeError, ValueError):
+        return None, DESCRIBE_FAILED
+    words = " ".join(text.split())[:400]
+    if not words:
+        return None, DESCRIBE_FAILED
+    return words, None
+
+
+def video_line(words):
+    """The sentence a video prompt carries for a described reference — feel only."""
+    return (f" Inspiration for the feel only (do not copy any person, logo, artist or work): {words}"
+            if words else "")

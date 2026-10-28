@@ -55,10 +55,10 @@ FEATURES = [
     # spends nothing of ours, so the gate is client-side (like rest_alerts) and a
     # video exported during the sample is the member's, like a routine the Coach paired.
     {"key": "lipsync", "label": "Lip-sync a photo to a voice in VideoZ", "tab": "videoz", "target": "videoz-lipsync"},
-    # Video ConnectZ Develop & Direct: the AI plans (and in Direct, picks) each shot to fit the song. A plan is a
+    # Video ConnectZ Direct: the AI plans (and, if asked, picks) each shot to fit the song. A plan is a
     # read of the song and each run is still paid, so it switches off cleanly; a video
     # rendered from a plan during the sample is the member's.
-    {"key": "video_develop", "label": "Develop & Direct: each video shot picked to fit your song",
+    {"key": "video_develop", "label": "Direct: each video shot picked to fit your song",
      "tab": "videoconnectz", "target": "video-develop"},
 ]
 

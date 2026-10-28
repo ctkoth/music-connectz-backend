@@ -148,7 +148,7 @@ CREDIT_OUTCOMES = {
                             "privacy risk that a stateless call does not create.",
         "no_free_way": "It reads one photo with a model; the daily free allowance is the free way in."},
     "videodevelop": {
-        "resource": "promptz", "label": "Video ConnectZ Develop & Direct",
+        "resource": "promptz", "label": "Video ConnectZ Direct",
         "buys": "A shot plan for your music video, made by listening to your track: for every shot, what is heard in that part of the song and three shots that go with its lyric, mood or beat, each with why, and the one the coach would direct.",
         "outcomes": ["understandable", "tangible"],
         "lands_in": ["videoconnectz"],
