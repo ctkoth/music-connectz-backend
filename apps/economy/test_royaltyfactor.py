@@ -236,3 +236,50 @@ class RoyaltiesNeverOweTests(TestCase):
         rows = list(RoyaltyEntry.objects.filter(user=a))
         self.assertTrue(rows)
         self.assertTrue(all(r.amount_cents > 0 and r.tax_cents >= 0 for r in rows))
+
+
+class DerivedRoyaltyTests(TestCase):
+    """A cover or remix pays the original's author a cut of what it earns; never new money."""
+
+    def _world(self, cover_rating=None):
+        """One harness: an ordinary post and a cover of somebody's song, same plays, one accrual."""
+        t = BadRatingsEarnLessTests("test_better_rated_earns_more_and_worse_rated_earns_less_than_unrated")
+        t.setUp()
+        orig, cov, plain = mk("origauth"), mk("coverer"), mk("plainposter")
+        song = Post.objects.create(author=orig, title="Song", visibility="public")
+        t._track(plain, "plain", None, 0)
+        post = t._track(cov, "My cover", cover_rating, 6 if cover_rating else 0)
+        post.derived = {"id": song.id, "kind": "cover", "title": "Song", "author": "origauth"}
+        post.save(update_fields=["derived"])
+        accrue_playlist_royalties_for_date(timezone.now().date())
+        earned = lambda u: sum(e.amount_cents + e.tax_cents for e in RoyaltyEntry.objects.filter(user=u))
+        return earned(orig), earned(cov), earned(plain)
+
+    def test_the_original_gets_twenty_percent_and_nothing_is_created(self):
+        from .derivedroyalty import DERIVED_ROYALTY_PCT
+        o, c, plain = self._world()
+        self.assertGreater(o, 0)
+        self.assertEqual(o + c, plain)                                         # a split, never new money
+        self.assertAlmostEqual(o / plain, DERIVED_ROYALTY_PCT / 100, delta=0.03)
+
+    def test_a_poorly_rated_cover_pays_the_original_less_too(self):
+        o, c, plain = self._world(cover_rating=2)
+        self.assertLess(o + c, plain)
+        self.assertGreater(o, 0)
+
+    def test_no_original_no_cut_and_the_poster_never_pays_themselves(self):
+        from .derivedroyalty import original_cut
+        a = mk("self_cover")
+        post = Post.objects.create(author=a, title="x", visibility="public",
+                                   derived={"id": 1, "kind": "cover", "title": "t", "author": "self_cover"})
+        self.assertEqual(original_cut(post, 100), (None, 0))
+        post.derived = {"id": 1, "kind": "cover", "title": "t", "author": "deleted_user"}
+        self.assertEqual(original_cut(post, 100), (None, 0))
+        post.derived = {}
+        self.assertEqual(original_cut(post, 100), (None, 0))
+
+    def test_the_terms_are_served_before_posting(self):
+        c = APIClient(); c.force_authenticate(mk("reader"))
+        d = c.get("/api/economy/derivedz/").data
+        self.assertEqual(d["pct"], 20)
+        self.assertIn("20%", d["text"])
