@@ -85,6 +85,7 @@ from .superset import BodieZPairView
 from .viewz import ViewBeatView, ViewCountsView, ViewMineView, ViewPostResultsView, ViewStartView, ViewTimelineView
 from .metricz import HoroscopeView, MetricZView, SubstanceScaleView
 from .videoz import VideoDetailView, VideoView
+from .videodevelop import VideoDevelopView
 from .videostitch import VideoStitchDetailView, VideoStitchView
 from .instrumentalz import InstrumentalAIPresetView, InstrumentalApplyPresetView, InstrumentalInspirationView, InstrumentalMidiView, InstrumentalMixPresetsView, InstrumentalMixSheetView, InstrumentalMixView, InstrumentalMoodView, InstrumentalView
 from .intelligencez import IntelligenceHubView
@@ -256,6 +257,7 @@ urlpatterns = [
     path("views/post/<int:pk>/", ViewPostResultsView.as_view(), name="economy-views-post"),
     path("videoz/", VideoView.as_view(), name="economy-videoz"),
     path("videoz/<int:pk>/", VideoDetailView.as_view(), name="economy-videoz-detail"),
+    path("videoz/develop/", VideoDevelopView.as_view(), name="economy-videoz-develop"),
     path("videoz/stitch/", VideoStitchView.as_view(), name="economy-videoz-stitch"),
     path("videoz/stitch/<int:pk>/", VideoStitchDetailView.as_view(), name="economy-videoz-stitch-detail"),
     path("substancez/", SubstanceScaleView.as_view(), name="economy-substancez-scale"),

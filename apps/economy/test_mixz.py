@@ -71,6 +71,11 @@ class LadderTests(TestCase):
         self.assertEqual(catalog.mastering_for("premium")["glue_db_max"], 4)
         self.assertEqual(catalog.mastering_for("statz")["glue_db_max"], 8)
 
+    def test_wav_depth_is_24_for_statz_16_for_premium_and_free_still_exports(self):
+        # Corey: 24-bit WAV for StatZ, 16-bit for Premium. Free gets MP3 (0), which
+        # is how much of the master survives the trip, never whether it can leave.
+        self.assertEqual([catalog.mastering_for(t)["wav_bits"] for t in ("free", "premium", "statz")], [0, 16, 24])
+
     def test_every_intensity_on_the_ladder_has_a_label_and_heaviest_is_max(self):
         for row in catalog.MASTERING.values():
             for i in row["intensities"]:
@@ -106,11 +111,11 @@ class ReadTests(TestCase):
         self.assertEqual(set(d), {"tier", "allowed", "ladder", "intensity_labels", "cost",
                                   "storage", "masters"})
         self.assertEqual(d["tier"], "free")
-        self.assertEqual(set(d["allowed"]), {"intensities", "manual_glue", "glue_db_max"})
+        self.assertEqual(set(d["allowed"]), {"intensities", "manual_glue", "glue_db_max", "wav_bits"})
         self.assertEqual([r["tier"] for r in d["ladder"]], ["free", "premium", "statz"])
         self.assertEqual([r["label"] for r in d["ladder"]], ["Free", "Premium", "StatZ"])
         for r in d["ladder"]:
-            self.assertEqual(set(r), {"tier", "label", "intensities", "manual_glue", "glue_db_max"})
+            self.assertEqual(set(r), {"tier", "label", "intensities", "manual_glue", "glue_db_max", "wav_bits"})
         self.assertEqual(d["cost"], {"free": True, "line": mixz.COST_LINE})
         self.assertIn("Nothing is uploaded unless you save it", d["cost"]["line"])
         self.assertEqual(set(d["storage"]), {"used_mb", "storage_mb", "upload_mb", "free_mb"})

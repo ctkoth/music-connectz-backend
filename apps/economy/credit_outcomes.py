@@ -147,13 +147,13 @@ CREDIT_OUTCOMES = {
                             "history. A repeated biometric-adjacent rating held over time is its own "
                             "privacy risk that a stateless call does not create.",
         "no_free_way": "It reads one photo with a model; the daily free allowance is the free way in."},
-    "matchref": {
-        "resource": "promptz", "label": "Inspiration (match a reference)",
-        "buys": "Your take heard against a song you want to sound like: how close it is, what separates them in each dimension and in EQ, how to close the gap, and how the reference writes.",
-        "outcomes": ["understandable", "learnable"],
-        "lands_in": ["singz", "rapz", "sentenceconnectz"],
-        "ephemeral_reason": "Nothing is saved as the member's by design (matchref.py): a gap to somebody else's record is not a measurement of the member, and the reference itself must never be kept.",
-        "free_way": {"label": "A daily free prompt covers a run, and a plain coached take scores you on the same dimensions.", "tab": "singz"}},
+    "videodevelop": {
+        "resource": "promptz", "label": "Video ConnectZ Develop & Direct",
+        "buys": "A shot plan for your music video, made by listening to your track: for every shot, what is heard in that part of the song and three shots that go with its lyric, mood or beat, each with why, and the one the coach would direct.",
+        "outcomes": ["understandable", "tangible"],
+        "lands_in": ["videoconnectz"],
+        "ephemeral_reason": "The plan goes straight onto the shot fields and is not stored on its own; what is kept is the video it becomes, whose every shot carries the text that was picked.",
+        "free_way": {"label": "Writing each shot yourself is free and open to everyone, and a daily free prompt covers a plan.", "tab": "videoconnectz"}},
     "bodiez_ai_view": {
         "resource": "promptz", "label": "BodieZ AI coach",
         "buys": "An AI read of a workout, routine or muscle from your logs (what's working, what to change, your next session), or a form check that watches one video of a set and scores it with cues.",
