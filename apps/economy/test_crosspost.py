@@ -400,6 +400,40 @@ class CoachThePostTests(TestCase):
         p.refresh_from_db()
         self.assertEqual(p.score, {})
 
+    @patch("apps.economy.vocalcoach._key", return_value="test-key")
+    @patch("apps.economy.gemini.requests.post", return_value=fake_gemini())
+    def test_somebody_elses_post_is_a_radar_read_and_counts_as_nothing_of_yours(self, rq, _k):
+        """Corey: let members put others' work on their radar. It is THEIR
+        performance, so it must not land in your history, XP or share card —
+        that would be a good number without getting good."""
+        from apps.economy.models import TakeScore
+        p, _ = self.stored_post(owner=self.them)
+        before_takes = TakeScore.objects.filter(user=self.me).count()
+        before_xp = getattr(wallet_for(self.me), "xp", 0)
+        r = self.c.post("/api/singz/coach/", {"post_id": p.id}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertTrue(r.data["radar"])
+        self.assertTrue(r.data["reference"])
+        self.assertIsNone(r.data["take_score_id"])
+        self.assertEqual(r.data["share_url"], "")
+        self.assertEqual(r.data["post_author"], self.them.username)
+        self.assertEqual(TakeScore.objects.filter(user=self.me).count(), before_takes)
+        self.assertEqual(getattr(wallet_for(self.me), "xp", 0), before_xp)
+        p.refresh_from_db()
+        self.assertEqual(p.score, {})
+
+    def test_the_door_on_somebody_elses_post_says_radar_before_the_tap(self):
+        from apps.economy.crosspost import destinations_for
+        from apps.economy.postz import media_slots
+        theirs, _ = self.stored_post(owner=self.them)
+        mine, _ = self.stored_post()
+        door = lambda p: next(d for d in destinations_for(p, self.me, media_slots(p)) if d["app"] == "singz")
+        self.assertTrue(door(theirs)["radar"])
+        self.assertIn("Radar read", door(theirs)["label"])
+        self.assertIn("nothing is written on their post", door(theirs)["what"])
+        self.assertFalse(door(mine)["radar"])
+        self.assertEqual(door(mine)["label"], "Coach it in SingZ")
+
     # ---- what it refuses ----
     def test_a_post_you_cannot_view_cannot_be_sent_to_a_model(self):
         p, _ = self.stored_post(owner=self.them, visibility="private")

@@ -286,17 +286,24 @@ def destinations_for(post, user, media, *, price=None, collabs=0, take_bytes=Non
     # the next one, so these go first.
     for app_key in COACH_APPS:
         p = profile_for_app(app_key)
+        dims = ", ".join(list(p["scores"].values())[:3]).lower()
         out.append({
             "app": app_key,
-            "label": f"Coach it in {p['label']}",
+            # Somebody else's post is a Radar read (vocalcoach._radar): the coach's read
+            # of THEIR work, for you, counted as nothing of yours and written nowhere.
+            "label": f"Coach it in {p['label']}" if mine else f"📡 Radar read in {p['label']}",
             "target": "bosstake-mic",
             "action": "coach",
-            "what": f"Send this {take or 'take'} to the {p['coach']} — scored out of 10 on "
-                    + ", ".join(list(p["scores"].values())[:3]).lower()
-                    + ", with what worked, what to fix and one drill.",
+            "radar": not mine,
+            "what": (f"Send this {take or 'take'} to the {p['coach']} — scored out of 10 on {dims}, "
+                     "with what worked, what to fix and one drill." if mine else
+                     f"Hear what the {p['coach']} makes of @{post.author.username}'s {take or 'take'} — "
+                     f"scored out of 10 on {dims}, and what it does well. For you to see: nothing "
+                     "is written on their post or counted as yours."),
             "needs": coach_needs,
             "cost": price,
-            "gain": {"what": "a scored take with a drill to run next"},
+            "gain": {"what": "a scored take with a drill to run next" if mine
+                     else "the coach's read of their work"},
             "carry": carry(post, media),
             "coach_kind": take,
             # What the client needs to hold the same line if it is showing a

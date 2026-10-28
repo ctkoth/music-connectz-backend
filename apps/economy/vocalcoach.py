@@ -235,6 +235,62 @@ def _media_part(f, mime, size, deadline=None):
             lambda: gemini_files.delete(up), None)
 
 
+# A reel or video the coach can read by its ADDRESS. Only YouTube (Shorts included):
+# Gemini watches a public YouTube video itself and nothing is downloaded here. The
+# other reel apps give out a page and a player, never the file, so the honest answer
+# is to attach the member's own saved copy — which the coach already watches.
+REEL_APPS = {"instagram.com": "Instagram", "instagr.am": "Instagram", "facebook.com": "Facebook",
+             "fb.watch": "Facebook", "fb.com": "Facebook", "tiktok.com": "TikTok", "vm.tiktok.com": "TikTok",
+             "snapchat.com": "Snapchat", "threads.net": "Threads"}
+REEL_SAVE = ("The coach can't open {label} links — {label} doesn't let anyone else fetch the video. "
+             "Save your reel to your phone from the {label} app (it lets you download your own), then "
+             "attach the file here: the coach watches video, so it's scored the same way.")
+LINK_TAKE_NOTE = ("Paste a YouTube video or Short: the coach watches it from the address (the first 4 "
+                  "minutes, or from ?t= if the link has one). Nothing is uploaded. In My take it counts as "
+                  "your own performance — somebody else's video goes through Listen to someone else's track.")
+LINK_UNREACHABLE = ("The coach couldn't open that YouTube video. It has to be public — not private, "
+                    "age-restricted or removed. Nothing was charged.")
+
+
+def take_link(url):
+    """(link, None) for a YouTube video or Short the coach can watch, else (None, sentence).
+
+    Built by `matchref.classify_link` from the video id alone, so nothing typed reaches
+    the model but that id and a start time. A reel app's link answers with how to
+    attach the reel instead, named for the app, rather than a generic refusal.
+    """
+    from urllib.parse import urlparse
+    from .matchref import classify_link
+    raw = str(url or "").strip()
+    try:
+        host = (urlparse(raw if "://" in raw else f"https://{raw}").hostname or "").lower()
+    except ValueError:
+        host = ""
+    for domain, label in REEL_APPS.items():
+        if host == domain or host.endswith("." + domain):
+            return None, REEL_SAVE.format(label=label)
+    return classify_link(raw)
+
+
+class _LinkTake:
+    """Stands in for a file when the take is read from its address: nothing to open,
+    nothing to measure, nothing kept — `score_take` is handed the link part instead."""
+    size = 0
+    instance = None
+
+    def __init__(self, link):
+        self.name = link["title"]
+
+    def open(self, *a):
+        return self
+
+    def close(self):
+        pass
+
+    def read(self, *a):
+        return b""
+
+
 def _parse(text):
     """Pull the JSON object out of a model reply that may be fenced."""
     if not text:
@@ -447,8 +503,12 @@ def listener_reasons(post, limit=5):
 
 def score_take(app_key, f, content_type, *, genre, target, difficulty, style=None,
                user=None, lyrics=False, mix=False, deadline=None, listeners=None,
-               think=True, reference=False, extras=(), counted=()):
+               think=True, reference=False, extras=(), counted=(), link_part=None):
     """Send one take to the model. Returns (payload, error) — exactly one is None.
+
+    `link_part` is a take the model reads by ADDRESS (a public YouTube video or
+    Short, built by `matchref.classify_link` from the video id alone): nothing is
+    uploaded, so the file and mime checks below are skipped for it.
 
     `reference=True` is a REFERENCE LISTEN: somebody else's recording, read
     with `reference_prompt_for`. No fixes, no second pass, no lyric/mix/
@@ -513,7 +573,7 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     # Normalise BEFORE the call. An unsupported container is a refusal we can
     # give instantly and explain, rather than a round trip that comes back as a
     # generic failure the member reads as "my take was bad".
-    mime = gemini_mime(content_type)
+    mime = "video/mp4" if link_part else gemini_mime(content_type)
     if not mime:
         return None, (
             {"detail": f"The coach can't read {content_type or 'that format'}. "
@@ -538,8 +598,11 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     # How the take travels: inline for small ones, uploaded-and-referenced for
     # anything the inline request can't carry. Deciding it HERE means the trial
     # door gets the same lift for free, and there is still exactly one rubric.
-    size = _size_of(f)
-    part, cleanup, why = _media_part(f, mime, size, deadline=deadline)
+    if link_part:
+        size, part, cleanup, why = 0, link_part, None, None
+    else:
+        size = _size_of(f)
+        part, cleanup, why = _media_part(f, mime, size, deadline=deadline)
     if why:
         return None, ({"detail": f"The coach couldn't take that one — {why}.",
                        "size_mb": round(size / (1024 * 1024), 1)},
@@ -1131,6 +1194,13 @@ class SingZCoachView(APIView):
                 "charged_on_failure": False, "saved": False,
                 "notice": REFERENCE_NOTICE,
             },
+            # Which reel and video links can be scored, said before one is pasted.
+            "links": {
+                "note": LINK_TAKE_NOTE,
+                "apps": [{"label": "YouTube", "ok": True, "note": LINK_TAKE_NOTE}]
+                        + [{"label": l, "ok": False, "why": REEL_SAVE.format(label=l)}
+                           for l in dict.fromkeys(REEL_APPS.values())],
+            },
             "upgrades": __import__("apps.economy.coach_upgrades", fromlist=["x"]).quote(request.user),
         })
 
@@ -1175,9 +1245,19 @@ class SingZCoachView(APIView):
             return Response({"detail": "A reference listen is an upload of somebody else's "
                                        "track. Your own posts and journal go through My take."},
                             status=status.HTTP_400_BAD_REQUEST)
-        post = stored = None
+        post = stored = link = None
         f = request.FILES.get("take")
-        if f:
+        if not f and str(request.data.get("link") or "").strip():
+            # A reel or video by its address (YouTube, Shorts included). Somebody
+            # else's track goes through the reference door, same as a file.
+            link, why = take_link(request.data.get("link"))
+            if why:
+                return Response({"detail": why, "link_refused": True}, status=status.HTTP_400_BAD_REQUEST)
+            f, content_type = _LinkTake(link), "video/mp4"
+            stored = {"kind": "link", "title": link["title"], "id": link["url"]}
+        if link is not None:
+            pass
+        elif f:
             content_type = (getattr(f, "content_type", "") or "").lower()
         else:
             post, f, content_type, err = self._take_from_post(request)
@@ -1251,6 +1331,11 @@ class SingZCoachView(APIView):
         # handoff didn't carry one, so a Drill track isn't scored as "unspecified".
         genre = data.get("genre") or (post.genre if post else "")
 
+        # Somebody ELSE's post is a Radar read, never the member's take (see _radar).
+        from .models import owns_post
+        if post is not None and not owns_post(post, request.user):
+            return self._radar(request, post, f, content_type, genre, energy_cost)
+
         from . import takescorez
         # Recovery-first. The blueprint makes this a safety rule rather than a
         # feature — "AI or automation features must not override recovery,
@@ -1275,7 +1360,7 @@ class SingZCoachView(APIView):
             _decl = takescorez.profile_row(request.user, self.app_key)
             target = (_decl.goal_range or _decl.confirmed_range) if _decl else None
         if reference:
-            return self._reference(request, f, content_type, genre)
+            return self._reference(request, f, content_type, genre, link=link)
         try:
             if stored is not None:
                 # Opened here rather than in the lookup, so a take refused on
@@ -1296,6 +1381,7 @@ class SingZCoachView(APIView):
                 listeners=listeners_for(post) or listeners_for(
                     post_for_upload(getattr(f, "instance", None), request.user)),
                 deadline=Deadline(COACH_BUDGET_SECONDS),
+                link_part=(link or {}).get("part"),
             )
         except Exception:
             # Almost always a recording that is no longer in storage. Say that,
@@ -1338,6 +1424,8 @@ class SingZCoachView(APIView):
                     pass
         if err:
             body, code = err
+            if link is not None and code == status.HTTP_502_BAD_GATEWAY:
+                body = {**body, "detail": LINK_UNREACHABLE, "link_unreachable": True}
             return Response(body, status=code)
 
         # Only bill once a usable result exists — a failed take is not charged.
@@ -1428,7 +1516,10 @@ class SingZCoachView(APIView):
                 _row.save(update_fields=["share_token"])
             except Exception:                                # pragma: no cover
                 pass
-        if stored is not None and post is None and stored.get("kind") == "upload":
+        if stored is not None and stored.get("kind") == "link":
+            # Scored from its address: the way back is the video itself.
+            out.update({"source": "link", "link": stored["id"]})
+        elif stored is not None and post is None and stored.get("kind") == "upload":
             # From FileZ (any app's Doors bar): the way back is the file itself.
             out.update({"source": "upload", "upload_id": stored["id"],
                         "open_in": "filez", "target": "filez-list"})
@@ -1483,7 +1574,51 @@ class SingZCoachView(APIView):
 
         return Response(out)
 
-    def _reference(self, request, f, content_type, genre):
+    def _radar(self, request, post, f, content_type, genre, energy_cost):
+        """A Radar read (Corey's name): the coach's read of ANOTHER member's post.
+
+        A scout, a collaborator or a fan puts somebody's work on their radar and
+        hears what the coach makes of it. It is that post's performance, so it is
+        read the way a reference listen is and recorded as NOTHING of the member's:
+        no TakeScore, no share card under their name, no XP, no skill movement, no
+        streak — and nothing is written on the other member's post (their post
+        carries their name). Before this, a viewable post that was not yours was
+        scored as YOUR take, which put somebody else's performance in your history:
+        the substance rule's failure case, a good number without getting good.
+
+        Priced like coaching any post — the post's ⚡ plus one AI prompt, both
+        stated on the door before the tap, neither charged when the read fails.
+        """
+        data = request.data
+        try:
+            payload, err = score_take(
+                self.app_key, f, content_type, genre=genre, target=None,
+                difficulty=None, style=data.get("style"), user=request.user,
+                deadline=Deadline(COACH_BUDGET_SECONDS), reference=True)
+        except Exception:
+            logger.exception("%s radar read: post %s could not be read", self.app_key, post.id)
+            mark_upload_missing(getattr(f, "instance", None))
+            return Response({"detail": f"The recording on \"{post.title}\" isn't on the server any more, so "
+                                       "there's nothing to read. Nothing was charged.",
+                             "reference": True, "radar": True, "post_id": post.id, "take_missing": True},
+                            status=status.HTTP_410_GONE)
+        if err:
+            body, code = err
+            return Response({**body, "reference": True, "radar": True}, status=code)
+        charged = _bill(request.user,
+                        note=f"{profile_for_app(self.app_key)['label']} Radar read — AI",
+                        count_daily=True)
+        if energy_cost:
+            spend_energy(request.user, energy_cost, f"Radar read — {post.title[:50]}",
+                         app_key=self.app_key, target=f"post:{post.id}")
+        return Response({**payload, "cost_cents": charged, "energy_cost": energy_cost,
+                         "reference": True, "radar": True, "saved": False,
+                         "take_score_id": None, "share_url": "", "saved_to_post": False,
+                         "source": "post", "post_id": post.id, "post_title": post.title,
+                         "post_author": post.author.username,
+                         "open_in": "postz", "target": f"post:{post.id}"})
+
+    def _reference(self, request, f, content_type, genre, link=None):
         """A reference listen: somebody else's track, analysed and forgotten.
 
         Everything a take does AFTER scoring is deliberately absent: no
@@ -1499,13 +1634,16 @@ class SingZCoachView(APIView):
             payload, err = score_take(
                 self.app_key, f, content_type, genre=genre, target=None,
                 difficulty=None, style=data.get("style"), user=request.user,
-                deadline=Deadline(COACH_BUDGET_SECONDS), reference=True)
+                deadline=Deadline(COACH_BUDGET_SECONDS), reference=True,
+                link_part=(link or {}).get("part"))
         except Exception:
             logger.exception("%s reference listen: file could not be read", self.app_key)
             return Response({"detail": "The coach couldn't read that file. Nothing was charged.",
                              "reference": True}, status=status.HTTP_400_BAD_REQUEST)
         if err:
             body, code = err
+            if link is not None and code == status.HTTP_502_BAD_GATEWAY:
+                body = {**body, "detail": LINK_UNREACHABLE, "link_unreachable": True}
             return Response({**body, "reference": True}, status=code)
         charged = _bill(request.user,
                         note=f"{profile_for_app(self.app_key)['label']} Reference listen — AI",

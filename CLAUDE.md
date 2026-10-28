@@ -2945,3 +2945,26 @@ Real AI lip-matching would need a provider, a key and a price — Corey's call, 
   in `InventoryAIRating` (about a thing, not a person — unlike LookZMaxZ) and hidden until the owner shows
   them; a newer photo marks a reading as older. Like member ratings, it never moves a skill, price, royalty
   or rank. Never run against Google (CI has no key).
+
+## A Radar read: the coach on somebody else's post, counted as nothing of yours
+
+Corey: let members put others' work on their radar. The coach always accepted any post the member could VIEW, and
+`_save_to_post` already kept the score off a post that was not theirs — but the run was still recorded as the
+member's own take: a `TakeScore` in their history, XP, the skill blend, a share card under their name. Somebody
+else's performance in your record is the substance rule's failure case (a good number without getting good).
+
+`vocalcoach._radar` is that path now: a post the member does not own is read like a reference listen
+(`reference=True`, no fixes pass) and NOTHING is written — no TakeScore, share, XP, streak or post write-back. It costs
+what coaching any post costs (the post's ⚡ plus one AI prompt, both on the door before the tap, neither charged on a
+failed read). `crosspost.destinations_for` labels the door "📡 Radar read in X" with `radar: true` and says what it
+is not. Your own posts are unchanged: still "Coach it", still kept on the post. `test_crosspost` pins both.
+
+## Coaches score reels by link — YouTube only, and the reel apps are told how instead
+
+`vocalcoach` takes `link` beside a file, post, journal entry or upload. `take_link` reuses `matchref.classify_link`
+(the YouTube address is REBUILT from the video id, Shorts included, `?t=` kept, a `LINK_WINDOW_SECONDS` window), and
+`score_take(link_part=…)` sends that part instead of uploading anything. Instagram, Facebook, TikTok, Snapchat and Threads
+give out a page and a player, never the file, so `REEL_SAVE` answers 400 BEFORE anything runs, naming the app and saying to
+attach the member's own saved reel (video takes already work). A link in My take is the member's declaration, the same trust
+an attached file gets; with `reference` it is a reference listen. `TakeScore.source = "link"`, `ref` = the canonical address.
+A 502 for a link says it must be public, and nothing is charged. `test_coach_links` pins all of it.
