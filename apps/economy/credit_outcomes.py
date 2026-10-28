@@ -168,7 +168,7 @@ CREDIT_OUTCOMES = {
         "free_way": {"label": "Other members rate your pieces for free, 1 to 10, and a daily free prompt covers a run.", "tab": "profilez"}},
     "lookmaxz_view": {
         "resource": "promptz", "label": "LookZMaxZ reading",
-        "buys": "A sector-by-sector read of how a photo presents (face, skin, teeth, styling) with what to change and where to shop for it.",
+        "buys": "A sector-by-sector read of how a photo of you presents (face, skin, teeth, styling) with what to change and where to shop for it — or, from anybody's photo, Look Inspiration: the cut, facial hair, brows and styling in it and how to get them, with no scores.",
         # Extends AttractivenessZ and inherits its privacy line: the reading
         # itself is never stored (only the member's own shop-market
         # preferences are, in LookmaxPrefs — a different thing). "tangible"

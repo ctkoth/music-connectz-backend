@@ -56,7 +56,7 @@ from .coachvoice import CoachVoiceView, CoachSpeakView
 from .coach_upgrades import CoachMarketsView
 from .dawz import DawZView
 from .attractivenessz_view import AttractivenessZView
-from .lookmaxz_view import LookmaxZMarketsView, LookmaxZShopView, LookmaxZView
+from .lookmaxz_view import LookInspireView, LookmaxZMarketsView, LookmaxZShopView, LookmaxZView
 from .soundcloud_engagement import SoundCloudEngagementView
 from .appversion import AppVersionView
 from .soundcloud_import import SoundCloudImportView
@@ -365,6 +365,7 @@ urlpatterns = [
     path("attractivenessz/", AttractivenessZView.as_view(), name="economy-attractivenessz"),
     path("lookmaxz/", LookmaxZView.as_view(), name="economy-lookmaxz"),
     path("lookmaxz/shop/", LookmaxZShopView.as_view(), name="economy-lookmaxz-shop"),
+    path("lookmaxz/inspire/", LookInspireView.as_view(), name="economy-lookmaxz-inspire"),
     path("lookmaxz/markets/", LookmaxZMarketsView.as_view(), name="economy-lookmaxz-markets"),
     path("soundcloud/engagement/", SoundCloudEngagementView.as_view(), name="economy-soundcloud-engagement"),
     path("soundcloud/import/", SoundCloudImportView.as_view(), name="economy-soundcloud-import"),

@@ -2968,3 +2968,17 @@ give out a page and a player, never the file, so `REEL_SAVE` answers 400 BEFORE 
 attach the member's own saved reel (video takes already work). A link in My take is the member's declaration, the same trust
 an attached file gets; with `reference` it is a reference listen. `TakeScore.source = "link"`, `ref` = the canonical address.
 A 502 for a link says it must be public, and nothing is charged. `test_coach_links` pins all of it.
+
+## LookZMaxZ takes social image links, and anybody's photo gets Inspiration, never a score
+
+`imagelinks.py` fetches a photo by its IMAGE address from the social apps' own image hosts only (a fixed list, so a member
+can never point this server at an address of its choosing), https, no redirects followed, streamed to the reading's byte
+ceiling, image content-types only, kept nowhere. A post or profile PAGE is refused before anything runs with how to copy the
+image address. `LookmaxZView` reads `photo_url` when no file came, AFTER every free refusal.
+
+Corey also asked to allow other people's photos. **The 1-10 reading stays self-only**: rating a stranger's face from their
+Instagram is the harm the feature's lines exist to prevent, and a link makes it one paste. `LookInspireView`
+(`/lookmaxz/inspire/`, `lookmaxz.inspire_look`) is what anybody's photo gets: the cut, facial hair, brows and styling described
+and how to get them; the prompt forbids any number, any word on the person's face, skin, teeth, body, age, ethnicity or
+attractiveness, and guessing who they are; `clean_inspiration` keeps only the four declared parts as text. Adults only, priced
+like a reading, not charged when nothing is described. `test_lookmaxz_links` pins the host list, the refusals and the no-score rule.
