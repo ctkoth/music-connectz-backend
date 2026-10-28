@@ -399,3 +399,41 @@ class WitDepthTests(TestCase):
 
 
 from apps.economy.test_vocalcoach import GOOD as GOODISH  # noqa: E402
+
+
+class BothTakesAreRatedAndComparedTests(TestCase):
+    """Corey: Inspiration must rate and compare both takes. The model rates both on one scale;
+    the server does the subtraction."""
+
+    def test_each_side_gets_an_overall_and_the_gap_is_server_arithmetic(self):
+        from apps.economy.matchref import clean_reply
+        keys = list(scores_for("rapz"))
+        scores = {k: {"take": 6, "reference": 8} for k in keys}
+        scores[keys[0]] = {"take": 9, "reference": 7}
+        scores[keys[1]] = {"take": 5, "reference": 5}
+        out = clean_reply({**REPLY, "scores": scores, "overall": {"take": 6, "reference": 9, "take_why": "pocket",
+                                                                   "reference_why": "breath control", "x": 1}}, "rapz")
+        self.assertEqual(out["overall"], {"take": 6, "reference": 9, "take_why": "pocket", "reference_why": "breath control"})
+        c = out["compare"]
+        self.assertEqual((c["take_leads"], c["even"], c["reference_leads"]), (1, 1, len(keys) - 2))
+        self.assertEqual((c["overall_gap"], c["overall_leads"]), (-3, "reference"))
+        self.assertEqual(c["closest"], keys[0])
+        self.assertEqual(c["dimensions"][0], {"key": keys[0], "take": 9, "reference": 7, "gap": 2, "leads": "take"})
+
+    def test_half_an_overall_is_no_overall(self):
+        from apps.economy.matchref import clean_reply
+        out = clean_reply({**REPLY, "overall": {"take": 7}}, "rapz")
+        self.assertIsNone(out["overall"])
+        self.assertIsNone(out["compare"]["overall_leads"])
+
+    def test_the_take_ahead_everywhere_has_no_widest_gap(self):
+        from apps.economy.matchref import compare
+        c = compare({"flow": {"take": 9, "reference": 6}}, None)
+        self.assertIsNone(c["widest"])
+
+    def test_the_prompt_asks_for_both_on_one_scale(self):
+        from apps.economy.matchref import _prompt
+        p = _prompt("rapz", "trap")
+        self.assertIn("Rate BOTH recordings", p)
+        self.assertIn('"overall": {"take"', p)
+        self.assertIn("SAME 1-10 scale", p)

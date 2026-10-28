@@ -2982,3 +2982,11 @@ Instagram is the harm the feature's lines exist to prevent, and a link makes it 
 and how to get them; the prompt forbids any number, any word on the person's face, skin, teeth, body, age, ethnicity or
 attractiveness, and guessing who they are; `clean_inspiration` keeps only the four declared parts as text. Adults only, priced
 like a reading, not charged when nothing is described. `test_lookmaxz_links` pins the host list, the refusals and the no-score rule.
+
+### Inspiration rates both takes and compares them (Corey's ask)
+
+`matchref` asks for every dimension AND an overall for the take and the reference, on one stated 1-10 scale so the numbers
+compare, each overall with a one-sentence reason (`_clean_overall`: both or none). `compare()` is the server's subtraction —
+per dimension `gap` (take − reference) and `leads`, counts, the overall gap, and the closest and widest dimensions — so the
+model rates and never does the arithmetic. Still nothing saved: no TakeScore, XP or skill rating, because a rating of somebody
+else's record and a gap to it are not measurements of the member.

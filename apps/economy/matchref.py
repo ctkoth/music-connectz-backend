@@ -32,6 +32,9 @@ Rules that hold it, each one the repo's existing rule applied here:
   however many of the two sides are posts. Stated on the control before it is pressed,
   checked before the model runs, spent only after a usable result. A file, a FileZ upload
   or a journal entry costs no ⚡.
+* **Both takes are rated and compared** (Corey's ask): every dimension and an overall, for the
+  take AND the reference, on one scale so the numbers compare; `compare()` does the subtraction
+  (who leads where, by how much) so the model rates and the server does the arithmetic.
 * **Nothing is saved as the member's.** No TakeScore, no share card, no SkillZ
   XP, no skill rating: a gap to somebody else's record is not a measurement of
   the member, and a number the member could raise by copying a record would be
@@ -109,8 +112,15 @@ in this order: first the MEMBER'S OWN TAKE, then a REFERENCE track they want to 
 sound closer to. The reference is another artist's finished record; the take is \
 a developing performance. Genre: {genre}.
 
-Your job is the GAP, not a grade. Say what separates the take from the \
-reference and what the member can do about it. Never tell the member their take \
+Rate BOTH recordings and compare them. Score every dimension, and the overall, \
+for the take AND the reference on the SAME 1-10 scale, so the numbers compare: \
+1-2 barely holding together, 3-4 a real attempt that keeps slipping, 5-7 solid \
+and ordinary, 8 strong, 9 excellent, 10 a performance you would hold up as an \
+example. A finished record will usually rate higher than a developing take; \
+that gap is what you are here to explain, not a verdict on the member. The \
+overall is not an average and never the weakest dimension: a real strength may \
+carry one fixable rough spot, the way a listener hears it. Say what separates \
+the take from the reference and what the member can do about it. Never tell the member their take \
 is bad for not being a finished record, never call the reference perfect, and \
 never invent detail you cannot hear. Production differences (room, mic, mix) \
 belong in "eq" and "how_to", not in the performance readings.
@@ -130,6 +140,7 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "closeness": <0-100 integer: how near the SOUND and approach of the take is to the reference>,
   "closeness_why": "<one sentence on what drives that number>",
   "scores": {{{shape}}},
+  "overall": {{"take": <1-10>, "reference": <1-10>, "take_why": "<one sentence: what most decides the take's number>", "reference_why": "<one sentence: what most decides the reference's number>"}},
   "summary": "<two sentences: the biggest gap and the easiest win>",
   "eq": [{{"region": "<one of: {regions}>", "direction": "<take needs: more | less | close>", "what": "<what you hear in each>", "how": "<the move: which control, which way, roughly how much>"}}, ...],
   "how_to": [{{"what": "<the gap>", "why": "<why the reference sounds the way it does>", "how": "<concrete steps>"}}, ...],
@@ -169,9 +180,46 @@ def _clean_scores(raw, keys):
     return out
 
 
+def _clean_overall(raw):
+    """Both overall ratings, or None — never half of one (a lone number compares with nothing)."""
+    if not isinstance(raw, dict):
+        return None
+    t, r = vc._clamp(raw.get("take")), vc._clamp(raw.get("reference"))
+    if t is None or r is None:
+        return None
+    return {"take": t, "reference": r, "take_why": str(raw.get("take_why", "")).strip()[:300],
+            "reference_why": str(raw.get("reference_why", "")).strip()[:300]}
+
+
+def _side(diff):
+    return "take" if diff > 0 else "reference" if diff < 0 else "even"
+
+
+def compare(scores, overall):
+    """The comparison, as arithmetic on the two sets of ratings — the model rates, the server
+    subtracts. `gap` is take minus reference (negative = the reference is ahead); `closest` and
+    `widest` name the dimensions where the take is nearest and furthest behind."""
+    rows = [{"key": k, "take": v["take"], "reference": v["reference"], "gap": v["take"] - v["reference"],
+             "leads": _side(v["take"] - v["reference"])} for k, v in scores.items()]
+    out = {"dimensions": rows,
+           "take_leads": sum(r["leads"] == "take" for r in rows),
+           "reference_leads": sum(r["leads"] == "reference" for r in rows),
+           "even": sum(r["leads"] == "even" for r in rows),
+           "overall_gap": overall["take"] - overall["reference"] if overall else None,
+           "overall_leads": _side(overall["take"] - overall["reference"]) if overall else None,
+           "closest": None, "widest": None}
+    if rows:
+        out["closest"] = max(rows, key=lambda r: r["gap"])["key"]
+        widest = min(rows, key=lambda r: r["gap"])
+        out["widest"] = widest["key"] if widest["gap"] < 0 else None
+    return out
+
+
 def clean_reply(parsed, app_key):
     """The whitelist: anything the model adds beyond this never reaches a screen."""
     keys = list(scores_for(app_key))
+    scores = _clean_scores(parsed.get("scores"), keys)
+    overall = _clean_overall(parsed.get("overall"))
     try:
         closeness = max(0, min(100, int(round(float(parsed.get("closeness"))))))
     except (TypeError, ValueError):
@@ -179,7 +227,9 @@ def clean_reply(parsed, app_key):
     return {
         "closeness": closeness,
         "closeness_why": str(parsed.get("closeness_why", "")).strip()[:300],
-        "scores": _clean_scores(parsed.get("scores"), keys),
+        "scores": scores,
+        "overall": overall,
+        "compare": compare(scores, overall),
         "summary": str(parsed.get("summary", "")).strip()[:500],
         "eq": _clean_eq(parsed.get("eq")),
         "how_to": vc.clean_practice(parsed.get("how_to")),
