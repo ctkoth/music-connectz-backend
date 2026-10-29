@@ -3019,3 +3019,13 @@ that does not fit is still read) and signs its id into `share.reading` (`"p"`), 
 reading was made from. `show_photo` on a share puts `photo_upload_id` on the stored payload; `view_of` serves it as
 `photo_url` (never the id) and goes blank the moment the member deletes the upload. `photo` on a post attaches it as image
 media. On an approval request `show_photo` keeps the photo as the SUBJECT's upload, in her storage, instead of deleting it.
+
+## Two free trial takes per browser, and the second one says what moved
+
+The coach's value is the change between takes, and one take can never show a change. So `TRIAL_PER_BROWSER` is 2 (env-overridable). The POST answers with:
+- `previous`: this browser's earlier scored take on the same coach, as {score, change, at}.
+- `takes_left`.
+
+The address backstop and `trial_daily_cap()` are unchanged, so the most the door can spend in a day has not moved. Each extra take costs one model call (about 3¢).
+
+`PublicTiersView` now also serves, per tier, `wav_bits` and `profile_links`. At the top level it serves `statz_features` (labels from `statz_trial.FEATURES`) and `statz_sample`. With these, the trial's "what an account adds" panel reads every claim from here.
