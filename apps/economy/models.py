@@ -8486,3 +8486,23 @@ class InventoryAIRating(models.Model):
 
     class Meta:
         unique_together = ("user", "item")
+
+
+class LookShare(models.Model):
+    """A LookZMaxZ reading its OWN subject chose to show somebody (`lookshare.py`).
+
+    A reading is never stored; this row exists only because the person in the photo pressed
+    Share. It holds the numbers and the coach's words from a server-signed snapshot (never
+    anything the client typed, never the photo), and deleting it is how a share is taken back.
+    """
+    token = models.CharField(max_length=32, unique=True, db_index=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="look_shares")
+    # Who it was shown to. Null is "any verified adult with the link"; a named member is the only viewer
+    # besides the owner. SET_NULL would widen it, so a deleted recipient deletes the share.
+    to_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+                                related_name="look_shares_received")
+    payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]

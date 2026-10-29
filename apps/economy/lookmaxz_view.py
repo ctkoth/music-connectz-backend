@@ -15,6 +15,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import imagelinks
+from . import lookshare
 from . import lookmaxz as lm
 from .attractivenessz import too_big
 from .attractivenessz_view import presentation_price
@@ -145,6 +146,9 @@ class LookmaxZView(APIView):
             charge_ai_usage(request.user, price["cost_cents"],
                             note="LookmaxZ presentation reading", count_daily=True)
             charged = True
+            # The one way a reading can leave this response: a server-signed snapshot the member
+            # may choose to share (lookshare.py). Nothing is stored unless they do.
+            payload["share"] = {"reading": lookshare.sign(request.user, payload), "note": lookshare.SHARE_NOTE}
         shop_info = lm.markets_for(request.user)
         markets = shop_info["markets"]
         body = lm.body_sector(request.user)

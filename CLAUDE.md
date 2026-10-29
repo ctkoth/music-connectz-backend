@@ -2990,3 +2990,14 @@ compare, each overall with a one-sentence reason (`_clean_overall`: both or none
 per dimension `gap` (take − reference) and `leads`, counts, the overall gap, and the closest and widest dimensions — so the
 model rates and never does the arithmetic. Still nothing saved: no TakeScore, XP or skill rating, because a rating of somebody
 else's record and a gap to it are not measurements of the member.
+
+## LookZMaxZ shares: the person in the reading decides, from a snapshot the server signed
+
+`lookshare.py`. Corey wanted to show a woman her score; rating a photo someone else uploads stays self-only, so the
+invite (`GET lookmaxz/invite/<handle>/`, open logged-out) sends HER to get her own, and only she can share it. A reading
+answers with `share.reading`, a `signing.dumps` of `snapshot()` (photo sectors' numbers, verdict, working, caveat — no
+photo, no Body, no opt-in sectors) valid for a day; `POST lookmaxz/share/` accepts nothing else, and only from the user
+it names, so a share cannot carry a number the coach did not give. `LookShare` is the one stored copy (migration 0232):
+viewable by her, the member she names (who must be a verified adult, and is notified), or any verified adult when she
+names nobody; she deletes it to take it down, and every "not yours" answers the same 404. `to_user` CASCADEs so a
+deleted recipient can never turn a named share into a link share. Free; nothing is charged.
