@@ -120,3 +120,21 @@ class LookAskTests(Base):
         self.assertEqual((post.author, post.visibility), (self.her, "private"))
         self.assertIn("Overall", post.description)
         self.assertNotIn("10/10!!", post.description)
+
+
+class ShowThePhotoTests(LookAskTests):
+    def test_approving_with_show_the_photo_keeps_it_as_her_upload(self):
+        from apps.economy.models import Upload
+        pk = self.ask().json()["id"]
+        r, _g, _c = self.answer(pk, decision="approve", confirm_self=True, show_photo=True)
+        self.assertEqual(r.status_code, 200, r.content)
+        up = Upload.objects.get()
+        self.assertEqual(up.user, self.her)
+        self.assertIn(f"/media/{up.id}/", self.c.get(f"{URL}share/{r.json()['share']['token']}/").json()["photo_url"])
+        self.assertFalse(LookRequest.objects.get(pk=pk).photo)    # the request's own copy is still gone
+
+    def test_without_the_tick_nothing_is_kept(self):
+        from apps.economy.models import Upload
+        pk = self.ask().json()["id"]
+        self.answer(pk, decision="approve", confirm_self=True)
+        self.assertFalse(Upload.objects.exists())

@@ -19,6 +19,7 @@ from . import lookshare
 from . import lookmaxz as lm
 from .attractivenessz import too_big
 from .attractivenessz_view import presentation_price
+from .media import stable_media_url
 from .models import LookmaxPrefs, charge_ai_usage
 
 # Look Inspiration (Corey: "allow others or self img"). Scoring SOMEBODY ELSE'S looks stays out:
@@ -71,6 +72,7 @@ def _state(user):
         "link_hosts": sorted(set(imagelinks.IMAGE_HOSTS.values())),
         "page_hosts": sorted(set(imagelinks.PAGE_HOSTS)),
         "inspire": {"what": INSPIRE_WHAT, "rule": INSPIRE_RULE},
+        "keep_note": lookshare.KEEP_NOTE,
     }
 
 
@@ -146,9 +148,23 @@ class LookmaxZView(APIView):
             charge_ai_usage(request.user, price["cost_cents"],
                             note="LookmaxZ presentation reading", count_daily=True)
             charged = True
+            # Keep my photo (opt-in, like Keep this take): an ordinary upload of theirs, so a share
+            # or post can show what was read. Never kept without the tick.
+            kept = None
+            if str(request.data.get("keep_photo", "")).lower() in ("1", "true", "yes", "on"):
+                try:
+                    photo.seek(0)
+                    raw = photo.read()
+                except Exception:
+                    raw = b""
+                kept, why = (lookshare.keep_photo(request.user, raw, ctype) if raw
+                             else (None, "Not kept — the photo couldn't be read back. It was still read."))
+                payload["kept_photo"] = ({"url": stable_media_url(kept, request), "id": kept.id} if kept
+                                         else {"url": "", "note": why})
             # The one way a reading can leave this response: a server-signed snapshot the member
-            # may choose to share (lookshare.py). Nothing is stored unless they do.
-            payload["share"] = {"reading": lookshare.sign(request.user, payload), "note": lookshare.SHARE_NOTE}
+            # may choose to share (lookshare.py). Nothing else is stored unless they do.
+            payload["share"] = {"reading": lookshare.sign(request.user, payload, kept), "note": lookshare.SHARE_NOTE,
+                                "photo_kept": bool(kept)}
         shop_info = lm.markets_for(request.user)
         markets = shop_info["markets"]
         body = lm.body_sector(request.user)

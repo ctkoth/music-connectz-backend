@@ -78,3 +78,44 @@ class LookShareTests(Base):
         c = APIClient()
         c.force_authenticate(u)
         return c
+
+
+class KeptPhotoTests(LookShareTests):
+    """No exception for LookZMaxZ: the photo that was read can be kept and shown — opt-in, the member's own upload."""
+
+    def reading_kept(self, keep=True):
+        r = self.post(keep_photo="true" if keep else "")
+        self.assertEqual(r.status_code, 200, r.content)
+        return r.json()
+
+    def test_nothing_is_kept_without_the_tick(self):
+        from apps.economy.models import Upload
+        d = self.reading_kept(keep=False)
+        self.assertNotIn("kept_photo", d)
+        self.assertFalse(Upload.objects.exists())
+
+    def test_a_kept_photo_is_the_members_upload_and_a_share_can_show_it(self):
+        from apps.economy.models import Upload
+        d = self.reading_kept()
+        up = Upload.objects.get()
+        self.assertEqual(up.user, self.user)
+        self.assertTrue(d["kept_photo"]["url"])
+        hidden = self.c.post(SHARE, {"reading": d["share"]["reading"], "to": "corey"}, format="json").json()
+        self.assertEqual(hidden["photo_url"], "")                  # kept, but not ticked to show
+        shown = self.c.post(SHARE, {"reading": d["share"]["reading"], "to": "corey", "show_photo": True},
+                            format="json").json()
+        seen = self.client_for(self.corey).get(f"{SHARE}{shown['token']}/").json()
+        self.assertIn(f"/media/{up.id}/", seen["photo_url"])
+        self.assertNotIn("photo_upload_id", seen)
+        up.delete()                                                # she deletes it: the share stops showing it
+        self.assertEqual(self.client_for(self.corey).get(f"{SHARE}{shown['token']}/").json()["photo_url"], "")
+
+    def test_a_post_carries_the_photo_only_when_asked(self):
+        from apps.economy.models import Post
+        d = self.reading_kept()
+        token = self.c.post(SHARE, {"reading": d["share"]["reading"], "show_photo": True}, format="json").json()["token"]
+        plain = Post.objects.get(pk=self.c.post(f"{SHARE}{token}/post/", {}, format="json").json()["post_id"])
+        self.assertEqual(plain.media_url, "")
+        pic = Post.objects.get(pk=self.c.post(f"{SHARE}{token}/post/", {"photo": True}, format="json").json()["post_id"])
+        self.assertEqual(pic.media_type, "image")
+        self.assertIn("/media/", pic.media_url)

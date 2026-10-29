@@ -26,17 +26,19 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import lookmaxz as lm
-from .models import LookShare, notify, profile_for
+from .media import stable_media_url
+from .models import LookShare, Upload, notify, profile_for
 
 User = get_user_model()
 SALT = "mcz.lookshare"
 MAX_AGE = 24 * 3600
 
 SHARE_NOTE = ("Only if you want to: share this reading with one person, or with any verified adult who has "
-              "the link. They see the numbers and the coach's words — never your photo. Delete it any time.")
+              "the link. They see the numbers and the coach's words, and your photo only if you kept it and tick "
+              "Show my photo. Delete it any time.")
 INVITE_WHAT = ("@{handle} invited you to get your own LookZMaxZ reading: you upload a photo of yourself, the "
                "coach scores your hair, skin, teeth and styling 1-10 and says how to lift each. It's 18+ with an "
-               "ID check, your photo is kept nowhere, and the result is yours — you choose whether @{handle} sees it.")
+               "ID check, your photo is kept only if you choose, and the result is yours — you choose whether @{handle} sees it.")
 INVITE_RULE = ("Nobody can rate you from a photo they upload. The only way @{handle} sees a score is if you get "
                "your own and share it.")
 INVITE_SHARE = "Get your own LookZMaxZ reading — it's yours, and you choose who sees it."
@@ -61,19 +63,34 @@ def snapshot(payload):
             "sectors": sectors, "caveat": lm.CAVEAT, "scale": lm.SCALE}
 
 
-def sign(user, payload):
-    return signing.dumps({"u": user.id, "r": snapshot(payload)}, salt=SALT, compress=True)
+def sign(user, payload, photo=None):
+    """`photo` is the Upload the member chose to keep with this reading (or None). Only its id
+    rides in the signature, so a share can only ever show a photo the reading was made from."""
+    data = {"u": user.id, "r": snapshot(payload)}
+    if photo is not None:
+        data["p"] = photo.id
+    return signing.dumps(data, salt=SALT, compress=True)
+
+
+def photo_url(share, request=None):
+    """The kept photo's address, or "" when none was shown or the owner has since deleted it."""
+    pid = (share.payload or {}).get("photo_upload_id")
+    if not pid:
+        return ""
+    up = Upload.objects.filter(pk=pid, user_id=share.user_id, missing_since__isnull=True).first()
+    return stable_media_url(up, request) if up else ""
 
 
 def new_token():
     return secrets.token_hex(12)
 
 
-def view_of(share, viewer):
+def view_of(share, viewer, request=None):
+    body = {k: v for k, v in (share.payload or {}).items() if k != "photo_upload_id"}
     return {"token": share.token, "username": share.user.username,
             "to": share.to_user.username if share.to_user_id else None,
             "mine": share.user_id == viewer.id, "created_at": share.created_at.isoformat(),
-            **share.payload}
+            **body, "photo_url": photo_url(share, request)}
 
 
 class LookShareView(APIView):
@@ -85,8 +102,8 @@ class LookShareView(APIView):
             return Response({"mine": [], "to_me": [], "note": SHARE_NOTE})
         mine = LookShare.objects.filter(user=request.user).select_related("user", "to_user")[:20]
         to_me = LookShare.objects.filter(to_user=request.user).select_related("user", "to_user")[:20]
-        return Response({"mine": [view_of(s, request.user) for s in mine],
-                         "to_me": [view_of(s, request.user) for s in to_me], "note": SHARE_NOTE})
+        return Response({"mine": [view_of(s, request.user, request) for s in mine],
+                         "to_me": [view_of(s, request.user, request) for s in to_me], "note": SHARE_NOTE})
 
     def post(self, request):
         if not _adult(request.user):
@@ -114,12 +131,15 @@ class LookShareView(APIView):
             if not _adult(to):
                 return Response({"detail": f"@{to.username} hasn't verified they're an adult, so they can't "
                                            "see a reading. Nothing was shared."}, status=status.HTTP_400_BAD_REQUEST)
-        share = LookShare.objects.create(token=new_token(), user=request.user, to_user=to,
-                                         payload=data.get("r") or {})
+        payload = dict(data.get("r") or {})
+        if data.get("p") and str(request.data.get("show_photo", "")).lower() in ("1", "true", "yes", "on"):
+            if Upload.objects.filter(pk=data["p"], user=request.user).exists():
+                payload["photo_upload_id"] = data["p"]
+        share = LookShare.objects.create(token=new_token(), user=request.user, to_user=to, payload=payload)
         if to:
             notify(to, "system", f"@{request.user.username} shared their LookZMaxZ reading with you.",
                    actor=request.user, item_id=f"lookshare:{share.token}")
-        return Response(view_of(share, request.user), status=status.HTTP_201_CREATED)
+        return Response(view_of(share, request.user, request), status=status.HTTP_201_CREATED)
 
 
 class LookShareDetailView(APIView):
@@ -137,7 +157,7 @@ class LookShareDetailView(APIView):
             # One answer for "gone", "not yours" and "not an adult": a share's existence is not public.
             return Response({"detail": "That reading isn't shared with you, or was taken down."},
                             status=status.HTTP_404_NOT_FOUND)
-        return Response(view_of(share, request.user))
+        return Response(view_of(share, request.user, request))
 
     def delete(self, request, token):
         share = self._find(token)
@@ -161,8 +181,8 @@ class LookInviteView(APIView):
                          "share_text": INVITE_SHARE, "link": f"/rate/{h}"})
 
 
-POST_NOTE = ("Post your reading to PostZ: the numbers and the coach's words, never the photo. Only the person in the "
-             "reading can post it. Free.")
+POST_NOTE = ("Post your reading to PostZ: the numbers and the coach's words, and your photo if it is kept with this "
+             "reading and you tick it. Only the person in the reading can post it. Free.")
 
 
 def post_text(payload):
@@ -194,10 +214,30 @@ class LookSharePostView(APIView):
         if not _adult(request.user):
             return Response({"detail": "Posting a reading is for verified adults."}, status=status.HTTP_403_FORBIDDEN)
         vis = str(request.data.get("visibility") or "public").lower()
-        post, _info, err = create_post(request.user, {"title": "My LookZMaxZ reading", "visibility": vis,
-                                                      "description": post_text(share.payload)})
+        body = {"title": "My LookZMaxZ reading", "visibility": vis, "description": post_text(share.payload)}
+        if str(request.data.get("photo", "")).lower() in ("1", "true", "yes", "on"):
+            url = photo_url(share, request)
+            if url:
+                body.update({"media_url": url, "media_type": "image"})
+        post, _info, err = create_post(request.user, body)
         if err:
             body, code = err
             return Response(body, status=code)
         return Response({"post_id": post.id, "visibility": post.visibility, "url": f"/p/{post.id}"},
                         status=status.HTTP_201_CREATED)
+
+
+KEEP_NOTE = ("Keep my photo: stored as one of your uploads (it counts toward your storage, and you can delete it any "
+             "time), so you can show it with this reading when you share or post it. Off unless you tick it.")
+
+
+def keep_photo(user, data, content_type):
+    """(Upload, "") or (None, reason): the photo the member just had read, kept because they asked.
+
+    Goes through the coach's own `keep_take`, so the same per-file and storage limits apply and a
+    photo that does not fit is still read, just not kept."""
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from .takekeep import keep_take
+    ext = {"image/png": "png", "image/webp": "webp", "image/gif": "gif"}.get(content_type, "jpg")
+    up, why = keep_take(user, SimpleUploadedFile(f"lookzmaxz.{ext}", data, content_type=content_type))
+    return up, why.replace("It was still scored.", "It was still read.")

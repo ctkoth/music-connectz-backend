@@ -3011,3 +3011,11 @@ while pending (`EXPIRE_DAYS` 7, swept on every read) and deleted on any decision
 came back; one pending request per pair and `MAX_PENDING` (5) per requester; a block either way refuses; a decline gives
 the requester no reason. `LookSharePostView` lets ONLY the person in a reading post it to PostZ through `create_post`, with
 text built from the stored snapshot (`post_text`) — a request body never reaches it.
+
+### The photo behind a LookZMaxZ reading can be shown — opt-in, and always the owner's upload (Corey: no exception)
+
+`keep_photo` on a reading stores the photo through the coach's `keep_take` (same per-file and storage limits; a photo
+that does not fit is still read) and signs its id into `share.reading` (`"p"`), so a share can only ever show the photo the
+reading was made from. `show_photo` on a share puts `photo_upload_id` on the stored payload; `view_of` serves it as
+`photo_url` (never the id) and goes blank the moment the member deletes the upload. `photo` on a post attaches it as image
+media. On an approval request `show_photo` keeps the photo as the SUBJECT's upload, in her storage, instead of deleting it.

@@ -44,8 +44,9 @@ ASK_NOTE = ("Ask a member to approve a reading of a photo of them. Nothing is sc
             "the photo first, the result goes to both of you, and they can take it down. The photo is deleted as soon "
             "as they decide, or after {days} days. You pay only if it's read.")
 APPROVE_NOTE = ("Approving reads this photo of you in LookZMaxZ — hair, skin, teeth and styling — and shows the result "
-                "to you and @{who}. You can take it down any time. Declining deletes the photo; @{who} is only told "
-                "it wasn't approved.")
+                "to you and @{who}. Tick Show the photo to keep it with the reading (as your upload, in your "
+                "storage); otherwise it is deleted. You can take it down any time. Declining deletes the photo; "
+                "@{who} is only told it wasn't approved.")
 
 
 def _adult(user):
@@ -210,11 +211,20 @@ class LookAskOneView(APIView):
             return Response(_row(req, request.user))
         charge_ai_usage(req.requester, price["cost_cents"], note=f"LookZMaxZ reading approved by @{req.subject.username}",
                         count_daily=True)
+        snap = lookshare.snapshot(payload)
+        kept_note = ""
+        if str(request.data.get("show_photo", "")).lower() in ("1", "true", "yes", "on"):
+            # Her choice, and then HER upload: kept in her storage, deletable by her like any other.
+            with req.photo.open("rb") as f:
+                kept, kept_note = lookshare.keep_photo(req.subject, f.read(), req.content_type)
+            if kept:
+                snap["photo_upload_id"] = kept.id
         share = LookShare.objects.create(token=lookshare.new_token(), user=req.subject, to_user=req.requester,
-                                         payload=lookshare.snapshot(payload))
+                                         payload=snap)
         req.share = share
         req.save(update_fields=["share"])
         _drop_photo(req, "approved")
         notify(req.requester, "system", f"@{req.subject.username} approved your LookZMaxZ request — the reading is "
                "in LookZMaxZ under Shared with you.", actor=req.subject, item_id=f"lookshare:{share.token}")
-        return Response({**_row(req, request.user), "share": lookshare.view_of(share, request.user)})
+        return Response({**_row(req, request.user), "share": lookshare.view_of(share, request.user, request),
+                         "kept_note": kept_note})
