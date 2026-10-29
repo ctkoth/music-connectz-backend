@@ -112,3 +112,37 @@ class IdentityResultsTests(TestCase):
                                          "metadata": {"user_id": str(other.id)},
                                          "verified_outputs": {"dob": dob(30)}}))
         self.assertFalse(profile_for(other).verified_18plus)
+
+
+@override_settings(STRIPE_SECRET_KEY="sk_test_x")
+class DobIsExpandedTests(TestCase):
+    """Stripe leaves `verified_outputs.dob` out unless it is expanded by name, so expanding only
+    `verified_outputs` read every passed check as "date of birth could not be read"."""
+
+    def setUp(self):
+        self.u = User.objects.create_user("dobm", "d@e.com", "pw-Long-enough-1")
+
+    def test_the_retrieve_expands_the_dob_itself(self):
+        full = {"id": "vs_9", "status": "verified", "metadata": {"user_id": str(self.u.id)},
+                "verified_outputs": {"dob": dob(34)}}
+        with patch("stripe.identity.VerificationSession.retrieve", return_value=full) as m:
+            row = apply_session({"id": "vs_9", "status": "verified", "metadata": {"user_id": str(self.u.id)}})
+        self.assertIn("verified_outputs.dob", m.call_args.kwargs["expand"])
+        self.assertEqual(row.status, IdentityCheck.VERIFIED)
+        self.assertTrue(profile_for(self.u).verified_18plus)
+
+    def test_an_unreadable_check_is_read_again_without_a_new_scan(self):
+        IdentityCheck.objects.create(user=self.u, session_id="vs_8", status=IdentityCheck.UNREADABLE, reason="unreadable")
+        full = {"id": "vs_8", "status": "verified", "metadata": {"user_id": str(self.u.id)},
+                "verified_outputs": {"dob": dob(34)}}
+        from apps.economy.identity import refresh
+        with patch("stripe.identity.VerificationSession.retrieve", return_value=full):
+            refresh(self.u)
+        self.assertEqual(IdentityCheck.objects.get(session_id="vs_8").status, IdentityCheck.VERIFIED)
+        self.assertTrue(profile_for(self.u).verified_18plus)
+
+    def test_other_endings_stay_final(self):
+        IdentityCheck.objects.create(user=self.u, session_id="vs_7", status=IdentityCheck.FAILED, reason="document_expired")
+        row = apply_session({"id": "vs_7", "status": "verified", "metadata": {"user_id": str(self.u.id)},
+                             "verified_outputs": {"dob": dob(34)}})
+        self.assertEqual(row.status, IdentityCheck.FAILED)

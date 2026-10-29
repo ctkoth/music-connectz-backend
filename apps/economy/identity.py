@@ -17,10 +17,11 @@ adult content — a self-reported birthday is never trusted for it.
 
 **Fetches**, not reads. The event body carries the session's status and nothing
 personal — no `verified_outputs`, by design on Stripe's side. So the DOB comes
-from a retrieve with `expand=["verified_outputs"]`, and a verification that
+from a retrieve that expands `verified_outputs.dob` (see EXPAND), and a verification that
 can't be read leaves the member unverified rather than waved through.
 """
 import datetime
+import logging
 
 from django.conf import settings
 from django.utils import timezone
@@ -30,6 +31,14 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import profile_for
+
+logger = logging.getLogger(__name__)
+
+# `verified_outputs.dob` is one of Stripe's sensitive fields: it is NOT included when you expand
+# `verified_outputs` alone, only when `dob` itself is expanded. Expanding just the parent returned
+# the name and address and no date — so every passed check read as "date of birth could not be
+# read back", however legible the ID.
+EXPAND = ["verified_outputs", "verified_outputs.dob"]
 
 
 def _age_from_dob(dob):
@@ -73,13 +82,20 @@ def _verified_dob(session):
     stripe.api_key = settings.STRIPE_SECRET_KEY
     try:
         full = stripe.identity.VerificationSession.retrieve(
-            session_id, expand=["verified_outputs"])
+            session_id, expand=EXPAND)
     except Exception:
         # A verification we can't read is not a verification. Leaving the flag
         # unset is the safe failure for an age gate: the member is asked again,
         # rather than being let through on a check that never completed.
+        # Logged with its cause: the member only ever sees "date of birth could
+        # not be read", which is the same words whether Stripe refused the call
+        # (a key without Identity read access, say) or the ID really had no date.
+        logger.exception("identity: could not retrieve verified outputs for %s", session_id)
         return {}
-    return _pluck(_pluck(full, "verified_outputs") or {}, "dob") or {}
+    dob = _pluck(_pluck(full, "verified_outputs") or {}, "dob")
+    if not dob:
+        logger.warning("identity: session %s verified but Stripe returned no dob", session_id)
+    return dob or {}
 
 
 
@@ -133,7 +149,10 @@ def apply_session(session, user=None):
     if not user:
         return None
     row = _create_or_get(user, session)
-    if row is None or row.status not in IdentityCheck.OPEN:
+    # UNREADABLE is re-read, never final: it means WE could not read a date off a check Stripe
+    # passed, so the member's scan already proved what it proves and charging them another one
+    # for our mistake would be wrong. Every other ending stays final.
+    if row is None or (row.status not in IdentityCheck.OPEN and row.status != IdentityCheck.UNREADABLE):
         return row
     st = _pluck(session, "status")
     if st == "verified":
@@ -177,15 +196,17 @@ def refresh(user):
     if not settings.STRIPE_SECRET_KEY:
         return
     cutoff = timezone.now() - datetime.timedelta(days=2)
-    open_rows = list(IdentityCheck.objects.filter(user=user, status__in=IdentityCheck.OPEN, created_at__gte=cutoff)[:5])
+    open_rows = list(IdentityCheck.objects.filter(
+        user=user, status__in=[*IdentityCheck.OPEN, IdentityCheck.UNREADABLE], created_at__gte=cutoff)[:5])
     if not open_rows:
         return
     import stripe
     stripe.api_key = settings.STRIPE_SECRET_KEY
     for row in open_rows:
         try:
-            full = stripe.identity.VerificationSession.retrieve(row.session_id, expand=["verified_outputs"])
+            full = stripe.identity.VerificationSession.retrieve(row.session_id, expand=EXPAND)
         except Exception:
+            logger.exception("identity: could not refresh session %s", row.session_id)
             continue
         apply_session(full, user=user)
 
