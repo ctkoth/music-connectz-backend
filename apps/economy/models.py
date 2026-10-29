@@ -3851,7 +3851,13 @@ TRIAL_CLAIM_DAYS = 30            # a token stays claimable this long
 # thing that actually caps the money has always been `trial_daily_cap()`, which
 # refuses rather than overspends — the per-IP rule was never what stood between
 # us and a bill, it just read like it.
-TRIAL_PER_BROWSER = int(os.environ.get("TRIAL_PER_BROWSER", "1"))
+# TWO, on purpose (Corey, after zero joins from a month of trials): the coach's value is the
+# number MOVING, and a visitor with one take never sees it move — they are asked to join before
+# they have felt the thing an account is for. The second take answers with the change since the
+# first (`previous` / `change` on the trial response). The money is still capped by
+# `trial_daily_cap()`, which refuses rather than overspends; this only spends more of it on the
+# visitors who came back for a second go, which are exactly the ones worth spending it on.
+TRIAL_PER_BROWSER = int(os.environ.get("TRIAL_PER_BROWSER", "2"))
 # Sized for a shared carrier address, not for one machine. Well under the
 # global daily cap on purpose: one address may never spend the whole day.
 TRIAL_PER_IP = int(os.environ.get("TRIAL_PER_IP", "25"))

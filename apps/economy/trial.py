@@ -101,6 +101,16 @@ def trial_state(ip, anon_id=""):
     return today, browser_done, ip_over
 
 
+def takes_left(anon_id):
+    """Free takes this browser has left in the window; the full allowance for a browser we can't identify."""
+    from datetime import timedelta
+    if not anon_id:
+        return TRIAL_PER_BROWSER
+    used = TrialTake.objects.filter(anon_id=anon_id, scored=True,
+                                    created_at__gte=timezone.now() - timedelta(hours=TRIAL_PER_IP_HOURS)).count()
+    return max(0, TRIAL_PER_BROWSER - used)
+
+
 from .retake import offer as remind_offer  # noqa: E402
 
 
@@ -178,8 +188,12 @@ class TrialCoachView(APIView):
             # is showing strangers the product. Same shape as `ranges` above.
             "style_label": profile["style_label"],
             "styles": [{"key": k, "label": l} for k, l in profile["styles"]],
-            "per_address": (f"one free take per browser every {TRIAL_PER_IP_HOURS} hours "
+            "per_address": (f"{TRIAL_PER_BROWSER} free takes per browser every {TRIAL_PER_IP_HOURS} hours "
                             f"({TRIAL_PER_IP} per network address)"),
+            # How many free takes this browser has left, so the door can say "the second one shows
+            # your number move" BEFORE the first, not after it is spent.
+            "takes_left": takes_left(client_anon_id(request)),
+            "takes_per_browser": TRIAL_PER_BROWSER,
             "max_mb": TRIAL_MAX_MB,
             # The longest a take may now run before the server gives up and
             # says so. On screen BEFORE the button, because a wait with a
@@ -229,7 +243,7 @@ class TrialCoachView(APIView):
         today, mine, ip_over = trial_state(ip, anon_id)
         if mine:
             return Response(
-                {"detail": "You've had your free take for today. Make an account and the coach is yours whenever you want it.",
+                {"detail": "You've had today's free takes. Make an account and the coach is yours whenever you want it.",
                  "already_used": True},
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
@@ -309,6 +323,16 @@ class TrialCoachView(APIView):
             emailed = body
         from .models import mint_score_share
         share = mint_score_share(self.app_key, payload, genre=data.get("genre", ""))
+        # The second take's whole point: the change since this browser's last scored one on this coach.
+        previous = None
+        if take.scored and anon_id:
+            prev = (TrialTake.objects.filter(anon_id=anon_id, app_key=self.app_key, scored=True)
+                    .exclude(pk=take.pk).order_by("-created_at").first())
+            if prev and (prev.result or {}).get("score") is not None:
+                was = prev.result.get("score_exact", prev.result.get("score"))
+                now = payload.get("score_exact", payload.get("score"))
+                previous = {"score": was, "change": round(float(now) - float(was), 1),
+                            "at": prev.created_at.isoformat()}
         return Response({
             **payload,
             "trial": True,
@@ -328,6 +352,8 @@ class TrialCoachView(APIView):
             # The gain of joining, stated after they have had the value: what this exact
             # take would have been as a Free member. The trial itself spends nothing.
             "as_member": _as_member(payload),
+            "previous": previous,
+            "takes_left": takes_left(anon_id),
         }, status=status.HTTP_201_CREATED)
 
 
@@ -444,7 +470,7 @@ class PublicTiersView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        from .catalog import tier_ladder, TIER_FREE, TIER_PREMIUM, TIER_STATZ
+        from .catalog import MASTERING, tier_ladder, TIER_FREE, TIER_PREMIUM, TIER_STATZ
         from .models import (ENERGY_FLOOR_PER_HOUR, PROMPT_ALLOWANCE,
                              REFERRAL_REWARD_JOINEE_SPINAZ,
                              REFERRAL_REWARD_REFERRER_SPINAZ,
@@ -490,6 +516,9 @@ class PublicTiersView(APIView):
                 "platform_fee_pct": round(DEV_TAX.get(tier_key, 0) * 100, 2),
                 "energy_per_dollar": ENERGY_TOPUP_MULT.get(tier_key, 1),
                 "scored_per_day": SUBMISSION_DAILY_CAP.get(tier_key, 0),
+                # What a value panel can name as the tier's, read from the same tables that gate it.
+                "wav_bits": MASTERING.get(tier_key, {}).get("wav_bits", 0),
+                "profile_links": limits.get("profile_links"),
             }
 
             # Add founding info for StatZ
@@ -504,8 +533,15 @@ class PublicTiersView(APIView):
 
             tiers.append(tier_data)
 
+        # Every StatZ feature a member can actually try, each with the screen it opens on — the
+        # audited `statz_trial.FEATURES`, so a value panel never names a feature that is not built.
+        from .statz_trial import FEATURES as STATZ_FEATURES, FIRST_TRIAL_MINUTES, TRIAL_MINUTES
+        statz_features = [{"key": f["key"], "label": f["label"], "tab": f.get("tab", ""), "target": f.get("target", "")}
+                          for f in STATZ_FEATURES]
         return Response({
             "tiers": tiers,
+            "statz_features": statz_features,
+            "statz_sample": {"first_minutes": FIRST_TRIAL_MINUTES, "daily_minutes": TRIAL_MINUTES},
             # What joining itself pays, so the signup form can state the gain
             # before the button rather than after it. The welcome bonus was
             # paid on every registration and named on no screen — the cost/gain

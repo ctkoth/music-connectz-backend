@@ -156,16 +156,22 @@ class TrialTakeTests(TestCase):
         self.assertEqual(TrialTake.objects.get().app_key, "rapz")
 
     @patch("apps.economy.trial._key", return_value="k")
-    def test_one_per_browser_per_day(self, _k):
-        """This used to read `one_per_address_per_day`, and the address was the
-        bug: mobile carriers put thousands of subscribers behind one CGNAT
-        address, so the first person through spent the free take for all of
-        them. The count is per BROWSER now — see test_trial_gate."""
-        self.assertEqual(self._post(anon_id="phone-a").status_code, 201)
+    def test_two_per_browser_per_day_and_the_second_says_what_moved(self, _k):
+        """Per BROWSER, never per address (mobile carriers put thousands behind one CGNAT
+        address — see test_trial_gate). Two, because the coach's value is the number moving:
+        the second take answers with the change since the first."""
+        first = self._post(anon_id="phone-a")
+        self.assertEqual(first.status_code, 201)
+        self.assertIsNone(first.data["previous"])
+        self.assertEqual(first.data["takes_left"], 1)
         second = self._post(anon_id="phone-a")
-        self.assertEqual(second.status_code, 429, second.content)
-        self.assertTrue(second.data["already_used"])
-        self.assertEqual(TrialTake.objects.count(), 1)
+        self.assertEqual(second.status_code, 201, second.content)
+        self.assertEqual(second.data["previous"]["change"], 0.0)
+        self.assertEqual(second.data["takes_left"], 0)
+        third = self._post(anon_id="phone-a")
+        self.assertEqual(third.status_code, 429, third.content)
+        self.assertTrue(third.data["already_used"])
+        self.assertEqual(TrialTake.objects.count(), 2)
 
     @patch("apps.economy.trial._key", return_value="k")
     def test_a_second_browser_on_the_same_address_is_a_second_person(self, _k):
@@ -281,3 +287,18 @@ class TrialClaimTests(TestCase):
         self.assertEqual(self._register().status_code, 201)
         self.take.refresh_from_db()
         self.assertIsNone(self.take.claimed_by)
+
+
+class TheValuePanelIsReadNotTypedTests(TestCase):
+    """The trial's 'what an account adds' panel names only what the server gates: per-tier numbers
+    from the same tables, and StatZ's features from statz_trial.FEATURES."""
+
+    def test_tiers_carry_the_wav_ladder_links_and_the_statz_features(self):
+        from apps.economy.statz_trial import FEATURES
+        d = APIClient().get("/api/economy/tiers/").json()
+        by = {t["key"]: t for t in d["tiers"]}
+        self.assertEqual((by["free"]["wav_bits"], by["premium"]["wav_bits"], by["statz"]["wav_bits"]), (0, 16, 24))
+        self.assertLess(by["free"]["profile_links"], by["premium"]["profile_links"])
+        self.assertEqual([f["key"] for f in d["statz_features"]], [f["key"] for f in FEATURES])
+        self.assertTrue(all(f["label"] and f["tab"] for f in d["statz_features"]))
+        self.assertGreater(d["statz_sample"]["first_minutes"], d["statz_sample"]["daily_minutes"])

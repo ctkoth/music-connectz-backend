@@ -85,8 +85,10 @@ class BodieZTrialScoringTests(TestCase):
         self.assertIn("month_cents", r.data["upgrade"])
 
     def test_the_free_take_is_shared_with_every_other_door(self):
-        # One free take total, same as SingZ/RapZ — not one per app.
-        self._post(exercise_id=self.ex.id, reps=5, weight_kg=20)
+        # The free takes are shared across every door, same as SingZ/RapZ — not per app.
+        from apps.economy.models import TRIAL_PER_BROWSER
+        for _ in range(TRIAL_PER_BROWSER):
+            self._post(exercise_id=self.ex.id, reps=5, weight_kg=20)
         r2 = self.client.get(TRIAL, {"anon_id": "anon-1"})
         self.assertTrue(r2.data["already_used"])
         r3 = self._post(exercise_id=self.ex.id, reps=5, weight_kg=20)

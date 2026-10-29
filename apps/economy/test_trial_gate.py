@@ -35,7 +35,11 @@ class TheAddressIsNotThePersonTests(TestCase):
         self.assertFalse(browser_done, "a different browser has not had a take")
         self.assertFalse(ip_over, "one take must not close a shared address")
 
-    def test_a_browser_still_only_gets_one(self):
+    def test_a_browser_still_has_its_own_ceiling(self):
+        from apps.economy.models import TRIAL_PER_BROWSER
+        for _ in range(TRIAL_PER_BROWSER - 1):
+            self.take(ip="203.0.113.5", anon_id="phone-a")
+        self.assertFalse(trial_state("203.0.113.5", "phone-a")[1])   # the second take is still there
         self.take(ip="203.0.113.5", anon_id="phone-a")
         _today, browser_done, _ip = trial_state("203.0.113.5", "phone-a")
         self.assertTrue(browser_done)
@@ -169,8 +173,10 @@ class AnUnscorableTakeIsNotTheTakeTheyCameForTests(TestCase):
         self.assertFalse(browser_done)
 
     def test_a_scored_take_still_does(self):
-        TrialTake.objects.create(token="s1", app_key="singz", ip="203.0.113.5",
-                                 anon_id="phone-a", scored=True, result={"score": 7})
+        from apps.economy.models import TRIAL_PER_BROWSER
+        for i in range(TRIAL_PER_BROWSER):
+            TrialTake.objects.create(token=f"s{i}", app_key="singz", ip="203.0.113.5",
+                                     anon_id="phone-a", scored=True, result={"score": 7})
         _today, browser_done, _ip = self.state_for()
         self.assertTrue(browser_done)
 
