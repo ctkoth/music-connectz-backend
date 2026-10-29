@@ -96,6 +96,11 @@ LINK_NO = ("The coach can't listen to {label} links: {label} gives out a player,
            "there is nothing to hear and the coach won't guess from the title. Upload the file, pick a "
            "post, or use a YouTube link.")
 NOT_A_LINK = ("That isn't a link the coach can listen to. Paste a YouTube link, or upload the file.")
+LINK_SOURCES = [
+    {"provider": "youtube", "label": "YouTube", "ok": True, "note": LINK_NOTE},
+    {"provider": "spotify", "label": "Spotify", "ok": False, "why": LINK_NO.format(label="Spotify")},
+    {"provider": "soundcloud", "label": "SoundCloud", "ok": False, "why": LINK_NO.format(label="SoundCloud")},
+]
 POST_NOTE = ("Using a post as either side costs {cost} ⚡ once. Nothing is written on the post "
              "and its file is read for this comparison only.")
 LYRIC_NOTE = ("This describes how the reference writes — never its words. Rewrite your "
@@ -375,6 +380,103 @@ def _resolve(request, name, doors):
     return (None, err) if err else (_Slot(f, ctype, stored=stored), None)
 
 
+def run_match(app_key, take, ref, genre):
+    """Send the two recordings to the coach and return `(cleaned_reply, None)`, or `(None, Response)`.
+
+    The ONE place a comparison runs: the member's endpoint below and the no-account trial's
+    (`trial_inspiration.py`) both call it, so what the coach is asked, how long it may take, what a
+    failure says and what the reply is cleaned to can never differ between them. It bills nothing and
+    writes nothing — the caller decides what a usable result costs. Every failure is a ready-made
+    answer that already says nothing was charged; an `unscorable` Response carries that key in its data.
+    Closes both slots and any Files API copies before returning, whichever way it goes.
+    """
+    deadline = Deadline(COACH_BUDGET_SECONDS)
+    cleanups = []
+    try:
+        parts = []
+        for side in (take, ref):
+            if side.link is not None:
+                parts.append(side.link["part"])
+                continue
+            side.opened()
+            size = vc._size_of(side.file)
+            if size == 0:
+                return None, Response({"detail": f"\"{side.title or 'One of those files'}\" is empty. "
+                                           "Nothing was charged."}, status=status.HTTP_400_BAD_REQUEST)
+            part, cleanup, why = vc._media_part(side.file, side.mime, size, deadline=deadline)
+            if cleanup:
+                cleanups.append(cleanup)
+            if why:
+                return None, Response({"detail": f"The coach couldn't take that one — {why}. Nothing was charged."},
+                                status=status.HTTP_502_BAD_GATEWAY)
+            parts.append(part)
+        sections = [f"{n.upper()} is a {LINK_WINDOW_SECONDS // 60}-minute section of a video, starting at "
+                    f"{x.link['start'] // 60}:{x.link['start'] % 60:02d}. Judge only that section."
+                    for n, x in (("the member's take", take), ("the reference", ref)) if x.link is not None]
+        body = {"contents": [{"parts": [{"text": _prompt(app_key, genre) + ("\n\n" + " ".join(sections) if sections else "")},
+                                        {"text": "MEMBER'S TAKE:"}, parts[0],
+                                        {"text": "REFERENCE TRACK:"}, parts[1]]}],
+                "generationConfig": {"temperature": vc.COACH_TEMPERATURE}}
+        deadline.check("the files were still uploading when the time ran out")
+        resp, _tried = generate_content(
+            "text", body, key=_key(),
+            timeout=deadline.remaining(cap=300 if cleanups else 90),
+            env_vars=("GEMINI_AUDIO_MODEL",), label=f"{app_key} match")
+    except Expired as e:
+        return None, Response({"detail": f"The comparison is taking longer than it should — {e.message}. "
+                                   "Nothing was charged.", "timed_out": True},
+                        status=status.HTTP_504_GATEWAY_TIMEOUT)
+    except requests.RequestException:
+        logger.exception("%s match: could not reach Gemini", app_key)
+        return None, Response({"detail": "Couldn't reach the coach. Nothing was charged — try again."},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    except Exception:
+        logger.exception("%s match: files could not be read", app_key)
+        # A stored side whose file has gone from storage: say so as a fact about the
+        # FILE (410), write it down for the next member, and charge nothing.
+        gone = [x for x in (take, ref) if x.on_disk]
+        for x in gone:
+            mark_upload_missing(getattr(x.file, "instance", None))
+        if gone:
+            where = ", ".join(f'"{x.title}"' for x in gone if x.title) or "one of those"
+            return None, Response({"detail": f"The recording on {where} isn't on the server any more, so "
+                                       "there's nothing to compare. Nothing was charged.",
+                             "take_missing": True}, status=status.HTTP_410_GONE)
+        return None, Response({"detail": "The coach couldn't read those files. Nothing was charged."},
+                        status=status.HTTP_400_BAD_REQUEST)
+    finally:
+        take.close()
+        ref.close()
+        for c in cleanups:
+            try:
+                c()
+            except Exception:  # pragma: no cover - tidiness, never a failure
+                logger.exception("%s match: cleanup failed", app_key)
+
+    if resp.status_code != 200:
+        logger.error("%s match: Gemini %s — %s", app_key, resp.status_code, resp.text[:300])
+        if take.link is not None or ref.link is not None:
+            return None, Response({"detail": "The coach couldn't open that YouTube video. It has to be public — not "
+                                       "private, age-restricted or removed. Nothing was charged.",
+                             "link_unreachable": True}, status=status.HTTP_502_BAD_GATEWAY)
+        return None, Response({"detail": "The coach couldn't read those files right now. Nothing was charged."},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    try:
+        text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError, ValueError):
+        return None, Response({"detail": "The coach's reply didn't come back readable. Nothing was charged."},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    parsed = vc._parse(text)
+    if parsed and str(parsed.get("unscorable") or "").strip():
+        return None, Response({"unscorable": str(parsed["unscorable"]).strip()[:400], "reference": True,
+                         "match": True, "cost_cents": 0, "saved": False})
+    out = clean_reply(parsed or {}, app_key)
+    if not parsed or out["closeness"] is None or not (out["eq"] or out["how_to"] or out["summary"]):
+        return None, Response({"detail": "The coach's reply didn't come back readable. Nothing was charged."},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    return out, None
+
+
 TAKE_DOORS = ("post_id", "upload_id", "journal_id")
 REFERENCE_DOORS = ("post_id", "upload_id")      # a diary page is not "another artist's finished record"
 
@@ -406,11 +508,7 @@ class MatchReferenceView(APIView):
             # Which links work, said before one is pasted. Only YouTube can be heard.
             "link_window_seconds": LINK_WINDOW_SECONDS,
             "link_note": LINK_NOTE,
-            "link_sources": [
-                {"provider": "youtube", "label": "YouTube", "ok": True, "note": LINK_NOTE},
-                {"provider": "spotify", "label": "Spotify", "ok": False, "why": LINK_NO.format(label="Spotify")},
-                {"provider": "soundcloud", "label": "SoundCloud", "ok": False, "why": LINK_NO.format(label="SoundCloud")},
-            ],
+            "link_sources": LINK_SOURCES,
         })
 
     def post(self, request):
@@ -474,90 +572,9 @@ class MatchReferenceView(APIView):
                             status=status.HTTP_402_PAYMENT_REQUIRED)
 
         genre = str(request.data.get("genre") or "unspecified")[:60]
-        deadline = Deadline(COACH_BUDGET_SECONDS)
-        cleanups = []
-        try:
-            parts = []
-            for side in (take, ref):
-                if side.link is not None:
-                    parts.append(side.link["part"])
-                    continue
-                side.opened()
-                size = vc._size_of(side.file)
-                if size == 0:
-                    return Response({"detail": f"\"{side.title or 'One of those files'}\" is empty. "
-                                               "Nothing was charged."}, status=status.HTTP_400_BAD_REQUEST)
-                part, cleanup, why = vc._media_part(side.file, side.mime, size, deadline=deadline)
-                if cleanup:
-                    cleanups.append(cleanup)
-                if why:
-                    return Response({"detail": f"The coach couldn't take that one — {why}. Nothing was charged."},
-                                    status=status.HTTP_502_BAD_GATEWAY)
-                parts.append(part)
-            sections = [f"{n.upper()} is a {LINK_WINDOW_SECONDS // 60}-minute section of a video, starting at "
-                        f"{x.link['start'] // 60}:{x.link['start'] % 60:02d}. Judge only that section."
-                        for n, x in (("the member's take", take), ("the reference", ref)) if x.link is not None]
-            body = {"contents": [{"parts": [{"text": _prompt(self.app_key, genre) + ("\n\n" + " ".join(sections) if sections else "")},
-                                            {"text": "MEMBER'S TAKE:"}, parts[0],
-                                            {"text": "REFERENCE TRACK:"}, parts[1]]}],
-                    "generationConfig": {"temperature": vc.COACH_TEMPERATURE}}
-            deadline.check("the files were still uploading when the time ran out")
-            resp, _tried = generate_content(
-                "text", body, key=_key(),
-                timeout=deadline.remaining(cap=300 if cleanups else 90),
-                env_vars=("GEMINI_AUDIO_MODEL",), label=f"{self.app_key} match")
-        except Expired as e:
-            return Response({"detail": f"The comparison is taking longer than it should — {e.message}. "
-                                       "Nothing was charged.", "timed_out": True},
-                            status=status.HTTP_504_GATEWAY_TIMEOUT)
-        except requests.RequestException:
-            logger.exception("%s match: could not reach Gemini", self.app_key)
-            return Response({"detail": "Couldn't reach the coach. Nothing was charged — try again."},
-                            status=status.HTTP_502_BAD_GATEWAY)
-        except Exception:
-            logger.exception("%s match: files could not be read", self.app_key)
-            # A stored side whose file has gone from storage: say so as a fact about the
-            # FILE (410), write it down for the next member, and charge nothing.
-            gone = [x for x in (take, ref) if x.on_disk]
-            for x in gone:
-                mark_upload_missing(getattr(x.file, "instance", None))
-            if gone:
-                where = ", ".join(f'"{x.title}"' for x in gone if x.title) or "one of those"
-                return Response({"detail": f"The recording on {where} isn't on the server any more, so "
-                                           "there's nothing to compare. Nothing was charged.",
-                                 "take_missing": True}, status=status.HTTP_410_GONE)
-            return Response({"detail": "The coach couldn't read those files. Nothing was charged."},
-                            status=status.HTTP_400_BAD_REQUEST)
-        finally:
-            take.close()
-            ref.close()
-            for c in cleanups:
-                try:
-                    c()
-                except Exception:  # pragma: no cover - tidiness, never a failure
-                    logger.exception("%s match: cleanup failed", self.app_key)
-
-        if resp.status_code != 200:
-            logger.error("%s match: Gemini %s — %s", self.app_key, resp.status_code, resp.text[:300])
-            if take.link is not None or ref.link is not None:
-                return Response({"detail": "The coach couldn't open that YouTube video. It has to be public — not "
-                                           "private, age-restricted or removed. Nothing was charged.",
-                                 "link_unreachable": True}, status=status.HTTP_502_BAD_GATEWAY)
-            return Response({"detail": "The coach couldn't read those files right now. Nothing was charged."},
-                            status=status.HTTP_502_BAD_GATEWAY)
-        try:
-            text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-        except (KeyError, IndexError, ValueError):
-            return Response({"detail": "The coach's reply didn't come back readable. Nothing was charged."},
-                            status=status.HTTP_502_BAD_GATEWAY)
-        parsed = vc._parse(text)
-        if parsed and str(parsed.get("unscorable") or "").strip():
-            return Response({"unscorable": str(parsed["unscorable"]).strip()[:400], "reference": True,
-                             "match": True, "cost_cents": 0, "saved": False})
-        out = clean_reply(parsed or {}, self.app_key)
-        if not parsed or out["closeness"] is None or not (out["eq"] or out["how_to"] or out["summary"]):
-            return Response({"detail": "The coach's reply didn't come back readable. Nothing was charged."},
-                            status=status.HTTP_502_BAD_GATEWAY)
+        out, failed = run_match(self.app_key, take, ref, genre)
+        if failed is not None:
+            return failed
         charged = _bill(request.user, note=f"{profile_for_app(self.app_key)['label']} Inspiration — AI",
                         count_daily=True)
         if energy_cost:

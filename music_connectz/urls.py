@@ -80,7 +80,9 @@ try:
     from apps.economy.playlistz import PublicPlaylistView
     from apps.economy.publicz import PublicPostView
     from apps.economy.trial import TrialCoachView, TrialTakeDetailView
+    from apps.economy.trial_inspiration import TrialInspirationView
 except Exception:  # pragma: no cover - never take the deploy down
+    TrialInspirationView = None
     PublicPostView = TrialCoachView = TrialTakeDetailView = PublicPlaylistView = None
 
 
@@ -199,6 +201,9 @@ urlpatterns = [
     path(f"api/{key}/trial/", TrialCoachView.as_view(app_key=key), name=f"{key}-trial")
     for key in INSTRUMENT_APP_KEYS
 ] if TrialCoachView else []) + ([
+    path(f"api/{key}/trial/inspiration/", TrialInspirationView.as_view(app_key=key), name=f"{key}-trial-inspiration")
+    for key in INSTRUMENT_APP_KEYS
+] if TrialInspirationView else []) + ([
     path(f"api/{key}/coach/", SingZCoachView.as_view(app_key=key), name=f"{key}-coach")
     for key in INSTRUMENT_APP_KEYS
 ] if SingZCoachView else []) + ([

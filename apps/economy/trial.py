@@ -144,6 +144,48 @@ def example_for(app_key, request=None):
     return out
 
 
+def trial_gate(request):
+    """The three "no"s of the free door, in one place: `(ip, anon_id, None)` to go ahead, or
+    `(ip, anon_id, Response)` with the visitor's own sentence for why not.
+
+    Shared by the scored take and the Inspiration comparison (`trial_inspiration.py`), because both
+    spend the SAME free take and must be refused for the same reasons, in the same words: this
+    browser has had its takes, this network address is busy, or the day's global ceiling is met.
+    """
+    ip = client_ip(request)
+    anon_id = client_anon_id(request)
+    today, mine, ip_over = trial_state(ip, anon_id)
+    if mine:
+        return ip, anon_id, Response(
+            {"detail": "You've had today's free takes. Make an account and the coach is yours whenever you want it.",
+             "already_used": True},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+    if ip_over:
+        # Never "you've had yours" — they have not. This fires when the
+        # ADDRESS is busy, which on a mobile carrier means somebody they
+        # have never met is behind the same CGNAT. Blaming the visitor for
+        # it is a lie, and an account genuinely is the fix, so say both.
+        return ip, anon_id, Response(
+            {"detail": "This network has used up today's free takes — that's the connection "
+                       "you're on, not you. An account gets you the coach on any connection.",
+             "address_busy": True},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+    if today >= trial_daily_cap():
+        return ip, anon_id, Response(
+            {"detail": "Free takes are all spoken for today — they're limited so we can keep giving them away. Try tomorrow, or make an account.",
+             "retry_tomorrow": True},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    return ip, anon_id, None
+
+
+def _inspiration_offer(app_key):
+    from .trial_inspiration import inspiration_offer   # imported late: it imports this module
+    return inspiration_offer(app_key)
+
+
 class TrialCoachView(APIView):
     """GET what the trial offers and whether it's available; POST one take.
 
@@ -227,6 +269,9 @@ class TrialCoachView(APIView):
             "example": example_for(self.app_key, request),
             # Whether the "email me the score" field may render BEFORE the take is sent.
             "remind": remind_offer(),
+            # Inspiration at the free door: published here so the control renders only when
+            # true and says, before the press, that it spends the free take.
+            "inspiration": _inspiration_offer(self.app_key),
         })
 
     def post(self, request):
@@ -238,32 +283,9 @@ class TrialCoachView(APIView):
                            "here is for your own performance. Make an account and try both.",
                  "reference_needs_account": True},
                 status=status.HTTP_403_FORBIDDEN)
-        ip = client_ip(request)
-        anon_id = client_anon_id(request)
-        today, mine, ip_over = trial_state(ip, anon_id)
-        if mine:
-            return Response(
-                {"detail": "You've had today's free takes. Make an account and the coach is yours whenever you want it.",
-                 "already_used": True},
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
-            )
-        if ip_over:
-            # Never "you've had yours" — they have not. This fires when the
-            # ADDRESS is busy, which on a mobile carrier means somebody they
-            # have never met is behind the same CGNAT. Blaming the visitor for
-            # it is a lie, and an account genuinely is the fix, so say both.
-            return Response(
-                {"detail": "This network has used up today's free takes — that's the connection "
-                           "you're on, not you. An account gets you the coach on any connection.",
-                 "address_busy": True},
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
-            )
-        if today >= trial_daily_cap():
-            return Response(
-                {"detail": "Free takes are all spoken for today — they're limited so we can keep giving them away. Try tomorrow, or make an account.",
-                 "retry_tomorrow": True},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+        ip, anon_id, blocked = trial_gate(request)
+        if blocked:
+            return blocked
 
         f = request.FILES.get("take")
         if not f:
