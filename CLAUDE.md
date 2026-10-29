@@ -3033,3 +3033,7 @@ The address backstop and `trial_daily_cap()` are unchanged, so the most the door
 ## SessionZ rows say how much of the plan was done, and never a made-up number for a custom session
 
 `_log_row` now carries `done_pct`, which is the end-of-session report's own `completion_pct` (sets done on the routine's lifts over the sets it planned). The list and the ended-session card therefore cannot disagree. It is `None` for a custom session: with no plan there is nothing to have completed, and 0% would read as a failure. It is effort, not a rating. The routine's Thorough rating is read from the routines board on the client, and the screen labels it as the routine's rating now, not this one session's.
+
+## A set logged on the wrong lift is taken back where it happened
+
+`DELETE /api/economy/bodiez/sessions/<id>/sets/<set_id>/` (`BodieZSetDetailView`) removes ONE set, and only from the OPEN session, then renumbers that lift's remaining sets so the next one logged cannot repeat a number. A finished session is still edited through `PUT .../sets/`, which keeps the rest clock and the records honest in one place. Without this the only way to fix a slip on the live logger was to finish the workout and open SessionZ.

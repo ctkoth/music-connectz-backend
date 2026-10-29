@@ -1708,6 +1708,19 @@ class BodieZSessionLogTests(TestCase):
         self.assertEqual(rows[routine.id]["done_pct"], 50)                  # 2 of 4 planned sets
         self.assertIsNone(rows[None]["done_pct"])                           # nothing planned, so not 0%
 
+    def test_a_set_logged_by_mistake_can_be_taken_back_from_the_open_session_only(self):
+        open_s = BodieZSession.objects.create(user=self.user)
+        ids = [BodieZSet.objects.create(session=open_s, exercise=self.press, set_number=i, reps=10, weight_kg=20).id for i in (1, 2, 3)]
+        url = lambda sid, i: f"/api/economy/bodiez/sessions/{sid}/sets/{i}/"
+        self.assertEqual(self.client.delete(url(open_s.id, ids[1])).status_code, 204)
+        self.assertEqual(list(open_s.sets.order_by("id").values_list("set_number", flat=True)), [1, 2])   # no gap, no repeat
+        done = self.session([(self.press, 10, 20)])
+        self.assertEqual(self.client.delete(url(done.id, done.sets.first().id)).status_code, 400)        # finished: edit it instead
+        other = User.objects.create_user("other", "o@e.com", "hunter2hunter2")
+        mine = BodieZSession.objects.create(user=other)
+        theirs = BodieZSet.objects.create(session=mine, exercise=self.press, set_number=1, reps=5)
+        self.assertEqual(self.client.delete(url(mine.id, theirs.id)).status_code, 404)                   # not yours
+
     def test_lists_every_finished_session_newest_first_not_just_fifty(self):
         for d in range(1, 61):
             self.session([(self.press, 10, 20)], days_ago=d)
