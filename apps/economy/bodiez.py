@@ -1146,8 +1146,12 @@ def _log_row(sess, sets):
     volume = sum(x["weight_kg"] * x["reps"] for x in rows if x["weight_kg"] is not None)
     duration = (None if sess.backfilled or not sess.ended_at
                 else int((sess.ended_at - sess.started_at).total_seconds()))
+    # `done_pct` is the report's own figure (sets done on the routine's lifts over what it planned), so the list
+    # and the ended-session card can never disagree. None for a custom session: no plan, nothing to have
+    # completed. It is effort, not a rating, and the screen words it that way.
     d.update({"volume_kg": round(volume, 2), "reps": sum(x["reps"] for x in rows),
-              "duration_seconds": duration, "check": _check_notes(sess, rows, duration)})
+              "duration_seconds": duration, "check": _check_notes(sess, rows, duration),
+              "done_pct": _report(sess, sets)["completion_pct"]})
     return d
 
 
@@ -1998,6 +2002,36 @@ class BodieZSetsView(APIView):
                                       position=last_pos + 1 if last_pos else 0,
                                       reps=reps, weight_kg=weight_kg, rest_seconds=rest, one_sided=side)
         return Response(_set_dict(s), status=status.HTTP_201_CREATED)
+
+
+class BodieZSetDetailView(APIView):
+    """DELETE /api/economy/bodiez/sessions/{id}/sets/{set_id}/ — take back ONE set of the session being logged.
+
+    A set logged against the wrong lift is the commonest slip on the live logger, and fixing it should not mean
+    leaving the workout to edit a past log. Only an OPEN session: a finished one is edited through `PUT .../sets/`,
+    which keeps the rest clock and the records honest in one place. The lift's remaining sets are renumbered so the
+    next one logged does not repeat a number.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, session_id, set_id):
+        try:
+            sess = BodieZSession.objects.get(id=session_id, user=request.user)
+        except BodieZSession.DoesNotExist:
+            return Response({"detail": "Session not found."}, status=status.HTTP_404_NOT_FOUND)
+        if sess.ended_at:
+            return Response({"detail": "This session is finished — fix it from SessionZ."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            gone = sess.sets.get(id=set_id)
+        except BodieZSet.DoesNotExist:
+            return Response({"detail": "That set isn't in this session."}, status=status.HTTP_404_NOT_FOUND)
+        exercise_id = gone.exercise_id
+        gone.delete()
+        for n, x in enumerate(sess.sets.filter(exercise_id=exercise_id).order_by("position", "id"), 1):
+            if x.set_number != n:
+                BodieZSet.objects.filter(id=x.id).update(set_number=n)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class BodieZProgressView(APIView):
