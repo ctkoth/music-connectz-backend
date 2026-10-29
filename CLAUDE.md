@@ -3029,3 +3029,7 @@ The coach's value is the change between takes, and one take can never show a cha
 The address backstop and `trial_daily_cap()` are unchanged, so the most the door can spend in a day has not moved. Each extra take costs one model call (about 3¢).
 
 `PublicTiersView` now also serves, per tier, `wav_bits` and `profile_links`. At the top level it serves `statz_features` (labels from `statz_trial.FEATURES`) and `statz_sample`. With these, the trial's "what an account adds" panel reads every claim from here.
+
+## SessionZ rows say how much of the plan was done, and never a made-up number for a custom session
+
+`_log_row` now carries `done_pct`, which is the end-of-session report's own `completion_pct` (sets done on the routine's lifts over the sets it planned). The list and the ended-session card therefore cannot disagree. It is `None` for a custom session: with no plan there is nothing to have completed, and 0% would read as a failure. It is effort, not a rating. The routine's Thorough rating is read from the routines board on the client, and the screen labels it as the routine's rating now, not this one session's.

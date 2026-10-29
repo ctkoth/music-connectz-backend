@@ -1146,8 +1146,12 @@ def _log_row(sess, sets):
     volume = sum(x["weight_kg"] * x["reps"] for x in rows if x["weight_kg"] is not None)
     duration = (None if sess.backfilled or not sess.ended_at
                 else int((sess.ended_at - sess.started_at).total_seconds()))
+    # `done_pct` is the report's own figure (sets done on the routine's lifts over what it planned), so the list
+    # and the ended-session card can never disagree. None for a custom session: no plan, nothing to have
+    # completed. It is effort, not a rating, and the screen words it that way.
     d.update({"volume_kg": round(volume, 2), "reps": sum(x["reps"] for x in rows),
-              "duration_seconds": duration, "check": _check_notes(sess, rows, duration)})
+              "duration_seconds": duration, "check": _check_notes(sess, rows, duration),
+              "done_pct": _report(sess, sets)["completion_pct"]})
     return d
 
 

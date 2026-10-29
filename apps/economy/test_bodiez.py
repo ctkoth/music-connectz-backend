@@ -1699,6 +1699,15 @@ class BodieZSessionLogTests(TestCase):
     def get(self, **params):
         return self.client.get("/api/economy/bodiez/sessions/log/", params)
 
+    def test_a_routine_session_says_how_much_of_the_plan_was_done_and_a_custom_one_says_nothing(self):
+        routine = BodieZRoutine.objects.create(user=self.user, title="Push", exercises=[
+            {"exercise_id": self.press.id, "sets": 4, "reps": 10, "weight_kg": 20}])
+        self.session([(self.press, 10, 20), (self.press, 10, 20)], routine=routine, days_ago=2)
+        self.session([(self.press, 10, 20)], days_ago=1)                     # no routine behind it
+        rows = {r["routine_id"]: r for r in self.get().data["sessions"]}
+        self.assertEqual(rows[routine.id]["done_pct"], 50)                  # 2 of 4 planned sets
+        self.assertIsNone(rows[None]["done_pct"])                           # nothing planned, so not 0%
+
     def test_lists_every_finished_session_newest_first_not_just_fifty(self):
         for d in range(1, 61):
             self.session([(self.press, 10, 20)], days_ago=d)
