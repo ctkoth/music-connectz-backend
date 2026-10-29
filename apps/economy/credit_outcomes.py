@@ -180,6 +180,13 @@ CREDIT_OUTCOMES = {
                             "the same reason (a held biometric-adjacent history is its own risk). Only "
                             "the member's own shop-market preferences persist, in LookmaxPrefs.",
         "free_way": {"label": "Body, the shop and your marketplaces are free; a daily free prompt covers a reading.", "tab": "lookmaxz"}},
+    "lookask": {
+        "resource": "promptz", "label": "LookZMaxZ reading, approved by the person in it",
+        "buys": "A LookZMaxZ reading of a photo of another member, made only after they saw the photo and approved it, shown to both of you as their share.",
+        "outcomes": ["understandable", "shareable"],
+        "lands_in": ["lookmaxz"],
+        "ephemeral_reason": "The photo is deleted as soon as it is decided; what is kept is the share the person in it chose to make, which they can take down.",
+        "free_way": {"label": "Send your invite link instead: they get their own reading and choose whether to share it, at no cost to you.", "tab": "lookmaxz"}},
     "views": {
         "resource": "promptz", "label": "AI usage charge",
         "buys": "The model run another screen asked for, billed once and logged with its reason.",

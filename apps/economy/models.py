@@ -8506,3 +8506,25 @@ class LookShare(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class LookRequest(models.Model):
+    """Somebody asked to have a photo of ANOTHER member read in LookZMaxZ (`lookask.py`).
+
+    Nothing is scored until the person in the photo approves it. The photo is held only while
+    the request is pending and is deleted the moment it is decided, cancelled or expires — this
+    row then keeps only its status and, after an approval, the share it became.
+    """
+    STATUSES = ("pending", "approved", "declined", "cancelled", "expired", "failed")
+    requester = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="look_requests_sent")
+    subject = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="look_requests_received")
+    photo = models.FileField(upload_to="lookask/", blank=True)
+    content_type = models.CharField(max_length=60, blank=True, default="")
+    status = models.CharField(max_length=12, default="pending", db_index=True)
+    note = models.CharField(max_length=300, blank=True, default="")
+    share = models.ForeignKey("LookShare", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]

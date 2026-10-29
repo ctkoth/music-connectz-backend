@@ -65,7 +65,11 @@ def sign(user, payload):
     return signing.dumps({"u": user.id, "r": snapshot(payload)}, salt=SALT, compress=True)
 
 
-def _view(share, viewer):
+def new_token():
+    return secrets.token_hex(12)
+
+
+def view_of(share, viewer):
     return {"token": share.token, "username": share.user.username,
             "to": share.to_user.username if share.to_user_id else None,
             "mine": share.user_id == viewer.id, "created_at": share.created_at.isoformat(),
@@ -81,8 +85,8 @@ class LookShareView(APIView):
             return Response({"mine": [], "to_me": [], "note": SHARE_NOTE})
         mine = LookShare.objects.filter(user=request.user).select_related("user", "to_user")[:20]
         to_me = LookShare.objects.filter(to_user=request.user).select_related("user", "to_user")[:20]
-        return Response({"mine": [_view(s, request.user) for s in mine],
-                         "to_me": [_view(s, request.user) for s in to_me], "note": SHARE_NOTE})
+        return Response({"mine": [view_of(s, request.user) for s in mine],
+                         "to_me": [view_of(s, request.user) for s in to_me], "note": SHARE_NOTE})
 
     def post(self, request):
         if not _adult(request.user):
@@ -110,12 +114,12 @@ class LookShareView(APIView):
             if not _adult(to):
                 return Response({"detail": f"@{to.username} hasn't verified they're an adult, so they can't "
                                            "see a reading. Nothing was shared."}, status=status.HTTP_400_BAD_REQUEST)
-        share = LookShare.objects.create(token=secrets.token_hex(12), user=request.user, to_user=to,
+        share = LookShare.objects.create(token=new_token(), user=request.user, to_user=to,
                                          payload=data.get("r") or {})
         if to:
             notify(to, "system", f"@{request.user.username} shared their LookZMaxZ reading with you.",
                    actor=request.user, item_id=f"lookshare:{share.token}")
-        return Response(_view(share, request.user), status=status.HTTP_201_CREATED)
+        return Response(view_of(share, request.user), status=status.HTTP_201_CREATED)
 
 
 class LookShareDetailView(APIView):
@@ -133,7 +137,7 @@ class LookShareDetailView(APIView):
             # One answer for "gone", "not yours" and "not an adult": a share's existence is not public.
             return Response({"detail": "That reading isn't shared with you, or was taken down."},
                             status=status.HTTP_404_NOT_FOUND)
-        return Response(_view(share, request.user))
+        return Response(view_of(share, request.user))
 
     def delete(self, request, token):
         share = self._find(token)
@@ -155,3 +159,45 @@ class LookInviteView(APIView):
         h = who.username
         return Response({"username": h, "what": INVITE_WHAT.format(handle=h), "rule": INVITE_RULE.format(handle=h),
                          "share_text": INVITE_SHARE, "link": f"/rate/{h}"})
+
+
+POST_NOTE = ("Post your reading to PostZ: the numbers and the coach's words, never the photo. Only the person in the "
+             "reading can post it. Free.")
+
+
+def post_text(payload):
+    """The post, built from the stored snapshot — nothing the request sends reaches it."""
+    def n(v):
+        return "—" if v is None else (str(int(v)) if float(v).is_integer() else f"{v:.1f}")
+    lines = [f"Overall {n(payload.get('overall'))}/10"]
+    lines.append(" · ".join(f"{s.get('emoji', '')} {s.get('label', k)} {n(s.get('score'))}"
+                            for k, s in (payload.get("sectors") or {}).items()))
+    if payload.get("verdict"):
+        lines.append(payload["verdict"])
+    lines.append("AI-read from a photo I chose — hair, skin, teeth and styling, never face shape or body. "
+                 "One photo, not a verdict on me.")
+    return "\n\n".join(x for x in lines if x)
+
+
+class LookSharePostView(APIView):
+    """POST lookmaxz/share/<token>/post/ {visibility}: the person in the reading posts it to PostZ."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, token):
+        return Response({"note": POST_NOTE})
+
+    def post(self, request, token):
+        from .postz import create_post
+        share = LookShare.objects.filter(token=str(token)[:32], user=request.user).first()
+        if not share:
+            return Response({"detail": "Only the person in the reading can post it."}, status=status.HTTP_404_NOT_FOUND)
+        if not _adult(request.user):
+            return Response({"detail": "Posting a reading is for verified adults."}, status=status.HTTP_403_FORBIDDEN)
+        vis = str(request.data.get("visibility") or "public").lower()
+        post, _info, err = create_post(request.user, {"title": "My LookZMaxZ reading", "visibility": vis,
+                                                      "description": post_text(share.payload)})
+        if err:
+            body, code = err
+            return Response(body, status=code)
+        return Response({"post_id": post.id, "visibility": post.visibility, "url": f"/p/{post.id}"},
+                        status=status.HTTP_201_CREATED)

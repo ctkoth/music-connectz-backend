@@ -3001,3 +3001,13 @@ it names, so a share cannot carry a number the coach did not give. `LookShare` i
 viewable by her, the member she names (who must be a verified adult, and is notified), or any verified adult when she
 names nobody; she deletes it to take it down, and every "not yours" answers the same 404. `to_user` CASCADEs so a
 deleted recipient can never turn a named share into a link share. Free; nothing is charged.
+
+### Asking another member to approve a reading, and posting your own
+
+`lookask.py` (`LookRequest`, migration 0233). Corey asked to score other people; the version built is consent-first: the
+requester names a verified adult member and uploads a photo of them, NOTHING is read until that member sees the photo and
+approves ("this is a photo of me"), and then the reading becomes their `LookShare` to the requester. The photo is held only
+while pending (`EXPIRE_DAYS` 7, swept on every read) and deleted on any decision; the requester pays only for a reading that
+came back; one pending request per pair and `MAX_PENDING` (5) per requester; a block either way refuses; a decline gives
+the requester no reason. `LookSharePostView` lets ONLY the person in a reading post it to PostZ through `create_post`, with
+text built from the stored snapshot (`post_text`) — a request body never reaches it.
