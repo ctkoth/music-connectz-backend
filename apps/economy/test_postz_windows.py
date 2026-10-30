@@ -78,9 +78,11 @@ class RateWindowTests(TestCase):
         self.assertFalse(ItemRating.objects.exists())
 
     def test_the_window_only_applies_to_posts(self):
-        # Playlists, faces and works have no author and no unlock timer.
+        # Playlists have no unlock timer (an invented one is refused now, so use a real one).
+        from apps.economy.models import Playlist
+        pl = Playlist.objects.create(owner=self.author, title="Set", visibility="public")
         resp = self.client.post("/api/economy/social/rate/",
-                                {"item": "playlist:99", "action": "rate", "score": 7},
+                                {"item": f"playlist:{pl.id}", "action": "rate", "score": 7},
                                 format="json")
         self.assertEqual(resp.status_code, 200, resp.content)
 
