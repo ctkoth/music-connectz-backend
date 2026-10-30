@@ -333,15 +333,20 @@ def over_writer_brief(text, tier):
 #   hand rather than taking the intensity's own.
 # * `glue_db_max` — the most gain reduction, in dB, the glue compressor may apply:
 #   automatically on Free, by hand above it.
+# * `wav_bits` — the deepest WAV the master may be exported as (Corey's call:
+#   24-bit for StatZ, 16-bit for Premium). 0 means MP3 only: Free still takes its
+#   master away, the tier decides how much of it survives the trip, never whether.
 #
 # A recommendation like every number here, and Corey's to move. The engine
 # masters at whatever intensity it is handed, so the client reads this ladder
 # from the server (/api/economy/mixz/) and never decides it.
 MASTERING = {
-    TIER_FREE: {"intensities": ["low", "medium"], "manual_glue": False, "glue_db_max": 2},
-    TIER_PREMIUM: {"intensities": ["low", "medium", "high"], "manual_glue": True, "glue_db_max": 4},
-    TIER_STATZ: {"intensities": ["low", "medium", "high", "max"], "manual_glue": True, "glue_db_max": 8},
-    TIER_DEBUG: {"intensities": ["low", "medium", "high", "max"], "manual_glue": True, "glue_db_max": 8},
+    TIER_FREE: {"intensities": ["low", "medium"], "manual_glue": False, "glue_db_max": 2, "wav_bits": 0},
+    TIER_PREMIUM: {"intensities": ["low", "medium", "high"], "manual_glue": True, "glue_db_max": 4, "wav_bits": 16},
+    TIER_STATZ: {"intensities": ["low", "medium", "high", "max"], "manual_glue": True, "glue_db_max": 8,
+                 "wav_bits": 24},
+    TIER_DEBUG: {"intensities": ["low", "medium", "high", "max"], "manual_glue": True, "glue_db_max": 8,
+                 "wav_bits": 24},
 }
 
 # The screen's words for each intensity, served so no client retypes them.
@@ -349,11 +354,11 @@ MASTERING_INTENSITY_LABELS = {"low": "Low", "medium": "Medium", "high": "High", 
 
 
 def mastering_for(tier):
-    """{intensities, manual_glue, glue_db_max} for this tier — a copy, so a
-    caller editing it cannot move the ladder."""
+    """{intensities, manual_glue, glue_db_max, wav_bits} for this tier — a copy,
+    so a caller editing it cannot move the ladder."""
     row = MASTERING.get(tier, MASTERING[TIER_FREE])
     return {"intensities": list(row["intensities"]), "manual_glue": row["manual_glue"],
-            "glue_db_max": row["glue_db_max"]}
+            "glue_db_max": row["glue_db_max"], "wav_bits": row["wav_bits"]}
 
 
 def mastering_ladder():

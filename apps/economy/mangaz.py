@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 
 from .catalog import ai_cost
 from .characterz import prompt_block
+from . import refinput
 from .gemini import _bill, _key, generate_content
 from .models import Character, MangaPage, can_afford_ai, daily_prompt_covers, daily_prompt_state
 from . import voicez
@@ -102,6 +103,9 @@ class MangaPagesView(APIView):
         except (TypeError, ValueError):
             n = 4
         style = d.get("style") if d.get("style") in STYLES else ""
+        ref, problem = refinput.parse(d.get("reference"))
+        if problem:
+            return Response({"detail": problem}, status=status.HTTP_400_BAD_REQUEST)
         key = _key()
         if not key:
             return Response({"detail": "MangaZ isn't switched on yet."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
@@ -109,7 +113,8 @@ class MangaPagesView(APIView):
         if not pr["affordable"]:
             return Response({"detail": "Not enough PromptZ or balance for this one.", "cost_cents": pr["cost_cents"]},
                             status=status.HTTP_402_PAYMENT_REQUIRED)
-        body = {"contents": [{"parts": [{"text": script_prompt(chars, idea, n, style)}]}],
+        body = {"contents": [{"parts": [{"text": script_prompt(chars, idea, n, style) + refinput.guard(ref)},
+                                        *([refinput.part(ref)] if ref else [])]}],
                 "generationConfig": {"temperature": 0.9, "responseMimeType": "application/json"}}
         try:
             resp, _ = generate_content("text", body, key=key, timeout=60, label="MangaZ")

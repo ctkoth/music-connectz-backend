@@ -753,3 +753,78 @@ def body_sector(user):
         "sessions_28d": sessions,
         "open_in": {"tab": "bodiez", "label": "Log a session in BodieZ"},
     }
+
+
+# ---- Look Inspiration: somebody's LOOK, never somebody ---------------------------------------
+# The reading above is for photos of the member and scores them 1-10. A photo of anybody else is
+# described, never scored: the changeable choices in it (cut, facial hair, brows, styling) and how
+# to get each. The prompt forbids a number, any word about the person's face, skin, teeth or body,
+# guessing who they are, and attractiveness itself — so a stranger's picture cannot come back as a
+# verdict on the stranger. What it does come back as is the useful part: "I want that cut".
+INSPIRE_PARTS = {"hair": "Haircut", "facial_hair": "Facial hair", "brows": "Brows", "styling": "Styling"}
+
+
+def inspire_prompt():
+    parts = ", ".join(f'"{k}" ({v})' for k, v in INSPIRE_PARTS.items())
+    return (
+        "Describe the LOOK in this photo so somebody else can recreate it. Cover only these parts, and only "
+        f"the ones the photo shows: {parts}. For each give \"what\" (what the look is, in the words a barber, "
+        "stylist or shop would use) and \"how\" (how to get it: what to ask for, how to wear it, what to buy, "
+        "as categories never brands).\n"
+        "Rules you must not break: give NO score, rating or number of any kind. Say NOTHING about the person's "
+        "face shape, features, skin, teeth, body, weight, age, ethnicity or attractiveness. Do not guess or "
+        "say who they are. Describe the choices, never the person.\n"
+        "If the photo shows none of those parts, return {\"none\": \"<one sentence why>\"}.\n"
+        "Reply with JSON only: {\"summary\": \"<one sentence: the look>\", \"parts\": {\"<part>\": "
+        "{\"what\": \"<…>\", \"how\": [\"<step>\"]}}}"
+    )
+
+
+def clean_inspiration(parsed):
+    """Only the declared parts, text only, bounded; nothing numeric survives."""
+    parts = []
+    raw = parsed.get("parts") if isinstance(parsed, dict) else None
+    for key, label in INSPIRE_PARTS.items():
+        row = raw.get(key) if isinstance(raw, dict) else None
+        if not isinstance(row, dict):
+            continue
+        what = " ".join(str(row.get("what") or "").split())[:300]
+        how = [" ".join(str(x).split())[:240] for x in (row.get("how") or []) if str(x).strip()][:5] \
+            if isinstance(row.get("how"), list) else []
+        if what:
+            parts.append({"key": key, "label": label, "what": what, "how": how})
+    return {"summary": " ".join(str((parsed or {}).get("summary") or "").split())[:300], "parts": parts}
+
+
+def inspire_look(fileobj, content_type):
+    """(look, None) or (None, reason). `look["parts"]` empty means nothing to describe (not charged)."""
+    key = _key()
+    if not key:
+        return None, "the coach isn't configured (GEMINI_API_KEY)"
+    mime = gemini_image_mime(content_type)
+    if not mime:
+        return None, f"can't read {content_type or 'that format'}"
+    body = {"contents": [{"parts": [
+        {"text": inspire_prompt()},
+        {"inline_data": {"mime_type": mime, "data": base64.b64encode(fileobj.read()).decode()}},
+    ]}], "generationConfig": {"temperature": 0.4}}
+    try:
+        resp, _tried = generate_content("text", body, key=key, timeout=90,
+                                        env_vars=("GEMINI_VIDEO_MODEL", "GEMINI_AUDIO_MODEL"),
+                                        label="LookZMaxZ inspiration")
+    except requests.RequestException:
+        logger.exception("LookZMaxZ inspiration: could not reach Gemini")
+        return None, "couldn't reach the coach"
+    if resp.status_code != 200:
+        logger.error("LookZMaxZ inspiration: Gemini %s — %s", resp.status_code, resp.text[:300])
+        return None, "the coach couldn't read that photo right now"
+    try:
+        text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError, ValueError):
+        return None, "the reply didn't come back readable"
+    parsed = _parse(text)
+    if not parsed:
+        return None, "the reply didn't come back readable"
+    if parsed.get("none"):
+        return {"summary": "", "parts": [], "why": str(parsed["none"])[:300]}, None
+    return clean_inspiration(parsed), None

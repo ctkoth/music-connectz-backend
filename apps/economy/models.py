@@ -884,10 +884,15 @@ AI_ENERGY_TIER_FACTOR = {"free": 1.0, "premium": 0.5, "statz": 0.25, "debug": 0.
 
 
 def ai_energy_cost(user, engine=None, tier=None):
+    """The ⚡ one AI run takes from this member — the number the screen prices the
+    run at AND the number `_take_ai_energy` takes, so a coach badge's discount
+    (`ai_energy_off_pct`, badgez_wave.py) is on the button, not discovered after."""
     import math
+    from .badgez_wave import AI_ENERGY_OFF_CAP
     tier = tier or membership_for(user).tier
     base = AI_ENERGY_BASE.get(str(engine or "").lower(), 1)
-    return max(1, math.ceil(base * AI_ENERGY_TIER_FACTOR.get(tier, 1.0)))
+    off = min(AI_ENERGY_OFF_CAP, int(badge_effects(user).get("ai_energy_off_pct", 0) or 0)) if user else 0
+    return max(1, math.ceil(base * AI_ENERGY_TIER_FACTOR.get(tier, 1.0) * (100 - off) / 100))
 
 
 def _take_ai_energy(user, engine, note):
@@ -1245,6 +1250,8 @@ class Profile(models.Model):
     genres = models.JSONField(default=list, blank=True)
     influences = models.JSONField(default=list, blank=True)
     gear = models.JSONField(default=list, blank=True)
+    # Structured inventory: [{name, kind, where, note}] — what an artist or studio actually uses.
+    inventory = models.JSONField(default=list, blank=True)
     label = models.CharField(max_length=100, blank=True, default="")
     timezone = models.CharField(max_length=48, blank=True, default="")
     pinned_post_id = models.PositiveIntegerField(null=True, blank=True)
@@ -1662,6 +1669,14 @@ def post_interaction_block(item_id, user, kind):
                 return {"detail": "You're on this deal — you can't rate its contributors."}
         return None
 
+    # gear:<owner>:<piece> — a piece of somebody's InventoryZ. Your own kit is
+    # rated by other people or not at all (inventoryz.py).
+    if kind == "rate" and item_id.startswith("gear:"):
+        from .inventoryz import owner_of
+        if owner_of(item_id) == getattr(user, "id", None):
+            return {"detail": "That's your own gear — other members rate it."}
+        return None
+
     # battle:<id>:entry:<id> — a battle is decided by people who are NOT in
     # it. Rating your own take used to be accepted, which let one entrant
     # supply a judge of their own; in a 1v1 neither contestant may score the
@@ -1777,6 +1792,10 @@ class Post(models.Model):
     # their own genre. Putting it in the genre list would have forced a choice
     # between the two and split the tag across every family in it.
     freestyle = models.BooleanField(default=False)
+    # CoverZ / RemixeZ: {id, kind: cover|remix, title, author} snapshot of the post this one is made
+    # from. A snapshot, not a join, so the feed pays no extra query and the credit survives the
+    # original being deleted. Empty for ordinary posts.
+    derived = models.JSONField(default=dict, blank=True)
     # Which skills went into it — 2.2 required this on every example, and it is
     # what makes a post matchable to the people who have those skills and
     # priceable against their rates. A post without it is a file with a caption.
@@ -1956,7 +1975,10 @@ def submission_cap_for(user):
     tier = membership_for(user).tier if user and user.is_authenticated else "free"
     base = SUBMISSION_DAILY_CAP.get(tier, SUBMISSION_DAILY_CAP["free"])
     row = DailySubmission.objects.filter(user=user, day=timezone.localdate()).first() if user and user.is_authenticated else None
-    return base + (row.bonus if row else 0)
+    # Collaborator's +5. The badge said so from the day it shipped and this line
+    # did not exist, so the cap a Collaborator hit was everybody else's.
+    badge = int(badge_effects(user).get("submission_bonus", 0) or 0) if user and user.is_authenticated else 0
+    return base + (row.bonus if row else 0) + badge
 
 
 def submissions_used_today(user):
@@ -3829,7 +3851,13 @@ TRIAL_CLAIM_DAYS = 30            # a token stays claimable this long
 # thing that actually caps the money has always been `trial_daily_cap()`, which
 # refuses rather than overspends — the per-IP rule was never what stood between
 # us and a bill, it just read like it.
-TRIAL_PER_BROWSER = int(os.environ.get("TRIAL_PER_BROWSER", "1"))
+# TWO, on purpose (Corey, after zero joins from a month of trials): the coach's value is the
+# number MOVING, and a visitor with one take never sees it move — they are asked to join before
+# they have felt the thing an account is for. The second take answers with the change since the
+# first (`previous` / `change` on the trial response). The money is still capped by
+# `trial_daily_cap()`, which refuses rather than overspends; this only spends more of it on the
+# visitors who came back for a second go, which are exactly the ones worth spending it on.
+TRIAL_PER_BROWSER = int(os.environ.get("TRIAL_PER_BROWSER", "2"))
 # Sized for a shared carrier address, not for one machine. Well under the
 # global daily cap on purpose: one address may never spend the whole day.
 TRIAL_PER_IP = int(os.environ.get("TRIAL_PER_IP", "25"))
@@ -4694,6 +4722,12 @@ def _translations_done(user):
     return KeyTranslation.objects.filter(user=user).count()
 
 
+def _thorough_is(user, key):
+    """True when the member is on this rung of the Thorough ladder right now."""
+    from . import thoroughz
+    return thoroughz.badge_key_for(user) == key
+
+
 BADGES = {
     # ---- gifted ----
     # This badge shipped claiming `dev_tax_share: 1.0` and
@@ -4765,8 +4799,11 @@ BADGES = {
         "name": "Collaborator", "emoji": "🤝", "title": "Collaborator", "gifted": False,
         "desc": "Ten pieces of work shipped with other people on them.",
         "how": "Be credited on 10 posts that came out of a CollabZ deal.",
-        "effects": {"submission_bonus": 5, "needs_priority": True},
-        "effect_note": "+5 submissions a day, and your open needs list first.",
+        # "Your open needs list first" was half this note and nothing read it:
+        # there is no platform-wide needs list for it to sort, only each deal's
+        # own. The half that is real is the one that stays.
+        "effects": {"submission_bonus": 5},
+        "effect_note": "+5 submissions a day.",
         "check": lambda u: _shipped_collabs(u) >= 10,
     },
     "straight_shooter": {
@@ -4897,7 +4934,65 @@ BADGES = {
         "effect_note": "Achievement unlocked.",
         "check": lambda u: _check_multi_craft(u),
     },
+    # ---- the Thorough ladder (thoroughz.py) ----
+    # Five rungs, one held at a time: each check is true at its own rating only,
+    # TEMPORARY so the mark falls when the 28-day window empties, and `ladder`
+    # so stepping onto the next rung is not announced as the last one lapsing.
+    # Emoji are Corey's placeholders; `icon` stays empty until his art lands.
+    # No effect on Energy, SpinaZ or price: a rating that paid would be worth
+    # faking, and this one only shows effort.
+    "thorough": {
+        "name": "Thorough", "emoji": "💯", "title": "Thorough 💯", "gifted": False,
+        "temporary": True, "ladder": "thorough", "icon": "badge_thorough.png",
+        "desc": "You train thoroughly: a Thorough rating above 5.",
+        "how": "Hold a Thorough rating of 6 across at least 3 lifts, from finished BodieZ sessions in the last 28 days.",
+        "effects": {"achievement": True},
+        "effect_note": "A mark of effort — no payout. It lapses if the 28 days go quiet.",
+        "check": lambda u: _thorough_is(u, "thorough"),
+    },
+    "decent": {
+        "name": "Decent", "emoji": "🥈", "title": "Decent 🥈", "gifted": False,
+        "temporary": True, "ladder": "thorough", "icon": "badge_decent.png",
+        "desc": "A Thorough rating of 7.",
+        "how": "Hold a Thorough rating of 7 across at least 3 lifts in the last 28 days.",
+        "effects": {"achievement": True},
+        "effect_note": "A mark of effort — no payout. It lapses if the 28 days go quiet.",
+        "check": lambda u: _thorough_is(u, "decent"),
+    },
+    "legendary": {
+        "name": "Legendary", "emoji": "🥇", "title": "Legendary 🥇", "gifted": False,
+        "temporary": True, "ladder": "thorough", "icon": "badge_legendary.png",
+        "desc": "A Thorough rating of 8.",
+        "how": "Hold a Thorough rating of 8 across at least 3 lifts in the last 28 days.",
+        "effects": {"achievement": True},
+        "effect_note": "A mark of effort — no payout. It lapses if the 28 days go quiet.",
+        "check": lambda u: _thorough_is(u, "legendary"),
+    },
+    "supreme": {
+        "name": "Supreme", "emoji": "🌟", "title": "Supreme 🌟", "gifted": False,
+        "temporary": True, "ladder": "thorough", "icon": "badge_supreme.png",
+        "desc": "A Thorough rating of 9.",
+        "how": "Hold a Thorough rating of 9 across at least 3 lifts in the last 28 days.",
+        "effects": {"achievement": True},
+        "effect_note": "A mark of effort — no payout. It lapses if the 28 days go quiet.",
+        "check": lambda u: _thorough_is(u, "supreme"),
+    },
+    "perfect": {
+        "name": "Perfect", "emoji": "💎", "title": "Perfect 💎", "gifted": False,
+        "temporary": True, "ladder": "thorough", "icon": "badge_perfect.png",
+        "desc": "A Thorough rating of 10.",
+        "how": "Hold a Thorough rating of 10 across at least 3 lifts in the last 28 days.",
+        "effects": {"achievement": True},
+        "effect_note": "A mark of effort — no payout. It lapses if the 28 days go quiet.",
+        "check": lambda u: _thorough_is(u, "perfect"),
+    },
 }
+
+# Wave one: a badge per coach, and the royalty pair (badgez_wave.py). Kept in its
+# own module so the reasoning for each sits beside it; registered here so every
+# reader of BADGES — the catalogue, recheck, worn chips — sees one list.
+from .badgez_wave import specs as _wave_specs  # noqa: E402
+BADGES.update(_wave_specs())
 
 
 class Badge(models.Model):
@@ -4953,10 +5048,17 @@ def badge_effects(user):
 
 def grant_badge(user, key, by=None):
     """Give a badge. Returns (badge, created)."""
+    spec = BADGES.get(key, {})
+    # A penalty is hidden from other members until its holder chooses to show
+    # it: an achievement is a disclosure, and a penalty is a louder one.
     badge, created = Badge.objects.get_or_create(
-        user=user, key=key, defaults={"awarded_by": by})
+        user=user, key=key, defaults={"awarded_by": by, "visible": not spec.get("penalty")})
+    if created and spec.get("penalty"):
+        notify(user, "badge",
+               f"{spec.get('emoji', '🏅')} {spec.get('name', key)} applies to you — {spec.get('how', '')}".strip(),
+               actor=by)
+        return badge, created
     if created:
-        spec = BADGES.get(key, {})
         # A badge granting a tier applies it immediately — a tier that only
         # takes effect on the next unrelated save is a promise with a delay
         # nobody explained.
@@ -4966,13 +5068,18 @@ def grant_badge(user, key, by=None):
             if m.tier != tier:
                 m.tier = tier
                 m.save(update_fields=["tier", "updated_at"])
+        # Bug Hunter's +50 🏷️, once, when the badge lands. The badge promised it
+        # and nothing paid it.
+        grant = int(spec.get("effects", {}).get("promptz_grant", 0) or 0)
+        if grant:
+            award_promptz(user, grant, f"{spec.get('name', key)} badge", app_key="badgez")
         notify(user, "badge",
                f"{spec.get('emoji', '🏅')} You earned {spec.get('name', key)} — "
                f"{spec.get('effect_note', '')}".strip(), actor=by)
     return badge, created
 
 
-def revoke_badge(user, key):
+def revoke_badge(user, key, quiet=False):
     """Take a temporary badge back, and say so.
 
     Losing a badge in silence is worse than never holding one: the member's
@@ -4989,6 +5096,11 @@ def revoke_badge(user, key):
     if p.badge_title and p.badge_title == spec.get("title"):
         p.badge_title = ""
         p.save(update_fields=["badge_title", "updated_at"])
+    if quiet:
+        return True
+    if spec.get("penalty"):
+        notify(user, "badge", f"{spec.get('emoji', '🏅')} {spec.get('name', key)} has lifted.")
+        return True
     notify(user, "badge",
            f"{spec.get('emoji', '🏅')} {spec.get('name', key)} has lapsed — "
            f"{spec.get('how', '')} Earn it back and it returns by itself.".strip())
@@ -5006,21 +5118,30 @@ def recheck_badges(user):
     Permanent badges are never revoked here. A shipped collab or a founding
     seat is a thing that HAPPENED; no later state undoes it.
     """
+    # One fresh reading per recheck, never a stale one from an earlier call.
+    for attr in ("_thorough_key", "_hot_counts", "_royalty_reading"):
+        setattr(user, attr, None)
     have = {b.key for b in Badge.objects.filter(user=user)}
     won, lost = [], []
+    verdicts = {}
     for key, spec in BADGES.items():
         check = spec.get("check")
         if not check:
             continue
         try:
-            passes = bool(check(user))
+            verdicts[key] = bool(check(user))
         except Exception:      # a broken check must never block a page load
             continue
+    # A ladder holds one rung: when the member is still on SOME rung of it, a
+    # rung given up was stepped past, not lost, and is not announced as lapsed.
+    on_ladder = {BADGES[k]["ladder"] for k, v in verdicts.items() if v and BADGES[k].get("ladder")}
+    for key, passes in verdicts.items():
+        spec = BADGES[key]
         if passes and key not in have:
             grant_badge(user, key)
             won.append(key)
         elif not passes and key in have and spec.get("temporary"):
-            if revoke_badge(user, key):
+            if revoke_badge(user, key, quiet=spec.get("ladder") in on_ladder):
                 lost.append(key)
     return won
 
@@ -5245,6 +5366,24 @@ def skill_rating_median(user, skill):
     return scores[n // 2] if n % 2 else round((scores[n // 2 - 1] + scores[n // 2]) / 2, 1)
 
 
+GHOST_WRITER = "Ghost Writer"
+
+
+def ghost_writer_skill(post):
+    """The skill a ghostwriter on this post is rated and paid under.
+
+    Lyrics written for a sung or rapped track are credited as writing FOR that performance —
+    "Ghost Writer · Rapping" — so the rating they earn is for the words, in the form they served,
+    and never for a performance they did not give. A post with no performance skill (a poem, a
+    script, a caption) keeps plain "Ghost Writer". Falls back, never invents: the performance skill
+    is only read off what the post itself declares."""
+    from .royaltyfactor import coach_skill_key
+    for s in (post.skills_used or [])[:40]:
+        if isinstance(s, str) and s.strip() and coach_skill_key(s):
+            return f"{GHOST_WRITER} \u00b7 {s.strip()}"[:60]
+    return GHOST_WRITER
+
+
 def skills_for_post(post):
     """[(user, skill)] — who gets rated for what when this post is rated.
 
@@ -5262,6 +5401,8 @@ def skills_for_post(post):
         for c in contributors:
             u = User.objects.filter(username=c.get("username")).first()
             skill = slot_skill.get(c.get("slot") or "")
+            if skill == GHOST_WRITER:
+                skill = ghost_writer_skill(post)
             if u and skill:
                 pairs.append((u, skill))
         return pairs
@@ -6534,6 +6675,11 @@ class BodieZSession(models.Model):
     # nothing the server MEASURES (rest between sets, how long it took) exists
     # for it, and it is never shown as if it did.
     backfilled = models.BooleanField(default=False)
+    # Lifts the member did back to back, as [[exercise_id, exercise_id], ...] — ANY two lifts of the session, because
+    # a logged workout has no "adjacent rows" the way a routine does (a lift's sets can be spread across the session).
+    # Cleaned on every write (`bodiez.clean_pairs`): two distinct lifts, each in at most one pair. Saving the session as
+    # a routine turns these into the routine's own adjacent `group` pairs, so a superset made while logging is not lost.
+    superset_pairs = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ("-started_at",)
@@ -6970,6 +7116,10 @@ class LilithTask(models.Model):
     action = models.CharField(max_length=24, blank=True, default="")
     goal = models.PositiveSmallIntegerField(default=1)
     due = models.DateTimeField(null=True, blank=True)
+    # An upgrade that costs real money (a mic, a plugin, studio time). BudgetZ says whether it is
+    # affordable THIS month and Lilith may then bring it to Today; nothing is spent or reserved.
+    cost_cents = models.PositiveIntegerField(default=0)
+    budget_category = models.CharField(max_length=40, blank=True, default="")
     routine = models.ForeignKey("LilithRoutine", null=True, blank=True,
                                 on_delete=models.SET_NULL, related_name="tasks")
     done_at = models.DateTimeField(null=True, blank=True, db_index=True)
@@ -7916,6 +8066,62 @@ class InstrumentalWork(models.Model):
         ordering = ["-created_at"]
 
 
+class BudgetLine(models.Model):
+    """One income or expense in BudgetZ — typed by the member, or imported from a bank they linked
+    (StatZ). `ext_id` is the bank's own id so a re-import never doubles a line."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="budget_lines")
+    kind = models.CharField(max_length=8, default="expense")      # income | expense
+    category = models.CharField(max_length=40, default="Other")
+    amount_cents = models.PositiveIntegerField()
+    on = models.DateField()
+    note = models.CharField(max_length=120, blank=True, default="")
+    source = models.CharField(max_length=8, default="manual")     # manual | bank
+    ext_id = models.CharField(max_length=80, blank=True, default="")
+
+    class Meta:
+        ordering = ["-on", "-id"]
+        indexes = [models.Index(fields=["user", "on"])]
+
+
+class BudgetLimit(models.Model):
+    """A member's monthly limit for one category."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="budget_limits")
+    category = models.CharField(max_length=40)
+    monthly_cents = models.PositiveIntegerField()
+
+    class Meta:
+        unique_together = ("user", "category")
+
+
+class BudgetBank(models.Model):
+    """A bank account a StatZ member linked through Stripe Financial Connections. Only Stripe's
+    account id and a display label are kept — no credentials ever reach this server."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="budget_banks")
+    stripe_account = models.CharField(max_length=80)
+    label = models.CharField(max_length=80, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "stripe_account")
+
+
+class AIPreset(models.Model):
+    """A StatZ member's saved mix preset for a TYPE of music (a genre or a mood): nudges per part
+    group, written by the AI coach from the type they named. Theirs to keep, rename and reuse."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="ai_presets")
+    kind = models.CharField(max_length=40)
+    nudges = models.JSONField(default=dict)
+    note = models.CharField(max_length=300, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
 class GeneratedImage(models.Model):
     """One image Image ConnectZ made: the prompt that made it and the file it produced.
 
@@ -7931,6 +8137,9 @@ class GeneratedImage(models.Model):
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="generated_images")
     prompt = models.TextField()
+    # imagez.KINDS key — what the picture is FOR (profile_pic, song_cover, header…);
+    # blank for a free-form one and for everything made before kinds existed.
+    kind = models.CharField(max_length=20, blank=True, default="")
     upload = models.ForeignKey("Upload", on_delete=models.SET_NULL, null=True, related_name="+")
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -8230,6 +8439,9 @@ class Character(models.Model):
     personality = models.CharField(max_length=4, blank=True, default="")
     spec = models.JSONField(default=dict, blank=True)
     sample = models.TextField(blank=True, default="")
+    # What this character likes doing, as short tags the member typed or picked
+    # (characterz.clean_hobbies). Declared flavour for dialogue, never scored.
+    hobbies = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -8253,6 +8465,72 @@ class MangaPage(models.Model):
     page_image = models.CharField(max_length=300, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class InventoryAIRating(models.Model):
+    """The AI's read of one InVenTorieZ piece — or, with `item` "*", of the whole set.
+
+    Kept because the member paid for it and it is theirs to show: unlike a looks
+    reading (`attractivenessz.py`), a rating of a guitar is about a guitar. It is
+    keyed by the piece's NAME slug, like member ratings (`inventoryz.item_key`), so
+    renaming a piece starts it again, and `photo` remembers which photo was read
+    so a reading of an older photo is said to be one. `shown` is the owner's
+    choice: hidden until they put it on their inventory, so nobody runs a rating
+    and has it on display before they have seen it.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="inventory_ai_ratings")
+    item = models.CharField(max_length=60)
+    score = models.PositiveSmallIntegerField()
+    why = models.CharField(max_length=300, blank=True, default="")
+    photo = models.CharField(max_length=500, blank=True, default="")
+    shown = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "item")
+
+
+class LookShare(models.Model):
+    """A LookZMaxZ reading its OWN subject chose to show somebody (`lookshare.py`).
+
+    A reading is never stored; this row exists only because the person in the photo pressed
+    Share. It holds the numbers and the coach's words from a server-signed snapshot (never
+    anything the client typed, never the photo), and deleting it is how a share is taken back.
+    """
+    token = models.CharField(max_length=32, unique=True, db_index=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="look_shares")
+    # Who it was shown to. Null is "any verified adult with the link"; a named member is the only viewer
+    # besides the owner. SET_NULL would widen it, so a deleted recipient deletes the share.
+    to_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+                                related_name="look_shares_received")
+    payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class LookRequest(models.Model):
+    """Somebody asked to have a photo of ANOTHER member read in LookZMaxZ (`lookask.py`).
+
+    Nothing is scored until the person in the photo approves it. The photo is held only while
+    the request is pending and is deleted the moment it is decided, cancelled or expires — this
+    row then keeps only its status and, after an approval, the share it became.
+    """
+    STATUSES = ("pending", "approved", "declined", "cancelled", "expired", "failed")
+    requester = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="look_requests_sent")
+    subject = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="look_requests_received")
+    photo = models.FileField(upload_to="lookask/", blank=True)
+    content_type = models.CharField(max_length=60, blank=True, default="")
+    status = models.CharField(max_length=12, default="pending", db_index=True)
+    note = models.CharField(max_length=300, blank=True, default="")
+    share = models.ForeignKey("LookShare", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]

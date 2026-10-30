@@ -729,6 +729,7 @@ def _task_dict(t, progress=None):
         "id": t.pk, "title": t.title, "note": t.note, "kind": t.kind,
         "bucket": t.bucket, "source": t.source,
         "app_key": t.app_key, "target": t.target,
+        "cost_cents": t.cost_cents, "budget_category": t.budget_category,
         "due": t.due.isoformat() if t.due else None,
         "routine_id": t.routine_id,
         "done_at": t.done_at.isoformat() if t.done_at else None,
@@ -932,6 +933,7 @@ class LilithTaskListView(APIView):
             kind=kind, bucket=bucket, source=source,
             app_key=app_key, target=target, action=action, goal=goal,
             due=d.get("due") or None,
+            cost_cents=_cost_cents(d.get("cost")), budget_category=str(d.get("budget_category") or "")[:40],
         )
         return Response(_task_dict(t), status=status.HTTP_201_CREATED)
 
@@ -966,6 +968,12 @@ class LilithTaskDetailView(APIView):
         if "due" in d:
             t.due = d["due"] or None
             fields.append("due")
+        if "cost" in d:
+            t.cost_cents = _cost_cents(d["cost"])
+            fields.append("cost_cents")
+        if "budget_category" in d:
+            t.budget_category = str(d["budget_category"] or "")[:40]
+            fields.append("budget_category")
         if fields:
             t.save(update_fields=fields)
         return Response(_task_dict(t))
@@ -1190,6 +1198,55 @@ class LilithStarterAddView(APIView):
             return Response(_routine_dict(r), status=status.HTTP_201_CREATED)
 
         return Response({"detail": "Say whether it is a task or a routine."}, status=400)
+
+
+def _cost_cents(raw):
+    """Dollars typed by a member -> cents; blank, junk or negative is 0 (no cost)."""
+    try:
+        v = int(round(float(raw) * 100))
+    except (TypeError, ValueError):
+        return 0
+    return v if 0 < v <= 100_000_000 else 0
+
+
+class LilithBudgetView(APIView):
+    """GET /api/economy/lilith/budget/ — BudgetZ's verdict on every open task with a price, in one pass
+    (one budget read for all of them, not one per row)."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from . import budgetz
+        d = budgetz.summary(request.user, budgetz._month(None))
+        rows = (LilithTask.objects.filter(user=request.user, done_at__isnull=True, cost_cents__gt=0)
+                .exclude(bucket__in=("trash", "logbook"))[:100])
+        return Response({"month": d["month"], "left_cents": d["left_cents"],
+                         "tasks": [{"id": t.pk, "title": t.title, "bucket": t.bucket,
+                                    "verdict": budgetz.afford(request.user, t.cost_cents, t.budget_category, month_data=d)}
+                                   for t in rows]})
+
+
+class LilithGoAheadView(APIView):
+    """POST /api/economy/lilith/tasks/<id>/goahead/ — BudgetZ's yes, then Today.
+
+    The verdict is read HERE, never taken from the client. A yes moves the task to Today and nothing
+    else: no money is spent or set aside, because a go-ahead is not a purchase. A no says why and
+    moves nothing."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, task_id):
+        from . import budgetz
+        t = LilithTask.objects.filter(pk=task_id, user=request.user).first()
+        if not t:
+            return Response({"detail": "No such task."}, status=404)
+        if t.done_at or t.bucket in ("trash", "logbook"):
+            return Response({"detail": "That one is finished or in the Trash."}, status=400)
+        v = budgetz.afford(request.user, t.cost_cents, t.budget_category)
+        if not v["affordable"]:
+            return Response({"detail": v["reason"], "verdict": v}, status=status.HTTP_409_CONFLICT)
+        if t.bucket != "today":
+            t.bucket = "today"
+            t.save(update_fields=["bucket"])
+        return Response({"task": _task_dict(t), "verdict": v})
 
 
 class LilithMoveView(APIView):

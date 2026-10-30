@@ -37,6 +37,31 @@ from . import voicez
 from .models import VoicePrefs, voice_prefs_for
 from .resources import ENERGY, MONEY, PROMPTZ, SPINAZ, XP
 
+# The exclamation mark has a job, and this is it. It used to be banned outright,
+# which kept the copy honest and also kept it flat: the one moment a member does
+# something real was worded like the moment they hit a limit. So it is allowed
+# for the two things below and nowhere else: at most once a paragraph, and at
+# the least once a page that has something to mark (Corey's range). A mark on
+# every line is noise, and noise is what the ban was for; a page that reports a
+# real win and never says so is the flatness the ban caused.
+# COREY_VOICE.txt, 2.8, is the long form and the reasons.
+BANG_RULE = (
+    "EXCLAMATION MARKS: at most ONE per paragraph, and at least one per page "
+    "that has something to mark. Mark only something that already happened and "
+    "was measured (a personal best, a milestone reached, money that landed) or "
+    "a gain that is true, free and available right now. A page with nothing like "
+    "that gets none — never invent a reason to meet the minimum. "
+    "Never on a fix, a refusal, an error, a price, a deletion, a safety or legal "
+    "line, an instruction, or a promise about later. Never stacked. The test: "
+    "say it flat to a member whose take scored a 3 — if it is still true, the "
+    "mark may stay."
+)
+BANG_RULE_SHORT = (
+    "At most one exclamation mark per paragraph, and one in the reply when it "
+    "reports a personal best or a milestone — only on something that already "
+    "happened and was measured, never on a fix, a price or a refusal."
+)
+
 # The four rules, compressed to what a model needs in order not to break them.
 # Longer than a style note because each one is a rule about what is TRUE, and a
 # model that only has the headline will follow the headline off a cliff.
@@ -71,7 +96,9 @@ never "the AI". "spend"/"costs"/"charged", never "consume" or "deduct". Apps are
 CamelCase-Z: SingZ, PostZ, CollabZ, LogZ, OCC.
 
 NEVER WRITE: "Oops". "Something went wrong". "Please try again later". "Error
-occurred". Bare status codes. Exclamation marks.
+occurred". Bare status codes.
+
+{BANG_RULE}
 
 NUMBERS: never invent a tier limit, a price or an allowance. If you do not have
 the number in front of you, say what it depends on and where the member reads
@@ -298,7 +325,7 @@ def prose_voice(user=None, *, surface=None):
         "Write every prose field in the house voice: second person, talking to the "
         "member about their own work. Plain words, contractions, long-short-long "
         "rhythm, em dashes for the turn. Say what actually worked before what to "
-        "fix. Never 'Oops', never 'Something went wrong', no exclamation marks. "
+        "fix. Never 'Oops', never 'Something went wrong'. " + BANG_RULE_SHORT + " "
         "Say 'take', not 'recording' or 'file'. End on what to do next — never a "
         "dead stop."
     )

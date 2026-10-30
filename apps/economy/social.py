@@ -62,7 +62,7 @@ from .models import (RATING_REWARD_ENERGY,
 from .badgez import worn_badges, worn_badges_by_user
 from .catalog import AVATAR_MAX_MB, limits_for, over_char_limit
 from .gates import clean_gates, failing_gate, member_metrics
-from .personaz import clean_link, clean_persona, links_of, personas_of
+from .personaz import clean_link, clean_persona, links_of, personas_of, rate_unit_of
 from .personalityz import (AXES as PERSONALITY_AXES, as_dict as personality_dict,
                            clean_code as clean_personality, filter_reason,
                            matches as personality_matches, wanted_from)
@@ -249,7 +249,7 @@ PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign
                   "nationalities", "regions", "substances", "sober",
                   "attracted_to", "asexual", "traits", "personas", "links",
                   "external_followers", "personality", "religion", "languages",
-                  "pronouns", "headline", "genres", "influences", "gear", "label",
+                  "pronouns", "headline", "genres", "influences", "gear", "inventory", "label",
                   "timezone", "pinned_post_id", "cover_url")
 
 
@@ -302,6 +302,52 @@ def _links_ceiling(p):
     return {"links_limit": max(tier_cap, len(links_of(p))), "links_tier_cap": tier_cap}
 
 
+INVENTORY_KINDS = ("instrument", "microphone", "interface", "monitors", "outboard", "software", "controller",
+                   "clothing", "other")
+INVENTORY_WHERE = ("home", "studio", "stage")
+INVENTORY_MAX = 100
+
+
+def clean_inventory(value):
+    """[{name, kind, where, note}] — declared by the member, what an artist or a studio uses.
+    A closed kind and place; free text is trimmed and de-marked. Repeats of one name fold.
+    The ceiling is flat, not a tier: a studio has many things, and a tier that said whether
+    somebody may list their own microphone would be the ladder rule's counter-example."""
+    out, seen = [], set()
+    for x in (value if isinstance(value, list) else []):
+        if not isinstance(x, dict):
+            continue
+        name = " ".join(str(x.get("name", "")).replace("<", " ").replace(">", " ").split())[:80]
+        if not name or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        kind = x.get("kind") if x.get("kind") in INVENTORY_KINDS else "other"
+        where = x.get("where") if x.get("where") in INVENTORY_WHERE else "home"
+        row = {"name": name, "kind": kind, "where": where,
+               "note": " ".join(str(x.get("note", "")).split())[:120]}
+        # A photo is optional and only ever one we host or an https image, so a
+        # member cannot put a javascript: or data: URL on somebody else's screen.
+        photo = str(x.get("photo") or "").strip()[:500]
+        if photo.startswith("/api/economy/media/") or photo.startswith("https://"):
+            row["photo"] = photo
+        # What it is worth, the member's way: an exact price OR a 1-10 $ level
+        # (1 the cheapest thing they own, 10 the dearest). One or the other, never
+        # both — two numbers that disagree about one guitar would be worse than none.
+        from .inventoryz import clean_value
+        row.update(clean_value(x))
+        out.append(row)
+        if len(out) >= INVENTORY_MAX:
+            break
+    return out
+
+
+def gear_names(p):
+    """Every lower-cased gear name a member declared: the plain list plus the inventory."""
+    names = {str(g).strip().lower() for g in (p.gear or []) if isinstance(g, str)}
+    names |= {str(i.get("name", "")).strip().lower() for i in (p.inventory or []) if isinstance(i, dict)}
+    return names
+
+
 def clean_profile_field(field, value):
     """The stored form of one PROFILE_FIELDS value, from whatever came in."""
     if field == "substances":
@@ -349,6 +395,8 @@ def clean_profile_field(field, value):
             import re
             return text if re.fullmatch(r"[A-Za-z_]+(/[A-Za-z0-9_+\-]+){0,2}", text or "-") else ""
         return text
+    if field == "inventory":
+        return clean_inventory(value)
     if field in ("genres", "influences", "gear"):
         cap = {"genres": 8, "influences": 12, "gear": 20}[field]
         out, seen = [], set()
@@ -491,7 +539,8 @@ def profile_skill_rate(p, pick=min):
     rates = []
     for persona in personas_of(p):
         for s in (persona.get("skills") or []):
-            if isinstance(s, dict) and s.get("rate_cents"):
+            # Only HOURLY prices: a per-work price is not comparable with a rate per hour.
+            if isinstance(s, dict) and s.get("rate_cents") and rate_unit_of(s) == "hour":
                 try:
                     rates.append(int(s["rate_cents"]))
                 except (TypeError, ValueError):
@@ -522,6 +571,7 @@ def _profile_card(p, request=None, badges=None, audience=None, batched=None):
     `badges` lets a listing pass in rows it has already loaded in bulk; left
     alone, the card fetches its own.
     """
+    from .inventoryz import inventory_shown
     m = getattr(p.user, "membership", None)
     # Built whole, then redacted in one pass — see `visibility.redact`. Doing it
     # per key here would mean a field added below is exposed until somebody
@@ -572,6 +622,8 @@ def _profile_card(p, request=None, badges=None, audience=None, batched=None):
         "languages": p.languages,
         "pronouns": p.pronouns, "headline": p.headline, "genres": p.genres,
         "influences": p.influences, "gear": p.gear, "label": p.label,
+        # What each piece is WORTH is its own setting (inventory_value); the pieces are not.
+        "inventory": inventory_shown(p, viewer, audience),
         "timezone": p.timezone, "cover_url": cover_abs(p.cover_url, request),
         # Only on a single card (batched is None) — the member search would
         # pay one query per row for it.
@@ -744,7 +796,13 @@ class SocialView(APIView):
         # a member must never be left waiting on a cron nobody is watching.
         # `manage.py settle_comment_karma` is the sweep for comments nobody
         # happens to open.
-        karmaz.settle_visible(rows, post_author_id=_post_author_id(item))
+        author_id = _post_author_id(item)
+        karmaz.settle_visible(rows, post_author_id=author_id)
+        # SuperfanZ 🫶 (superfanz.py): the artist's top fans, as this viewer may
+        # see them. Their comments pin first — the one perk the status carries,
+        # and attention is what a fan wants from an artist anyway.
+        from .superfanz import top_ids
+        fans = top_ids(author_id, request.user) if author_id else set()
         # Two queries for the whole list rather than two per comment. A
         # hundred comments must not be two hundred lookups on a feed read,
         # which is the rule the feed's own query-count test already holds.
@@ -761,9 +819,12 @@ class SocialView(APIView):
              "my_vote": my_votes.get(c.id, 0),
              # What it earned, once settled. Zero after settling is a real
              # answer ("nobody voted it up"); null means not settled yet.
-             "karma_energy": c.karma_energy if c.karma_settled_at else None}
+             "karma_energy": c.karma_energy if c.karma_settled_at else None,
+             "superfan": c.user_id in fans}
             for c in rows
         ]
+        # Stable: superfans first, everyone else in the order they already had.
+        comments.sort(key=lambda c: not c["superfan"])
         my_r = ItemRating.objects.filter(user=request.user, item_id=item).first()
         heard = ListenProgress.objects.filter(user=request.user, item_id=item).first()
         return {
@@ -1305,6 +1366,16 @@ VYBEZ_MINOR_REASON = ("VybeZ is for finding someone, and that part of Music Conn
                       "find collaborators your own age in CollabZ.")
 
 
+def member_genres(p):
+    """Every genre a member has declared, lower-cased: the profile's own list plus each persona skill's."""
+    out = {str(g).strip().lower() for g in (p.genres or []) if isinstance(g, str)}
+    for persona in personas_of(p):
+        for sk in persona.get("skills") or []:
+            if isinstance(sk, dict):
+                out |= {str(g).strip().lower() for g in (sk.get("genres") or []) if isinstance(g, str)}
+    return out
+
+
 class MembersView(APIView):
     """Search members by multi-select metrics: regions, genders, signs, sober.
 
@@ -1341,6 +1412,10 @@ class MembersView(APIView):
         # level — "can we talk at all" is the search question; the level
         # itself is for the card to show, not for this to gate on.
         languages = multi("languages")
+        # GenreZ: ?genres=hip hop,metal — a member passes if ANY wanted genre is one
+        # they declared on their profile or on a skill of a persona. Declared, never inferred.
+        gear_wanted = [g.strip().lower() for g in multi("gear") if g.strip()]
+        genres_wanted = {g.strip().lower() for g in multi("genres")}
         # SubstanceZ multi-select: substance keys the searcher wants sober-friendly.
         # A member passes if, on every selected substance, they are NOT active
         # ("use"/"sometimes"). Undeclared counts as sober-friendly.
@@ -1457,6 +1532,10 @@ class MembersView(APIView):
                 if not personality_dict(p.personality).keys() >= personality_wanted.keys():
                     personality_undeclared += 1
                 continue
+            if gear_wanted and not any(w in n for w in gear_wanted for n in gear_names(p)):
+                continue
+            if genres_wanted and not genres_wanted & member_genres(p):
+                continue
             if persona_keys and not persona_keys & {str(x.get("key") or "") for x in personas_of(p)}:
                 continue
             if uses and not metric_matches("substancez", p, uses, use_freq, request.user, aud):
@@ -1498,8 +1577,12 @@ class MembersView(APIView):
         if origin[0] is not None:
             results.sort(key=lambda c: (c.get("distance_km") is None, c.get("distance_km") or 0))
         else:
-            from .models import Badge
-            boosted = set(Badge.objects.filter(key="sexy", visible=True)
+            # Any badge whose effect is a discovery boost, read off the effect
+            # rather than the key "sexy", so the next badge to carry it works
+            # without a second edit here. Visible badges only, as before.
+            from .models import BADGES, Badge
+            boost_keys = [k for k, sp in BADGES.items() if sp.get("effects", {}).get("social_boost")]
+            boosted = set(Badge.objects.filter(key__in=boost_keys, visible=True)
                           .values_list("user__username", flat=True))
             results.sort(key=lambda c: c.get("username") not in boosted)
         return Response({

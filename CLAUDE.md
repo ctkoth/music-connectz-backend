@@ -2666,3 +2666,374 @@ TakeScore, share, XP or rating, because a gap to someone's record is not a measu
 near the SOUND is, never good/bad. EQ regions are server-owned (`EQ_REGIONS`) and said to be heard, not measured. Lyrics
 come back as a DIRECTION for Sentence ConnectZ, never the reference's words (prompt forbids quoting). One standard AI
 price, stated on GET before the button; a failed run is not charged. Never run against Google (CI has no key).
+
+## Interests, brands and strengths: intuition is allowed, as a suggestion with its reason
+
+Corey asked for VoiceZ to pick up the brands and interests a member mentions in
+speech, and for the app to be intuitive about what they imply — a designer who
+draws is probably dexterous, a designer who does song covers is probably creative
+and observant. The obvious version breaks the substance rule in its first line:
+a trait derived from a hobby is "a number derived from activity and presented as a
+fact about a person", which `personaz` and PersonalitieZ both refuse by name. So
+the intuition is kept and the claim is not:
+
+- **`interestz_table.RULES` IS the intuition.** Every suggestion is one row — who,
+  which interests, which trait, and the reason in a sentence. It is read before the
+  member decides and can be argued with and changed by a person. No model guesses a
+  trait from a pile of interests; that would be a conclusion with no reason behind it.
+- **A strength is a suggestion until the member says "that's me".** Then it is theirs
+  (`declared_strengths` on the persona, a closed list), shown as declared, and
+  **nothing reads it as a measurement** — no rating, skill level, median, price or
+  search rank. `test_interestz` fails if a second module reads `declared_*`.
+- **The scan is a closed list.** Words are matched against `INTERESTS` and `BRANDS`,
+  so sensitive territory (health, faith, politics, orientation) cannot be picked out
+  of a transcript: the list can only find what is on it.
+- **Speech arrives as text.** The keyboard's voice-clip door (`keyz/transcribe/`,
+  already metered and priced before the mic) turns a clip into words; `interestz/scan/`
+  reads those words and writes nothing. The transcript is not stored — only what the
+  member picks. That adds no audio path and nothing new to disclose about speech.
+- **A brand is a thing a member likes.** It unlocks nothing, is shared with nobody and
+  is not an ad-targeting profile. If that ever changes, the privacy policy changes first.
+
+CharacterZ has hobbies too (`Character.hobbies`, migration 0223, a JSON list). They are
+short tags bounded like a persona's interests (`characterz.clean_hobbies`, 20 of 40
+characters, repeats folded), declared by the member, and `prompt_block` hands them to the
+dialogue writer as flavour inside the same defanged data block as the rest of the
+character — a hobby cannot close the block. A character gets the interests picker only:
+no brands and no strengths, which are claims about a real member's own work. The persona
+picker lives in a persona's bio and interests editor.
+
+## A finished session says what changed since the last one
+
+`session_summary` carries `vs_last` (`bodiez._vs_last`): the same totals for the member's previous
+finished session, the signed change in volume (with a percent), sets, reps and — only when BOTH lengths
+were measured — duration, and per exercise `top_delta_kg` / `volume_delta_kg` on its row of `exercises`.
+Arithmetic over logged sets and nothing else.
+
+- **Like with like.** A routine is compared with the last run of the SAME routine (`basis: "routine"`);
+  a routine with no earlier run, or an ad-hoc session, with the last session that had anything logged
+  (`basis: "last"`). Push day against a leg day would be noise, and the screen says which it did.
+- **None, never a made-up number.** No earlier session → `vs_last` is None ("starting mark"). Last
+  time's volume 0 (all bodyweight) → no percent. A lift done last time and skipped now is named in
+  `not_repeated`; one new this time has no `vs_last` row. A workout typed in afterwards has no
+  duration to compare.
+- **A drop is not "worse".** Lighter can be a deload; the screen shows direction and does not colour it
+  as a failure. Only a RECORD (heaviest, most reps at a weight, biggest session) gets the trophy, and
+  those are unchanged — they compare with every earlier session, not only the last.
+
+## Inspiration: either side can already be on the platform
+
+`matchref.MatchReferenceView` takes, per side, a file OR an id: the take as `take_post_id` /
+`take_upload_id` / `take_journal_id`, the reference as `reference_post_id` / `reference_upload_id`. They
+go through the coach's own `_take_from_post` / `_take_from_upload` / `_take_from_journal` (via `_Fields`,
+which presents the prefixed fields as the plain ones), so view rights (`can_view_post`), own-uploads-only,
+size-from-the-row and the "recording is gone" 410 are the coach's rules and not a second copy of them.
+
+- **The reference can be ANY post the member may view** — that is the "famous example". It is read for
+  the comparison and never kept (no `Upload` row, Files API copy deleted), nothing is written on the
+  post (`_save_to_post` is not called) and its author is not notified. The response names the post and
+  its author in `sources`; nothing else about it is sent.
+- **A post on either side costs `coach_post_energy` ⚡, once.** Same figure as coaching a post, served
+  on GET (`post_energy_cost`, `post_note`) so the screen states it before the button, checked BEFORE the
+  model runs (402 with the shortfall), spent only after a usable result. Files, FileZ uploads and
+  journal entries cost no ⚡. **A recommendation, Corey's to move:** without it Inspiration would be a
+  ⚡-free way to put other people's posts in front of a model, which the post-coach deliberately is not.
+  Every AI run still takes its usual small ⚡ (`_take_ai_energy`) on top.
+- A journal entry is take-only: a diary page is not "another artist's finished record". The same post
+  on both sides is a 400.
+- **Never run against Google** (CI has no key), like the rest of the coach's transport.
+
+### Inspiration links: YouTube can be heard, Spotify and SoundCloud cannot
+
+Either side may be `take_url` / `reference_url`. Only a **YouTube** link works: Gemini watches a public video
+from its address (`file_data.file_uri` + `video_metadata`), so nothing is downloaded or stored here, and
+`classify_link` rebuilds the address from the 11-character id alone (reusing `widgetz._player_for`, so
+lookalike hosts and appended junk never reach the model). The coach reads `LINK_WINDOW_SECONDS` (4 min) from
+the link's `?t=` / `?start=` (default 0) — a whole album upload must not be the price of one comparison —
+and is told it is hearing a section.
+
+**Spotify and SoundCloud are refused up front, with the reason, and nothing runs.** They serve a player and never
+the audio, so there is nothing to hear; having the model "review" a song from its title would be invented detail,
+which is the substance rule's failure case. `GET` publishes `link_sources` (the sentence per provider) and
+`link_note` so the screen says it as the member pastes, not after the press. A link costs no ⚡ (only a post does).
+A video Gemini cannot open (private, age-restricted, removed) answers 502 `link_unreachable`, uncharged.
+
+**Never run against Google** — the YouTube-URL input is Gemini's preview feature and CI has no key, so the request
+shape is pinned by tests and unverified live. Check it once with a real key before relying on it.
+
+## SessionZ: every past session, editable, with the ones that need a look said plainly
+
+`GET /api/economy/bodiez/sessions/log/` (`BodieZSessionLogView`) is every FINISHED session, newest first, paged
+(`limit` ≤ 100, `offset`), searchable (`q`: a routine's title or a lift's name), bounded by `since` / `until`
+(YYYY-MM-DD), fetchable singly (`id`), with lifetime `totals`. The plain `sessions/` list stays the newest 50 with
+the open one mixed in, because Today needs exactly that; SessionZ is where somebody goes to find a log from last
+spring, so this one has no ceiling. Each row is the editable session (sets with ids, so an edit keeps measured rest)
+plus its own `volume_kg` / `reps` / `duration_seconds` and `check`. Yours only, by the query; the cost is constant in
+the number of sessions (a test pins it).
+
+- **`check` is facts about the row, worded for the member, never a correction.** Nothing logged → "add what you did,
+  or delete it". A LIVE session that ran ≥ `LEFT_OPEN_HOURS` (4) → "probably left open, so the length may not be the
+  workout's; the sets are what count". A workout typed in afterwards has no measured length, so it is never flagged for
+  one. `check=1` narrows the list to these. The fix stays the member's.
+- Editing and deleting use the endpoints that already existed (`sessions/<id>/sets/` PUT, `sessions/<id>/` PATCH and
+  DELETE); this only lists. An edit recounts records, BodyMap and goals, as before.
+
+## The Plan rating: a coach-made routine is built to its checks — it is NOT stamped a 10
+
+Corey asked that a routine the coach makes or edits get a 10, and that an edit show how the score changes and why.
+Taken literally that is the substance rule's exact failure: the routine rating that exists, **Thorough**
+(`bodiez.thoroughness`), is read off sessions the member actually trained and is None until there are some, and a flat 10
+stamped on a plan nobody has trained is a number that measures nothing — *could a member get a good one without getting
+good?* So the two asks are met with a DIFFERENT number about a different thing (`routine_plan.py`): the **Plan** rating,
+the routine AS WRITTEN against rules that are written down, each shown passed or failed with the lift that decided it.
+
+- **Five checks, score = 10 × passed ÷ judged (one decimal):** `reps` and `sets` inside the goal's range (`GOALS`, each with its
+  citation; sets within ±1), `order` (compound before isolation, from `superset_table`'s declared mechanic — the app's own
+  rule, said to be uncited), `access` (the server's own `accessible` flag) and `repeats`. A check that cannot be judged (no goal,
+  nothing to compare) is LEFT OUT, never passed; an empty routine has no score, not a 10 and not a 0.
+- **The Planner builds to the checks, so its routines read 10.** `source: "coach"` on create runs `polish` (big lifts first;
+  reps and sets to the NEAREST edge of the goal's range — the smallest change that passes, never a number of the Planner's
+  choosing) and returns what it changed in `polished`. A routine made by hand is scored as written and never rearranged.
+  That a coach-made routine usually reads 10 is a statement of what it was built to, not of how good it is for anyone — said
+  in the caveat served with it (`PLAN_CAVEAT`), which also says Thorough is the other number and where it comes from.
+- **An edit says how the score moved and why.** `PATCH` returns `plan_change` ({before, after, change, checks[{label, was, now, why}]},
+  `why` naming the lift); `POST routines/plan/` is the same arithmetic read-only, so Fit to equipment and "Let the Planner fix this"
+  show "Plan 7.5 → 10, because Bench Press: 3 → 8 reps…" BEFORE anything is saved, and `polish: true` returns the Planner's list.
+- **Only what the Planner can fix, it fixes** (order, reps, sets). `access` and `repeats` are the member's to resolve: reported
+  as "still yours to fix", never silently deleted or swapped. Weights and every other field are untouched.
+- **Found on the way:** the board (`routines/` cards are drawn from `bodiez/board/`) never carried `coach_rating`, so the Thorough
+  line on a routine card read "not rated yet" for everybody. Both ratings ride the board now, in a constant number of queries.
+- Never feeds a skill level, leaderboard, price or anything else — it only labels a routine.
+
+`session_summary` carries `routine_id` (None for a custom session, and None once the routine is deleted) so the ended-session card can
+offer "Improve this routine" and LAND on that routine; a routine that no longer exists offers nothing rather than a dead door.
+
+## Supersets while logging, the end-of-session report, and pairing when creating or improving
+
+- **A session's supersets are PAIRS of lift ids** (`BodieZSession.superset_pairs`, migration 0230), ANY two lifts, because a logged workout has no
+  adjacent rows the way a routine does. `clean_pairs` is the rule (two distinct lifts, each in at most one pair, every id a lift this member may
+  use — refused with the reason, never half-kept); `prune_pairs` is the one place a pair is dropped on purpose: a live session may pair a lift it
+  has not logged yet, finishing ends that pair, and taking a lift out of a finished workout takes its superset with it.
+- **Saving a session as a routine keeps them** (`pair_session_rows`): the second lift moves to sit directly under the first and the pair gets the
+  routine's own `group` letter — what the designer's "Superset with…" makes. With no pairs the routine is exactly what it was before.
+- **`POST sessions/<id>/routine/ {"update": id}` updates the routine the workout came from** (`merge_session_into_routine`): lifts done take the
+  session's sets, reps and TOP-set weight; lifts SKIPPED are kept as they were (skipped is not deleted); lifts done that the routine lacked are
+  added; the routine's own order is never reshuffled; the session's supersets apply on top. Only the session's own routine can be updated from it.
+  The answer is the same `plan_change` an edit returns, so "Plan stays 10" / "7.5 → 10" says how it moved.
+- **`report` on the summary is FACTS, not a score** (`_report`): `completion_pct` = sets done on the routine's lifts ÷ sets it planned (a lift
+  done more than planned counts as planned; extras are reported apart), against the routine AS IT IS NOW; None for a custom session, which has no
+  plan to complete. Rest = the server-measured gap between sets against the goal's own `rest_seconds`. It is effort, never named or used as a
+  rating (XP and badges may reward effort; ratings and skill levels may not), and the screen says so beside it. `vs_last.report`,
+  `completion_delta` and **`routine_changed`** (the routine was edited after that session, so the comparison says its lifts may differ) make "compare
+  with the last session of the same / edited routine" literal.
+- **Pairing when creating or improving**: `pair_mode` (`compound_isolation` | `push_pull`) on `POST routines/` (source `coach` only — a hand-made
+  routine is never rearranged), on `POST routines/plan/` with `polish`, and in Fit to equipment. Same two pairings, same gate as `bodiez/pair/` (the
+  Coach CHOOSING is StatZ's or the free hour's; hand-linking stays free); a member without it gets `pair: {blocked, detail, upgrade}` and the routine is still
+  built or polished, never refused. Pairing runs BEFORE the Planner's fix, so a partner it ADDS is brought inside the goal's range and the Plan survives.
+- **The Plan's `order` check judges a superset pair as one unit** (a pair with a big lift in it is a big lift), so a push-pull pair of a curl and a row is not
+  "a curl before a row".
+
+## Thorough 💯: a badge ladder on the Thorough rating, worn on posts, collabs and venues
+
+`apps/economy/thoroughz.py`. Corey's rungs on a member's Thorough rating (the mean of each lift's Thorough rating over the
+last 28 days — `bodiez.lift_thoroughness`, the one formula, never re-scored here): **6 💯 Thorough** (anything above 5),
+**7 🥈 Decent, 8 🥇 Legendary, 9 🌟 Supreme, 10 💎 Perfect**. The emoji are his placeholders; `icon` stays empty until art.
+
+- **They are BADGES** (five keys in `models.BADGES`, `ladder: "thorough"`), so the per-badge privacy switch, the member card's
+  worn badges, titles and lapse notices all come for free. Each check is true at its own rung only, so **one is held at a
+  time**; `recheck_badges` evaluates every check first and a rung given up while still on the ladder is revoked QUIETLY —
+  climbing is not announced as a lapse.
+- **Temporary**: the window is 28 days, so the mark must be able to fall. It moves when a session FINISHES (hook in the
+  session PATCH, swallowed) and `manage.py refresh_badges` (hourly cron, holders of any temporary badge) takes down a mark nobody trained for.
+- **`MIN_LIFTS` (3)** distinct lifts in the window or no rating: one lift trained hard is real and narrow, and "Perfect"
+  for it would say more than the evidence does. Cost: a member who only ever does one lift gets no badge.
+- **Pays nothing** (`effects: {"achievement": True}`, tested). It is effort plus a progress leg — a badge may reward that;
+  a rating that paid would be worth faking.
+- **Worn on UGC**: posts carry `author_mark` + `contributor_marks`, deals `marks` {username: mark}, venues `host_mark`.
+  Each is ONE batch per list (`marks_for_posts` / `marks_for_deals` / `marks_by_username`, two queries) and two for a single
+  row; the feed's query count is pinned flat. Only `visible=True` badges are read, so a hidden badge leaks nowhere.
+- **The group** is `GET /api/economy/thoroughz/`: "Thorough 💯", members by rung, the group's newest viewable posts on top,
+  and the caller's own rating, rung and what the next one takes. It is derived from the badge, not a GroupZ list anybody keeps.
+
+## InventoryZ: the profile inventory, rated piece by piece and in total
+
+Corey asked for an inventory on ProfileZ where members post equipment, instruments and clothes and get rated on each and
+in total. **The inventory already existed** (`Profile.inventory`, `social.clean_inventory`, edited in profile fields,
+searchable in GenreZ), so `apps/economy/inventoryz.py` adds ratings on top and nothing else — a second place to list gear
+would be two lists that disagree. `clean_inventory` gained a `clothing` kind and an optional `photo` (our own media address
+or https only, so nothing typed becomes a `javascript:` URL on someone else's screen).
+
+- **A piece is rated through the one rating path** (`social/rate/`) on `gear:<owner id>:<slug of name>`: same scale, edit
+  window, rater reward and cap as a post. The name is the identity because the cleaner folds repeats; **renaming starts its
+  ratings again**, and the editor says so. `post_interaction_block` refuses the owner rating their own kit.
+- **Individual** = median + count per piece, None until rated. **Total** = median of every rating across the CURRENT pieces,
+  None until `TOTAL_MIN_RATINGS` (3). A removed piece's ratings are not shown or counted.
+- **It is taste, not measurement**, and `RATING_NOTE` says so on screen: it never feeds a skill, royalty, price or search rank
+  (`test_inventoryz` fails if another module names a `gear:` key). Three queries however many pieces.
+- `GET /api/economy/inventoryz/?username=` carries `rating_reward` (the gain, before the rating) for a viewer and
+  `edit_in` / `rename_note` for the owner. The flat 100-piece ceiling is the existing one, kept flat on purpose.
+
+## BadgeZ wave one: a badge per coach, royalties said out loud, and five stickers made real
+
+`apps/economy/badgez_wave.py`, registered into `models.BADGES`. Named in Corey's voice — a Z where an s would be (High
+NoteZ, Hot BarZ, Royal RatingZ, Cut RoyaltieZ) — except Thorough, which he wants plain. His emoji are the placeholders,
+worn inside a neon medal (`tools/make-neon-badges.mjs`, frontend) until his `badgez.<name>.jpg` art is committed.
+
+- **The audit found five effects promised on screen and read by nothing**: Collaborator's +5 submissions and "needs list
+  first", Straight Shooter's waived stake, the discovery boost (read by the hardcoded key "sexy") and Bug Hunter's +50 🏷️.
+  All real now (`submission_cap_for`, `collab.stake_for`, `MembersView` reads the effect, `grant_badge` pays the grant
+  once) except needs-first, which had no list to sort and was dropped from the note. **`test_badgez_wave` fails when any
+  badge effect has no reader outside the catalogue** — a badge that only looks nice is a sticker.
+- **A badge per coach (all eleven)**, temporary: `HOT_TAKES` (3) takes the coach scored `HOT_SCORE`+ (8) inside
+  `HOT_DAYS` (30). The coach LISTENED, so nobody gets one without the takes getting good. The perk is
+  `ai_energy_off_pct` (−10% ⚡ per AI run each, capped at −50%), applied inside `ai_energy_cost` — the same function that
+  prices the run on screen — so the discount is on the button. It lands on the take that earns it (`takescorez.record`).
+- **The royalty pair reflects the formula, never a second copy of it.** Royal RatingZ 💰 while a track's factor is ≥1.2;
+  Cut RoyaltieZ ✂️ while one is under 1.0 — five-plus OUTSIDE raters, read in two queries for the member's last 50 posts.
+- **A penalty (`penalty: True`) is hidden by default, worded as applying, and "lifted" when it goes.** It must come out of
+  a record somebody ELSE settled. No-show and dispute penalties are NOT here: nothing records a no-show, and a dispute is
+  opened by one side of a deal — a penalty either could fire would be a weapon one member aims at another.
+- **Tapping a medal opens everybody wearing it** — `GET /api/economy/badgez/holders/?key=`, visible badges only.
+- `manage.py refresh_badges` (was `refresh_thorough`) re-checks holders of ANY temporary badge hourly.
+
+## SuperfanZ 🫶: an artist's top fans, counted from what they did, paying nothing
+
+`apps/economy/superfanz.py`, `GET /api/economy/superfanz/?username=`. Badges say who is good; nothing said who is
+THEIRS. An artist's top `TOP` (3) fans over `WINDOW_DAYS` (30), from acts on that artist's posts: a play heard to the end
+1, a rating 2, a comment 2, a share 3, with `MIN_POINTS` (5) before anybody counts.
+
+- **Pays nothing**, so a second account farming fan status buys nothing. The one perk is attention: **a superfan's comments
+  pin first on that artist's posts** (`SocialView._payload` reads `top_ids`, each comment carries `superfan`).
+- **A fan can leave every list**: `superfan` is a VisibilitieZ field (members by default); private hides them everywhere and
+  they still see their own standing (`you`: points, superfan, `to_top`).
+- **The age wall, blocks and missing profiles**: a viewer sees fans in their own age group only; blocks either way drop a fan;
+  a fan with no Profile row yet (made lazily) takes every default rather than being skipped — the bug the first test found.
+- Points are cached 10 minutes per artist (five queries to build). It is a count of acts, never a rating of a person.
+
+## Mix ConnectZ raises a vocal that sits too low (VocalZ)
+
+The engine is the frontend's (`src/mastering/master.js`); this repo keeps the settings a saved master remembers.
+`mixz.clean_settings` keeps `vocal` (`"auto"` or 0–6 dB), `vocalLevel` (±12 dB) and `vocalFile` (whether a separate vocal
+was mixed in — never the file, the same rule as the reference).
+
+## VideoZ: the editor is the frontend's; this repo holds one StatZ row
+
+VideoZ (frontend `src/apps/VideoZ.jsx`, `src/videoedit/`) is a multitrack editor that runs on
+the member's device — nothing renders here, and an export reaches the server only as an ordinary
+`uploads/` POST when the member presses Save, under the tier's storage caps. **Lip-sync** (a photo's
+mouth following a voice) is StatZ: `statz_trial.FEATURES` / `DRIVERS` row `lipsync`, sampled, with
+no server module because the gate is client-side like `rest_alerts` — it spends nothing of ours, and
+a video exported during the sample is the member's, like a routine the Coach paired. It follows the
+SOUND (loudness and tone), not the words: there is no speech or face model, and the screen says so.
+Real AI lip-matching would need a provider, a key and a price — Corey's call, not built.
+
+## InVenTorieZ: worth and an AI read, on the inventory that already exists
+
+`inventoryz.py` grew two things, both on `Profile.inventory` rather than a second list:
+
+- **Worth** (`clean_value`, called from `social.clean_inventory`): `price_cents` OR `price_level` 1-10, never
+  both (an exact price wins). A level is the member's own ranking, so `value_summary` adds prices and counts
+  levels beside them. Who sees it is `visibility` field `inventory_value`, MEMBER by default — a price list
+  beside "kept at home" on the logged-out page is a burglar's shopping list. Every reader that serves
+  someone else goes through `inventory_shown` (the member card, `publicz`, the inventory view); a fourth
+  reader that reads `p.inventory` directly leaks prices.
+- **The AI's read** (`ai_rate`, `InventoryAIView`): Gemini looks at the OWNER'S OWN uploaded photos (never a
+  typed address, never someone else's upload — `_photo_bytes`) and rates condition, care and fit for purpose
+  (wardrobe: put-together). The prompt forbids price, authenticity, sound and comments on people; a piece
+  with no photo is never rated, because rating a name would invent the thing measured. One price per run
+  (up to 8 pieces, plus the kit together), charged only when something came back rated. Readings are KEPT
+  in `InventoryAIRating` (about a thing, not a person — unlike LookZMaxZ) and hidden until the owner shows
+  them; a newer photo marks a reading as older. Like member ratings, it never moves a skill, price, royalty
+  or rank. Never run against Google (CI has no key).
+
+## A Radar read: the coach on somebody else's post, counted as nothing of yours
+
+Corey: let members put others' work on their radar. The coach always accepted any post the member could VIEW, and
+`_save_to_post` already kept the score off a post that was not theirs — but the run was still recorded as the
+member's own take: a `TakeScore` in their history, XP, the skill blend, a share card under their name. Somebody
+else's performance in your record is the substance rule's failure case (a good number without getting good).
+
+`vocalcoach._radar` is that path now: a post the member does not own is read like a reference listen
+(`reference=True`, no fixes pass) and NOTHING is written — no TakeScore, share, XP, streak or post write-back. It costs
+what coaching any post costs (the post's ⚡ plus one AI prompt, both on the door before the tap, neither charged on a
+failed read). `crosspost.destinations_for` labels the door "📡 Radar read in X" with `radar: true` and says what it
+is not. Your own posts are unchanged: still "Coach it", still kept on the post. `test_crosspost` pins both.
+
+## Coaches score reels by link — YouTube only, and the reel apps are told how instead
+
+`vocalcoach` takes `link` beside a file, post, journal entry or upload. `take_link` reuses `matchref.classify_link`
+(the YouTube address is REBUILT from the video id, Shorts included, `?t=` kept, a `LINK_WINDOW_SECONDS` window), and
+`score_take(link_part=…)` sends that part instead of uploading anything. Instagram, Facebook, TikTok, Snapchat and Threads
+give out a page and a player, never the file, so `REEL_SAVE` answers 400 BEFORE anything runs, naming the app and saying to
+attach the member's own saved reel (video takes already work). A link in My take is the member's declaration, the same trust
+an attached file gets; with `reference` it is a reference listen. `TakeScore.source = "link"`, `ref` = the canonical address.
+A 502 for a link says it must be public, and nothing is charged. `test_coach_links` pins all of it.
+
+## LookZMaxZ takes social image links, and anybody's photo gets Inspiration, never a score
+
+`imagelinks.py` fetches a photo by its IMAGE address from the social apps' own image hosts only (a fixed list, so a member
+can never point this server at an address of its choosing), https, no redirects followed, streamed to the reading's byte
+ceiling, image content-types only, kept nowhere. A post or profile PAGE is refused before anything runs with how to copy the
+image address. `LookmaxZView` reads `photo_url` when no file came, AFTER every free refusal.
+
+Corey also asked to allow other people's photos. **The 1-10 reading stays self-only**: rating a stranger's face from their
+Instagram is the harm the feature's lines exist to prevent, and a link makes it one paste. `LookInspireView`
+(`/lookmaxz/inspire/`, `lookmaxz.inspire_look`) is what anybody's photo gets: the cut, facial hair, brows and styling described
+and how to get them; the prompt forbids any number, any word on the person's face, skin, teeth, body, age, ethnicity or
+attractiveness, and guessing who they are; `clean_inspiration` keeps only the four declared parts as text. Adults only, priced
+like a reading, not charged when nothing is described. `test_lookmaxz_links` pins the host list, the refusals and the no-score rule.
+
+### Inspiration rates both takes and compares them (Corey's ask)
+
+`matchref` asks for every dimension AND an overall for the take and the reference, on one stated 1-10 scale so the numbers
+compare, each overall with a one-sentence reason (`_clean_overall`: both or none). `compare()` is the server's subtraction —
+per dimension `gap` (take − reference) and `leads`, counts, the overall gap, and the closest and widest dimensions — so the
+model rates and never does the arithmetic. Still nothing saved: no TakeScore, XP or skill rating, because a rating of somebody
+else's record and a gap to it are not measurements of the member.
+
+## LookZMaxZ shares: the person in the reading decides, from a snapshot the server signed
+
+`lookshare.py`. Corey wanted to show a woman her score; rating a photo someone else uploads stays self-only, so the
+invite (`GET lookmaxz/invite/<handle>/`, open logged-out) sends HER to get her own, and only she can share it. A reading
+answers with `share.reading`, a `signing.dumps` of `snapshot()` (photo sectors' numbers, verdict, working, caveat — no
+photo, no Body, no opt-in sectors) valid for a day; `POST lookmaxz/share/` accepts nothing else, and only from the user
+it names, so a share cannot carry a number the coach did not give. `LookShare` is the one stored copy (migration 0232):
+viewable by her, the member she names (who must be a verified adult, and is notified), or any verified adult when she
+names nobody; she deletes it to take it down, and every "not yours" answers the same 404. `to_user` CASCADEs so a
+deleted recipient can never turn a named share into a link share. Free; nothing is charged.
+
+### Asking another member to approve a reading, and posting your own
+
+`lookask.py` (`LookRequest`, migration 0233). Corey asked to score other people; the version built is consent-first: the
+requester names a verified adult member and uploads a photo of them, NOTHING is read until that member sees the photo and
+approves ("this is a photo of me"), and then the reading becomes their `LookShare` to the requester. The photo is held only
+while pending (`EXPIRE_DAYS` 7, swept on every read) and deleted on any decision; the requester pays only for a reading that
+came back; one pending request per pair and `MAX_PENDING` (5) per requester; a block either way refuses; a decline gives
+the requester no reason. `LookSharePostView` lets ONLY the person in a reading post it to PostZ through `create_post`, with
+text built from the stored snapshot (`post_text`) — a request body never reaches it.
+
+### The photo behind a LookZMaxZ reading can be shown — opt-in, and always the owner's upload (Corey: no exception)
+
+`keep_photo` on a reading stores the photo through the coach's `keep_take` (same per-file and storage limits; a photo
+that does not fit is still read) and signs its id into `share.reading` (`"p"`), so a share can only ever show the photo the
+reading was made from. `show_photo` on a share puts `photo_upload_id` on the stored payload; `view_of` serves it as
+`photo_url` (never the id) and goes blank the moment the member deletes the upload. `photo` on a post attaches it as image
+media. On an approval request `show_photo` keeps the photo as the SUBJECT's upload, in her storage, instead of deleting it.
+
+## Two free trial takes per browser, and the second one says what moved
+
+The coach's value is the change between takes, and one take can never show a change. So `TRIAL_PER_BROWSER` is 2 (env-overridable). The POST answers with:
+- `previous`: this browser's earlier scored take on the same coach, as {score, change, at}.
+- `takes_left`.
+
+The address backstop and `trial_daily_cap()` are unchanged, so the most the door can spend in a day has not moved. Each extra take costs one model call (about 3¢).
+
+`PublicTiersView` now also serves, per tier, `wav_bits` and `profile_links`. At the top level it serves `statz_features` (labels from `statz_trial.FEATURES`) and `statz_sample`. With these, the trial's "what an account adds" panel reads every claim from here.
+
+## SessionZ rows say how much of the plan was done, and never a made-up number for a custom session
+
+`_log_row` now carries `done_pct`, which is the end-of-session report's own `completion_pct` (sets done on the routine's lifts over the sets it planned). The list and the ended-session card therefore cannot disagree. It is `None` for a custom session: with no plan there is nothing to have completed, and 0% would read as a failure. It is effort, not a rating. The routine's Thorough rating is read from the routines board on the client, and the screen labels it as the routine's rating now, not this one session's.
+
+## A set logged on the wrong lift is taken back where it happened
+
+`DELETE /api/economy/bodiez/sessions/<id>/sets/<set_id>/` (`BodieZSetDetailView`) removes ONE set, and only from the OPEN session, then renumbers that lift's remaining sets so the next one logged cannot repeat a number. A finished session is still edited through `PUT .../sets/`, which keeps the rest clock and the records honest in one place. Without this the only way to fix a slip on the live logger was to finish the workout and open SessionZ.

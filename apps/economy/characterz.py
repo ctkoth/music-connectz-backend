@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import personalityz, voicez
+from .personaz import clean_tags
 from .media import stable_media_url
 from .models import Character, Face, Upload, membership_for
 
@@ -21,6 +22,17 @@ CHARACTER_LIMIT = {"free": 3, "premium": 10, "statz": 50, "debug": 50}
 LOOKS_MAX = 300
 LIKENESS = ("A character's look is a drawing, or your own face — never another real person's. "
             "Putting a real person into AI-made pages without their say-so is not something this does.")
+
+
+def clean_hobbies(value):
+    """A character's hobbies: short tags, bounded like a persona's interests (20 of 40
+    characters), junk dropped and repeats folded. Declared flavour, never a score."""
+    out, seen = [], set()
+    for tag in clean_tags(value):
+        if tag.lower() not in seen:
+            seen.add(tag.lower())
+            out.append(tag)
+    return out
 
 
 def limit_for(user):
@@ -41,6 +53,9 @@ def prompt_block(c):
     if p:
         bits.append(p)
     bits.append("Tone: " + voicez.summary(v))
+    if c.hobbies:
+        bits.append("Hobbies (things they like doing; use them for flavour, never as a fact about a real person): "
+                    + ", ".join(voicez._defang(h) for h in clean_hobbies(c.hobbies)))
     if c.looks:
         bits.append("Looks (for drawing them consistently): " + voicez._defang(c.looks))
     return f"CHARACTER {voicez._defang(c.name)}:\n" + "\n".join(bits)
@@ -56,7 +71,7 @@ def character_dict(c, request=None):
         except Exception:
             img = ""
     return {"id": c.id, "name": c.name, "image": img, "face_id": c.face_id, "upload_id": c.upload_id,
-            "looks": c.looks, "bio": c.bio, "personality": c.personality,
+            "looks": c.looks, "hobbies": clean_hobbies(c.hobbies), "bio": c.bio, "personality": c.personality,
             "spec": {**voicez.DIAL_DEFAULTS, **(c.spec or {})}, "sample": c.sample,
             "voice_summary": voicez.summary(voice_of(c))}
 
@@ -110,7 +125,8 @@ class CharactersView(APIView):
             return Response({"detail": err}, status=status.HTTP_400_BAD_REQUEST)
         c = Character.objects.create(user=request.user, face=face, upload=upload,
                                      look_attested=bool(face or upload),
-                                     looks=voicez._clean(request.data.get("looks"))[:LOOKS_MAX], **fields)
+                                     looks=voicez._clean(request.data.get("looks"))[:LOOKS_MAX],
+                                     hobbies=clean_hobbies(request.data.get("hobbies")), **fields)
         return Response(character_dict(c, request), status=status.HTTP_201_CREATED)
 
 
@@ -136,6 +152,8 @@ class CharacterDetailView(APIView):
         c.face, c.upload, c.look_attested = face, upload, bool(face or upload)
         if "looks" in request.data:
             c.looks = voicez._clean(request.data.get("looks"))[:LOOKS_MAX]
+        if "hobbies" in request.data:
+            c.hobbies = clean_hobbies(request.data.get("hobbies"))
         c.save()
         return Response(character_dict(c, request))
 

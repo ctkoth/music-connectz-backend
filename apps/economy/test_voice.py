@@ -61,6 +61,39 @@ class TheRulesAreNotAPreferenceTests(TestCase):
         for phrase in ("Oops", "Something went wrong", "member"):
             self.assertIn(phrase, p)
 
+    def test_the_exclamation_mark_has_a_job_and_a_ceiling(self):
+        # It was banned outright, which kept the copy flat: a personal best was
+        # worded like a limit. Allowed now for two things, once, and the
+        # exclusions are what stop it becoming hype — so they are pinned, not
+        # just the permission.
+        p = voice.voice_prompt(member())
+        self.assertIn(voice.BANG_RULE, p)
+        for must in ("ONE per paragraph", "at least one per page",
+                     "never invent a reason", "already happened and was measured",
+                     "true, free and available right now", "a price", "a refusal",
+                     "Never stacked", "scored a 3"):
+            self.assertIn(must, voice.BANG_RULE)
+
+    def test_it_is_not_a_blanket_ban_any_more(self):
+        # The old line. If it comes back, the rule above contradicts it and a
+        # model obeys whichever it read last.
+        self.assertNotIn("Exclamation marks.", voice.PARADIGM)
+        self.assertNotIn("no exclamation marks", voice.prose_voice(member()))
+
+    def test_the_structured_surfaces_get_the_short_form_only(self):
+        # They get the voice for prose inside fields and must stay short.
+        p = voice.prose_voice(member())
+        self.assertIn(voice.BANG_RULE_SHORT, p)
+        self.assertNotIn(voice.BANG_RULE, p)
+
+    def test_the_rule_is_in_every_prompt_at_every_setting(self):
+        # Not a tone preference: "never on a price" protects rule 1.
+        u = member()
+        for style in ("corey", "standard", "technical"):
+            for emoji in ("heavy", "light", "off"):
+                p = voice.voice_prompt(u, override={"style": style, "emoji": emoji})
+                self.assertIn("EXCLAMATION MARKS", p, (style, emoji))
+
     def test_it_is_told_never_to_invent_a_number(self):
         # The drift that put "20 free prompts" in nine places, with a model
         # able to make a new one every reply.

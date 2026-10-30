@@ -19,6 +19,7 @@ from .catalog import (SUBMISSION_PACK, SUBMISSION_PACK_ENERGY, SUBMISSION_PACKS_
                       POST_ENERGY_FLOOR, edit_window_for)
 from .coachshare import clean_visibility, coach_read_for, for_new_post, legacy_score
 from .crosspost import coach_cap, coach_price, destinations_for, take_state_for
+from .thoroughz import marks_for_posts
 from .gates import clean_gates, failing_gate, member_metrics, refusal
 from .models import (
     CollabDeal,
@@ -153,8 +154,13 @@ def clean_post_price(value):
 
 def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_UNSET,
                cap=None, shares=None, joins=None, rating=_UNSET, bought=_UNSET,
-               plays=None):
+               plays=None, marks=_UNSET):
     vibe = up - down
+    # Thorough marks (thoroughz.py): the author's and any credited
+    # contributor's, by name. A list passes them in one batch; a single post
+    # costs the two queries here.
+    if marks is _UNSET:
+        marks = marks_for_posts([p])
     media = media_slots(p)
     if take_state is _UNSET:
         take_state = take_state_for([(p, media)]).get(p.id)
@@ -171,12 +177,17 @@ def _post_dict(p, request, up=0, down=0, collabs=None, price=None, take_state=_U
     return {
         "id": p.id,
         "author": p.author.username,
+        "author_mark": marks.get(p.author.username),
+        "contributor_marks": {c["username"]: marks[c["username"]]
+                              for c in (p.contributors or [])
+                              if isinstance(c, dict) and c.get("username") in marks},
         # True for everyone credited, not just whoever pressed post — a
         # collab post belongs to all of them.
         "mine": owns_post(p, request.user),
         "contributors": p.contributors or [],
         "co_owned": bool(p.contributors),
         "title": p.title,
+        "derived": p.derived or None,
         "description": p.description,
         "links": p.links,
         "media_type": p.media_type,
@@ -324,7 +335,10 @@ def one_of_each(items):
 
 
 def skill_prices(user):
-    """{skill name: rate_cents} from the member's own PersonaZ skills."""
+    """{skill name: price_cents} from the member's own PersonaZ skills.
+
+    Every price still counts here whatever its unit, so nobody's costs moved when the unit
+    arrived; `skill_price_units` says what each one is per, and the quote carries it."""
     from .models import profile_for
     out = {}
     for persona in personas_of(profile_for(user)):
@@ -341,6 +355,18 @@ def skill_prices(user):
     return out
 
 
+def skill_price_units(user):
+    """{skill name: "hour" | "work"} for the priced skills — what each price is PER."""
+    from .models import profile_for
+    from .personaz import rate_unit_of
+    out = {}
+    for persona in personas_of(profile_for(user)):
+        for s in (persona.get("skills") or []):
+            if isinstance(s, dict) and s.get("name") and int(s.get("rate_cents") or 0) > 0:
+                out.setdefault(str(s["name"]).strip(), rate_unit_of(s))
+    return out
+
+
 def post_cost_cents(user, skills_used, floor=None):
     """What posting this costs: the combined price of the skills that went in.
 
@@ -353,12 +379,16 @@ def post_cost_cents(user, skills_used, floor=None):
     rather than discovered by pressing it.
     """
     prices = skill_prices(user)
+    units = skill_price_units(user)
     lines, total = [], 0
     for name in (skills_used or [])[:40]:
         if not isinstance(name, str):
             continue
         cents = prices.get(name.strip(), 0)
-        lines.append({"skill": name.strip(), "cents": cents})
+        line = {"skill": name.strip(), "cents": cents}
+        if cents:
+            line["unit"] = units.get(name.strip(), "hour")      # said beside the price, never assumed
+        lines.append(line)
         total += cents
     # BadgeZ reads here, where the price is decided — the Gifted badge's
     # discount would be a sticker anywhere else.
@@ -460,6 +490,28 @@ def charge_skill_energy(user, skills):
     return {"energy_cost": cost, "energy_charged": cost, "energy": w.energy}, None
 
 
+DERIVED_KINDS = ("cover", "remix")
+
+
+def clean_derived(user, raw):
+    """({snapshot}, error). A cover or remix names a PUBLIC post by someone else — credit is the one
+    thing it always carries. Nothing is paid to the original here: a royalty split is Corey's call,
+    and the screen says so rather than implying one."""
+    if not raw:
+        return {}, ""
+    if not isinstance(raw, dict) or raw.get("kind") not in DERIVED_KINDS:
+        return {}, "A cover or remix must say which: cover or remix."
+    try:
+        orig = Post.objects.select_related("author").filter(pk=int(raw.get("id"))).first()
+    except (TypeError, ValueError):
+        orig = None
+    if not orig or orig.visibility != "public":
+        return {}, "That original isn't a public post, so it can't be covered or remixed."
+    if orig.author_id == user.id:
+        return {}, "That's your own post — post it as new work instead."
+    return {"id": orig.id, "kind": raw["kind"], "title": orig.title[:160], "author": orig.author.username}, ""
+
+
 def create_post(user, d):
     """Make a post from a PostZ payload. Returns (post, info, error).
 
@@ -529,8 +581,11 @@ def create_post(user, d):
         from .models import Transaction, log_resource
         log_resource(user, Transaction.RES_ENERGY, -charged, f"Post: {title[:60]}",
                      app_key="postz", target="postz:compose")
+    derived, derr = clean_derived(user, d.get("derived"))
+    if derr:
+        return None, {}, ({"detail": derr}, status.HTTP_400_BAD_REQUEST)
     p = Post.objects.create(
-        author=user, title=title,
+        author=user, title=title, derived=derived,
         description=str(d.get("description", ""))[:4000],
         links=d.get("links") or [], media_type=media_type, media_url=media_url,
         is_album=is_album, items=items,
@@ -828,7 +883,9 @@ class PostsView(APIView):
         ratings = item_rating_medians([f"post:{i}" for i in ids])
         bought = _bought_ids(request, ids)
         plays = plays_for(visible)
+        marks = marks_for_posts(visible)
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
+                            marks=marks,
                             collabs=deals.get(p.id, 0), price=price, cap=cap,
                             take_state=sizes.get(p.id),
                             shares=shares.get(p.id, 0),
@@ -1331,8 +1388,10 @@ class DiscoveryFeedView(APIView):
         ratings = item_rating_medians([f"post:{i}" for i in ids])
         bought = _bought_ids(request, ids)
         plays = plays_for(recommendations)
+        marks = marks_for_posts(recommendations)
 
         posts = [_post_dict(p, request, *reactions.get(p.id, (0, 0)),
+                            marks=marks,
                             collabs=deals.get(p.id, 0), price=price, cap=cap,
                             take_state=sizes.get(p.id),
                             shares=shares.get(p.id, 0),

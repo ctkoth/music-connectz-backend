@@ -49,9 +49,16 @@ FEATURES = {
         "tier": TIER_STATZ, "label": "C++ / Unreal", "emoji": "🎮",
         "blurb": "Build games in any language including C++. Unreal is StatZ-only.",
     },
+    # Games ladder by HOW BIG, never whether (Corey's call): everybody builds a
+    # basic game, Premium a medium one, StatZ an advanced one. occ_spec.GAME_LEVELS
+    # says what each level holds; these are the tiers it reads.
     "occ_games": {
-        "tier": TIER_PREMIUM, "label": "Game builds", "emoji": "🕹️",
-        "blurb": "Build games in any language except C++.",
+        "tier": TIER_FREE, "label": "Basic games", "emoji": "🕹️",
+        "blurb": "One-screen games in Python, JavaScript or TypeScript.",
+    },
+    "occ_games_medium": {
+        "tier": TIER_PREMIUM, "label": "Medium games", "emoji": "🎮",
+        "blurb": "Levels, sprites, sound and saving, in any language except C++.",
     },
     # JournalZ. The diary itself is free and always will be — a paywall on
     # writing something down would make the app's most private surface its most

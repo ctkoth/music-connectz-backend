@@ -59,8 +59,8 @@ LOGICZ_TABS = [
      "desc": "PostZ is for show. This is where it becomes work — escrowed, so a "
              "stranger can take the first deal without either of you praying.",
      "apps": [
-         _app("CoverZ", "🫴🏼", "Covers of songs, redraws of existing art.", False),
-         _app("RemixeZ", "🔄", "Remixing posts and songs.", False),
+         _app("CoverZ", "🫴🏼", "Covers of songs, redraws of existing art — credited to the original.", True, tab="postz"),
+         _app("RemixeZ", "🔄", "Remixing posts and songs — credited to the original.", True, tab="postz"),
      ]},
     {"key": "battlez", "name": "BattleZ", "emoji": "🪖", "icon": "battlez.png",
      "desc": "One post against another. Verified 18+ can bet money on themselves; "
@@ -137,7 +137,7 @@ LOGICZ_TABS = [
     # place which exist, which are switched on or what each costs. `tab` points at
     # the app's own tab: sentenceconnectz, instrumentalconnectz, mixconnectz,
     # videoconnectz and facez are mounted by the frontend alongside this tab in the
-    # same release. Image ConnectZ has no screen, so it says so and links nowhere.
+    # same release.
     {"key": "intelligencez", "name": "IntelligenceZ", "emoji": "🧠", "icon": "intelligencez.png",
      "desc": "The apps that make things for you — written, composed, mastered, "
              "rendered. The price is on each one before you open it.",
@@ -156,15 +156,17 @@ LOGICZ_TABS = [
          # Runs entirely on the member's device, so it is free at every tier;
          # the tier buys how heavy the compression may go, never whether.
          _app("Mix ConnectZ", "🎚️",
-              "Master a finished song on your device — loudness, tone, width and "
-              "peaks, measured. Free; the tier sets how heavy the compression goes.",
+              "Master a finished song on your device — loudness, tone, width, "
+              "DynamicZ (punch and multiband) and peaks, measured; WAV or MP3. Free; the tier sets how heavy the compression goes.",
               True, tab="mixconnectz"),
          _app("Video ConnectZ", "🎬",
               "Short AI video clips from a prompt, with an optional photo as the "
               "first frame.", True, tab="videoconnectz"),
          _app("FaceZ", "🙂", "The photos Video ConnectZ can start from.",
               True, tab="facez"),
-         _app("Image ConnectZ", "🖼️", "Not built yet.", False),
+         _app("Image ConnectZ", "🖼️",
+              "Pictures made by AI for a use: profile picture, avatar, song and album "
+              "covers, banners, wallpapers, thumbnails, flyers and merch.", True, tab="imageconnectz"),
      ]},
     {"key": "keyconnectz", "name": "KeyConnectZ", "emoji": "⌨️", "icon": "keyconnectz.png",
      "desc": "The keyboard. Premium buys the wallpaper; everybody gets to be understood.",

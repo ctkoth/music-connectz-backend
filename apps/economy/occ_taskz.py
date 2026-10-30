@@ -34,6 +34,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .occ_guard import repo_attempt
 from .models import (
     OccTask,
     notify,
@@ -43,6 +44,7 @@ from .models import (
 )
 from .occ_suggest import can_reverse, reverse
 from .occ_spec import (
+    game_levels_for,
     EXPORT_ROUTES,
     GAME_GENRES,
     OCC_IMAGE_EXPORTS,
@@ -117,6 +119,8 @@ class OccSpecView(APIView):
                         for t in OCC_TOGGLES],
             "languages": allowed_langs,
             "languages_locked": locked_langs,
+            "game_levels": game_levels_for(tier)[0],
+            "game_level": game_levels_for(tier)[1],
             "game_genres": [{"key": k, "name": n, "emoji": e, "subgenres": subs}
                             for k, n, e, subs in GAME_GENRES],
             "image_exports": OCC_IMAGE_EXPORTS,
@@ -267,6 +271,10 @@ class OccTasksView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        refused = repo_attempt(request.user, " ".join(str(d.get(k, "") or "") for k in
+                                                      ("git_repo", "title", "what", "how", "detail")), "taskz")
+        if refused:
+            return Response({"detail": refused, "flagged": True}, status=status.HTTP_403_FORBIDDEN)
         task = OccTask.objects.create(
             user=request.user, title=title[:200], kind=kind,
             status=(OccTask.STATUS_SUGGESTED if suggested else OccTask.STATUS_QUEUED),

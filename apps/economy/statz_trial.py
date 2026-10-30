@@ -51,6 +51,15 @@ FEATURES = [
     # ViewZ: who viewed a post by name and every visit as a track on a clock, with what
     # each viewer did. It is a READ of what already happened, so it switches off cleanly.
     {"key": "viewz_tracks", "label": "Who viewed your posts, as DAW tracks", "tab": "viewz", "target": "viewz-tracks"},
+    # VideoZ: a photo's mouth moving with a voice. It runs on the member's device and
+    # spends nothing of ours, so the gate is client-side (like rest_alerts) and a
+    # video exported during the sample is the member's, like a routine the Coach paired.
+    {"key": "lipsync", "label": "Lip-sync a photo to a voice in VideoZ", "tab": "videoz", "target": "videoz-lipsync"},
+    # Video ConnectZ Direct: the AI plans (and, if asked, picks) each shot to fit the song. A plan is a
+    # read of the song and each run is still paid, so it switches off cleanly; a video
+    # rendered from a plan during the sample is the member's.
+    {"key": "video_develop", "label": "Direct: each video shot picked to fit your song",
+     "tab": "videoconnectz", "target": "video-develop"},
 ]
 
 # THE AUDIT: every place StatZ is the difference, and whether the daily sample covers it.
@@ -69,9 +78,17 @@ DRIVERS = [
     {"key": "mood_search", "sampled": True, "modules": ["instrumentalz"]},
     {"key": "page_widgets", "sampled": True, "modules": ["widgetz"]},
     {"key": "advanced_horoscope", "sampled": True, "modules": ["metricz"]},
-    {"key": "coach_pairing", "sampled": True, "modules": ["superset"]},
+    {"key": "coach_pairing", "sampled": True, "modules": ["superset", "bodiez"]},
     {"key": "rest_alerts", "sampled": True, "modules": []},
     {"key": "viewz_tracks", "sampled": True, "modules": ["viewz"]},
+    {"key": "lipsync", "sampled": True, "modules": []},
+    {"key": "video_develop", "sampled": True, "modules": ["videodevelop"]},
+    {"key": "instrumental_mix", "sampled": False, "modules": ["instrumentalz"],
+     "why_not": "A kept set of levels is a saved preference on a stored piece — a sample that left one behind would be a permanent grant wearing a timer."},
+    {"key": "mix_presets", "sampled": False, "modules": [],
+     "why_not": "Keeping a preset's mix and a saved library of AI presets are saved preferences — a sample that left them behind would be a permanent grant wearing a timer."},
+    {"key": "budget_bank", "sampled": False, "modules": [],
+     "why_not": "A linked bank is a standing connection that keeps importing — a sample that left one behind would be a permanent grant wearing a timer."},
     {"key": "coach_voices", "sampled": False, "modules": ["coachvoice"],
      "why_not": "Saving a coach voice is a standing preference — a sample that left one behind would be a permanent grant wearing a timer."},
     {"key": "custom_voices", "sampled": False, "modules": ["voicez"],

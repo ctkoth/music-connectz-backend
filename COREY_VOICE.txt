@@ -174,7 +174,7 @@ and nothing said so".
 2.4  SECOND PERSON, PLAIN WORDS, MEMBER-SIDE
 --------------------------------------------------------------------------------
 Member copy talks to the member about their own work. No product-speak, no
-apology theatre, no "oops", no exclamation marks.
+apology theatre, no "oops". Exclamation marks have one job, in 2.8 — nowhere else.
 
     "Record one take — mic or camera — or upload audio or video, and have it
      scored. You'll get what actually worked, what to fix, and a drill to run
@@ -236,6 +236,85 @@ When a number appears in prose, say where it came from and what could move it:
      Files API first and read by URI, which takes 2GB a file, free. So the number
      is no longer 'what fits in a request' — it is a judgement about what one
      take IS, and it can move without anyone re-deriving base64 overhead."
+
+
+--------------------------------------------------------------------------------
+2.8  THE EXCLAMATION MARK HAS ONE JOB
+--------------------------------------------------------------------------------
+It was banned outright, which kept the copy honest and also flat: the moment a
+member does something real was worded exactly like the moment they hit a limit.
+A ban that can't tell those apart is a ban on the wrong thing. The thing to
+ban is a "!" that adds energy to a claim. The thing to allow is a "!" that
+marks a fact.
+
+A "!" may mark exactly two things:
+
+  1. SOMETHING THAT ALREADY HAPPENED AND WAS MEASURED. A personal best, a
+     milestone rung reached, money that landed. The member did it and the
+     server can show the row.
+         "That's a personal best — 8.1 on flow, up from 7.4!"
+         "Seven days in a row — the 20 🍥 rung is yours!"
+  2. A GAIN THAT IS TRUE, FREE AND AVAILABLE RIGHT NOW. Not "limited", not
+     "soon", not "founding" — available, today, to the person reading.
+         "Free scored take, no account!"
+
+Everything else keeps the full stop:
+
+  * Corey's range: AT MOST once a paragraph, AT THE LEAST once a page. The
+    ceiling stops it being a rhythm; the floor stops a page that reports a
+    real win from reading like a limit. The floor only applies where there is
+    something true to mark — a page with no event and no free gain gets none,
+    because a mark invented to meet a minimum is the thing the rule forbids.
+  * Never stacked ("!!"), never "?!", never with a wall of emoji.
+  * Never on a fix, a refusal, an error, a price, a deletion, or a safety or
+    legal line. A cost that arrives with a "!" is a bill with a smile on it.
+  * Never on an instruction ("Join now!") or a promise about later ("You'll
+    love it!"). Neither has happened, so there's nothing for it to mark.
+  * Never on a sale. A deadline, a count of what's left, a "was $50" — that
+    is FunnelZ rule 2 and 3, and a "!" doesn't make a fake one true.
+  * Never in a code comment, a commit message or a CLAUDE.md section. Nobody
+    there did anything the mark could celebrate.
+
+THE TEST: say the sentence flat to a member whose take scored a 3. If it is
+still true — "Free scored take, no account" is — the mark may stay. If saying
+it to them would be cruel or false ("Great take!"), the mark was inflating a
+number, and a number that is inflated is the substance rule's failure case
+with punctuation on it.
+
+Where it is wired: voice.BANG_RULE (every model prompt, once) and
+voice.BANG_RULE_SHORT (the structured surfaces). Nothing retypes it.
+
+
+--------------------------------------------------------------------------------
+2.9  AN EMOJI CAN BE THE WORD, WHEN THERE'S NO ROOM TO SAY IT
+--------------------------------------------------------------------------------
+Taught by Corey, with the site description as the worked example:
+
+    AI Coaching & Gamified👾 way to make professional portfolio📑 of your music🎶 related work❓
+
+  * The emoji is attached to the word it labels, with no space on that side:
+    Gamified👾, 💲professional, portfolio📑. It can sit before or after.
+  * An emoji can TAKE THE PLACE of a word. "Your 🎶 related work" has no
+    "music" in it; the note is the word, so it keeps its own spaces.
+  * ❓ AFTER A WORD MEANS "THIS CAN BE ANYTHING". It is an open slot, used
+    instead of a list: "related work❓" because there are 11 personas (eleven,
+    when this was written) and a line that named them all would stop being a
+    line. Every member brings a different kind of work from the next — a
+    producer's is not a videographer's — so the slot is open for each of them
+    to fill with their own. The list belongs to the persona
+    picker in ProfileZ, one tap away, not to the headline.
+    It stays on the final line. An earlier draft of this note said it had been
+    dropped; that was a misreading, corrected by Corey.
+  * 🎶 on "music" is a mark ON the word. In an earlier cut it replaced the word;
+    now both are there, which also keeps "music" readable to anything that
+    can't render the emoji.
+
+THE COST, SAID OUT LOUD: an emoji standing in for a word is invisible to
+anything that can't render it. A crawler, a link unfurler and a screen reader
+all lose the word "music". So the word stays somewhere on the same surface —
+on the site, the page title says Music ConnectZ and the no-JS page spells out
+"your music-related work" — and an emoji stands in only where the word is
+still elsewhere in view.
 
 
 ================================================================================
@@ -405,7 +484,10 @@ VOICE
   [ ] Does every non-obvious line say WHY, including the rejected alternative?
   [ ] Is the scar named, with its number or symptom?
   [ ] Is it "member", not "user"?
-  [ ] Any "Oops", "Something went wrong", or exclamation marks? Remove them.
+  [ ] Any "Oops" or "Something went wrong"? Remove them.
+  [ ] Any "!"? At most one a paragraph, at least one a page that has a real
+      win or free gain, and never on a fix, a price, a refusal or a promise?
+      (2.8)
 
 
 ================================================================================
@@ -482,6 +564,70 @@ Rules for using it:
   literal, and his own example above.)
 
 ================================================================================
+PART 9 — IMAGERY: NAMES WITH A Z, AND THE EMOJI AS THE PICTURE
+================================================================================
+
+Corey's voice is not only sentences. Half of what a member reads is a NAME and
+an IMAGE, and both follow rules as fixed as the reversal in 2.1.
+
+--------------------------------------------------------------------------------
+9.1  A Z WHERE AN S WOULD BE
+--------------------------------------------------------------------------------
+Apps, badges, lists and anything plural take a Z: SingZ, BattleZ, VybeZ,
+InventoryZ, High NoteZ, Hot BarZ, Royal RatingZ, Cut RoyaltieZ. The Z is lit in
+the accent colour on every neon tile and medal (`wordmark()` in both icon
+generators), so the brand is the last letter of the word.
+
+  * The Z replaces the plural or the final s — it is never bolted onto a word
+    that has no s in it. "Deep PocketZ", not "DeepZ Pocket".
+  * One exception, by Corey's call: THOROUGH has no Z. It is the word for every
+    rating (8b), and a rating word stays plain so it reads as a measurement,
+    not a brand.
+  * Names are short enough to sit under a 36px tile: two words, about 13
+    characters at most. Longer, and the wordmark shrinks until nobody reads it.
+
+--------------------------------------------------------------------------------
+9.2  THE NAME IS AN IMAGE BEFORE IT IS A LABEL
+--------------------------------------------------------------------------------
+A good name puts a picture in the head that is TRUE of the thing:
+
+    High NoteZ    a singer hitting it          (3 SingZ takes scored 8+)
+    Deep PocketZ  a drummer sitting in the groove
+    Golden BowZ   a violin, lit
+    Royal RatingZ the room crowning a track    (a royalty boost it earned)
+    Cut RoyaltieZ scissors on a payout         (a royalty cut it earned)
+
+The test is the substance rule wearing a picture: does the image describe what
+the member DID? "Legendary" over a rating of 8 is earned; "Legendary" over a
+signup is decoration with a crown on it.
+
+--------------------------------------------------------------------------------
+9.3  THE EMOJI IS THE PICTURE, AND IT SITS ON THE WORD
+--------------------------------------------------------------------------------
+From 2.9: an emoji attaches to the word it labels, or stands in for it when
+there is no room — never decoration scattered beside a sentence.
+
+  * Every badge, tab and rung has ONE emoji that is its picture: 💯 Thorough,
+    🥈 Decent, 🥇 Legendary, 🌟 Supreme, 💎 Perfect, 🎤 High NoteZ, 🎒 InventoryZ.
+    One, not three. A row of emoji is a wall, and a wall says nothing.
+  * The emoji IS the placeholder art. Until Corey draws a piece, his emoji sits
+    inside a neon frame (a hexagon for a badge, a rounded tile for an app) and
+    the screen is finished, not waiting. His art replaces the frame, never the
+    other way round.
+  * Resource emoji are not imagery, they are currency: ⚡ 🍥 🏷️ 💵 ⭐ always
+    mean exactly one thing and are imported, never retyped (Rule 1).
+  * A penalty gets an image that says what happened (✂️ a cut), never a shaming
+    one. The picture describes the record, not the member.
+
+--------------------------------------------------------------------------------
+9.4  NEON, ONE BOX OF PENS
+--------------------------------------------------------------------------------
+The look is neon on near-black: cyan, pink, purple, gold, ember, emerald, and
+nothing else (the palette in tools/make-neon-icons.mjs). Heavy strokes, one
+glow, the Z lit in the accent. A set is a set because it draws from one box of
+pens — a new icon is a glyph and a colour, never a redraw of the frame.
+
+================================================================================
 PART 8 — THE ONE-PARAGRAPH SUMMARY
 ================================================================================
 
@@ -491,6 +637,7 @@ Never leave anyone on a screen with nowhere to go. When something fails, say
 which failure it was and what to do next. Write every comment for the person
 who will want to delete the line, and every commit message as the sentence that
 would have prevented the bug. Name your own broken parts, keep them named, and
-say what it would take to fix them.
+say what it would take to fix them. Name things with a Z and a true picture,
+and let one emoji be the image until the art is drawn.
 
 ================================================================================

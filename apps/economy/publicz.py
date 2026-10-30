@@ -19,6 +19,7 @@ The rule here is narrow on purpose:
   author's; neither is reachable without a session, which is what
   `can_view_post` already says.
 """
+from .inventoryz import inventory_shown
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -35,7 +36,7 @@ from .models import (
     can_view_post,
     item_rating_median,
 )
-from .personaz import links_of, personas_of
+from .personaz import links_of, personas_of, rate_unit_of
 
 
 def public_post_dict(p, viewer=None):
@@ -109,6 +110,9 @@ def public_profile_dict(p, request=None):
                 entry = {"name": s["name"]}
                 if s.get("rate_cents"):
                     entry["rate_cents"] = s["rate_cents"]
+                    entry["rate_unit"] = rate_unit_of(s)
+                if s.get("genres"):
+                    entry["genres"] = s["genres"]
                 skills.append(entry)
         personas.append({
             "key": persona.get("key", ""),
@@ -131,6 +135,8 @@ def public_profile_dict(p, request=None):
         # logged-out card: it narrows where somebody lives for no hiring gain.
         "pronouns": p.pronouns, "headline": p.headline, "genres": p.genres or [],
         "influences": p.influences or [], "gear": p.gear or [], "label": p.label,
+        # Logged out, so only an owner who set "what it's worth" to Public shows prices here.
+        "inventory": inventory_shown(p, None), 
         "cover_url": cover_abs(p.cover_url, request),
         "pinned_post": _pinned(p),
         # BadgeZ travels with the card. A shared profile is somebody's proof

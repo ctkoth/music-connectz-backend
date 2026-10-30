@@ -51,6 +51,7 @@ from .models import (
     membership_for,
     profile_for,
 )
+from .occ_spec import game_note
 from .occ_tools import CHANGES_FILES, TOOLS, run_tool
 from .resources import PROMPTZ
 
@@ -204,7 +205,7 @@ def run_agent(user, prompt, *, project="main", model_key=None,
             response = client.messages.create(
                 model=spec["id"],
                 max_tokens=MAX_TOKENS_PER_TURN,
-                system=AGENT_SYSTEM + _budget_note(spent, max_cents),
+                system=AGENT_SYSTEM + game_note(membership_for(user).tier) + _budget_note(spent, max_cents),
                 tools=TOOLS,
                 messages=messages,
                 **extra,

@@ -281,3 +281,68 @@ class CollabGateTests(TestCase):
         }, format="json")
         self.assertEqual(resp.status_code, 201, resp.content)
         self.assertEqual(resp.data["gates"], {})
+
+
+class RateUnitTests(TestCase):
+    """A skill's price is per HOUR (the default) or per WORK, and the two are never mixed up."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("unitz", "unitz@e.com", "pw-Long-enough-1")
+
+    def _set(self, skills):
+        from .personaz import clean_persona
+        p = profile_for(self.user)
+        p.personas = [clean_persona({"key": "m", "name": "M", "skills": skills})]
+        p.save()
+        return p
+
+    def test_hourly_is_the_default_and_is_not_stored(self):
+        p = self._set([{"name": "Mixing", "rate_cents": 5000}])
+        self.assertNotIn("rate_unit", p.personas[0]["skills"][0])
+
+    def test_per_work_is_kept_and_junk_falls_back_to_hourly(self):
+        p = self._set([{"name": "A", "rate_cents": 900, "rate_unit": "work"},
+                       {"name": "B", "rate_cents": 900, "rate_unit": "banana"},
+                       {"name": "C", "rate_unit": "work"}])           # no price -> no unit
+        a, b, c = p.personas[0]["skills"]
+        self.assertEqual(a["rate_unit"], "work")
+        self.assertNotIn("rate_unit", b)
+        self.assertNotIn("rate_unit", c)
+
+    def test_every_price_still_counts_in_a_post_and_the_quote_names_its_unit(self):
+        from .postz import post_cost_cents, skill_prices
+        self._set([{"name": "Mixing", "rate_cents": 5000},
+                   {"name": "Cover", "rate_cents": 700, "rate_unit": "work"}])
+        self.assertEqual(skill_prices(self.user), {"Mixing": 5000, "Cover": 700})   # nobody's cost moved
+        _, lines = post_cost_cents(self.user, ["Mixing", "Cover"], floor=0)
+        units = {l["skill"]: l["unit"] for l in lines}
+        self.assertEqual(units, {"Mixing": "hour", "Cover": "work"})
+
+    def test_a_per_work_price_is_not_an_hourly_rate(self):
+        from .social import profile_skill_rate
+        p = self._set([{"name": "Mixing", "rate_cents": 5000},
+                       {"name": "Cover", "rate_cents": 700, "rate_unit": "work"}])
+        self.assertEqual(profile_skill_rate(p), 5000)
+
+
+class SkillGenreTests(TestCase):
+    """A skill can carry the same genres every picker offers: plain, short, unique, a few."""
+
+    def test_genres_are_cleaned_and_kept_on_the_skill(self):
+        from .personaz import clean_persona
+        p = clean_persona({"key": "m", "name": "M", "skills": [
+            {"name": "Rapping", "genres": ["Trap", " drill ", "trap", "<b>Boom Bap</b>", 5, None, "x" * 80]}]})
+        g = p["skills"][0]["genres"]
+        self.assertEqual(g[:2], ["Trap", "drill"])                        # trimmed, in the order given
+        self.assertIn("Trap", g)
+        self.assertNotIn("<", "".join(g))
+        self.assertEqual(len([x for x in g if x.lower() == "trap"]), 1)
+        self.assertTrue(all(len(x) <= 40 for x in g))
+
+    def test_no_genres_means_no_key_and_a_cap(self):
+        from .personaz import SKILL_GENRES_MAX, clean_persona
+        none = clean_persona({"key": "m", "name": "M", "skills": [{"name": "Mixing"}]})["skills"][0]
+        self.assertNotIn("genres", none)
+        many = clean_persona({"key": "m", "name": "M", "skills": [
+            {"name": "Mixing", "genres": [f"G{i}" for i in range(30)]}]})["skills"][0]["genres"]
+        self.assertEqual(len(many), SKILL_GENRES_MAX)

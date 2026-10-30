@@ -206,7 +206,7 @@ services:
     buildCommand: "pip install -r requirements.txt"
     # Retake reminders ride the same hourly job rather than a second paid
     # cron service. `;` not `&&`: one failing must not stop the other.
-    startCommand: "python manage.py check_habits_and_notify; python manage.py send_retake_reminders"
+    startCommand: "python manage.py check_habits_and_notify; python manage.py send_retake_reminders; python manage.py refresh_badges"
     envVars:
       - key: DATABASE_URL
         fromService: {type: web, name: music-connectz-backend, envVarKey: DATABASE_URL}

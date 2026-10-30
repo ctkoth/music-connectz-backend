@@ -28,7 +28,7 @@ from rest_framework.views import APIView
 from . import videoz
 from .catalog import ai_cost, ai_model_for
 from .gemini import _key
-from .models import (Face, InstrumentalWork, MasterWork, OccOutput, SentenceWork, VideoWork,
+from .models import (Face, GeneratedImage, InstrumentalWork, MasterWork, OccOutput, SentenceWork, VideoWork,
                      daily_prompt_covers, daily_prompt_state, membership_for, profile_for)
 from .sentencez import KINDS as SENTENCE_KINDS
 
@@ -76,13 +76,13 @@ APPS = [
     ("instrumentalconnectz", "Instrumental ConnectZ", "🎹", "instrumentalconnectz.png",
      "AI-composed MIDI loops by genre, instruments, BPM and key.", True),
     ("mixconnectz", "Mix ConnectZ", "🎚️", "mixconnectz.png",
-     "Master a finished song on your device — loudness, tone, width and peaks, measured.", True),
+     "Master a finished song on your device — loudness, tone, width, DynamicZ and peaks, measured; WAV or MP3.", True),
     ("videoconnectz", "Video ConnectZ", "🎬", "videoconnectz.png",
      "Short AI video clips from a prompt, with an optional photo as the first frame.", True),
     ("facez", "FaceZ", "🙂", "facez.png",
      "The photos Video ConnectZ can start from.", True),
     ("imageconnectz", "Image ConnectZ", "🖼️", "imageconnectz.png",
-     "Not built yet.", False),
+     "Profile pictures, avatars, song and album covers, banners, wallpapers, thumbnails and flyers — pick what it's for.", True),
 ]
 
 # The data-tour anchor each shelf row lands on in its own app.
@@ -115,7 +115,9 @@ def _prices(user, tier, daily_left):
         "mixconnectz": {"kind": "device"},
         "videoconnectz": {"kind": "fixed", "cost_cents": videoz.price_cents()},
         "facez": {"kind": "free"},
-        "imageconnectz": None,
+        # A picture runs a dearer model than the daily allowance is priced for, so it
+        # is never covered by it (gemini._bill, count_daily=False) — a fixed price.
+        "imageconnectz": {"kind": "fixed", "cost_cents": standard},
     }
 
 
@@ -130,8 +132,7 @@ def _configured():
         "videoconnectz": gemini,
         # Photos are stored, not generated.
         "facez": True,
-        # Nothing is built, so nothing can be switched on.
-        "imageconnectz": False,
+        "imageconnectz": gemini,
     }
 
 
@@ -143,7 +144,7 @@ def _counts(user):
         "mixconnectz": MasterWork.objects.filter(user=user).count(),
         "videoconnectz": VideoWork.objects.filter(user=user).count(),
         "facez": Face.objects.filter(owner=user).count(),
-        "imageconnectz": 0,
+        "imageconnectz": GeneratedImage.objects.filter(user=user).count(),
     }
 
 

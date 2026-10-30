@@ -23,6 +23,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .priorities import clause as priorities_clause
+from . import imagez
 from .catalog import ai_cost
 from .media import stable_media_url
 from .models import (GeneratedImage, Upload, can_afford_ai, charge_ai_usage,
@@ -39,6 +41,7 @@ def _image_dict(work, request=None):
     up = work.upload
     return {
         "id": work.id, "prompt": work.prompt, "created_at": work.created_at,
+        "kind": work.kind, "upload_id": up.id if up else None,
         # None when the file itself was later removed from the uploads screen —
         # the record still says what was made, same as MasterWork.
         "url": stable_media_url(up, request) if up else None,
@@ -297,6 +300,33 @@ INSPIRATION_WRAP = (
     "recognisable artwork from it. Make a new, original picture for this request: ")
 
 
+def self_faces(user):
+    """The member's FaceZ photos that may stand for THEM: theirs, not tagged as anyone else."""
+    from django.db.models import Q
+    from .models import Face
+    return Face.objects.filter(owner=user).exclude(image="").filter(Q(tagged__isnull=True) | Q(tagged=user))
+
+
+_FACE_MIME = {".png": "image/png", ".webp": "image/webp", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+
+
+def face_reference(user, face_id):
+    """(data URL, None) for one of the member's own faces, or (None, why)."""
+    try:
+        face = self_faces(user).filter(pk=int(face_id)).first()
+    except (TypeError, ValueError):
+        face = None
+    if not face:
+        return None, "Only your own FaceZ photo of yourself can be used — not one tagged as somebody else."
+    try:
+        with face.image.open("rb") as fh:
+            raw = fh.read()
+    except Exception:
+        return None, "That FaceZ photo couldn't be read from storage. Pick another or upload one."
+    ext = os.path.splitext(face.image.name)[1].lower()
+    return f"data:{_FACE_MIME.get(ext, 'image/jpeg')};base64,{base64.b64encode(raw).decode()}", None
+
+
 class GeminiImageView(APIView):
     """GET: images you've made. POST { prompt } → a generated image, kept."""
 
@@ -305,14 +335,43 @@ class GeminiImageView(APIView):
     def get(self, request):
         works = GeneratedImage.objects.filter(user=request.user).select_related("upload")[:30]
         _, _, daily_left = daily_prompt_state(request.user)
+        allowance, _, _ = daily_prompt_state(request.user)
         return Response({"images": [_image_dict(w, request) for w in works],
-                         "cost_cents": ai_cost("standard"), "free_today": daily_left > 0,
-                         "inspiration_note": INSPIRATION_IMAGE_NOTE})
+                         # A picture is never covered by the daily free prompts (see _bill):
+                         # saying "free today" here would be a price that turns into a bill.
+                         "cost_cents": ai_cost("standard"), "free_today": False,
+                         "cost_note": "Pictures aren't covered by the daily free prompts. A run that fails isn't charged.",
+                         "daily_prompts": allowance, "daily_prompts_left": daily_left,
+                         "configured": bool(_key()),
+                         "inspiration_note": INSPIRATION_IMAGE_NOTE, **imagez.catalogue(),
+                         # Saved FaceZ photos the member may use as their own likeness: theirs, and
+                         # not tagged as somebody else.
+                         "faces": [{"id": f.id, "name": f.name, "url": request.build_absolute_uri(f.image.url)}
+                                   for f in self_faces(request.user)[:30]]})
 
     def post(self, request):
-        prompt = str((request.data or {}).get("prompt", "")).strip()
-        if not prompt:
-            return Response({"detail": "prompt required"}, status=status.HTTP_400_BAD_REQUEST)
+        data = request.data or {}
+        prompt = str(data.get("prompt", "")).strip()[:1000]
+        kind, style, mood, colours, words = imagez.clean_options(data)
+        if not prompt and not kind:
+            return Response({"detail": "Pick what it's for, or describe the picture."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        likeness = str(data.get("reference_mode", "")).lower() == "me"
+        if likeness:
+            if not imagez.KINDS.get(kind, {}).get("likeness"):
+                return Response({"detail": "Your photo can only be used on a picture that's of you — "
+                                           "a profile picture, avatar, cover, thumbnail, post or flyer."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if str(data.get("confirm_self", "")).lower() not in ("1", "true", "yes", "on"):
+                return Response({"detail": "Confirm the photo is of you. " + imagez.LIKENESS_NOTE},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if data.get("face_id") not in (None, ""):
+                ref, why = face_reference(request.user, data.get("face_id"))
+                if why:
+                    return Response({"detail": why}, status=status.HTTP_400_BAD_REQUEST)
+                data = {**data, "reference": ref}
+            if not data.get("reference"):
+                return Response({"detail": "Pick your photo first."}, status=status.HTTP_400_BAD_REQUEST)
         key = _key()
         if not key:
             return Response({"detail": "Image generation isn't configured — set GEMINI_API_KEY on the backend.", "image": None},
@@ -328,8 +387,13 @@ class GeminiImageView(APIView):
         if inspiration and not (request.data or {}).get("reference"):
             return Response({"detail": "Pick a picture for Inspiration first.", "image": None},
                             status=status.HTTP_400_BAD_REQUEST)
-        parts = [{"text": (INSPIRATION_WRAP + prompt) if inspiration else prompt}]
-        reference = (request.data or {}).get("reference")
+        if likeness:
+            inspiration = False
+        framed = imagez.build_prompt(prompt, kind, style, mood, colours, words) + priorities_clause("image", (request.data or {}).get("priorities"))
+        wrap = INSPIRATION_WRAP if inspiration else imagez.LIKENESS_WRAP if likeness else ""
+        parts = [{"text": wrap + framed}]
+        aspect = imagez.KINDS.get(kind, {}).get("aspect")
+        reference = data.get("reference")
         if isinstance(reference, str) and reference.startswith("data:") and "," in reference:
             header, b64 = reference.split(",", 1)
             ref_mime = header.split(";")[0].split(":")[-1] or "image/jpeg"
@@ -339,19 +403,27 @@ class GeminiImageView(APIView):
             # the full URL in every connection error it raises, and this view
             # used to hand `str(exc)` to the member — so a dropped connection
             # printed part of GEMINI_API_KEY on their screen.
-            r = requests.post(
-                f"{BASE}/models/{model}:generateContent",
-                headers={"x-goog-api-key": key},
-                json={"contents": [{"parts": parts}],
-                      "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}},
-                timeout=90,
-            )
-            data = r.json()
+            # The frame shape rides in imageConfig where the model takes it. A model that
+            # refuses the field answers without an image, so the same request goes once
+            # more without it — the shape is also in the prompt, so it is still asked for.
             img, mime = None, "image/png"
-            for part in (data.get("candidates") or [{}])[0].get("content", {}).get("parts", []):
-                inline = part.get("inlineData") or part.get("inline_data")
-                if inline and inline.get("data"):
-                    img = inline["data"]; mime = inline.get("mimeType") or inline.get("mime_type") or mime
+            for with_aspect in ((True, False) if aspect else (False,)):
+                config = {"responseModalities": ["IMAGE", "TEXT"]}
+                if with_aspect:
+                    config["imageConfig"] = {"aspectRatio": aspect}
+                r = requests.post(
+                    f"{BASE}/models/{model}:generateContent",
+                    headers={"x-goog-api-key": key},
+                    json={"contents": [{"parts": parts}], "generationConfig": config},
+                    timeout=90,
+                )
+                data = r.json()
+                for part in (data.get("candidates") or [{}])[0].get("content", {}).get("parts", []):
+                    inline = part.get("inlineData") or part.get("inline_data")
+                    if inline and inline.get("data"):
+                        img = inline["data"]; mime = inline.get("mimeType") or inline.get("mime_type") or mime
+                        break
+                if img:
                     break
             if not img:
                 # Google's own words are for the log, not the screen: they are a
@@ -377,7 +449,9 @@ class GeminiImageView(APIView):
             up = Upload(user=request.user, name=name, size_bytes=len(raw), content_type=mime)
             up.file.save(name, ContentFile(raw), save=False)
             up.save()
-            work = GeneratedImage.objects.create(user=request.user, prompt=prompt, upload=up)
+            label = imagez.KINDS.get(kind, {}).get("label", "")
+            work = GeneratedImage.objects.create(user=request.user, kind=kind, upload=up,
+                                                 prompt=prompt or label or "Image")
         except (binascii.Error, ValueError, OSError):
             logger.exception("Image ConnectZ: billed but couldn't save a kept copy")
 

@@ -156,15 +156,28 @@ CREDIT_OUTCOMES = {
                             "history. A repeated biometric-adjacent rating held over time is its own "
                             "privacy risk that a stateless call does not create.",
         "no_free_way": "It reads one photo with a model; the daily free allowance is the free way in."},
+    "videodevelop": {
+        "resource": "promptz", "label": "Video ConnectZ Direct",
+        "buys": "A shot plan for your music video, made by listening to your track: for every shot, what is heard in that part of the song and three shots that go with its lyric, mood or beat, each with why, and the one the coach would direct.",
+        "outcomes": ["understandable", "tangible"],
+        "lands_in": ["videoconnectz"],
+        "ephemeral_reason": "The plan goes straight onto the shot fields and is not stored on its own; what is kept is the video it becomes, whose every shot carries the text that was picked.",
+        "free_way": {"label": "Writing each shot yourself is free and open to everyone, and a daily free prompt covers a plan.", "tab": "videoconnectz"}},
     "bodiez_ai_view": {
         "resource": "promptz", "label": "BodieZ AI coach",
         "buys": "An AI read of a workout, routine or muscle from your logs (what's working, what to change, your next session), or a form check that watches one video of a set and scores it with cues.",
         "outcomes": ["tangible", "understandable", "learnable"],
         "lands_in": ["bodiez"],
         "free_way": {"label": "Every lift, muscle and routine already has a free Thorough rating, and a daily free prompt covers a read.", "tab": "bodiez"}},
+    "inventoryz": {
+        "resource": "promptz", "label": "InVenTorieZ AI rating",
+        "buys": "A 1-10 rating of each pictured piece of gear or clothing, and of the whole kit together, with the reason — kept, and shown on your InVenTorieZ when you choose.",
+        "outcomes": ["tangible", "understandable", "braggable", "shareable"],
+        "lands_in": ["profilez"],
+        "free_way": {"label": "Other members rate your pieces for free, 1 to 10, and a daily free prompt covers a run.", "tab": "profilez"}},
     "lookmaxz_view": {
         "resource": "promptz", "label": "LookZMaxZ reading",
-        "buys": "A sector-by-sector read of how a photo presents (face, skin, teeth, styling) with what to change and where to shop for it.",
+        "buys": "A sector-by-sector read of how a photo of you presents (face, skin, teeth, styling) with what to change and where to shop for it — or, from anybody's photo, Look Inspiration: the cut, facial hair, brows and styling in it and how to get them, with no scores.",
         # Extends AttractivenessZ and inherits its privacy line: the reading
         # itself is never stored (only the member's own shop-market
         # preferences are, in LookmaxPrefs — a different thing). "tangible"
@@ -176,6 +189,13 @@ CREDIT_OUTCOMES = {
                             "the same reason (a held biometric-adjacent history is its own risk). Only "
                             "the member's own shop-market preferences persist, in LookmaxPrefs.",
         "free_way": {"label": "Body, the shop and your marketplaces are free; a daily free prompt covers a reading.", "tab": "lookmaxz"}},
+    "lookask": {
+        "resource": "promptz", "label": "LookZMaxZ reading, approved by the person in it",
+        "buys": "A LookZMaxZ reading of a photo of another member, made only after they saw the photo and approved it, shown to both of you as their share.",
+        "outcomes": ["understandable", "shareable"],
+        "lands_in": ["lookmaxz"],
+        "ephemeral_reason": "The photo is deleted as soon as it is decided; what is kept is the share the person in it chose to make, which they can take down.",
+        "free_way": {"label": "Send your invite link instead: they get their own reading and choose whether to share it, at no cost to you.", "tab": "lookmaxz"}},
     "views": {
         "resource": "promptz", "label": "AI usage charge",
         "buys": "The model run another screen asked for, billed once and logged with its reason.",

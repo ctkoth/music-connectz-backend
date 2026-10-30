@@ -34,6 +34,8 @@ import ast
 import json
 from urllib.parse import urlparse
 
+from .interestz_table import BRANDS, TRAITS
+
 
 # Bio/interests/pet peeves — bounded the same way `skills` already is
 # (`[:100]`, `[:80]` per name), so a persona row cannot be grown into a
@@ -57,6 +59,18 @@ def _clean_tag_list(value):
     return out
 
 
+def clean_tags(value):
+    """`_clean_tag_list`, for callers outside this module (a character's hobbies)."""
+    return _clean_tag_list(value)
+
+
+def _clean_keys(value, table):
+    """The keys in `value` that are on `table`, once each, in order."""
+    if not isinstance(value, list):
+        return []
+    return [k for k in dict.fromkeys(str(x) for x in value[:MAX_TAGS * 2]) if k in table][:MAX_TAGS]
+
+
 def _recover(text):
     """A dict back out of a string that is the printed form of one, else None.
 
@@ -77,6 +91,37 @@ def _recover(text):
         if isinstance(out, dict):
             return out
     return None
+
+
+RATE_HOUR, RATE_WORK = "hour", "work"
+RATE_UNITS = (RATE_HOUR, RATE_WORK)
+
+
+def rate_unit_of(skill):
+    """"work" or "hour" — what a skill's `rate_cents` is a price per. Anything else is hourly."""
+    if isinstance(skill, dict) and str(skill.get("rate_unit") or "").lower() == RATE_WORK:
+        return RATE_WORK
+    return RATE_HOUR
+
+
+SKILL_GENRES_MAX = 8
+
+
+def clean_skill_genres(raw):
+    """['Trap', 'Drill'] from whatever arrived: strings only, trimmed, no markup, unique, a few."""
+    if not isinstance(raw, (list, tuple)):
+        return []
+    out, seen = [], set()
+    for g in raw:
+        if not isinstance(g, str):
+            continue
+        g = " ".join(g.replace("<", " ").replace(">", " ").split())[:40]
+        if g and g.lower() not in seen:
+            seen.add(g.lower())
+            out.append(g)
+        if len(out) >= SKILL_GENRES_MAX:
+            break
+    return out
 
 
 def clean_persona(raw):
@@ -128,6 +173,11 @@ def clean_persona(raw):
         except (TypeError, ValueError):
             rate = 0
         entry = {"name": name}
+        # What the price is FOR: an hour of the member's time, or one finished piece of work.
+        # Hourly is the default and is not stored, so every price written before this existed
+        # keeps meaning what it always meant.
+        if rate and str(s.get("rate_unit") or "").lower() == RATE_WORK:
+            entry["rate_unit"] = RATE_WORK
         if periods:
             entry["periods"] = periods
         else:
@@ -136,6 +186,13 @@ def clean_persona(raw):
                 entry["start"] = start
         if rate:
             entry["rate_cents"] = rate
+        # The genres this skill is practised in - the same names every genre picker offers
+        # ("Rapping" in Trap and Drill). Free-form tags, not a closed list: the picker's list
+        # lives in the client, and a member who works in a genre we have not listed should not
+        # be refused for it. Short, de-duplicated, plain text.
+        genres = clean_skill_genres(s.get("genres"))
+        if genres:
+            entry["genres"] = genres
         skills.append(entry)
 
     key = str(raw.get("key") or raw.get("name") or "")[:60]
@@ -155,6 +212,18 @@ def clean_persona(raw):
     pet_peeves = _clean_tag_list(raw.get("pet_peeves"))
     if pet_peeves:
         out["pet_peeves"] = pet_peeves
+
+    # Brands and strengths the member PICKED (interestz.py). Closed lists, so a
+    # key that isn't on one is dropped, and both are declared rather than
+    # measured: nothing may read `declared_strengths` as a measurement. The
+    # `declared_` prefix is also what lets a test find every reader, which a
+    # bare word (the coach has its own) could not.
+    brands = _clean_keys(raw.get("declared_brands"), BRANDS)
+    if brands:
+        out["declared_brands"] = brands
+    strengths = _clean_keys(raw.get("declared_strengths"), TRAITS)
+    if strengths:
+        out["declared_strengths"] = strengths
 
     return out
 

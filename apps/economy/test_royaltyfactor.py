@@ -181,3 +181,105 @@ class BattleCoachTests(TestCase):
         board = scoreboard(bt)
         self.assertGreater(board["host"]["median"], board["opponent"]["median"])
         self.assertEqual(board["host"]["coach"]["takes"], 1)
+
+
+class GhostWriterSkillTests(TestCase):
+    """Lyrics for a sung or rapped track are rated under the form they served, not as a performance."""
+
+    def _post(self, skills_used, slot="text"):
+        a, w = mk("gwauthor"), mk("gwriter")
+        post = Post.objects.create(author=a, title="t", visibility="public", skills_used=skills_used,
+                                   contributors=[{"username": "gwauthor", "slot": "audio"},
+                                                 {"username": "gwriter", "slot": slot}])
+        return post, a, w
+
+    def test_a_ghostwriter_on_a_rap_is_credited_for_writing_rapping(self):
+        from .models import skills_for_post
+        post, a, w = self._post(["Rapping"])
+        pairs = {(u.username, s) for u, s in skills_for_post(post)}
+        self.assertIn(("gwriter", "Ghost Writer · Rapping"), pairs)
+        self.assertIn(("gwauthor", "Independent Artist"), pairs)            # the performer is unchanged
+        self.assertNotIn(("gwriter", "Rapping"), pairs)                     # never rated AS the rapper
+
+    def test_with_no_performance_skill_it_stays_plain_ghost_writer(self):
+        from .models import skills_for_post
+        post, a, w = self._post(["Poetry"])
+        self.assertIn(("gwriter", "Ghost Writer"), {(u.username, s) for u, s in skills_for_post(post)})
+
+    def test_only_the_text_slot_is_a_ghostwriter(self):
+        from .models import skills_for_post
+        post, a, w = self._post(["Rapping"], slot="video")
+        self.assertIn(("gwriter", "Videographer"), {(u.username, s) for u, s in skills_for_post(post)})
+
+
+class RoyaltiesNeverOweTests(TestCase):
+    """Corey: (median − 5) × 10% on top of the base. A 4 or lower earns LESS, never owes."""
+
+    def test_every_rating_is_a_positive_factor_and_four_or_less_is_below_the_base(self):
+        for m in range(1, 5):
+            self.assertGreater(rf.curve(m), 0, m)
+            self.assertLess(rf.curve(m), 1.0, m)
+        self.assertEqual(rf.curve(5), 1.0)
+        self.assertGreater(rf.curve(6), 1.0)
+
+    def test_no_median_however_wild_goes_below_the_floor(self):
+        for m in (-50, 0, 0.5, 1):
+            self.assertEqual(rf.curve(m), rf.LOWEST)
+        self.assertGreater(rf.LOWEST, 0)
+
+    def test_a_low_rated_track_never_writes_a_negative_royalty_row(self):
+        t = BadRatingsEarnLessTests("test_better_rated_earns_more_and_worse_rated_earns_less_than_unrated")
+        t.setUp()
+        a = mk("lowauth")
+        t._run((a, "low", 1, 6))
+        from .models import RoyaltyEntry
+        rows = list(RoyaltyEntry.objects.filter(user=a))
+        self.assertTrue(rows)
+        self.assertTrue(all(r.amount_cents > 0 and r.tax_cents >= 0 for r in rows))
+
+
+class DerivedRoyaltyTests(TestCase):
+    """A cover or remix pays the original's author a cut of what it earns; never new money."""
+
+    def _world(self, cover_rating=None):
+        """One harness: an ordinary post and a cover of somebody's song, same plays, one accrual."""
+        t = BadRatingsEarnLessTests("test_better_rated_earns_more_and_worse_rated_earns_less_than_unrated")
+        t.setUp()
+        orig, cov, plain = mk("origauth"), mk("coverer"), mk("plainposter")
+        song = Post.objects.create(author=orig, title="Song", visibility="public")
+        t._track(plain, "plain", None, 0)
+        post = t._track(cov, "My cover", cover_rating, 6 if cover_rating else 0)
+        post.derived = {"id": song.id, "kind": "cover", "title": "Song", "author": "origauth"}
+        post.save(update_fields=["derived"])
+        accrue_playlist_royalties_for_date(timezone.now().date())
+        earned = lambda u: sum(e.amount_cents + e.tax_cents for e in RoyaltyEntry.objects.filter(user=u))
+        return earned(orig), earned(cov), earned(plain)
+
+    def test_the_original_gets_twenty_percent_and_nothing_is_created(self):
+        from .derivedroyalty import DERIVED_ROYALTY_PCT
+        o, c, plain = self._world()
+        self.assertGreater(o, 0)
+        self.assertEqual(o + c, plain)                                         # a split, never new money
+        self.assertAlmostEqual(o / plain, DERIVED_ROYALTY_PCT / 100, delta=0.03)
+
+    def test_a_poorly_rated_cover_pays_the_original_less_too(self):
+        o, c, plain = self._world(cover_rating=2)
+        self.assertLess(o + c, plain)
+        self.assertGreater(o, 0)
+
+    def test_no_original_no_cut_and_the_poster_never_pays_themselves(self):
+        from .derivedroyalty import original_cut
+        a = mk("self_cover")
+        post = Post.objects.create(author=a, title="x", visibility="public",
+                                   derived={"id": 1, "kind": "cover", "title": "t", "author": "self_cover"})
+        self.assertEqual(original_cut(post, 100), (None, 0))
+        post.derived = {"id": 1, "kind": "cover", "title": "t", "author": "deleted_user"}
+        self.assertEqual(original_cut(post, 100), (None, 0))
+        post.derived = {}
+        self.assertEqual(original_cut(post, 100), (None, 0))
+
+    def test_the_terms_are_served_before_posting(self):
+        c = APIClient(); c.force_authenticate(mk("reader"))
+        d = c.get("/api/economy/derivedz/").data
+        self.assertEqual(d["pct"], 20)
+        self.assertIn("20%", d["text"])

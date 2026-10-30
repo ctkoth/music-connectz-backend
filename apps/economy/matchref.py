@@ -11,6 +11,30 @@ Rules that hold it, each one the repo's existing rule applied here:
   request's own temporary file, never an `Upload` row, never in a quota, never
   served back, and any Files API copy is deleted. The member must have the right
   to analyse it (`REFERENCE_NOTICE` is shown beside the control).
+* **Either side can already be on the platform.** The take: a file, one of the member's
+  own posts (a RapZ submission, say), a FileZ upload from whichever app made it, or a
+  journal recording. The reference: a file, ANY post the member is allowed to view (the
+  famous example, or another member's track), or one of their own uploads. Every one of
+  those goes through the coach's own lookups (`_take_from_post`, `_take_from_upload`,
+  `_take_from_journal`), so view rights, ownership and size-from-the-row are the rules the
+  coach already enforces and not a second copy of them. Nothing is ever written onto
+  someone else's post, and a post's file is read for this comparison only.
+* **A YouTube link can be either side; Spotify and SoundCloud links cannot, and the screen says
+  so BEFORE the press.** The coach hears audio, and only YouTube can be handed to the model by
+  address (Gemini watches a public video itself — nothing is downloaded here). Spotify and
+  SoundCloud serve a player and never the audio, so there is nothing to hear; "reviewing" a
+  song from its title would be invented detail, which is the substance rule's failure case. The
+  link is parsed by `widgetz` (the same parser a link widget uses) and REBUILT from the video id,
+  so nothing the member typed reaches the model but that id and a start time. Only a
+  `LINK_WINDOW_SECONDS` window is read — a whole album upload would otherwise be the price of
+  one comparison.
+* **Using a post costs what coaching a post costs** (`vocalcoach.coach_post_energy`, ⚡) — ONCE,
+  however many of the two sides are posts. Stated on the control before it is pressed,
+  checked before the model runs, spent only after a usable result. A file, a FileZ upload
+  or a journal entry costs no ⚡.
+* **Both takes are rated and compared** (Corey's ask): every dimension and an overall, for the
+  take AND the reference, on one scale so the numbers compare; `compare()` does the subtraction
+  (who leads where, by how much) so the model rates and the server does the arithmetic.
 * **Nothing is saved as the member's.** No TakeScore, no share card, no SkillZ
   XP, no skill rating: a gap to somebody else's record is not a measurement of
   the member, and a number the member could raise by copying a record would be
@@ -28,6 +52,8 @@ Rules that hold it, each one the repo's existing rule applied here:
   before it is pressed (`GET`), billed only after a usable parse.
 """
 import logging
+import re
+from urllib.parse import parse_qs, urlparse
 
 import requests
 from rest_framework import status
@@ -40,7 +66,7 @@ from .catalog import ai_cost
 from .deadline import COACH_BUDGET_SECONDS, Deadline, Expired
 from .gemini import _bill, _key, generate_content
 from .instruments import profile_for_app, scores_for
-from .models import can_afford_ai, daily_prompt_state
+from .models import can_afford_ai, daily_prompt_state, mark_upload_missing, spend_energy, wallet_for
 from . import vocalcoach as vc
 
 logger = logging.getLogger(__name__)
@@ -61,6 +87,22 @@ NOTICE = ("Use music you have the right to analyse. The reference is read for th
           "the file isn't kept. Your take isn't saved either unless you keep it elsewhere.")
 EQ_NOTE = ("EQ notes are what the coach HEARD, not a measured spectrum — check them "
            "against your own meters and ears before you cut or boost.")
+# What a link can be, said before it is pressed. Served on GET; the screen retypes none of it.
+LINK_WINDOW_SECONDS = 240
+LINK_NOTE = ("A YouTube link works: the coach watches a public video from the address, and reads "
+             f"the first {LINK_WINDOW_SECONDS // 60} minutes (or from the time in the link, like ?t=80). "
+             "It has to be public — not private, age-restricted or removed.")
+LINK_NO = ("The coach can't listen to {label} links: {label} gives out a player, never the audio, so "
+           "there is nothing to hear and the coach won't guess from the title. Upload the file, pick a "
+           "post, or use a YouTube link.")
+NOT_A_LINK = ("That isn't a link the coach can listen to. Paste a YouTube link, or upload the file.")
+LINK_SOURCES = [
+    {"provider": "youtube", "label": "YouTube", "ok": True, "note": LINK_NOTE},
+    {"provider": "spotify", "label": "Spotify", "ok": False, "why": LINK_NO.format(label="Spotify")},
+    {"provider": "soundcloud", "label": "SoundCloud", "ok": False, "why": LINK_NO.format(label="SoundCloud")},
+]
+POST_NOTE = ("Using a post as either side costs {cost} ⚡ once. Nothing is written on the post "
+             "and its file is read for this comparison only.")
 LYRIC_NOTE = ("This describes how the reference writes — never its words. Rewrite your "
               "own lines in Sentence ConnectZ with it.")
 
@@ -75,8 +117,15 @@ in this order: first the MEMBER'S OWN TAKE, then a REFERENCE track they want to 
 sound closer to. The reference is another artist's finished record; the take is \
 a developing performance. Genre: {genre}.
 
-Your job is the GAP, not a grade. Say what separates the take from the \
-reference and what the member can do about it. Never tell the member their take \
+Rate BOTH recordings and compare them. Score every dimension, and the overall, \
+for the take AND the reference on the SAME 1-10 scale, so the numbers compare: \
+1-2 barely holding together, 3-4 a real attempt that keeps slipping, 5-7 solid \
+and ordinary, 8 strong, 9 excellent, 10 a performance you would hold up as an \
+example. A finished record will usually rate higher than a developing take; \
+that gap is what you are here to explain, not a verdict on the member. The \
+overall is not an average and never the weakest dimension: a real strength may \
+carry one fixable rough spot, the way a listener hears it. Say what separates \
+the take from the reference and what the member can do about it. Never tell the member their take \
 is bad for not being a finished record, never call the reference perfect, and \
 never invent detail you cannot hear. Production differences (room, mic, mix) \
 belong in "eq" and "how_to", not in the performance readings.
@@ -96,6 +145,7 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "closeness": <0-100 integer: how near the SOUND and approach of the take is to the reference>,
   "closeness_why": "<one sentence on what drives that number>",
   "scores": {{{shape}}},
+  "overall": {{"take": <1-10>, "reference": <1-10>, "take_why": "<one sentence: what most decides the take's number>", "reference_why": "<one sentence: what most decides the reference's number>"}},
   "summary": "<two sentences: the biggest gap and the easiest win>",
   "eq": [{{"region": "<one of: {regions}>", "direction": "<take needs: more | less | close>", "what": "<what you hear in each>", "how": "<the move: which control, which way, roughly how much>"}}, ...],
   "how_to": [{{"what": "<the gap>", "why": "<why the reference sounds the way it does>", "how": "<concrete steps>"}}, ...],
@@ -135,9 +185,46 @@ def _clean_scores(raw, keys):
     return out
 
 
+def _clean_overall(raw):
+    """Both overall ratings, or None — never half of one (a lone number compares with nothing)."""
+    if not isinstance(raw, dict):
+        return None
+    t, r = vc._clamp(raw.get("take")), vc._clamp(raw.get("reference"))
+    if t is None or r is None:
+        return None
+    return {"take": t, "reference": r, "take_why": str(raw.get("take_why", "")).strip()[:300],
+            "reference_why": str(raw.get("reference_why", "")).strip()[:300]}
+
+
+def _side(diff):
+    return "take" if diff > 0 else "reference" if diff < 0 else "even"
+
+
+def compare(scores, overall):
+    """The comparison, as arithmetic on the two sets of ratings — the model rates, the server
+    subtracts. `gap` is take minus reference (negative = the reference is ahead); `closest` and
+    `widest` name the dimensions where the take is nearest and furthest behind."""
+    rows = [{"key": k, "take": v["take"], "reference": v["reference"], "gap": v["take"] - v["reference"],
+             "leads": _side(v["take"] - v["reference"])} for k, v in scores.items()]
+    out = {"dimensions": rows,
+           "take_leads": sum(r["leads"] == "take" for r in rows),
+           "reference_leads": sum(r["leads"] == "reference" for r in rows),
+           "even": sum(r["leads"] == "even" for r in rows),
+           "overall_gap": overall["take"] - overall["reference"] if overall else None,
+           "overall_leads": _side(overall["take"] - overall["reference"]) if overall else None,
+           "closest": None, "widest": None}
+    if rows:
+        out["closest"] = max(rows, key=lambda r: r["gap"])["key"]
+        widest = min(rows, key=lambda r: r["gap"])
+        out["widest"] = widest["key"] if widest["gap"] < 0 else None
+    return out
+
+
 def clean_reply(parsed, app_key):
     """The whitelist: anything the model adds beyond this never reaches a screen."""
     keys = list(scores_for(app_key))
+    scores = _clean_scores(parsed.get("scores"), keys)
+    overall = _clean_overall(parsed.get("overall"))
     try:
         closeness = max(0, min(100, int(round(float(parsed.get("closeness"))))))
     except (TypeError, ValueError):
@@ -145,13 +232,253 @@ def clean_reply(parsed, app_key):
     return {
         "closeness": closeness,
         "closeness_why": str(parsed.get("closeness_why", "")).strip()[:300],
-        "scores": _clean_scores(parsed.get("scores"), keys),
+        "scores": scores,
+        "overall": overall,
+        "compare": compare(scores, overall),
         "summary": str(parsed.get("summary", "")).strip()[:500],
         "eq": _clean_eq(parsed.get("eq")),
         "how_to": vc.clean_practice(parsed.get("how_to")),
         "keep": str(parsed.get("keep", "")).strip()[:300],
         "lyric_direction": str(parsed.get("lyric_direction", "")).strip()[:600],
     }
+
+
+class _Slot:
+    """One side of the comparison, resolved to something the coach can read.
+
+    `file` is open for reading when it is a stored file (closed by `close()`); `post` is set only when
+    the side came from a post, because that is what costs ⚡ and what the result names; `link` is a
+    YouTube address the model reads itself, with nothing for us to open or close.
+    """
+    def __init__(self, file, ctype, post=None, stored=None, link=None):
+        self.file, self.ctype, self.post, self.stored, self.link = file, ctype, post, stored, link
+        self.mime = vc.gemini_mime(ctype)
+
+    @property
+    def uploaded(self):
+        return self.file is not None and self.stored is None and self.post is None and self.link is None
+
+    @property
+    def on_disk(self):
+        """A file that is already stored here (post, FileZ, journal) — opened and closed by us."""
+        return self.file is not None and not self.uploaded
+
+    @property
+    def title(self):
+        if self.post is not None:
+            return self.post.title
+        if self.link is not None:
+            return self.link["title"]
+        return (self.stored or {}).get("title") or ""
+
+    def opened(self):
+        if self.on_disk:
+            self.file.open("rb")
+
+    def close(self):
+        if self.on_disk:
+            try:
+                self.file.close()
+            except Exception:                            # pragma: no cover
+                pass
+
+    def describe(self):
+        """What the screen is told this side was. A post names its author — it is theirs and
+        the member can already see it; nothing else about it is sent."""
+        if self.post is not None:
+            return {"kind": "post", "id": self.post.id, "title": self.post.title,
+                    "author": self.post.author.username}
+        if self.link is not None:
+            return {"kind": "link", "provider": self.link["provider"], "title": self.link["title"],
+                    "url": self.link["url"], "start_seconds": self.link["start"]}
+        if self.stored is not None:
+            return {"kind": self.stored["kind"], "id": self.stored["id"], "title": self.stored.get("title", "")}
+        return {"kind": "file", "title": getattr(self.file, "name", "") or ""}
+
+
+_VIDEO_ID = re.compile(r"/embed/([A-Za-z0-9_-]{11})(?:$|[/?])")
+_T = re.compile(r"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$")
+
+
+def _start_seconds(url):
+    """Where in the video a pasted link starts: `?t=80`, `?t=1m20s` or `?start=80`. 0 when absent or odd."""
+    try:
+        q = parse_qs(urlparse(url).query or "")
+    except ValueError:
+        return 0
+    raw = ((q.get("t") or q.get("start") or [""])[0] or "").strip().lower()
+    m = _T.match(raw) if raw else None
+    if not m or not any(m.groups()):
+        return 0
+    h, mi, sec = (int(g or 0) for g in m.groups())
+    return min(h * 3600 + mi * 60 + sec, 6 * 3600)
+
+
+def classify_link(url):
+    """(slot_link, None) for a YouTube video the coach can watch, else (None, refusal sentence).
+
+    Reuses `widgetz._player_for` — the parser that already decides which links are players — and then
+    rebuilds the address from the video id alone. `youtube.com.evil.example` and a link with junk
+    appended never reach this far with anything but the id.
+    """
+    from . import widgetz
+    url = str(url or "").strip()[:500]
+    if not url.lower().startswith(("http://", "https://")):
+        return None, NOT_A_LINK
+    spec = widgetz._player_for(url)
+    if not spec:
+        return None, NOT_A_LINK
+    if spec["provider"] != "youtube":
+        return None, LINK_NO.format(label=spec["label"])
+    m = _VIDEO_ID.search(spec["src"] + "/")
+    if not m:
+        return None, NOT_A_LINK
+    vid, start = m.group(1), _start_seconds(url)
+    canonical = f"https://www.youtube.com/watch?v={vid}"
+    return {"provider": "youtube", "id": vid, "url": canonical, "start": start,
+            "title": f"YouTube video {vid}",
+            "part": {"file_data": {"file_uri": canonical},
+                     "video_metadata": {"start_offset": f"{start}s",
+                                        "end_offset": f"{start + LINK_WINDOW_SECONDS}s"}}}, None
+
+
+class _Fields:
+    """The coach's lookups read plain `post_id` / `upload_id` / `journal_id`. Inspiration has TWO
+    slots, so each slot's prefixed fields (`take_post_id`, `reference_post_id`…) are presented to
+    those same lookups rather than copying their checks."""
+    NAMES = ("post_id", "upload_id", "journal_id")
+
+    def __init__(self, request, prefix):
+        self.user = request.user
+        self.data = {n: request.data.get(f"{prefix}{n}") for n in self.NAMES}
+
+
+def _resolve(request, name, doors):
+    """(slot, error_response) for 'take' or 'reference'. `doors` is the ids this side accepts."""
+    f = request.FILES.get(name)
+    if f:
+        return _Slot(f, (getattr(f, "content_type", "") or "").lower()), None
+    given = [d for d in doors if request.data.get(f"{name}_{d}") not in (None, "")]
+    if not given:
+        link_url = request.data.get(f"{name}_url")
+        if link_url in (None, ""):
+            return None, None
+        link, why = classify_link(link_url)
+        if why:
+            return None, Response({"detail": why, "link_unsupported": True, "side": name},
+                                  status=status.HTTP_400_BAD_REQUEST)
+        return _Slot(None, "video/mp4", link=link), None
+    coach = vc.SingZCoachView()
+    fields = _Fields(request, f"{name}_")
+    if "post_id" in given:
+        post, f, ctype, err = coach._take_from_post(fields)
+        return (None, err) if err else (_Slot(f, ctype, post=post), None)
+    if "upload_id" in given:
+        stored, f, ctype, err = coach._take_from_upload(fields)
+        return (None, err) if err else (_Slot(f, ctype, stored=stored), None)
+    stored, f, ctype, err = coach._take_from_journal(fields)
+    return (None, err) if err else (_Slot(f, ctype, stored=stored), None)
+
+
+def run_match(app_key, take, ref, genre):
+    """Send the two recordings to the coach and return `(cleaned_reply, None)`, or `(None, Response)`.
+
+    The ONE place a comparison runs: the member's endpoint below and the no-account trial's
+    (`trial_inspiration.py`) both call it, so what the coach is asked, how long it may take, what a
+    failure says and what the reply is cleaned to can never differ between them. It bills nothing and
+    writes nothing — the caller decides what a usable result costs. Every failure is a ready-made
+    answer that already says nothing was charged; an `unscorable` Response carries that key in its data.
+    Closes both slots and any Files API copies before returning, whichever way it goes.
+    """
+    deadline = Deadline(COACH_BUDGET_SECONDS)
+    cleanups = []
+    try:
+        parts = []
+        for side in (take, ref):
+            if side.link is not None:
+                parts.append(side.link["part"])
+                continue
+            side.opened()
+            size = vc._size_of(side.file)
+            if size == 0:
+                return None, Response({"detail": f"\"{side.title or 'One of those files'}\" is empty. "
+                                           "Nothing was charged."}, status=status.HTTP_400_BAD_REQUEST)
+            part, cleanup, why = vc._media_part(side.file, side.mime, size, deadline=deadline)
+            if cleanup:
+                cleanups.append(cleanup)
+            if why:
+                return None, Response({"detail": f"The coach couldn't take that one — {why}. Nothing was charged."},
+                                status=status.HTTP_502_BAD_GATEWAY)
+            parts.append(part)
+        sections = [f"{n.upper()} is a {LINK_WINDOW_SECONDS // 60}-minute section of a video, starting at "
+                    f"{x.link['start'] // 60}:{x.link['start'] % 60:02d}. Judge only that section."
+                    for n, x in (("the member's take", take), ("the reference", ref)) if x.link is not None]
+        body = {"contents": [{"parts": [{"text": _prompt(app_key, genre) + ("\n\n" + " ".join(sections) if sections else "")},
+                                        {"text": "MEMBER'S TAKE:"}, parts[0],
+                                        {"text": "REFERENCE TRACK:"}, parts[1]]}],
+                "generationConfig": {"temperature": vc.COACH_TEMPERATURE}}
+        deadline.check("the files were still uploading when the time ran out")
+        resp, _tried = generate_content(
+            "text", body, key=_key(),
+            timeout=deadline.remaining(cap=300 if cleanups else 90),
+            env_vars=("GEMINI_AUDIO_MODEL",), label=f"{app_key} match")
+    except Expired as e:
+        return None, Response({"detail": f"The comparison is taking longer than it should — {e.message}. "
+                                   "Nothing was charged.", "timed_out": True},
+                        status=status.HTTP_504_GATEWAY_TIMEOUT)
+    except requests.RequestException:
+        logger.exception("%s match: could not reach Gemini", app_key)
+        return None, Response({"detail": "Couldn't reach the coach. Nothing was charged — try again."},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    except Exception:
+        logger.exception("%s match: files could not be read", app_key)
+        # A stored side whose file has gone from storage: say so as a fact about the
+        # FILE (410), write it down for the next member, and charge nothing.
+        gone = [x for x in (take, ref) if x.on_disk]
+        for x in gone:
+            mark_upload_missing(getattr(x.file, "instance", None))
+        if gone:
+            where = ", ".join(f'"{x.title}"' for x in gone if x.title) or "one of those"
+            return None, Response({"detail": f"The recording on {where} isn't on the server any more, so "
+                                       "there's nothing to compare. Nothing was charged.",
+                             "take_missing": True}, status=status.HTTP_410_GONE)
+        return None, Response({"detail": "The coach couldn't read those files. Nothing was charged."},
+                        status=status.HTTP_400_BAD_REQUEST)
+    finally:
+        take.close()
+        ref.close()
+        for c in cleanups:
+            try:
+                c()
+            except Exception:  # pragma: no cover - tidiness, never a failure
+                logger.exception("%s match: cleanup failed", app_key)
+
+    if resp.status_code != 200:
+        logger.error("%s match: Gemini %s — %s", app_key, resp.status_code, resp.text[:300])
+        if take.link is not None or ref.link is not None:
+            return None, Response({"detail": "The coach couldn't open that YouTube video. It has to be public — not "
+                                       "private, age-restricted or removed. Nothing was charged.",
+                             "link_unreachable": True}, status=status.HTTP_502_BAD_GATEWAY)
+        return None, Response({"detail": "The coach couldn't read those files right now. Nothing was charged."},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    try:
+        text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError, ValueError):
+        return None, Response({"detail": "The coach's reply didn't come back readable. Nothing was charged."},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    parsed = vc._parse(text)
+    if parsed and str(parsed.get("unscorable") or "").strip():
+        return None, Response({"unscorable": str(parsed["unscorable"]).strip()[:400], "reference": True,
+                         "match": True, "cost_cents": 0, "saved": False})
+    out = clean_reply(parsed or {}, app_key)
+    if not parsed or out["closeness"] is None or not (out["eq"] or out["how_to"] or out["summary"]):
+        return None, Response({"detail": "The coach's reply didn't come back readable. Nothing was charged."},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    return out, None
+
+
+TAKE_DOORS = ("post_id", "upload_id", "journal_id")
+REFERENCE_DOORS = ("post_id", "upload_id")      # a diary page is not "another artist's finished record"
 
 
 class MatchReferenceView(APIView):
@@ -173,35 +500,68 @@ class MatchReferenceView(APIView):
             "rates_lyrics": bool(profile.get("lyrics")),
             "notice": NOTICE, "eq_note": EQ_NOTE, "lyric_note": LYRIC_NOTE,
             "configured": bool(_key()),
+            # Said before the button: a post on either side costs this once; the rest cost none.
+            "post_energy_cost": vc.coach_post_energy(request.user),
+            "post_note": POST_NOTE.format(cost=vc.coach_post_energy(request.user)),
+            "take_sources": ["file", "post", "upload", "journal", "link"],
+            "reference_sources": ["file", "post", "upload", "link"],
+            # Which links work, said before one is pasted. Only YouTube can be heard.
+            "link_window_seconds": LINK_WINDOW_SECONDS,
+            "link_note": LINK_NOTE,
+            "link_sources": LINK_SOURCES,
         })
 
     def post(self, request):
         limited = vc.coach_rate_limit_check(request.user)
         if limited:
             return limited
-        take, ref = request.FILES.get("take"), request.FILES.get("reference")
+        take, err = _resolve(request, "take", TAKE_DOORS)
+        if err:
+            return err
+        ref, err = _resolve(request, "reference", REFERENCE_DOORS)
+        if err:
+            return err
         if not take or not ref:
             return Response({"detail": "Send both: your take and the reference track."},
                             status=status.HTTP_400_BAD_REQUEST)
-        kinds = []
-        for f in (take, ref):
-            ct = (getattr(f, "content_type", "") or "").lower()
-            if not ct.startswith(("audio/", "video/")):
-                return Response({"detail": "Both files must be audio or video."},
+        if take.post is not None and ref.post is not None and take.post.id == ref.post.id:
+            return Response({"detail": "That's the same post on both sides — pick a different reference."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        for side in (take, ref):
+            if not side.ctype.startswith(("audio/", "video/")):
+                return Response({"detail": "Both must be audio or video."},
                                 status=status.HTTP_400_BAD_REQUEST)
-            if not vc.gemini_mime(ct):
-                return Response({"detail": f"The coach can't read {ct}. Use m4a, mp3, wav, ogg or mp4."},
+            if not side.mime:
+                return Response({"detail": f"The coach can't read {side.ctype}. Use m4a, mp3, wav, ogg or mp4."},
                                 status=status.HTTP_400_BAD_REQUEST)
-            kinds.append(vc.gemini_mime(ct))
         cap_mb, cap_is_tier = vc.cap_for(request.user)
-        for f in (take, ref):
-            if f.size > cap_mb * 1024 * 1024:
-                return Response({"detail": f"That file is {f.size / (1024 * 1024):.0f}MB. "
-                                           + vc.cap_why(cap_mb, cap_is_tier), "max_mb": cap_mb},
-                                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
-            if f.size == 0:
-                return Response({"detail": "One of those files is empty."},
-                                status=status.HTTP_400_BAD_REQUEST)
+        for side in (take, ref):
+            # Only an uploaded file is measured here. A stored one was measured from its
+            # database row by the lookup (a FieldFile's .size is a storage call that raises
+            # when the file has gone), and an empty one is caught once it is opened below.
+            if side.uploaded:
+                if side.file.size > cap_mb * 1024 * 1024:
+                    return Response({"detail": f"That file is {side.file.size / (1024 * 1024):.0f}MB. "
+                                               + vc.cap_why(cap_mb, cap_is_tier), "max_mb": cap_mb},
+                                    status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+                if side.file.size == 0:
+                    return Response({"detail": "One of those files is empty."},
+                                    status=status.HTTP_400_BAD_REQUEST)
+        # A post on either side costs ⚡ — once. Checked BEFORE the model runs so nobody waits
+        # on a comparison they cannot pay for; spent only after a usable result.
+        post_sides = [x for x in (take, ref) if x.post is not None]
+        energy_cost = vc.coach_post_energy(request.user) if post_sides else 0
+        if energy_cost:
+            have = max(0, wallet_for(request.user).energy or 0)
+            if have < energy_cost:
+                return Response({
+                    "detail": f"Using a post costs {energy_cost} ⚡ and you have {have}. Nothing was run "
+                              "or charged. A file or a FileZ upload on both sides costs no ⚡.",
+                    "insufficient": True, "resource": "energy",
+                    "cost": {"resource": "energy", "amount": energy_cost},
+                    "energy_needed": energy_cost, "energy_available": have,
+                    "energy_short": energy_cost - have,
+                }, status=status.HTTP_402_PAYMENT_REQUIRED)
         if not _key():
             return Response({"detail": "The coach isn't configured — set GEMINI_API_KEY on the backend."},
                             status=status.HTTP_503_SERVICE_UNAVAILABLE)
@@ -212,65 +572,16 @@ class MatchReferenceView(APIView):
                             status=status.HTTP_402_PAYMENT_REQUIRED)
 
         genre = str(request.data.get("genre") or "unspecified")[:60]
-        deadline = Deadline(COACH_BUDGET_SECONDS)
-        cleanups = []
-        try:
-            parts = []
-            for f, mime in zip((take, ref), kinds):
-                part, cleanup, why = vc._media_part(f, mime, vc._size_of(f), deadline=deadline)
-                if cleanup:
-                    cleanups.append(cleanup)
-                if why:
-                    return Response({"detail": f"The coach couldn't take that one — {why}. Nothing was charged."},
-                                    status=status.HTTP_502_BAD_GATEWAY)
-                parts.append(part)
-            body = {"contents": [{"parts": [{"text": _prompt(self.app_key, genre)},
-                                            {"text": "MEMBER'S TAKE:"}, parts[0],
-                                            {"text": "REFERENCE TRACK:"}, parts[1]]}],
-                    "generationConfig": {"temperature": vc.COACH_TEMPERATURE}}
-            deadline.check("the files were still uploading when the time ran out")
-            resp, _tried = generate_content(
-                "text", body, key=_key(),
-                timeout=deadline.remaining(cap=300 if cleanups else 90),
-                env_vars=("GEMINI_AUDIO_MODEL",), label=f"{self.app_key} match")
-        except Expired as e:
-            return Response({"detail": f"The comparison is taking longer than it should — {e.message}. "
-                                       "Nothing was charged.", "timed_out": True},
-                            status=status.HTTP_504_GATEWAY_TIMEOUT)
-        except requests.RequestException:
-            logger.exception("%s match: could not reach Gemini", self.app_key)
-            return Response({"detail": "Couldn't reach the coach. Nothing was charged — try again."},
-                            status=status.HTTP_502_BAD_GATEWAY)
-        except Exception:
-            logger.exception("%s match: files could not be read", self.app_key)
-            return Response({"detail": "The coach couldn't read those files. Nothing was charged."},
-                            status=status.HTTP_400_BAD_REQUEST)
-        finally:
-            for c in cleanups:
-                try:
-                    c()
-                except Exception:  # pragma: no cover - tidiness, never a failure
-                    logger.exception("%s match: cleanup failed", self.app_key)
-
-        if resp.status_code != 200:
-            logger.error("%s match: Gemini %s — %s", self.app_key, resp.status_code, resp.text[:300])
-            return Response({"detail": "The coach couldn't read those files right now. Nothing was charged."},
-                            status=status.HTTP_502_BAD_GATEWAY)
-        try:
-            text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-        except (KeyError, IndexError, ValueError):
-            return Response({"detail": "The coach's reply didn't come back readable. Nothing was charged."},
-                            status=status.HTTP_502_BAD_GATEWAY)
-        parsed = vc._parse(text)
-        if parsed and str(parsed.get("unscorable") or "").strip():
-            return Response({"unscorable": str(parsed["unscorable"]).strip()[:400], "reference": True,
-                             "match": True, "cost_cents": 0, "saved": False})
-        out = clean_reply(parsed or {}, self.app_key)
-        if not parsed or out["closeness"] is None or not (out["eq"] or out["how_to"] or out["summary"]):
-            return Response({"detail": "The coach's reply didn't come back readable. Nothing was charged."},
-                            status=status.HTTP_502_BAD_GATEWAY)
+        out, failed = run_match(self.app_key, take, ref, genre)
+        if failed is not None:
+            return failed
         charged = _bill(request.user, note=f"{profile_for_app(self.app_key)['label']} Inspiration — AI",
                         count_daily=True)
+        if energy_cost:
+            spend_energy(request.user, energy_cost,
+                         f"Inspiration with a post — {(post_sides[0].title or 'post')[:50]}",
+                         app_key=self.app_key, target=f"post:{post_sides[0].post.id}")
         return Response({**out, "match": True, "reference": True, "saved": False, "feature": LABEL,
-                         "cost_cents": charged, "eq_note": EQ_NOTE, "lyric_note": LYRIC_NOTE,
-                         "genre": genre})
+                         "cost_cents": charged, "energy_cost": energy_cost,
+                         "eq_note": EQ_NOTE, "lyric_note": LYRIC_NOTE, "genre": genre,
+                         "sources": {"take": take.describe(), "reference": ref.describe()}})

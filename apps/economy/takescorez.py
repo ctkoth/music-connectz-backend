@@ -228,7 +228,7 @@ def record(user, app_key, payload, *, difficulty="", genre="", target="",
                    else round(sum(scores.values()) / len(scores)) if scores else None)
         weakest = min(scores, key=lambda k: scores[k]) if scores else ""
         cls, low, high = parse_range(payload.get("range_profile"), prof["ranges"])
-        return TakeScore.objects.create(
+        take = TakeScore.objects.create(
             user=user, app_key=app_key, scores=scores, overall=overall,
             weakest=weakest, difficulty=str(difficulty or "")[:16],
             genre=str(genre or "")[:60], target=str(target or "")[:60],
@@ -242,6 +242,15 @@ def record(user, app_key, payload, *, difficulty="", genre="", target="",
         )
     except Exception:                                       # pragma: no cover
         return None
+    # The coach badge for this app (badgez_wave.py) lands on the take that earns
+    # it, not the next time something unrelated rechecks. Swallowed: a badge
+    # must never fail a take.
+    try:
+        from .models import recheck_badges
+        recheck_badges(user)
+    except Exception:                                       # pragma: no cover
+        pass
+    return take
 
 
 # --------------------------------------------------------------- reading
