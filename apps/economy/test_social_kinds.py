@@ -35,3 +35,24 @@ class ScoreItemTests(TestCase):
         self.assertEqual(self.o.post("/api/economy/social/react/", {"item": "score:tok123", "value": 1}, format="json").status_code, 403)
         self.assertEqual(self.o.post("/api/economy/social/rate/", {"item": "score:tok123", "score": 9}, format="json").status_code, 403)
         self.assertEqual(self.o.post("/api/economy/social/comment/", {"item": "score:tok123", "body": "thanks all"}, format="json").status_code, 200)
+
+
+class BattleAndPlaylistItemTests(TestCase):
+    def setUp(self):
+        from apps.economy.models import Battle, Playlist
+        self.owner = User.objects.create_user("host", "h@e.com", "pw-Long-enough-1")
+        self.fan = User.objects.create_user("fan2", "f2@e.com", "pw-Long-enough-1")
+        self.battle = Battle.objects.create(host=self.owner, title="Clash")
+        self.pub = Playlist.objects.create(owner=self.owner, title="Set", visibility="public")
+        self.priv = Playlist.objects.create(owner=self.owner, title="Mine", visibility="private")
+        self.c = APIClient(); self.c.force_authenticate(self.fan)
+        self.o = APIClient(); self.o.force_authenticate(self.owner)
+
+    def test_a_battle_and_a_public_playlist_take_likes_and_their_owner_cannot_like_their_own(self):
+        for item in (f"battle:{self.battle.id}", f"playlist:{self.pub.id}"):
+            self.assertEqual(self.c.post("/api/economy/social/react/", {"item": item, "value": 1}, format="json").status_code, 200, item)
+            self.assertEqual(self.o.post("/api/economy/social/react/", {"item": item, "value": 1}, format="json").status_code, 403, item)
+
+    def test_a_private_playlist_or_an_invented_battle_is_not_an_item(self):
+        for item in (f"playlist:{self.priv.id}", "battle:999999", "battle:x"):
+            self.assertEqual(self.c.post("/api/economy/social/rate/", {"item": item, "score": 8}, format="json").status_code, 404, item)

@@ -737,8 +737,32 @@ def _score_owner(ref):
     return (share is not None), (share.user if share else None)
 
 
+def _battle_owner(ref):
+    from .models import Battle
+    try:
+        b = Battle.objects.select_related("host").filter(pk=int(ref)).first()
+    except ValueError:
+        return False, None
+    return (b is not None), (b.host if b else None)
+
+
+def _playlist_owner(ref):
+    # A private playlist is only for its owner and the collaborators they invited, so
+    # it is not an item anybody else can like, rate or comment on.
+    from .models import Playlist
+    try:
+        pl = Playlist.objects.select_related("owner").filter(pk=int(ref)).first()
+    except ValueError:
+        return False, None
+    if pl is None or pl.visibility == "private":
+        return False, None
+    return True, pl.owner
+
+
 ITEM_KINDS = {
     "score": {"label": "take", "resolve": _score_owner},
+    "battle": {"label": "battle", "resolve": _battle_owner},
+    "playlist": {"label": "playlist", "resolve": _playlist_owner},
 }
 
 
