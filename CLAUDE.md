@@ -1570,7 +1570,7 @@ The three, and what each looked like from the inside:
   decides how fast it goes, the floor decides that it goes.
 - **PromptZ could be bought with cash and nothing else.** Every free way to earn
   here — rating, referring, AdZ, OfferZ, OnboardZ — pays in 🍥, and 🍥 could not
-  reach the AI. `catalog.SPINAZ_PER_PROMPTZ` (10:1) is the door; cash stays the
+  reach the AI. `catalog.SPINAZ_PER_PROMPTZ` is the door (10:1 then; Corey moved it to 1000:1 as a 🍥 sink); cash stays the
   fast lane and the subscription stays the shortcut.
 
 And the inverse failure, in the same audit, which is what makes the first one
