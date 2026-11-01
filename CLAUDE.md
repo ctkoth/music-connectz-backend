@@ -3037,3 +3037,20 @@ The address backstop and `trial_daily_cap()` are unchanged, so the most the door
 ## A set logged on the wrong lift is taken back where it happened
 
 `DELETE /api/economy/bodiez/sessions/<id>/sets/<set_id>/` (`BodieZSetDetailView`) removes ONE set, and only from the OPEN session, then renumbers that lift's remaining sets so the next one logged cannot repeat a number. A finished session is still edited through `PUT .../sets/`, which keeps the rest clock and the records honest in one place. Without this the only way to fix a slip on the live logger was to finish the workout and open SessionZ.
+
+## FileZ says a lost file is lost, instead of drawing a player that sits at 0:00
+
+A member's FileZ was mostly players frozen at 0:00 / 0:00 and read as "corrupt". They were not
+corrupt: the `Upload` rows survived the era when every deploy rebuilt the disk and the bytes did
+not, so the list drew a player for a file that was not there. There is nothing to repair, and
+"corrupt" sends somebody looking for a fix that does not exist.
+
+- **`_upload_dict` serves `missing` / `missing_since`** — a column, never a lookup. The list view
+  still never asks storage (`test_listing_never_asks_storage`), per the rule above that a read path
+  must not walk it.
+- **`POST /api/economy/uploads/check/`** (`uploadcheck.py`) is the member's own press of
+  `reconcile_uploads`: it goes and LOOKS (`storage.exists`) at the caller's own files (capped at
+  `LIMIT`), stamps the absent, clears the ones that came back, and marks nothing when storage cannot
+  answer (`unreadable`). Nothing is deleted. It is free.
+- **Not recoverable from here.** A file whose bytes are gone stays gone; the screen says to upload it
+  again. A lost file does not count against storage (`storage_used_bytes`), already true.

@@ -4,6 +4,7 @@ from .bodiez_ai_view import BodieZAIDetailView, BodieZAIFormView, BodieZAIReadVi
 from .directz_app import (DirectZCopyrightView, DirectZWorksView,
                           DirectZRateView)
 from .media import MediaFileView
+from .uploadcheck import UploadCheckView
 from .questz import QuestBoardView, QuestClaimView
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
@@ -395,6 +396,7 @@ urlpatterns = [
     path("payouts/connect/", PayoutConnectView.as_view(), name="economy-payouts-connect"),
     path("payouts/refresh/", PayoutRefreshView.as_view(), name="economy-payouts-refresh"),
     path("uploads/", UploadsView.as_view(), name="economy-uploads"),
+    path("uploads/check/", UploadCheckView.as_view(), name="economy-uploads-check"),
     path("uploads/<int:pk>/", UploadDetailView.as_view(), name="economy-upload-detail"),
     # The address an upload is HANDED OUT under, and the only one anything
     # stores. Resolved to wherever the bytes are on every request, so a signed

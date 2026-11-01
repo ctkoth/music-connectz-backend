@@ -1470,6 +1470,12 @@ def _upload_dict(u, request):
         # then STORES on a post, a deal or a battle entry. See media.py.
         "url": stable_media_url(u, request) or None,
         "created_at": u.created_at,
+        # A column, not a lookup: set only by something that went and looked
+        # (the coach, `reconcile_uploads`, `uploads/check/`). None means "no
+        # reason to think so", never "checked and present". FileZ says a lost
+        # file is lost instead of drawing a player that sits at 0:00.
+        "missing": bool(getattr(u, "missing_since", None)),
+        "missing_since": getattr(u, "missing_since", None),
     }
 
 
