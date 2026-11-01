@@ -2738,7 +2738,7 @@ size-from-the-row and the "recording is gone" 410 are the coach's rules and not 
   model runs (402 with the shortfall), spent only after a usable result. Files, FileZ uploads and
   journal entries cost no ⚡. **A recommendation, Corey's to move:** without it Inspiration would be a
   ⚡-free way to put other people's posts in front of a model, which the post-coach deliberately is not.
-  Every AI run still takes its usual small ⚡ (`_take_ai_energy`) on top.
+  Every AI run still takes its own ⚡ (`_take_ai_energy`, see "A prompt costs ⚡ by tier") on top.
 - A journal entry is take-only: a diary page is not "another artist's finished record". The same post
   on both sides is a 400.
 - **Never run against Google** (CI has no key), like the rest of the coach's transport.
@@ -3054,3 +3054,20 @@ not, so the list drew a player for a file that was not there. There is nothing t
   answer (`unreadable`). Nothing is deleted. It is free.
 - **Not recoverable from here.** A file whose bytes are gone stays gone; the screen says to upload it
   again. A lost file does not count against storage (`storage_used_bytes`), already true.
+
+## A prompt costs ⚡ by tier: Free 4000, Premium 400, StatZ 40 (Corey's numbers)
+
+`models.AI_ENERGY_PER_PROMPT` is what one AI run takes, times the engine's base
+(`AI_ENERGY_BASE`: Haiku and every unnamed run 1, Sonnet 2, Opus 4, Fable 8), less any
+coach-badge discount. It replaced a tier FACTOR on a base of 1 (1 / 0.5 / 0.25 ⚡ a run).
+`ai_energy_cost` is still the one function, so `/ai/energy/` and every button that prices a
+run show the new number with no client change.
+
+- **Still taken UP TO what is held, never refused.** At a ⚡ floor of a few an hour, 4000 is
+  more than a Free member holds, so in practice a Free prompt takes their whole ⚡ balance and
+  then runs anyway. That is deliberate (a tier says how much, never whether): the AI is still
+  reachable, and the ⚡ is what it costs them. If 4000 ever became a hard requirement, Free
+  members would lose the AI, which is the ladder rule broken.
+- **Kept the engine multiplier** (Corey's earlier call that dearer engines cost more ⚡), so a
+  Fable run on Free is 32000. Dropping it is one line in `ai_energy_cost`.
+- The trial's "as a member this take would cost" line (`trial._as_member`) reads the Free figure.

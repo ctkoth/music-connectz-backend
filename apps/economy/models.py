@@ -874,13 +874,14 @@ def is_platform_owner(user):
     return bool(getattr(user, "is_superuser", False))
 
 
-# ⚡ per AI run (Corey's numbers): the engine's base times the tier's factor, rounded
-# up, at least 1. Dearer engines cost more ⚡; higher tiers pay less, the same shape
-# they earn it faster. Any run that is not one of the named engines (the coach, the
-# writer) is base 1. Taken UP TO what the member holds, never refused for it: a tier
-# says how much, never whether, and ⚡ regenerates at a floor for everybody.
+# ⚡ per AI run (Corey's numbers): what one prompt costs at the tier — Free 4000,
+# Premium 400, StatZ 40 — times the engine's base (dearer engines cost more ⚡),
+# less any coach-badge discount. Any run that is not one of the named engines (the
+# coach, the writer) is base 1, i.e. exactly the tier's number. Taken UP TO what the
+# member holds, never refused for it: a tier says how much, never whether, and ⚡
+# regenerates at a floor for everybody.
 AI_ENERGY_BASE = {"haiku": 1, "sonnet": 2, "opus": 4, "fable": 8}
-AI_ENERGY_TIER_FACTOR = {"free": 1.0, "premium": 0.5, "statz": 0.25, "debug": 0.25}
+AI_ENERGY_PER_PROMPT = {"free": 4000, "premium": 400, "statz": 40, "debug": 40}
 
 
 def ai_energy_cost(user, engine=None, tier=None):
@@ -892,7 +893,8 @@ def ai_energy_cost(user, engine=None, tier=None):
     tier = tier or membership_for(user).tier
     base = AI_ENERGY_BASE.get(str(engine or "").lower(), 1)
     off = min(AI_ENERGY_OFF_CAP, int(badge_effects(user).get("ai_energy_off_pct", 0) or 0)) if user else 0
-    return max(1, math.ceil(base * AI_ENERGY_TIER_FACTOR.get(tier, 1.0) * (100 - off) / 100))
+    per = AI_ENERGY_PER_PROMPT.get(tier, AI_ENERGY_PER_PROMPT["free"])
+    return max(1, math.ceil(base * per * (100 - off) / 100))
 
 
 def _take_ai_energy(user, engine, note):
