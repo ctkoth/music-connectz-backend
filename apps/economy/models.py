@@ -782,9 +782,13 @@ PROMPT_ALLOWANCE = {"free": 4, "premium": 7, "statz": 12, "debug": 10 ** 6}
 # margin note above, which reasons at the 3c floor, was describing a ladder that
 # did not exist. The COUNT was capped and the PRICE was not.
 #
-# 3c covers every engine a Free member can pick (Haiku 2c), the coach and the
+# NOTE: since AI_TASK_PROMPTZ made every task 1 PromptZ (1c) whatever the engine,
+# every engine is under this cap, so a free daily prompt now covers Fable too. The
+# paragraph below describes the per-engine prices this was written against.
+#
+# 3c covered every engine a Free member could pick (Haiku 2c), the coach and the
 # other Gemini surfaces (ai_cost("standard") = 3c), and Corey GPT (1c). Sonnet,
-# Opus and Fable are dearer than an allowance and are paid for in PromptZ or
+# Opus and Fable were dearer than an allowance and paid for in PromptZ or
 # cash, which is what PromptZ is for. So the tier buys HOW MANY runs and the
 # engine is what costs money, both knowable before either is chosen — the same
 # shape as KeyConnectZ's allowance ladder.
@@ -874,13 +878,14 @@ def is_platform_owner(user):
     return bool(getattr(user, "is_superuser", False))
 
 
-# ⚡ per AI run (Corey's numbers): the engine's base times the tier's factor, rounded
-# up, at least 1. Dearer engines cost more ⚡; higher tiers pay less, the same shape
-# they earn it faster. Any run that is not one of the named engines (the coach, the
-# writer) is base 1. Taken UP TO what the member holds, never refused for it: a tier
-# says how much, never whether, and ⚡ regenerates at a floor for everybody.
+# ⚡ per AI run (Corey's numbers): what one prompt costs at the tier — Free 4000,
+# Premium 400, StatZ 40 — times the engine's base (dearer engines cost more ⚡),
+# less any coach-badge discount. Any run that is not one of the named engines (the
+# coach, the writer) is base 1, i.e. exactly the tier's number. Taken UP TO what the
+# member holds, never refused for it: a tier says how much, never whether, and ⚡
+# regenerates at a floor for everybody.
 AI_ENERGY_BASE = {"haiku": 1, "sonnet": 2, "opus": 4, "fable": 8}
-AI_ENERGY_TIER_FACTOR = {"free": 1.0, "premium": 0.5, "statz": 0.25, "debug": 0.25}
+AI_ENERGY_PER_PROMPT = {"free": 4000, "premium": 400, "statz": 40, "debug": 40}
 
 
 def ai_energy_cost(user, engine=None, tier=None):
@@ -892,7 +897,8 @@ def ai_energy_cost(user, engine=None, tier=None):
     tier = tier or membership_for(user).tier
     base = AI_ENERGY_BASE.get(str(engine or "").lower(), 1)
     off = min(AI_ENERGY_OFF_CAP, int(badge_effects(user).get("ai_energy_off_pct", 0) or 0)) if user else 0
-    return max(1, math.ceil(base * AI_ENERGY_TIER_FACTOR.get(tier, 1.0) * (100 - off) / 100))
+    per = AI_ENERGY_PER_PROMPT.get(tier, AI_ENERGY_PER_PROMPT["free"])
+    return max(1, math.ceil(base * per * (100 - off) / 100))
 
 
 def _take_ai_energy(user, engine, note):

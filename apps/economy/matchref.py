@@ -575,12 +575,12 @@ class MatchReferenceView(APIView):
         out, failed = run_match(self.app_key, take, ref, genre)
         if failed is not None:
             return failed
-        charged = _bill(request.user, note=f"{profile_for_app(self.app_key)['label']} Inspiration — AI",
-                        count_daily=True)
-        if energy_cost:
+        if energy_cost:   # before the run's own up-to ⚡ (vocalcoach says why)
             spend_energy(request.user, energy_cost,
                          f"Inspiration with a post — {(post_sides[0].title or 'post')[:50]}",
                          app_key=self.app_key, target=f"post:{post_sides[0].post.id}")
+        charged = _bill(request.user, note=f"{profile_for_app(self.app_key)['label']} Inspiration — AI",
+                        count_daily=True)
         return Response({**out, "match": True, "reference": True, "saved": False, "feature": LABEL,
                          "cost_cents": charged, "energy_cost": energy_cost,
                          "eq_note": EQ_NOTE, "lyric_note": LYRIC_NOTE, "genre": genre,

@@ -381,14 +381,14 @@ class TrialCoachView(APIView):
 
 
 def _as_member(payload):
-    from .models import AI_ENERGY_TIER_FACTOR, PROMPT_ALLOWANCE
+    from .models import AI_ENERGY_PER_PROMPT, PROMPT_ALLOWANCE
     from .vocalcoach import coach_xp_base
     import math
     if payload.get("score") is None:
         return None
     return {
         "daily_prompts": PROMPT_ALLOWANCE.get("free"),
-        "energy": max(1, math.ceil(1 * AI_ENERGY_TIER_FACTOR.get("free", 1.0))),
+        "energy": AI_ENERGY_PER_PROMPT["free"],
         "xp": coach_xp_base(payload.get("score_exact", payload.get("score"))),
         "kept": True,
     }

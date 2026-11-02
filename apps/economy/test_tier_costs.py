@@ -14,14 +14,16 @@ def at(user, tier):
 
 
 class AiEnergyTests(TestCase):
-    def test_engine_base_times_tier_factor_rounded_up_at_least_one(self):
+    def test_a_prompt_costs_the_tiers_energy_times_the_engine_base(self):
+        # Corey's numbers: one prompt is 4000 ⚡ on Free, 400 on Premium, 40 on StatZ.
         u = User.objects.create_user("a", "a@e.com", "pw12345678")
-        self.assertEqual(ai_energy_cost(u, "haiku"), 1)
-        self.assertEqual(ai_energy_cost(u, "fable"), 8)
-        self.assertEqual(ai_energy_cost(u, None), 1)
-        at(u, "premium"); self.assertEqual(ai_energy_cost(u, "opus"), 2)
-        at(u, "statz"); self.assertEqual(ai_energy_cost(u, "fable"), 2)
-        self.assertEqual(ai_energy_cost(u, "haiku"), 1)
+        self.assertEqual(ai_energy_cost(u, None), 4000)
+        self.assertEqual(ai_energy_cost(u, "haiku"), 4000)
+        self.assertEqual(ai_energy_cost(u, "fable"), 32000)
+        at(u, "premium"); self.assertEqual(ai_energy_cost(u, None), 400)
+        self.assertEqual(ai_energy_cost(u, "opus"), 1600)
+        at(u, "statz"); self.assertEqual(ai_energy_cost(u, None), 40)
+        self.assertEqual(ai_energy_cost(u, "fable"), 320)
 
     def test_a_run_takes_its_energy_and_never_more_than_is_held(self):
         u = User.objects.create_user("b", "b@e.com", "pw12345678")
@@ -54,4 +56,4 @@ class TrialAsMemberTests(TestCase):
         self.assertIsNone(_as_member({"score": None}))
         from apps.economy.models import PROMPT_ALLOWANCE
         self.assertEqual(_as_member({"score": 8, "score_exact": 8.0}),
-                         {"daily_prompts": PROMPT_ALLOWANCE["free"], "energy": 1, "xp": 40, "kept": True})
+                         {"daily_prompts": PROMPT_ALLOWANCE["free"], "energy": 4000, "xp": 40, "kept": True})
