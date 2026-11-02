@@ -2349,10 +2349,10 @@ the only way "limit the earn so it doesn't inflate" has a number to check. A mem
 (restricted) post paid its author **300 🍥 per engaged member** — $3.00 for somebody staying
 five seconds, and at `JOIN_REWARD_DAILY_CAP_PER_AUTHOR` (500) that is up to $1,500 a day
 from one account. `RESTRICTED_JOIN_REWARD_SPINAZ` is **150** now (Corey's two options were
-300 and 150; this is the recommendation, reversible in one line). **Not changed, and the
-bigger exposure:** `JOIN_MIN_ACTIVE_SECONDS` is 5 and the per-author cap is 500, so the
-worst case is still $750 a day per author. A recommendation, Corey's to move: a per-author
-cap near 40 and a longer minimum stay.
+300 and 150; this is the recommendation, reversible in one line). **The
+bigger exposure, since fixed:** `JOIN_MIN_ACTIVE_SECONDS` was 5 and the per-author cap 500,
+so the worst case was $750 a day per author. They are 30 s and 40 now (see "A prompt costs ⚡
+by tier"), which is $60.
 
 ## A past take writes its own promo post, and the brief is the server's
 
@@ -3088,22 +3088,43 @@ the karma up-vote, and two likes would be two answers to how many people liked s
   an unknown mood is a 400, never guessed. The maker is told on the FIRST reaction, not every change.
 - **Merge the backend before the frontend:** the bar calls `social/mood/`, and an older server simply draws no picker.
 
-## A prompt costs ⚡ by tier: Free 4000, Premium 400, StatZ 40 (Corey's numbers)
+## A prompt costs ⚡ by tier: Free 10, Premium 6, StatZ 4 — and the audit that set it
 
 `models.AI_ENERGY_PER_PROMPT` is what one AI run takes, times the engine's base
 (`AI_ENERGY_BASE`: Haiku and every unnamed run 1, Sonnet 2, Opus 4, Fable 8), less any
-coach-badge discount. It replaced a tier FACTOR on a base of 1 (1 / 0.5 / 0.25 ⚡ a run).
-`ai_energy_cost` is still the one function, so `/ai/energy/` and every button that prices a
-run show the new number with no client change.
+coach-badge discount, taken UP TO what is held and never refused. `ai_energy_cost` is the
+one function, so `/ai/energy/` and every button that prices a run show it with no client change.
 
-- **Still taken UP TO what is held, never refused.** At a ⚡ floor of a few an hour, 4000 is
-  more than a Free member holds, so in practice a Free prompt takes their whole ⚡ balance and
-  then runs anyway. That is deliberate (a tier says how much, never whether): the AI is still
-  reachable, and the ⚡ is what it costs them. If 4000 ever became a hard requirement, Free
-  members would lose the AI, which is the ladder rule broken.
-- **Kept the engine multiplier** (Corey's earlier call that dearer engines cost more ⚡), so a
-  Fable run on Free is 32000. Dropping it is one line in `ai_energy_cost`.
-- The trial's "as a member this take would cost" line (`trial._as_member`) reads the Free figure.
+Corey first set 4000 / 400 / 40. An audit of every resource-moving number then found that
+4000 was ~83 days of Free regeneration (2 ⚡/hour): one prompt emptied any Free wallet, and
+everything that REFUSES short of ⚡ — a cold DM (2), coaching a post (10), a submission pack
+(30), a boost (40) — was out of reach for the rest of the day for anyone who used the AI at
+all. A tier deciding whether, not how much. He applied the recommendation: 10 / 6 / 4, sized
+so four free prompts (40 ⚡) fit inside a Free day's regeneration (48). `test_tier_costs` pins
+that inequality, not just the numbers, and that a higher tier never pays more.
+
+Four more numbers moved in the same pass, all his calls on the audit's recommendations:
+
+- **The coach-take ⚡ is flat at 2** (was 2 / 6 / 20, StatZ paying ten times Free for the same
+  take), for the reason `COACH_POST_ENERGY` was already made flat.
+- **Free daily prompts no longer cover Fable.** Every engine is charged 1 PromptZ, so the price
+  fit the allowance everywhere and a StatZ member's 12 free prompts could all be Fable.
+  `daily_prompt_covers(cost, engine)` now also reads the engine's real model fees for a typical
+  message (`catalog.engine_typical_cents`, ~2k tokens in / 500 out, from `AI_MODELS`' list
+  prices): Haiku 0.45c, Sonnet 1.35c, Opus 2.25c are covered, Fable 4.5c is not. A run with no
+  engine (the coach, the writer, Gemini surfaces) is judged on its price alone, as before.
+- **The members-only join reward needs 30 seconds and caps at 40 joins a day** per post and per
+  author (were 5 s and 100 / 500). At 150 🍥 and 1 🍥 = 1¢ that is $60 a day per author, down
+  from $750. The SoundCloud-import copy said the cap was in 🍥; it is joins, and says so now.
+- **Not moved: 🍥 → 🏷️ at 1000:1.** It prices a prompt at $10 of 🍥 against 0.8¢ in cash, and
+  that is Corey's deliberate sink; the audit only recorded the cost.
+
+**Three bugs the audit found, fixed.** Coaching a post, a Radar read and Inspiration with a post
+checked the fixed post ⚡, billed the run (whose ⚡ is taken up to the balance), then spent the fee
+from what was left — on an empty wallet it failed silently and was still reported as paid. The fee
+is spent first now (`test_the_post_fee_is_paid_even_when_the_run_takes_everything_else`). The
+trial's "as a member" line now counts the take's ⚡ as well as the prompt's. And comments that
+described numbers since moved were corrected.
 
 ## Moving uploads to a bucket does not move the files — `copy_media_to_bucket` does
 

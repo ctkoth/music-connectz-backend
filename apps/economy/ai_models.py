@@ -77,7 +77,7 @@ def model_row(key, allowed, current, *, daily_left=None, user=None):
         # free prompts — computed by the same two tests the chat endpoint
         # applies (`daily_prompt_covers` and prompts remaining), so the Send
         # button can say "Free today" before it is pressed and be right.
-        row["free_today"] = bool(daily_prompt_covers(spec["cost_cents"]) and daily_left > 0)
+        row["free_today"] = bool(daily_prompt_covers(spec["cost_cents"], key) and daily_left > 0)
     if user is not None:
         # Whether the wallet could pay for one message without a free prompt.
         row["affordable"] = can_afford_ai(user, spec["cost_cents"])

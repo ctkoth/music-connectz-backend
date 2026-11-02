@@ -278,7 +278,7 @@ class OccChatView(APIView):
         _, _, daily_left = daily_prompt_state(request.user)
         # Whether prompts REMAIN is only half of it — the allowance also has a
         # ceiling, and this member may have picked an engine above it.
-        covered_free = daily_prompt_covers(cost) and daily_left > 0
+        covered_free = daily_prompt_covers(cost, model_key) and daily_left > 0
 
         # Check affordability up front so we don't call the model then fail to bill.
         if cost and not covered_free and not can_afford_ai(request.user, cost):
@@ -286,8 +286,8 @@ class OccChatView(APIView):
             # to wait until tomorrow for an allowance that was never going to
             # cover this engine. Say which it is.
             why = ("today's free prompts are spent"
-                   if daily_prompt_covers(cost)
-                   else f"a free daily prompt covers up to {DAILY_PROMPT_MAX_CENTS} {PROMPTZ} "
+                   if daily_prompt_covers(cost, model_key)
+                   else f"free daily prompts don't cover {model_spec['name']} "
                         f"— switch engine to run it free")
             return Response(
                 {"detail": f"{model_spec['emoji']} {model_spec['name']} costs "
