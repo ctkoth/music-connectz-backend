@@ -2991,6 +2991,18 @@ per dimension `gap` (take − reference) and `leads`, counts, the overall gap, a
 model rates and never does the arithmetic. Still nothing saved: no TakeScore, XP or skill rating, because a rating of somebody
 else's record and a gap to it are not measurements of the member.
 
+### Inspiration says what is better and worse, drills toward the reference, and prices the lyric rewrite
+
+Corey: rate both, say what is better or worse, advise with drills, and offer Sentence ConnectZ to move the
+lyrics toward the reference. Each dimension carries the model's one-line `why` (what separates the two there);
+`compare` adds `better` (take ahead, biggest lead first) and `worse` (reference ahead, widest gap first) —
+still the server's subtraction. `drills` (`clean_drills`, at most `DRILL_MAX` 4) are performance practice, each
+`targets` one of THIS coach's dimensions or it is dropped (a drill for a dimension nobody scores has no number
+to show it worked), sorted widest gap first, minutes clamped 1-30. Free to do. The member endpoint also serves
+`lyrics_door` (`lyrics_door()`): Sentence ConnectZ's writer with the direction in the brief, its standard price
+(`crosspost.coach_price`, read AFTER the comparison's bill so "free today" is true) and royalty note on the door.
+The reference's words are still never carried; the trial door gets no `lyrics_door` (no account, no writer).
+
 ## LookZMaxZ shares: the person in the reading decides, from a snapshot the server signed
 
 `lookshare.py`. Corey wanted to show a woman her score; rating a photo someone else uploads stays self-only, so the

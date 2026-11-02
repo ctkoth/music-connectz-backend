@@ -107,10 +107,32 @@ LYRIC_NOTE = ("This describes how the reference writes — never its words. Rewr
               "own lines in Sentence ConnectZ with it.")
 
 
+LYRICS_DOOR_NOTE = ("Opens Sentence ConnectZ with this direction in the brief — add your own lyrics under it "
+                    "and press Write. Nothing runs until you do. The reference's words are never sent. A "
+                    "failed run is not charged. If you keep the result and use it in a release, battle or "
+                    "deal, K-Oth's royalty applies to the part you keep.")
+
+
+def lyrics_door(direction, genre, price):
+    """The paid writer, handed the lyric direction — with its price said before it is pressed.
+    None when there is no direction (no words in the recordings). `price` is
+    `crosspost.coach_price`, the same standard run Sentence ConnectZ charges."""
+    if not direction:
+        return None
+    return {"key": "lyrics", "label": "Rewrite my lyrics toward the reference", "tab": "sentenceconnectz",
+            "target": "sentencez-write",
+            "carry": {"kind": "lyrics", "genre": genre if genre != "unspecified" else "",
+                      "text": ("Rewrite my lyrics with this direction (the reference's words are not used):\n"
+                               f"{direction}\n\nMy lyrics:\n")},
+            "cost": {"resource": "promptz", "amount": price["amount"], "free_today": price["free_today"]},
+            "note": LYRICS_DOOR_NOTE}
+
+
 def _prompt(app_key, genre):
     p = profile_for_app(app_key)
     keys = list(scores_for(app_key))
-    shape = ", ".join(f'"{k}": {{"take": <1-10>, "reference": <1-10>}}' for k in keys)
+    shape = ", ".join(f'"{k}": {{"take": <1-10>, "reference": <1-10>, "why": "<one sentence: what separates them here>"}}' for k in keys)
+    dims = ", ".join(keys)
     regions = ", ".join(EQ_REGIONS)
     return f"""You are the Music ConnectZ {p['coach']}. You are given TWO recordings, \
 in this order: first the MEMBER'S OWN TAKE, then a REFERENCE track they want to \
@@ -129,6 +151,12 @@ the take from the reference and what the member can do about it. Never tell the 
 is bad for not being a finished record, never call the reference perfect, and \
 never invent detail you cannot hear. Production differences (room, mic, mix) \
 belong in "eq" and "how_to", not in the performance readings.
+
+DRILLS: give 2-4 practice drills that move the take TOWARD the reference on the \
+dimensions where the reference is ahead, widest gap first. Each is something the \
+member can do today with what they have, names the one dimension it trains (one \
+of: {dims}), says how many minutes, and gives the steps. A drill is about the \
+PERFORMANCE; mix and room moves stay in "eq" and "how_to".
 
 If either file has no real performance (silence, talking, wrong file), set \
 "unscorable" to one sentence saying which file and what you heard, and stop.
@@ -149,6 +177,7 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "summary": "<two sentences: the biggest gap and the easiest win>",
   "eq": [{{"region": "<one of: {regions}>", "direction": "<take needs: more | less | close>", "what": "<what you hear in each>", "how": "<the move: which control, which way, roughly how much>"}}, ...],
   "how_to": [{{"what": "<the gap>", "why": "<why the reference sounds the way it does>", "how": "<concrete steps>"}}, ...],
+  "drills": [{{"name": "<short name>", "targets": "<one of: {dims}>", "minutes": <1-30 integer>, "why": "<what it closes between the take and the reference>", "how": "<the steps>"}}, ...],
   "keep": "<what the take already does that the reference does too, or does better>",
   "lyric_direction": "<empty, or 2-4 sentences: how the reference writes, as an instruction for rewriting the member's own lines. No quotes from the reference.>"
 }}"""
@@ -181,7 +210,7 @@ def _clean_scores(raw, keys):
             continue
         t, r = vc._clamp(v.get("take")), vc._clamp(v.get("reference"))
         if t is not None and r is not None:
-            out[k] = {"take": t, "reference": r}
+            out[k] = {"take": t, "reference": r, "why": str(v.get("why", "")).strip()[:240]}
     return out
 
 
@@ -205,18 +234,52 @@ def compare(scores, overall):
     subtracts. `gap` is take minus reference (negative = the reference is ahead); `closest` and
     `widest` name the dimensions where the take is nearest and furthest behind."""
     rows = [{"key": k, "take": v["take"], "reference": v["reference"], "gap": v["take"] - v["reference"],
-             "leads": _side(v["take"] - v["reference"])} for k, v in scores.items()]
+             "leads": _side(v["take"] - v["reference"]), "why": v.get("why", "")} for k, v in scores.items()]
     out = {"dimensions": rows,
            "take_leads": sum(r["leads"] == "take" for r in rows),
            "reference_leads": sum(r["leads"] == "reference" for r in rows),
            "even": sum(r["leads"] == "even" for r in rows),
            "overall_gap": overall["take"] - overall["reference"] if overall else None,
            "overall_leads": _side(overall["take"] - overall["reference"]) if overall else None,
-           "closest": None, "widest": None}
+           "closest": None, "widest": None,
+           # What is better and what is worse, said as lists so nobody has to read it off a grid:
+           # `better` = where the take is ahead (biggest lead first), `worse` = where the reference
+           # is (widest gap first). Even dimensions are in neither.
+           "better": [r["key"] for r in sorted(rows, key=lambda r: -r["gap"]) if r["gap"] > 0],
+           "worse": [r["key"] for r in sorted(rows, key=lambda r: r["gap"]) if r["gap"] < 0]}
     if rows:
         out["closest"] = max(rows, key=lambda r: r["gap"])["key"]
         widest = min(rows, key=lambda r: r["gap"])
         out["widest"] = widest["key"] if widest["gap"] < 0 else None
+    return out
+
+
+DRILL_MAX = 4
+
+
+def clean_drills(raw, keys, worse=()):
+    """[{name, targets, label, minutes, why, how}] — at most DRILL_MAX, `name` and `how` required,
+    `targets` one of this coach's own dimensions or the drill is dropped (a drill for a dimension
+    the coach does not score has no number to move, so nothing could say whether it worked).
+    Ordered so drills for the widest gaps (`worse`, from the server's arithmetic) come first."""
+    out, seen = [], set()
+    for item in raw[:10] if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or len(out) == DRILL_MAX:
+            continue
+        name = str(item.get("name", "")).strip()[:80]
+        how = str(item.get("how", "")).strip()[:500]
+        target = str(item.get("targets", "")).strip().lower()
+        if not name or not how or target not in keys or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        try:
+            minutes = max(1, min(30, int(round(float(item.get("minutes"))))))
+        except (TypeError, ValueError):
+            minutes = None
+        out.append({"name": name, "targets": target, "minutes": minutes,
+                    "why": str(item.get("why", "")).strip()[:300], "how": how})
+    rank = {k: i for i, k in enumerate(worse)}
+    out.sort(key=lambda d: rank.get(d["targets"], len(rank)))
     return out
 
 
@@ -234,10 +297,11 @@ def clean_reply(parsed, app_key):
         "closeness_why": str(parsed.get("closeness_why", "")).strip()[:300],
         "scores": scores,
         "overall": overall,
-        "compare": compare(scores, overall),
+        "compare": (cmp := compare(scores, overall)),
         "summary": str(parsed.get("summary", "")).strip()[:500],
         "eq": _clean_eq(parsed.get("eq")),
         "how_to": vc.clean_practice(parsed.get("how_to")),
+        "drills": clean_drills(parsed.get("drills"), keys, cmp["worse"]),
         "keep": str(parsed.get("keep", "")).strip()[:300],
         "lyric_direction": str(parsed.get("lyric_direction", "")).strip()[:600],
     }
@@ -471,7 +535,7 @@ def run_match(app_key, take, ref, genre):
         return None, Response({"unscorable": str(parsed["unscorable"]).strip()[:400], "reference": True,
                          "match": True, "cost_cents": 0, "saved": False})
     out = clean_reply(parsed or {}, app_key)
-    if not parsed or out["closeness"] is None or not (out["eq"] or out["how_to"] or out["summary"]):
+    if not parsed or out["closeness"] is None or not (out["eq"] or out["how_to"] or out["drills"] or out["summary"]):
         return None, Response({"detail": "The coach's reply didn't come back readable. Nothing was charged."},
                         status=status.HTTP_502_BAD_GATEWAY)
     return out, None
@@ -581,7 +645,9 @@ class MatchReferenceView(APIView):
                          app_key=self.app_key, target=f"post:{post_sides[0].post.id}")
         charged = _bill(request.user, note=f"{profile_for_app(self.app_key)['label']} Inspiration — AI",
                         count_daily=True)
+        from .crosspost import coach_price   # read after the bill, so "free today" is today's truth
+        door = lyrics_door(out["lyric_direction"], genre, coach_price(request.user))
         return Response({**out, "match": True, "reference": True, "saved": False, "feature": LABEL,
-                         "cost_cents": charged, "energy_cost": energy_cost,
+                         "cost_cents": charged, "energy_cost": energy_cost, "lyrics_door": door,
                          "eq_note": EQ_NOTE, "lyric_note": LYRIC_NOTE, "genre": genre,
                          "sources": {"take": take.describe(), "reference": ref.describe()}})
