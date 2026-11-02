@@ -3104,3 +3104,12 @@ run show the new number with no client change.
 - **Kept the engine multiplier** (Corey's earlier call that dearer engines cost more ⚡), so a
   Fable run on Free is 32000. Dropping it is one line in `ai_energy_cost`.
 - The trial's "as a member this take would cost" line (`trial._as_member`) reads the Free figure.
+
+## Moving uploads to a bucket does not move the files — `copy_media_to_bucket` does
+
+Setting `S3_BUCKET_NAME` + keys changes where the app LOOKS for a key like `uploads/12/take.wav`, not where the
+bytes are, so the files already on the persistent disk would read as lost the moment the bucket went on.
+`manage.py copy_media_to_bucket [--write] [--source DIR]` copies every file any model's FileField names from the
+disk into the storage now in force, **keeping the key exactly** (no row changes), **never overwriting and never
+deleting** (the disk stays the second copy until a person drops it), dry by default, and reporting files not on the
+source as already lost. Run it once after the S3 variables are live, then `reconcile_uploads --write`.
