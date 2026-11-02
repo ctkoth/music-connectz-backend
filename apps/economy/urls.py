@@ -106,6 +106,7 @@ from .messages_view import MessagesView
 from .logz import FeaturesView, LogZExportView, LogZView
 from .observationz import ObservationConsentView, ObservationZView
 from .social_verify import SocialReviewQueueView, SocialVerifyView
+from .socialz import SocialZView
 from .parcel import ParcelCampaignView, ParcelEmailPrefView, ParcelUnsubscribeView
 from .reach import ReachGatesView
 from .autotopup import AutoTopUpView, AutoTopUpCancelView
@@ -453,6 +454,7 @@ urlpatterns = [
     path("social/listened/", SocialView.as_view(), {"action": "listened"},
          name="economy-social-listened"),
     path("social/verify/", SocialVerifyView.as_view(), name="economy-social-verify"),
+    path("socialz/", SocialZView.as_view(), name="economy-socialz"),
     # What the AI couldn't confirm goes to a person, not to a wall.
     path("social/reviews/", SocialReviewQueueView.as_view(), name="economy-social-reviews"),
     path("members/", MembersView.as_view(), name="economy-members"),

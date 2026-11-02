@@ -38,13 +38,13 @@ SUBSTANCES = [
     ("caffeine", "Caffeine", "☕"),
     ("alcohol", "Alcohol", "🍺"),
     ("thc", "THC", "🍃"),
-    ("dxm", "DXM", "🧴"),
-    ("adderall", "Adderall", "💊"),
-    ("benzos", "Benzos", "💊"),
-    ("opioids", "Opioids", "💊"),
     ("heroin", "Heroin", "💉"),
     ("crack", "Crack", "💎"),
     ("meth", "Meth", "💎"),
+    ("dxm", "DXM", "🧴"),
+    ("adderall", "Adderall", "💊"),
+    ("opioids", "Opioids", "💊"),
+    ("benzos", "Benzos", "💊"),
 ]
 SUBSTANCE_KEYS = [s[0] for s in SUBSTANCES]
 

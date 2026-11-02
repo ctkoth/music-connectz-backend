@@ -137,7 +137,7 @@ class EarnView(APIView):
                  tab="social", target="social-feed",
                  note="Once per post, after you've actually watched it."),
             _way("link", "Someone clicks your link", LINK_CLICK_REWARD_ENERGY, "energy",
-                 tab="profilez", target="profile-links"),
+                 tab="profilez", target="portfolio-links"),
             _way("restricted", "Someone joins your restricted post",
                  RESTRICTED_JOIN_REWARD_SPINAZ, "spinaz",
                  tab="social", target="social-compose"),
@@ -145,7 +145,7 @@ class EarnView(APIView):
             # never 0, so this stopped being a locked row a new member reads as
             # "not for you" and became a number that grows when they verify.
             _way("passive", "Passive Energy, hourly", rate, "energy",
-                 tab="profilez", target="profile-reach",
+                 tab="socialz", target="socialz-reach",
                  note="Paid by the hour, tier-scaled. Verify a social account "
                       "and your median reach raises it above the floor."),
             _way("onboard", "Finish OnboardZ", ONBOARD_REWARD_SPINAZ, "spinaz",

@@ -17,8 +17,11 @@ Two layers, most-trusted first:
    number. Best-effort: some platforms block server fetches; the UI labels
    those links "unverified" and they're excluded from the reach median.
 """
+import ipaddress
 import re
 import secrets
+import socket
+from urllib.parse import urljoin, urlparse
 
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -49,20 +52,93 @@ def _find_link(links, url):
     return None
 
 
+MAX_REDIRECTS = 3
+MAX_PAGE_BYTES = 1_000_000
+
+
+def _public_host_problem(url):
+    """None if `url` is a public web address this server may fetch, else a short
+    reason a member can read.
+
+    A member types the address and THIS SERVER fetches it, which is how a
+    verification button becomes a way to ask our own network for things
+    (localhost, the cloud metadata address, a database host). So: http(s) only,
+    no credentials in the address, and every address the name resolves to must
+    be a public one. A hostname that resolves to ANY private address is refused,
+    not "the first one wins".
+
+    Honest limit: the name is resolved here and again by `requests`, so a DNS
+    answer that changes between the two is not caught. This narrows the door a
+    great deal; it does not close it, and nothing here should be read as saying
+    it does.
+    """
+    try:
+        u = urlparse(url)
+        port = u.port
+    except ValueError:
+        return "that isn't a web address"
+    if u.scheme not in ("http", "https") or not u.hostname:
+        return "only web addresses (http or https) can be checked"
+    if u.username or u.password:
+        return "that address has a login in it, so it can't be checked"
+    try:
+        infos = socket.getaddrinfo(u.hostname, port or (443 if u.scheme == "https" else 80),
+                                   proto=socket.IPPROTO_TCP)
+    except (OSError, UnicodeError):
+        return "couldn't find that site"
+    if not infos:
+        return "couldn't find that site"
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return "that isn't a public website"
+        if ip.version == 6 and ip.ipv4_mapped:
+            ip = ip.ipv4_mapped
+        if not ip.is_global:
+            return "that isn't a public website"
+    return None
+
+
 def _fetch_public_page(url):
-    """Fetch a public profile page's visible text. Returns (text, error)."""
+    """Fetch a public profile page's visible text. Returns (text, error).
+
+    Redirects are followed by hand, up to MAX_REDIRECTS, and every hop is checked
+    like the first — a public page that redirects to a private address is the
+    obvious way round a check made only on the address that was typed. The body
+    is capped: a profile page is not a download.
+    """
     import requests
     try:
-        resp = requests.get(
-            url,
-            timeout=12,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; MusicConnectZ/1.0)"},
-        )
-        resp.raise_for_status()
+        for _ in range(MAX_REDIRECTS + 1):
+            problem = _public_host_problem(url)
+            if problem:
+                return None, problem
+            resp = requests.get(
+                url,
+                timeout=12,
+                allow_redirects=False,
+                stream=True,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; MusicConnectZ/1.0)"},
+            )
+            if resp.status_code in (301, 302, 303, 307, 308) and resp.headers.get("Location"):
+                url = urljoin(url, resp.headers["Location"])
+                resp.close()
+                continue
+            resp.raise_for_status()
+            break
+        else:
+            return None, "that page sent us around in circles"
+        body = b""
+        for chunk in resp.iter_content(65536):
+            body += chunk
+            if len(body) > MAX_PAGE_BYTES:
+                break
+        html = body.decode(resp.encoding or "utf-8", errors="replace")
     except Exception as exc:  # network, 403 (platform blocks bots), timeout
         return None, f"couldn't reach that page ({exc})"[:160]
     # Strip tags to visible text so the model reads the follower count + bio.
-    text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", resp.text, flags=re.S | re.I)
+    text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html, flags=re.S | re.I)
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text[:12000], None
@@ -224,12 +300,29 @@ class SocialVerifyView(APIView):
         if not url:
             return Response({"detail": "url required"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # The same cleaner every other writer of `links` uses. This door used to
+        # store whatever it was handed, which put an unvalidated address on a
+        # profile that renders it as <a href> for logged-out visitors.
+        from .personaz import clean_link
+        from .social import links_of, links_over_cap
+        cleaned = clean_link({"label": request.data.get("label", ""), "url": url})
+        if cleaned is None or urlparse(cleaned["url"]).scheme not in ("http", "https"):
+            return Response({"detail": "That doesn't look like a web link."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        url = cleaned["url"]
+
         p = profile_for(request.user)
         links = list(p.links or [])
         link = _find_link(links, url)
         if link is None:
-            # Allow verifying a URL that isn't saved yet by adding a stub link.
-            link = {"label": str(request.data.get("label", "")).strip() or url, "url": url}
+            # Allow verifying a URL that isn't saved yet by adding a stub link —
+            # under the same per-tier ceiling as adding it in the portfolio.
+            link = {"label": cleaned["label"].strip() or url, "url": url}
+            over = links_over_cap(request.user, links_of(p), links_of(p) + [link])
+            if over is not None:
+                return Response({"detail": f"Your portfolio holds {over} links on your tier — "
+                                           "remove one, or verify a link you already have."},
+                                status=status.HTTP_400_BAD_REQUEST)
             links.append(link)
 
         if action == "start":

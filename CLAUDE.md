@@ -3037,3 +3037,35 @@ The address backstop and `trial_daily_cap()` are unchanged, so the most the door
 ## A set logged on the wrong lift is taken back where it happened
 
 `DELETE /api/economy/bodiez/sessions/<id>/sets/<set_id>/` (`BodieZSetDetailView`) removes ONE set, and only from the OPEN session, then renumbers that lift's remaining sets so the next one logged cannot repeat a number. A finished session is still edited through `PUT .../sets/`, which keeps the rest clock and the records honest in one place. Without this the only way to fix a slip on the live logger was to finish the workout and open SessionZ.
+
+## SocialZ: the income path had a backend and no way in
+
+`social_verify.py` has proven a linked account is the member's and read its real follower count
+since it shipped, and `reach_median` feeds passive ⚡ — but the only screen that ever drove it was
+in the unmounted `src/mcz2/`. `apps/economy/socialz.py` (`GET /api/economy/socialz/`) is the read a
+live screen needs; verifying is still `POST social/verify/`.
+
+- **Nothing is retyped.** The divisor and floor are `ENERGY_REACH_DIVISOR` / `ENERGY_FLOOR_PER_HOUR`,
+  the per-tier rates are `energy_rate_per_hour(user, tier=)` against the member's OWN reach, and the
+  rule's sentence is built from those constants. The screen words the difference between two reads of
+  the server's rate after a check; it never works the rate out.
+- **A connected sign-in does not count followers, and the payload says so** (`oauth_note`). OAuth proves
+  it is you at login; only a verified link feeds reach. The module docstring of `social_verify` still
+  describes an OAuth-reads-the-count "layer 1" that does not exist in code — do not build a screen
+  that promises it.
+- **`status` is one word per account** (verified / pending / rejected / unverified) and `counts` is true
+  only for verified. A rejected account says so, or a member re-submits it forever.
+- **The verify door got hardened because a screen now sits in front of it.** It used to (1) store whatever
+  URL it was handed, skipping `clean_link` and the per-tier link ceiling — an unvalidated address on a
+  profile that renders `<a href>` to logged-out visitors — and (2) fetch any URL a member typed from this
+  server. Now: the same cleaner and `links_over_cap` as the portfolio, http(s) only, and
+  `_public_host_problem` refuses any name that resolves to a non-public address, every redirect hop
+  re-checked, body capped. **Honest limit:** the name is resolved by the check and again by `requests`, so a
+  DNS answer that changes between the two is not caught. This narrows the door; it does not close it.
+- **Unverified here:** `VERIFY_MODEL = "claude-opus-4-8"` and the model call itself have never run against
+  Anthropic from CI (no key). The tests stub `_fetch_public_page` and the model.
+- `earn.py` pointed passive ⚡ at `profilez/profile-reach` and link clicks at `profile-links`; neither anchor
+  existed in the frontend. They land on `socialz/socialz-reach` and `profilez/portfolio-links` now.
+
+SubstanceZ's list is in the order members asked for (cigarettes, caffeine, alcohol, THC, heroin, crack,
+meth, DXM, Adderall, opioids, benzos). Keys did not change; only the order a screen lists them in did.
