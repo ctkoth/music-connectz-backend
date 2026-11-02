@@ -223,3 +223,22 @@ class OtherFiltersAreNoOraclesEitherTests(SearchTests):
         self.assertEqual(self.names("signs=Leo"), {"default"})
         self.assertEqual(self.names("regions=Europe"), {"default"})
         self.assertEqual(self.names("languages=en"), {"default"})
+
+
+class PersonalityFilterIsNoOracleTests(SearchTests):
+    def test_a_hidden_personality_is_not_found_and_is_counted_as_not_having_said(self):
+        self.member("quiet", personality="INTJ", visibility={"personality": ["private"]})
+        self.member("loud", personality="INTJ")
+        self.member("blank")
+        r = self.client.get(f"{MEMBERS}?ie=I")
+        self.assertEqual({m["username"] for m in r.data["members"]}, {"loud"})
+        # Hidden and undeclared are the same thing from here: two members, not one.
+        self.assertIn("2 members hidden", r.data["personality_note"])
+
+    def test_the_count_is_the_same_whether_the_hidden_member_declared_or_not(self):
+        self.member("hidden_declared", personality="INTJ", visibility={"personality": ["private"]})
+        a = self.client.get(f"{MEMBERS}?ie=I").data["personality_note"]
+        User.objects.filter(username="hidden_declared").delete()
+        self.member("hidden_blank", personality="", visibility={"personality": ["private"]})
+        b = self.client.get(f"{MEMBERS}?ie=I").data["personality_note"]
+        self.assertEqual(a, b)

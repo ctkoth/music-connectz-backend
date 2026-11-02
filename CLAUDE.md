@@ -3094,7 +3094,8 @@ option. **Decided: one app, two independent fields** (`apps/economy/philosophiez
   religion private was still found by searching for their religion. Same oracle, same fix; `test_philosophiez` pins it.
   **The rest of that family is fixed too (Corey said yes):** `regions`, `genders`, `signs`, `signs_cn` (which answers to the
   `sign` setting, like the card key via `_DERIVED`) and `languages` now go through `can_see`. Exposure had only been for members
-  who chose private, but a privacy setting that the search ignores is a setting that does nothing. **Still not checked:** the
-  `personality` filter (its "nobody has said" counter needs a deliberate decision about hidden vs undeclared). `nationalities` is not a
-  server-side search filter, so it has no such leak.
+  who chose private, but a privacy setting that the search ignores is a setting that does nothing. **`personality` is fixed too:** a hidden
+  personality is read as UNDECLARED — it never matches, and it is counted in the "hidden for not having said" note exactly like a member
+  who truly has not said, so neither the matches nor the count can tell a searcher which of the two a member is (a test pins the count
+  being identical either way). `nationalities` is not a server-side search filter, so it has no such leak.
 - Not decided: whether minors may declare politics. The age-grouped search keeps minors with minors; no separate wall.

@@ -1569,15 +1569,19 @@ class MembersView(APIView):
                     continue
             if sober_only and not (p.sober and can_see(p, "sober", request.user, aud)):
                 continue
-            if personality_wanted and not personality_matches(p.personality, personality_wanted):
-                # Counted apart from an ordinary miss. An empty grid has two
-                # completely different causes — nobody matches, or nobody has
-                # said — and on a field this new the second is usually the
-                # real one. `filter_reason` is what stops a searcher
-                # concluding there are no Introverts here.
-                if not personality_dict(p.personality).keys() >= personality_wanted.keys():
-                    personality_undeclared += 1
-                continue
+            if personality_wanted:
+                # A hidden personality is read as UNDECLARED: it never matches, and it is counted
+                # with the members who have not said, so neither the matches nor the "hidden for
+                # not having said" count can tell a searcher which of the two a member is.
+                code = p.personality if can_see(p, "personality", request.user, aud) else ""
+                if not personality_matches(code, personality_wanted):
+                    # Counted apart from an ordinary miss. An empty grid has two completely
+                    # different causes — nobody matches, or nobody has said — and on a field this
+                    # new the second is usually the real one. `filter_reason` is what stops a
+                    # searcher concluding there are no Introverts here.
+                    if not personality_dict(code).keys() >= personality_wanted.keys():
+                        personality_undeclared += 1
+                    continue
             if gear_wanted and not any(w in n for w in gear_wanted for n in gear_names(p)):
                 continue
             if genres_wanted and not genres_wanted & member_genres(p):
