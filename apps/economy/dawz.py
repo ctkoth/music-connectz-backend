@@ -1,4 +1,4 @@
-"""DawZ — seven DAW knockoffs, none built, clicking one casts a vote.
+"""DawZ — eight DAW knockoffs on one engine; a built one opens, an unbuilt one takes a vote.
 
 The descriptions and the seven names already existed — written for
 `src/mcz2/dawz.js`, the frontend's 2.2 reference app, which is explicitly
@@ -89,7 +89,7 @@ DAWS = [
     {
         "id": "intuition",
         "name": "Intuition",
-        "emoji": "🤔",
+        "emoji": "💭",
         "icon": "intuition.png",
         "knockoff": "Logic Pro",
         "desc": ("Polished, all-in-one songwriting powerhouse — stacked "
@@ -107,9 +107,36 @@ DAWS = [
                  "dead-simple recording — the on-ramp that gets a beginner "
                  "their first W. Our knockoff of GarageBand."),
     },
+    {
+        "id": "studio_dragon",
+        "name": "Studio Dragon",
+        "emoji": "🐉",
+        "icon": "",
+        "knockoff": "Studio One",
+        "desc": ("One window, drag-and-drop everything — drop a sound on a "
+                 "track, an effect on a channel, a song section where it "
+                 "goes. Songwriting and mastering live in the same room, so "
+                 "the record you build is the record you finish. Our "
+                 "knockoff of Studio One."),
+    },
 ]
 
 DAW_IDS = {d["id"] for d in DAWS}
+
+# The DAWs that exist, and the tab each one opens. All of them run on ONE engine in the frontend
+# (src/daw/): a DAW here is a workflow — which windows, which edit modes, which way a track is
+# laid out — not a second codebase. A DAW joins this map when its workflow ships, never before:
+# a "built" flag on something that isn't is the LogicZ failure in reverse.
+BUILT = {"arsenal": "arsenal"}
+
+# Said beside every DAW, because "VST" is the word people arrive with and the answer is not a
+# yes. A VST is a native desktop program; no web page can load one, and the Android app is a web
+# page. What a browser can run is a plugin written for the web (Web Audio Modules), and third-party
+# plugin code would run with the member's own sign-in — so only the built-in effects ship now.
+PLUGIN_NOTE = ("Effects are built in: EQ, compressor, delay, reverb, filter and gain, on every "
+               "track, free. VST plugins can't run in a browser or the phone app — they are "
+               "desktop programs. Loading outside plugins is planned for the Windows app, where "
+               "they can run safely.")
 
 
 class DawVote(models.Model):
@@ -135,8 +162,8 @@ def daw_catalog(user):
         counts[row["daw_id"]] = row["n"]
     mine = set(DawVote.objects.filter(user=user).values_list("daw_id", flat=True))
     return [
-        {**d, "built": False, "votes": counts.get(d["id"], 0),
-         "my_vote": d["id"] in mine}
+        {**d, "built": d["id"] in BUILT, "tab": BUILT.get(d["id"], ""),
+         "votes": counts.get(d["id"], 0), "my_vote": d["id"] in mine}
         for d in DAWS
     ]
 
@@ -153,7 +180,7 @@ class DawZView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response({"daws": daw_catalog(request.user)})
+        return Response({"daws": daw_catalog(request.user), "plugin_note": PLUGIN_NOTE})
 
     def post(self, request):
         daw_id = str(request.data.get("daw_id") or "").strip()
@@ -164,4 +191,4 @@ class DawZView(APIView):
             existing.delete()
         else:
             DawVote.objects.create(user=request.user, daw_id=daw_id)
-        return Response({"daws": daw_catalog(request.user)})
+        return Response({"daws": daw_catalog(request.user), "plugin_note": PLUGIN_NOTE})

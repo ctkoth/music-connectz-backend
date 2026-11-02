@@ -3134,3 +3134,13 @@ bytes are, so the files already on the persistent disk would read as lost the mo
 disk into the storage now in force, **keeping the key exactly** (no row changes), **never overwriting and never
 deleting** (the disk stays the second copy until a person drops it), dry by default, and reporting files not on the
 source as already lost. Run it once after the S3 variables are live, then `reconcile_uploads --write`.
+
+## DawZ: what is built is said here, and what a VST is
+
+`dawz.py` lists eight DAWs (Corey's six plus Fruity Möbius and Witchcraft). `BUILT` maps the ones that
+exist to the tab that opens them (Arsenal only, for now) and the catalogue serves `built` + `tab`; an
+unbuilt one still takes a vote. They share ONE engine in the frontend (`src/daw/`), so a DAW is a
+workflow, not a codebase. `PLUGIN_NOTE` is the answer to "VST": a native desktop plugin cannot run in a
+browser or the TWA, outside web plugins would run with the member's sign-in, so only built-in effects
+ship and outside plugins wait for the Windows app. Nothing about a DAW session reaches this server — the
+frontend keeps it on the device until the member saves a bounce to FileZ.

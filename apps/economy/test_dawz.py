@@ -22,10 +22,24 @@ class Base(TestCase):
 
 
 class TheCatalogTests(Base):
-    def test_all_seven_are_listed_and_none_are_built(self):
+    def test_all_eight_are_listed_and_only_the_built_ones_say_so(self):
         d = self.client.get(URL).data["daws"]
-        self.assertEqual(len(d), 7)
-        self.assertTrue(all(row["built"] is False for row in d))
+        self.assertEqual(len(d), 8)
+        built = {row["id"]: row["tab"] for row in d if row["built"]}
+        self.assertEqual(built, {"arsenal": "arsenal"})
+        self.assertTrue(all(row["tab"] == "" for row in d if not row["built"]))
+
+    def test_corey_s_six_are_named_as_he_named_them(self):
+        by = {row["id"]: row for row in DAWS}
+        for key, emoji, knockoff in (("azrael", "☠️", "Reaper"), ("trump_toupee", "🤵🏼‍♂️", "Bitwig"),
+                                     ("intuition", "💭", "Logic Pro"), ("formulawon", "🚦", "GarageBand"),
+                                     ("studio_dragon", "🐉", "Studio One"), ("arsenal", "⚔️", "Pro Tools")):
+            self.assertEqual((by[key]["emoji"], by[key]["knockoff"]), (emoji, knockoff))
+
+    def test_the_plugin_answer_is_said_with_the_list(self):
+        r = self.client.get(URL).data
+        self.assertIn("VST", r["plugin_note"])
+        self.assertIn("built in", r["plugin_note"])
 
     def test_the_ids_match_the_one_list(self):
         d = self.client.get(URL).data["daws"]
