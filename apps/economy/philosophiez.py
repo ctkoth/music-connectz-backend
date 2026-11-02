@@ -71,6 +71,8 @@ POLITICS = (
     ("environmentalist", "Green / environmentalist"),
     ("liberal", "Liberal"),
     ("libertarian", "Libertarian"),
+    ("nationalist", "Nationalist"),
+    ("populist", "Populist"),
     ("progressive", "Progressive"),
     ("social_democrat", "Social democrat"),
     ("socialist", "Socialist"),

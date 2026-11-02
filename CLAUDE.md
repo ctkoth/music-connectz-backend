@@ -3087,11 +3087,14 @@ option. **Decided: one app, two independent fields** (`apps/economy/philosophiez
   can see each, from the member's own settings, above the picker.
 - **The words are broad outlooks, never parties**, listed alphabetically with Other last so order implies nothing.
   **Both lists are an editorial judgement, Corey's to change** — one place, keys are what is stored, labels can move.
-  Left out on purpose and worth a decision: "nationalist" and "populist" (contested as self-descriptions either way).
+  "Nationalist" and "populist" were left out at first as contested either way; Corey said to add them, so they are in (alphabetical, like the rest).
 - **The search filters go through `can_see`** (`?philosophies=`, `?politics=`). A filter that matched a hidden
   declaration would let a searcher read it off who appears.
 - **Found on the way and fixed: the existing `?religions=` filter ignored a member's privacy setting.** A member who set
   religion private was still found by searching for their religion. Same oracle, same fix; `test_philosophiez` pins it.
-  **Not fixed, same family:** the `genders`, `signs` and `signs_cn` filters read the column without `can_see`. Worth a
-  deliberate look — gender and sign are member-visible by default, so the exposure is only for members who chose private.
+  **The rest of that family is fixed too (Corey said yes):** `regions`, `genders`, `signs`, `signs_cn` (which answers to the
+  `sign` setting, like the card key via `_DERIVED`) and `languages` now go through `can_see`. Exposure had only been for members
+  who chose private, but a privacy setting that the search ignores is a setting that does nothing. **Still not checked:** the
+  `personality` filter (its "nobody has said" counter needs a deliberate decision about hidden vs undeclared). `nationalities` is not a
+  server-side search filter, so it has no such leak.
 - Not decided: whether minors may declare politics. The age-grouped search keeps minors with minors; no separate wall.

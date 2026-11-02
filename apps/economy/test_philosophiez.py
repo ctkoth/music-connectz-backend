@@ -44,6 +44,10 @@ class ListTests(TestCase):
             self.assertEqual(labels, sorted(labels, key=str.lower))
             self.assertEqual(rows[-1][0], "other")
 
+    def test_nationalist_and_populist_are_on_the_list_and_still_in_order(self):
+        keys = {k for k, _ in ph.POLITICS}
+        self.assertTrue({"nationalist", "populist"} <= keys)
+
     def test_politics_names_outlooks_not_parties(self):
         words = " ".join(l.lower() for _, l in ph.POLITICS)
         for party in ("democrat party", "republican", "labour", "tory", "gop", "maga"):
@@ -189,3 +193,33 @@ class SearchTests(TestCase):
         self.member("quiet", religion="catholic", visibility={"religion": ["private"]})
         self.member("loud", religion="catholic")
         self.assertEqual(self.names("religions=catholic"), {"loud"})
+
+
+class OtherFiltersAreNoOraclesEitherTests(SearchTests):
+    """The same leak, closed for the rest of the declared-value filters in the member search:
+    a member who hid a field must not be found by searching for its value."""
+
+    def test_a_hidden_gender_is_not_found_by_gender(self):
+        self.member("quiet", gender="female", visibility={"gender": ["private"]})
+        self.member("loud", gender="female")
+        self.assertEqual(self.names("genders=female"), {"loud"})
+
+    def test_a_hidden_sign_is_not_found_by_sign_or_by_animal(self):
+        self.member("quiet", sign="Leo", birthday="1990-08-01", visibility={"sign": ["private"]})
+        self.member("loud", sign="Leo", birthday="1990-08-01")
+        self.assertEqual(self.names("signs=Leo"), {"loud"})
+        self.assertEqual(self.names("signs_cn=Horse"), {"loud"})
+
+    def test_hidden_regions_and_languages_are_not_found_either(self):
+        self.member("quiet", regions=["Europe"], languages={"en": "fluent"},
+                    visibility={"regions": ["private"], "languages": ["private"]})
+        self.member("loud", regions=["Europe"], languages={"en": "fluent"})
+        self.assertEqual(self.names("regions=Europe"), {"loud"})
+        self.assertEqual(self.names("languages=en"), {"loud"})
+
+    def test_nothing_changes_for_a_member_who_left_the_defaults(self):
+        self.member("default", gender="male", sign="Leo", regions=["Europe"], languages={"en": "fluent"})
+        self.assertEqual(self.names("genders=male"), {"default"})
+        self.assertEqual(self.names("signs=Leo"), {"default"})
+        self.assertEqual(self.names("regions=Europe"), {"default"})
+        self.assertEqual(self.names("languages=en"), {"default"})

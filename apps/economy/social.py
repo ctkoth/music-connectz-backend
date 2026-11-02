@@ -1544,24 +1544,27 @@ class MembersView(APIView):
             "edges": follow_edges_for(card_ids),
         }
         for p in qs:
-            if regions and not (set(regions) & set(p.regions or [])):
+            # `can_see` on every declared-value filter in this block: a hidden declaration is
+            # read as undeclared, so being filtered in or out can never reveal it. `signs_cn`
+            # is read off the same birthday as `sign`, so it answers to the `sign` setting —
+            # `visibility._DERIVED` says the same about the card key.
+            if regions and not (can_see(p, "regions", request.user, aud) and set(regions) & set(p.regions or [])):
                 continue
-            if genders and p.gender not in genders:
+            if genders and not (can_see(p, "gender", request.user, aud) and p.gender in genders):
                 continue
-            if signs and p.sign not in signs:
+            if signs and not (can_see(p, "sign", request.user, aud) and p.sign in signs):
                 continue
-            # `can_see` on every declared-value filter below: a hidden declaration is
-            # read as undeclared, so being filtered in or out can never reveal it.
             if religions and not (can_see(p, "religion", request.user, aud) and p.religion in religions):
                 continue
             if philosophies and not (can_see(p, "philosophy", request.user, aud) and p.philosophy in philosophies):
                 continue
             if politics_wanted and not (can_see(p, "politics", request.user, aud) and p.politics in politics_wanted):
                 continue
-            if languages and not (set(languages) & set((p.languages or {}).keys())):
+            if languages and not (can_see(p, "languages", request.user, aud)
+                                  and set(languages) & set((p.languages or {}).keys())):
                 continue
             if signs_cn:
-                cn = chinese_zodiac_for(p.birthday)
+                cn = chinese_zodiac_for(p.birthday) if can_see(p, "sign", request.user, aud) else None
                 if not cn or cn["animal"] not in signs_cn:
                     continue
             if sober_only and not (p.sober and can_see(p, "sober", request.user, aud)):
