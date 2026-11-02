@@ -861,6 +861,11 @@ class SocialView(APIView):
         return {"comment_cost_energy": 0 if (own or free_left) else COMMENT_ENERGY,
                 "comment_free_left": free_left, "comment_free_per_day": COMMENT_FREE_PER_DAY}
 
+    def _moods(self, item, user):
+        from . import moods
+        counts, mine = moods.summary(item, user)
+        return {"list": moods.catalog(), "counts": counts, "mine": mine}
+
     def _payload(self, item, request):
         ups = Reaction.objects.filter(item_id=item, value=1).count()
         downs = Reaction.objects.filter(item_id=item, value=-1).count()
@@ -924,6 +929,8 @@ class SocialView(APIView):
             # guesses: where this item can be linked to, and where it opens.
             "share": share_for(item),
             "opens": opens_for(item),
+            # Moods: the server's list, how many of each, and this member's own.
+            "moods": self._moods(item, request.user),
             **self._comment_quote(item, request.user),
         }
 
@@ -962,6 +969,41 @@ class SocialView(APIView):
             return
         notify(post.author, kind, text, actor=actor, item_id=item)
 
+    def _mood(self, request, item):
+        """Set, change or clear this member's mood on an item. Free, pays nothing."""
+        from . import moods
+        from .models import MoodReaction, can_view_post
+        mood = moods.clean((request.data or {}).get("mood", ""))
+        if mood is None:
+            return Response({"detail": "That isn't one of the moods."}, status=status.HTTP_400_BAD_REQUEST)
+        spec, exists, owner = item_kind(item)
+        if spec:
+            if not exists:
+                return Response({"detail": "That isn't here any more."}, status=status.HTTP_404_NOT_FOUND)
+            label = spec["label"]
+        elif item.startswith("post:"):
+            try:
+                post = Post.objects.select_related("author").get(pk=int(item.split(":", 1)[1]))
+            except (ValueError, Post.DoesNotExist):
+                return Response({"detail": "That isn't here any more."}, status=status.HTTP_404_NOT_FOUND)
+            if not can_view_post(post, request.user):
+                return Response({"detail": "That isn't here any more."}, status=status.HTTP_404_NOT_FOUND)
+            owner, label = post.author, "post"
+        else:
+            return Response({"detail": "You can't react to that."}, status=status.HTTP_400_BAD_REQUEST)
+        if mood and owner is not None and owner.id == request.user.id:
+            return Response({"detail": f"You can't react to your own {label}. Others can, from the link."},
+                            status=status.HTTP_403_FORBIDDEN)
+        if not mood:
+            MoodReaction.objects.filter(user=request.user, item_id=item).delete()
+        else:
+            _row, created = MoodReaction.objects.update_or_create(
+                user=request.user, item_id=item, defaults={"mood": mood})
+            if created:
+                emoji = next(e for k, e, _l in moods.MOODS if k == mood)
+                self._notify_target(item, "like", f"@{request.user.username} reacted {emoji} to your post", request.user)
+        return Response(self._payload(item, request))
+
     def post(self, request, action=None):
         item = str((request.data or {}).get("item", "")).strip()[:160]
         if not item:
@@ -977,6 +1019,8 @@ class SocialView(APIView):
             return Response({"item": item, "listened_sec": row.seconds,
                              "finished": row.finished,
                              "listen_required_sec": LISTEN_REQUIRED_SEC})
+        if action == "mood":
+            return self._mood(request, item)
         spec, exists, owner = item_kind(item)
         if spec and action in ("react", "comment", "rate"):
             if not exists:

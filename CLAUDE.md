@@ -3074,3 +3074,16 @@ that was false cost members their recordings. Two things can be checked, and now
 
 What none of this can do: bring back bytes that are gone, or protect against losing the disk itself.
 A bucket (`S3_*`) is the only real second copy.
+
+## Moods: how it made you feel, beside the karma vote — a reaction, never a measurement
+
+`apps/economy/moods.py` is the list (❤️ love, 😂 funny, 😲 shocked, 🤔 curious, 😢 sad, 😡 hate), `MoodReaction`
+(migration 0234) holds one per member per item, `POST /api/economy/social/mood/ {item, mood}` sets, changes or clears
+(`""`), and `GET social/` serves `moods: {list, counts, mine}` in two queries. "Like" is deliberately NOT a mood — it is
+the karma up-vote, and two likes would be two answers to how many people liked something.
+
+- **Pays nothing and moves nothing.** No rating, median, royalty factor, skill, price or rank reads a mood, and
+  `test_moods` fails if any module outside `moods`/`models`/`social` names one. Nothing to farm.
+- Only registered kinds and visible posts can be reacted to; your own work cannot (403, same sentence style as a like);
+  an unknown mood is a 400, never guessed. The maker is told on the FIRST reaction, not every change.
+- **Merge the backend before the frontend:** the bar calls `social/mood/`, and an older server simply draws no picker.

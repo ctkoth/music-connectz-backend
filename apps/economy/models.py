@@ -3178,6 +3178,22 @@ class Reaction(models.Model):
         unique_together = ("user", "item_id")
 
 
+class MoodReaction(models.Model):
+    """How one member felt about one item: love, funny, shocked, curious, sad or hate.
+
+    One per member per item (tap another to change it, the same one to clear).
+    Separate from `Reaction`, which is the up/down karma vote — a member has one
+    of each. Pays nothing and moves no measurement; see moods.py.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="mood_reactions")
+    item_id = models.CharField(max_length=160, db_index=True)
+    mood = models.CharField(max_length=12)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("user", "item_id")
+
+
 class ListenProgress(models.Model):
     """How long this member has actually PLAYED this item.
 

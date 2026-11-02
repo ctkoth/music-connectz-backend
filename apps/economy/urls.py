@@ -449,6 +449,7 @@ urlpatterns = [
     path("social/react/", SocialView.as_view(), {"action": "react"}, name="economy-social-react"),
     path("social/comment/", SocialView.as_view(), {"action": "comment"}, name="economy-social-comment"),
     path("social/rate/", SocialView.as_view(), {"action": "rate"}, name="economy-social-rate"),
+    path("social/mood/", SocialView.as_view(), {"action": "mood"}, name="economy-social-mood"),
     # The player's heartbeat. Rating a track you never played was possible for
     # every post older than a minute — the age window gated the post, not the
     # listener. See models.ListenProgress.
