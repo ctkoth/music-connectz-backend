@@ -1466,11 +1466,14 @@ class SingZCoachView(APIView):
             note += f" — {stored['kind']} #{stored['id']}"
         from django.utils import timezone as _tz
         _t0 = _tz.now()
-        charged = _bill(request.user, note=note, count_daily=True)
+        # The post's fixed ⚡ goes BEFORE the run's own ⚡: the run takes up to what is
+        # held (on Free a prompt is more than anybody holds), so spent after it the
+        # fee met an empty wallet, failed silently and was still reported as paid.
         if energy_cost:
             spend_energy(request.user, energy_cost, f"Coach a post — {post.title[:50]}",
                          app_key=self.app_key, target=f"post:{post.id}")
-        elif post is None and stored is None:
+        charged = _bill(request.user, note=note, count_daily=True)
+        if not energy_cost and post is None and stored is None:
             # A freshly recorded take: take what is there, up to the price. Never a wall.
             want = coach_take_energy(request.user)
             have = max(0, wallet_for(request.user).energy or 0)
@@ -1638,12 +1641,12 @@ class SingZCoachView(APIView):
         if err:
             body, code = err
             return Response({**body, "reference": True, "radar": True}, status=code)
+        if energy_cost:   # before the run's own up-to ⚡; see the coach path
+            spend_energy(request.user, energy_cost, f"Radar read — {post.title[:50]}",
+                         app_key=self.app_key, target=f"post:{post.id}")
         charged = _bill(request.user,
                         note=f"{profile_for_app(self.app_key)['label']} Radar read — AI",
                         count_daily=True)
-        if energy_cost:
-            spend_energy(request.user, energy_cost, f"Radar read — {post.title[:50]}",
-                         app_key=self.app_key, target=f"post:{post.id}")
         return Response({**payload, "cost_cents": charged, "energy_cost": energy_cost,
                          "reference": True, "radar": True, "saved": False,
                          "take_score_id": None, "share_url": "", "saved_to_post": False,

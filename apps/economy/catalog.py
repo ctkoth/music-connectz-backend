@@ -468,7 +468,7 @@ PLAYLIST_RECENCY_BOOST_MULTIPLIER = 1.5 # fresh content earns 50% more
 # Corey's rule: ONE task costs ONE PromptZ, whatever engine ran it. A task that
 # genuinely combines several (a stitched video: one clip per shot) is charged one
 # PromptZ for every task in it. This is below the provider's real cost on the dearer
-# engines, so it is a subsidy by design; the daily prompts (3/5/10) still come first.
+# engines, so it is a subsidy by design; the daily prompts (PROMPT_ALLOWANCE) still come first.
 AI_TASK_PROMPTZ = 1
 
 AI_MODEL_COSTS = {
@@ -722,7 +722,8 @@ SUBMISSION_PACKS_MAX = 4
 COACH_TAKE_ENERGY = {"free": 2, "premium": 6, "statz": 20, "debug": 20}
 
 # ⚡ to coach a POST from PostZ (the post door; a freshly recorded take stays
-# PromptZ-only). Corey: ten times the prompt cost, by tier. The base is 10 x
+# PromptZ-only). Corey: ten times the prompt's PromptZ cost, by tier. (Not the prompt's ⚡,
+# which is AI_ENERGY_PER_PROMPT in models and is taken on top.) The base is 10 x
 # AI_TASK_PROMPTZ and each tier multiplies it by how much more it regenerates
 # (ENERGY_FLOOR_PER_HOUR 2 / 6 / 20 an hour = x1 / x3 / x10), so it is felt at every
 # tier and never a wall: the tier buys how MUCH regenerates, not whether it runs.

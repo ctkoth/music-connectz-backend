@@ -72,12 +72,14 @@ class InspirationFromPostsTests(TestCase):
     """Either side can already be on the platform — a post, a FileZ upload — through the coach's own
     lookups, so view rights and ownership are the coach's rules. A post costs ⚡ once."""
 
+    FULL = 100_000   # more than a Free prompt's ⚡, so the run's own ⚡ is measurable beside the post's
+
     def setUp(self):
         self.c = APIClient()
         self.me = User.objects.create_user("me", "me@e.com", "pw12345678")
         self.famous = User.objects.create_user("famous", "f@e.com", "pw12345678")
         self.c.force_authenticate(self.me)
-        w = wallet_for(self.me); w.money_cents = 10000; w.energy = 1000; w.save()
+        w = wallet_for(self.me); w.money_cents = 10000; w.energy = self.FULL; w.save()
         self.cost = vc.coach_post_energy(self.me)
 
     def stored_post(self, owner, title="Song", visibility="public"):
@@ -104,8 +106,8 @@ class InspirationFromPostsTests(TestCase):
         post cost is measured on top of it rather than assumed to be the whole difference."""
         r = self.run_match({"take": f("b.wav"), "reference": f("c.wav")})
         self.assertEqual(r.status_code, 200, r.content)
-        spent = 1000 - self.energy()
-        w = wallet_for(self.me); w.energy = 1000; w.save()
+        spent = self.FULL - self.energy()
+        w = wallet_for(self.me); w.energy = self.FULL; w.save()
         return spent
 
     def test_the_price_of_a_post_is_stated_before_the_button(self):
@@ -124,7 +126,21 @@ class InspirationFromPostsTests(TestCase):
         self.assertEqual(j["sources"]["reference"], {"kind": "post", "id": ref.id, "title": "Famous", "author": "famous"})
         self.assertEqual(j["sources"]["take"]["kind"], "file")
         self.assertEqual(j["energy_cost"], self.cost)
-        self.assertEqual(1000 - self.energy(), base + self.cost)
+        self.assertEqual(self.FULL - self.energy(), base + self.cost)
+
+    def test_the_post_fee_is_paid_even_when_the_run_takes_everything_else(self):
+        # A Free prompt's ⚡ is more than anybody holds and is taken UP TO the balance, so the
+        # post's fixed fee has to be spent first — spent after, it met an empty wallet, failed
+        # silently and was still reported as paid.
+        w = wallet_for(self.me); w.energy = self.cost + 5; w.save()
+        ref, _ = self.stored_post(self.famous, "Famous")
+        r = self.run_match({"take": f("t.wav"), "reference_post_id": ref.id})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["energy_cost"], self.cost)
+        self.assertTrue(m.Transaction.objects.filter(
+            user=self.me, resource=m.Transaction.RES_ENERGY, amount=-self.cost,
+            note__startswith="Inspiration with a post").exists())
+        self.assertEqual(self.energy(), 0)
 
     def test_nothing_is_written_on_the_post_that_was_used(self):
         ref, _ = self.stored_post(self.famous, "Famous")
@@ -139,7 +155,7 @@ class InspirationFromPostsTests(TestCase):
         r = self.run_match({"take_post_id": mine.id, "reference": f("r.wav")})
         self.assertEqual(r.status_code, 200, r.content)
         self.assertEqual(r.json()["sources"]["take"]["title"], "My verse")
-        self.assertEqual(1000 - self.energy(), base + self.cost)
+        self.assertEqual(self.FULL - self.energy(), base + self.cost)
 
     def test_two_posts_cost_the_energy_once(self):
         base = self.baseline()
@@ -147,7 +163,7 @@ class InspirationFromPostsTests(TestCase):
         ref, _ = self.stored_post(self.famous, "Famous")
         r = self.run_match({"take_post_id": mine.id, "reference_post_id": ref.id})
         self.assertEqual(r.status_code, 200, r.content)
-        self.assertEqual(1000 - self.energy(), base + self.cost)       # once, not twice
+        self.assertEqual(self.FULL - self.energy(), base + self.cost)       # once, not twice
 
     def test_files_cost_no_post_energy(self):
         r = self.run_match({"take": f("t.wav"), "reference": f("r.wav")})
@@ -159,7 +175,7 @@ class InspirationFromPostsTests(TestCase):
         r = self.run_match({"take": f("t.wav"), "reference_post_id": hidden.id})
         self.assertEqual(r.status_code, 403)
         self.last_call.assert_not_called()
-        self.assertEqual(self.energy(), 1000)
+        self.assertEqual(self.energy(), self.FULL)
 
     def test_not_enough_energy_says_so_before_the_model_runs(self):
         ref, _ = self.stored_post(self.famous)
@@ -173,7 +189,7 @@ class InspirationFromPostsTests(TestCase):
         ref, _ = self.stored_post(self.famous)
         r = self.run_match({"take": f("t.wav"), "reference_post_id": ref.id}, reply={"closeness": None})
         self.assertEqual(r.status_code, 502)
-        self.assertEqual(self.energy(), 1000)
+        self.assertEqual(self.energy(), self.FULL)
 
     def test_the_same_post_on_both_sides_is_refused(self):
         mine, _ = self.stored_post(self.me)
@@ -199,7 +215,7 @@ class InspirationFromPostsTests(TestCase):
         self.assertEqual(r.status_code, 410, r.content)
         self.assertTrue(r.json()["take_missing"])
         self.assertIsNotNone(m.Upload.objects.get(pk=up.pk).missing_since)
-        self.assertEqual(self.energy(), 1000)
+        self.assertEqual(self.energy(), self.FULL)
         self.assertEqual(wallet_for(self.me).money_cents, 10000)
 
 
