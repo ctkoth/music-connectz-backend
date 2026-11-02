@@ -51,11 +51,23 @@ class WhenUploadsAreNotDurableTests(TestCase):
         survives a deploy, and from in here it is indistinguishable from the
         container's own directory — so it is an assertion by whoever mounted
         it, and nothing else will be taken as one."""
-        with patch.dict("os.environ", {"RENDER": "true", "MEDIA_DURABLE": "1"}):
+        with patch.dict("os.environ", {"RENDER": "true", "MEDIA_DURABLE": "1"}), \
+                patch("apps.economy.storage_health.is_mounted", return_value=True):
             state = upload_storage_state()
         self.assertTrue(state["durable"])
         self.assertFalse(state["ephemeral"])
         self.assertEqual(state["kept_by"], "a persistent disk")
+
+    @override_settings(STORAGES=LOCAL)
+    def test_a_declared_disk_that_is_not_mounted_is_not_believed(self):
+        """MEDIA_DURABLE=1 over a directory inside the container is the lie that
+        deletes everybody's music on the next deploy. A disk is a mount point."""
+        with patch.dict("os.environ", {"RENDER": "true", "MEDIA_DURABLE": "1"}), \
+                patch("apps.economy.storage_health.is_mounted", return_value=False):
+            state = upload_storage_state()
+        self.assertTrue(state["ephemeral"])
+        self.assertFalse(state["durable"])
+        self.assertIn("nothing is mounted", state["detail"])
 
     @override_settings(STORAGES=LOCAL)
     def test_saying_nothing_is_not_saying_it_is_durable(self):

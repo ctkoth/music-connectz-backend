@@ -3054,3 +3054,23 @@ not, so the list drew a player for a file that was not there. There is nothing t
   answer (`unreadable`). Nothing is deleted. It is free.
 - **Not recoverable from here.** A file whose bytes are gone stays gone; the screen says to upload it
   again. A lost file does not count against storage (`storage_used_bytes`), already true.
+
+## Whether a disk is durable is measured where it can be, and an upload is only accepted if it landed
+
+"There is no way to ask the filesystem whether it survives a deploy" was half true, and the half
+that was false cost members their recordings. Two things can be checked, and now are:
+
+- **A disk is a mount point.** `storage_health.is_mounted(MEDIA_ROOT)` (the path or any parent
+  short of "/"). On Render, `MEDIA_DURABLE=1` over a directory that is not mounted is NOT believed:
+  `ephemeral: true`, `kept_by` says a disk is declared but nothing is mounted, and `economy.W001`
+  fires with that reason. A cannot-tell answer counts as mounted, so a real disk is never called a lie.
+- **A canary file survives deploys or it does not.** `touch_canary()` writes `.mcz-canary` in
+  MEDIA_ROOT at startup (O_EXCL, two workers) and later starts report `canary.survived: true` and when
+  it was first written in `GET /`. No database is touched. It proves survival only from the SECOND
+  deploy on; `survived: false` with an old `since` on a service that has been up is wiped storage.
+- **`POST uploads/` answers 201 only for a file in storage at the size sent** (`_stored_intact`);
+  otherwise 503, the row is removed and the member is told nothing was kept or charged. A write that
+  landed nowhere used to answer 201.
+
+What none of this can do: bring back bytes that are gone, or protect against losing the disk itself.
+A bucket (`S3_*`) is the only real second copy.

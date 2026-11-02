@@ -101,3 +101,61 @@ class UploadCheckTests(TestCase):
         self.lose(gone)
         self.c.post("/api/economy/uploads/check/")
         self.assertTrue(Upload.objects.filter(pk=gone.pk).exists())
+
+
+class AnUploadIsOnlyAcceptedIfItLanded(TestCase):
+    """201 means the bytes are in storage at the size sent. A write that lands
+    nowhere used to answer 201 and surface weeks later as a dead player."""
+
+    def setUp(self):
+        # Its own directory per test: with `exists` patched to False Django's
+        # saver cannot see a name collision and would loop forever on a leftover.
+        ov = override_settings(MEDIA_ROOT=tempfile.mkdtemp(prefix="mcz-up-"))
+        ov.enable()
+        self.addCleanup(ov.disable)
+        self.me = User.objects.create_user(username="up", password=PW)
+        self.c = APIClient()
+        self.c.force_authenticate(self.me)
+
+    def post(self):
+        f = SimpleUploadedFile("t.webm", b"0" * 64, content_type="audio/webm")
+        return self.c.post("/api/economy/uploads/", {"file": f}, format="multipart")
+
+    def test_a_normal_upload_still_works(self):
+        self.assertEqual(self.post().status_code, 201)
+
+    def test_a_write_that_vanished_is_refused_and_keeps_no_row(self):
+        with patch("django.core.files.storage.FileSystemStorage.exists", return_value=False):
+            r = self.post()
+        self.assertEqual(r.status_code, 503)
+        self.assertIn("nothing was kept or charged", r.json()["detail"])
+        self.assertEqual(Upload.objects.filter(user=self.me).count(), 0)
+
+    def test_a_truncated_write_is_refused(self):
+        with patch("django.core.files.storage.FileSystemStorage.size", return_value=3):
+            self.assertEqual(self.post().status_code, 503)
+        self.assertEqual(Upload.objects.filter(user=self.me).count(), 0)
+
+
+class StorageDurabilityIsMeasuredWhereItCanBe(TestCase):
+
+    def test_a_directory_in_the_container_is_not_a_mount(self):
+        from apps.economy.storage_health import is_mounted
+        with patch("os.path.ismount", return_value=False):
+            self.assertFalse(is_mounted("/var/mcz-media"))
+
+    def test_a_subdirectory_of_a_mounted_disk_counts(self):
+        from apps.economy.storage_health import is_mounted
+        with patch("os.path.ismount", side_effect=lambda p: p == "/var/mcz-media"):
+            self.assertTrue(is_mounted("/var/mcz-media/uploads"))
+
+    def test_the_canary_is_written_once_and_found_next_time(self):
+        import tempfile
+        from apps.economy import storage_health as sh
+        root = tempfile.mkdtemp(prefix="mcz-canary-")
+        with override_settings(MEDIA_ROOT=root):
+            first = sh.touch_canary()
+            second = sh.touch_canary()
+        self.assertFalse(first["survived"])
+        self.assertTrue(second["survived"])
+        self.assertEqual(first["since"], second["since"])

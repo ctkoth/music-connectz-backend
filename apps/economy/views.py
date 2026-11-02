@@ -1511,6 +1511,15 @@ def _posts_by_upload(user):
     return out
 
 
+def _stored_intact(u):
+    """Does storage now hold this upload, at the size that was sent?"""
+    try:
+        return bool(u.file.name) and u.file.storage.exists(u.file.name) \
+            and u.file.storage.size(u.file.name) == u.size_bytes
+    except Exception:
+        return False
+
+
 class UploadsView(APIView):
     """GET lists the user's uploads + storage summary; POST uploads one file.
 
@@ -1558,6 +1567,18 @@ class UploadsView(APIView):
             user=request.user, file=f, name=f.name[:255], size_bytes=f.size,
             content_type=getattr(f, "content_type", "")[:120],
         )
+        # Say 201 only for a file that is actually in storage. A write that lands
+        # nowhere (a disk that was never attached, a full volume, a bucket that
+        # took the call and kept nothing) used to answer 201 anyway, and the
+        # member found out weeks later from a player that would not play.
+        if not _stored_intact(u):
+            u.delete()
+            return Response(
+                {"detail": "That file didn't save on our side, so nothing was kept or charged. "
+                           "Please try again — if it keeps happening it is ours to fix, not yours.",
+                 **_storage_summary(request.user, m.tier)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         return Response(
             {"upload": _upload_dict(u, request), **_storage_summary(request.user, m.tier)},
             status=status.HTTP_201_CREATED,

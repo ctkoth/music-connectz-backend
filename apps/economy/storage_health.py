@@ -57,6 +57,65 @@ def _env_flag(name):
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def is_mounted(path):
+    """Is `path` on a mounted volume — itself or any parent short of "/"?
+
+    A Render disk is a mount point and the container's own directory is not, so
+    this CAN tell a declared disk from one that was never attached. The module
+    used to say nothing could (and so took MEDIA_DURABLE=1 on faith): a flag
+    over a directory inside the container is the exact lie that deletes
+    everybody's music on the next deploy, and it is checkable. A subdirectory of
+    a mounted disk counts, so MEDIA_ROOT may sit inside one.
+    """
+    try:
+        p = os.path.abspath(str(path))
+        while p and p != os.path.dirname(p):
+            if os.path.ismount(p):
+                return True
+            p = os.path.dirname(p)
+    except Exception:                                    # pragma: no cover
+        return True      # cannot tell: do not call a real disk a lie
+    return False
+
+
+CANARY_NAME = ".mcz-canary"
+_canary = {}
+
+
+def touch_canary():
+    """Leave a marker in MEDIA_ROOT, or find the one a previous deploy left.
+
+    Whether a disk survives a deploy is a fact about the NEXT deploy, so the
+    only proof is a file that is still there after one. The first run writes it;
+    every later start that finds it reports `survived: True` and when it was
+    first written. A start that does NOT find it, on a service that has been
+    running for a while, is storage that was wiped. Never raises, and touches
+    no database (`GET /` must not).
+    """
+    from datetime import datetime, timezone
+    try:
+        path = os.path.join(str(settings.MEDIA_ROOT), CANARY_NAME)
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                _canary.update(survived=True, since=fh.read().strip())
+            return dict(_canary)
+        except FileNotFoundError:
+            pass
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            # O_EXCL: two gunicorn workers start together and only one writes.
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(now)
+        except FileExistsError:
+            pass
+        _canary.update(survived=False, since=now)
+    except Exception:                                    # pragma: no cover
+        _canary.update(survived=None, since="")
+    return dict(_canary)
+
+
 def _backend():
     """The dotted path of whatever is storing uploads right now."""
     try:
@@ -77,7 +136,13 @@ def upload_storage_state():
     # A mounted persistent disk is local storage that DOES survive a deploy,
     # and it is indistinguishable from the container's own directory from in
     # here. Whoever mounted it says so; nothing else can.
-    on_disk = local and _env_flag(DURABLE_ENV)
+    declared = local and _env_flag(DURABLE_ENV)
+    # ...except that it CAN be checked, a little: a disk is a mount point. A
+    # declared disk with nothing mounted under MEDIA_ROOT is the lie that costs
+    # everyone their music, so on Render it is not believed.
+    unmounted = (declared and on_render
+                 and not is_mounted(getattr(settings, "MEDIA_ROOT", "")))
+    on_disk = declared and not unmounted
     # Ephemeral means all three: on the container's own disk, running somewhere
     # that throws the container away, and no disk mounted under it. Any one of
     # those being false is fine.
@@ -93,12 +158,18 @@ def upload_storage_state():
         # tell, and the reason MEDIA_DURABLE has to be set deliberately.
         "kept_by": ("a bucket" if not local
                     else "a persistent disk" if on_disk
+                    else "nothing — a disk is declared but nothing is mounted at MEDIA_ROOT" if unmounted
                     else "nothing" if on_render else "this machine"),
+        "canary": dict(_canary) or None,
         "where": str(getattr(settings, "MEDIA_ROOT", "")) if local else "object storage",
         "detail": (
             "Uploads are on this container's own disk, and this container is "
             "replaced on every deploy — so every file a member has uploaded is "
-            "deleted the next time anything ships. " + DOCS
+            "deleted the next time anything ships. "
+            + ("MEDIA_DURABLE says a disk is mounted, but nothing is mounted at "
+               "MEDIA_ROOT, so the declaration is not believed — attach the disk "
+               "in render.yaml. " if unmounted else "")
+            + DOCS
         ) if ephemeral else "",
     }
 
@@ -107,6 +178,8 @@ def warn_once():
     """Say it in the running service's log, at startup. Never raises: a warning
     that can take the app down is worse than the thing it warns about."""
     try:
+        if _backend().endswith("FileSystemStorage") and os.environ.get(RENDER_ENV):
+            touch_canary()
         state = upload_storage_state()
     except Exception:                                    # pragma: no cover
         return
