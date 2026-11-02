@@ -759,11 +759,65 @@ def _playlist_owner(ref):
     return True, pl.owner
 
 
+# Where each kind's PUBLIC page lives (the frontend's own routes). A kind with no
+# address cannot be shared as a link, and the bar says so instead of offering a
+# button that copies nothing.
+SHARE_PATHS = {"post": "/p/{ref}", "score": "/s/{ref}", "battle": "/b/{ref}", "playlist": "/pl/{ref}"}
+
 ITEM_KINDS = {
     "score": {"label": "take", "resolve": _score_owner},
     "battle": {"label": "battle", "resolve": _battle_owner},
     "playlist": {"label": "playlist", "resolve": _playlist_owner},
 }
+
+
+def share_for(item):
+    """{path, who} for an item that has a public page, else None.
+
+    `who` is the sentence the Share control shows BEFORE it is pressed: sharing
+    never widens who can open the thing, because the page runs its own check.
+    """
+    kind, _, ref = str(item or "").partition(":")
+    tmpl = SHARE_PATHS.get(kind)
+    if not tmpl or not ref:
+        return None
+    who = "Anyone with the link can open it."
+    if kind == "post":
+        try:
+            vis = Post.objects.filter(pk=int(ref)).values_list("visibility", flat=True).first()
+        except ValueError:
+            return None
+        if vis == "private":
+            return {"path": "", "who": "Private — only its author can open it, so there is nothing to share."}
+        if vis in ("members", "restricted"):
+            who = "Members only — anyone else is asked to sign in first."
+    return {"path": tmpl.format(ref=ref), "who": who}
+
+
+def opens_for(item):
+    """Other apps this item opens in, each `{label, tab, target}`.
+
+    The cross-pollination rule: a thing seen in one app is never a dead end. A
+    post's own doors are richer (`crosspost.destinations_for`, priced, with what
+    each still needs) and PostZ renders those; this is the list for every other
+    kind. Labels say what the door does, and none costs anything — a door that
+    spent something would say so here, before the press.
+    """
+    kind, _, ref = str(item or "").partition(":")
+    if kind == "score":
+        from .models import ScoreShare
+        key = ScoreShare.objects.filter(token=ref).values_list("app_key", flat=True).first() or ""
+        out = [{"label": "Open its coach", "tab": key, "target": ""}] if key else []
+        return out + [{"label": "Send it in a message", "tab": "messagez", "target": ""}]
+    if kind == "battle":
+        return [{"label": "Open in BattleZ", "tab": "battlez", "target": ""},
+                {"label": "Send it in a message", "tab": "messagez", "target": ""}]
+    if kind == "playlist":
+        return [{"label": "Open in PlaylistZ", "tab": "playlistz", "target": ""},
+                {"label": "Send it in a message", "tab": "messagez", "target": ""}]
+    if kind == "post":
+        return [{"label": "Open it in the feed", "tab": "postz", "target": ""}]
+    return []
 
 
 def item_kind(item):
@@ -866,6 +920,10 @@ class SocialView(APIView):
             "listen_required_sec": LISTEN_REQUIRED_SEC,
             # The gain half, before the press: what a first rating pays the rater.
             "rating_reward_energy": RATING_REWARD_ENERGY,
+            # The other two of the five controls, served so the bar never
+            # guesses: where this item can be linked to, and where it opens.
+            "share": share_for(item),
+            "opens": opens_for(item),
             **self._comment_quote(item, request.user),
         }
 
