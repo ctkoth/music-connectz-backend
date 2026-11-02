@@ -783,8 +783,10 @@ PROMPT_ALLOWANCE = {"free": 4, "premium": 7, "statz": 12, "debug": 10 ** 6}
 # did not exist. The COUNT was capped and the PRICE was not.
 #
 # NOTE: since AI_TASK_PROMPTZ made every task 1 PromptZ (1c) whatever the engine,
-# every engine is under this cap, so a free daily prompt now covers Fable too. The
-# paragraph below describes the per-engine prices this was written against.
+# the PRICE is under this cap on every engine, so `daily_prompt_covers` also reads
+# the engine's real model fees for a typical message (catalog.engine_typical_cents)
+# and Fable, at ~4.5c, is not covered. The paragraph below describes the per-engine
+# prices this was written against.
 #
 # 3c covered every engine a Free member could pick (Haiku 2c), the coach and the
 # other Gemini surfaces (ai_cost("standard") = 3c), and Corey GPT (1c). Sonnet,
@@ -795,13 +797,27 @@ PROMPT_ALLOWANCE = {"free": 4, "premium": 7, "statz": 12, "debug": 10 ** 6}
 DAILY_PROMPT_MAX_CENTS = int(os.environ.get("DAILY_PROMPT_MAX_CENTS", "3"))
 
 
-def daily_prompt_covers(cost_cents):
-    """True when a free daily prompt may pay for a run at this price.
+def daily_prompt_covers(cost_cents, engine=None):
+    """True when a free daily prompt may pay for a run at this price, on this engine.
 
     Callers that need to SAY whether a run will be free — before it is made,
     per the cost/gain rule — must ask this and not merely whether prompts remain.
+
+    `engine` is the Claude engine the member picked, when there is one. Every engine
+    is charged 1 PromptZ, so the price alone would let a free prompt cover Fable; the
+    allowance covers an engine only when a typical message on it costs the platform
+    no more than DAILY_PROMPT_MAX_CENTS in model fees (catalog.engine_typical_cents).
+    A run with no engine (the coach, the writer, every Gemini surface) is judged on
+    its price alone, as before.
     """
-    return 0 < int(cost_cents or 0) <= DAILY_PROMPT_MAX_CENTS
+    if not 0 < int(cost_cents or 0) <= DAILY_PROMPT_MAX_CENTS:
+        return False
+    if engine:
+        from .catalog import engine_typical_cents
+        typical = engine_typical_cents(engine)
+        if typical is not None and typical > DAILY_PROMPT_MAX_CENTS:
+            return False
+    return True
 
 
 def daily_prompt_state(user):
@@ -856,11 +872,11 @@ def prompt_walls_week(user):
     return w.prompt_walls or 0
 
 
-def _consume_daily_prompt(user, cost_cents):
+def _consume_daily_prompt(user, cost_cents, engine=None):
     """Spend one of today's free prompts if any remain AND this run is inside
     what an allowance is worth. Returns True if one was consumed (the caller
     should treat the run as free), else False."""
-    if not daily_prompt_covers(cost_cents):
+    if not daily_prompt_covers(cost_cents, engine):
         return False
     _, _, remaining = daily_prompt_state(user)  # also handles the daily reset
     if remaining <= 0:
@@ -878,14 +894,20 @@ def is_platform_owner(user):
     return bool(getattr(user, "is_superuser", False))
 
 
-# ⚡ per AI run (Corey's numbers): what one prompt costs at the tier — Free 4000,
-# Premium 400, StatZ 40 — times the engine's base (dearer engines cost more ⚡),
+# ⚡ per AI run: what one prompt costs at the tier — Free 10, Premium 6, StatZ 4 —
+# times the engine's base (dearer engines cost more ⚡),
 # less any coach-badge discount. Any run that is not one of the named engines (the
 # coach, the writer) is base 1, i.e. exactly the tier's number. Taken UP TO what the
 # member holds, never refused for it: a tier says how much, never whether, and ⚡
 # regenerates at a floor for everybody.
 AI_ENERGY_BASE = {"haiku": 1, "sonnet": 2, "opus": 4, "fable": 8}
-AI_ENERGY_PER_PROMPT = {"free": 4000, "premium": 400, "statz": 40, "debug": 40}
+AI_ENERGY_PER_PROMPT = {"free": 10, "premium": 6, "statz": 4, "debug": 4}
+# Corey set 4000 / 400 / 40 and then applied the audit's recommendation. 4000 was ~83
+# days of Free regeneration (ENERGY_FLOOR_PER_HOUR 2), so one prompt emptied any Free
+# wallet and left cold DMs, coaching a post, submission packs and boosts out of reach
+# for anyone who used the AI that day — a tier deciding WHETHER rather than how much.
+# At 10, four free prompts a day (40 ⚡) still fit inside a Free day's regeneration
+# (48), so the AI costs something real without closing the rest of the app.
 
 
 def ai_energy_cost(user, engine=None, tier=None):
@@ -921,7 +943,7 @@ def charge_ai_usage(user, cost_cents, note="AI usage", count_daily=False, engine
         return w.money_cents
     # A free daily prompt covers a run priced like an allowance before any paid
     # balance is touched. A dearer engine is the member's choice and their bill.
-    if count_daily and _consume_daily_prompt(user, cost_cents):
+    if count_daily and _consume_daily_prompt(user, cost_cents, engine):
         Transaction.objects.create(
             user=user, kind=Transaction.KIND_SPEND, amount_cents=0,
             dev_tax_cents=0, note=(note + " · daily prompt 🏷️")[:200],

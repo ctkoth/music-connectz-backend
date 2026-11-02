@@ -137,13 +137,13 @@ class PromptAllowanceMarginTests(TestCase):
         """
         self.assertGreaterEqual(models.DAILY_PROMPT_MAX_CENTS,
                                 catalog.ai_cost("standard"))
-        # Under Corey's flat rule every engine is one task = one PromptZ, so the
-        # ceiling covers the dearest too. The exposure this used to bound (a
-        # StatZ member on Fable, ten free runs a day at 15c) is now accepted by
-        # design, not prevented; this pins that it is the price rule doing it.
+        # Under Corey's flat rule every engine is one task = one PromptZ, so the PRICE
+        # fits the ceiling on every engine. The exposure this bounds (a StatZ member's
+        # free prompts all spent on Fable) is closed by the engine's own model fees:
+        # an engine whose typical message costs more than the ceiling is not covered.
         dearest = max(m["cost_cents"] for m in catalog.AI_MODELS.values())
         self.assertEqual(dearest, catalog.AI_TASK_PROMPTZ)
-        self.assertTrue(models.daily_prompt_covers(dearest))
+        self.assertFalse(models.daily_prompt_covers(dearest, "fable"))
 
 
 class StatZCheckoutTests(TestCase):

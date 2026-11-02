@@ -95,16 +95,16 @@ TARGETS = {
 }
 
 
-def _prompt_price(cost, daily_left):
+def _prompt_price(cost, daily_left, engine=None):
     return {"kind": "prompt", "cost_cents": cost,
-            "free_today": daily_left > 0 and daily_prompt_covers(cost),
+            "free_today": daily_left > 0 and daily_prompt_covers(cost, engine),
             "daily_remaining": daily_left}
 
 
 def _prices(user, tier, daily_left):
     standard = ai_cost("standard")
     engine_key, engine = ai_model_for(profile_for(user).ai_model, tier)
-    occ = _prompt_price(engine["cost_cents"], daily_left)
+    occ = _prompt_price(engine["cost_cents"], daily_left, engine_key)
     # The engine the member picked, because on OCC the engine IS the price.
     occ["engine"] = engine["name"]
     occ["engine_key"] = engine_key

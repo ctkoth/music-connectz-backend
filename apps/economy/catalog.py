@@ -716,10 +716,13 @@ SUBMISSION_PACK = 5
 SUBMISSION_PACK_ENERGY = 30
 SUBMISSION_PACKS_MAX = 4
 
-# Coaching a freshly recorded take also costs a little ⚡: about an hour of the tier's
-# own regeneration. Unlike the post door it NEVER refuses: it takes what is there, so
-# the core coach loop is not gated by Energy.
-COACH_TAKE_ENERGY = {"free": 2, "premium": 6, "statz": 20, "debug": 20}
+# Coaching a freshly recorded take also costs a little ⚡. Unlike the post door it
+# NEVER refuses: it takes what is there, so the core coach loop is not gated by Energy.
+# FLAT, for the reason COACH_POST_ENERGY is flat below: it was 2 / 6 / 20 ("an hour of
+# the tier's regeneration"), so StatZ paid ten times Free for the same take — paying more
+# for paying more, and the opposite direction to the prompt's own ⚡. The same 2 ⚡ is
+# fewer minutes of regeneration on a higher tier, which is the benefit.
+COACH_TAKE_ENERGY = {t: 2 for t in ("free", "premium", "statz", "debug")}
 
 # ⚡ to coach a POST from PostZ (the post door; a freshly recorded take stays
 # PromptZ-only). Corey: ten times the prompt's PromptZ cost, by tier. (Not the prompt's ⚡,
@@ -863,6 +866,23 @@ def ai_model_for(key, tier):
     if key not in allowed:
         key = default_ai_model(tier)
     return key, AI_MODELS[key]
+
+
+# What a TYPICAL message on an engine costs the platform in model fees, from the list
+# prices above. Every engine is charged 1 PromptZ (AI_TASK_PROMPTZ), so the price a
+# member pays cannot tell the free daily allowance which engines it can afford to
+# cover; this can. A typical message is ~2,000 tokens in and ~500 out (a chat turn with
+# some history); a long conversation costs more, so this is a floor, not a ceiling.
+TYPICAL_MESSAGE_TOKENS = (2_000, 500)
+
+
+def engine_typical_cents(key):
+    """Cents of model fees for one typical message on this engine, or None if unknown."""
+    spec = AI_MODELS.get(str(key or "").lower())
+    if not spec:
+        return None
+    tin, tout = TYPICAL_MESSAGE_TOKENS
+    return (tin * spec["in_cents_mtok"] + tout * spec["out_cents_mtok"]) / 1_000_000
 
 
 def ai_model_cost(key, tier):

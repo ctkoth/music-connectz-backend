@@ -138,7 +138,7 @@ def _explain():
                   "SoundCloud's own player.",
         "restricted": ("Only signed-in members can open it. When a different member opens it and "
                        f"stays {JOIN_MIN_ACTIVE_SECONDS} seconds, you earn {RESTRICTED_JOIN_REWARD_SPINAZ} \U0001f365 "
-                       f"(once per member; up to {JOIN_REWARD_DAILY_CAP_PER_AUTHOR} \U0001f365 a day across your posts)."),
+                       f"(once per member; up to {JOIN_REWARD_DAILY_CAP_PER_AUTHOR} paid joins a day across your posts)."),
         "private": "Only you can see it. Nothing is sent to anyone.",
     }
 

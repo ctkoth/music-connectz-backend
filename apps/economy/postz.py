@@ -68,9 +68,14 @@ HIDE_FLAG_RATIO = 2.0    # ...and dislikes must exceed likes by this factor
 # Restricted-join reward anti-fraud. A reward requires a real, engaged visitor:
 # a distinct authenticated user + IP who was active >= N seconds, and caps how
 # much a post/author can mint per day so rotating IPs / accounts can't farm it.
-JOIN_MIN_ACTIVE_SECONDS = 5
-JOIN_REWARD_DAILY_CAP_PER_POST = 100
-JOIN_REWARD_DAILY_CAP_PER_AUTHOR = 500
+#
+# 30 seconds and 40 a day (were 5 and 100/500): at RESTRICTED_JOIN_REWARD_SPINAZ 150 and
+# 1 🍥 = 1¢, the old author cap was $750 a day from one account for visitors who stayed
+# five seconds. 30 s is the minimum a share or a link click already asks for; 40 joins is
+# $60 a day per author, still worth earning. The per-post cap can never exceed the author's.
+JOIN_MIN_ACTIVE_SECONDS = 30
+JOIN_REWARD_DAILY_CAP_PER_POST = 40
+JOIN_REWARD_DAILY_CAP_PER_AUTHOR = 40
 
 
 # One reader, in clientip.py. This was a local copy that took

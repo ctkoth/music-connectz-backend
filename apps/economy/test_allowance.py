@@ -60,12 +60,25 @@ class AllowanceCeilingTests(TestCase):
         # And the coach and every other Gemini surface, which all price here.
         self.assertTrue(daily_prompt_covers(ai_cost("standard")))
 
-    def test_every_engine_is_one_task_so_the_allowance_covers_all_of_them(self):
-        # Corey's rule: one task costs one PromptZ whatever the engine. That makes a
-        # free daily prompt cover Fable too. It was the opposite while the price
-        # tracked the provider's rate; if per-engine prices come back, so does the
-        # old assertion (not covered above DAILY_PROMPT_MAX_CENTS).
+    def test_the_allowance_covers_an_engine_only_when_its_real_cost_fits(self):
+        # Every engine is charged one PromptZ, so the PRICE fits the allowance on all of
+        # them; what decides is the engine's own model fees for a typical message.
+        from apps.economy.catalog import engine_typical_cents
+        for key, spec in AI_MODELS.items():
+            covered = daily_prompt_covers(spec["cost_cents"], key)
+            self.assertEqual(covered, engine_typical_cents(key) <= DAILY_PROMPT_MAX_CENTS, key)
+        self.assertTrue(daily_prompt_covers(AI_MODELS["haiku"]["cost_cents"], "haiku"))
+        self.assertFalse(daily_prompt_covers(AI_MODELS["fable"]["cost_cents"], "fable"))
+        # A run with no engine (the coach, the writer) is judged on its price alone.
         self.assertTrue(daily_prompt_covers(AI_MODELS["fable"]["cost_cents"]))
+
+    def test_a_fable_run_spends_promptz_not_a_free_prompt(self):
+        w = wallet_for(self.user); w.promptz = 5; w.save(update_fields=["promptz"])
+        _, _, before = daily_prompt_state(self.user)
+        charge_ai_usage(self.user, AI_MODELS["fable"]["cost_cents"], count_daily=True, engine="fable")
+        _, _, after = daily_prompt_state(self.user)
+        self.assertEqual(after, before)
+        self.assertEqual(wallet_for(self.user).promptz, 5 - AI_MODELS["fable"]["cost_cents"])
 
     def test_a_covered_run_spends_a_prompt_and_no_money(self):
         w = wallet_for(self.user)

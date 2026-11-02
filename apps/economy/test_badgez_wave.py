@@ -97,7 +97,7 @@ class CoachBadges(TestCase):
     def test_every_coach_badge_together_stops_at_the_cap(self):
         for key, _n, _e in W.COACH_BADGES.values():
             grant_badge(self.u, key)
-        self.assertEqual(ai_energy_cost(self.u, "fable"), 16000)   # 8 × 4000 × 50%, never under
+        self.assertEqual(ai_energy_cost(self.u, "fable"), 40)   # 8 × 10 × 50%, never under
 
 
 class RoyaltyPair(TestCase):
