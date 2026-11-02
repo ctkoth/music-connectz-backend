@@ -1146,6 +1146,13 @@ class Profile(models.Model):
     # DECLARATION filterable in MembersView, never a measurement — see
     # religionz.py for why that distinction is what makes it allowed.
     religion = models.CharField(max_length=32, blank=True, default="", db_index=True)
+    # PhilosophieZ — a declared philosophy and a declared political outlook, each
+    # from a closed list in philosophiez.py, or "" for "hasn't said". Declarations,
+    # never measurements and never inferred (see that module). Separate columns on
+    # purpose: they combine freely, and they carry independent privacy — politics
+    # is private until the member opens it.
+    philosophy = models.CharField(max_length=32, blank=True, default="", db_index=True)
+    politics = models.CharField(max_length=32, blank=True, default="", db_index=True)
     # LanguageZ — declared languages spoken AND how well, from the closed
     # list in languagez.py: {lang_key: "beginner"|"intermediate"|"fluent"}.
     # Same shape SubstanceZ already uses for "what, and how often" — a bare

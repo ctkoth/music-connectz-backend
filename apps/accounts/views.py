@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 from apps.economy.personaz import clean_persona
 from apps.economy.personalityz import clean_code as clean_personality
 from apps.economy.religionz import clean_religion
+from apps.economy.philosophiez import clean_philosophy, clean_politics
 from apps.economy.languagez import clean_languages
 
 from .models import OAuthIdentity, Profile
@@ -543,6 +544,13 @@ class MeView(APIView):
         if "religion" in data:
             p.religion = clean_religion(data["religion"])
             changed.append("religion")
+        # One cleaner per field, shared with ProfileView — the two-writers rule.
+        if "philosophy" in data:
+            p.philosophy = clean_philosophy(data["philosophy"])
+            changed.append("philosophy")
+        if "politics" in data:
+            p.politics = clean_politics(data["politics"])
+            changed.append("politics")
         if "languages" in data:
             p.languages = clean_languages(data["languages"])
             changed.append("languages")

@@ -55,6 +55,13 @@ DEFAULTS = {
     "sober": MEMBER,
     "personality": MEMBER,
     "religion": MEMBER,
+    # PhilosophieZ. Philosophy is open to members like religion. POLITICS is private
+    # until the member opens it: it is the most contested thing on a profile and the one
+    # a stranger can do most with, and this table stores only deviations, so the default
+    # IS the member's whole exposure. Opening it later is one tap; having it open by
+    # accident cannot be taken back.
+    "philosophy": MEMBER,
+    "politics": PRIVATE,
     "languages": MEMBER,
     "attracted_to": MEMBER,
     "age": MEMBER,

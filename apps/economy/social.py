@@ -67,6 +67,7 @@ from .personalityz import (AXES as PERSONALITY_AXES, as_dict as personality_dict
                            clean_code as clean_personality, filter_reason,
                            matches as personality_matches, wanted_from)
 from .religionz import clean_religion
+from .philosophiez import clean_philosophy, clean_politics
 from .languagez import clean_languages
 
 User = get_user_model()
@@ -248,7 +249,7 @@ ADULT_ONLY_PROFILE_FIELDS = ("attracted_to", "asexual")
 PROFILE_FIELDS = ("display_name", "bio", "location", "gender", "birthday", "sign",
                   "nationalities", "regions", "substances", "sober",
                   "attracted_to", "asexual", "traits", "personas", "links",
-                  "external_followers", "personality", "religion", "languages",
+                  "external_followers", "personality", "religion", "philosophy", "politics", "languages",
                   "pronouns", "headline", "genres", "influences", "gear", "inventory", "label",
                   "timezone", "pinned_post_id", "cover_url")
 
@@ -372,6 +373,10 @@ def clean_profile_field(field, value):
         # Same rule: an unrecognised key becomes "hasn't said" rather than
         # 400ing a profile edit. See religionz.py.
         return clean_religion(value)
+    if field == "philosophy":
+        return clean_philosophy(value)     # same rule: junk becomes "hasn't said"
+    if field == "politics":
+        return clean_politics(value)
     if field == "languages":
         # A list rather than one value — a member commonly speaks several.
         # Unrecognised entries drop rather than refusing the whole save.
@@ -619,6 +624,8 @@ def _profile_card(p, request=None, badges=None, audience=None, batched=None):
         "personality": p.personality,
         "personality_axes": personality_dict(p.personality),
         "religion": p.religion,
+        "philosophy": p.philosophy,
+        "politics": p.politics,
         "languages": p.languages,
         "pronouns": p.pronouns, "headline": p.headline, "genres": p.genres,
         "influences": p.influences, "gear": p.gear, "label": p.label,
@@ -1430,6 +1437,12 @@ class MembersView(APIView):
         # ReligionZ: ?religions=catholic,sunni — same shape as signs/genders,
         # a declared single value matched against a closed list.
         religions = multi("religions")
+        # PhilosophieZ: ?philosophies=stoicism,humanism and ?politics=centrist — the same
+        # declared-single-value match. Both go through `can_see`: a filter that matched
+        # on a hidden declaration would tell the searcher what the member chose not to
+        # say (step through the list and read it off who appears).
+        philosophies = multi("philosophies")
+        politics_wanted = multi("politics")
         # LanguageZ: ?languages=en,es — a member passes if they declared ANY
         # of the selected languages, same OR-within-a-metric rule `regions`
         # already follows just below. The FILTER matches on presence, not
@@ -1537,7 +1550,13 @@ class MembersView(APIView):
                 continue
             if signs and p.sign not in signs:
                 continue
-            if religions and p.religion not in religions:
+            # `can_see` on every declared-value filter below: a hidden declaration is
+            # read as undeclared, so being filtered in or out can never reveal it.
+            if religions and not (can_see(p, "religion", request.user, aud) and p.religion in religions):
+                continue
+            if philosophies and not (can_see(p, "philosophy", request.user, aud) and p.philosophy in philosophies):
+                continue
+            if politics_wanted and not (can_see(p, "politics", request.user, aud) and p.politics in politics_wanted):
                 continue
             if languages and not (set(languages) & set((p.languages or {}).keys())):
                 continue

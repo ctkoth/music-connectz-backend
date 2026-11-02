@@ -108,6 +108,10 @@ LOGICZ_TABS = [
               "One declared tradition out of fifty, grouped into families. "
               "No tradition outranks another, and it never moves a rating.",
               True, tab="profilez"),
+         _app("PhilosophieZ", "⚖️",
+              "A philosophy and a political outlook you declare yourself. Neither list is "
+              "ranked, nothing is guessed from what you do, and politics is private until "
+              "you open it.", True, tab="profilez"),
          # Same shape again — multi-select this time, because a member
          # commonly speaks several, but the same declared-never-scored rule.
          _app("VoiceZ", "🎙️",

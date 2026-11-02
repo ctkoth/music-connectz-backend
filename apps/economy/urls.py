@@ -25,6 +25,7 @@ from .widgetz import WidgetOpenView, WidgetZView
 from .rulez import RulezView
 from .personalityz import PersonalityAxesView, PersonalityTestView
 from .religionz import ReligionsView
+from .philosophiez import PhilosophieView
 from .languagez import LanguagesView
 from .trialdoorz import TrialDoorsView
 from .trial import TrialPublicStatsView, PublicTiersView
@@ -574,6 +575,7 @@ urlpatterns = [
     # ReligionZ — the closed list of 50, read by the profile picker and every
     # member search filter. Same shape as personalityz above.
     path("religionz/", ReligionsView.as_view(), name="economy-religionz"),
+    path("philosophiez/", PhilosophieView.as_view(), name="economy-philosophiez"),
     # LanguageZ — the closed list of 50, grouped by region. Same shape.
     path("languagez/", LanguagesView.as_view(), name="economy-languagez"),
     path("signbonus/", SignBonusView.as_view(), name="economy-signbonus"),

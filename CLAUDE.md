@@ -3069,3 +3069,29 @@ live screen needs; verifying is still `POST social/verify/`.
 
 SubstanceZ's list is in the order members asked for (cigarettes, caffeine, alcohol, THC, heroin, crack,
 meth, DXM, Adderall, opioids, benzos). Keys did not change; only the order a screen lists them in did.
+
+## PhilosophieZ: two declarations, politics private by default, and a filter that no longer leaks
+
+Corey asked for religious/spiritual and for philosophies, with "PhilosophieZ w politics and philosophy" as the
+option. **Decided: one app, two independent fields** (`apps/economy/philosophiez.py`; `Profile.philosophy`,
+`Profile.politics`, migration 0234, additive). The art's own subtitle ("thoughtZ PoliticZ") says one app.
+
+- **Spiritual needed no new list.** ReligionZ already has "Spiritual, not religious", agnostic, atheist, pagan,
+  animist and indigenous traditions, and its test pins exactly fifty leaves, so it was left alone.
+- **Not inside ReligionZ, and two columns rather than one**, because a tradition you belong to and views you hold
+  combine freely (a Catholic Stoic who votes green) and carry different privacy.
+- **Same three lines as ReligionZ and PersonalitieZ**: never touches a measurement, never inferred (a test greps
+  that only the two profile writers assign either column), undeclared (`""`) is a third state.
+- **Politics is PRIVATE until the member opens it** (`visibility.DEFAULTS`); philosophy is members-only like religion.
+  `Profile.visibility` stores only deviations, so the default is the member's entire exposure. The screen states who
+  can see each, from the member's own settings, above the picker.
+- **The words are broad outlooks, never parties**, listed alphabetically with Other last so order implies nothing.
+  **Both lists are an editorial judgement, Corey's to change** — one place, keys are what is stored, labels can move.
+  Left out on purpose and worth a decision: "nationalist" and "populist" (contested as self-descriptions either way).
+- **The search filters go through `can_see`** (`?philosophies=`, `?politics=`). A filter that matched a hidden
+  declaration would let a searcher read it off who appears.
+- **Found on the way and fixed: the existing `?religions=` filter ignored a member's privacy setting.** A member who set
+  religion private was still found by searching for their religion. Same oracle, same fix; `test_philosophiez` pins it.
+  **Not fixed, same family:** the `genders`, `signs` and `signs_cn` filters read the column without `can_see`. Worth a
+  deliberate look — gender and sign are member-visible by default, so the exposure is only for members who chose private.
+- Not decided: whether minors may declare politics. The age-grouped search keeps minors with minors; no separate wall.
