@@ -434,7 +434,7 @@ class BothTakesAreRatedAndComparedTests(TestCase):
         self.assertEqual((c["take_leads"], c["even"], c["reference_leads"]), (1, 1, len(keys) - 2))
         self.assertEqual((c["overall_gap"], c["overall_leads"]), (-3, "reference"))
         self.assertEqual(c["closest"], keys[0])
-        self.assertEqual(c["dimensions"][0], {"key": keys[0], "take": 9, "reference": 7, "gap": 2, "leads": "take"})
+        self.assertEqual(c["dimensions"][0], {"key": keys[0], "take": 9, "reference": 7, "gap": 2, "leads": "take", "why": ""})
 
     def test_half_an_overall_is_no_overall(self):
         from apps.economy.matchref import clean_reply
@@ -453,3 +453,73 @@ class BothTakesAreRatedAndComparedTests(TestCase):
         self.assertIn("Rate BOTH recordings", p)
         self.assertIn('"overall": {"take"', p)
         self.assertIn("SAME 1-10 scale", p)
+
+
+class BetterWorseDrillsAndLyricsTests(TestCase):
+    """Corey: Inspiration says what is better and worse, gives drills to sound more like the
+    reference, and offers Sentence ConnectZ to move the lyrics toward it."""
+
+    def setUp(self):
+        self.keys = list(scores_for("rapz"))
+
+    def test_better_and_worse_are_lists_ordered_by_the_gap_with_the_reason(self):
+        k = self.keys
+        scores = {x: {"take": 5, "reference": 5} for x in k}
+        scores[k[0]] = {"take": 8, "reference": 6, "why": "tighter pocket"}
+        scores[k[1]] = {"take": 4, "reference": 9, "why": "breath runs out"}
+        scores[k[2]] = {"take": 6, "reference": 7}
+        out = matchref.clean_reply({**REPLY, "scores": scores}, "rapz")
+        c = out["compare"]
+        self.assertEqual(c["better"], [k[0]])
+        self.assertEqual(c["worse"], [k[1], k[2]])
+        row = next(r for r in c["dimensions"] if r["key"] == k[1])
+        self.assertEqual(row["why"], "breath runs out")
+
+    def test_drills_target_only_this_coachs_dimensions_widest_gap_first(self):
+        k = self.keys
+        scores = {x: {"take": 7, "reference": 7} for x in k}
+        scores[k[0]] = {"take": 6, "reference": 7}
+        scores[k[1]] = {"take": 3, "reference": 9}
+        drills = [
+            {"name": "Small", "targets": k[0], "minutes": 5, "why": "w", "how": "h"},
+            {"name": "Big", "targets": k[1], "minutes": 99, "why": "w", "how": "h"},
+            {"name": "Invented", "targets": "charisma", "minutes": 5, "how": "h"},
+            {"name": "No steps", "targets": k[0]},
+            {"name": "small", "targets": k[0], "how": "dupe"},
+        ]
+        out = matchref.clean_reply({**REPLY, "scores": scores, "drills": drills}, "rapz")
+        self.assertEqual([d["name"] for d in out["drills"]], ["Big", "Small"])
+        self.assertEqual(out["drills"][0]["minutes"], 30)
+
+    def test_the_prompt_asks_for_drills_and_a_reason_per_dimension(self):
+        p = matchref._prompt("rapz", "trap")
+        self.assertIn("DRILLS", p)
+        self.assertIn('"drills"', p)
+        self.assertIn("what separates them here", p)
+
+    def test_a_reply_with_only_drills_is_still_usable(self):
+        r = {**REPLY, "eq": [], "how_to": [], "summary": "",
+             "drills": [{"name": "D", "targets": self.keys[0], "minutes": 5, "how": "h"}]}
+        out = matchref.clean_reply(r, "rapz")
+        self.assertEqual(len(out["drills"]), 1)
+
+    def test_the_lyrics_door_states_its_price_and_carries_the_direction_only(self):
+        door = matchref.lyrics_door("Short bars.", "trap", {"amount": 3, "free_today": True})
+        self.assertEqual(door["tab"], "sentenceconnectz")
+        self.assertEqual(door["cost"], {"resource": "promptz", "amount": 3, "free_today": True})
+        self.assertIn("Short bars.", door["carry"]["text"])
+        self.assertEqual(door["carry"]["kind"], "lyrics")
+        self.assertIsNone(matchref.lyrics_door("", "trap", {"amount": 3, "free_today": True}))
+
+    def test_the_member_endpoint_serves_the_lyrics_door(self):
+        u = User.objects.create_user("ldoor", "l@e.com", "pw12345678")
+        c = APIClient(); c.force_authenticate(u)
+        w = wallet_for(u); w.money_cents = 10000; w.save()
+        with patch("apps.economy.matchref._key", return_value="k"), \
+             patch("apps.economy.vocalcoach._key", return_value="k"), \
+             patch("apps.economy.gemini.requests.post", return_value=fake_gemini(REPLY)):
+            r = c.post("/api/rapz/match/", {"take": f("t.wav"), "reference": f("r.wav")}, format="multipart")
+        self.assertEqual(r.status_code, 200, r.content)
+        d = r.json()["lyrics_door"]
+        self.assertEqual(d["cost"]["resource"], "promptz")
+        self.assertIn(REPLY["lyric_direction"], d["carry"]["text"])
