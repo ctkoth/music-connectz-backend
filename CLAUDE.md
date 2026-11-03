@@ -3024,6 +3024,15 @@ nothing. Only coaches that rate lyrics ask for them (`profile["lyrics"]`). A dru
 every row an "Improve yours" fixer door with that factor's scores and reason in the brief, priced by `coach_price`.
 The reference's words are never carried. The trial gets the rows and no doors.
 
+### Delivery, factor by factor (SingZ and RapZ)
+
+Corey: add delivery for SingZ and RapZ. `_delivery_factors()` is the coach's own FeelZ tip kinds (delivery, diction,
+projection, phrasing, dynamics, pacing, intention) minus mic & gear and room, which are production and stay in "eq" /
+"how_to". Both tracks are scored on the same scale with the reason and `how`, one step to practise
+(`clean_delivery_scores`, same both-or-dropped rule as lyrics). Only coaches with words ask for it. The doors are free to
+open: a new take in the coach's own recorder (`bosstake-mic`; its price is on Send), and BreathZ for projection, because
+that is breath support first.
+
 ## LookZMaxZ shares: the person in the reading decides, from a snapshot the server signed
 
 `lookshare.py`. Corey wanted to show a woman her score; rating a photo someone else uploads stays self-only, so the
