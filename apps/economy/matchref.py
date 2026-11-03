@@ -132,22 +132,68 @@ LYRIC_COMPARE_NOTE = ("Both sets of words are rated on the same 1-10 scale. Impr
                       "for that one factor with what the inspiration does there — never its words.")
 
 
-def clean_lyric_scores(raw):
-    """[{dim, label, fixer, take, reference, gap, leads, why}] in the factor order, both numbers or the
-    row is dropped (one track's score compares with nothing). Empty when the recordings had no words."""
+def _factor_rows(raw, factors, extra=()):
+    """[{dim, label, take, reference, gap, leads, why, ...}] in the factor order, both numbers or the row
+    is dropped (one track's score compares with nothing). `extra` names text keys kept beside them."""
     if not isinstance(raw, dict):
         return []
     rows = []
-    for dim, f in _lyric_factors().items():
+    for dim, f in factors.items():
         v = raw.get(dim)
         if not isinstance(v, dict):
             continue
         t, r = vc._clamp(v.get("take")), vc._clamp(v.get("reference"))
         if t is None or r is None:
             continue
-        rows.append({"dim": dim, "label": f["label"], "fixer": f["fixer"], "take": t, "reference": r,
-                     "gap": t - r, "leads": _side(t - r), "why": str(v.get("why", "")).strip()[:240]})
+        row = {"dim": dim, **f, "take": t, "reference": r, "gap": t - r, "leads": _side(t - r),
+               "why": str(v.get("why", "")).strip()[:240]}
+        for k in extra:
+            row[k] = str(v.get(k, "")).strip()[:300]
+        rows.append(row)
     return rows
+
+
+def clean_lyric_scores(raw):
+    """The lyric rows. Empty when the recordings had no words."""
+    return _factor_rows(raw, _lyric_factors())
+
+
+# How the voice is DELIVERED, apart from the words: the coach's own FeelZ tip kinds, minus the two that
+# are production (mic & gear, room) — those are "eq" and "how_to" here. One list, so a delivery factor
+# reads the same in Inspiration as in a low-FeelZ tip.
+_DELIVERY_EMOJI = {"delivery": "🔥", "diction": "🔍", "projection": "📢", "phrasing": "🎼",
+                   "dynamics": "📊", "pacing": "⏱️", "intention": "🎯"}
+
+
+def _delivery_factors():
+    return {k: {"label": f"{vc.FEELZ_TIP_KINDS[k]} {e}"} for k, e in _DELIVERY_EMOJI.items()
+            if k in vc.FEELZ_TIP_KINDS}
+
+
+DELIVERY_COMPARE_NOTE = ("How each track is delivered, apart from the words, on the same 1-10 scale. The step under each is "
+                         "free to practise; your next take's score is how you'll know it moved.")
+
+
+def clean_delivery_scores(raw):
+    """The delivery rows, each with `how` — one concrete step to close that gap."""
+    return _factor_rows(raw, _delivery_factors(), extra=("how",))
+
+
+def delivery_doors(rows, app_key):
+    """{dim: door} — practising a delivery factor happens in a take, so the door opens the coach's own
+    recorder (whose price is on its Send button, not here). Projection is breath support first, so it
+    opens the free breath trainer. Free to open; nothing runs until the member sends a take."""
+    from .takescorez import BREATH_DOOR
+    label = profile_for_app(app_key)["label"]
+    out = {}
+    for x in rows:
+        if x["dim"] == "projection":
+            out[x["dim"]] = {**BREATH_DOOR, "label": "Train your breath (free)"}
+        else:
+            out[x["dim"]] = {"key": "retake", "label": f"Try it in a new take — {label}", "tab": app_key,
+                             "target": "bosstake-mic", "carry": {}, "cost": None,
+                             "note": "Opens the recorder. Nothing runs until you send a take; the coach's price is on Send."}
+    return out
 
 
 def lyric_compare(rows):
@@ -201,6 +247,13 @@ def _prompt(app_key, genre):
     lyr = _lyric_factors() if p.get("lyrics") else {}
     lyric_shape = ", ".join(f'"{d}": {{"take": <1-10>, "reference": <1-10>, "why": "<one sentence: what separates them>"}}'
                             for d in lyr)
+    dlv = _delivery_factors() if p.get("lyrics") else {}
+    delivery_shape = ", ".join(f'"{d}": {{"take": <1-10>, "reference": <1-10>, "why": "<one sentence: what separates them>", '
+                               f'"how": "<one concrete step the member can practise to close it>"}}' for d in dlv)
+    delivery_rule = (f"\nDELIVERY: rate how each VOICE is delivered, apart from the words, in \"delivery_scores\" — "
+                     f"{', '.join(dlv)} — on the same 1-10 scale, each with what separates them and one step to close it. "
+                     "Mic, room and mix belong in \"eq\" and \"how_to\", not here.\n" if dlv else "")
+    delivery_line = f'"delivery_scores": {{{delivery_shape}}},\n  ' if dlv else ""
     lyric_rule = (f"Rate the WORDS of both tracks on the same 1-10 scale in \"lyric_scores\" — {', '.join(lyr)} — "
                   "judging what is written and sung, never quoting it. If either track has no words, send {}. "
                   if lyr else "")
@@ -238,7 +291,7 @@ PERFORMANCE; mix and room moves stay in "eq" and "how_to".
 If either file has no real performance (silence, talking, wrong file), set \
 "unscorable" to one sentence saying which file and what you heard, and stop.
 
-LYRICS: only if the recordings have words. {lyric_rule}Describe HOW the reference writes — \
+{delivery_rule}LYRICS: only if the recordings have words. {lyric_rule}Describe HOW the reference writes — \
 rhyme habits, imagery, structure, point of view, line length, density — in your \
 own words. NEVER quote, paraphrase line-by-line or reproduce any of the \
 reference's lyrics. "lyric_direction" is an instruction the member's own writing \
@@ -257,7 +310,7 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "how_to": [{{"what": "<the gap>", "why": "<why the reference sounds the way it does>", "how": "<concrete steps>"}}, ...],
   "drills": [{{"name": "<short name>", "targets": "<one of: {dims}>", "minutes": <1-30 integer>, "why": "<what it closes between the take and the reference>", "how": "<the steps>"}}, ...],
   "keep": "<what the take already does that the reference does too, or does better>",
-  {lyric_line}"lyric_direction": "<empty, or 2-4 sentences: how the reference writes, as an instruction for rewriting the member's own lines. No quotes from the reference.>"
+  {delivery_line}{lyric_line}"lyric_direction": "<empty, or 2-4 sentences: how the reference writes, as an instruction for rewriting the member's own lines. No quotes from the reference.>"
 }}"""
 
 
@@ -393,6 +446,8 @@ def clean_reply(parsed, app_key):
         "lyric_direction": str(parsed.get("lyric_direction", "")).strip()[:600],
         "lyric_scores": (lyr := clean_lyric_scores(parsed.get("lyric_scores")) if profile_for_app(app_key).get("lyrics") else []),
         "lyric_compare": lyric_compare(lyr),
+        "delivery_scores": (dl := clean_delivery_scores(parsed.get("delivery_scores")) if profile_for_app(app_key).get("lyrics") else []),
+        "delivery_compare": lyric_compare(dl),
     }
 
 
@@ -750,8 +805,10 @@ class MatchReferenceView(APIView):
         price = coach_price(request.user)
         door = lyrics_door(out["lyric_direction"], genre, price)
         lyric_factor_doors = lyric_doors(out["lyric_scores"], genre, price, self.app_key)
+        delivery_factor_doors = delivery_doors(out["delivery_scores"], self.app_key)
         return Response({**out, "match": True, "reference": True, "saved": False, "feature": LABEL,
-                         "cost_cents": charged, "energy_cost": energy_cost, "lyrics_door": door, "lyric_doors": lyric_factor_doors,
+                         "cost_cents": charged, "energy_cost": energy_cost, "lyrics_door": door, "lyric_doors": lyric_factor_doors, "delivery_doors": delivery_factor_doors,
+                         "delivery_compare_note": DELIVERY_COMPARE_NOTE if out["delivery_scores"] else "",
                          "lyric_compare_note": LYRIC_COMPARE_NOTE if out["lyric_scores"] else "",
                          "eq_note": EQ_NOTE, "lyric_note": LYRIC_NOTE, "genre": genre,
                          "sources": {"take": take.describe(), "reference": ref.describe()}})

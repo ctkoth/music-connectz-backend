@@ -626,3 +626,55 @@ class LyricFactorsAreComparedBeforeTheWriterTests(TestCase):
         self.assertEqual(j["lyric_compare"]["worse"][0], "punchlines")
         self.assertIn("punchlines", j["lyric_doors"])
         self.assertTrue(j["lyric_compare_note"])
+
+
+class DeliveryFactorsAreComparedTests(TestCase):
+    """Corey: add delivery for SingZ and RapZ — how each voice is delivered, apart from the words,
+    scored for both tracks with the gap, the reason and a step to close it."""
+
+    DLV = {"diction": {"take": 5, "reference": 8, "why": "theirs is crisp on the fast bars", "how": "Slow the verse to 70%"},
+           "pacing": {"take": 7, "reference": 6, "why": "you leave more room"},
+           "gear": {"take": 3, "reference": 9},       # production, not delivery: dropped
+           "phrasing": {"take": 6}}                   # half a pair: dropped
+
+    def test_the_factors_are_the_coachs_own_tip_kinds_without_the_production_ones(self):
+        f = matchref._delivery_factors()
+        self.assertEqual(set(f), {"delivery", "diction", "projection", "phrasing", "dynamics", "pacing", "intention"})
+        self.assertNotIn("gear", f)
+        self.assertNotIn("room", f)
+        for k in f:
+            self.assertIn(k, vc.FEELZ_TIP_KINDS)
+
+    def test_rows_keep_both_numbers_the_reason_and_the_step(self):
+        rows = matchref.clean_delivery_scores(self.DLV)
+        self.assertEqual([r["dim"] for r in rows], ["diction", "pacing"])
+        d = rows[0]
+        self.assertEqual((d["gap"], d["leads"], d["how"]), (-3, "reference", "Slow the verse to 70%"))
+        self.assertEqual(matchref.lyric_compare(rows)["worse"], ["diction"])
+
+    def test_only_singz_and_rapz_ask_for_or_keep_delivery(self):
+        for key in ("singz", "rapz"):
+            self.assertIn('"delivery_scores"', matchref._prompt(key, "pop"))
+        self.assertNotIn('"delivery_scores"', matchref._prompt("guitarz", "rock"))
+        self.assertEqual(matchref.clean_reply({**REPLY, "delivery_scores": self.DLV}, "guitarz")["delivery_scores"], [])
+
+    def test_doors_open_the_recorder_free_and_projection_opens_breath_training(self):
+        rows = matchref.clean_delivery_scores({**self.DLV, "projection": {"take": 4, "reference": 8}})
+        doors = matchref.delivery_doors(rows, "singz")
+        self.assertEqual((doors["diction"]["tab"], doors["diction"]["target"]), ("singz", "bosstake-mic"))
+        self.assertIsNone(doors["diction"]["cost"])
+        self.assertEqual(doors["projection"]["tab"], "breathz")
+
+    def test_the_member_endpoint_serves_delivery(self):
+        u = User.objects.create_user("dlv", "dl@e.com", "pw12345678")
+        c = APIClient(); c.force_authenticate(u)
+        w = wallet_for(u); w.money_cents = 10000; w.save()
+        with patch("apps.economy.matchref._key", return_value="k"), \
+             patch("apps.economy.vocalcoach._key", return_value="k"), \
+             patch("apps.economy.gemini.requests.post", return_value=fake_gemini({**REPLY, "delivery_scores": self.DLV})):
+            r = c.post("/api/singz/match/", {"take": f("t.wav"), "reference": f("r.wav")}, format="multipart")
+        self.assertEqual(r.status_code, 200, r.content)
+        j = r.json()
+        self.assertEqual(len(j["delivery_scores"]), 2)
+        self.assertIn("diction", j["delivery_doors"])
+        self.assertTrue(j["delivery_compare_note"])
