@@ -723,3 +723,23 @@ class MixFactorsAreDiagnosedTests(TestCase):
         self.assertEqual(len(j["mix_scores"]), 4)
         self.assertIn("balance", j["mix_doors"])
         self.assertTrue(j["mix_compare_note"])
+
+
+class PickWhatToFixTests(TestCase):
+    """Corey: let the member pick which lyric factors Sentence ConnectZ fixes, keeping their own song."""
+
+    def test_the_door_prepicks_where_the_inspiration_leads_and_carries_reasons(self):
+        rows = matchref.clean_lyric_scores({"rhyme": {"take": 6, "reference": 8, "why": "lands on the stress"},
+                                            "punchlines": {"take": 3, "reference": 8, "why": "their turns surprise"},
+                                            "story": {"take": 8, "reference": 6}})
+        d = matchref.revise_door(rows, "trap", {"amount": 3, "free_today": True})
+        self.assertEqual(d["carry"]["kind"], "revise")
+        self.assertEqual(d["carry"]["factors"], ["punchlines", "rhymes"])          # widest gap first, story not picked
+        self.assertEqual(d["carry"]["notes"]["punchlines"], "their turns surprise")
+        self.assertEqual(d["cost"]["amount"], 3)
+        self.assertIsNone(matchref.revise_door([], "trap", {"amount": 3, "free_today": True}))
+
+    def test_every_lyric_factor_maps_to_a_factor_the_writer_accepts(self):
+        from apps.economy.sentencez import clean_revise_factors
+        fixers = [f["fixer"] for f in matchref._lyric_factors().values()]
+        self.assertEqual(sorted(clean_revise_factors(fixers)), sorted(fixers))
