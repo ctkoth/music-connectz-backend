@@ -76,6 +76,8 @@ def show(label, out):
     print(f"  overall  you {o.get('take')}  ·  inspiration {o.get('reference')}  ·  closeness {out.get('closeness')}%")
     print("  better:", out["compare"].get("better"), " worse:", out["compare"].get("worse"))
     print("  drills:", [f"{d['name']} ({d['targets']}, {d['minutes']} min)" for d in out.get("drills", [])])
+    for r in out.get("lyric_scores", []):
+        print(f"  lyrics {r['label']}: you {r['take']} · inspiration {r['reference']} ({r['gap']:+d})")
     print("  lyric direction:", (out.get("lyric_direction") or "")[:160])
 
 

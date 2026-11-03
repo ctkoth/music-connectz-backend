@@ -65,7 +65,7 @@ from rest_framework.views import APIView
 from .catalog import ai_cost
 from .deadline import COACH_BUDGET_SECONDS, Deadline, Expired
 from .gemini import _bill, _key, generate_content
-from .instruments import profile_for_app, scores_for
+from .instruments import LYRIC_SCORE, profile_for_app, scores_for
 from .models import can_afford_ai, daily_prompt_state, mark_upload_missing, spend_energy, wallet_for
 from . import vocalcoach as vc
 
@@ -113,6 +113,70 @@ LYRICS_DOOR_NOTE = ("Opens Sentence ConnectZ with this direction in the brief �
                     "deal, K-Oth's royalty applies to the part you keep.")
 
 
+def _lyric_factors():
+    """The lyric factors Inspiration compares — the coach's own five writing scores, then HookZ and
+    FeelZ — each one a factor Sentence ConnectZ has a fixer for, so every row can say "improve yours"
+    and mean a real writer. Labels are the coach's, so a factor reads the same on both screens."""
+    from .sentencez import FIXERS, FIXER_FOR_DIM
+    out = {}
+    for dim in list(LYRIC_SCORE) + ["hook", "feelz"]:
+        key = FIXER_FOR_DIM.get(dim)
+        if not key:
+            continue
+        f = FIXERS[key]
+        out[dim] = {"fixer": key, "label": LYRIC_SCORE.get(dim) or f"{f['label']} {f['emoji']}"}
+    return out
+
+
+LYRIC_COMPARE_NOTE = ("Both sets of words are rated on the same 1-10 scale. Improve yours opens Sentence ConnectZ's writer "
+                      "for that one factor with what the inspiration does there — never its words.")
+
+
+def clean_lyric_scores(raw):
+    """[{dim, label, fixer, take, reference, gap, leads, why}] in the factor order, both numbers or the
+    row is dropped (one track's score compares with nothing). Empty when the recordings had no words."""
+    if not isinstance(raw, dict):
+        return []
+    rows = []
+    for dim, f in _lyric_factors().items():
+        v = raw.get(dim)
+        if not isinstance(v, dict):
+            continue
+        t, r = vc._clamp(v.get("take")), vc._clamp(v.get("reference"))
+        if t is None or r is None:
+            continue
+        rows.append({"dim": dim, "label": f["label"], "fixer": f["fixer"], "take": t, "reference": r,
+                     "gap": t - r, "leads": _side(t - r), "why": str(v.get("why", "")).strip()[:240]})
+    return rows
+
+
+def lyric_compare(rows):
+    """The server's subtraction over the lyric rows: who leads where, widest gap first."""
+    return {"better": [x["dim"] for x in sorted(rows, key=lambda x: -x["gap"]) if x["gap"] > 0],
+            "worse": [x["dim"] for x in sorted(rows, key=lambda x: x["gap"]) if x["gap"] < 0],
+            "take_leads": sum(x["leads"] == "take" for x in rows),
+            "reference_leads": sum(x["leads"] == "reference" for x in rows)}
+
+
+def lyric_doors(rows, genre, price, app_key):
+    """{dim: door} — every factor gets "Improve yours", opening its own fixer with the reason the
+    inspiration is stronger there already in the brief. The price is the writer's, said on the door."""
+    from .takescorez import fixer_door
+    g = genre if genre != "unspecified" else ""
+    out = {}
+    for x in rows:
+        d = fixer_door(app_key, x["dim"], genre=g, price=price)
+        if not d:
+            continue
+        lead = (f"The inspiration scores {x['reference']} on {x['label']} and I score {x['take']}"
+                if x["gap"] < 0 else f"I score {x['take']} on {x['label']} and the inspiration {x['reference']}")
+        why = f" — {x['why']}" if x["why"] else ""
+        d = {**d, "label": "Improve yours",
+             "carry": {**d["carry"], "text": f"{lead}{why}. Help me improve mine (don't copy its words).\n\nMy bars:\n"}}
+        out[x["dim"]] = d
+    return out
+
+
 def lyrics_door(direction, genre, price):
     """The paid writer, handed the lyric direction — with its price said before it is pressed.
     None when there is no direction (no words in the recordings). `price` is
@@ -134,6 +198,13 @@ def _prompt(app_key, genre):
     shape = ", ".join(f'"{k}": {{"take": <1-10>, "reference": <1-10>, "why": "<one sentence: what separates them here>"}}' for k in keys)
     dims = ", ".join(keys)
     regions = ", ".join(EQ_REGIONS)
+    lyr = _lyric_factors() if p.get("lyrics") else {}
+    lyric_shape = ", ".join(f'"{d}": {{"take": <1-10>, "reference": <1-10>, "why": "<one sentence: what separates them>"}}'
+                            for d in lyr)
+    lyric_rule = (f"Rate the WORDS of both tracks on the same 1-10 scale in \"lyric_scores\" — {', '.join(lyr)} — "
+                  "judging what is written and sung, never quoting it. If either track has no words, send {}. "
+                  if lyr else "")
+    lyric_line = f'"lyric_scores": {{{lyric_shape}}},\n  ' if lyr else ""
     return f"""You are the Music ConnectZ {p['coach']}. You are given TWO recordings, \
 in this order: TRACK A is the MEMBER'S OWN TAKE, TRACK B is the INSPIRATION — a \
 reference track they want to sound closer to. Each is announced by name just \
@@ -167,7 +238,7 @@ PERFORMANCE; mix and room moves stay in "eq" and "how_to".
 If either file has no real performance (silence, talking, wrong file), set \
 "unscorable" to one sentence saying which file and what you heard, and stop.
 
-LYRICS: only if the recordings have words. Describe HOW the reference writes — \
+LYRICS: only if the recordings have words. {lyric_rule}Describe HOW the reference writes — \
 rhyme habits, imagery, structure, point of view, line length, density — in your \
 own words. NEVER quote, paraphrase line-by-line or reproduce any of the \
 reference's lyrics. "lyric_direction" is an instruction the member's own writing \
@@ -186,7 +257,7 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "how_to": [{{"what": "<the gap>", "why": "<why the reference sounds the way it does>", "how": "<concrete steps>"}}, ...],
   "drills": [{{"name": "<short name>", "targets": "<one of: {dims}>", "minutes": <1-30 integer>, "why": "<what it closes between the take and the reference>", "how": "<the steps>"}}, ...],
   "keep": "<what the take already does that the reference does too, or does better>",
-  "lyric_direction": "<empty, or 2-4 sentences: how the reference writes, as an instruction for rewriting the member's own lines. No quotes from the reference.>"
+  {lyric_line}"lyric_direction": "<empty, or 2-4 sentences: how the reference writes, as an instruction for rewriting the member's own lines. No quotes from the reference.>"
 }}"""
 
 
@@ -320,6 +391,8 @@ def clean_reply(parsed, app_key):
         "drills": clean_drills(parsed.get("drills"), keys, cmp["worse"]),
         "keep": str(parsed.get("keep", "")).strip()[:300],
         "lyric_direction": str(parsed.get("lyric_direction", "")).strip()[:600],
+        "lyric_scores": (lyr := clean_lyric_scores(parsed.get("lyric_scores")) if profile_for_app(app_key).get("lyrics") else []),
+        "lyric_compare": lyric_compare(lyr),
     }
 
 
@@ -674,8 +747,11 @@ class MatchReferenceView(APIView):
         charged = _bill(request.user, note=f"{profile_for_app(self.app_key)['label']} Inspiration — AI",
                         count_daily=True)
         from .crosspost import coach_price   # read after the bill, so "free today" is today's truth
-        door = lyrics_door(out["lyric_direction"], genre, coach_price(request.user))
+        price = coach_price(request.user)
+        door = lyrics_door(out["lyric_direction"], genre, price)
+        lyric_factor_doors = lyric_doors(out["lyric_scores"], genre, price, self.app_key)
         return Response({**out, "match": True, "reference": True, "saved": False, "feature": LABEL,
-                         "cost_cents": charged, "energy_cost": energy_cost, "lyrics_door": door,
+                         "cost_cents": charged, "energy_cost": energy_cost, "lyrics_door": door, "lyric_doors": lyric_factor_doors,
+                         "lyric_compare_note": LYRIC_COMPARE_NOTE if out["lyric_scores"] else "",
                          "eq_note": EQ_NOTE, "lyric_note": LYRIC_NOTE, "genre": genre,
                          "sources": {"take": take.describe(), "reference": ref.describe()}})
