@@ -3014,6 +3014,16 @@ it makes two clips that cannot be confused (slow/low against fast/bright, via Ge
 runs it again with the files swapped, and fails unless the `heard` lines follow the files. **It has not been run yet:**
 no `GEMINI_API_KEY` in the session that wrote it.
 
+### Every lyric factor is compared before the writer opens
+
+Corey: compare all the lyric factors with scores, like the rest of Inspiration ("inspiration punchlines +3"), with
+"improve yours" opening Sentence ConnectZ. `_lyric_factors()` is the coach's own five writing scores (`LYRIC_SCORE`)
+plus HookZ and FeelZ, and every one has a Sentence ConnectZ fixer (`FIXER_FOR_DIM`), so no row can carry a door to
+nothing. Only coaches that rate lyrics ask for them (`profile["lyrics"]`). A drum take has no words to score.
+`clean_lyric_scores` keeps both numbers or drops the row; `lyric_compare` is the subtraction; `lyric_doors` gives
+every row an "Improve yours" fixer door with that factor's scores and reason in the brief, priced by `coach_price`.
+The reference's words are never carried. The trial gets the rows and no doors.
+
 ## LookZMaxZ shares: the person in the reading decides, from a snapshot the server signed
 
 `lookshare.py`. Corey wanted to show a woman her score; rating a photo someone else uploads stays self-only, so the

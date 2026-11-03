@@ -568,3 +568,61 @@ class WhichTrackIsWhichTests(TestCase):
         self.assertEqual(out["heard"], {"take": "slow male rap", "reference": "fast female sung hook"})
         self.assertIsNone(matchref.clean_reply({**REPLY, "heard": {"take": "only one"}}, "rapz")["heard"])
         self.assertIsNone(matchref.clean_reply(REPLY, "rapz")["heard"])
+
+
+class LyricFactorsAreComparedBeforeTheWriterTests(TestCase):
+    """Corey: analyse and compare every lyric factor with scores, like the rest of Inspiration
+    ("inspiration punchlines +3"), and open Sentence ConnectZ from the factor to improve yours."""
+
+    LYR = {"rhyme": {"take": 6, "reference": 8, "why": "theirs land on the stress"},
+           "punchlines": {"take": 4, "reference": 7, "why": "their turns surprise"},
+           "story": {"take": 7, "reference": 6},
+           "imagery": {"take": 5},                       # half a pair: dropped
+           "invented": {"take": 9, "reference": 1}}      # not a factor: dropped
+
+    def test_every_factor_has_a_writer_and_a_label(self):
+        from apps.economy.sentencez import FIXERS
+        f = matchref._lyric_factors()
+        self.assertEqual(set(f), {"rhyme", "punchlines", "story", "imagery", "freshness", "hook", "feelz"})
+        for row in f.values():
+            self.assertIn(row["fixer"], FIXERS)
+            self.assertTrue(row["label"])
+
+    def test_both_scores_or_nothing_and_the_gap_is_the_servers(self):
+        rows = matchref.clean_lyric_scores(self.LYR)
+        self.assertEqual([r["dim"] for r in rows], ["rhyme", "punchlines", "story"])
+        punch = next(r for r in rows if r["dim"] == "punchlines")
+        self.assertEqual((punch["gap"], punch["leads"]), (-3, "reference"))
+        c = matchref.lyric_compare(rows)
+        self.assertEqual(c["worse"], ["punchlines", "rhyme"])
+        self.assertEqual(c["better"], ["story"])
+
+    def test_only_coaches_with_words_ask_or_answer(self):
+        self.assertIn('"lyric_scores"', matchref._prompt("rapz", "trap"))
+        self.assertNotIn('"lyric_scores"', matchref._prompt("drumz", "rock"))
+        self.assertEqual(matchref.clean_reply({**REPLY, "lyric_scores": self.LYR}, "drumz")["lyric_scores"], [])
+
+    def test_improve_yours_opens_that_factors_writer_priced_and_without_their_words(self):
+        rows = matchref.clean_lyric_scores(self.LYR)
+        doors = matchref.lyric_doors(rows, "trap", {"amount": 3, "free_today": False}, "rapz")
+        d = doors["punchlines"]
+        self.assertEqual((d["label"], d["tab"], d["carry"]["kind"]), ("Improve yours", "sentenceconnectz", "punchlines"))
+        self.assertEqual(d["cost"]["amount"], 3)
+        self.assertIn("scores 7", d["carry"]["text"])
+        self.assertIn("their turns surprise", d["carry"]["text"])
+        self.assertEqual(set(doors), {"rhyme", "punchlines", "story"})
+
+    def test_the_member_endpoint_serves_rows_compare_and_doors(self):
+        u = User.objects.create_user("lyrf", "lf@e.com", "pw12345678")
+        c = APIClient(); c.force_authenticate(u)
+        w = wallet_for(u); w.money_cents = 10000; w.save()
+        with patch("apps.economy.matchref._key", return_value="k"), \
+             patch("apps.economy.vocalcoach._key", return_value="k"), \
+             patch("apps.economy.gemini.requests.post", return_value=fake_gemini({**REPLY, "lyric_scores": self.LYR})):
+            r = c.post("/api/rapz/match/", {"take": f("t.wav"), "reference": f("r.wav")}, format="multipart")
+        self.assertEqual(r.status_code, 200, r.content)
+        j = r.json()
+        self.assertEqual(len(j["lyric_scores"]), 3)
+        self.assertEqual(j["lyric_compare"]["worse"][0], "punchlines")
+        self.assertIn("punchlines", j["lyric_doors"])
+        self.assertTrue(j["lyric_compare_note"])
