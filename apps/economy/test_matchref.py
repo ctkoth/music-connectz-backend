@@ -678,3 +678,48 @@ class DeliveryFactorsAreComparedTests(TestCase):
         self.assertEqual(len(j["delivery_scores"]), 2)
         self.assertIn("diction", j["delivery_doors"])
         self.assertTrue(j["delivery_compare_note"])
+
+
+class MixFactorsAreDiagnosedTests(TestCase):
+    """Corey: a diagnosis of the mix factors — every coach, both tracks scored, the move, and a door
+    that lands on the control that makes it (or none, where nothing here can)."""
+
+    MIX = {"balance": {"take": 5, "reference": 8, "why": "your vocal is buried", "how": "VocalZ +2 dB"},
+           "space": {"take": 6, "reference": 8},
+           "clean": {"take": 3, "reference": 9, "why": "the take clips on the hook"},
+           "punch": {"take": 7, "reference": 7},
+           "loudness": {"take": 4}}                    # half a pair: dropped
+
+    def test_every_coach_asks_for_the_mix(self):
+        for key in ("singz", "rapz", "drumz", "guitarz", "violinz"):
+            self.assertIn('"mix_scores"', matchref._prompt(key, "x"))
+
+    def test_rows_and_compare(self):
+        rows = matchref.clean_mix_scores(self.MIX)
+        self.assertEqual([r["dim"] for r in rows], ["balance", "punch", "space", "clean"])
+        self.assertEqual(rows[0]["how"], "VocalZ +2 dB")
+        self.assertEqual(matchref.lyric_compare(rows)["worse"], ["clean", "balance", "space"])
+
+    def test_doors_land_on_real_controls_and_clipping_has_none(self):
+        rows = matchref.clean_mix_scores(self.MIX)
+        voice = matchref.mix_doors(rows, "singz")
+        self.assertEqual((voice["balance"]["tab"], voice["balance"]["target"]), ("mixconnectz", "mixz-vocalz"))
+        self.assertEqual(voice["punch"]["target"], "mixz-dynamicz")
+        self.assertEqual(voice["space"]["tab"], "arsenal")
+        self.assertNotIn("clean", voice)
+        self.assertEqual(matchref.mix_doors(rows, "drumz")["balance"]["target"], "mixz-settings")
+        self.assertTrue(all(d["cost"] is None for d in voice.values()))
+
+    def test_the_member_endpoint_serves_the_mix(self):
+        u = User.objects.create_user("mixd", "mx@e.com", "pw12345678")
+        c = APIClient(); c.force_authenticate(u)
+        w = wallet_for(u); w.money_cents = 10000; w.save()
+        with patch("apps.economy.matchref._key", return_value="k"), \
+             patch("apps.economy.vocalcoach._key", return_value="k"), \
+             patch("apps.economy.gemini.requests.post", return_value=fake_gemini({**REPLY, "mix_scores": self.MIX})):
+            r = c.post("/api/drumz/match/", {"take": f("t.wav"), "reference": f("r.wav")}, format="multipart")
+        self.assertEqual(r.status_code, 200, r.content)
+        j = r.json()
+        self.assertEqual(len(j["mix_scores"]), 4)
+        self.assertIn("balance", j["mix_doors"])
+        self.assertTrue(j["mix_compare_note"])
