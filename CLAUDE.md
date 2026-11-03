@@ -3033,6 +3033,16 @@ projection, phrasing, dynamics, pacing, intention) minus mic & gear and room, wh
 open: a new take in the coach's own recorder (`bosstake-mic`; its price is on Send), and BreathZ for projection, because
 that is breath support first.
 
+### Mix diagnosis, factor by factor (every coach)
+
+Corey: a diagnosis of the mix factors. `MIX_FACTORS` has seven: balance, tone balance, punch & dynamics, loudness,
+stereo width, reverb & space, and clean signal. Each is scored for both tracks with what separates them and `how`, the
+move. Every coach asks, because every recording is mixed. It is said to be heard, not metered. Mix ConnectZ measures
+for real. `mix_doors` lands each factor on the control that moves it: VocalZ for balance on a voice coach, DynamicZ for
+punch, the main settings for tone, loudness and width, and Arsenal's reverb for space, since mastering does not add
+space. **Clean signal has no door**: nothing here can unclip a take, and a door to a tool that cannot fix it is a dead end.
+All are free (on device). The client hands Mix ConnectZ the member's own track when it has an address (`mixCarry`).
+
 ## LookZMaxZ shares: the person in the reading decides, from a snapshot the server signed
 
 `lookshare.py`. Corey wanted to show a woman her score; rating a photo someone else uploads stays self-only, so the
