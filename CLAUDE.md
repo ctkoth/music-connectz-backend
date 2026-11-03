@@ -3003,6 +3003,17 @@ to show it worked), sorted widest gap first, minutes clamped 1-30. Free to do. T
 (`crosspost.coach_price`, read AFTER the comparison's bill so "free today" is true) and royalty note on the door.
 The reference's words are still never carried; the trial door gets no `lyrics_door` (no account, no writer).
 
+### Which track is which — to the model and on the screen
+
+Each recording goes to Gemini announced by name: `TRACK A — THE MEMBER'S OWN TAKE (titled "…")`, the file, `END OF
+TRACK A.`, then the same for `TRACK B — THE INSPIRATION`. Order alone used to carry it. The prompt ties every "take"
+key to A and every "reference" key to B, and the reply opens with `heard`: one sentence per track saying what the model
+actually heard (both or None, `_clean_heard`). The screen shows it under each track, so a swap is something the member
+can see. An uploaded file's own name is its title (`_Slot.title`). `tools/inspiration_live_check.py` is the live check:
+it makes two clips that cannot be confused (slow/low against fast/bright, via Gemini TTS), runs the real `run_match`,
+runs it again with the files swapped, and fails unless the `heard` lines follow the files. **It has not been run yet:**
+no `GEMINI_API_KEY` in the session that wrote it.
+
 ## LookZMaxZ shares: the person in the reading decides, from a snapshot the server signed
 
 `lookshare.py`. Corey wanted to show a woman her score; rating a photo someone else uploads stays self-only, so the

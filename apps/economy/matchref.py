@@ -119,7 +119,7 @@ def lyrics_door(direction, genre, price):
     `crosspost.coach_price`, the same standard run Sentence ConnectZ charges."""
     if not direction:
         return None
-    return {"key": "lyrics", "label": "Rewrite my lyrics toward the reference", "tab": "sentenceconnectz",
+    return {"key": "lyrics", "label": "Rewrite my lyrics toward the inspiration", "tab": "sentenceconnectz",
             "target": "sentencez-write",
             "carry": {"kind": "lyrics", "genre": genre if genre != "unspecified" else "",
                       "text": ("Rewrite my lyrics with this direction (the reference's words are not used):\n"
@@ -135,9 +135,15 @@ def _prompt(app_key, genre):
     dims = ", ".join(keys)
     regions = ", ".join(EQ_REGIONS)
     return f"""You are the Music ConnectZ {p['coach']}. You are given TWO recordings, \
-in this order: first the MEMBER'S OWN TAKE, then a REFERENCE track they want to \
-sound closer to. The reference is another artist's finished record; the take is \
+in this order: TRACK A is the MEMBER'S OWN TAKE, TRACK B is the INSPIRATION — a \
+reference track they want to sound closer to. Each is announced by name just \
+before it. Every "take" key below is TRACK A and every "reference" key is TRACK B; \
+never swap them. The reference is another artist's finished record; the take is \
 a developing performance. Genre: {genre}.
+
+Start with "heard": one sentence per track describing what you actually hear in it \
+(voice or instrument, tempo, energy, production), so the member can check you \
+kept the two apart. Do not quote either track's words.
 
 Rate BOTH recordings and compare them. Score every dimension, and the overall, \
 for the take AND the reference on the SAME 1-10 scale, so the numbers compare: \
@@ -169,6 +175,7 @@ can follow. If there are no words, leave it empty.
 
 Return ONLY valid JSON, no markdown fence, in exactly this shape:
 {{
+  "heard": {{"take": "<one sentence: what TRACK A sounds like>", "reference": "<one sentence: what TRACK B sounds like>"}},
   "unscorable": <null, or one sentence>,
   "closeness": <0-100 integer: how near the SOUND and approach of the take is to the reference>,
   "closeness_why": "<one sentence on what drives that number>",
@@ -283,6 +290,14 @@ def clean_drills(raw, keys, worse=()):
     return out
 
 
+def _clean_heard(raw):
+    """Both sentences, or None — one side described says nothing about whether they were swapped."""
+    if not isinstance(raw, dict):
+        return None
+    t, r = str(raw.get("take") or "").strip()[:240], str(raw.get("reference") or "").strip()[:240]
+    return {"take": t, "reference": r} if t and r else None
+
+
 def clean_reply(parsed, app_key):
     """The whitelist: anything the model adds beyond this never reaches a screen."""
     keys = list(scores_for(app_key))
@@ -293,6 +308,7 @@ def clean_reply(parsed, app_key):
     except (TypeError, ValueError):
         closeness = None
     return {
+        "heard": _clean_heard(parsed.get("heard")),
         "closeness": closeness,
         "closeness_why": str(parsed.get("closeness_why", "")).strip()[:300],
         "scores": scores,
@@ -333,6 +349,8 @@ class _Slot:
             return self.post.title
         if self.link is not None:
             return self.link["title"]
+        if self.uploaded:   # a file from the device: its own name is the only title it has
+            return str(getattr(self.file, "name", "") or "").rsplit("/", 1)[-1]
         return (self.stored or {}).get("title") or ""
 
     def opened(self):
@@ -444,6 +462,14 @@ def _resolve(request, name, doors):
     return (None, err) if err else (_Slot(f, ctype, stored=stored), None)
 
 
+def _announce(letter, role, side):
+    """The line just before a recording: which track it is, and its title when it has one, so the
+    model is never left to work out from order alone which file is the member's. Titles are the
+    member's or a post's, so they are cut short and quoted as data."""
+    title = (side.title or "").replace('"', "'").strip()[:80]
+    return f"TRACK {letter} — {role}" + (f' (titled "{title}")' if title else "") + ":"
+
+
 def run_match(app_key, take, ref, genre):
     """Send the two recordings to the coach and return `(cleaned_reply, None)`, or `(None, Response)`.
 
@@ -478,8 +504,10 @@ def run_match(app_key, take, ref, genre):
                     f"{x.link['start'] // 60}:{x.link['start'] % 60:02d}. Judge only that section."
                     for n, x in (("the member's take", take), ("the reference", ref)) if x.link is not None]
         body = {"contents": [{"parts": [{"text": _prompt(app_key, genre) + ("\n\n" + " ".join(sections) if sections else "")},
-                                        {"text": "MEMBER'S TAKE:"}, parts[0],
-                                        {"text": "REFERENCE TRACK:"}, parts[1]]}],
+                                        {"text": _announce("A", "THE MEMBER'S OWN TAKE", take)}, parts[0],
+                                        {"text": "END OF TRACK A."},
+                                        {"text": _announce("B", "THE INSPIRATION (reference)", ref)}, parts[1],
+                                        {"text": "END OF TRACK B."}]}],
                 "generationConfig": {"temperature": vc.COACH_TEMPERATURE}}
         deadline.check("the files were still uploading when the time ran out")
         resp, _tried = generate_content(
