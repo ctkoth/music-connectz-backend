@@ -296,7 +296,7 @@ class InspirationLinkTests(TestCase):
     def test_a_youtube_reference_is_sent_by_address_and_costs_no_post_energy(self):
         r = self.run_match({"take": f("t.wav"), "reference_url": f"https://youtu.be/{self.VID}?t=75"})
         self.assertEqual(r.status_code, 200, r.content)
-        ref_part = self.sent()[4]
+        ref_part = self.sent()[5]   # prompt, A label, take, END A, B label, reference
         self.assertEqual(ref_part["file_data"]["file_uri"], f"https://www.youtube.com/watch?v={self.VID}")
         self.assertEqual(ref_part["video_metadata"]["start_offset"], "75s")
         self.assertIn("section of a video", self.sent()[0]["text"])
@@ -523,3 +523,48 @@ class BetterWorseDrillsAndLyricsTests(TestCase):
         d = r.json()["lyrics_door"]
         self.assertEqual(d["cost"]["resource"], "promptz")
         self.assertIn(REPLY["lyric_direction"], d["carry"]["text"])
+
+
+class WhichTrackIsWhichTests(TestCase):
+    """Corey: it has to be clear which track is the member's and which is the inspiration — to
+    the model, and on the screen."""
+
+    def test_each_recording_is_announced_by_name_and_role_in_order(self):
+        sent = {}
+
+        def capture(kind, body, **kw):
+            sent["parts"] = body["contents"][0]["parts"]
+            return fake_gemini(REPLY), []
+
+        u = User.objects.create_user("which", "w@e.com", "pw12345678")
+        c = APIClient(); c.force_authenticate(u)
+        w = wallet_for(u); w.money_cents = 10000; w.save()
+        with patch("apps.economy.matchref._key", return_value="k"), \
+             patch("apps.economy.vocalcoach._key", return_value="k"), \
+             patch("apps.economy.matchref.generate_content", side_effect=capture):
+            r = c.post("/api/rapz/match/", {"take": f("t.wav"), "reference": f("r.wav")}, format="multipart")
+        self.assertEqual(r.status_code, 200, r.content)
+        texts = [p.get("text", "") for p in sent["parts"]]
+        a = next(i for i, t in enumerate(texts) if t.startswith("TRACK A — THE MEMBER'S OWN TAKE"))
+        b = next(i for i, t in enumerate(texts) if t.startswith("TRACK B — THE INSPIRATION"))
+        self.assertLess(a, b)
+        self.assertNotIn("text", sent["parts"][a + 1])   # the recording follows its own label
+        self.assertNotIn("text", sent["parts"][b + 1])
+
+    def test_a_title_is_named_in_the_label_and_cannot_break_out_of_its_quotes(self):
+        class S:
+            title = 'My "verse"' + "x" * 200
+        line = matchref._announce("A", "THE MEMBER'S OWN TAKE", S())
+        self.assertIn("titled \"My 'verse'", line)
+        self.assertLess(len(line), 140)
+
+    def test_the_prompt_ties_take_to_A_and_reference_to_B(self):
+        p = matchref._prompt("rapz", "trap")
+        self.assertIn('every "take" key below is TRACK A', p.replace("Every", "every"))
+        self.assertIn('"heard"', p)
+
+    def test_heard_is_both_sentences_or_nothing(self):
+        out = matchref.clean_reply({**REPLY, "heard": {"take": "slow male rap", "reference": "fast female sung hook"}}, "rapz")
+        self.assertEqual(out["heard"], {"take": "slow male rap", "reference": "fast female sung hook"})
+        self.assertIsNone(matchref.clean_reply({**REPLY, "heard": {"take": "only one"}}, "rapz")["heard"])
+        self.assertIsNone(matchref.clean_reply(REPLY, "rapz")["heard"])
