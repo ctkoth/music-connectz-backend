@@ -3075,6 +3075,18 @@ What it states it does is what Mix ConnectZ does: it matches EQ (tonal balance) 
 controls the member sets; reverb is Arsenal's. A YouTube inspiration has no audio file to hand over, and the door says so
 (`with_reference: false`) rather than implying a match.
 
+### Writing, factor by factor — every coach, in its own terms
+
+Corey: add the instrument writing factors to the other coaches. `WRITING_BY_APP` scores how each track is WRITTEN — the
+parts chosen, not how well they are played — for both tracks, judged against the genre. Five shared ideas (hook,
+harmony, arrangement, feel, space) are worded per instrument: a guitar's riff and chord choices; a bass's hummable line
+and note choice; keys' figure, voicing and hands; drums' signature beat and **sound & tuning instead of harmony**;
+violin's line and double-stops; one wind set for flute, sax, clarinet and trumpet (line, note choice against the chords,
+entrances, time feel, breath). SingZ adds Melody and ad-libs & harmonies beside its lyrics; RapZ adds cadence switches and
+ad-libs. The module asserts on import that every coach in `INSTRUMENTS` has a set, because the first draft covered seven
+of eleven and only the test noticed. **Doors are the coach's recorder (free to open)**: Instrumental ConnectZ has no
+hand-off and cannot take a part brief, so there is no writer door for an instrument part rather than a button to nowhere.
+
 ## LookZMaxZ shares: the person in the reading decides, from a snapshot the server signed
 
 `lookshare.py`. Corey wanted to show a woman her score; rating a photo someone else uploads stays self-only, so the

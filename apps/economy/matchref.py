@@ -259,6 +259,81 @@ def match_mix_door(reference):
             "note": MATCH_NO_FILE if link else MATCH_NOTE}
 
 
+# How each track is WRITTEN, apart from how well it is played: the instrument's own writing layer.
+# Five shared ideas (hook, harmony, arrangement, feel, space) worded for each instrument, so a drummer is
+# asked about a signature beat and sound choice rather than chords. A voice coach keeps its lyrics and
+# adds the two non-lyric writing factors it has: SingZ Melody and ad-libs, RapZ cadence switches and ad-libs.
+# Style-relative by instruction — space in jazz is not space in drill.
+_SPACE = {"label": "Space 🌬️", "what": "rests between phrases; not over-playing"}
+WRITING_BY_APP = {
+    "guitarz": {"hook": {"label": "Riff 🪝", "what": "a riff or figure you would remember after one listen"},
+                "harmony": {"label": "Chord choices 🎼", "what": "the chords and voicings chosen"},
+                "arrangement": {"label": "Part writing 🏗️", "what": "rhythm part vs lead: what the part does in the song"},
+                "feel": {"label": "Feel 🕺", "what": "pushing or laying back against the beat"},
+                "space": _SPACE},
+    "bassz": {"hook": {"label": "Bassline hook 🪝", "what": "a bassline you would hum"},
+              "harmony": {"label": "Note choice 🎼", "what": "roots vs passing tones, outlining the chords"},
+              "arrangement": {"label": "Part writing 🏗️", "what": "where it drops out, walks or doubles"},
+              "feel": {"label": "Lock 🕺", "what": "locked to the kick and the groove"},
+              "space": _SPACE},
+    "keyz": {"hook": {"label": "Figure & melody 🪝", "what": "a figure or melody you would remember"},
+             "harmony": {"label": "Harmony & voicing 🎼", "what": "chord colour and voice leading"},
+             "arrangement": {"label": "Hands 🏗️", "what": "the left hand's and the right hand's roles"},
+             "feel": {"label": "Comping feel 🕺", "what": "the rhythm of the comping against the beat"},
+             "space": _SPACE},
+    "drumz": {"hook": {"label": "Signature beat 🪝", "what": "a pattern you would recognise"},
+              "sound": {"label": "Sound & tuning 🥁", "what": "the drum sounds and tuning chosen for the song"},
+              "arrangement": {"label": "Builds & fills 🏗️", "what": "builds, drops and where the fills land in the form"},
+              "feel": {"label": "Feel 🕺", "what": "swing vs straight, ahead of or behind the beat"},
+              "space": {"label": "Space 🌬️", "what": "ghost notes vs silence; not filling every gap"}},
+    "violinz": {"hook": {"label": "Line 🪝", "what": "a melodic line you would remember"},
+                "harmony": {"label": "Double-stops & counter-melody 🎼", "what": "harmony played against the tune"},
+                "arrangement": {"label": "Entrances 🏗️", "what": "when it enters and when it rests"},
+                "feel": {"label": "Phrasing shape 🕺", "what": "rubato, the rise and fall of a phrase"},
+                "space": {"label": "Breath in the phrase 🌬️", "what": "room between phrases"}},
+    "singz": {"melody": {"label": "Melody 🎼", "what": "contour, hookiness, and how it uses the singer's range"},
+              "adlibs": {"label": "Ad-libs & harmonies 🎶", "what": "backing vocals, stacks and ad-libs"}},
+    "rapz": {"cadence": {"label": "Cadence switches 🔀", "what": "whether the pattern changes, or one flow runs the whole verse"},
+             "adlibs": {"label": "Ad-libs 🗣️", "what": "ad-libs and doubles that lift the bars"}},
+}
+# Winds and brass play a lead line, so their writing is the line itself: what it plays against the chords,
+# when it answers or lays out, and the breath between phrases. One set for the four, worded for a horn.
+_WINDS_WRITING = {
+    "hook": {"label": "Line 🪝", "what": "a melodic line you would remember"},
+    "harmony": {"label": "Note choice 🎼", "what": "the notes chosen against the chords — inside or outside"},
+    "arrangement": {"label": "Entrances & answers 🏗️", "what": "when it plays, answers the lead, or lays out"},
+    "feel": {"label": "Time feel 🕺", "what": "ahead of, on or behind the beat; swing or straight"},
+    "space": {"label": "Breath in the phrase 🌬️", "what": "room between phrases"},
+}
+for _k in ("flutez", "saxz", "clarinetz", "trumpetz"):
+    WRITING_BY_APP[_k] = _WINDS_WRITING
+assert all(k in WRITING_BY_APP for k in __import__("apps.economy.instruments", fromlist=["INSTRUMENTS"]).INSTRUMENTS), \
+    "a coach has no writing factors — add it to WRITING_BY_APP"
+
+WRITING_COMPARE_NOTE = ("How each track is written — the parts chosen, not how well they are played — on the same 1-10 "
+                        "scale, judged against the genre. The step under each is a change to try in your next take.")
+
+
+def _writing_factors(app_key):
+    return {k: {"label": v["label"]} for k, v in WRITING_BY_APP.get(app_key, {}).items()}
+
+
+def clean_writing_scores(raw, app_key):
+    """The writing rows for this coach, each with `how` — one concrete change to try in the writing."""
+    return _factor_rows(raw, _writing_factors(app_key), extra=("how",))
+
+
+def writing_doors(rows, app_key):
+    """{dim: door} — a writing change is tried in a take, so the door is the coach's recorder, free to
+    open. There is no writer door for an instrument part: Instrumental ConnectZ cannot take a part brief,
+    and a button promising one would land nowhere."""
+    label = profile_for_app(app_key)["label"]
+    return {x["dim"]: {"key": "retake", "label": f"Try it in a new take — {label}", "tab": app_key,
+                       "target": "bosstake-mic", "carry": {}, "cost": None,
+                       "note": "Opens the recorder. Nothing runs until you send a take; the coach's price is on Send."}
+            for x in rows}
+
+
 def delivery_doors(rows, app_key):
     """{dim: door} — practising a delivery factor happens in a take, so the door opens the coach's own
     recorder (whose price is on its Send button, not here). Projection is breath support first, so it
@@ -364,6 +439,14 @@ def _prompt(app_key, genre):
     mix_rule = ("\nMIX: rate the MIX of each track, apart from the performance, in \"mix_scores\" — "
                 + "; ".join(f"{d} ({v['what']})" for d, v in MIX_FACTORS.items())
                 + " — on the same 1-10 scale. A finished record usually mixes better than a home take; say what to change.\n")
+    wrt = WRITING_BY_APP.get(app_key, {})
+    writing_shape = ", ".join(f'"{d}": {{"take": <1-10>, "reference": <1-10>, "why": "<one sentence: what separates them>", '
+                              f'"how": "<one concrete change to try in the writing>"}}' for d in wrt)
+    writing_rule = ("\nWRITING: rate how each track is WRITTEN — the parts chosen, not how well they are played — in "
+                    "\"writing_scores\" — " + "; ".join(f"{d} ({v['what']})" for d, v in wrt.items())
+                    + f" — on the same 1-10 scale, judged against the genre ({genre}): what is right for one style is "
+                    "wrong for another.\n" if wrt else "")
+    writing_line = f'"writing_scores": {{{writing_shape}}},\n  ' if wrt else ""
     lyric_rule = (f"Rate the WORDS of both tracks on the same 1-10 scale in \"lyric_scores\" — {', '.join(lyr)} — "
                   "judging what is written and sung, never quoting it. If either track has no words, send {}. "
                   if lyr else "")
@@ -401,7 +484,7 @@ PERFORMANCE; mix and room moves stay in "eq" and "how_to".
 If either file has no real performance (silence, talking, wrong file), set \
 "unscorable" to one sentence saying which file and what you heard, and stop.
 
-{mix_rule}{delivery_rule}LYRICS: only if the recordings have words. {lyric_rule}Describe HOW the reference writes — \
+{mix_rule}{delivery_rule}{writing_rule}LYRICS: only if the recordings have words. {lyric_rule}Describe HOW the reference writes — \
 rhyme habits, imagery, structure, point of view, line length, density — in your \
 own words. NEVER quote, paraphrase line-by-line or reproduce any of the \
 reference's lyrics. "lyric_direction" is an instruction the member's own writing \
@@ -421,7 +504,7 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "drills": [{{"name": "<short name>", "targets": "<one of: {dims}>", "minutes": <1-30 integer>, "why": "<what it closes between the take and the reference>", "how": "<the steps>"}}, ...],
   "keep": "<what the take already does that the reference does too, or does better>",
   "mix_scores": {{{mix_shape}}},
-  {delivery_line}{lyric_line}"lyric_direction": "<empty, or 2-4 sentences: how the reference writes, as an instruction for rewriting the member's own lines. No quotes from the reference.>"
+  {delivery_line}{writing_line}{lyric_line}"lyric_direction": "<empty, or 2-4 sentences: how the reference writes, as an instruction for rewriting the member's own lines. No quotes from the reference.>"
 }}"""
 
 
@@ -559,6 +642,8 @@ def clean_reply(parsed, app_key):
         "lyric_compare": lyric_compare(lyr),
         "delivery_scores": (dl := clean_delivery_scores(parsed.get("delivery_scores"), app_key)),
         "delivery_compare": lyric_compare(dl),
+        "writing_scores": (wr := clean_writing_scores(parsed.get("writing_scores"), app_key)),
+        "writing_compare": lyric_compare(wr),
         "mix_scores": (mx := clean_mix_scores(parsed.get("mix_scores"))),
         "mix_compare": lyric_compare(mx),
     }
@@ -921,9 +1006,11 @@ class MatchReferenceView(APIView):
         fix_door = revise_door(out["lyric_scores"], genre, price)
         delivery_factor_doors = delivery_doors(out["delivery_scores"], self.app_key)
         mix_factor_doors = mix_doors(out["mix_scores"], self.app_key)
+        writing_factor_doors = writing_doors(out["writing_scores"], self.app_key)
         mix_match = match_mix_door(ref.describe()) if out["mix_scores"] else None
         return Response({**out, "match": True, "reference": True, "saved": False, "feature": LABEL,
-                         "cost_cents": charged, "energy_cost": energy_cost, "lyrics_door": door, "lyric_doors": lyric_factor_doors, "revise_door": fix_door, "delivery_doors": delivery_factor_doors, "mix_doors": mix_factor_doors, "mix_match_door": mix_match,
+                         "cost_cents": charged, "energy_cost": energy_cost, "lyrics_door": door, "lyric_doors": lyric_factor_doors, "revise_door": fix_door, "delivery_doors": delivery_factor_doors, "mix_doors": mix_factor_doors, "writing_doors": writing_factor_doors,
+                         "writing_compare_note": WRITING_COMPARE_NOTE if out["writing_scores"] else "", "mix_match_door": mix_match,
                          "mix_compare_note": MIX_COMPARE_NOTE if out["mix_scores"] else "",
                          "delivery_compare_note": DELIVERY_COMPARE_NOTE if out["delivery_scores"] else "",
                          "lyric_compare_note": LYRIC_COMPARE_NOTE if out["lyric_scores"] else "",

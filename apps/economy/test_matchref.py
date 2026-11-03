@@ -765,3 +765,29 @@ class MixLikeTheInspirationTests(TestCase):
         link = matchref.match_mix_door({"kind": "link", "url": "https://www.youtube.com/watch?v=x"})
         self.assertFalse(link["with_reference"])
         self.assertIn("link", link["note"])
+
+
+class WritingFactorsForEveryCoachTests(TestCase):
+    """Corey: the instrument writing factors on the other coaches — how each track is written, apart from
+    how well it is played — plus Melody/ad-libs for SingZ and cadence switches/ad-libs for RapZ."""
+
+    def test_every_coach_has_a_writing_table_in_its_own_terms(self):
+        from apps.economy.instruments import INSTRUMENTS
+        for key in INSTRUMENTS:
+            self.assertTrue(matchref.WRITING_BY_APP.get(key), key)
+            self.assertIn('"writing_scores"', matchref._prompt(key, "rock"))
+        self.assertIn("sound", matchref.WRITING_BY_APP["drumz"])          # a drummer is not asked about chords
+        self.assertNotIn("harmony", matchref.WRITING_BY_APP["drumz"])
+        self.assertIn("cadence", matchref.WRITING_BY_APP["rapz"])
+        self.assertIn("melody", matchref.WRITING_BY_APP["singz"])
+
+    def test_the_prompt_judges_against_the_genre(self):
+        self.assertIn("judged against the genre (jazz)", matchref._prompt("keyz", "jazz"))
+
+    def test_rows_are_this_coachs_only_and_doors_are_the_free_recorder(self):
+        rows = matchref.clean_writing_scores({"hook": {"take": 5, "reference": 8, "why": "theirs repeats", "how": "loop the riff"},
+                                              "cadence": {"take": 3, "reference": 9}}, "guitarz")
+        self.assertEqual([r["dim"] for r in rows], ["hook"])               # a rap factor is not a guitar's
+        self.assertEqual(rows[0]["how"], "loop the riff")
+        d = matchref.writing_doors(rows, "guitarz")["hook"]
+        self.assertEqual((d["tab"], d["target"], d["cost"]), ("guitarz", "bosstake-mic", None))
