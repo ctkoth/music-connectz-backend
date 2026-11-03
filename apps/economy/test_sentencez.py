@@ -480,3 +480,83 @@ class PunchlineTests(SentenceTests):
         other = APIClient()
         other.force_authenticate(get_user_model().objects.create_user("stranger", "s@e.com", "pw-Long-enough-1"))
         self.assertEqual(other.post(url, {"stars": 5}, format="json").status_code, 404)
+
+
+class ReviseKeepsItTheSameSongTests(TestCase):
+    """Corey: pick which factors to fix and Sentence ConnectZ fixes only those, keeping the member's
+    own lyrics as close as practical — the same song with its faults fixed."""
+
+    SONG = "Walking down the street at night\nI feel alright\nMoney on my mind all day\nThat's the only way"
+    REPLY = ('{"lyrics": "Walking down the street at night\\nI feel alright\\nMoney humming in my veins all day\\n'
+             'That\'s the only way", "changes": ['
+             '{"factor": "imagery", "before": "Money on my mind all day", "after": "Money humming in my veins all day", "why": "shows it"},'
+             '{"factor": "rhymes", "before": "I feel alright", "after": "I feel so bright", "why": "not picked"},'
+             '{"factor": "imagery", "before": "A line that was never in the song", "after": "x", "why": "made up"}]}')
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user("rev", "rv@e.com", "pw-Long-enough-1")
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def test_the_kind_is_offered_with_its_factor_picker_and_in_the_members_voice(self):
+        with patch("apps.economy.sentencez._key", return_value="k"):
+            kinds = {k["key"]: k for k in self.client.get(URL).json()["kinds"]}
+        rv = kinds["revise"]
+        self.assertEqual({f["key"] for f in rv["factors"]}, set(sentencez.FIXERS))
+        self.assertEqual(rv["voice"], "plain")
+        self.assertNotIn("revise", sentencez.CREATIVE_KINDS)   # no house voice, no samples
+
+    def test_nothing_runs_without_a_factor(self):
+        with patch("apps.economy.sentencez._key", return_value="k"):
+            r = self.client.post(URL, {"kind": "revise", "topic": self.SONG, "factors": []}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertFalse(SentenceWork.objects.filter(user=self.user).exists())
+
+    def test_factors_accept_a_coach_dimension_and_drop_junk(self):
+        self.assertEqual(sentencez.clean_revise_factors(["punchlines", "hook", "feelz", "bogus"]),
+                         ["punchlines", "hooks", "depth"])
+
+    def test_the_prompt_says_only_these_and_keep_every_other_line(self):
+        p = sentencez.prompt_for("revise", self.SONG, "trap",
+                                 revise={"factors": ["imagery"], "notes": {"imagery": "theirs is concrete"}})
+        self.assertIn("FIX ONLY THESE", p)
+        self.assertIn("Imagery", p)
+        self.assertNotIn("Punchlines:", p)
+        self.assertIn("copied back exactly", p)
+        self.assertIn("theirs is concrete", p)
+        self.assertIn(self.SONG, p)
+
+    @patch("apps.economy.sentencez._key", return_value="k")
+    def test_only_picked_real_changes_survive_and_only_they_are_royalty_text(self, _k):
+        with patch("apps.economy.gemini.requests.post", return_value=reply(self.REPLY)):
+            r = self.client.post(URL, {"kind": "revise", "topic": self.SONG, "factors": ["imagery"],
+                                       "notes": {"imagery": "theirs is concrete", "rhymes": "ignored"}}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        rv = r.json()["revision"]
+        self.assertEqual([c["after"] for c in rv["changes"]], ["Money humming in my veins all day"])
+        self.assertEqual((rv["kept_lines"], rv["total_lines"]), (3, 4))
+        self.assertEqual(rv["factors"], ["imagery"])
+        work = SentenceWork.objects.get(user=self.user)
+        self.assertEqual(work.text, "Money humming in my veins all day")   # never the member's own lines
+        self.assertTrue(r.json()["revise_note"])
+
+    @patch("apps.economy.sentencez._key", return_value="k")
+    def test_an_unreadable_revision_is_not_charged(self, _k):
+        with patch("apps.economy.gemini.requests.post", return_value=reply("not json at all")):
+            r = self.client.post(URL, {"kind": "revise", "topic": self.SONG, "factors": ["imagery"]}, format="json")
+        self.assertEqual(r.status_code, 502)
+        self.assertFalse(SentenceWork.objects.filter(user=self.user).exists())
+
+
+class ReviseRoyaltyIsOnlyTheFixesTests(TestCase):
+    CH = [{"before": "money on my mind all day", "after": "money humming in my veins all day"}]
+
+    def test_one_changed_line_in_a_long_song_is_a_small_share(self):
+        song = "\n".join(f"line number {i} of my own song here" for i in range(20)) + "\nmoney humming in my veins all day"
+        share = sentencez.revise_share(self.CH, song)
+        self.assertGreater(share, 0)
+        self.assertLess(share, 0.1)
+
+    def test_reverting_the_fix_drops_the_royalty_to_nothing(self):
+        self.assertEqual(sentencez.revise_share(self.CH, "walking at night\nmoney on my mind all day"), 0.0)
+        self.assertEqual(sentencez.revise_share([], "anything"), 0.0)

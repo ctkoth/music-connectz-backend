@@ -3043,6 +3043,26 @@ punch, the main settings for tone, loudness and width, and Arsenal's reverb for 
 space. **Clean signal has no door**: nothing here can unclip a take, and a door to a tool that cannot fix it is a dead end.
 All are free (on device). The client hands Mix ConnectZ the member's own track when it has an address (`mixCarry`).
 
+### Fix my lyrics: the member picks the factors, and it is still their song
+
+Corey: let members pick which factors Sentence ConnectZ rewrites, so if it is punchlines it only improves punchlines,
+keeping as close to the member's lyrics as practical — the same song with its faults fixed. The fixers write five new
+lines to choose from; the `revise` kind (`KINDS["revise"]`, "Fix my lyrics") EDITS the member's own lyrics instead.
+
+- **Only picked factors** (`clean_revise_factors`: fixer keys or coach dimensions, junk dropped, at least one or a 400
+  before anything is priced). `REVISE_RULES` says to keep story, sections, order, slang and voice, change only lines weak
+  on the listed factors, use the fewest words, keep syllables within two and the end-rhyme sound, and copy every other
+  line back exactly. The lyrics go in as delimited DATA.
+- **The member's voice, not K-Oth's**: `plain`, not in `CREATIVE_KINDS` (no house voice, no samples, no custom voice).
+- **The server checks the claim** (`parse_revision`): a change survives only if it names a picked factor and quotes a
+  line that IS in the member's lyrics, and `kept_lines` / `total_lines` are counted here, never taken from the model.
+  Unreadable means 502 and not charged.
+- **What is stored is only the changed lines**, and the royalty follows them (`revise_share`, line by line from the stored
+  before/after pairs): one fixed line in a long song is a small share, and a change the member reverted counts nothing.
+  Word-by-word matching was tried first and credited shared words like "my", so it is not used here.
+- Inspiration serves `revise_door`, pre-picked with every factor the inspiration leads on (widest gap first) and carrying
+  the comparison's reasons as notes. The member changes the picks on screen.
+
 ## LookZMaxZ shares: the person in the reading decides, from a snapshot the server signed
 
 `lookshare.py`. Corey wanted to show a woman her score; rating a photo someone else uploads stays self-only, so the

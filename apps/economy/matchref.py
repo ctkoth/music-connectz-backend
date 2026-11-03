@@ -270,6 +270,29 @@ def lyric_doors(rows, genre, price, app_key):
     return out
 
 
+REVISE_DOOR_NOTE = ("Opens Sentence ConnectZ's Fix my lyrics with the factors you picked. Paste your lyrics: only "
+                    "those faults change and every other line stays word for word, so it is still your song. "
+                    "Nothing runs until you press Write; a failed run is not charged. K-Oth's royalty can only "
+                    "apply to a changed line you keep, never to your own words.")
+
+
+def revise_door(rows, genre, price):
+    """ONE door that edits the member's own lyrics, fixing only the factors they pick. Pre-picked with
+    every factor the inspiration leads on (the widest gap first); the screen lets the member change
+    that. Each picked factor carries the comparison's reason as a note — data, never the reference's
+    words. None when there were no lyric rows to pick from."""
+    if not rows:
+        return None
+    by_gap = sorted(rows, key=lambda x: x["gap"])
+    return {"key": "revise", "label": "Fix my lyrics — only what I pick", "tab": "sentenceconnectz",
+            "target": "sentencez-write",
+            "carry": {"kind": "revise", "genre": genre if genre != "unspecified" else "",
+                      "factors": [x["fixer"] for x in by_gap if x["gap"] < 0],
+                      "notes": {x["fixer"]: x["why"] for x in rows if x["why"]}},
+            "cost": {"resource": "promptz", "amount": price["amount"], "free_today": price["free_today"]},
+            "note": REVISE_DOOR_NOTE}
+
+
 def lyrics_door(direction, genre, price):
     """The paid writer, handed the lyric direction — with its price said before it is pressed.
     None when there is no direction (no words in the recordings). `price` is
@@ -860,10 +883,11 @@ class MatchReferenceView(APIView):
         price = coach_price(request.user)
         door = lyrics_door(out["lyric_direction"], genre, price)
         lyric_factor_doors = lyric_doors(out["lyric_scores"], genre, price, self.app_key)
+        fix_door = revise_door(out["lyric_scores"], genre, price)
         delivery_factor_doors = delivery_doors(out["delivery_scores"], self.app_key)
         mix_factor_doors = mix_doors(out["mix_scores"], self.app_key)
         return Response({**out, "match": True, "reference": True, "saved": False, "feature": LABEL,
-                         "cost_cents": charged, "energy_cost": energy_cost, "lyrics_door": door, "lyric_doors": lyric_factor_doors, "delivery_doors": delivery_factor_doors, "mix_doors": mix_factor_doors,
+                         "cost_cents": charged, "energy_cost": energy_cost, "lyrics_door": door, "lyric_doors": lyric_factor_doors, "revise_door": fix_door, "delivery_doors": delivery_factor_doors, "mix_doors": mix_factor_doors,
                          "mix_compare_note": MIX_COMPARE_NOTE if out["mix_scores"] else "",
                          "delivery_compare_note": DELIVERY_COMPARE_NOTE if out["delivery_scores"] else "",
                          "lyric_compare_note": LYRIC_COMPARE_NOTE if out["lyric_scores"] else "",
