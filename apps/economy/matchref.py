@@ -165,18 +165,31 @@ _DELIVERY_EMOJI = {"delivery": "🔥", "diction": "🔍", "projection": "📢", 
                    "dynamics": "📊", "pacing": "⏱️", "intention": "🎯"}
 
 
-def _delivery_factors():
-    return {k: {"label": f"{vc.FEELZ_TIP_KINDS[k]} {e}"} for k, e in _DELIVERY_EMOJI.items()
-            if k in vc.FEELZ_TIP_KINDS}
+# RapZ also has FLOW — how the bars ride the beat, which is the rapper's delivery before anything else.
+# Every other coach has a voice-free performance, so it gets CLARITY: whether every note is defined
+# and heard, the instrument's own diction. One table, per-coach rows.
+RAP_FLOW = {"flow": {"label": "Flow 🌊", "what": "how the bars ride the beat: cadence, pocket, switches"}}
+CLARITY = {"clarity": {"label": "Clarity 🔍", "what": "whether every note is defined and heard, not smeared"}}
+
+
+def _delivery_factors(app_key="singz"):
+    """The performance factors for THIS coach: a voice gets the coach's own FeelZ tip kinds (RapZ adds
+    Flow first); an instrument gets Clarity."""
+    if not profile_for_app(app_key).get("lyrics"):
+        return {k: {"label": v["label"]} for k, v in CLARITY.items()}
+    voice = {k: {"label": f"{vc.FEELZ_TIP_KINDS[k]} {e}"} for k, e in _DELIVERY_EMOJI.items() if k in vc.FEELZ_TIP_KINDS}
+    if app_key == "rapz":
+        return {**{k: {"label": v["label"]} for k, v in RAP_FLOW.items()}, **voice}
+    return voice
 
 
 DELIVERY_COMPARE_NOTE = ("How each track is delivered, apart from the words, on the same 1-10 scale. The step under each is "
                          "free to practise; your next take's score is how you'll know it moved.")
 
 
-def clean_delivery_scores(raw):
-    """The delivery rows, each with `how` — one concrete step to close that gap."""
-    return _factor_rows(raw, _delivery_factors(), extra=("how",))
+def clean_delivery_scores(raw, app_key="singz"):
+    """The delivery rows for this coach, each with `how` — one concrete step to close that gap."""
+    return _factor_rows(raw, _delivery_factors(app_key), extra=("how",))
 
 
 # The MIX, apart from the performance — every coach, because every recording is mixed. Each names the
@@ -184,14 +197,16 @@ def clean_delivery_scores(raw):
 # clipping and noise are fixed at the recording, and a door to a tool that cannot fix them is a dead end.
 MIX_FACTORS = {
     "balance": {"label": "Balance ⚖️", "what": "levels between the parts — does each sit where it should"},
-    "tone": {"label": "Tone balance 🎚️", "what": "lows, mids and highs overall (the regions are in EQ below)"},
-    "punch": {"label": "Punch & dynamics 💥", "what": "how hits land and how much the loud parts move"},
+    "eq": {"label": "EQ 🎚️", "what": "tonal balance: lows, mids and highs (the regions are in EQ below)"},
+    "compression": {"label": "Compression 🗜️", "what": "how hits land and how much the loud parts are held in — punch vs squash"},
     "loudness": {"label": "Loudness 📈", "what": "how loud the finished track is, and whether it is squashed"},
-    "width": {"label": "Stereo width ↔️", "what": "how wide or narrow the mix sounds"},
+    "stereo": {"label": "Stereo width ↔️", "what": "how wide or narrow the mix sounds, and whether the low end stays centred"},
     "space": {"label": "Reverb & space 🌌", "what": "depth: how near or far each part sounds"},
+    "clarity": {"label": "Clarity & separation 🔍", "what": "whether parts mask each other — mud, boxiness, a buried lead"},
     "clean": {"label": "Clean signal 🔇", "what": "noise, hiss, clipping and distortion that wasn't meant"},
 }
-_MIX_TARGET = {"tone": "mixz-settings", "loudness": "mixz-settings", "width": "mixz-settings", "punch": "mixz-dynamicz"}
+_MIX_TARGET = {"eq": "mixz-match", "clarity": "mixz-match", "loudness": "mixz-settings", "stereo": "mixz-match",
+               "compression": "mixz-dynamicz"}
 MIX_COMPARE_NOTE = ("The mix of each track, apart from the performance, on the same 1-10 scale — heard, not metered. "
                     "Mix ConnectZ measures yours for real and is free on your device.")
 
@@ -224,6 +239,24 @@ def mix_doors(rows, app_key):
         out[d] = {"key": "mixz", "label": "Fix it in Mix ConnectZ", "tab": "mixconnectz", "target": target,
                   "carry": {}, "cost": None, "note": "Free, mastered on your device. Nothing uploads unless you save it."}
     return out
+
+
+MATCH_NOTE = ("Opens Mix ConnectZ with your track and the inspiration both loaded, on Match reference: it matches "
+              "your EQ (tonal balance) and loudness to the inspiration. Compression (DynamicZ) and stereo width are "
+              "controls you set beside it, guided by the rows above. Free, mastered on your device; nothing uploads "
+              "unless you save. Reverb is not mastering — that is Arsenal.")
+MATCH_NO_FILE = ("The inspiration is a link, and Mix ConnectZ needs the song's audio to match it, so only your track is "
+                 "loaded — add the inspiration's file under Inspiration there.")
+
+
+def match_mix_door(reference):
+    """One door: mix the member's track toward the inspiration in Mix ConnectZ. `reference` is the side
+    as described; a YouTube link has no audio file to hand over, and the door says so rather than
+    pretending the match will happen."""
+    link = (reference or {}).get("kind") == "link"
+    return {"key": "mixmatch", "label": "Mix my song like the inspiration", "tab": "mixconnectz", "target": "mixz-match",
+            "carry": {}, "cost": None, "with_reference": not link,
+            "note": MATCH_NO_FILE if link else MATCH_NOTE}
 
 
 def delivery_doors(rows, app_key):
@@ -317,15 +350,17 @@ def _prompt(app_key, genre):
     lyr = _lyric_factors() if p.get("lyrics") else {}
     lyric_shape = ", ".join(f'"{d}": {{"take": <1-10>, "reference": <1-10>, "why": "<one sentence: what separates them>"}}'
                             for d in lyr)
-    dlv = _delivery_factors() if p.get("lyrics") else {}
+    dlv = _delivery_factors(app_key)
+    _what = {**RAP_FLOW, **CLARITY}
+    dlv_named = ", ".join(f"{d} ({_what[d]['what']})" if d in _what else d for d in dlv)
     delivery_shape = ", ".join(f'"{d}": {{"take": <1-10>, "reference": <1-10>, "why": "<one sentence: what separates them>", '
                                f'"how": "<one concrete step the member can practise to close it>"}}' for d in dlv)
-    delivery_rule = (f"\nDELIVERY: rate how each VOICE is delivered, apart from the words, in \"delivery_scores\" — "
-                     f"{', '.join(dlv)} — on the same 1-10 scale, each with what separates them and one step to close it. "
+    delivery_rule = (f"\nDELIVERY: rate how each PERFORMANCE is delivered, apart from the words, in \"delivery_scores\" — "
+                     f"{dlv_named} — on the same 1-10 scale, each with what separates them and one step to close it. "
                      "Mic, room and mix belong in \"eq\" and \"how_to\", not here.\n" if dlv else "")
     delivery_line = f'"delivery_scores": {{{delivery_shape}}},\n  ' if dlv else ""
     mix_shape = ", ".join(f'"{d}": {{"take": <1-10>, "reference": <1-10>, "why": "<one sentence: what separates them>", '
-                          f'"how": "<the move: which control, which way, roughly how much>"}}' for d in MIX_FACTORS)
+                          f'"how": "<the move in that process: which control, which way, roughly how much>"}}' for d in MIX_FACTORS)
     mix_rule = ("\nMIX: rate the MIX of each track, apart from the performance, in \"mix_scores\" — "
                 + "; ".join(f"{d} ({v['what']})" for d, v in MIX_FACTORS.items())
                 + " — on the same 1-10 scale. A finished record usually mixes better than a home take; say what to change.\n")
@@ -522,7 +557,7 @@ def clean_reply(parsed, app_key):
         "lyric_direction": str(parsed.get("lyric_direction", "")).strip()[:600],
         "lyric_scores": (lyr := clean_lyric_scores(parsed.get("lyric_scores")) if profile_for_app(app_key).get("lyrics") else []),
         "lyric_compare": lyric_compare(lyr),
-        "delivery_scores": (dl := clean_delivery_scores(parsed.get("delivery_scores")) if profile_for_app(app_key).get("lyrics") else []),
+        "delivery_scores": (dl := clean_delivery_scores(parsed.get("delivery_scores"), app_key)),
         "delivery_compare": lyric_compare(dl),
         "mix_scores": (mx := clean_mix_scores(parsed.get("mix_scores"))),
         "mix_compare": lyric_compare(mx),
@@ -886,8 +921,9 @@ class MatchReferenceView(APIView):
         fix_door = revise_door(out["lyric_scores"], genre, price)
         delivery_factor_doors = delivery_doors(out["delivery_scores"], self.app_key)
         mix_factor_doors = mix_doors(out["mix_scores"], self.app_key)
+        mix_match = match_mix_door(ref.describe()) if out["mix_scores"] else None
         return Response({**out, "match": True, "reference": True, "saved": False, "feature": LABEL,
-                         "cost_cents": charged, "energy_cost": energy_cost, "lyrics_door": door, "lyric_doors": lyric_factor_doors, "revise_door": fix_door, "delivery_doors": delivery_factor_doors, "mix_doors": mix_factor_doors,
+                         "cost_cents": charged, "energy_cost": energy_cost, "lyrics_door": door, "lyric_doors": lyric_factor_doors, "revise_door": fix_door, "delivery_doors": delivery_factor_doors, "mix_doors": mix_factor_doors, "mix_match_door": mix_match,
                          "mix_compare_note": MIX_COMPARE_NOTE if out["mix_scores"] else "",
                          "delivery_compare_note": DELIVERY_COMPARE_NOTE if out["delivery_scores"] else "",
                          "lyric_compare_note": LYRIC_COMPARE_NOTE if out["lyric_scores"] else "",

@@ -652,11 +652,15 @@ class DeliveryFactorsAreComparedTests(TestCase):
         self.assertEqual((d["gap"], d["leads"], d["how"]), (-3, "reference", "Slow the verse to 70%"))
         self.assertEqual(matchref.lyric_compare(rows)["worse"], ["diction"])
 
-    def test_only_singz_and_rapz_ask_for_or_keep_delivery(self):
-        for key in ("singz", "rapz"):
-            self.assertIn('"delivery_scores"', matchref._prompt(key, "pop"))
-        self.assertNotIn('"delivery_scores"', matchref._prompt("guitarz", "rock"))
-        self.assertEqual(matchref.clean_reply({**REPLY, "delivery_scores": self.DLV}, "guitarz")["delivery_scores"], [])
+    def test_rapz_leads_with_flow_and_instruments_get_clarity(self):
+        self.assertEqual(list(matchref._delivery_factors("rapz"))[0], "flow")
+        self.assertNotIn("flow", matchref._delivery_factors("singz"))
+        for key in ("guitarz", "drumz", "keyz", "violinz", "bassz"):
+            self.assertEqual(list(matchref._delivery_factors(key)), ["clarity"])
+            self.assertIn('"delivery_scores"', matchref._prompt(key, "rock"))
+        self.assertIn("how the bars ride the beat", matchref._prompt("rapz", "trap"))
+        rows = matchref.clean_delivery_scores({"clarity": {"take": 5, "reference": 8}, "diction": {"take": 1, "reference": 2}}, "guitarz")
+        self.assertEqual([r["dim"] for r in rows], ["clarity"])      # a voice factor is not a guitar's
 
     def test_doors_open_the_recorder_free_and_projection_opens_breath_training(self):
         rows = matchref.clean_delivery_scores({**self.DLV, "projection": {"take": 4, "reference": 8}})
@@ -687,7 +691,7 @@ class MixFactorsAreDiagnosedTests(TestCase):
     MIX = {"balance": {"take": 5, "reference": 8, "why": "your vocal is buried", "how": "VocalZ +2 dB"},
            "space": {"take": 6, "reference": 8},
            "clean": {"take": 3, "reference": 9, "why": "the take clips on the hook"},
-           "punch": {"take": 7, "reference": 7},
+           "compression": {"take": 7, "reference": 7},
            "loudness": {"take": 4}}                    # half a pair: dropped
 
     def test_every_coach_asks_for_the_mix(self):
@@ -696,7 +700,7 @@ class MixFactorsAreDiagnosedTests(TestCase):
 
     def test_rows_and_compare(self):
         rows = matchref.clean_mix_scores(self.MIX)
-        self.assertEqual([r["dim"] for r in rows], ["balance", "punch", "space", "clean"])
+        self.assertEqual([r["dim"] for r in rows], ["balance", "compression", "space", "clean"])
         self.assertEqual(rows[0]["how"], "VocalZ +2 dB")
         self.assertEqual(matchref.lyric_compare(rows)["worse"], ["clean", "balance", "space"])
 
@@ -704,7 +708,7 @@ class MixFactorsAreDiagnosedTests(TestCase):
         rows = matchref.clean_mix_scores(self.MIX)
         voice = matchref.mix_doors(rows, "singz")
         self.assertEqual((voice["balance"]["tab"], voice["balance"]["target"]), ("mixconnectz", "mixz-vocalz"))
-        self.assertEqual(voice["punch"]["target"], "mixz-dynamicz")
+        self.assertEqual(voice["compression"]["target"], "mixz-dynamicz")
         self.assertEqual(voice["space"]["tab"], "arsenal")
         self.assertNotIn("clean", voice)
         self.assertEqual(matchref.mix_doors(rows, "drumz")["balance"]["target"], "mixz-settings")
@@ -743,3 +747,21 @@ class PickWhatToFixTests(TestCase):
         from apps.economy.sentencez import clean_revise_factors
         fixers = [f["fixer"] for f in matchref._lyric_factors().values()]
         self.assertEqual(sorted(clean_revise_factors(fixers)), sorted(fixers))
+
+
+
+class MixLikeTheInspirationTests(TestCase):
+    """Corey: diagnose the mix by process (compression, EQ, stereo, space) and a door to mix the song more
+    like the reference in Mix ConnectZ."""
+
+    def test_the_factors_are_named_by_the_process_that_fixes_them(self):
+        for k in ("eq", "compression", "stereo", "space", "clarity", "balance", "loudness", "clean"):
+            self.assertIn(k, matchref.MIX_FACTORS)
+
+    def test_the_match_door_loads_both_or_says_why_it_cannot(self):
+        d = matchref.match_mix_door({"kind": "file", "title": "ref.wav"})
+        self.assertEqual((d["tab"], d["target"], d["with_reference"], d["cost"]), ("mixconnectz", "mixz-match", True, None))
+        self.assertIn("EQ", d["note"])
+        link = matchref.match_mix_door({"kind": "link", "url": "https://www.youtube.com/watch?v=x"})
+        self.assertFalse(link["with_reference"])
+        self.assertIn("link", link["note"])

@@ -3063,6 +3063,18 @@ lines to choose from; the `revise` kind (`KINDS["revise"]`, "Fix my lyrics") EDI
 - Inspiration serves `revise_door`, pre-picked with every factor the inspiration leads on (widest gap first) and carrying
   the comparison's reasons as notes. The member changes the picks on screen.
 
+### Flow for RapZ, Clarity for every coach, the mix by process, and Mix it like the inspiration
+
+Corey's asks, applied to Inspiration. **Delivery is per coach** (`_delivery_factors(app_key)`): RapZ leads with **Flow 🌊**
+(how the bars ride the beat), SingZ keeps the voice factors, and every instrument coach gets **Clarity 🔍** (every note
+defined, not smeared), so every coach has a delivery table. A voice factor sent for a guitar is dropped. **The mix is
+named by the process that fixes it**: EQ, Compression, Stereo width, Reverb & space, Clarity & separation, plus balance,
+loudness and clean signal. EQ, clarity and stereo land on Mix ConnectZ's `mixz-match` section; compression on DynamicZ.
+**`match_mix_door`** opens Mix ConnectZ with the member's track and the inspiration both loaded, on Match reference.
+What it states it does is what Mix ConnectZ does: it matches EQ (tonal balance) and loudness; compression and width are
+controls the member sets; reverb is Arsenal's. A YouTube inspiration has no audio file to hand over, and the door says so
+(`with_reference: false`) rather than implying a match.
+
 ## LookZMaxZ shares: the person in the reading decides, from a snapshot the server signed
 
 `lookshare.py`. Corey wanted to show a woman her score; rating a photo someone else uploads stays self-only, so the
