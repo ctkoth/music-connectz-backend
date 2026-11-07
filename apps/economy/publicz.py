@@ -35,6 +35,8 @@ from .models import (
     public_name,
     can_view_post,
     item_rating_median,
+    SkillRating,
+    _median,
 )
 from .personaz import links_of, personas_of, rate_unit_of
 
@@ -94,6 +96,19 @@ def public_post_dict(p, viewer=None):
 from apps.economy.social import _pinned, cover_abs  # noqa: E402
 
 
+def skill_medians_of(user):
+    """{skill: {"rating", "count"}} for a member, from the work that used each skill.
+
+    One query for the whole member, not one per skill. Same rule as ratez.skills_of:
+    nothing is rated directly, a skill's number is the median of the work that used it.
+    """
+    from collections import defaultdict
+    by_skill = defaultdict(list)
+    for skill, score in SkillRating.objects.filter(subject=user).values_list("skill", "score"):
+        by_skill[skill].append(score)
+    return {k: {"rating": _median(v), "count": len(v)} for k, v in by_skill.items()}
+
+
 def public_profile_dict(p, request=None):
     """A member's card as a stranger sees it — the work, not the person.
 
@@ -103,11 +118,19 @@ def public_profile_dict(p, request=None):
     inside the app and are nobody's business from outside it.
     """
     personas = []
+    # Each skill carries the median of the work that used it, so a stranger sees
+    # what the work scored, not just what the skill is called. It rides inside
+    # `personas`, so the card's existing visibility rule for personas covers it.
+    medians = skill_medians_of(p.user)
     for persona in personas_of(p):
         skills = []
         for s in (persona.get("skills") or []):
             if isinstance(s, dict) and s.get("name"):
                 entry = {"name": s["name"]}
+                sm = medians.get(s["name"])
+                if sm and sm["rating"] is not None:
+                    entry["rating"] = sm["rating"]
+                    entry["rating_count"] = sm["count"]
                 if s.get("rate_cents"):
                     entry["rate_cents"] = s["rate_cents"]
                     entry["rate_unit"] = rate_unit_of(s)
