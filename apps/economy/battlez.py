@@ -107,6 +107,10 @@ def battle_dict(b, request=None, with_entries=True, batched=None):
                         if batched else b.entries.count()),
         "mode": b.mode,
         "kind": b.kind,
+        "instrumental_url": b.instrumental_url,
+        "instrumental_title": b.instrumental_title,
+        "same_instrumental": bool(b.instrumental_url),
+        "source_item": b.source_item,
         "opponent": b.opponent.username if b.opponent else "",
         "accepted_at": b.accepted_at.isoformat() if b.accepted_at else None,
         "ends_at": b.ends_at.isoformat() if b.ends_at else None,
@@ -551,6 +555,17 @@ def maybe_auto_settle(battle):
     return battle
 
 
+def open_battle(b):
+    """Start a pending 1v1: the clock begins on ACCEPTANCE, not on the challenge,
+    otherwise a slow reply eats the window the contestants actually get. One
+    function so a manual accept and an auto-accept cannot diverge."""
+    b.status = Battle.STATUS_OPEN
+    b.accepted_at = timezone.now()
+    b.ends_at = b.accepted_at + timedelta(hours=BATTLE_WINDOW_HOURS)
+    b.save(update_fields=["status", "accepted_at", "ends_at", "updated_at"])
+    return b
+
+
 class BattleChallengeView(APIView):
     """POST /api/economy/battlez/challenge/ — name somebody and throw down.
 
@@ -565,6 +580,18 @@ class BattleChallengeView(APIView):
         d = request.data or {}
         title = str(d.get("title", "")).strip()
         opponent_name = str(d.get("opponent", "")).strip()
+        # A challenge can start from a PostZ post: the post's author is the
+        # opponent, and the battle remembers the post so it can be opened again.
+        source_item = ""
+        post = None
+        if d.get("post_id"):
+            from .models import Post
+            post = Post.objects.select_related("author").filter(pk=d.get("post_id")).first()
+            if not post:
+                return Response({"detail": "That post isn't there any more."},
+                                status=status.HTTP_404_NOT_FOUND)
+            opponent_name = post.author.username
+            source_item = f"post:{post.id}"
         opponent = User.objects.filter(username__iexact=opponent_name).first()
         if not opponent:
             return Response({"detail": f"No member called '{opponent_name}'."},
@@ -589,6 +616,15 @@ class BattleChallengeView(APIView):
                 body["detail"] = f"@{opponent.username} is outside this battle's range — {describe(failed, gates)}."
                 return Response(body, status=status.HTTP_403_FORBIDDEN)
 
+        genre = str(d.get("genre", "") or "")[:40] or (post.genre if post else "")
+        # The defender's ChallengeZ filters run BEFORE anything is charged, so a
+        # refusal at the door is free and says why.
+        from .callouts import auto_accepts, door_check
+        refused = door_check(opponent, request.user, genre)
+        if refused:
+            return Response({"detail": refused[1] + " Nothing was sent or charged.",
+                             "filtered": refused[0]}, status=status.HTTP_403_FORBIDDEN)
+
         kind = str(d.get("kind", "1v1")).lower()
         # Charged with the create in one unit, so a failed call-out is free.
         with transaction.atomic():
@@ -608,7 +644,9 @@ class BattleChallengeView(APIView):
                 host=request.user, opponent=opponent,
                 title=(title or f"@{request.user.username} vs @{opponent.username}")[:160],
                 description=str(d.get("description", "") or ""),
-                genre=str(d.get("genre", "") or "")[:40],
+                genre=genre, source_item=source_item,
+                instrumental_url=str(d.get("instrumental_url", "") or "")[:500],
+                instrumental_title=str(d.get("instrumental_title", "") or "")[:160],
                 mode=Battle.MODE_1V1,
                 kind=kind if kind in ("1v1", "freestyle", "cypher") else "1v1",
                 gates=gates, status=Battle.STATUS_PENDING, **_media(d),
@@ -616,6 +654,13 @@ class BattleChallengeView(APIView):
         notify(opponent, "system",
                f"@{request.user.username} challenged you to '{b.title}' ⚔️",
                actor=request.user, item_id=b.item_key)
+        # A defender who set auto-accept has already said yes to anything that
+        # cleared their filters, and it just did.
+        if auto_accepts(opponent):
+            open_battle(b)
+            notify(request.user, "system",
+                   f"@{opponent.username} is taking all comers — '{b.title}' is on ⚔️",
+                   actor=opponent, item_id=b.item_key)
         return Response(battle_dict(b, request), status=status.HTTP_201_CREATED)
 
 
@@ -645,12 +690,7 @@ class BattleRespondView(APIView):
                    actor=request.user, item_id=b.item_key)
             return Response(battle_dict(b, request))
 
-        b.status = Battle.STATUS_OPEN
-        b.accepted_at = timezone.now()
-        # The clock starts on ACCEPTANCE, not on the challenge — otherwise a
-        # slow reply eats the window the contestants actually get.
-        b.ends_at = b.accepted_at + timedelta(hours=BATTLE_WINDOW_HOURS)
-        b.save(update_fields=["status", "accepted_at", "ends_at", "updated_at"])
+        open_battle(b)
         notify(b.host, "system", f"@{request.user.username} accepted '{b.title}' — it's on ⚔️",
                actor=request.user, item_id=b.item_key)
         return Response(battle_dict(b, request))

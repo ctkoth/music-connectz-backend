@@ -4449,6 +4449,15 @@ class Battle(models.Model):
     # challenge endpoint sets 1v1 explicitly, alongside the opponent.
     mode = models.CharField(max_length=8, choices=MODE_CHOICES, default=MODE_OPEN)
     kind = models.CharField(max_length=16, blank=True, default="1v1")   # 1v1 | freestyle | cypher
+    # Where the call-out came from, in the shared item space ("post:123"), so
+    # a challenge made from a PostZ post can open that post again. Blank for a
+    # challenge that was just aimed at a username.
+    source_item = models.CharField(max_length=40, blank=True, default="")
+    # A shared instrumental: both contestants put their OWN track over this one
+    # beat, so the two scores are measured on the same ground. Blank = each
+    # side brings their own. Entries stay separate rows; only the beat is shared.
+    instrumental_url = models.CharField(max_length=500, blank=True, default="")
+    instrumental_title = models.CharField(max_length=160, blank=True, default="")
 
     # 1v1 only. Null on an open challenge.
     opponent = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
@@ -4535,6 +4544,32 @@ class BattleEntry(models.Model):
     @property
     def item_key(self):
         return f"battle:{self.battle_id}:entry:{self.id}"
+
+
+class ChallengeFilter(models.Model):
+    """What a defender is willing to be challenged to — their ChallengeZ filters.
+
+    A filter is a door, not a score: it decides who may CALL YOU OUT and changes
+    nothing about how anyone is rated. The ranges are the same five exclusive
+    ranges search and VenueZ use (`gates`), applied to the challenger, so there
+    is one spec for "who may" across the app. Empty everywhere means open to
+    everybody, which is also what a member with no row at all gets.
+    """
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                                related_name="challenge_filter")
+    # Not taking challenges at all right now. Kept apart from the other filters
+    # so turning it off and on again never loses the rest.
+    paused = models.BooleanField(default=False)
+    # Genres this member will be called out in. Empty = any.
+    genres = models.JSONField(default=list, blank=True)
+    # Ranges the CHALLENGER must be inside (rating, price, attract, age, km).
+    gates = models.JSONField(default=dict, blank=True)
+    # People who may not challenge this member, without being blocked outright.
+    muted = models.ManyToManyField(settings.AUTH_USER_MODEL, blank=True, related_name="+")
+    # A challenge that clears every filter above opens straight away instead of
+    # waiting for an answer. Off by default: accepting is a commitment.
+    auto_accept = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 # ---- OCC: TaskZ ----

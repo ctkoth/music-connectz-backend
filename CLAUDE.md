@@ -804,6 +804,39 @@ publishing a theory about them.
 One writer, reached twice: `clean_code` is imported by BOTH `social.py`'s
 `clean_profile_field` and `accounts/views.py`, per the two-writers note above.
 
+## ChallengeZ: BattleZ already had the call-out, so this is the defender's door and a way in from a post
+
+The 7/28 audit said `battlez` was an empty app. It was an empty directory in the FRONTEND repo; the real BattleZ has
+always lived in `apps/economy/battlez.py`. Check the code before trusting an audit line, and delete the line when it is
+wrong — a "not built" note nobody re-checks sends the next reader to build something twice.
+
+`apps/economy/callouts.py` adds the two things the call-out lacked, and nothing else:
+
+- **A challenge can start from a post** (`post_id` on `battlez/challenge/`): the author is the opponent, the genre comes
+  from the post, and `Battle.source_item` ("post:123") lets the row open the post again (`open_in`, cross-pollination).
+- **The defender's filters** (`ChallengeFilter`, one row per member, `battlez/challengez/filters/`): genres, the same five
+  exclusive ranges applied to the CHALLENGER, a mute list, a pause, and auto-accept. No row means open to everybody.
+- **`battlez/challengez/`** is the one list: incoming (pending 1v1s aimed at you) and sent, each row stating what Accept
+  costs (nothing) and what a decline refunds the challenger BEFORE either is pressed.
+
+Four decisions, each with what it traded away:
+
+- **The filter runs BEFORE the energy spend, so a refusal is free and says why.** There is no "declined bin" the challenger
+  paid into. Traded away: a defender cannot see the challenges their filters turned away, which would have been a second
+  inbox to read. If they want to see them they can widen the filter.
+- **Paused and muted give the SAME sentence.** A mute that announces itself is a block with extra steps.
+- **Auto-accept only ever follows a passed filter, and never fires while paused.** Accepting is a commitment, so it is off by
+  default. `open_battle` is the one place the clock starts, shared by the manual accept and the auto-accept.
+- **A challenger puts up no SpinaZ stake.** Wagers here are spectators' (`BattleWager`); the challenger's cost is
+  `BATTLE_CALLOUT_ENERGY`, refunded on decline. An earlier sketch had a challenger wager and was wrong. The battle window is
+  `BATTLE_WINDOW_HOURS` (48), not 24.
+
+**Same instrumental, different tracks.** `Battle.instrumental_url` / `instrumental_title` carry one beat; each contestant
+still enters their OWN track, so the two scores are measured on the same ground. Entries stay separate rows and the
+scoreboard (judges' median, the opt-in coach reading) is unchanged — this adds a shared beat, not a new way to score. Nothing
+checks that an entry was actually made over the beat; the label says what was asked, not what was verified, and the screen
+words it that way.
+
 ## Deployment
 
 **Both repos auto-deploy from `main`. Merging to `main` IS the deploy.**

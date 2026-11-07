@@ -80,6 +80,7 @@ from .battlez import (BattlesView, BattleChallengeView, BattleDetailView, Battle
 from .opportunitiez import OpportunitieZView
 from .breathz import BreathZView
 from .challengez import ChallengeView
+from .callouts import ChallengeFilterView, ChallengeInboxView
 from .whyz import WhyZView
 from .credit_outcomes import CreditOutcomesView
 from .sentencez import PunchlineRateView, SentenceInspirationView, SentenceRoyaltyView, SentenceView
@@ -238,6 +239,8 @@ urlpatterns = [
     path("battlez/weekly/", WeeklyBattleView.as_view(), name="economy-battlez-weekly"),
     path("battlez/", BattlesView.as_view(), name="economy-battlez"),
     path("battlez/challenge/", BattleChallengeView.as_view(), name="economy-battle-challenge"),
+    path("battlez/challengez/", ChallengeInboxView.as_view(), name="economy-challengez"),
+    path("battlez/challengez/filters/", ChallengeFilterView.as_view(), name="economy-challengez-filters"),
     path("battlez/moneyvote/", MoneyBattleVoteView.as_view(), name="economy-battle-moneyvote"),
     path("battlez/<int:pk>/", BattleDetailView.as_view(), name="economy-battle"),
     path("battlez/<int:pk>/public/", BattlePublicView.as_view(), name="economy-battle-public"),
