@@ -39,6 +39,7 @@ from .models import (
     _median,
 )
 from .personaz import links_of, personas_of, rate_unit_of
+from .instruments import profile_for_app
 
 
 def public_post_dict(p, viewer=None):
@@ -118,7 +119,12 @@ def skill_medians_of(user):
             coach_used = bool(detail and detail.get("coach") and detail["coach"].get("used"))
         else:
             rating, coach_used = _median(scores), False
-        out[skill] = {"rating": rating, "count": len(scores), "coach": coach_used}
+        metrics = []
+        if coach_used:
+            # Name the metrics that went in, so a number picked from some dimensions is never unexplained.
+            labels = profile_for_app(rf.coach_skill_key(skill))["scores"]
+            metrics = [labels.get(d, d) for d in rf.coach_metrics_for(user, rf.coach_skill_key(skill))]
+        out[skill] = {"rating": rating, "count": len(scores), "coach": coach_used, "metrics": metrics}
     return out
 
 
@@ -146,6 +152,8 @@ def public_profile_dict(p, request=None):
                     entry["rating_count"] = sm["count"]
                     if sm["coach"]:
                         entry["rating_coach"] = True
+                        if sm["metrics"]:
+                            entry["rating_metrics"] = sm["metrics"]
                 if s.get("rate_cents"):
                     entry["rate_cents"] = s["rate_cents"]
                     entry["rate_unit"] = rate_unit_of(s)

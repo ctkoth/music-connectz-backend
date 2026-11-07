@@ -1264,6 +1264,8 @@ class Profile(models.Model):
     # matching skill rating. Each one is chosen on its own, so a member can count their
     # vocal coach and not their drum coach.
     coach_factors = models.JSONField(default=list, blank=True)
+    # Per-coach metric pick: {app_key: [dimension keys]}. A coach missing here counts its own overall.
+    coach_metrics = models.JSONField(default=dict, blank=True)
     verified_18plus = models.BooleanField(default=False, db_index=True)
     verified_18plus_at = models.DateTimeField(null=True, blank=True)
     # One-time onboarding reward: set when the member finishes the intro flow so

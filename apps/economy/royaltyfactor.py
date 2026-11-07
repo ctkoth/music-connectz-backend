@@ -105,11 +105,43 @@ def coach_skill_key(skill):
     return None
 
 
+def coach_metrics_for(user, app_key):
+    """The dimensions a member chose to count for this coach, or [] for the coach's own overall.
+
+    Only dimensions this coach actually scores are kept, so a stale or invented key is dropped.
+    """
+    from .models import profile_for
+    from .instruments import profile_for_app
+    chosen = (getattr(profile_for(user), "coach_metrics", None) or {}).get(app_key) or []
+    valid = profile_for_app(app_key)["scores"]
+    return [d for d in chosen if d in valid]
+
+
+def metric_read(take, metrics):
+    """One take's score under a member's chosen metrics: the mean of those dimensions the take has.
+
+    None when the take has none of them. This is NOT the coach's overall, which the coach says
+    is not an average of its dimensions; callers label it so the number is never passed off as one.
+    """
+    vals = [v for d, v in (take.scores or {}).items()
+            if d in metrics and isinstance(v, int) and not isinstance(v, bool)]
+    return round(sum(vals) / len(vals)) if vals else None
+
+
+def _coach_reads(user, app_key, rows):
+    """The per-take score for this coach: the coach's overall, or the member's chosen metrics."""
+    metrics = coach_metrics_for(user, app_key)
+    if not metrics:
+        return [t.overall for t in rows if t.overall is not None]
+    return [r for r in (metric_read(t, metrics) for t in rows) if r is not None]
+
+
 def _coach_median(user, app_key):
     from .models import TakeScore
-    rows = list(TakeScore.objects.filter(user=user, app_key=app_key, overall__isnull=False)
-                .order_by("-created_at").values_list("overall", flat=True)[:COACH_WINDOW])
-    return (_median(rows), len(rows)) if len(rows) >= MIN_COACH_TAKES else (None, len(rows))
+    rows = list(TakeScore.objects.filter(user=user, app_key=app_key)
+                .order_by("-created_at")[:COACH_WINDOW * 3])
+    reads = _coach_reads(user, app_key, rows)[:COACH_WINDOW]
+    return (_median(reads), len(reads)) if len(reads) >= MIN_COACH_TAKES else (None, len(reads))
 
 
 def opted_coaches(user):
@@ -137,7 +169,7 @@ def battle_coach_reading(user, battle):
     battle reads the coach the member used most in that window."""
     from django.db.models import Count
     from .models import TakeScore
-    rows = TakeScore.objects.filter(user=user, overall__isnull=False, created_at__gte=battle.created_at)
+    rows = TakeScore.objects.filter(user=user, created_at__gte=battle.created_at)
     if getattr(battle, "kind", "") in ("freestyle", "cypher"):
         app_key = "rapz"
     else:
@@ -145,7 +177,7 @@ def battle_coach_reading(user, battle):
         app_key = top["app_key"] if top else None
     if not app_key or not coach_opted(user, app_key):
         return None
-    scores = list(rows.filter(app_key=app_key).order_by("-created_at").values_list("overall", flat=True)[:COACH_WINDOW])
+    scores = _coach_reads(user, app_key, list(rows.filter(app_key=app_key).order_by("-created_at")[:COACH_WINDOW]))
     if not scores:
         return None
     return {"app_key": app_key, "takes": len(scores), "median": _median(scores)}
@@ -220,13 +252,21 @@ class SkillzCoachView(APIView):
 
     def _state(self, request):
         from .instruments import profile_for_app
+        from .models import profile_for
         chosen = opted_coaches(request.user)
+        picked = getattr(profile_for(request.user), "coach_metrics", None) or {}
         rows = []
         for app_key in COACH_SKILLS:
+            prof = profile_for_app(app_key)
             med, n = _coach_median(request.user, app_key)
-            rows.append({"app_key": app_key, "label": profile_for_app(app_key)["label"],
+            rows.append({"app_key": app_key, "label": prof["label"],
                          "takes": n, "median": med, "enough": med is not None,
-                         "opted": app_key in chosen})
+                         "opted": app_key in chosen,
+                         # Every dimension this coach scores, so the member picks from the real list.
+                         "metrics": [{"key": k, "label": v} for k, v in prof["scores"].items()],
+                         # Empty means the coach's own overall, which is the default.
+                         "picked": coach_metrics_for(request.user, app_key)
+                                   if picked.get(app_key) else []})
         return {"enabled": bool(chosen), "note": COACH_OPT_IN_NOTE, "coach_votes": COACH_VOTES,
                 "min_takes": MIN_COACH_TAKES, "window": COACH_WINDOW, "coaches": rows}
 
@@ -248,6 +288,36 @@ class SkillzCoachView(APIView):
         chosen = (chosen | targets) if enabled else (chosen - targets)
         p.coach_factors = sorted(chosen)
         p.save(update_fields=["coach_factors", "updated_at"])
+        return Response(self._state(request))
+
+    def put(self, request):
+        """PUT {app_key, metrics: [dimension keys]} — choose which of one coach's scores count.
+
+        An empty list goes back to the coach's own overall. Only dimensions this coach scores are
+        accepted, and a choice of one is refused: a single score is a pick, not a measure of the work.
+        """
+        from .models import profile_for
+        from .instruments import profile_for_app
+        data = request.data or {}
+        app_key = data.get("app_key")
+        metrics = data.get("metrics")
+        if app_key not in COACH_SKILLS:
+            return Response({"detail": "Unknown coach."}, status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(metrics, list) or not all(isinstance(m, str) for m in metrics):
+            return Response({"detail": "Pick a list of metrics."}, status=status.HTTP_400_BAD_REQUEST)
+        valid = set(profile_for_app(app_key)["scores"])
+        picked = sorted({m for m in metrics if m in valid})
+        if len(picked) == 1:
+            return Response({"detail": "Pick at least two metrics, or none to use the coach's overall."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        p = profile_for(request.user)
+        table = dict(getattr(p, "coach_metrics", None) or {})
+        if picked:
+            table[app_key] = picked
+        else:
+            table.pop(app_key, None)
+        p.coach_metrics = table
+        p.save(update_fields=["coach_metrics", "updated_at"])
         return Response(self._state(request))
 
 
