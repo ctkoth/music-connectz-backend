@@ -103,10 +103,23 @@ def skill_medians_of(user):
     nothing is rated directly, a skill's number is the median of the work that used it.
     """
     from collections import defaultdict
+    from . import royaltyfactor as rf
     by_skill = defaultdict(list)
     for skill, score in SkillRating.objects.filter(subject=user).values_list("skill", "score"):
         by_skill[skill].append(score)
-    return {k: {"rating": _median(v), "count": len(v)} for k, v in by_skill.items()}
+    # Same rule as ratez.skills_of: for a member who opted in, the AI coach's reading
+    # is blended into a skill that has a coach. `coach` marks it, so the number is
+    # never unexplained on the card. Off by default; the listener median is used otherwise.
+    opted = rf.opted_in(user)
+    out = {}
+    for skill, scores in by_skill.items():
+        if opted and rf.coach_skill_key(skill):
+            rating, detail = rf.blended_skill_rating(user, skill)
+            coach_used = bool(detail and detail.get("coach") and detail["coach"].get("used"))
+        else:
+            rating, coach_used = _median(scores), False
+        out[skill] = {"rating": rating, "count": len(scores), "coach": coach_used}
+    return out
 
 
 def public_profile_dict(p, request=None):
@@ -131,6 +144,8 @@ def public_profile_dict(p, request=None):
                 if sm and sm["rating"] is not None:
                     entry["rating"] = sm["rating"]
                     entry["rating_count"] = sm["count"]
+                    if sm["coach"]:
+                        entry["rating_coach"] = True
                 if s.get("rate_cents"):
                     entry["rate_cents"] = s["rate_cents"]
                     entry["rate_unit"] = rate_unit_of(s)
