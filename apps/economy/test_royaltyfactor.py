@@ -149,7 +149,7 @@ class CoachCountsForSkillzTests(TestCase):
 
     def test_it_needs_an_explicit_yes_or_no(self):
         self.assertEqual(self.c.post("/api/economy/skillz-coach/", {}, format="json").status_code, 400)
-        self.assertFalse(profile_for(self.u).coach_counts_for_skillz)
+        self.assertEqual(profile_for(self.u).coach_factors, [])
 
     def test_the_skillz_list_shows_when_the_coach_is_part_of_a_rating(self):
         from .ratez import skills_of
@@ -177,7 +177,7 @@ class BattleCoachTests(TestCase):
         self.assertEqual(scoreboard(bt)["host"]["median"], 6)
         TakeScore.objects.create(user=a, app_key="rapz", overall=10)
         self.assertEqual(scoreboard(bt)["host"]["median"], 6)          # not opted in: nothing changes
-        p = profile_for(a); p.coach_counts_for_skillz = True; p.save()
+        p = profile_for(a); p.coach_factors = list(rf.COACH_SKILLS); p.save()
         board = scoreboard(bt)
         self.assertGreater(board["host"]["median"], board["opponent"]["median"])
         self.assertEqual(board["host"]["coach"]["takes"], 1)

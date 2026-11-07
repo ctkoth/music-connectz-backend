@@ -112,9 +112,20 @@ def _coach_median(user, app_key):
     return (_median(rows), len(rows)) if len(rows) >= MIN_COACH_TAKES else (None, len(rows))
 
 
-def opted_in(user):
+def opted_coaches(user):
+    """The coach app_keys this member has chosen to count, each one on its own."""
     from .models import profile_for
-    return bool(getattr(profile_for(user), "coach_counts_for_skillz", False))
+    keys = getattr(profile_for(user), "coach_factors", None) or []
+    return {k for k in keys if k in COACH_SKILLS}
+
+
+def opted_in(user):
+    """True when at least one coach counts. Per-coach checks use coach_opted()."""
+    return bool(opted_coaches(user))
+
+
+def coach_opted(user, app_key):
+    return bool(app_key) and app_key in opted_coaches(user)
 
 
 def battle_coach_reading(user, battle):
@@ -124,8 +135,6 @@ def battle_coach_reading(user, battle):
     the battle was created, so an old take cannot carry a new fight. One battle take is one
     performance, so it needs 1 take, not MIN_COACH_TAKES. A freestyle/cypher reads RapZ; a plain
     battle reads the coach the member used most in that window."""
-    if not opted_in(user):
-        return None
     from django.db.models import Count
     from .models import TakeScore
     rows = TakeScore.objects.filter(user=user, overall__isnull=False, created_at__gte=battle.created_at)
@@ -134,7 +143,7 @@ def battle_coach_reading(user, battle):
     else:
         top = rows.values("app_key").annotate(n=Count("id")).order_by("-n").first()
         app_key = top["app_key"] if top else None
-    if not app_key:
+    if not app_key or not coach_opted(user, app_key):
         return None
     scores = list(rows.filter(app_key=app_key).order_by("-created_at").values_list("overall", flat=True)[:COACH_WINDOW])
     if not scores:
@@ -157,7 +166,7 @@ def blended_skill_rating(user, skill):
     detail = {"listeners": len(human), "coach": None}
     app_key = coach_skill_key(skill)
     coach = None
-    if app_key and opted_in(user):
+    if app_key and coach_opted(user, app_key):
         med, n = _coach_median(user, app_key)
         detail["coach"] = {"app_key": app_key, "takes": n, "median": med, "used": med is not None}
         coach = med
@@ -177,7 +186,7 @@ def skill_haircut(post, user):
     factors = []
     for skill in set(mine):
         n = SkillRating.objects.filter(subject=user, skill=skill).count()
-        if n < MIN_RATERS and not (coach_skill_key(skill) and opted_in(user)):
+        if n < MIN_RATERS and not coach_opted(user, coach_skill_key(skill)):
             factors.append(1.0)
             continue
         rating, _ = blended_skill_rating(user, skill)
@@ -202,18 +211,23 @@ COACH_OPT_IN_NOTE = (
 
 
 class SkillzCoachView(APIView):
-    """GET → the choice, what it does and what is behind each coach skill; POST {enabled}."""
+    """GET → the choice per coach, what it does and what is behind each coach skill.
+
+    POST {app_key, enabled} switches ONE coach. POST {enabled} with no app_key switches all
+    of them, which is what the old single switch meant.
+    """
     permission_classes = [IsAuthenticated]
 
     def _state(self, request):
         from .instruments import profile_for_app
-        on = opted_in(request.user)
+        chosen = opted_coaches(request.user)
         rows = []
         for app_key in COACH_SKILLS:
             med, n = _coach_median(request.user, app_key)
             rows.append({"app_key": app_key, "label": profile_for_app(app_key)["label"],
-                         "takes": n, "median": med, "enough": med is not None})
-        return {"enabled": on, "note": COACH_OPT_IN_NOTE, "coach_votes": COACH_VOTES,
+                         "takes": n, "median": med, "enough": med is not None,
+                         "opted": app_key in chosen})
+        return {"enabled": bool(chosen), "note": COACH_OPT_IN_NOTE, "coach_votes": COACH_VOTES,
                 "min_takes": MIN_COACH_TAKES, "window": COACH_WINDOW, "coaches": rows}
 
     def get(self, request):
@@ -221,12 +235,19 @@ class SkillzCoachView(APIView):
 
     def post(self, request):
         from .models import profile_for
-        enabled = (request.data or {}).get("enabled")
+        data = request.data or {}
+        enabled = data.get("enabled")
         if not isinstance(enabled, bool):
             return Response({"detail": "Say yes or no."}, status=status.HTTP_400_BAD_REQUEST)
+        app_key = data.get("app_key")
+        if app_key is not None and app_key not in COACH_SKILLS:
+            return Response({"detail": "Unknown coach."}, status=status.HTTP_400_BAD_REQUEST)
+        targets = {app_key} if app_key else set(COACH_SKILLS)
         p = profile_for(request.user)
-        p.coach_counts_for_skillz = enabled
-        p.save(update_fields=["coach_counts_for_skillz", "updated_at"])
+        chosen = set(opted_coaches(request.user))
+        chosen = (chosen | targets) if enabled else (chosen - targets)
+        p.coach_factors = sorted(chosen)
+        p.save(update_fields=["coach_factors", "updated_at"])
         return Response(self._state(request))
 
 

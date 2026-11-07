@@ -1259,7 +1259,11 @@ class Profile(models.Model):
     # Opt-in: the AI coach's scores for an instrument count beside listener ratings in the
     # matching skill rating (royaltyfactor.blended_skill_rating). Off by default — it can lower
     # a rating as well as raise it, so nobody gets it without choosing it.
-    coach_counts_for_skillz = models.BooleanField(default=False)
+    coach_counts_for_skillz = models.BooleanField(default=False)  # superseded by coach_factors
+    # Per-coach opt-in: the app_keys (singz, rapz, ...) whose coach scores count toward the
+    # matching skill rating. Each one is chosen on its own, so a member can count their
+    # vocal coach and not their drum coach.
+    coach_factors = models.JSONField(default=list, blank=True)
     verified_18plus = models.BooleanField(default=False, db_index=True)
     verified_18plus_at = models.DateTimeField(null=True, blank=True)
     # One-time onboarding reward: set when the member finishes the intro flow so
