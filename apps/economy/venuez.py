@@ -22,6 +22,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from .thoroughz import marks_by_username
+from .geo import geocode
 from .models import VenueBooking, VenueEvent, award_spinaz, spend_spinaz, wallet_for
 from .postz import charge_skill_energy, post_cost_cents, skill_price_units, skill_prices, skills_from
 from .gates import clean_gates, describe, failing_gate, member_metrics
@@ -338,6 +339,9 @@ def event_dict(event, viewer, marks=None):
         "area": event.area,
         # Empty until a booking is ACCEPTED. Asking is not being let in.
         "address": address_for(event, viewer),
+        # The pin follows the address: present only where the address itself is shown.
+        "location": ({"lat": event.lat, "lng": event.lng}
+                     if address_for(event, viewer) and event.lat is not None else None),
         "starts_at": event.starts_at,
         "hours": event.hours,
         "basis": event.basis,
@@ -435,8 +439,11 @@ class VenueListView(APIView):
         basis = (d.get("basis") if d.get("basis") in dict(VenueEvent.BASIS_CHOICES)
                  else VenueEvent.BASIS_HOUR)
 
+        addr = str(d.get("address", "")).strip()[:300]
+        pin = geocode(addr) if addr else None
         event = VenueEvent.objects.create(
             host=request.user, kind=kind, title=title, area=area,
+            lat=pin[0] if pin else None, lng=pin[1] if pin else None,
             description=str(d.get("description", ""))[:4000],
             address=str(d.get("address", "")).strip()[:300],
             starts_at=starts_at, hours=_int(d, "hours", 1, 1, 24), basis=basis,
@@ -516,7 +523,10 @@ class VenueDetailView(APIView):
             fields.append("description")
         if "address" in d:
             event.address = str(d["address"] or "").strip()[:300]
-            fields.append("address")
+            # Re-pin on every address change; an address that will not geocode has no pin.
+            pin = geocode(event.address) if event.address else None
+            event.lat, event.lng = (pin if pin else (None, None))
+            fields += ["address", "lat", "lng"]
         if "category" in d and d["category"] in dict(VenueEvent.CATEGORY_CHOICES):
             event.category = d["category"]
             fields.append("category")

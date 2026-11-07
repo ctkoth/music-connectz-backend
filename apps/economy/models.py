@@ -3613,6 +3613,10 @@ class VenueEvent(models.Model):
     # from the one this is meant to be.
     area = models.CharField(max_length=120)
     address = models.CharField(max_length=300, blank=True, default="")
+    # Geocoded from `address` when it is saved. Released WITH the address only — a pin is the
+    # doorstep as precisely as the text is, so it follows the same rule (address_for).
+    lat = models.FloatField(null=True, blank=True)
+    lng = models.FloatField(null=True, blank=True)
 
     starts_at = models.DateTimeField(db_index=True)
     hours = models.PositiveSmallIntegerField(default=1)
