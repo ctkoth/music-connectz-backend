@@ -1,0 +1,10 @@
+[
+  {"slug": "mix-vocal-tuning", "name": "Vocal Tuning", "family": "Mixing", "app_key": "mixz", "price_cents": 300},
+  {"slug": "mix-vocal-comping", "name": "Vocal Comping", "family": "Mixing", "app_key": "mixz", "price_cents": 300},
+  {"slug": "mix-drum-bus", "name": "Drum Bus Mixing", "family": "Mixing", "app_key": "mixz", "price_cents": 400},
+  {"slug": "rap-flow-triplet", "name": "Triplet Flow", "family": "Rapping", "app_key": "rapz", "price_cents": 200},
+  {"slug": "rap-multisyllabic", "name": "Multisyllabic Rhyme", "family": "Rapping", "app_key": "rapz", "price_cents": 200},
+  {"slug": "rap-freestyle", "name": "Freestyle", "family": "Rapping", "app_key": "rapz", "price_cents": 200},
+  {"slug": "sing-harmony-stacking", "name": "Harmony Stacking", "family": "Singing", "app_key": "singz", "price_cents": 250},
+  {"slug": "prod-808-design", "name": "808 Design", "family": "Producing", "app_key": "producez", "price_cents": 300}
+]
