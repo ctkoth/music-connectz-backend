@@ -48,6 +48,11 @@ _DRUMS = {"timing": "Timing ⏱️", "groove": "Groove 🕺", "dynamics": "Dynam
           "consistency": "Consistency 📐", "fills": "Fills 🥁"}
 _BOWED = {"intonation": "Intonation 🎯", "tone": "Tone 🌈", "bowing": "Bowing 🏹",
           "timing": "Timing ⏱️", "vibrato": "Vibrato 〰️"}
+# A producer's work IS the recording, so what is scored is the production itself: the beat or
+# instrumental heard as a finished piece, never a performance of it. Mix is a dimension here
+# (not the opt-in MIX_SCORE block every other coach offers, which would score it twice).
+_PRODUCE = {"groove": "Groove 🕺", "sounds": "Sounds 🎛️", "arrangement": "Arrangement 🏗️",
+            "harmony": "Harmony & Melody 🎼", "mix": "Mix 🎚️"}
 # Winds and brass. Breath is a dimension here because it is what the instrument IS:
 # unlike a drummer, a flute player's air is the thing being played. That also makes
 # the recovery-first rule (takescorez.STRAIN_DIMENSIONS) apply to them, and BreathZ
@@ -76,6 +81,11 @@ _CRAFT_NOT_SONG = ("The dimensions above score your PERFORMANCE. Song 🎶 score
                    "itself — the hook, whether it connects — as its own separate number. "
                    "A take can score high on one and moderate on the other; both can be "
                    "true at once, and neither is allowed to move the other.")
+
+_PRODUCE_CAVEAT = ("Groove, sounds, arrangement, harmony and mix are what one beat or instrumental can show — "
+                   "judged on what can be heard, never on how many tracks or plugins it took. "
+                   + _HISTORY_CAVEAT + " Song 🎶 scores the SONG itself — the hook, whether it holds you, as a listener "
+                   "hears it — as its own separate number; neither may move the other.")
 
 INSTRUMENTS = {
     "singz": {
@@ -128,6 +138,15 @@ INSTRUMENTS = {
         "label": "ViolinZ", "performer": "violinist", "coach": "strings coach",
         "scores": _BOWED, "range_label": None, "ranges": [], "style_label": None, "styles": [],
         "caveat": "Intonation, tone, bowing, timing and vibrato are what one take can show. " + _HISTORY_CAVEAT + " " + _CRAFT_NOT_SONG,
+    },
+    # ProduceZ: the instrumental / beat-making coach. The member sends a finished beat or instrumental
+    # (an export, not a project file) and it is heard as a record. `production: True` is read by
+    # prompt_for (production is the work, so the recording is NOT to be set aside) and rates_mix.
+    "producez": {
+        "label": "ProduceZ", "performer": "producer", "coach": "production coach",
+        "production": True,
+        "scores": _PRODUCE, "range_label": None, "ranges": [], "style_label": None, "styles": [],
+        "caveat": _PRODUCE_CAVEAT,
     },
     **{key: {
         "label": label, "performer": performer, "coach": f"{noun} coach",
@@ -306,7 +325,7 @@ def rates_mix(app_key):
     cannot be listened to as a recording. It exists so the caller reads the
     same shape for both toggles.
     """
-    return True
+    return not profile_for_app(app_key).get("production")
 
 
 def profile_for_app(app_key):
@@ -517,8 +536,24 @@ Cents_off: negative = flat, positive = sharp. If pitch is 70+, return []."""
         "change what you hear in the performance; score what you hear."
         if listeners else "")
 
-    return f"""You are the Music ConnectZ {p['coach']}. You are listening to one \
-recorded take from a member training in {p['label']}.
+    produces = bool(p.get("production"))
+    what_heard = ("one finished beat or instrumental from a member training in " + p["label"]
+                  if produces else f"one recorded take from a member training in {p['label']}")
+    perf_rule = (
+        """Score the PRODUCTION as a record. For a producer the recording IS the work: \
+the groove, the sound choices, the arrangement, the harmony and the mix are all theirs, \
+so judge them. What may NOT pull a score down is the member's gear, the format of the \
+file, or how many tracks and plugins it took — judge what you hear, never what you \
+imagine was behind it. A simple sparse beat that is well chosen beats a crowded one that \
+is not. There is no vocal performance to judge; if a vocal or sample is on it, judge how it \
+sits, not how it was sung."""
+        if produces else
+        """Score the PERFORMANCE, not the recording. Room noise, phone microphones, no \
+mixing, a backing track that is too loud — none of that is their singing, \
+playing or writing, and none of it may pull a score down. If the recording \
+genuinely gets in the way of hearing something, say so in the fixes and don't \
+score that dimension harshly for it.""" + mix_caveat)
+    return f"""You are the Music ConnectZ {p['coach']}. You are listening to {what_heard}.
 
 Their context:
 - Genre: {genre}{target_line}{style_line}
@@ -590,11 +625,7 @@ The line that matters is not how many facets need work, it is whether \
 anything is actually BROKEN — falling apart, losing the beat entirely, \
 unintelligible throughout. Developing is not broken.
 
-Score the PERFORMANCE, not the recording. Room noise, phone microphones, no \
-mixing, a backing track that is too loud — none of that is their singing, \
-playing or writing, and none of it may pull a score down. If the recording \
-genuinely gets in the way of hearing something, say so in the fixes and don't \
-score that dimension harshly for it.{mix_caveat}
+{perf_rule}
 
 SONG vs PERFORMANCE — two different questions, and "song_score" is where the \
 second one lives. Everything above judges the PERFORMANCE: how the take sits, \

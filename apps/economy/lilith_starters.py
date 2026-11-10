@@ -233,6 +233,7 @@ INSTRUMENT_PACKS = {
     "saxz": ["daily_saxz", "breathe_first", "with_the_click"],
     "clarinetz": ["daily_clarinetz", "breathe_first", "with_the_click"],
     "trumpetz": ["daily_trumpetz", "breathe_first", "with_the_click"],
+    "producez": ["daily_producez", "weekly_challenge"],
 }
 
 # Starters about "my instrument" rather than a particular one: they open on the coach the member

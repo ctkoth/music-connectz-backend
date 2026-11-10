@@ -36,7 +36,7 @@ except Exception:  # pragma: no cover - never let this take the deploy down
 # tree, so five fully-scoreable instruments 404'd behind a tab the frontend
 # never had reason to build. One line.
 INSTRUMENT_APP_KEYS = ["singz", "rapz", "guitarz", "bassz", "keyz", "drumz", "violinz",
-                       "flutez", "saxz", "clarinetz", "trumpetz"]
+                       "flutez", "saxz", "clarinetz", "trumpetz", "producez"]
 
 # Boss Take — the blueprint's scored final take, coached by the StatZ AI coach.
 # Mounted for EVERY instrument app beside the SkillZ tree, because a take is a

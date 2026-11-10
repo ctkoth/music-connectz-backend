@@ -353,7 +353,7 @@ _ROLES = {
 # Role → the AI coach for that instrument, so a rapper is pointed at RapZ. One list; Lilith reads it.
 ROLE_COACH = {"Rapper": "rapz", "Singer": "singz", "Guitarist": "guitarz", "Ukulele player": "guitarz",
               "Bassist": "bassz", "Pianist": "keyz", "Keyboardist": "keyz", "Drummer": "drumz",
-              "Percussionist": "drumz", "Violinist": "violinz"}
+              "Percussionist": "drumz", "Violinist": "violinz", "Beat Maker": "producez"}
 
 
 def _skill_token(name):

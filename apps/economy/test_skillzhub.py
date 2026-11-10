@@ -24,7 +24,7 @@ from apps.skillz.models import TrainingProfile
 User = get_user_model()
 URL = "/api/economy/skillz/"
 PW = "pw12345!"
-ORDER = ["singz", "rapz", "guitarz", "bassz", "keyz", "violinz", "flutez", "saxz", "clarinetz", "trumpetz", "drumz"]
+ORDER = ["singz", "rapz", "guitarz", "bassz", "keyz", "violinz", "flutez", "saxz", "clarinetz", "trumpetz", "drumz", "producez"]
 
 
 class HubBase(TestCase):
@@ -80,7 +80,7 @@ class ShapeTests(HubBase):
 
     def test_what_is_not_built_is_names_only_and_never_a_tile(self):
         body = self.get()
-        self.assertEqual(body["coming"], ["DJ", "Producer", "A&R", "Illustrator", "Videographer"])
+        self.assertEqual(body["coming"], ["DJ", "A&R", "Illustrator", "Videographer"])
         labels = {a["label"] for a in body["apps"]}
         self.assertFalse(labels & set(body["coming"]))
         self.assertTrue(all(isinstance(c, str) for c in body["coming"]))

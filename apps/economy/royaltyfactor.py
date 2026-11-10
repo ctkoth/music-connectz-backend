@@ -55,6 +55,7 @@ COACH_SKILLS = {
     "keyz": ("key", "piano", "synth"),
     "drumz": ("drum", "percussion"),
     "violinz": ("violin", "fiddle", "strings"),
+    "producez": ("produc", "beat"),
 }
 
 RULE = (f"What a track earns per play moves by its median rating minus {PIVOT}, times {int(STEP * 100)}%: a "

@@ -109,7 +109,7 @@ def _specs():
 # What a take is called for each coach — the noun a member recognises, used in the routine's name.
 COACH_NOUN = {"singz": "Vocal", "rapz": "Verse", "guitarz": "Riff", "bassz": "Groove", "keyz": "Keys",
               "drumz": "Pattern", "violinz": "Phrase", "flutez": "Line", "saxz": "Line",
-              "clarinetz": "Line", "trumpetz": "Line"}
+              "clarinetz": "Line", "trumpetz": "Line", "producez": "Beat"}
 
 
 def coaches():

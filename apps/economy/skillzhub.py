@@ -60,10 +60,11 @@ COACHES = [
     ("clarinetz", "🎼", "clarinetz.png"),
     ("trumpetz", "🎺", "trumpetz.png"),
     ("drumz", "🥁", "drumz.png"),
+    ("producez", "🎚️", "producez.png"),
 ]
 
 # Named on the SkillZ artwork, built nowhere. Names only — see the module docstring.
-COMING = ["DJ", "Producer", "A&R", "Illustrator", "Videographer"]
+COMING = ["DJ", "A&R", "Illustrator", "Videographer"]
 
 _EMOJI = re.compile(r"\s*[^\w\s&'/-]+\s*$", re.UNICODE)
 

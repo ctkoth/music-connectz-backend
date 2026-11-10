@@ -198,6 +198,10 @@ LOGICZ_TABS = [
        "apps": [_app("Coach", "🤖", "What to practise next, and why.", True)]}
       for k, n, e in (("flutez", "FluteZ", "🪈"), ("saxz", "SaxZ", "🎷"),
                       ("clarinetz", "ClarinetZ", "🎼"), ("trumpetz", "TrumpetZ", "🎺"))],
+    {"key": "producez", "name": "ProduceZ", "emoji": "🎚️", "icon": "producez.png",
+     "desc": "Groove, sounds, arrangement, harmony and mix of your beat, scored — plus Inspiration: "
+             "send a song you want to make like and get its blueprint and a build plan.",
+     "apps": [_app("Coach", "🤖", "What to fix in your beat next, and why.", True)]},
     {"key": "drumz", "name": "DrumZ", "emoji": "🥁", "icon": "drumz.png",
      "desc": "Timing, groove, dynamics, consistency and fills, scored — plus a "
              "beat-sequencer practice pad.",

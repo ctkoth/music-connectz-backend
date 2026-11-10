@@ -791,3 +791,45 @@ class WritingFactorsForEveryCoachTests(TestCase):
         self.assertEqual(rows[0]["how"], "loop the riff")
         d = matchref.writing_doors(rows, "guitarz")["hook"]
         self.assertEqual((d["tab"], d["target"], d["cost"]), ("guitarz", "bosstake-mic", None))
+
+
+class ProduceZInspirationTests(TestCase):
+    """ProduceZ: the producer coach scores the production itself, and Inspiration turns a reference
+    into a blueprint and a build plan without ever carrying the reference's notes."""
+
+    def test_the_producer_is_scored_on_production_not_performance(self):
+        from apps.economy import instruments as I
+        keys = list(I.scores_for("producez", mix=True))
+        self.assertIn("mix", keys)                      # a dimension of its own ...
+        self.assertEqual(keys.count("mix"), 1)          # ... never scored twice
+        self.assertNotIn("clarity_mix", keys)           # the opt-in mix block is off for a producer
+        self.assertFalse(I.rates_mix("producez"))
+        self.assertTrue(I.rates_mix("drumz"))
+        text = I.prompt_for("producez", "trap", "", "intermediate")
+        self.assertIn("Score the PRODUCTION as a record", text)
+        self.assertNotIn("Score the PERFORMANCE", text)
+
+    def test_a_beat_has_no_delivery_table(self):
+        self.assertEqual(matchref._delivery_factors("producez"), {})
+        self.assertIn("structure", matchref._writing_factors("producez"))
+
+    def test_blueprint_keeps_only_what_was_heard(self):
+        bp = matchref.clean_blueprint({"tempo_bpm": 9999, "key": "", "feel": "", "sections": [], "sounds": []})
+        self.assertIsNone(bp)                           # an impossible tempo is dropped, not clamped
+        bp = matchref.clean_blueprint({"tempo_bpm": 140, "key": "F minor", "sections": [{"name": "hook", "bars": 8}], "sounds": ["808"]})
+        self.assertEqual((bp["tempo_bpm"], bp["key"], bp["sections"][0]["bars"], bp["sounds"]), (140, "F minor", 8, ["808"]))
+        self.assertIsNone(matchref.clean_blueprint("nope"))
+
+    def test_build_plan_steps_need_a_move_and_a_door(self):
+        keys = ["groove", "mix"]
+        plan = matchref.clean_build_plan([{"what": "", "how": "x"}, {"what": "Swing the hats", "how": "56%", "targets": "groove"},
+                                   {"what": "Glue", "how": "2:1", "targets": "mix"}, {"what": "x", "how": "y", "targets": "bogus"}], keys)
+        self.assertEqual([s["order"] for s in plan], [1, 2, 3])
+        self.assertEqual(plan[0]["open_in"]["tab"], "arsenal")
+        self.assertEqual(plan[1]["open_in"]["tab"], "mixconnectz")
+        self.assertEqual(plan[2]["targets"], "")
+
+    def test_only_producers_get_a_build_plan(self):
+        self.assertIn("build_plan", matchref.clean_reply({}, "producez"))
+        self.assertNotIn("build_plan", matchref.clean_reply({}, "drumz"))
+        self.assertIn("build_plan", matchref._prompt("producez", "trap"))

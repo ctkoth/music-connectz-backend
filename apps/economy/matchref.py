@@ -175,6 +175,8 @@ CLARITY = {"clarity": {"label": "Clarity 🔍", "what": "whether every note is d
 def _delivery_factors(app_key="singz"):
     """The performance factors for THIS coach: a voice gets the coach's own FeelZ tip kinds (RapZ adds
     Flow first); an instrument gets Clarity."""
+    if profile_for_app(app_key).get("production"):
+        return {}                       # a beat is not performed; its writing and mix are scored instead
     if not profile_for_app(app_key).get("lyrics"):
         return {k: {"label": v["label"]} for k, v in CLARITY.items()}
     voice = {k: {"label": f"{vc.FEELZ_TIP_KINDS[k]} {e}"} for k, e in _DELIVERY_EMOJI.items() if k in vc.FEELZ_TIP_KINDS}
@@ -295,6 +297,16 @@ WRITING_BY_APP = {
               "adlibs": {"label": "Ad-libs & harmonies 🎶", "what": "backing vocals, stacks and ad-libs"}},
     "rapz": {"cadence": {"label": "Cadence switches 🔀", "what": "whether the pattern changes, or one flow runs the whole verse"},
              "adlibs": {"label": "Ad-libs 🗣️", "what": "ad-libs and doubles that lift the bars"}},
+}
+# A producer's writing is the beat itself: the loop that hooks, the lead line, the chords, how the sections
+# are built and how it moves between them. Groove, sounds and mix are scored as ProduceZ's own dimensions,
+# so they are not repeated here.
+WRITING_BY_APP["producez"] = {
+    "hook": {"label": "Loop hook 🪝", "what": "a loop or motif you would remember after one listen"},
+    "melody": {"label": "Lead line 🎶", "what": "the topline-space melody or lead: contour, repetition, answer"},
+    "harmony": {"label": "Chord choices 🎼", "what": "the chords, voicings and where they move"},
+    "structure": {"label": "Structure 🏗️", "what": "sections and bar counts: intro, verse, hook, drop, outro"},
+    "transitions": {"label": "Transitions ➡️", "what": "risers, fills, drops and mutes that carry one section into the next"},
 }
 # Winds and brass play a lead line, so their writing is the line itself: what it plays against the chords,
 # when it answers or lays out, and the breath between phrases. One set for the four, worded for a horn.
@@ -451,8 +463,24 @@ def _prompt(app_key, genre):
                   "judging what is written and sung, never quoting it. If either track has no words, send {}. "
                   if lyr else "")
     lyric_line = f'"lyric_scores": {{{lyric_shape}}},\n  ' if lyr else ""
+    produces = bool(p.get("production"))
+    build_rule = ("""
+BUILD PLAN: this member is a PRODUCER, and TRACK A is a beat or instrumental of theirs. Tell them how to make \
+a song like TRACK B. "blueprint" is what you hear in the reference — tempo (BPM), key, feel, its sections with \
+bar counts, and the sounds it is built from; leave anything you cannot actually tell as null, never guess a \
+tempo or key. "build_plan" is 4-8 ordered steps for the member's OWN project, tied to where TRACK A differs \
+(each names one dimension it trains or ""): what to do, why the reference works that way, and how — which \
+control, which way, roughly how much, or what to listen for. Approach only: never the reference's melody, \
+chord notes, samples or stems.
+""" if produces else "")
+    build_line = ('"blueprint": {"tempo_bpm": <number or null>, "key": "<e.g. F minor, or null>", "feel": "<swing, straight, pushed...>", '
+                  '"sections": [{"name": "<intro|verse|hook|drop|bridge|outro>", "bars": <int or null>, "what": "<what happens>"}, ...], '
+                  '"sounds": ["<a sound or instrument heard>", ...]},\n  '
+                  '"build_plan": [{"what": "<the move>", "why": "<why the reference works that way>", "how": "<the steps>", '
+                  '"targets": "<one scored dimension or empty>"}, ...],\n  ' if produces else "")
+    take_word = ("the member's OWN beat" if produces else "the MEMBER'S OWN TAKE")
     return f"""You are the Music ConnectZ {p['coach']}. You are given TWO recordings, \
-in this order: TRACK A is the MEMBER'S OWN TAKE, TRACK B is the INSPIRATION — a \
+in this order: TRACK A is {take_word}, TRACK B is the INSPIRATION — a \
 reference track they want to sound closer to. Each is announced by name just \
 before it. Every "take" key below is TRACK A and every "reference" key is TRACK B; \
 never swap them. The reference is another artist's finished record; the take is \
@@ -484,7 +512,7 @@ PERFORMANCE; mix and room moves stay in "eq" and "how_to".
 If either file has no real performance (silence, talking, wrong file), set \
 "unscorable" to one sentence saying which file and what you heard, and stop.
 
-{mix_rule}{delivery_rule}{writing_rule}LYRICS: only if the recordings have words. {lyric_rule}Describe HOW the reference writes — \
+{build_rule}{mix_rule}{delivery_rule}{writing_rule}LYRICS: only if the recordings have words. {lyric_rule}Describe HOW the reference writes — \
 rhyme habits, imagery, structure, point of view, line length, density — in your \
 own words. NEVER quote, paraphrase line-by-line or reproduce any of the \
 reference's lyrics. "lyric_direction" is an instruction the member's own writing \
@@ -504,8 +532,67 @@ Return ONLY valid JSON, no markdown fence, in exactly this shape:
   "drills": [{{"name": "<short name>", "targets": "<one of: {dims}>", "minutes": <1-30 integer>, "why": "<what it closes between the take and the reference>", "how": "<the steps>"}}, ...],
   "keep": "<what the take already does that the reference does too, or does better>",
   "mix_scores": {{{mix_shape}}},
-  {delivery_line}{writing_line}{lyric_line}"lyric_direction": "<empty, or 2-4 sentences: how the reference writes, as an instruction for rewriting the member's own lines. No quotes from the reference.>"
+  {build_line}{delivery_line}{writing_line}{lyric_line}"lyric_direction": "<empty, or 2-4 sentences: how the reference writes, as an instruction for rewriting the member's own lines. No quotes from the reference.>"
 }}"""
+
+
+# HOW TO MAKE A SONG LIKE THE EXAMPLE (ProduceZ only). The blueprint is what the model hears in the
+# reference — tempo, key, feel, form, sounds — each None when it cannot tell, because a BPM or key
+# invented to fill the slot is a number somebody builds a session around. The steps are ordered moves
+# for the member's own project; they describe the approach and never ask for the reference's notes,
+# samples or stems. Nothing here is saved as the member's score.
+BUILD_STEPS_MAX = 8
+BUILD_NOTE = ("Heard from the recording, not metered — check the tempo against your own tool. This is the approach "
+              "behind the reference, in your own sounds and notes; it never copies its melody, samples or stems.")
+
+
+def _text(v, n):
+    return str(v or "").strip()[:n]
+
+
+def clean_blueprint(raw):
+    """{tempo_bpm, key, feel, sections[{name,bars,what}], sounds[]} or None. Anything unheard is None/empty."""
+    if not isinstance(raw, dict):
+        return None
+    try:
+        bpm = float(raw.get("tempo_bpm"))
+        bpm = int(round(bpm)) if 40 <= bpm <= 260 else None
+    except (TypeError, ValueError):
+        bpm = None
+    secs = []
+    for it in raw.get("sections") if isinstance(raw.get("sections"), list) else []:
+        if not isinstance(it, dict) or len(secs) == 12 or not _text(it.get("name"), 40):
+            continue
+        try:
+            bars = int(round(float(it.get("bars"))))
+            bars = bars if 1 <= bars <= 128 else None
+        except (TypeError, ValueError):
+            bars = None
+        secs.append({"name": _text(it.get("name"), 40), "bars": bars, "what": _text(it.get("what"), 200)})
+    sounds = [_text(x, 80) for x in (raw.get("sounds") if isinstance(raw.get("sounds"), list) else [])[:10] if _text(x, 80)]
+    out = {"tempo_bpm": bpm, "key": _text(raw.get("key"), 30) or None, "feel": _text(raw.get("feel"), 120) or None,
+           "sections": secs, "sounds": sounds}
+    return out if (bpm or out["key"] or out["feel"] or secs or sounds) else None
+
+
+def clean_build_plan(raw, keys):
+    """[{order, what, why, how, targets, open_in}] — at most BUILD_STEPS_MAX, `what` and `how` required.
+    `targets` is one of the coach's own dimensions or ""; every step opens Arsenal (the DAW) except a
+    mix step, which opens Mix ConnectZ — a step with nowhere to do it is a dead end."""
+    out = []
+    for it in raw[:20] if isinstance(raw, list) else []:
+        if not isinstance(it, dict) or len(out) == BUILD_STEPS_MAX:
+            continue
+        what, how = _text(it.get("what"), 140), _text(it.get("how"), 500)
+        if not what or not how:
+            continue
+        t = _text(it.get("targets"), 20).lower()
+        t = t if t in keys else ""
+        door = ({"tab": "mixconnectz", "target": "mixz-match", "label": "Do it in Mix ConnectZ"} if t == "mix" else
+                {"tab": "arsenal", "target": "", "label": "Do it in Arsenal"})
+        out.append({"order": len(out) + 1, "what": what, "why": _text(it.get("why"), 300), "how": how,
+                    "targets": t, "open_in": {**door, "cost": None}})
+    return out
 
 
 def _clean_eq(raw):
@@ -646,6 +733,10 @@ def clean_reply(parsed, app_key):
         "writing_compare": lyric_compare(wr),
         "mix_scores": (mx := clean_mix_scores(parsed.get("mix_scores"))),
         "mix_compare": lyric_compare(mx),
+        # ProduceZ only: how to make a song like the reference. Absent (not empty) for every other coach.
+        **({"blueprint": clean_blueprint(parsed.get("blueprint")),
+            "build_plan": clean_build_plan(parsed.get("build_plan"), keys),
+            "build_note": BUILD_NOTE} if profile_for_app(app_key).get("production") else {}),
     }
 
 

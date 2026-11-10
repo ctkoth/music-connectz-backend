@@ -14,7 +14,7 @@ User = get_user_model()
 # (INSTRUMENT_APP_KEYS grown to 7 without this list, or the reverse) before
 # it reached a PR.
 FRONTEND_INSTRUMENT_KEYS = ["singz", "rapz", "guitarz", "bassz", "keyz", "drumz", "violinz",
-                            "flutez", "saxz", "clarinetz", "trumpetz"]
+                            "flutez", "saxz", "clarinetz", "trumpetz", "producez"]
 
 
 class InstrumentSkillZRoutesTests(TestCase):

@@ -55,10 +55,11 @@ COACH_BADGES = {
     "saxz": ("smooth_saxz", "Smooth SaxZ", "🎷"),
     "clarinetz": ("reed_tonez", "Reed ToneZ", "🎼"),
     "trumpetz": ("brass_blastz", "Brass BlastZ", "🎺"),
+    "producez": ("beat_makerz", "Beat MakerZ", "🎚️"),
 }
 COACH_LABEL = {"singz": "SingZ", "rapz": "RapZ", "guitarz": "GuitarZ", "bassz": "BassZ",
                "keyz": "KeyZ", "drumz": "DrumZ", "violinz": "ViolinZ",
-               "flutez": "FluteZ", "saxz": "SaxZ", "clarinetz": "ClarinetZ", "trumpetz": "TrumpetZ"}
+               "flutez": "FluteZ", "saxz": "SaxZ", "clarinetz": "ClarinetZ", "trumpetz": "TrumpetZ", "producez": "ProduceZ"}
 
 
 def _cached(user, attr, compute):
