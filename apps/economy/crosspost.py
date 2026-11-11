@@ -284,9 +284,19 @@ def destinations_for(post, user, media, *, price=None, collabs=0, take_bytes=Non
     # --- The improvement doors. -------------------------------------------
     # A post is a finished take standing still. The coach is what turns it into
     # the next one, so these go first.
+    # A SoundCloud import is a PLAYER, never the file: there is nothing on the post
+    # for the coach to hear, and "attach a recording" is the wrong sentence for a
+    # post whose whole point is a track the member already has elsewhere. The
+    # author's way through is their own copy, scored in the coach; the post's
+    # edit window would shut that door on an old import, so it does not go
+    # through the post. Said on the row, before the tap.
+    sc_only = (not take) and has_soundcloud_embed(post)
     for app_key in COACH_APPS:
         p = profile_for_app(app_key)
         dims = ", ".join(list(p["scores"].values())[:3]).lower()
+        if sc_only:
+            out.append(_soundcloud_coach_door(app_key, p, post, mine, price, dims))
+            continue
         out.append({
             "app": app_key,
             # Somebody else's post is a Radar read (vocalcoach._radar): the coach's read
@@ -405,6 +415,64 @@ def destinations_for(post, user, media, *, price=None, collabs=0, take_bytes=Non
     for d in out:
         d["available"] = not d["needs"]
     return out
+
+
+def has_soundcloud_embed(post):
+    """True when the post frames a SoundCloud player. A JSON column, so no query."""
+    return any(isinstance(e, dict) and e.get("type") == "soundcloud"
+               for e in (post.embeds or []))
+
+
+SOUNDCLOUD_NO_AUDIO = ("SoundCloud gives us a player and never the audio file, so the "
+                       "coach has nothing to hear on this post")
+
+
+def _soundcloud_coach_door(app_key, profile, post, mine, price, dims):
+    """The coach row for a post that is only a SoundCloud player.
+
+    Not `action: "coach"`: that hands the post's id over, and the coach would
+    answer that the post carries no recording. `action: "open"` lands on the
+    recorder, where the member attaches their OWN copy of the track — which is
+    scored like any take, and says so. Nothing is written on the post: nothing
+    checks that the file is the track on the player, so the read answers to
+    the member and the post is left as it is.
+
+    Somebody else's SoundCloud post stays shut, with the reason. A Radar read
+    needs a file only its author has.
+    """
+    row = {
+        "app": app_key,
+        "target": "bosstake-mic",
+        "action": "open",
+        "own_copy": True,
+        "carry": {},
+        "coach_kind": "",
+        "take_bytes": 0,
+        "max_bytes": 0,
+        "max_is_tier_limit": False,
+        "gain": {"what": "a scored take with a drill to run next"},
+        "cost": price,
+    }
+    if mine:
+        row.update({
+            "label": f"Coach your copy in {profile['label']}",
+            "radar": False,
+            "what": (f"{SOUNDCLOUD_NO_AUDIO}. Open the {profile['coach']} and attach your "
+                     f"own copy of the track — scored out of 10 on {dims}, with what "
+                     "worked, what to fix and one drill. The score is yours; it isn't "
+                     "written on this post, because nothing checks the file is the "
+                     "track on the player."),
+            "needs": [],
+        })
+    else:
+        row.update({
+            "label": f"📡 Radar read in {profile['label']}",
+            "radar": True,
+            "what": (f"{SOUNDCLOUD_NO_AUDIO}."),
+            "needs": [f"the audio file — only @{post.author.username} has one to give. "
+                      "SoundCloud serves a player, never the file"],
+        })
+    return row
 
 
 def _owns(post, user):

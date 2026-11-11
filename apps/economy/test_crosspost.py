@@ -84,6 +84,37 @@ class DestinationListTests(TestCase):
         self.assertFalse(singz["available"])
         self.assertIn("recording", singz["needs"][0])
 
+    # ---- a SoundCloud post is a player, not a file ----
+    SC_EMBED = {"type": "soundcloud", "url": "https://w.soundcloud.com/player/?url=x",
+                "title": "Hook", "sc_id": "1"}
+
+    def test_your_soundcloud_post_opens_the_coach_for_your_own_copy(self):
+        """The door is live, and says what it is BEFORE the tap: no audio on the post,
+        so the coach opens on the recorder instead of handing over a post id that
+        would be refused."""
+        p = self.post_with(embeds=[self.SC_EMBED])
+        for app in COACH_APPS:
+            d = find(self.dests(p), app)
+            self.assertTrue(d["available"])
+            self.assertEqual(d["action"], "open")
+            self.assertTrue(d["own_copy"])
+            self.assertIn("never the audio file", d["what"])
+            self.assertIn("isn't written on this post", d["what"])
+            self.assertEqual(d["cost"]["resource"], "promptz")    # the price is still quoted first
+
+    def test_somebody_elses_soundcloud_post_stays_shut_with_the_reason(self):
+        p = self.post_with(embeds=[self.SC_EMBED], author=self.them)
+        d = find(self.dests(p), "singz")
+        self.assertFalse(d["available"])
+        self.assertIn("serves a player, never the file", d["needs"][0])
+
+    def test_a_soundcloud_post_that_also_has_a_recording_is_coached_normally(self):
+        p = self.post_with(embeds=[self.SC_EMBED], media_type="audio",
+                           media_url="/media/uploads/1/take.webm")
+        d = find(self.dests(p), "singz")
+        self.assertEqual(d["action"], "coach")
+        self.assertNotIn("own_copy", d)
+
     def test_video_is_coachable_when_there_is_no_audio(self):
         p = self.post_with(media_type="video", media_url="/media/uploads/1/take.mp4")
         self.assertEqual(find(self.dests(p), "rapz")["coach_kind"], "video")
