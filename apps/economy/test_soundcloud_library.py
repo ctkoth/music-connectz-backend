@@ -197,3 +197,39 @@ class ApplyTests(Base):
     def test_tier_cap_statement_unchanged(self):
         m = membership_for(self.me); m.tier = TIER_STATZ; m.save(update_fields=["tier", "updated_at"])
         self.assertTrue(self.c.get("/api/economy/soundcloud/import/").data["whole_catalogue"])
+
+
+class DeleteTests(Base):
+    URL = LIB + "delete/"
+
+    def test_deletes_only_my_imported_tracks_and_is_free(self):
+        a, b = self.post(1), self.post(2, "public")
+        hand = Post.objects.create(author=self.me, title="Hand", embeds=[{"type": "soundcloud", "url": "u"}])
+        other = User.objects.create_user("o2", "o2@x.com", "hunter2hunter2")
+        theirs = Post.objects.create(author=other, title="Theirs", embeds=[imp("Theirs", 9)])
+        before = wallet_for(self.me).energy
+        r = self.c.post(self.URL, {"ids": [a.id, hand.id, theirs.id]}, format="json").data
+        self.assertEqual((r["deleted"], r["ignored"]), (1, 2))
+        self.assertFalse(Post.objects.filter(pk=a.id).exists())
+        for keep in (b, hand, theirs):
+            self.assertTrue(Post.objects.filter(pk=keep.id).exists())
+        self.assertEqual(wallet_for(self.me).energy, before)
+        self.assertEqual(r["charged"]["amount"], 0)
+
+    def test_visibility_guard_keeps_a_row_that_changed(self):
+        priv, pub = self.post(1), self.post(2, "public")
+        r = self.c.post(self.URL, {"ids": [priv.id, pub.id], "visibility": "private"}, format="json").data
+        self.assertEqual((r["deleted"], r["skipped"]), (1, 1))
+        self.assertTrue(Post.objects.filter(pk=pub.id).exists())
+
+    def test_bad_requests_and_per_call_cap(self):
+        self.assertEqual(self.c.post(self.URL, {"ids": []}, format="json").status_code, 400)
+        p = self.post(1)
+        self.assertEqual(self.c.post(self.URL, {"ids": [p.id], "visibility": "nope"}, format="json").status_code, 400)
+        self.assertTrue(Post.objects.filter(pk=p.id).exists())
+        posts = [self.post(n) for n in range(10, 10 + 103)]
+        r = self.c.post(self.URL, {"ids": [x.id for x in posts]}, format="json").data
+        self.assertEqual((r["deleted"], r["not_attempted"]), (100, 3))
+
+    def test_needs_sign_in(self):
+        self.assertIn(APIClient().post(self.URL, {"ids": [1]}, format="json").status_code, (401, 403))
