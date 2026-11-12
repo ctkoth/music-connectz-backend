@@ -26,7 +26,7 @@ class TheCatalogTests(Base):
         d = self.client.get(URL).data["daws"]
         self.assertEqual(len(d), 8)
         built = {row["id"]: row["tab"] for row in d if row["built"]}
-        self.assertEqual(built, {"arsenal": "arsenal", "fruity_mobius": "fruitymobius"})
+        self.assertEqual(built, {"arsenal": "arsenal", "fruity_mobius": "fruitymobius", "formulawon": "formulawon"})
         self.assertTrue(all(row["tab"] == "" for row in d if not row["built"]))
 
     def test_corey_s_six_are_named_as_he_named_them(self):
