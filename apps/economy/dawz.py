@@ -127,7 +127,7 @@ DAW_IDS = {d["id"] for d in DAWS}
 # (src/daw/): a DAW here is a workflow — which windows, which edit modes, which way a track is
 # laid out — not a second codebase. A DAW joins this map when its workflow ships, never before:
 # a "built" flag on something that isn't is the LogicZ failure in reverse.
-BUILT = {"arsenal": "arsenal", "fruity_mobius": "fruitymobius", "formulawon": "formulawon"}
+BUILT = {"arsenal": "arsenal", "fruity_mobius": "fruitymobius", "formulawon": "formulawon", "intuition": "intuition"}
 
 # Said beside every DAW, because "VST" is the word people arrive with and the answer is not a
 # yes. A VST is a native desktop program; no web page can load one, and the Android app is a web
