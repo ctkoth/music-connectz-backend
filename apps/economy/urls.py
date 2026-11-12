@@ -71,6 +71,7 @@ from .adz import AdzView, AdDetailView, AdRewardView
 from .rewards import (AdmobConfigView, AdmobSsvView, OfferzView,
                       OfferzCallbackView)
 from .translate import TranslateView
+from .uitext import UiTextView
 from .gemini import GeminiImageView
 from .notifications import NotificationsView
 from .push import PushPrefsView, PushSubscribeView, PushTestView, PushView
@@ -339,6 +340,8 @@ urlpatterns = [
     path("occ/workz/<int:pk>/share/", OccWorkShareView.as_view(), name="economy-occ-work-share"),
     path("occ/workz/<int:pk>/unshare/", OccWorkUnshareView.as_view(), name="economy-occ-work-unshare"),
     path("translate/", TranslateView.as_view(), name="economy-translate"),
+    # The app's own screens in the member's language: shared, free to the member.
+    path("uitext/", UiTextView.as_view(), name="economy-uitext"),
     path("gemini/image/", GeminiImageView.as_view(), name="economy-gemini-image"),
     # CallZ. The rate route is separate and comes FIRST in the flow: a member
     # asks what a call costs before anything rings, which is the whole

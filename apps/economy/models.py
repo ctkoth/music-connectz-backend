@@ -8613,3 +8613,21 @@ class LookRequest(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class UiString(models.Model):
+    """One string of the app's own screens in one language (`uitext.py`).
+
+    Shared by every member: translated once, read by everybody after. It is keyed by
+    a hash of the English because the English is the lookup and can be 240
+    characters. Nothing here belongs to a member, so nothing here is personal data.
+    """
+
+    lang = models.CharField(max_length=12)
+    key = models.CharField(max_length=40)
+    source = models.TextField()
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["lang", "key"], name="uistring_lang_key")]
