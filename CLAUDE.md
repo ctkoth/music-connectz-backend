@@ -2804,6 +2804,10 @@ spring, so this one has no ceiling. Each row is the editable session (sets with 
 plus its own `volume_kg` / `reps` / `duration_seconds` and `check`. Yours only, by the query; the cost is constant in
 the number of sessions (a test pins it).
 
+**Ordered by when each was COMPLETED** (`ended_at`, then `-id`), not when it began, and `since` / `until` bound that same completed
+date: a workout begun Monday and finished Friday is a Friday workout. The model's own `-started_at` ordering is for everything else;
+this view sets its own.
+
 - **`check` is facts about the row, worded for the member, never a correction.** Nothing logged → "add what you did,
   or delete it". A LIVE session that ran ≥ `LEFT_OPEN_HOURS` (4) → "probably left open, so the length may not be the
   workout's; the sets are what count". A workout typed in afterwards has no measured length, so it is never flagged for

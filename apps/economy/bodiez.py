@@ -1156,7 +1156,11 @@ def _log_row(sess, sets):
 
 
 class BodieZSessionLogView(APIView):
-    """GET /api/economy/bodiez/sessions/log/ — EVERY finished session, newest first, paged.
+    """GET /api/economy/bodiez/sessions/log/ — EVERY finished session, newest COMPLETED first, paged.
+
+    Ordered by when each was completed (`ended_at`), not when it was started: a session begun on Monday and
+    finished on Friday belongs with Friday's, and `since` / `until` bound that same completed date. `id` breaks ties
+    so a page boundary can never repeat or skip a row.
 
     The plain sessions list is the newest 50 with the open one mixed in (Today needs that). SessionZ
     is where somebody goes to find a log from last spring and fix it, so this one has no ceiling: it
@@ -1179,7 +1183,7 @@ class BodieZSessionLogView(APIView):
         q = (p.get("q") or "").strip()[:80]
         if q:
             qs = qs.filter(Q(routine__title__icontains=q) | Q(sets__exercise__name__icontains=q)).distinct()
-        for key, lookup in (("since", "started_at__date__gte"), ("until", "started_at__date__lte")):
+        for key, lookup in (("since", "ended_at__date__gte"), ("until", "ended_at__date__lte")):
             raw = (p.get(key) or "").strip()
             if raw:
                 try:
@@ -1193,7 +1197,7 @@ class BodieZSessionLogView(APIView):
             return Response({"detail": "limit and offset must be numbers."}, status=status.HTTP_400_BAD_REQUEST)
 
         only_check = p.get("check") in ("1", "true")
-        base = qs.select_related("routine").prefetch_related("sets__exercise")
+        base = qs.select_related("routine").prefetch_related("sets__exercise").order_by("-ended_at", "-id")
         if only_check:
             # A check is computed from the sets, so it cannot be a column filter. Page through the
             # whole (filtered) set in Python — bounded by one member's own sessions.

@@ -1728,8 +1728,21 @@ class BodieZSessionLogTests(TestCase):
         r = self.get(limit=100)
         self.assertEqual(r.data["total"], 60)
         self.assertEqual(len(r.data["sessions"]), 60)
-        starts = [x["started_at"] for x in r.data["sessions"]]
-        self.assertEqual(starts, sorted(starts, reverse=True))
+        ends = [x["ended_at"] for x in r.data["sessions"]]
+        self.assertEqual(ends, sorted(ends, reverse=True))
+
+    def test_ordered_by_when_it_was_completed_not_when_it_was_started(self):
+        now = timezone.now()
+        long_open = self.session([(self.press, 10, 20)], days_ago=5)
+        BodieZSession.objects.filter(id=long_open.id).update(ended_at=now - timedelta(hours=1))   # began 5 days ago, finished an hour ago
+        quick = self.session([(self.press, 10, 20)], days_ago=2)                                   # began and ended two days ago
+        rows = self.get().data["sessions"]
+        self.assertEqual([r["id"] for r in rows], [long_open.id, quick.id])
+        ends = [r["ended_at"] for r in rows]
+        self.assertEqual(ends, sorted(ends, reverse=True))
+        # The date bounds are the completed date too: it began 5 days ago but finished today, so it is inside "since yesterday".
+        since = (timezone.localdate() - timedelta(days=1)).isoformat()
+        self.assertEqual([r["id"] for r in self.get(since=since).data["sessions"]], [long_open.id])
 
     def test_paging_walks_the_whole_list_without_repeats(self):
         for d in range(1, 8):
