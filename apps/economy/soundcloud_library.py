@@ -23,6 +23,11 @@ DECISIONS (see CLAUDE.md-style reasoning in the tests)
   the same minute of the feed (the feed reads the newest 300 by created_at).
 * No notification is sent: PostZ has never notified followers of a new post or
   a visibility change, and a batch must not start.
+* Delete: `DeleteView` removes imported tracks for good, free, a batch at a time.
+  It only ever touches the caller's own IMPORTED posts (same `_load` apply uses), and
+  an optional `visibility` guard skips any row no longer at the visibility the screen
+  selected it under, so a stale selection can't delete a track that has since been
+  published. No refund and no undo: the screen says both before the button.
 * No daily limit applies: DailySubmission counts scored/media posts at creation,
   and neither an embed-only import nor a visibility change is one.
 """
@@ -385,4 +390,52 @@ class ApplyView(APIView):
             "charged": {"resource": "energy", "amount": charged},
             "stopped": stopped, "dated_to_release": backdate,
             "energy": max(0, wallet_for(user).energy or 0),
+        })
+
+
+class DeleteView(APIView):
+    """POST .../library/delete/ {ids, visibility?} — delete imported tracks, per item.
+
+    Free. Permanent: the post, and everything attached to it (ratings, comments,
+    views), goes with it, and nothing is refunded because nothing was charged for the
+    import. SoundCloud itself is untouched: this keeps no token and never talks to it.
+
+    `visibility` is a guard, not a filter: a row not at that visibility right now is
+    skipped, not deleted. The screen sends the one it selected under.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        d = request.data or {}
+        guard = str(d.get("visibility") or "").strip().lower()
+        if guard and guard not in VISIBILITIES:
+            return Response({"detail": "Choose public, restricted or private."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        ids = _ids(d)
+        if not ids:
+            return Response({"detail": "Nothing selected."}, status=status.HTTP_400_BAD_REQUEST)
+        todo, rest = ids[:MAX_PER_CALL], ids[MAX_PER_CALL:]
+        by_id = _load(request.user, todo)
+        results = []
+        for i in todo:
+            p = by_id.get(i)
+            if not p:
+                results.append({"id": i, "result": "ignored", "reason": "Not one of your imported tracks."})
+            elif guard and p.visibility != guard:
+                results.append({"id": i, "title": p.title, "result": "skipped",
+                                "reason": f"No longer {guard} (now {p.visibility}), so it was kept."})
+            else:
+                title = p.title
+                p.delete()
+                results.append({"id": i, "title": title, "result": "deleted", "reason": ""})
+        for i in rest:
+            results.append({"id": i, "result": "not_attempted",
+                            "reason": f"At most {MAX_PER_CALL} are done per request; send the rest again."})
+        return Response({
+            "results": results,
+            "deleted": sum(1 for r in results if r["result"] == "deleted"),
+            "skipped": sum(1 for r in results if r["result"] == "skipped"),
+            "ignored": sum(1 for r in results if r["result"] == "ignored"),
+            "not_attempted": sum(1 for r in results if r["result"] == "not_attempted"),
+            "charged": {"resource": "energy", "amount": 0},
         })
