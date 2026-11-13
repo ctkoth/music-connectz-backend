@@ -110,14 +110,12 @@ def declared_skills(user):
     from .models import profile_for
     from .personaz import personas_of
 
+    from .postz import declared_skill_names
+    from .social import _periods_of, _skill_years, skill_activity
+
     personas = personas_of(profile_for(user))
-    seen, names = set(), []
-    for persona in personas:
-        for s in persona.get("skills") or []:
-            name = str((s or {}).get("name") or "").strip()[:60] if isinstance(s, dict) else ""
-            if name and name not in seen:
-                seen.add(name)
-                names.append(name)
+    seen = declared_skill_names(user)           # the one rule, shared with the write paths
+    names = sorted(seen)
 
     rated = {r["skill"]: r for r in skills_of(user) if r["skill"] in seen}
 
@@ -152,12 +150,25 @@ def declared_skills(user):
                 continue
             claimed.add(name)
             r = rated.get(name)
+            years = _skill_years(s)
+            active, last_played = skill_activity(s)
+            stints = [{"start": a, **({"end": b} if b else {})} for a, b in _periods_of(s)]
             pieces = sorted(work.get(name, []), key=lambda w: -w["count"])   # stable: ties stay newest-first
             skills.append({
                 "skill": name,
                 "rating": r["rating"] if r else None,
                 "count": r["count"] if r else 0,
                 **({"coach": r["coach"]} if r and r.get("coach") else {}),
+                # Experience is time SERVED on the skill, summed from the stints the member declared
+                # (never elapsed time, never inferred). None, not 0, when it was never dated.
+                #   `learned` is the date they say they learned it (the earliest stint), `periods` the
+                #   stints themselves, so the screen can say how long that is from today in the
+                #   same words PersonaZ uses.
+                "learned": min((x["start"] for x in stints), default=None),
+                "periods": stints,
+                "years": years,
+                "active": active if years is not None else None,
+                "last_played": last_played,
                 "work": pieces[:WORK_PER_SKILL],
                 "work_total": len(pieces),
             })

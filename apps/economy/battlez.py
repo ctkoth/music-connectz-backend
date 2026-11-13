@@ -45,7 +45,7 @@ from .models import (
     profile_for,
     wallet_for,
 )
-from .postz import charge_skill_energy, skills_from
+from .postz import charge_skill_energy, skills_from, undeclared_refusal
 
 User = get_user_model()
 
@@ -328,6 +328,9 @@ class BattleEnterView(APIView):
         # NOT named `refusal` — that is the gates helper imported at module
         # level and called above, and a local of the same name would shadow it
         # for the whole method.
+        refused = undeclared_refusal(request.user, skills_from(d))
+        if refused:
+            return Response(refused[0], status=refused[1])
         energy, denied = charge_skill_energy(request.user, skills_from(d))
         if denied:
             body, code = denied

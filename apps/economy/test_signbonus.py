@@ -222,6 +222,14 @@ class ThePublishedList(TestCase):
                       (401, 403))
 
 
+def _learn(user, *names):
+    """Skills a post may list have to be on the member's profile."""
+    from .models import profile_for
+    p = profile_for(user)
+    p.personas = [{"key": "producer", "name": "Beat Producer", "skills": [{"name": n} for n in names]}]
+    p.save()
+
+
 class TheHooks(TestCase):
     """Each bonus fires off an action the platform ALREADY does.
 
@@ -235,6 +243,7 @@ class TheHooks(TestCase):
     def test_a_post_pays_the_signs_a_post_can_satisfy(self):
         from .postz import create_post
         virgo = member("v2", "Virgo")
+        _learn(virgo, "mixing")
         create_post(virgo, {"title": "take", "content": "x",
                             "skills_used": ["mixing"]})
         self.assertEqual(wallet_for(virgo).spinaz, 20)
@@ -242,6 +251,7 @@ class TheHooks(TestCase):
     def test_the_same_post_pays_a_different_sign_nothing(self):
         from .postz import create_post
         leo = member("l4", "Leo")
+        _learn(leo, "mixing")
         before = wallet_for(leo).spinaz
         create_post(leo, {"title": "take", "content": "x",
                           "skills_used": ["mixing"]})

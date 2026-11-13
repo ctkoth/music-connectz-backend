@@ -9,7 +9,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from apps.economy.models import Post
+from apps.economy.models import Post, profile_for
 
 User = get_user_model()
 PW = "hunter2hunter2"
@@ -20,6 +20,12 @@ class SkillsUsedTests(TestCase):
         self.client = APIClient()
         self.user = User.objects.create_user("k", "k@e.com", PW)
         self.client.force_authenticate(self.user)
+        # A post may only list skills the member has learned, so these members have learned them.
+        p = profile_for(self.user)
+        p.personas = [{"key": "producer", "name": "Beat Producer",
+                       "skills": [{"name": n} for n in ("flstudio", "any_daw", "mixing",
+                                                        *[f"s{i}" for i in range(80)])]}]
+        p.save()
 
     def post(self, **over):
         return self.client.post("/api/economy/postz/",

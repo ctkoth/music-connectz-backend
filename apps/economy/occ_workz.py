@@ -40,7 +40,7 @@ from .models import (
     membership_for,
 )
 from .occ_spec import EXPORT_ROUTES
-from .postz import clean_items, create_post, post_cost_cents
+from .postz import clean_items, create_post, post_cost_cents, undeclared_refusal
 
 # What OCC hands back when it hands back a file. Anything else routes as a
 # document, because text is a document and pretending otherwise sends a written
@@ -207,6 +207,9 @@ class OccWorkzView(APIView):
     def post(self, request):
         d = request.data or {}
         fields = _clean_fields(d)
+        refused = undeclared_refusal(request.user, fields["skills_used"])
+        if refused:
+            return Response(refused[0], status=refused[1])
         input_text = str(d.get("input_text", "") or "")
         input_items = clean_items(d.get("input_items"))
         if not (fields["title"] or fields["description"] or fields["media_url"]
@@ -282,6 +285,12 @@ class OccWorkDetailView(APIView):
         if not o:
             return Response({"detail": "work not found"}, status=status.HTTP_404_NOT_FOUND)
         d = request.data or {}
+        if "skills_used" in d:
+            # Only what is ADDED is judged: a run's own language tag is not the member's claim.
+            refused = undeclared_refusal(request.user, _clean_fields(d, o)["skills_used"],
+                                         keep=o.skills_used or [])
+            if refused:
+                return Response(refused[0], status=refused[1])
         for k, v in _clean_fields(d, o).items():
             setattr(o, k, v)
         if "input_text" in d:
@@ -368,7 +377,7 @@ class OccWorkShareView(APIView):
             "score": {"occ": {"work_id": o.id, "tab": o.tab,
                               "input": o.input_text[:2000]}},
         }
-        post, info, err = create_post(request.user, payload)
+        post, info, err = create_post(request.user, payload, keep_skills=o.skills_used or [])
         if err:
             return Response(err[0], status=err[1])
         o.shared_post = post
