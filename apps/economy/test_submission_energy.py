@@ -46,7 +46,9 @@ class BattleEntryEnergyTests(TestCase):
         self.host = User.objects.create_user("host", "h@e.com", PW)
         self.entrant = User.objects.create_user("entrant", "e@e.com", PW)
         membership_for(self.entrant)
-        _priced(self.entrant, Vocals=40, Mixing=25)
+        # "Dog Walking" is LEARNED but never priced: a skill must be on the profile to be listed at
+        # all, and the point of these tests is what an unpriced one costs.
+        _priced(self.entrant, Vocals=40, Mixing=25, **{"Dog Walking": 0})
         self.battle = Battle.objects.create(host=self.host, title="16 bars")
         self.client = APIClient()
         self.client.force_authenticate(self.entrant)

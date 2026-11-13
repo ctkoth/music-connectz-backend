@@ -156,7 +156,11 @@ class PriceUpFrontTests(WorkzBase):
 
     def test_an_unpriced_work_costs_only_the_post_floor_to_share(self):
         from apps.economy.catalog import POST_ENERGY_FLOOR
-        w = self.make(skills_used=["Beat Producer"])   # no rate set
+        from apps.economy.models import profile_for
+        p = profile_for(self.user)        # learned, but no rate set
+        p.personas = [{"key": "producer", "name": "Beat Producer", "skills": [{"name": "Beat Producer"}]}]
+        p.save()
+        w = self.make(skills_used=["Beat Producer"])
         self.assertEqual(w["share_cost"]["amount"], POST_ENERGY_FLOOR)
 
 
