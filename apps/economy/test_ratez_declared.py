@@ -185,3 +185,54 @@ class TheRatingAndItsEvidenceTests(DeclaredSkillsBase):
         # skills_of costs one median query per RATED skill, and "mastering" just became rated;
         # what must not move is anything per post.
         self.assertLessEqual(self.queries(), before + 1)
+
+
+class ExperienceBesideTheRatingTests(DeclaredSkillsBase):
+    """Skills and experience are the platform's focus, so the picker states both, apart."""
+
+    def learn_dated(self, name, periods=None, start=None):
+        s = {"name": name}
+        if periods:
+            s["periods"] = periods
+        if start:
+            s["start"] = start
+        p = profile_for(self.maker)
+        p.personas = [{"key": "mixengineer", "name": "Mix", "skills": [s]}]
+        p.save()
+
+    def test_experience_is_the_time_served_not_the_time_elapsed(self):
+        # 2000-2010 then stopped: ten years served, however long ago it ended.
+        self.learn_dated("mixing", periods=[{"start": "2000-01-01", "end": "2010-01-01"}])
+        s = self.skills()["mixing"]
+        self.assertEqual(s["years"], 10)
+        self.assertFalse(s["active"])
+        self.assertEqual(s["last_played"], "2010-01-01")
+
+    def test_a_skill_never_dated_has_no_years_not_zero(self):
+        self.learn("mixing")
+        s = self.skills()["mixing"]
+        self.assertIsNone(s["years"])
+        self.assertIsNone(s["active"])
+
+    def test_an_open_stint_is_still_practising(self):
+        self.learn_dated("mixing", start="2015-06-01")
+        s = self.skills()["mixing"]
+        self.assertGreaterEqual(s["years"], 10)
+        self.assertTrue(s["active"])
+
+    def test_experience_never_moves_the_rating(self):
+        self.learn_dated("mixing", start="2001-01-01")
+        self.assertIsNone(self.skills()["mixing"]["rating"])
+
+    def test_it_names_the_date_learned_and_the_stints_the_length_comes_from(self):
+        self.learn_dated("mixing", periods=[{"start": "2012-03-01", "end": "2014-03-01"},
+                                            {"start": "2018-01-01"}])
+        s = self.skills()["mixing"]
+        self.assertEqual(s["learned"], "2012-03-01")
+        self.assertEqual(s["periods"], [{"start": "2012-03-01", "end": "2014-03-01"}, {"start": "2018-01-01"}])
+
+    def test_undated_has_no_learned_date(self):
+        self.learn("mixing")
+        s = self.skills()["mixing"]
+        self.assertIsNone(s["learned"])
+        self.assertEqual(s["periods"], [])

@@ -23,7 +23,9 @@ from django.utils.dateparse import parse_datetime
 
 from .thoroughz import marks_by_username
 from .models import VenueBooking, VenueEvent, award_spinaz, spend_spinaz, wallet_for
-from .postz import charge_skill_energy, post_cost_cents, skill_price_units, skill_prices, skills_from
+from .postz import (
+    charge_skill_energy, post_cost_cents, skill_price_units, skill_prices, skills_from, undeclared_refusal,
+)
 from .gates import clean_gates, describe, failing_gate, member_metrics
 
 
@@ -610,6 +612,9 @@ class VenueBookView(APIView):
 
         d = request.data or {}
         asked = skills_from(d)
+        refused = undeclared_refusal(request.user, asked)
+        if refused:
+            return Response(refused[0], status=refused[1])
         skills = asked or list(event.skills or [])
         hours = _int(d, "hours", event.hours, 1, 24)
         q = quote_for(event, request.user, skills=skills, hours=hours)

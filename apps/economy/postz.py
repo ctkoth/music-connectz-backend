@@ -448,6 +448,56 @@ def skills_from(d, key="skills"):
     return [str(s).strip()[:80] for s in (d.get(key) or []) if str(s).strip()][:40]
 
 
+def declared_skill_names(user):
+    """The skill names this member has LEARNED: every skill on every persona of their profile.
+
+    The one rule for "may this member put this skill on their work". Names are cut to 60, the width
+    a skill is stored and rated under (`SkillRating.skill`), on both sides of every comparison.
+    """
+    from .models import profile_for
+    names = set()
+    for persona in personas_of(profile_for(user)):
+        for s in persona.get("skills") or []:
+            name = str(s.get("name") or "").strip()[:60] if isinstance(s, dict) else ""
+            if name:
+                names.add(name)
+    return names
+
+
+def undeclared_skills(user, skills, keep=()):
+    """The skills in `skills` the member has not learned, in the order given, once each.
+
+    `keep` is what the thing already carries and may keep: an edit is only judged on what it ADDS,
+    because nobody loses a skill off an old post when they drop it from their profile, and a system
+    tag (OCC's language) was never the member's claim to make.
+    """
+    ok = declared_skill_names(user) | {str(k).strip()[:60] for k in (keep or [])}
+    out = []
+    for s in skills or []:
+        name = str(s).strip()[:60]
+        if name and name not in ok and name not in out:
+            out.append(name)
+    return out
+
+
+def undeclared_refusal(user, skills, keep=()):
+    """(payload, 400) when any skill is not on the member's profile, else None.
+
+    Checked BEFORE anything is charged, so a refusal costs nothing, and the payload names the skills
+    and the control that adds them rather than only saying no. A skill rating lands on whoever the
+    post names, so a skill nobody declared would be a rating on a claim nobody made.
+    """
+    bad = undeclared_skills(user, skills, keep)
+    if not bad:
+        return None
+    say = ", ".join(b.replace("_", " ") for b in bad)
+    return ({"detail": f"Skills you list have to be ones you've learned. Not on your profile: {say}. "
+                       "Add them in PersonaZ first, or take them off this.",
+             "undeclared_skills": bad,
+             "open_in": {"tab": "personaz", "target": "", "label": "Add skills in PersonaZ"}},
+            status.HTTP_400_BAD_REQUEST)
+
+
 def charge_skill_energy(user, skills):
     """Spend the combined price of `skills` as ⚡ on a submission.
 
@@ -517,8 +567,11 @@ def clean_derived(user, raw):
     return {"id": orig.id, "kind": raw["kind"], "title": orig.title[:160], "author": orig.author.username}, ""
 
 
-def create_post(user, d):
+def create_post(user, d, keep_skills=()):
     """Make a post from a PostZ payload. Returns (post, info, error).
+
+    `skills_used` must be skills the author has learned (`undeclared_refusal`). `keep_skills` is for
+    a caller republishing something that already carries skills the member did not just choose.
 
     Lifted out of the view so anything that publishes work — the composer, and
     now an OCC output being shared — goes through the SAME daily cap, the same
@@ -544,6 +597,9 @@ def create_post(user, d):
     # this from the request meant the composer's zero was the real price.
     skills = [str(x)[:60] for x in (d.get("skills_used") or [])
               if isinstance(x, (str, int))][:40]
+    refused = undeclared_refusal(user, skills, keep_skills)
+    if refused:
+        return None, {}, refused
     cost, _lines = post_cost_cents(user, skills)
     media_url = str(d.get("media_url", "")).strip()[:500]
     media_type = str(d.get("media_type", "")).strip()[:24]
@@ -1074,8 +1130,14 @@ class PostsView(APIView):
             p.genre = str(d.get("genre") or "")[:40]
             fields.append("genre")
         if "skills_used" in d:
-            p.skills_used = [str(x)[:60] for x in (d.get("skills_used") or [])
-                             if isinstance(x, (str, int))][:40]
+            new_skills = [str(x)[:60] for x in (d.get("skills_used") or [])
+                          if isinstance(x, (str, int))][:40]
+            # Judged against the AUTHOR's profile (the platform owner may edit anyone's post, and
+            # the skills are the author's), and only on what the edit ADDS.
+            refused = undeclared_refusal(p.author, new_skills, keep=p.skills_used or [])
+            if refused:
+                return Response(refused[0], status=refused[1])
+            p.skills_used = new_skills
             fields.append("skills_used")
 
         after = {k: getattr(p, k) for k in before}
