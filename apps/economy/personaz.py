@@ -164,7 +164,14 @@ def clean_persona(raw):
             if not start:
                 continue
             end = str(pr.get("end") or "")[:10]
-            periods.append({"start": start, "end": end} if end else {"start": start})
+            stint = {"start": start, "end": end} if end else {"start": start}
+            # The member knew only the YEAR they started ("I started rapping at 16"). It is stored as
+            # that year's 1 January, so every date parser keeps working, and this flag says the month
+            # and day are a convention rather than something the member claimed. Only a 1 January
+            # can carry it: any other date is a full date whatever a request says.
+            if str(pr.get("precision") or "") == "year" and start.endswith("-01-01"):
+                stint["precision"] = "year"
+            periods.append(stint)
         # Hourly rate, in cents. The blueprint prices CallZ by "the other
         # member's skill rate per hour" and nothing stored one, so the price
         # range had no metric to gate on.
