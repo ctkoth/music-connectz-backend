@@ -83,6 +83,113 @@ def skills_of(user):
     return out
 
 
+WORK_PER_SKILL = 5      # how many pieces of work are named beside a skill's rating
+WORK_SCAN = 600         # newest rating rows read in total — bounds the work one request can do
+
+DECLARED_NOTE = (
+    "Only skills you have added to your profile can be picked here. A skill's rating is the "
+    "median of what members scored the posts that used it, and each rating links to that work."
+)
+
+
+def declared_skills(user):
+    """The skills this member has LEARNED (declared on their profile), each with its rating
+    and the work that earned it. What the "Skills used on this" picker offers.
+
+    The picker used to offer the whole catalogue, so a member could tick a skill they had never
+    said they had, and the skill rating then landed on a claim nobody had made. Now the list IS
+    the profile: a skill not on it is not here, and the way to get it here is PersonaZ.
+
+    The rating is the same number everywhere (`skills_of`, which is `skill_rating_median` and the
+    opt-in coach blend), never a second formula. `None`, never 0, when nothing has rated it yet —
+    an empty rating invites a real one and a fake one ends the question.
+
+    Work is read from the rating rows (`SkillRating.item_id`), so a link is only ever to a post
+    that actually produced a rating, and only one this member may open.
+    """
+    from .models import profile_for
+    from .personaz import personas_of
+
+    personas = personas_of(profile_for(user))
+    seen, names = set(), []
+    for persona in personas:
+        for s in persona.get("skills") or []:
+            name = str((s or {}).get("name") or "").strip()[:60] if isinstance(s, dict) else ""
+            if name and name not in seen:
+                seen.add(name)
+                names.append(name)
+
+    rated = {r["skill"]: r for r in skills_of(user) if r["skill"] in seen}
+
+    # Which posts gave each skill its rating: one query for the rows, one for the posts.
+    rows = list(SkillRating.objects.filter(subject=user, skill__in=names, item_id__startswith="post:")
+                .order_by("-created_at").values_list("skill", "item_id", "score")[:WORK_SCAN])
+    by_pair = {}
+    for skill, item_id, score in rows:
+        pid = item_id.split(":", 1)[1]
+        if pid.isdigit():
+            by_pair.setdefault((skill, int(pid)), []).append(score)
+    posts = {p.id: p for p in Post.objects.filter(pk__in={pid for _, pid in by_pair})}
+    work = {}
+    for (skill, pid), scores in by_pair.items():           # newest first, as read
+        p = posts.get(pid)
+        if p is None or not can_view_post(p, user):        # a deleted or unopenable post is no link
+            continue
+        scores = sorted(scores)
+        n = len(scores)
+        work.setdefault(skill, []).append({
+            "id": p.id, "title": p.title, "url": f"/p/{p.id}", "item_key": f"post:{p.id}",
+            "rating": scores[n // 2] if n % 2 else round((scores[n // 2 - 1] + scores[n // 2]) / 2, 1),
+            "count": n,
+        })
+
+    out, claimed = [], set()
+    for persona in personas:
+        skills = []
+        for s in persona.get("skills") or []:
+            name = str((s or {}).get("name") or "").strip()[:60] if isinstance(s, dict) else ""
+            if not name or name in claimed:
+                continue
+            claimed.add(name)
+            r = rated.get(name)
+            pieces = sorted(work.get(name, []), key=lambda w: -w["count"])   # stable: ties stay newest-first
+            skills.append({
+                "skill": name,
+                "rating": r["rating"] if r else None,
+                "count": r["count"] if r else 0,
+                **({"coach": r["coach"]} if r and r.get("coach") else {}),
+                "work": pieces[:WORK_PER_SKILL],
+                "work_total": len(pieces),
+            })
+        if skills:
+            out.append({"key": persona.get("key") or persona.get("name") or "",
+                        "name": persona.get("name") or persona.get("key") or "",
+                        "skills": skills})
+    return out
+
+
+class DeclaredSkillsView(APIView):
+    """GET /api/economy/ratez/skills/ — the caller's own learned skills, for the picker.
+
+    Own only: there is no username parameter, because this is a list to pick FROM and nobody
+    posts as somebody else. `open_in` is the control that adds a skill when the list is empty
+    or short, so the screen offers the jump rather than a dead end.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        personas = declared_skills(request.user)
+        skills = [s for p in personas for s in p["skills"]]
+        return Response({
+            "personas": personas,
+            "total": len(skills),
+            "rated": sum(1 for s in skills if s["rating"] is not None),
+            "note": DECLARED_NOTE,
+            "open_in": {"tab": "personaz", "target": "", "label": "Add skills in PersonaZ"},
+        })
+
+
 def posts_of(user, viewer, limit=50):
     """The member's posts the VIEWER may see, and what each scored.
 
