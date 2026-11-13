@@ -152,9 +152,10 @@ def declared_skills(user):
             r = rated.get(name)
             years = _skill_years(s)
             active, last_played = skill_activity(s)
-            year_only = {pr.get("start") for pr in (s.get("periods") or [])
-                         if isinstance(pr, dict) and pr.get("precision") == "year"}
-            stints = [{"start": a, **({"end": b} if b else {}), **({"precision": "year"} if a in year_only else {})}
+            raw = {pr.get("start"): pr for pr in (s.get("periods") or []) if isinstance(pr, dict)}
+            stints = [{"start": a, **({"end": b} if b else {}),
+                       **({"precision": "year"} if raw.get(a, {}).get("precision") == "year" else {}),
+                       **({"end_precision": "year"} if b and raw.get(a, {}).get("end_precision") == "year" else {})}
                       for a, b in _periods_of(s)]
             earliest = min(stints, key=lambda x: x["start"], default=None)
             pieces = sorted(work.get(name, []), key=lambda w: -w["count"])   # stable: ties stay newest-first
@@ -177,6 +178,11 @@ def declared_skills(user):
                 "years": years,
                 "active": active if years is not None else None,
                 "last_played": last_played,
+                # "year" when the stop was only known to the year, so the screen shows the year alone.
+                "last_played_precision": next(("year" if x.get("end_precision") == "year" else "day"
+                                               for x in stints if last_played and x.get("end") == last_played), None),
+                # True when ANY date on the skill is a year only, so the length is worded "about".
+                "approximate": any(x.get("precision") == "year" or x.get("end_precision") == "year" for x in stints),
                 "work": pieces[:WORK_PER_SKILL],
                 "work_total": len(pieces),
             })
