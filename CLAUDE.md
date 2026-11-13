@@ -3295,16 +3295,21 @@ skills and nothing else, each with the rating median and the posts that gave it.
 - **Ratings stored under a name that is not a profile skill key** (older posts, collab slot names) are
   not shown here: having been rated is not the same as having learned it.
 
-## A skill's start can be a YEAR: members know the year, not the day
+## A skill's start AND stop can be a YEAR: members know the year, not the day
 
-A member who "started rapping at 16" knows the year and nothing finer, so PersonaZ and ProfileZ offer
-"Just the year" beside the date. It is stored as that year's 1 January plus `precision: "year"` on the
-stint (`personaz.clean_persona` keeps the flag only on a 1 January, so a request cannot make a real
-date approximate). Every date parser keeps working unchanged, and calendar years since 1 January is
-exactly the whole years served, so experience arithmetic did not move. Only the START has it; end dates
-are still full dates.
+A member who "started rapping at 16" knows the year and nothing finer, and the same goes for "stopped in
+2013", so PersonaZ and ProfileZ offer "Just the year" beside each date. It is stored as a flag on the stint:
+a year-only START is that year's 1 January (`precision: "year"`) and a year-only STOP is that year's 1 JULY
+(`end_precision: "year"`). `personaz.clean_persona` keeps each flag only on its own day, so a request cannot
+make a real date approximate, and cleaning is stable so the repair sweep leaves it alone. Every date parser
+keeps working unchanged.
 
-`GET /api/economy/ratez/skills/` serves `learned_precision` (`"year"`, `"day"`, or `None` when undated)
-for the earliest stint, and the screen then says the year and "about N years", never a month or a day
-nobody gave. The cost: a year-only answer can overstate by up to 11 months (1 January is the earliest
-the start could be), which the word "about" carries.
+The stop is mid-year because a stop can fall anywhere in the year: 1 January would drop a start and stop in
+one year to zero days ("no start date"), and 31 December would overstate every stint. The start stays 1
+January (already shipped; it can never be in the future). The cost: a year-only date can be off by up to a
+year, which the word "about" carries, and the two conventions differ (a stint from "2000" to "2010" counts
+1 Jan 2000 to 1 Jul 2010, ten and a half years, shown "about 10 years").
+
+`GET /api/economy/ratez/skills/` serves `learned_precision` (`"year"`, `"day"`, `None` when undated) for the
+earliest stint, `last_played_precision` for the latest stop, and `approximate` (any date on the skill is a
+year only). The screen then says the year and "about N years", never a month or a day nobody gave.

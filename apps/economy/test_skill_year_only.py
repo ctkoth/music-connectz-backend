@@ -87,3 +87,61 @@ class PickerEndpointTests(TestCase):
                           format="json")
         kept = personas_of(profile_for(self.u))[0]["skills"][0]["periods"]
         self.assertEqual(kept, [{"start": "2010-01-01", "precision": "year"}])
+
+
+class YearOnlyEndTests(TestCase):
+    """The END can be a year too. Stored as that year's 1 July, flagged `end_precision: "year"`."""
+
+    def test_a_year_only_end_keeps_its_flag(self):
+        c = clean_persona(persona({"start": "2000-01-01", "precision": "year",
+                                   "end": "2010-07-01", "end_precision": "year"}))
+        self.assertEqual(c["skills"][0]["periods"],
+                         [{"start": "2000-01-01", "end": "2010-07-01", "precision": "year", "end_precision": "year"}])
+
+    def test_the_flag_is_dropped_on_any_other_end_date(self):
+        c = clean_persona(persona({"start": "2000-01-01", "end": "2010-03-04", "end_precision": "year"}))
+        self.assertEqual(c["skills"][0]["periods"], [{"start": "2000-01-01", "end": "2010-03-04"}])
+
+    def test_an_end_flag_with_no_end_is_nothing(self):
+        c = clean_persona(persona({"start": "2000-01-01", "end_precision": "year"}))
+        self.assertEqual(c["skills"][0]["periods"], [{"start": "2000-01-01"}])
+
+    def test_cleaning_is_stable(self):
+        stored = [clean_persona(persona({"start": "2000-01-01", "precision": "year",
+                                         "end": "2010-07-01", "end_precision": "year"}))]
+        self.assertFalse(needs_repair(stored))
+
+    def test_start_and_stop_in_one_year_is_still_counted(self):
+        # 1 January to 1 July: half a year served, never dropped to "no start date".
+        import datetime
+        y = datetime.date.today().year - 3
+        c = clean_persona(persona({"start": f"{y}-01-01", "precision": "year",
+                                   "end": f"{y}-07-01", "end_precision": "year"}))
+        self.assertEqual(_skill_years(c["skills"][0]), 0)         # whole years: under one
+        from apps.economy.social import _periods_of
+        self.assertEqual(len(_periods_of(c["skills"][0])), 1)
+
+
+class YearOnlyEndEndpointTests(PickerEndpointTests):
+    def test_served_with_the_precision_of_the_last_stop(self):
+        s = self.skill({"start": "2000-01-01", "precision": "year", "end": "2010-07-01", "end_precision": "year"})
+        self.assertEqual(s["last_played"], "2010-07-01")
+        self.assertEqual(s["last_played_precision"], "year")
+        self.assertTrue(s["approximate"])
+        self.assertEqual(s["years"], 10)                          # 1 Jan 2000 to 1 Jul 2010
+
+    def test_a_full_end_date_is_a_day(self):
+        s = self.skill({"start": "2000-03-04", "end": "2010-05-06"})
+        self.assertEqual(s["last_played_precision"], "day")
+        self.assertFalse(s["approximate"])
+
+    def test_a_year_only_start_alone_is_approximate(self):
+        s = self.skill({"start": "2000-01-01", "precision": "year"})
+        self.assertTrue(s["approximate"])
+        self.assertIsNone(s["last_played_precision"])
+
+    def test_the_end_flag_round_trips_through_the_profile_writer(self):
+        self.client.patch("/api/auth/me/", {"personas": [persona(
+            {"start": "2000-01-01", "precision": "year", "end": "2010-07-01", "end_precision": "year"})]}, format="json")
+        kept = personas_of(profile_for(self.u))[0]["skills"][0]["periods"]
+        self.assertEqual(kept[0]["end_precision"], "year")

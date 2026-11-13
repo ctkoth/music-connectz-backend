@@ -171,6 +171,12 @@ def clean_persona(raw):
             # can carry it: any other date is a full date whatever a request says.
             if str(pr.get("precision") or "") == "year" and start.endswith("-01-01"):
                 stint["precision"] = "year"
+            # The same for the END: the member knew only the year they stopped. It is stored as that
+            # year's 1 July (a stop can fall anywhere in the year, so the middle is the unbiased point;
+            # 1 January would drop a start and stop in one year to zero, and 31 December would overstate).
+            # Only a 1 July with an end can carry it.
+            if end and str(pr.get("end_precision") or "") == "year" and end.endswith("-07-01"):
+                stint["end_precision"] = "year"
             periods.append(stint)
         # Hourly rate, in cents. The blueprint prices CallZ by "the other
         # member's skill rate per hour" and nothing stored one, so the price
