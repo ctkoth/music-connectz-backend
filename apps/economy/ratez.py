@@ -152,7 +152,11 @@ def declared_skills(user):
             r = rated.get(name)
             years = _skill_years(s)
             active, last_played = skill_activity(s)
-            stints = [{"start": a, **({"end": b} if b else {})} for a, b in _periods_of(s)]
+            year_only = {pr.get("start") for pr in (s.get("periods") or [])
+                         if isinstance(pr, dict) and pr.get("precision") == "year"}
+            stints = [{"start": a, **({"end": b} if b else {}), **({"precision": "year"} if a in year_only else {})}
+                      for a, b in _periods_of(s)]
+            earliest = min(stints, key=lambda x: x["start"], default=None)
             pieces = sorted(work.get(name, []), key=lambda w: -w["count"])   # stable: ties stay newest-first
             skills.append({
                 "skill": name,
@@ -164,7 +168,11 @@ def declared_skills(user):
                 #   `learned` is the date they say they learned it (the earliest stint), `periods` the
                 #   stints themselves, so the screen can say how long that is from today in the
                 #   same words PersonaZ uses.
-                "learned": min((x["start"] for x in stints), default=None),
+                "learned": earliest["start"] if earliest else None,
+                # "year" when the member only knew the year they learned it: the screen then says the
+                # year and "about", and never claims a month or a day nobody gave.
+                "learned_precision": ("year" if earliest and earliest.get("precision") == "year"
+                                      else ("day" if earliest else None)),
                 "periods": stints,
                 "years": years,
                 "active": active if years is not None else None,
