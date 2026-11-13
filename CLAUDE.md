@@ -3273,3 +3273,24 @@ workflow, not a codebase. `PLUGIN_NOTE` is the answer to "VST": a native desktop
 browser or the TWA, outside web plugins would run with the member's sign-in, so only built-in effects
 ship and outside plugins wait for the Windows app. Nothing about a DAW session reaches this server — the
 frontend keeps it on the device until the member saves a bounce to FileZ.
+
+## "Skills used on this" offers only skills the member has LEARNED
+
+A post's skills are rated for its author (`skills_for_post`), so the picker used to let a member
+tick any skill in the catalogue and a rating then landed on a claim they had never made. The picker
+now reads `GET /api/economy/ratez/skills/` (`ratez.declared_skills`): the caller's own PersonaZ
+skills and nothing else, each with the rating median and the posts that gave it.
+
+- **The rating is not a second formula.** It is `skills_of` (`skill_rating_median`, plus the opt-in
+  coach blend), so the number matches every other screen. `None` and count 0 when unrated, never 0.
+- **Work is read from `SkillRating.item_id`**, so a link only ever points at a post that produced a
+  rating. A deleted post or one the member cannot open is dropped from the links (rating rows are not
+  deleted with a post, so the median can still include it — the links never invent work). Capped at
+  `WORK_PER_SKILL` (5), most-rated first, with `work_total` saying how many were left off.
+- **Own only, no `username`.** It is a list to pick FROM. `open_in` points an empty list at PersonaZ.
+- **Not enforced on the write path, on purpose.** Posting, BattleZ, VenueZ and CollabZ still accept any
+  skill name: OCC runs, the SoundCloud import, collab-slot credits ("Designer") and ~a dozen tests post
+  names that are not profile skill keys. This closes the door on the screen; closing it in `create_post`
+  would be a separate change with those callers to migrate. A profile skill's `name` is the picker's key.
+- **Ratings stored under a name that is not a profile skill key** (older posts, collab slot names) are
+  not shown here: having been rated is not the same as having learned it.

@@ -150,7 +150,7 @@ from .inventoryz import InventoryAIView, InventoryView
 from .superfanz import SuperfanzView
 from .bugz import BugTriageView, BugzView
 from .logicz import LogicZView
-from .ratez import RateQueueView, RatezView, RatingKindsView
+from .ratez import DeclaredSkillsView, RateQueueView, RatezView, RatingKindsView
 from .occ_workz import (OccWorkDetailView, OccWorkShareView, OccWorkUnshareView,
                         OccWorkzView, PostOccWorkView)
 from .payments import (
@@ -485,6 +485,7 @@ urlpatterns = [
     path("badgez/holders/", BadgeHoldersView.as_view(), name="economy-badgez-holders"),
     path("ratez/", RatezView.as_view(), name="economy-ratez"),
     path("ratez/kinds/", RatingKindsView.as_view(), name="economy-ratez-kinds"),
+    path("ratez/skills/", DeclaredSkillsView.as_view(), name="economy-ratez-skills"),
     path("ratez/queue/", RateQueueView.as_view(), name="economy-ratez-queue"),
     path("budgetz/", BudgetView.as_view(), name="economy-budgetz"),
     path("budgetz/line/<int:pk>/", BudgetLineView.as_view(), name="economy-budgetz-line"),
