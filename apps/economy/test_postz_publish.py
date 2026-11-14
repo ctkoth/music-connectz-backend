@@ -82,12 +82,16 @@ class PublishingAPrivateDraftTests(TestCase):
         self.assertEqual(p.visibility, "private")
 
 
+from apps.economy.test_post_cost import pin_small_floor  # noqa: E402
+
+
 class PublishingChargesTheShortfallTests(TestCase):
     """The docstring's own promise: "the normal cost of a post applies when
     they publish one" — but only the SHORTFALL, so a post already charged in
     full at creation is never charged twice for the same skills."""
 
     def setUp(self):
+        pin_small_floor(self)
         self.author = User.objects.create_user("author", "a@e.com", PW)
         self.client = APIClient()
         self.client.force_authenticate(self.author)

@@ -15,19 +15,19 @@ def at(user, tier):
 
 class AiEnergyTests(TestCase):
     def test_a_prompt_costs_the_tiers_energy_times_the_engine_base(self):
-        # One prompt is 2000 ⚡ on Free, 200 on Premium, 20 on StatZ, times the engine.
+        # One prompt is 2000 ⚡ on Free, 500 on Premium, 100 on StatZ, times the engine.
         u = User.objects.create_user("a", "a@e.com", "pw12345678")
         self.assertEqual(ai_energy_cost(u, None), 2000)
         self.assertEqual(ai_energy_cost(u, "haiku"), 2000)
         self.assertEqual(ai_energy_cost(u, "fable"), 16000)
-        at(u, "premium"); self.assertEqual(ai_energy_cost(u, None), 200)
-        self.assertEqual(ai_energy_cost(u, "opus"), 800)
-        at(u, "statz"); self.assertEqual(ai_energy_cost(u, None), 20)
-        self.assertEqual(ai_energy_cost(u, "fable"), 160)
+        at(u, "premium"); self.assertEqual(ai_energy_cost(u, None), 500)
+        self.assertEqual(ai_energy_cost(u, "opus"), 2000)
+        at(u, "statz"); self.assertEqual(ai_energy_cost(u, None), 100)
+        self.assertEqual(ai_energy_cost(u, "fable"), 800)
 
     def test_a_higher_tier_never_pays_more_for_the_same_prompt(self):
         # The old "a Free day's prompts fit inside a Free day's regeneration" guard is gone on
-        # purpose: 2000 / 200 / 20 is Corey's call and does not fit (see the note beside
+        # purpose: 2000 / 500 / 100 is Corey's call and does not fit (see the note beside
         # AI_ENERGY_PER_PROMPT). What still has to hold is the ladder's direction.
         from apps.economy.models import AI_ENERGY_PER_PROMPT
         self.assertGreater(AI_ENERGY_PER_PROMPT["free"], AI_ENERGY_PER_PROMPT["premium"])

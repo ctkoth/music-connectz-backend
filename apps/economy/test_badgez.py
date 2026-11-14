@@ -294,6 +294,11 @@ class GiftedAndSexyTests(BadgeBase):
     in the work economy on purpose.
     """
 
+    def setUp(self):
+        super().setUp()
+        from apps.economy.test_post_cost import pin_small_floor
+        pin_small_floor(self)         # the discount is checked on a skill price, not on the floor
+
     def rate_my_posts(self, score, n=5):
         from django.contrib.auth import get_user_model
         U = get_user_model()

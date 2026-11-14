@@ -129,6 +129,11 @@ class InputAndOutputTests(WorkzBase):
 class PriceUpFrontTests(WorkzBase):
     """A price discovered by paying it is not a price, it's a bill."""
 
+    def setUp(self):
+        super().setUp()
+        from apps.economy.test_post_cost import pin_small_floor
+        pin_small_floor(self)         # checks the skill price, not the tier floor
+
     def test_the_share_cost_is_on_the_row_before_the_button(self):
         p = profile_for(self.user)
         p.personas = [{"key": "x", "name": "x", "skills": [

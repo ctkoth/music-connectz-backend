@@ -901,9 +901,11 @@ def is_platform_owner(user):
 # member holds, never refused for it: a tier says how much, never whether, and ⚡
 # regenerates at a floor for everybody.
 AI_ENERGY_BASE = {"haiku": 1, "sonnet": 2, "opus": 4, "fable": 8}
-AI_ENERGY_PER_PROMPT = {"free": 2000, "premium": 200, "statz": 20, "debug": 20}
+AI_ENERGY_PER_PROMPT = {"free": 2000, "premium": 500, "statz": 100, "debug": 100}
 # Corey's call, and it has moved twice: 4000 / 400 / 40, then the audit's 10 / 6 / 4, now
-# 2000 / 200 / 20 ("promptz/postz cost by tier"). The same table prices a POST's floor
+# 2000 / 500 / 100 ("promptz/postz cost by tier"; Premium and StatZ raised from his first
+# 200 / 20 after his own wallet showed ~29,000 ⚡ at the StatZ floor of 20/hour with nothing to
+# spend it on). The same table prices a POST's floor
 # (`post_energy_floor`). Know what it costs before moving it again: Free regenerates 48 ⚡ a
 # day (ENERGY_FLOOR_PER_HOUR 2), so one Free prompt or post is ~42 days of regeneration. It is
 # still taken UP TO what is held and never refused (a tier says how much, never whether), so

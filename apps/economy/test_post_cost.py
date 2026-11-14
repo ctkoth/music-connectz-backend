@@ -8,7 +8,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from apps.economy.models import Post, membership_for, profile_for, wallet_for
+from apps.economy.models import Post, membership_for, post_energy_floor, profile_for, wallet_for
 
 User = get_user_model()
 PW = "hunter2hunter2"
@@ -16,8 +16,20 @@ POSTZ = "/api/economy/postz/"
 COST = "/api/economy/postz/cost/"
 
 
+def pin_small_floor(testcase):
+    """These tests check skill-price ARITHMETIC (40 + 25 = 65); the tier floor (a prompt's ⚡:
+    2000 / 500 / 100) would swamp every number. The floor has its own tests."""
+    from unittest.mock import patch
+    p = patch.dict("apps.economy.models.AI_ENERGY_PER_PROMPT",
+                   {"free": 1, "premium": 1, "statz": 1, "debug": 1})
+    p.start()
+    testcase.addCleanup(p.stop)
+
+
+
 class CostBase(TestCase):
     def setUp(self):
+        pin_small_floor(self)
         self.user = User.objects.create_user(username="maker", password=PW)
         membership_for(self.user)
         p = profile_for(self.user)
@@ -118,3 +130,53 @@ class TheChargeMatchesTheQuoteTests(CostBase):
         self.assertEqual(r.status_code, 201)
         self.assertEqual(r.data["energy_charged"], 10)
         self.assertEqual(wallet_for(self.user).energy, 0)
+
+
+class TheFloorIsWhatAPromptCostsTests(TestCase):
+    """Corey: "promptz/postz cost by tier" — a post costs at least what one AI prompt does on
+    the member's tier (2000 / 500 / 100 ⚡), and the real numbers are used here, unpinned."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="floor", password=PW)
+        membership_for(self.user)
+        p = profile_for(self.user)
+        p.personas = [{"key": "producer", "name": "Beat Producer", "skills": [
+            {"name": "Beat Producer", "rate_cents": 40}]}]
+        p.save()
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+
+    def at(self, tier):
+        m = membership_for(self.user); m.tier = tier; m.save(update_fields=["tier"])
+
+    def test_the_floor_is_the_prompt_price_on_each_tier(self):
+        for tier, amount in (("free", 2000), ("premium", 500), ("statz", 100)):
+            self.at(tier)
+            self.assertEqual(post_energy_floor(self.user), amount)
+            self.assertEqual(self.client.get(COST).data["cost"]["amount"], amount)
+            self.assertEqual(self.client.get(COST).data["floor"], amount)
+
+    def test_priced_skills_still_count_when_they_cost_more_than_the_floor(self):
+        self.at("statz")
+        p = profile_for(self.user)
+        p.personas = [{"key": "producer", "name": "Beat Producer", "skills": [
+            {"name": "Beat Producer", "rate_cents": 400}]}]
+        p.save()
+        self.assertEqual(self.client.get(f"{COST}?skills=Beat Producer").data["cost"]["amount"], 400)
+
+    def test_a_cheap_skill_is_lifted_to_the_floor_not_added_to_it(self):
+        self.at("statz")
+        self.assertEqual(self.client.get(f"{COST}?skills=Beat Producer").data["cost"]["amount"], 100)
+
+    def test_the_charge_takes_what_is_held_and_never_refuses(self):
+        w = wallet_for(self.user); w.energy = 500; w.save(update_fields=["energy"])
+        r = self.client.post(POSTZ, {"title": "Take"}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data["energy_charged"], 500)          # the Free floor is 2000
+        self.assertEqual(wallet_for(self.user).energy, 0)
+
+    def test_the_gifted_discount_reaches_the_floor(self):
+        from unittest.mock import patch
+        self.at("statz")
+        with patch("apps.economy.models.badge_effects", return_value={"post_discount_pct": 25}):
+            self.assertEqual(self.client.get(COST).data["cost"]["amount"], 75)   # 100 less 25%
