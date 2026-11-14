@@ -695,10 +695,11 @@ FOLLOW_ENERGY = 1
 # Hosting an open battle puts a listing in everyone's BattleZ.
 BATTLE_HOST_ENERGY = 1
 
-# Every post costs at least this much ⚡, whatever skills went into it. A post with
-# no priced skill used to be free, so the cheapest thing to do was also the thing
+# Every post costs at least what one AI prompt does on the member's tier — see
+# `models.post_energy_floor`, which reads `AI_ENERGY_PER_PROMPT` so the two cannot drift
+# (Corey: "postz should cost the same tiered energy amounts as promptz"). It was a flat 1.
+# A post with no priced skill used to be free, so the cheapest thing to do was also the thing
 # nothing paid for. Not a wall: a post still goes through with less than this.
-POST_ENERGY_FLOOR = 1
 
 # Boosting a post: ⚡ buys a day near the top of the feed for a PUBLIC post of
 # yours. It buys visibility only - never ratings, plays or royalties - and it is

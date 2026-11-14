@@ -15,25 +15,30 @@ def at(user, tier):
 
 class AiEnergyTests(TestCase):
     def test_a_prompt_costs_the_tiers_energy_times_the_engine_base(self):
-        # One prompt is 10 ⚡ on Free, 6 on Premium, 4 on StatZ, times the engine.
+        # One prompt is 2000 ⚡ on Free, 200 on Premium, 20 on StatZ, times the engine.
         u = User.objects.create_user("a", "a@e.com", "pw12345678")
-        self.assertEqual(ai_energy_cost(u, None), 10)
-        self.assertEqual(ai_energy_cost(u, "haiku"), 10)
-        self.assertEqual(ai_energy_cost(u, "fable"), 80)
-        at(u, "premium"); self.assertEqual(ai_energy_cost(u, None), 6)
-        self.assertEqual(ai_energy_cost(u, "opus"), 24)
-        at(u, "statz"); self.assertEqual(ai_energy_cost(u, None), 4)
-        self.assertEqual(ai_energy_cost(u, "fable"), 32)
+        self.assertEqual(ai_energy_cost(u, None), 2000)
+        self.assertEqual(ai_energy_cost(u, "haiku"), 2000)
+        self.assertEqual(ai_energy_cost(u, "fable"), 16000)
+        at(u, "premium"); self.assertEqual(ai_energy_cost(u, None), 200)
+        self.assertEqual(ai_energy_cost(u, "opus"), 800)
+        at(u, "statz"); self.assertEqual(ai_energy_cost(u, None), 20)
+        self.assertEqual(ai_energy_cost(u, "fable"), 160)
 
-    def test_a_free_days_prompts_fit_inside_a_free_days_regeneration(self):
-        # The reason the number is what it is: using every free prompt must not leave a
-        # Free member unable to afford anything else that day.
-        from apps.economy.models import AI_ENERGY_PER_PROMPT, ENERGY_FLOOR_PER_HOUR, PROMPT_ALLOWANCE
-        self.assertLessEqual(AI_ENERGY_PER_PROMPT["free"] * PROMPT_ALLOWANCE["free"],
-                             ENERGY_FLOOR_PER_HOUR["free"] * 24)
-        # And a higher tier never pays more for the same prompt.
+    def test_a_higher_tier_never_pays_more_for_the_same_prompt(self):
+        # The old "a Free day's prompts fit inside a Free day's regeneration" guard is gone on
+        # purpose: 2000 / 200 / 20 is Corey's call and does not fit (see the note beside
+        # AI_ENERGY_PER_PROMPT). What still has to hold is the ladder's direction.
+        from apps.economy.models import AI_ENERGY_PER_PROMPT
         self.assertGreater(AI_ENERGY_PER_PROMPT["free"], AI_ENERGY_PER_PROMPT["premium"])
         self.assertGreater(AI_ENERGY_PER_PROMPT["premium"], AI_ENERGY_PER_PROMPT["statz"])
+
+    def test_a_post_costs_at_least_what_a_prompt_does_on_the_same_tier(self):
+        from apps.economy.models import AI_ENERGY_PER_PROMPT, post_energy_floor
+        u = User.objects.create_user("p", "p@e.com", "pw12345678")
+        for tier in ("free", "premium", "statz"):
+            at(u, tier)
+            self.assertEqual(post_energy_floor(u), AI_ENERGY_PER_PROMPT[tier])
 
     def test_a_take_costs_the_same_energy_on_every_tier(self):
         from apps.economy.catalog import COACH_TAKE_ENERGY
@@ -68,6 +73,7 @@ class TrialAsMemberTests(TestCase):
     def test_the_trial_result_states_what_joining_is_worth(self):
         from apps.economy.trial import _as_member
         self.assertIsNone(_as_member({"score": None}))
-        from apps.economy.models import PROMPT_ALLOWANCE
+        from apps.economy.catalog import COACH_TAKE_ENERGY
+        from apps.economy.models import AI_ENERGY_PER_PROMPT, PROMPT_ALLOWANCE
         self.assertEqual(_as_member({"score": 8, "score_exact": 8.0}),
-                         {"daily_prompts": PROMPT_ALLOWANCE["free"], "energy": 12, "xp": 40, "kept": True})
+                         {"daily_prompts": PROMPT_ALLOWANCE["free"], "energy": AI_ENERGY_PER_PROMPT["free"] + COACH_TAKE_ENERGY["free"], "xp": 40, "kept": True})

@@ -155,9 +155,9 @@ class PriceUpFrontTests(WorkzBase):
         self.assertEqual(wallet_for(self.user).energy, 60)
 
     def test_an_unpriced_work_costs_only_the_post_floor_to_share(self):
-        from apps.economy.catalog import POST_ENERGY_FLOOR
+        from apps.economy.models import post_energy_floor
         w = self.make(skills_used=["Beat Producer"])   # no rate set
-        self.assertEqual(w["share_cost"]["amount"], POST_ENERGY_FLOOR)
+        self.assertEqual(w["share_cost"]["amount"], post_energy_floor(self.user))
 
 
 class ShareTests(WorkzBase):

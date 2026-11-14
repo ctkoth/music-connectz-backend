@@ -16,7 +16,7 @@ from django.db.models import Case, Count, IntegerField, Sum, When
 from django.utils import timezone
 
 from .catalog import (SUBMISSION_PACK, SUBMISSION_PACK_ENERGY, SUBMISSION_PACKS_MAX, BOOST_ENERGY, BOOST_HOURS, BOOST_MAX_AHEAD_HOURS, BOOST_SLOTS,
-                      POST_ENERGY_FLOOR, edit_window_for)
+                      edit_window_for)
 from .coachshare import clean_visibility, coach_read_for, for_new_post, legacy_score
 from .crosspost import coach_cap, coach_price, destinations_for, take_state_for
 from .thoroughz import marks_for_posts
@@ -46,6 +46,7 @@ from .models import (
     log_resource,
     membership_for,
     notify,
+    post_energy_floor,
     record_submission,
     split_cents,
     submission_cap_for,
@@ -397,13 +398,19 @@ def post_cost_cents(user, skills_used, floor=None):
         total += cents
     # BadgeZ reads here, where the price is decided — the Gifted badge's
     # discount would be a sticker anywhere else.
-    from .models import badge_effects
+    from .models import badge_effects, post_energy_floor
     off = badge_effects(user).get("post_discount_pct", 0)
     if off and total:
         total = max(0, total - int(total * off / 100))
-    # Every POST costs at least the floor. Submissions that refuse when short
-    # (battles, collabs, venues) pass floor=0: a floor there would be a wall.
-    floor = POST_ENERGY_FLOOR if floor is None else floor
+    # Every POST costs at least the floor: what one AI prompt costs on this tier.
+    # Submissions that refuse when short (battles, collabs, venues) pass floor=0: a
+    # floor there would be a wall. The Gifted discount reaches the floor too, because
+    # the badge promises "25% off the Energy every post costs you" and a post that is
+    # all floor is most posts.
+    if floor is None:
+        floor = post_energy_floor(user)
+        if off:
+            floor = max(1, -(-floor * (100 - off) // 100))
     if total < floor:
         lines.append({"skill": "Posting", "cents": floor - total})
         total = floor
@@ -714,8 +721,10 @@ class PostCostView(APIView):
             "charged": min(total, max(0, w.energy)),
             "affordable": w.energy >= total,
             "priced_skills": sorted(skill_prices(request.user)),
-            "note": "Posting costs the combined price of the skills you put on "
-                    "it. Skills you haven't priced cost nothing.",
+            "floor": post_energy_floor(request.user),
+            "note": "Posting costs the combined price of the skills you put on it, and "
+                    "never less than one AI prompt costs on your tier. Skills you haven't "
+                    "priced add nothing beyond that.",
         })
 
 

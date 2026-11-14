@@ -901,13 +901,16 @@ def is_platform_owner(user):
 # member holds, never refused for it: a tier says how much, never whether, and ⚡
 # regenerates at a floor for everybody.
 AI_ENERGY_BASE = {"haiku": 1, "sonnet": 2, "opus": 4, "fable": 8}
-AI_ENERGY_PER_PROMPT = {"free": 10, "premium": 6, "statz": 4, "debug": 4}
-# Corey set 4000 / 400 / 40 and then applied the audit's recommendation. 4000 was ~83
-# days of Free regeneration (ENERGY_FLOOR_PER_HOUR 2), so one prompt emptied any Free
-# wallet and left cold DMs, coaching a post, submission packs and boosts out of reach
-# for anyone who used the AI that day — a tier deciding WHETHER rather than how much.
-# At 10, four free prompts a day (40 ⚡) still fit inside a Free day's regeneration
-# (48), so the AI costs something real without closing the rest of the app.
+AI_ENERGY_PER_PROMPT = {"free": 2000, "premium": 200, "statz": 20, "debug": 20}
+# Corey's call, and it has moved twice: 4000 / 400 / 40, then the audit's 10 / 6 / 4, now
+# 2000 / 200 / 20 ("promptz/postz cost by tier"). The same table prices a POST's floor
+# (`post_energy_floor`). Know what it costs before moving it again: Free regenerates 48 ⚡ a
+# day (ENERGY_FLOOR_PER_HOUR 2), so one Free prompt or post is ~42 days of regeneration. It is
+# still taken UP TO what is held and never refused (a tier says how much, never whether), so
+# the effect is that a Free run empties the wallet rather than being blocked — and everything
+# that REFUSES short of ⚡ (a cold DM 2, coaching a post 10, a submission pack 30, a boost 40,
+# a strict batch publish) is out of reach for the rest of the day. The audit's 10 / 6 / 4 was
+# sized so four free prompts fit inside a Free day's regeneration; this is deliberately not.
 
 
 def ai_energy_cost(user, engine=None, tier=None):
@@ -921,6 +924,18 @@ def ai_energy_cost(user, engine=None, tier=None):
     off = min(AI_ENERGY_OFF_CAP, int(badge_effects(user).get("ai_energy_off_pct", 0) or 0)) if user else 0
     per = AI_ENERGY_PER_PROMPT.get(tier, AI_ENERGY_PER_PROMPT["free"])
     return max(1, math.ceil(base * per * (100 - off) / 100))
+
+
+def post_energy_floor(user, tier=None):
+    """The least a post costs in ⚡: what one AI prompt costs on this member's tier.
+
+    Read off `AI_ENERGY_PER_PROMPT` rather than restated, so "a post costs what a
+    prompt costs" stays true when that table moves. No engine multiplier (a post has
+    no engine) and no coach-badge discount (that perk is for AI runs); the Gifted
+    badge's own post discount is applied by `post_cost_cents`, where it is stated.
+    """
+    tier = tier or membership_for(user).tier
+    return AI_ENERGY_PER_PROMPT.get(tier, AI_ENERGY_PER_PROMPT["free"])
 
 
 def _take_ai_energy(user, engine, note):
