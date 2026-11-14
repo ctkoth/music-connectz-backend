@@ -161,6 +161,23 @@ def import_cap(tier):
     return limits_for(tier)["soundcloud_import"]
 
 
+def asked_limit(raw, cap):
+    """The member's own "newest N", never above the plan's ceiling.
+
+    The plan says how many MAY come in; this lets a member bring in fewer. A StatZ
+    import was the whole catalogue or nothing, so somebody who wanted twenty tracks
+    got four hundred drafts and a clean-up job. Junk, zero or a blank is "did not
+    say" and means the plan's own number, never a refusal.
+    """
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return cap
+    if n < 1:
+        return cap
+    return n if cap is None else min(n, cap)
+
+
 def _get(url, token, params, deadline):
     try:
         r = requests.get(
@@ -263,12 +280,17 @@ class SoundCloudImportView(APIView):
                    "two hundred at once would bury everyone else's, so what to "
                    "show people stays your call.",
             "stores_token": False,
+            # A member may ask for fewer than the plan allows ({limit: N} on the POST).
+            "can_choose": True,
         })
 
     def post(self, request):
         d = request.data or {}
         tier = membership_for(request.user).tier
-        cap = import_cap(tier)
+        plan_cap = import_cap(tier)
+        # The member's own number when they gave one; the plan's otherwise.
+        cap = asked_limit(d.get("limit"), plan_cap)
+        chose = cap != plan_cap
         try:
             token = access_token_for(
                 "soundcloud", str(d.get("code") or ""),
@@ -375,6 +397,9 @@ class SoundCloudImportView(APIView):
                          "Nothing is lost: run it again to carry on, nothing already imported comes in twice "
                          "(it re-reads from your newest, so a second run only reaches further "
                          "if SoundCloud is faster).")
+        elif capped and chose:
+            parts.append(f"You asked for your newest {cap}; older tracks were left on SoundCloud. "
+                         "Run it again with a bigger number to bring more in.")
         elif capped:
             parts.append(f"Your plan brings in your newest {cap} tracks per import; "
                          "running it again re-reads those same tracks, so it will not reach older ones.")
@@ -393,8 +418,10 @@ class SoundCloudImportView(APIView):
             "more_may_remain": (not complete) or capped,
             "left": 0 if (complete and not capped) else None,
             "capped_by_plan": capped,
-            "max_tracks": cap,
-            "whole_catalogue": cap is None,
+            "max_tracks": plan_cap,
+            "whole_catalogue": plan_cap is None,
+            # What this run was asked for: the member's own number, or None for the plan's.
+            "asked": cap if chose else None,
             # Said out loud because it is the whole reason this is safe to use:
             # the member handed over an authorisation and gets to see that
             # nothing was kept from it.

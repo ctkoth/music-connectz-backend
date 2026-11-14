@@ -323,3 +323,46 @@ class PrivateTracksComeInLockedTests(Base):
         r = self.run_with([dict(track(9), id=777, sharing="public")])
         self.assertEqual(r.data["imported"], 0)
         self.assertEqual(r.data["already_here"], 1)
+
+
+class TheMemberPicksHowManyTests(Base):
+    """The plan says how many MAY come in; the member may ask for fewer."""
+
+    def run_with(self, limit, n=40):
+        from . import soundcloud_import as m
+        seen = {}
+
+        def tracks(token, cap, deadline=None):
+            seen["cap"] = cap
+            rows = [track(i) for i in range(n)]
+            return (rows if cap is None else rows[:cap]), True
+        with patch.object(m, "access_token_for", return_value="tok"), patch.object(m, "_tracks", side_effect=tracks):
+            r = self.c.post("/api/economy/soundcloud/import/",
+                            {"code": "c", "redirect_uri": "r", "limit": limit}, format="json")
+        return r, seen["cap"]
+
+    def test_statz_can_bring_in_just_the_newest_few(self):
+        self.tier(TIER_STATZ)
+        r, cap = self.run_with(5)
+        self.assertEqual((cap, r.data["imported"], r.data["asked"]), (5, 5, 5))
+        self.assertIn("You asked for your newest 5", r.data["detail"])
+        self.assertTrue(r.data["whole_catalogue"], "the plan's own ceiling is still reported")
+
+    def test_a_number_above_the_plan_is_the_plans(self):
+        from .soundcloud_import import import_cap
+        free = import_cap(TIER_FREE)
+        r, cap = self.run_with(free + 50)
+        self.assertEqual(cap, free)
+        self.assertIsNone(r.data["asked"])
+        self.assertIn("Your plan brings in", r.data["detail"])
+
+    def test_junk_or_nothing_means_the_plans_number_never_a_refusal(self):
+        from .soundcloud_import import asked_limit
+        for junk in (None, "", "abc", 0, -3, [], {}):
+            self.assertEqual(asked_limit(junk, 10), 10)
+            self.assertIsNone(asked_limit(junk, None))
+        self.assertEqual(asked_limit("7", None), 7)
+        self.assertEqual(asked_limit(3, 10), 3)
+
+    def test_the_get_says_a_number_can_be_chosen(self):
+        self.assertTrue(self.c.get("/api/economy/soundcloud/import/").data["can_choose"])
