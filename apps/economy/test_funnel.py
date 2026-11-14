@@ -302,7 +302,46 @@ class HeadlineRateTests(TestCase):
 
     def test_the_three_are_the_three_that_decide_what_to_work_on(self):
         self.assertEqual([r["key"] for r in self.summary()["headline"]],
-                         ["try_view", "try_scored", "register_success"])
+                         ["try_view", "try_engage", "try_scored", "register_success"])
+
+    def test_a_rate_only_counts_browsers_that_did_both_steps(self):
+        # The numbers that prompted this: phones arrived straight on a trial
+        # link, desktops landed, and one total was divided by the other.
+        for a in ("d1", "d2", "d3", "d4"):
+            FunnelEvent.objects.create(kind="landing_view", anon_id=a)
+        FunnelEvent.objects.create(kind="try_view", anon_id="d1")
+        for a in ("p1", "p2", "p3"):
+            FunnelEvent.objects.create(kind="try_view", anon_id=a)
+        # Joined without ever being scored: must not read "1 of 0".
+        FunnelEvent.objects.create(kind="register_success", anon_id="p1")
+        d = self.summary()
+        rows = {r["key"]: r for r in d["headline"]}
+        self.assertEqual((rows["try_view"]["from"], rows["try_view"]["to"]), (4, 1))
+        self.assertEqual(d["direct_trial"], 3)
+        self.assertEqual((rows["register_success"]["from"], rows["register_success"]["to"]), (0, 0))
+        self.assertIsNone(rows["register_success"]["pct"])
+        for r in d["headline"]:
+            self.assertLessEqual(r["to"], r["from"])
+
+    def test_touching_the_trial_is_its_own_step_and_the_recorder_counts_as_touching(self):
+        for a in ("a", "b", "c"):
+            FunnelEvent.objects.create(kind="try_view", anon_id=a)
+        FunnelEvent.objects.create(kind="try_engage", anon_id="a", meta={"how": "tap"})
+        FunnelEvent.objects.create(kind="try_attach", anon_id="b")   # from before try_engage shipped
+        FunnelEvent.objects.create(kind="try_engage", anon_id="zzz")  # never opened: not counted
+        row = {r["key"]: r for r in self.summary()["headline"]}["try_engage"]
+        self.assertEqual((row["from"], row["to"], row["pct"]), (3, 2, 66.7))
+
+    def test_the_shell_rides_every_kind_and_junk_is_dropped(self):
+        c = APIClient()
+        c.post("/api/auth/funnel/", {"kind": "try_view", "anon_id": "s1",
+                                     "meta": {"shell": "inapp", "app_key": "singz"}}, format="json")
+        c.post("/api/auth/funnel/", {"kind": "try_engage", "anon_id": "s1",
+                                     "meta": {"shell": "Mozilla/5.0 whatever", "how": "swipe"}}, format="json")
+        self.assertEqual(FunnelEvent.objects.get(kind="try_view").meta["shell"], "inapp")
+        self.assertEqual(FunnelEvent.objects.get(kind="try_engage").meta, {})
+        shells = self.summary()["shells"]
+        self.assertEqual([(r["shell"], r["try_view"]) for r in shells], [("inapp", 1)])
 
 
 class RegisterAttributionTests(TestCase):

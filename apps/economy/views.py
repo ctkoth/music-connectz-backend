@@ -505,6 +505,7 @@ class FunnelEventView(APIView):
         "landing_view": {},
         "landing_cta": {"at": lambda v: v if v in ("hero", "compare", "doors") else None},
         "try_view": {},
+        "try_engage": {"how": lambda v: v if v in ("tap", "scroll", "key") else None},
         # Which "no" it was. Three completely different situations —
         # the visitor spent today's take, the platform spent the day's, or
         # nobody set the key — and a row that cannot tell them apart sends
@@ -572,7 +573,14 @@ class FunnelEventView(APIView):
     # visit, and app_key is exactly that: which door, if any, this browser
     # was using when it did whatever it's doing now. `track.js` remembers the
     # last one it saw and rides it on every call after, the same as `src`.
-    AMBIENT = {"src": _SRC, "dev": _DEV, "app_key": _APP}
+    # `shell` is which build the page is running in, from the client's own
+    # `appShell()` (the list sign-in already branches on). "inapp" is the
+    # browser inside Instagram, TikTok, Facebook and the rest, where a mic and
+    # a file picker often do not work: a trial opened there and a trial opened
+    # in Chrome fail for different reasons, and one number hid both.
+    _SHELL = lambda v: v if v in ("web", "inapp", "android", "android-old",
+                                  "desktop", "desktop-old") else None
+    AMBIENT = {"src": _SRC, "dev": _DEV, "app_key": _APP, "shell": _SHELL}
 
     def post(self, request):
         kind = str(request.data.get("kind") or "")
@@ -702,21 +710,36 @@ class FunnelSummaryView(APIView):
         # Each is stated as its two counts AND the rate, because a rate with
         # no denominator behind it is the decoration this file's own docstring
         # warns about — 100% of two people is not a working funnel.
-        def _rate(from_kind, to_kind, label, note):
-            top = steps[from_kind]["unique"]
-            got = steps[to_kind]["unique"]
+        # SAME BROWSER, every one of them. These used to divide one step's total
+        # by another's, which is only a rate when the second group is inside the
+        # first. It was not: 129 phones opened the trial and 10 phones ever saw the
+        # landing page, so "landing -> trial 39.3%" divided the phones that arrived
+        # straight on a trial link by the desktops that landed, and "scored ->
+        # account" read "1 of 0". `to` is now the browsers in `from` that ALSO did
+        # the next thing, so a rate can never exceed 100% or have an empty top.
+        who = {}
+        for kind, anon in rows.values_list("kind", "anon_id"):
+            who.setdefault(kind, set()).add(anon)
+
+        def _did(*kinds):
+            return set().union(*(who.get(k, set()) for k in kinds))
+
+        def _rate(key, top, got, label, note, **extra):
             return {
-                "key": to_kind,
-                "label": label,
-                "from_kind": from_kind, "to_kind": to_kind,
-                "from": top, "to": got,
+                "key": key, "label": label,
+                "from": len(top), "to": len(top & got),
                 # None, not 0, when nobody reached the top of the step. A 0%
                 # against no visitors reads as a broken product; it is an
                 # empty measurement, and the two need opposite responses.
-                "pct": round(100 * got / top, 1) if top else None,
-                "note": note,
+                "pct": round(100 * len(top & got) / len(top), 1) if top else None,
+                "note": note, "same_browser": True, **extra,
             }
 
+        landed, opened = _did("landing_view"), _did("try_view")
+        # Anything a person does on the trial screen. The recorder steps count
+        # too, so visits from before `try_engage` shipped are not read as idle.
+        engaged = _did("try_engage", "try_record", "try_mic_denied", "try_attach", "try_send")
+        scored = _did("try_scored")
         # The PersonalitieZ test is the other no-account door, and it had two plain rows
         # and no rate. This one is SAME-BROWSER: of the browsers that finished the test,
         # how many later created an account — which a comparison of two totals cannot
@@ -732,13 +755,19 @@ class FunnelSummaryView(APIView):
         }
 
         headline = [
-            _rate("landing_view", "try_view", "Landing → trial opened",
-                  "How many arrivals ever start the one thing the page promises."),
-            _rate("try_view", "try_scored", "Trial opened → scored",
+            _rate("try_view", landed, opened, "Landing → trial opened",
+                  "Of the browsers that saw the landing page, how many opened a trial."),
+            _rate("try_engage", opened, engaged, "Trial opened → touched",
+                  "A real tap, scroll or key press. Below this, nobody was looking — "
+                  "or nobody was there."),
+            _rate("try_scored", opened, scored, "Trial opened → scored",
                   "The recorder. Everything below is unreachable until this works."),
-            _rate("try_scored", "register_success", "Scored → account created",
+            _rate("register_success", scored, _did("register_success"), "Scored → account created",
                   "Whether a number somebody is proud of is worth keeping."),
         ]
+        # The trial's other way in, which the landing rate cannot see: a browser
+        # that opened a trial and never saw the landing page came by a direct link.
+        direct_trial = len(opened - landed)
 
         # Per channel. A count of arrivals that cannot say WHERE THEY CAME FROM
         # makes every channel look identical at zero, which is exactly the
@@ -778,6 +807,7 @@ class FunnelSummaryView(APIView):
         # trial's first move is a browser mic dialog. Totalled together, the
         # one number hides whichever of the two is the actual problem.
         devices = split_by("dev", "dev")
+        shells = split_by("shell", "shell")
 
         # Per DOOR now, not just totalled across every one of them. SingZ and
         # RapZ (and now BodieZ) each have their own visitors, and "sources"
@@ -843,6 +873,14 @@ class FunnelSummaryView(APIView):
             "browsers_excluded": FunnelExclusion.objects.count(),
             "base_kind": base_kind,
             "headline": headline,
+            "direct_trial": direct_trial,
+            "direct_trial_note": ("Browsers that opened a trial without ever seeing the landing "
+                                  "page: they came by a link straight to a trial door."),
+            "shells": shells,
+            "shells_note": ("Which browser the page ran in. \"inapp\" is the browser inside "
+                            "Instagram, TikTok, Facebook and similar apps, where a mic and a "
+                            "file picker often do not work. Visits from before this shipped "
+                            "carry none and are not in this table."),
             # Beside the three, not among them: those decide what to work on for the
             # coach's door; this is the other no-account door, read the same way.
             "quiz": quiz_rate,

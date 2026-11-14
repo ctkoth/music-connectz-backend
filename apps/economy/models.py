@@ -6026,6 +6026,12 @@ FUNNEL_KINDS = (
     # comparison exists to answer.
     ("landing_cta", "Landing button to the trial pressed"),
     ("try_view", "Trial take screen opened"),
+    # A real tap, scroll or key press on the trial screen. 156 browsers opened
+    # the trial and 1 pressed anything, and nothing could say whether the other
+    # 155 were people who looked and left or page loads nobody was behind (a
+    # link preview, a crawler). Those need opposite fixes: one is the page, the
+    # other is the traffic. Fired once per visit, from a trusted input event.
+    ("try_engage", "Trial screen touched or scrolled"),
     # Between opening the trial and getting a number there is a RECORDER, and
     # for the whole life of this funnel it was one unmeasured step. Thirteen
     # visitors opened the trial in a month and one got a score, and nothing

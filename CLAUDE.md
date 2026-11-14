@@ -3313,3 +3313,17 @@ year, which the word "about" carries, and the two conventions differ (a stint fr
 `GET /api/economy/ratez/skills/` serves `learned_precision` (`"year"`, `"day"`, `None` when undated) for the
 earliest stint, `last_played_precision` for the latest stop, and `approximate` (any date on the skill is a
 year only). The screen then says the year and "about N years", never a month or a day nobody gave.
+
+## The funnel's headline is same-browser, and a trial can say whether anyone touched it
+
+`FunnelSummaryView.summary` used to divide one step's unique count by another's, which is a rate only when the second
+group is inside the first. It was not: phones arrived straight on a trial link and desktops landed, so "landing -> trial"
+read 39.3% across two crowds and "scored -> account" read "1 of 0". Every headline row's `to` is now the browsers in
+`from` that ALSO did the next step (`same_browser: true`), and `direct_trial` counts trial opens that never saw the
+landing page. The per-step rows and `pct_of_base` are unchanged.
+
+- **`try_engage`** (`how`: tap | scroll | key) is the first real input on the trial screen. The "touched" rate also
+  counts the recorder steps, so visits from before it shipped are not read as idle.
+- **`shell`** is ambient (web, inapp, android, android-old, desktop, desktop-old; junk dropped) and `shells` splits by it.
+- The client sends nothing for a self-declared bot, so counts from before that change include crawler renders and
+  counts after do not. A window spanning the change mixes the two.
