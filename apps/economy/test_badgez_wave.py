@@ -97,7 +97,9 @@ class CoachBadges(TestCase):
     def test_every_coach_badge_together_stops_at_the_cap(self):
         for key, _n, _e in W.COACH_BADGES.values():
             grant_badge(self.u, key)
-        self.assertEqual(ai_energy_cost(self.u, "fable"), 40)   # 8 × 10 × 50%, never under
+        from apps.economy.models import AI_ENERGY_PER_PROMPT
+        # fable's 8 × the tier's prompt ⚡ × 50%, never under
+        self.assertEqual(ai_energy_cost(self.u, "fable"), 8 * AI_ENERGY_PER_PROMPT["free"] // 2)
 
 
 class RoyaltyPair(TestCase):

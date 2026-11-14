@@ -614,6 +614,8 @@ class CreateWithReadTests(Base):
         self.assertEqual(wallet_for(self.author).energy, 100)
 
     def test_the_read_adds_nothing_to_the_price(self):
+        from apps.economy.test_post_cost import pin_small_floor
+        pin_small_floor(self)         # compares two charges of a skill price, not the tier floor
         w = wallet_for(self.author)
         w.energy = 100
         w.save()

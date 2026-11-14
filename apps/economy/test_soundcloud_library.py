@@ -92,6 +92,15 @@ class ListingTests(Base):
 
 
 class ApplyTests(Base):
+    """Batch mechanics (dating, caps, strict funds) on small prices. The tier floor — what an AI
+    prompt costs, 2000 on Free — would make every publish unaffordable here; it is tested in
+    test_post_cost, and the consequence for a Free member's library is in the commit notes."""
+
+    def setUp(self):
+        super().setUp()
+        from apps.economy.test_post_cost import pin_small_floor
+        pin_small_floor(self)
+
     def go(self, which, ids, vis, **kw):
         return self.c.post(LIB + which + "/", {"ids": ids, "visibility": vis, **kw}, format="json")
 
