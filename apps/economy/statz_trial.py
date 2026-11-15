@@ -60,6 +60,11 @@ FEATURES = [
     # rendered from a plan during the sample is the member's.
     {"key": "video_develop", "label": "Direct: each video shot picked to fit your song",
      "tab": "videoconnectz", "target": "video-develop"},
+    # Select all on a pick-several list (Corey's call: StatZ, for scarcity). A tier on how
+    # FAST, never whether: every row can still be ticked by hand, and Clear is never gated.
+    # The gate is client-side like rest_alerts (it spends nothing of ours), and what was
+    # ticked during a sample stays ticked.
+    {"key": "select_all", "label": "Select all on every list", "tab": "singz", "target": "bosstake-options"},
 ]
 
 # THE AUDIT: every place StatZ is the difference, and whether the daily sample covers it.
@@ -83,6 +88,7 @@ DRIVERS = [
     {"key": "viewz_tracks", "sampled": True, "modules": ["viewz"]},
     {"key": "lipsync", "sampled": True, "modules": []},
     {"key": "video_develop", "sampled": True, "modules": ["videodevelop"]},
+    {"key": "select_all", "sampled": True, "modules": []},
     {"key": "instrumental_mix", "sampled": False, "modules": ["instrumentalz"],
      "why_not": "A kept set of levels is a saved preference on a stored piece — a sample that left one behind would be a permanent grant wearing a timer."},
     {"key": "mix_presets", "sampled": False, "modules": [],
@@ -99,6 +105,8 @@ DRIVERS = [
      "why_not": "Every run spends real compute, so a free sample of it every day is a cost with no sale attached."},
     {"key": "lesson_visibility", "sampled": False, "modules": ["lessonz"],
      "why_not": "Setting a lesson StatZ-only changes what OTHER members can see; it must not flip back under them when an hour ends."},
+    {"key": "sound_packs", "sampled": False, "modules": ["soundz"],
+     "why_not": "A chosen sound pack is a saved setting; a sample that left one behind would be a permanent grant wearing a timer."},
     {"key": "limits", "sampled": False, "modules": ["catalog"],
      "why_not": "Characters, uploads, storage, links and prompts are limits read from the tier, never from a sample."},
 ]

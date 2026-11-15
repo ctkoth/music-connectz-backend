@@ -128,3 +128,52 @@ class TheLineTests(TestCase):
         for word in ("sine", "square", "sawtooth", "triangle", "oscillator", "frequency"):
             self.assertNotIn(word, src.lower().split("\"\"\"")[-1],
                              f"synthesis detail '{word}' leaked into the server")
+
+
+class TheTopPackIsStatzTests(TestCase):
+    """Premium chooses a pack; one pack sits a tier higher. Decoration may be sold:
+    the house set is free and says the same things."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from django.contrib.auth import get_user_model
+        self.u = get_user_model().objects.create_user("roller", "r@mcz.test", "hunter2hunter2")
+        self.client = APIClient()
+        self.client.force_authenticate(self.u)
+
+    def tier(self, t):
+        from .models import membership_for
+        m = membership_for(self.u)
+        m.tier = t
+        m.save(update_fields=["tier", "updated_at"])
+
+    def test_premium_is_refused_the_statz_pack_and_nothing_is_saved(self):
+        from .models import TIER_PREMIUM, profile_for
+        self.tier(TIER_PREMIUM)
+        self.client.patch(URL, {"pack": "arcade"}, format="json")
+        r = self.client.patch(URL, {"pack": "highroller", "overrides": {"like": "soft"}}, format="json")
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("StatZ", r.data["detail"])
+        p = profile_for(self.u)
+        self.assertEqual((p.sound_pack, p.sound_overrides or {}), ("arcade", {}))
+        # ...and not through one sound's override either.
+        r = self.client.patch(URL, {"overrides": {"like": "highroller"}}, format="json")
+        self.assertEqual(r.status_code, 403)
+
+    def test_statz_may_choose_it_and_premium_keeps_every_other_pack(self):
+        from .models import TIER_PREMIUM, TIER_STATZ
+        self.tier(TIER_STATZ)
+        r = self.client.patch(URL, {"pack": "highroller"}, format="json")
+        self.assertEqual((r.status_code, r.data["pack"], r.data["has_statz_packs"]), (200, "highroller", True))
+        self.tier(TIER_PREMIUM)
+        self.assertEqual(self.client.patch(URL, {"pack": "casino"}, format="json").status_code, 200)
+
+    def test_a_lapse_serves_the_house_sound_and_keeps_the_choice(self):
+        from .models import TIER_PREMIUM, TIER_STATZ, profile_for
+        self.tier(TIER_STATZ)
+        self.client.patch(URL, {"pack": "highroller", "overrides": {"like": "highroller", "post": "soft"}}, format="json")
+        self.tier(TIER_PREMIUM)
+        d = self.client.get(URL).data
+        self.assertEqual((d["pack"], d["overrides"], d["has_statz_packs"]), ("", {"post": "soft"}, False))
+        self.assertEqual(profile_for(self.u).sound_pack, "highroller", "kept for when they are back")
+        self.assertEqual(d["statz_packs"], ["highroller"])
