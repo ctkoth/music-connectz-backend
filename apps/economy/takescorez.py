@@ -163,9 +163,14 @@ def read_of(payload):
         out["part"] = {"label": str(payload["part"]["label"])[:200],
                        "labels": [str(x)[:60] for x in (payload["part"].get("labels") or [])][:6],
                        "from": payload["part"].get("from"), "to": payload["part"].get("to")}
+    # Every section's grade, on every parameter it was given, so a past take can still say
+    # which verse was stronger. Numbers only: no words the model wrote ride into the history.
+    if isinstance(payload.get("parts"), list) and payload["parts"]:
         out["parts"] = [{"label": str(x.get("label", ""))[:40], "score": x.get("score"),
-                         "mine": x.get("mine") is True}
-                        for x in (payload.get("parts") or []) if isinstance(x, dict)][:8]
+                         "mine": x.get("mine") is True,
+                         "scores": {str(k)[:24]: v for k, v in (x.get("scores") or {}).items()
+                                    if isinstance(v, (int, float))}}
+                        for x in payload["parts"] if isinstance(x, dict)][:8]
     if isinstance(payload.get("song_score"), (int, float)):
         out["song_score"] = payload["song_score"]
     if isinstance(payload.get("score_notes"), dict) and payload["score_notes"]:

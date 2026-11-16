@@ -365,9 +365,51 @@ def _clock(n):
     return f"{n // 60}:{n % 60:02d}"
 
 
-def part_block(part):
-    """The instruction that tells the model whose parts to score. Goes BEFORE the JSON
-    contract, which stays the last thing the model reads."""
+def part_factors(app_key):
+    """Every parameter one section of a song is graded on, {key: label}.
+
+    The coach's own performance dimensions, and where the coach has words (SingZ, RapZ)
+    every writing parameter it knows: the five lyric scores and the opt-in ones
+    (wordplay, metaphors, wit, depth…). Corey: the real skill for a rapper is who did
+    what, and that is a verse, so a verse gets a number on all of it. Mainstream Appeal
+    is left out: it is reach, not quality, and it describes a song, not sixteen bars.
+    One list, so the prompt, the whitelist and the screen cannot disagree."""
+    out = dict(profile_for_app(app_key)["scores"])
+    if rates_lyrics(app_key):
+        out.update(LYRIC_SCORE)
+        out.update({k: v for k, v in WIT_SCORE.items()
+                    if k not in NEVER_COUNTED_EXTRAS and k in extras_offered(app_key)})
+    return out
+
+
+BREAKDOWN_NOTE = ("The coach lists each verse and chorus it hears and grades every one on its own, out of 10, on "
+                  "every parameter, so you can see which verse is stronger and where. Same price as the take.")
+
+
+def part_block(part, factors=None):
+    """The instruction that asks for the song section by section, and, when the member
+    said which parts are theirs, tells the model whose parts to score. Goes BEFORE the
+    JSON contract, which stays the last thing the model reads.
+
+    `part` is `clean_part`'s answer or None (a breakdown with nobody's parts named: the
+    whole take is the member's). `factors` is `part_factors`: every section then carries
+    a number for each, not only an overall."""
+    keys = list(factors or {})
+    per = (" and \"scores\": {" + ", ".join(f'\"{k}\": 1-10 or null' for k in keys) + "} "
+           "(null where that section gives you nothing to judge it on, never a guess), "
+           "and \"why\": one sentence on what makes this section stronger or weaker than the others"
+           if keys else "")
+    sections = (
+        "Return \"parts\": the song's sections in the order they are heard, at most "
+        f"{PARTS_MAX}, each {{\"label\": \"Verse 1\", \"from\": seconds, \"to\": seconds, "
+        "\"score\": 1-10 for how that section is performed"
+        + (", \"mine\": true only for a part the member named" if part else "") + "}" + per + ". "
+        "Grade each section ON ITS OWN, on the same scale as the take: two verses by the same artist "
+        "usually differ, so do not copy one section's numbers onto another. "
+        "Score a section only if you heard it; never invent one.")
+    if not part:
+        return ("THE SONG, SECTION BY SECTION\n"
+                "Besides the take as a whole, grade each verse and chorus separately.\n" + sections)
     when = ""
     if part.get("from") is not None and part.get("to") is not None:
         when = f" (from {_clock(part['from'])} to {_clock(part['to'])})"
@@ -386,16 +428,14 @@ def part_block(part):
         "\"song_score\" stays about the whole song.\n"
         "If you cannot find any of those parts in the recording, say so in \"verdict\" and return \"score\": null "
         "rather than scoring a different part.\n"
-        "Also return \"parts\": the song's sections in the order they are heard, at most "
-        f"{PARTS_MAX}, each {{\"label\": \"Verse 1\", \"from\": seconds, \"to\": seconds, "
-        "\"score\": 1-10 for how that section is performed, \"mine\": true only for a part the member named}}. "
-        "Give every part the member named its own row and its own score when you heard it. "
-        "Score a section only if you heard it; never invent one.")
+        "Also: " + sections + " Give every part the member named its own row and its own score when you heard it.")
 
 
-def clean_parts(raw):
+def clean_parts(raw, factors=None):
     """The sections the model listed, whitelisted. A row with no label or no score is
-    dropped: a section with no number is not a rating, and one with no name is nobody's."""
+    dropped: a section with no number is not a rating, and one with no name is nobody's.
+    `scores` keeps only the parameters asked for; one the model skipped is absent, never 0."""
+    keys = list(factors or {})
     out = []
     for row in raw if isinstance(raw, list) else []:
         if not isinstance(row, dict):
@@ -410,11 +450,49 @@ def clean_parts(raw):
                 return max(0, int(float(v)))
             except (TypeError, ValueError):
                 return None
-        out.append({"label": label, "score": score, "from": secs(row.get("from")),
-                    "to": secs(row.get("to")), "mine": row.get("mine") is True})
+        item = {"label": label, "score": score, "from": secs(row.get("from")),
+                "to": secs(row.get("to")), "mine": row.get("mine") is True}
+        if keys:
+            given = row.get("scores") if isinstance(row.get("scores"), dict) else {}
+            item["scores"] = {k: v for k in keys if (v := _clamp(given.get(k))) is not None}
+            item["why"] = str(row.get("why") or "")[:240]
+        out.append(item)
         if len(out) >= PARTS_MAX:
             break
     return out
+
+
+def _parts_payload(raw, factors):
+    parts = clean_parts(raw, factors)
+    return {"parts": parts, "part_factors": factors, "parts_compare": compare_parts(parts, factors)}
+
+
+def compare_parts(parts, factors=None):
+    """Which section is stronger, and where — the server's arithmetic, never the model's.
+
+    `ranked` is the sections best overall first (ties keep the order heard). `by_factor`
+    names, for each parameter at least two sections were graded on, the one that leads it
+    and by how much. None when there are fewer than two sections: one verse has nothing
+    to be compared with, and a "winner" of one would be a made-up result."""
+    rows = [p for p in parts or [] if isinstance(p.get("score"), (int, float))]
+    if len(rows) < 2:
+        return None
+    ranked = sorted(rows, key=lambda p: -p["score"])
+    by_factor = []
+    for key, label in (factors or {}).items():
+        have = [(p["label"], p["scores"][key]) for p in rows if key in (p.get("scores") or {})]
+        if len(have) < 2:
+            continue
+        have.sort(key=lambda x: -x[1])
+        lead = have[0][1] - have[1][1]
+        by_factor.append({"key": key, "label": label, "best": have[0][0] if lead > 0 else None,
+                          "score": have[0][1], "lead": lead,
+                          "all": [{"label": l, "score": s} for l, s in have]})
+    top, second = ranked[0], ranked[1]
+    return {"ranked": [{"label": p["label"], "score": p["score"], "mine": p.get("mine", False)} for p in ranked],
+            "best": top["label"] if top["score"] > second["score"] else None,
+            "tied": top["score"] == second["score"],
+            "by_factor": by_factor}
 
 
 SCORE_RULE = ("Overall leans on your strongest parts — your best dimensions count "
@@ -634,7 +712,8 @@ def listener_reasons(post, limit=5):
 
 def score_take(app_key, f, content_type, *, genre, target, difficulty, style=None,
                user=None, lyrics=False, mix=False, deadline=None, listeners=None,
-               think=True, reference=False, extras=(), counted=(), link_part=None, my_part=None):
+               think=True, reference=False, extras=(), counted=(), link_part=None, my_part=None,
+               breakdown=False):
     """Send one take to the model. Returns (payload, error) — exactly one is None.
 
     `link_part` is a take the model reads by ADDRESS (a public YouTube video or
@@ -701,9 +780,12 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     from .voice import prose_voice
     # `my_part`, not `part`: `part` is the audio payload further down this function.
     my_part = None if reference else my_part
-    if my_part:
+    # Section by section: asked for on its own, or implied by naming your parts.
+    breakdown = (bool(breakdown) or bool(my_part)) and not reference
+    factors = part_factors(app_key) if breakdown else {}
+    if breakdown:
         # Before the contract, so the JSON instruction is still the last thing read.
-        prompt = f"{part_block(my_part)}\n\n{prompt}"
+        prompt = f"{part_block(my_part, factors)}\n\n{prompt}"
     if not reference:
         prompt = f"{prose_voice(user, surface='coach')}\n\n{prompt}"
     # Normalise BEFORE the call. An unsupported container is a refusal we can
@@ -970,7 +1052,8 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         "heard": clean_heard(parsed.get("heard"), set(perf) | {"other"}),
         # Only when the member said which part is theirs: what was scored as theirs, and
         # every section with its own number.
-        **({"part": my_part, "parts": clean_parts(parsed.get("parts"))} if my_part else {}),
+        **({"part": my_part} if my_part else {}),
+        **(_parts_payload(parsed.get("parts"), factors) if breakdown else {}),
         "strengths": listy(parsed.get("strengths")),
         "fixes": listy(parsed.get("fixes")),
         "next_drill": str(parsed.get("next_drill", ""))[:300],
@@ -1325,7 +1408,12 @@ class SingZCoachView(APIView):
             "rates_mix": rates_mix(self.app_key),
             # "Which part is yours?": the choices and the sentence, so the screen types neither.
             "my_part": {"choices": list(PART_CHOICES), "note": PART_NOTE, "max_chars": PART_MAX_CHARS,
-                        "max_parts": MY_PARTS_MAX},
+                        "max_parts": MY_PARTS_MAX,
+                        # Section by section: every verse and chorus graded on every parameter.
+                        # On by default where there are words, because for a rapper or singer
+                        # the verse is the unit; the member can switch it off.
+                        "breakdown": {"note": BREAKDOWN_NOTE, "default": rates_lyrics(self.app_key),
+                                      "factors": part_factors(self.app_key)}},
             "mix_scores": MIX_SCORE if rates_mix(self.app_key) else {},
             "caveat": profile["caveat"],
             # The second pass and the opt-in gear advice, priced BEFORE either
@@ -1527,6 +1615,7 @@ class SingZCoachView(APIView):
                     post_for_upload(getattr(f, "instance", None), request.user)),
                 deadline=Deadline(COACH_BUDGET_SECONDS),
                 my_part=clean_part(data.get("my_part"), data.get("part_from"), data.get("part_to")),
+                breakdown=str(data.get("break_parts", "")).lower() in ("1", "true", "yes", "on"),
                 link_part=(link or {}).get("part"),
             )
         except Exception:

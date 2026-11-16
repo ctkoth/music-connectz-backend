@@ -21,9 +21,12 @@ from .views import credit_owner
 TRANSLATE_MODEL = "claude-opus-4-8"
 MAX_TEXTS = 60
 
-# Brand/app names that must never be translated.
+# Brand/app names that must never be translated. "Energy" was on this list, so a member
+# reading the app in Portuguese saw "29,727 Energy" beside "4 membros": it is the name of
+# a resource, but it is an ordinary word, and every language has its own (Energia,
+# Énergie, エネルギー). SpinaZ and PromptZ are made-up names and stay as they are.
 _BRANDS = (
-    "Music ConnectZ, MCZ, CollabZ, BattleZ, VenueZ, MerchZ, SpinAZ, Energy, "
+    "Music ConnectZ, MCZ, CollabZ, BattleZ, VenueZ, MerchZ, SpinAZ, SpinaZ, PromptZ, "
     "PersonaZ, NationalitieZ, SubstanceZ, PreferenceZ, ZodiacZ, LanguageZ, "
     "DirectZ, SingZ, RapZ, BodieZ, DawZ, OCC, RateZ, LabelZ, DistributeZ, "
     "RoyaltieZ, SpecZ, Lilith, GroupZ, MessageZ, CallZ, AdZ, GameZ, StatZ, Premium, Free"

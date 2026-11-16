@@ -116,3 +116,27 @@ class UiTextTests(TestCase):
                                        "texts": ["Save routine"] + [f"Sentence number {chr(65 + i % 26)}{chr(65 + i // 26)}" for i in range(150)]}, format="json")
         self.assertEqual(r.data["translations"], {"Save routine": "SAVE ROUTINE"})
         self.assertEqual(len(calls), 1)
+
+
+class EnergyIsAWordNotABrandTests(TestCase):
+    """A member reading the app in Portuguese saw "Energy" beside "membros"."""
+
+    def test_the_translator_is_told_to_translate_it_and_to_keep_the_made_up_names(self):
+        from apps.economy import translate, uitext
+        brands = [b.strip() for b in translate._BRANDS.split(",")]
+        self.assertNotIn("Energy", brands)
+        for kept in ("SpinaZ", "PromptZ", "StatZ", "Music ConnectZ"):
+            self.assertIn(kept, brands)
+        self.assertIn("ordinary word for energy", uitext._system("Portuguese"))
+
+    def test_the_migration_forgets_only_the_rows_that_kept_it_in_english(self):
+        import importlib
+        from django.apps import apps as django_apps
+        from apps.economy.models import UiString
+        UiString.objects.create(lang="pt", key="a", source="Energy", text="Energy")
+        UiString.objects.create(lang="pt", key="b", source="+1 Energy for every rating", text="+1 Energy por avaliação")
+        UiString.objects.create(lang="pt", key="c", source="Energy", text="Energia")
+        UiString.objects.create(lang="pt", key="d", source="members", text="membros")
+        mod = importlib.import_module("apps.economy.migrations.0238_retranslate_energy")
+        mod.forget(django_apps, None)
+        self.assertEqual(set(UiString.objects.values_list("key", flat=True)), {"c", "d"})

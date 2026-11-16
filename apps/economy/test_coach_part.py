@@ -119,3 +119,82 @@ class TheDoorSaysItTests(TestCase):
         self.assertIn("Verse 2", d["my_part"]["choices"])
         self.assertIn("each one gets its own grade", d["my_part"]["note"])
         self.assertEqual(d["my_part"]["max_parts"], vc.MY_PARTS_MAX)
+
+
+class SectionBySectionTests(TestCase):
+    """Every verse and chorus graded on its own, on every parameter, so verses can be compared."""
+
+    def test_a_rappers_verse_is_graded_on_the_performance_and_every_writing_parameter(self):
+        f = vc.part_factors("rapz")
+        for key in ("flow", "delivery", "punchlines", "rhyme", "imagery", "wordplay", "metaphor"):
+            self.assertIn(key, f)
+        self.assertNotIn("mainstream", f, "reach is a fact about a song, not about sixteen bars")
+        drums = vc.part_factors("drumz")
+        self.assertNotIn("wordplay", drums, "a drum take has no words to grade")
+        self.assertTrue(drums)
+
+    def test_the_breakdown_can_be_asked_for_with_nobodys_parts_named(self):
+        b = vc.part_block(None, vc.part_factors("rapz"))
+        self.assertIn("SECTION BY SECTION", b)
+        self.assertNotIn("WHOSE PART", b)
+        self.assertIn('"wordplay": 1-10 or null', b)
+        self.assertIn("do not copy one section's numbers onto another", b)
+        named = vc.part_block(vc.clean_part("Verse 2"), vc.part_factors("rapz"))
+        self.assertIn("WHOSE PART TO SCORE", named)
+        self.assertIn('"wordplay": 1-10 or null', named)
+
+    def test_only_asked_parameters_survive_and_a_skipped_one_is_absent_never_zero(self):
+        f = vc.part_factors("rapz")
+        got = vc.clean_parts([{"label": "Verse 1", "score": 7, "why": "tight pocket",
+                               "scores": {"flow": 8, "wordplay": 11, "punchlines": None, "made_up": 9, "imagery": "x"}}], f)
+        self.assertEqual(got[0]["scores"], {"flow": 8, "wordplay": 10})
+        self.assertEqual(got[0]["why"], "tight pocket")
+
+    def test_the_server_says_which_verse_is_stronger_and_where(self):
+        f = {"flow": "Flow", "wordplay": "Wordplay", "imagery": "Imagery"}
+        parts = vc.clean_parts([
+            {"label": "Verse 1", "score": 7, "scores": {"flow": 8, "wordplay": 6, "imagery": 7}},
+            {"label": "Verse 2", "score": 8, "mine": True, "scores": {"flow": 7, "wordplay": 9, "imagery": 7}},
+            {"label": "Hook", "score": 8, "scores": {"flow": 9}},
+        ], f)
+        c = vc.compare_parts(parts, f)
+        self.assertEqual([r["label"] for r in c["ranked"]], ["Verse 2", "Hook", "Verse 1"])
+        self.assertTrue(c["tied"])
+        self.assertIsNone(c["best"], "two sections level at the top is a tie, not a winner")
+        by = {r["key"]: r for r in c["by_factor"]}
+        self.assertEqual((by["flow"]["best"], by["flow"]["lead"]), ("Hook", 1))
+        self.assertEqual((by["wordplay"]["best"], by["wordplay"]["lead"]), ("Verse 2", 3))
+        self.assertIsNone(by["imagery"]["best"], "level on imagery: nobody leads it")
+
+    def test_one_section_has_nothing_to_be_compared_with(self):
+        self.assertIsNone(vc.compare_parts(vc.clean_parts([{"label": "Verse 1", "score": 7}])))
+        self.assertIsNone(vc.compare_parts([]))
+
+    def test_the_history_keeps_each_sections_numbers_and_none_of_the_models_words(self):
+        r = read_of({"verdict": "v", "parts": [{"label": "Verse 1", "score": 7, "mine": False, "why": "words",
+                                                "scores": {"flow": 8, "bad": "x"}}]})
+        self.assertEqual(r["parts"], [{"label": "Verse 1", "score": 7, "mine": False, "scores": {"flow": 8}}])
+
+    def test_the_coach_door_says_the_breakdown_is_on_where_there_are_words(self):
+        u = User.objects.create_user("b", "b@x.com", "hunter2hunter2")
+        c = APIClient()
+        c.force_authenticate(u)
+        rap = c.get("/api/rapz/coach/").data["my_part"]["breakdown"]
+        self.assertTrue(rap["default"])
+        self.assertIn("wordplay", rap["factors"])
+        self.assertFalse(c.get("/api/drumz/coach/").data["my_part"]["breakdown"]["default"])
+
+
+class VerseAgainstVerseTests(TestCase):
+    def test_inspiration_publishes_the_part_choice_and_a_side_says_which_part_it_was(self):
+        from . import matchref
+        u = User.objects.create_user("v", "v@x.com", "hunter2hunter2")
+        c = APIClient()
+        c.force_authenticate(u)
+        d = c.get("/api/rapz/match/").data
+        self.assertIn("Verse 1", d["parts"]["choices"])
+        self.assertIn("one verse with another", d["parts"]["note"])
+        slot = matchref._Slot(SimpleUploadedFile("a.mp3", b"x", content_type="audio/mpeg"), "audio/mpeg")
+        self.assertNotIn("part", slot.describe())
+        slot.part = "Verse 2"
+        self.assertEqual(slot.describe()["part"], "Verse 2")
