@@ -84,7 +84,7 @@ class UiTextTests(TestCase):
         self.assertEqual(calls, [])
 
     def test_a_bad_answer_stores_nothing_and_the_screen_keeps_english(self):
-        for reply in ["sorry, no", json.dumps(["only one"]), "[not json"]:
+        for reply in ["sorry, no", json.dumps([]), "[not json"]:
             r = self.post(self.member, ["Play", "Stop"], reply=reply)
             self.assertEqual(r.status_code, 200)
             self.assertEqual(r.data["translations"], {})

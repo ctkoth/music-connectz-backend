@@ -308,9 +308,26 @@ def translate_batch(texts, name):
     return [str(x) for x in out]
 
 
-def new_today():
+def new_today(lang=None):
+    """New strings stored today, for one language. The ceiling is per language: one shared
+    across 200 languages let the first few busy ones use it all, and every other language was
+    left half English for the rest of the day."""
     start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    return UiString.objects.filter(created_at__gte=start).count()
+    q = UiString.objects.filter(created_at__gte=start)
+    return (q.filter(lang=lang) if lang else q).count()
+
+
+def translate_resilient(texts, name, depth=0):
+    """`translate_batch`, but one string the model mangles cannot lose the other 59: a batch
+    with no usable answer is split in half and each half asked again. Returns a list the length
+    of `texts`, with None where nothing usable came back."""
+    done = translate_batch(texts, name)
+    if done:
+        return done
+    if len(texts) == 1 or depth >= 3:
+        return [None] * len(texts)
+    mid = len(texts) // 2
+    return translate_resilient(texts[:mid], name, depth + 1) + translate_resilient(texts[mid:], name, depth + 1)
 
 
 class UiTextView(APIView):
@@ -349,17 +366,18 @@ class UiTextView(APIView):
         missing = [t for k, t in keys.items() if k not in known]
         capped = False
         if missing and not known_only and request.user.is_authenticated:
-            room = DAILY_NEW - new_today()
+            room = DAILY_NEW - new_today(lang)
             if room <= 0:
                 capped = True
             else:
                 batch = missing[:room]
                 capped = len(batch) < len(missing)
-                done = translate_batch(batch, meta["name"])
-                if done:
+                done = translate_resilient(batch, meta["name"])
+                pairs = [(s, t) for s, t in zip(batch, done) if t and t.strip()]
+                if pairs:
                     UiString.objects.bulk_create(
-                        [UiString(lang=lang, key=key_for(s), source=s, text=t) for s, t in zip(batch, done) if t.strip()],
+                        [UiString(lang=lang, key=key_for(s), source=s, text=t) for s, t in pairs],
                         ignore_conflicts=True,
                     )
-                    out.update({s: t for s, t in zip(batch, done) if t.strip()})
+                    out.update(dict(pairs))
         return Response({"translations": out, "capped": capped})
