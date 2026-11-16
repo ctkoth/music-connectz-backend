@@ -1073,6 +1073,23 @@ def attractiveness_shown_medians(user_ids):
     return {k: v for k, v in medians.items() if k not in hidden}
 
 
+def attractiveness_stats(user_ids):
+    """{user_id: (median, how many ratings)} — `attractiveness_medians` with the count
+    behind each number, from the same two queries. A class that gates on a median needs
+    to know how many people it is the median of."""
+    ids = list(user_ids)
+    if not ids:
+        return {}
+    scores = {}
+    for uid, score in (AttractivenessRating.objects.filter(target_id__in=ids)
+                       .values_list("target_id", "score")):
+        scores.setdefault(uid, []).append(score)
+    for uid, score in (FaceRating.objects.filter(face__owner_id__in=ids)
+                       .values_list("face__owner_id", "score")):
+        scores.setdefault(uid, []).append(score)
+    return {k: (_median(v), len(v)) for k, v in scores.items()}
+
+
 def attractiveness_medians(user_ids):
     """{user_id: median} for many members, in TWO queries rather than 2N.
 
@@ -1111,14 +1128,9 @@ def overall_median(user):
     return _median(OverallRating.objects.filter(target=user).values_list("score", flat=True))
 
 
-def overall_medians(user_ids):
-    """{user_id: median} for many members, in ONE query.
-
-    Batched for the same reason the feed's ratings were: `MembersView` called
-    the per-user version once per card and walks up to 500 profiles. Measured
-    at 8.3 queries per member before this, and VybeZ fires that search from
-    three text inputs.
-    """
+def overall_scores(user_ids):
+    """{user_id: [every overall rating they were given]} in ONE query. The medians and
+    the classes (classz.py) are both read off this, so neither costs a second read."""
     ids = list(user_ids)
     if not ids:
         return {}
@@ -1126,7 +1138,12 @@ def overall_medians(user_ids):
     for uid, score in (OverallRating.objects.filter(target_id__in=ids)
                        .values_list("target_id", "score")):
         scores.setdefault(uid, []).append(score)
-    return {k: _median(v) for k, v in scores.items()}
+    return scores
+
+
+def overall_medians(user_ids):
+    """{user_id: median} for many members, in ONE query."""
+    return {k: _median(v) for k, v in overall_scores(user_ids).items()}
 
 
 # ---- Cross-user Profile ----

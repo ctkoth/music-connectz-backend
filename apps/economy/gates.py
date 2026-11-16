@@ -9,6 +9,9 @@ for that metric is out. A rating gate that lets unrated members through is not
 a rating gate — it is a suggestion.
 """
 GATE_KEYS = ("rating", "price", "attract", "age", "km")
+# One-tap classes (classz.py): a yes/no on a rating that enough members gave. Stored on
+# a gates dict as `{"thuro": true}` beside the ranges, and exclusive like them.
+CLASS_KEYS = ("thuro", "sexi")
 
 LABEL = {
     "rating": "skill rating", "price": "skill price", "attract": "attractiveness",
@@ -24,6 +27,9 @@ def clean_gates(raw):
     out = {}
     if not isinstance(raw, dict):
         return out
+    for key in CLASS_KEYS:
+        if raw.get(key) in (True, 1, "1", "true", "on"):
+            out[key] = True
     for key in GATE_KEYS:
         v = raw.get(key)
         if v is None:
@@ -75,6 +81,9 @@ class MemberMetrics:
                              overall_median, profile_age)
         from .social import profile_max_experience, profile_skill_rate
         p = self.profile
+        if key in CLASS_KEYS:
+            from .classz import classes_for
+            return key in classes_for([p]).get(p.user_id, ())
         if key == "rating":
             return overall_median(p.user)
         if key == "price":
@@ -101,6 +110,10 @@ def failing_gate(metrics, gates):
     """The first gate this member fails, or None. Named rather than boolean so
     a refusal can say which range excluded them instead of just "no"."""
     for key, pair in (gates or {}).items():
+        if key in CLASS_KEYS:
+            if pair and not metrics.get(key):
+                return key                  # exclusive: not in the class, no entry
+            continue
         if key not in GATE_KEYS:
             continue
         lo, hi = (pair + [None, None])[:2] if isinstance(pair, list) else (None, None)
@@ -117,6 +130,9 @@ def failing_gate(metrics, gates):
 
 
 def describe(key, gates):
+    if key in CLASS_KEYS:
+        from .classz import CLASSES
+        return f"{CLASSES[key]['label']} only ({CLASSES[key]['rule']})"
     lo, hi = (gates.get(key) or [None, None])[:2]
     label = LABEL.get(key, key)
     if key == "km":

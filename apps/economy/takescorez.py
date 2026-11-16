@@ -157,6 +157,15 @@ def read_of(payload):
                  ("next_drill", 300), ("song_why", 400)):
         if payload.get(k):
             out[k] = str(payload[k])[:n]
+    # Which part of the song was scored as the member's, and every section's number:
+    # the history has to say a 7 was for verse 2, not for the song.
+    if isinstance(payload.get("part"), dict) and payload["part"].get("label"):
+        out["part"] = {"label": str(payload["part"]["label"])[:200],
+                       "labels": [str(x)[:60] for x in (payload["part"].get("labels") or [])][:6],
+                       "from": payload["part"].get("from"), "to": payload["part"].get("to")}
+        out["parts"] = [{"label": str(x.get("label", ""))[:40], "score": x.get("score"),
+                         "mine": x.get("mine") is True}
+                        for x in (payload.get("parts") or []) if isinstance(x, dict)][:8]
     if isinstance(payload.get("song_score"), (int, float)):
         out["song_score"] = payload["song_score"]
     if isinstance(payload.get("score_notes"), dict) and payload["score_notes"]:

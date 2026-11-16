@@ -24,6 +24,7 @@ from .statshare import FunnelShareView, ViewShareView
 from .links import LinkClickView, LinkTalliesView
 from .widgetz import WidgetOpenView, WidgetZView
 from .rulez import RulezView
+from .classz import ClassZView
 from .personalityz import PersonalityAxesView, PersonalityTestView
 from .religionz import ReligionsView
 from .languagez import LanguagesView
@@ -564,6 +565,7 @@ urlpatterns = [
     # the one about how many accounts a person gets is needed on the signup
     # form, which is the one screen where nobody is signed in yet.
     path("rulez/", RulezView.as_view(), name="economy-rulez"),
+    path("classz/", ClassZView.as_view(), name="economy-classz"),
     path("priorities/", PrioritiesView.as_view(), name="economy-priorities"),
     # Logged-out: which coaches a stranger can reach without an account.
     path("trialdoorz/", TrialDoorsView.as_view(), name="economy-trial-doors"),

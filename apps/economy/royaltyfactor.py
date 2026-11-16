@@ -27,8 +27,8 @@ What it deliberately does not do:
   `Profile.coach_counts_for_skillz` on, a member's coach scores for the matching instrument
   join their listener ratings in `blended_skill_rating` as `COACH_VOTES` votes (the median of
   their recent takes, at least `MIN_COACH_TAKES` of them, so one lucky take cannot carry
-  it). It cuts both ways and the opt-in says so before it is pressed. Humans stay the
-  majority.
+  it). It cuts both ways and the opt-in says so before it is pressed. Listeners are the
+  majority once four of them have rated.
 """
 from collections import defaultdict
 
@@ -40,7 +40,10 @@ STEP = 0.10                    # each point above/below the pivot adds/takes thi
 LOWEST = round(1 + (1 - PIVOT) * STEP, 4)      # a median of 1  → 0.6
 HIGHEST = round(1 + (10 - PIVOT) * STEP, 4)    # a median of 10 → 1.5
 
-COACH_VOTES = 2                # how many listener votes one coach reading is worth
+# How many listener votes one coach reading is worth. Three (Corey's call, was 2): it can
+# stand in for listener ratings or add to them. Listeners are the majority from the fourth
+# rating on. The classes (classz.py) read this same number.
+COACH_VOTES = 3
 MIN_COACH_TAKES = 3            # takes the coach median needs behind it
 COACH_WINDOW = 10              # the most recent takes it reads
 
@@ -144,7 +147,7 @@ def battle_coach_reading(user, battle):
 
 
 def blend_with_coach(human_scores, coach_median):
-    """Listener scores plus the coach's COACH_VOTES votes; the listeners stay the majority."""
+    """Listener scores plus the coach's COACH_VOTES votes."""
     if coach_median is None:
         return _median(human_scores) if human_scores else None
     return round((sum(human_scores) + coach_median * COACH_VOTES) / (len(human_scores) + COACH_VOTES), 1)
@@ -198,8 +201,9 @@ COACH_OPT_IN_NOTE = (
     f"once you have {MIN_COACH_TAKES}). That rating moves what your share of a track's royalties is. "
     "It also counts in a battle: your AI coach's reading of the take you made in it joins the judges' "
     "ratings the same way, and it can change who wins. "
-    "It cuts both ways: a strong run of takes can raise it and a weak one can lower it. Listener ratings "
-    "stay the majority, and you can switch it off any time.")
+    f"It cuts both ways: a strong run of takes can raise it and a weak one can lower it. With fewer than "
+    f"{COACH_VOTES + 1} listener ratings the coach is the larger share of the number; from {COACH_VOTES + 1} on, "
+    "listeners are. You can switch it off any time.")
 
 
 class SkillzCoachView(APIView):

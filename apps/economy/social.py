@@ -1599,6 +1599,9 @@ class MembersView(APIView):
             "attract": [num("attr_min"), num("attr_max")],
             "age": [num("age_min"), num("age_max")],
             "km": [None, num("max_km")],
+            # ThuroZ / SeXi: the rating gate with the number chosen once (classz.py).
+            "thuro": request.query_params.get("thuro") in ("1", "true"),
+            "sexi": request.query_params.get("sexi") in ("1", "true"),
         })
         exp_min, exp_max = num("exp_min"), num("exp_max")  # years-of-experience range
 
@@ -1627,11 +1630,20 @@ class MembersView(APIView):
         # numbers on the card were not, so a 40-member search cost 322
         # queries and VybeZ fires this search from three text inputs.
         card_ids = [p.user_id for p in qs]
+        from .classz import classes_for
+        from .models import Membership, _median, attractiveness_stats, overall_scores
+        # The scores carry the count behind each median, so the classes ride the same
+        # reads the medians always cost (plus one for the coach's voice).
+        _overall, _attract = overall_scores(card_ids), attractiveness_stats(card_ids)
+        _hidden = set(Membership.objects.filter(user_id__in=card_ids, attractiveness_public=False)
+                      .values_list("user_id", flat=True))
         batched = {
-            "attract": attractiveness_shown_medians(card_ids),
-            "overall": overall_medians(card_ids),
+            "attract": {k: v[0] for k, v in _attract.items() if k not in _hidden},
+            "overall": {k: _median(v) for k, v in _overall.items()},
             "edges": follow_edges_for(card_ids),
+            "classes": classes_for(qs, overall=_overall, attract=_attract),
         }
+        class_skipped = 0
         for p in qs:
             if regions and not (set(regions) & set(p.regions or [])):
                 continue
@@ -1677,7 +1689,13 @@ class MembersView(APIView):
                        for k in substances):
                     continue
             metrics = member_metrics(p, origin)
+            # The classes are already known for the whole page; hand them to the gate
+            # so "ThuroZ only" costs no read per member.
+            for _ck in ("thuro", "sexi"):
+                metrics._cache[_ck] = _ck in batched["classes"].get(p.user_id, ())
             if gates and failing_gate(metrics, gates):
+                if any(gates.get(k) and not metrics.get(k) for k in ("thuro", "sexi")):
+                    class_skipped += 1
                 continue
             if exp_min is not None or exp_max is not None:
                 exp = metrics.get("exp")
@@ -1689,6 +1707,7 @@ class MembersView(APIView):
             card = _profile_card(p, request, badges=worn.get(p.user_id, []),
                                  audience=aud, batched=batched)
             card["distance_km"] = dist
+            card["classes"] = batched["classes"].get(p.user_id, [])
             if uses:
                 # How often, for the substances THIS search asked about and no
                 # others — the card of a member found under THC says how often
@@ -1715,4 +1734,10 @@ class MembersView(APIView):
             "members": results[:100],
             "origin_shared": origin[0] is not None,
             "personality_note": filter_reason(personality_wanted, personality_undeclared),
+            # A class filter with nobody in it has two causes, and the searcher is told
+            # which: how many members it left out, and that most are simply not rated yet.
+            "class_note": (
+                f"{class_skipped} member{'' if class_skipped == 1 else 's'} left out by the class filter. "
+                "A class needs at least 3 voices behind a rating, so most are not rated enough yet rather than rated low."
+                if class_skipped else ""),
         })
