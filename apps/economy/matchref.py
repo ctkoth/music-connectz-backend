@@ -1050,9 +1050,16 @@ class MatchReferenceView(APIView):
         if not take or not ref:
             return Response({"detail": "Send both: your take and the reference track."},
                             status=status.HTTP_400_BAD_REQUEST)
+        for side, field in ((take, "take_part"), (ref, "reference_part")):
+            named = vc.clean_part(request.data.get(field))
+            side.part = named["labels"][0] if named else ""
         if take.post is not None and ref.post is not None and take.post.id == ref.post.id:
-            return Response({"detail": "That's the same post on both sides — pick a different reference."},
-                            status=status.HTTP_400_BAD_REQUEST)
+            # One song against itself is only a comparison when it is one VERSE against
+            # another: two different parts named. Otherwise it is the same thing twice.
+            if not (take.part and ref.part and take.part.lower() != ref.part.lower()):
+                return Response({"detail": "That's the same post on both sides. Pick a different reference, or name a "
+                                           "different part on each side to compare two verses of it."},
+                                status=status.HTTP_400_BAD_REQUEST)
         for side in (take, ref):
             if not side.ctype.startswith(("audio/", "video/")):
                 return Response({"detail": "Both must be audio or video."},
@@ -1098,9 +1105,6 @@ class MatchReferenceView(APIView):
                             status=status.HTTP_402_PAYMENT_REQUIRED)
 
         genre = str(request.data.get("genre") or "unspecified")[:60]
-        for side, field in ((take, "take_part"), (ref, "reference_part")):
-            named = vc.clean_part(request.data.get(field))
-            side.part = named["labels"][0] if named else ""
         out, failed = run_match(self.app_key, take, ref, genre)
         if failed is not None:
             return failed

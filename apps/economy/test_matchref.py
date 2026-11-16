@@ -196,6 +196,16 @@ class InspirationFromPostsTests(TestCase):
         r = self.run_match({"take_post_id": mine.id, "reference_post_id": mine.id})
         self.assertEqual(r.status_code, 400)
 
+    def test_one_song_against_itself_is_a_comparison_only_verse_against_verse(self):
+        mine, _ = self.stored_post(self.me)
+        same = {"take_post_id": mine.id, "reference_post_id": mine.id}
+        # The same part named twice is still the same thing twice.
+        self.assertEqual(self.run_match({**same, "take_part": "Verse 1", "reference_part": "verse 1"}).status_code, 400)
+        self.assertEqual(self.run_match({**same, "take_part": "Verse 1"}).status_code, 400)
+        r = self.run_match({**same, "take_part": "Verse 1", "reference_part": "Verse 2"})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual((r.data["sources"]["take"]["part"], r.data["sources"]["reference"]["part"]), ("Verse 1", "Verse 2"))
+
     def test_a_filez_upload_of_your_own_works_and_costs_no_post_energy(self):
         _, up = self.stored_post(self.me, "Mine")
         r = self.run_match({"take_upload_id": up.id, "reference": f("r.wav")})
