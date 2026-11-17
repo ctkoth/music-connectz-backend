@@ -156,6 +156,13 @@ CREDIT_OUTCOMES = {
                             "history. A repeated biometric-adjacent rating held over time is its own "
                             "privacy risk that a stateless call does not create.",
         "no_free_way": "It reads one photo with a model; the daily free allowance is the free way in."},
+    "imagez_cutout": {
+        "resource": "promptz", "label": "ImageZ AI background removal",
+        "buys": "Your picture's main subject outlined and put on a layer mask, so the background is hidden and can be painted back wherever the AI was wrong.",
+        "outcomes": ["tangible", "shareable"],
+        "lands_in": ["imagez"],
+        "ephemeral_reason": "The mask goes straight into the picture on your device and is not stored here; what is kept is the picture you save.",
+        "free_way": {"label": "Masks, selections and the eraser cut a subject out by hand at every tier, and a daily free prompt covers a run.", "tab": "imagez"}},
     "videodevelop": {
         "resource": "promptz", "label": "Video ConnectZ Direct",
         "buys": "A shot plan for your music video, made by listening to your track: for every shot, what is heard in that part of the song and three shots that go with its lyric, mood or beat, each with why, and the one the coach would direct.",

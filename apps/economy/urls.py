@@ -93,6 +93,7 @@ from .viewz import ViewBeatView, ViewCountsView, ViewMineView, ViewPostResultsVi
 from .metricz import HoroscopeView, MetricZView, SubstanceScaleView
 from .videoz import VideoDetailView, VideoView
 from .videodevelop import VideoDevelopView
+from .imagez_cutout import ImageZCutoutView
 from .videostitch import VideoStitchDetailView, VideoStitchView
 from .instrumentalz import InstrumentalAIPresetView, InstrumentalApplyPresetView, InstrumentalInspirationView, InstrumentalMidiView, InstrumentalMixPresetsView, InstrumentalMixSheetView, InstrumentalMixView, InstrumentalMoodView, InstrumentalView
 from .intelligencez import IntelligenceHubView
@@ -267,6 +268,7 @@ urlpatterns = [
     path("videoz/", VideoView.as_view(), name="economy-videoz"),
     path("videoz/<int:pk>/", VideoDetailView.as_view(), name="economy-videoz-detail"),
     path("videoz/develop/", VideoDevelopView.as_view(), name="economy-videoz-develop"),
+    path("imagez/cutout/", ImageZCutoutView.as_view(), name="economy-imagez-cutout"),
     path("videoz/stitch/", VideoStitchView.as_view(), name="economy-videoz-stitch"),
     path("videoz/stitch/<int:pk>/", VideoStitchDetailView.as_view(), name="economy-videoz-stitch-detail"),
     path("substancez/", SubstanceScaleView.as_view(), name="economy-substancez-scale"),

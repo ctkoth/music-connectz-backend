@@ -71,6 +71,12 @@ FEATURES = [
     # the member's device and spends nothing of ours), and a picture cut out during the sample
     # is the member's.
     {"key": "imagez_erasers", "label": "Magic eraser and background eraser in ImageZ", "tab": "imagez", "target": "imagez-erasers"},
+    # ImageZ's AI background removal (Corey's call: StatZ). Each run is still paid like any one-photo
+    # reading, so it switches off cleanly; the mask a sample made stays in the member's picture.
+    # ImageZ's actions (record a series of edits, replay them on another picture) are automation:
+    # client-side like the erasers, and a picture edited during the sample is the member's.
+    {"key": "imagez_cutout", "label": "Remove background with AI in ImageZ", "tab": "imagez", "target": "imagez-cutout"},
+    {"key": "imagez_actions", "label": "Record and replay edits (Actions) in ImageZ", "tab": "imagez", "target": "imagez-actions"},
 ]
 
 # THE AUDIT: every place StatZ is the difference, and whether the daily sample covers it.
@@ -96,6 +102,8 @@ DRIVERS = [
     {"key": "video_develop", "sampled": True, "modules": ["videodevelop"]},
     {"key": "select_all", "sampled": True, "modules": []},
     {"key": "imagez_erasers", "sampled": True, "modules": []},
+    {"key": "imagez_cutout", "sampled": True, "modules": ["imagez_cutout"]},
+    {"key": "imagez_actions", "sampled": True, "modules": []},
     {"key": "instrumental_mix", "sampled": False, "modules": ["instrumentalz"],
      "why_not": "A kept set of levels is a saved preference on a stored piece — a sample that left one behind would be a permanent grant wearing a timer."},
     {"key": "mix_presets", "sampled": False, "modules": [],
