@@ -1029,6 +1029,9 @@ class Face(models.Model):
     name = models.CharField(max_length=80, blank=True, default="")
     # The member tagged in this media (who the face is), for likeness/credit.
     tagged = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="tagged_faces")
+    # Corey: a face is rated only if its owner wants it rated. Off for a new face; faces saved
+    # before the switch existed were already in the feed, so migration 0238 keeps those on.
+    open_to_ratings = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

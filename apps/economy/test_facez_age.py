@@ -23,7 +23,7 @@ def member(name, birthday=""):
 
 
 def face(owner):
-    return Face.objects.create(owner=owner, image=SimpleUploadedFile("f.png", PNG, content_type="image/png"))
+    return Face.objects.create(owner=owner, image=SimpleUploadedFile("f.png", PNG, content_type="image/png"), open_to_ratings=True)
 
 
 @override_settings(MEDIA_ROOT=tempfile.mkdtemp())

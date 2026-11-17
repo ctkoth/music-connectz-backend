@@ -82,7 +82,7 @@ class RatingPaysTests(TestCase):
         self.assertIn("@them", row.note)
 
     def test_the_second_rating_of_the_same_face_pays_nothing(self):
-        f = Face.objects.create(owner=self.them)
+        f = Face.objects.create(owner=self.them, open_to_ratings=True)
         first = self.client.post(f"/api/economy/facez/{f.pk}/rate/", {"score": 6}, format="json")
         self.assertEqual(first.status_code, 200, first.content)
         self.assertEqual(first.data["earned_energy"], RATING_REWARD_ENERGY)

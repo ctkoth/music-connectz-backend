@@ -142,10 +142,21 @@ def _face_dict(f, request):
         "name": f.name,
         "url": request.build_absolute_uri(f.image.url) if f.image else None,
         "tagged": f.tagged.username if f.tagged_id else "",
+        "open_to_ratings": f.open_to_ratings,
         "median": face_median(f),
         "count": f.ratings.count(),
         "my_rating": my,
     }
+
+
+RATINGS_NOTE = ("Open to ratings puts this face in the feed where adult members rate it 1-10; the median shows on the "
+                "face. It is off for a new face, and you can switch it off any time — ratings already given stay counted.")
+
+
+def faces_cap(user):
+    from .catalog import limits_for
+    from .models import membership_for
+    return limits_for(membership_for(user).tier).get("facez_faces")
 
 
 class FaceZView(APIView):
@@ -155,7 +166,7 @@ class FaceZView(APIView):
     parser_classes = [MultiPartParser, FormParser]
 
     def get(self, request):
-        mine = [_face_dict(f, request) for f in request.user.faces.all()[:100]]
+        mine = [_face_dict(f, request) for f in request.user.faces.all()[:500]]
         # The feed is faces to RATE, which is rating people on looks — the
         # same adult-only surface as AttractivenessRateView. It had no wall:
         # a minor could rate strangers' faces and a minor's face sat in every
@@ -163,30 +174,59 @@ class FaceZView(APIView):
         why = adult_only_reason(request.user)
         feed = [] if why else [
             _face_dict(f, request)
-            for f in Face.objects.exclude(owner=request.user).select_related("owner", "owner__mcz_profile")
+            for f in Face.objects.exclude(owner=request.user).filter(open_to_ratings=True).select_related("owner", "owner__mcz_profile")
                                  .order_by("-created_at")[:120]
             if not is_minor(f.owner)
         ][:60]
         from .ratez import rating_reward
+        cap = faces_cap(request.user)
         return Response({"mine": mine, "feed": feed, "feed_locked": why,
-                         "rating_reward": rating_reward(request.user)})
+                         "rating_reward": rating_reward(request.user),
+                         "faces_limit": cap, "faces_full": cap is not None and len(mine) >= cap,
+                         "ratings_note": RATINGS_NOTE})
 
     def post(self, request):
         img = request.FILES.get("image")
         if not img:
             return Response({"detail": "image (multipart) required"}, status=status.HTTP_400_BAD_REQUEST)
+        cap = faces_cap(request.user)
+        if cap is not None and request.user.faces.count() >= cap:
+            from .catalog import limits_for
+            nxt = limits_for("premium")["facez_faces"]
+            return Response({"detail": f"Your tier keeps {cap} faces — delete one, or upgrade "
+                                       f"(Premium keeps {nxt}; StatZ is unlimited).", "faces_limit": cap},
+                            status=status.HTTP_403_FORBIDDEN)
         tagged = None
         tname = str(request.data.get("tagged", "")).strip()
         if tname:
             tagged = User.objects.filter(username=tname).first()
-        f = Face.objects.create(owner=request.user, image=img, name=str(request.data.get("name", ""))[:80], tagged=tagged)
+        open_ = str(request.data.get("open_to_ratings", "")).lower() in ("1", "true", "yes", "on")
+        f = Face.objects.create(owner=request.user, image=img, name=str(request.data.get("name", ""))[:80], tagged=tagged,
+                                open_to_ratings=open_)
         if tagged and tagged.id != request.user.id:
             notify(tagged, "like", f"@{request.user.username} tagged you on FaceZ 🙂", actor=request.user, item_id=f"face:{f.id}")
         return Response({"face": _face_dict(f, request)}, status=status.HTTP_201_CREATED)
 
 
 class FaceDetailView(APIView):
+    """PATCH {open_to_ratings, name} on your own face; DELETE removes it."""
+
     permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        f = request.user.faces.filter(pk=pk).first()
+        if not f:
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        fields = []
+        if "open_to_ratings" in request.data:
+            f.open_to_ratings = str(request.data.get("open_to_ratings")).lower() in ("1", "true", "yes", "on")
+            fields.append("open_to_ratings")
+        if "name" in request.data:
+            f.name = str(request.data.get("name") or "")[:80]
+            fields.append("name")
+        if fields:
+            f.save(update_fields=fields)
+        return Response({"face": _face_dict(f, request)})
 
     def delete(self, request, pk):
         f = request.user.faces.filter(pk=pk).first()
@@ -208,6 +248,8 @@ class FaceRateView(APIView):
             return Response({"detail": "face not found"}, status=status.HTTP_404_NOT_FOUND)
         if f.owner_id == request.user.id:
             return Response({"detail": "can't rate your own face"}, status=status.HTTP_400_BAD_REQUEST)
+        if not f.open_to_ratings:
+            return Response({"detail": "This face isn't open to ratings."}, status=status.HTTP_403_FORBIDDEN)
         # Rating a face is rating somebody on looks: adults only, both ends.
         for who in (request.user, f.owner):
             reason = adult_only_reason(who)
