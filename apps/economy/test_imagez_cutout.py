@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from apps.economy.imagez_cutout import clean_masks
+from apps.economy.imagez_cutout import MAX_CENTS, MAX_OUTPUT_TOKENS, OUT_CENTS_PER_M, clean_masks, price_from_usage
 from apps.economy.models import Membership, TIER_STATZ
 
 PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\0" * 20).decode()
@@ -45,7 +45,7 @@ class CutoutViewTests(TestCase):
         self.assertFalse(self.c.get(URL).data["allowed"])
 
     @patch("apps.economy.imagez_cutout._key", return_value="k")
-    @patch("apps.economy.imagez_cutout._bill", return_value=0)
+    @patch("apps.economy.imagez_cutout._charge", return_value=0)
     @patch("apps.economy.imagez_cutout.generate_content")
     def test_a_mask_is_returned_and_billed(self, gen, bill, _k):
         self.statz()
@@ -56,7 +56,7 @@ class CutoutViewTests(TestCase):
         bill.assert_called_once()
 
     @patch("apps.economy.imagez_cutout._key", return_value="k")
-    @patch("apps.economy.imagez_cutout._bill")
+    @patch("apps.economy.imagez_cutout._charge")
     @patch("apps.economy.imagez_cutout.generate_content")
     def test_no_subject_is_not_charged(self, gen, bill, _k):
         self.statz()
@@ -70,3 +70,27 @@ class CutoutViewTests(TestCase):
         self.statz()
         r = self.c.post(URL, {"image": "data:text/html;base64,PGI+"}, format="json")
         self.assertEqual(r.status_code, 400)
+
+
+class PriceTests(TestCase):
+    def test_priced_from_tokens_between_the_stated_ends(self):
+        self.assertEqual(price_from_usage({"promptTokenCount": 1300, "candidatesTokenCount": 200}), 1)
+        self.assertEqual(price_from_usage({"promptTokenCount": 1300, "candidatesTokenCount": 9000}), 3)
+        self.assertEqual(price_from_usage({"promptTokenCount": 1, "candidatesTokenCount": 10**8}), MAX_CENTS)
+        self.assertEqual(price_from_usage(None), MAX_CENTS)
+
+    def test_the_output_cap_cannot_cost_more_than_the_top_price(self):
+        self.assertLessEqual(MAX_OUTPUT_TOKENS * OUT_CENTS_PER_M / 1_000_000, MAX_CENTS)
+
+    def test_the_top_price_fits_inside_a_free_daily_prompt(self):
+        from apps.economy.models import daily_prompt_covers
+        self.assertTrue(daily_prompt_covers(MAX_CENTS))
+
+
+class ChargeTests(TestCase):
+    def test_a_free_prompt_pays_and_nothing_reaches_the_owner(self):
+        from apps.economy.imagez_cutout import _charge
+        u = get_user_model().objects.create_user("payer", password="pw12345!x")
+        with patch("apps.economy.views.credit_owner") as owner:
+            self.assertEqual(_charge(u, 2), 0)
+            owner.assert_not_called()

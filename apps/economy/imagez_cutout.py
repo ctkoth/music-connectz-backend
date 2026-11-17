@@ -9,9 +9,13 @@ back wherever the model was wrong.
 * **StatZ, and the daily sample** (`statz_trial` feature `imagez_cutout`) — Corey's call.
   The editor's own cut-out tools (masks, selections, the plain eraser) stay free, so the
   tier buys speed, never whether.
-* **Price on the button, charged only when a mask came back.** One standard AI price per
-  run, covered by a daily free prompt first, exactly like every other one-photo reading.
-  A picture with no clear subject answers `none` and is not charged.
+* **Priced at what the model actually used, with the range on the button.** A mask comes back
+  as a picture, which is the expensive part of the answer, so a busy photo costs more than a
+  plain one. The run is billed from Gemini's own token count at its list price, rounded up,
+  never under `MIN_CENTS` and never over `MAX_CENTS` (the output is capped so it cannot cost
+  more). `MAX_CENTS` is the daily free prompt's ceiling, so a free prompt always covers it;
+  otherwise it is that many 🏷️. Plus the ⚡ every AI run takes, by tier. A picture with no
+  clear subject is not charged at all.
 * **Nothing is kept.** The photo is read and discarded; no Upload row, nothing logged but
   the size. What the member keeps is the mask in their own picture.
 * **Nothing a model wrote reaches the screen unchecked.** A mask must be a PNG data URL of
@@ -29,8 +33,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import ai_cost
-from .gemini import _bill, _key, generate_content
+from .gemini import _key, generate_content
 from .models import can_afford_ai, daily_prompt_state
 from .statz_trial import UPGRADE, has_statz
 
@@ -45,6 +48,11 @@ WHAT_IT_DOES = ("Finds the main subject and puts it on a layer mask — the back
 MAX_BYTES = 8 * 1024 * 1024
 MAX_SUBJECTS = 5
 MASK_MAX_CHARS = 3_000_000
+# Gemini 2.5 Flash list prices, in cents per million tokens (input, output). Corey: price it
+# appropriately — what it costs us, passed through, never a flat guess.
+IN_CENTS_PER_M, OUT_CENTS_PER_M = 30, 250
+MAX_OUTPUT_TOKENS = 12_000          # 12k × 250¢/M = 3¢: the output can never cost more than MAX_CENTS
+MIN_CENTS, MAX_CENTS = 1, 3
 MIMES = {"image/png", "image/jpeg", "image/webp"}
 _DATA_URL = re.compile(r"^data:(image/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=\s]+)$")
 
@@ -118,13 +126,45 @@ def clean_masks(items):
     return out
 
 
+def price_from_usage(usage):
+    """Cents for one run from Gemini's usageMetadata, rounded up, between MIN_CENTS and MAX_CENTS."""
+    import math
+    usage = usage if isinstance(usage, dict) else {}
+    try:
+        tin = int(usage.get("promptTokenCount") or 0)
+        tout = int(usage.get("candidatesTokenCount") or 0) + int(usage.get("thoughtsTokenCount") or 0)
+    except (TypeError, ValueError):
+        return MAX_CENTS
+    if not tin and not tout:
+        return MAX_CENTS        # no count means we cannot show it was cheaper: charge the stated top
+    return max(MIN_CENTS, min(MAX_CENTS, math.ceil((tin * IN_CENTS_PER_M + tout * OUT_CENTS_PER_M) / 1_000_000)))
+
+
+def _charge(user, cents):
+    """`gemini._bill` at this run's real price: a free daily prompt first, then PromptZ, then cash —
+    and nothing reaches the owner's wallet when a free prompt paid."""
+    from .models import charge_ai_usage, daily_prompt_covers
+    from .views import credit_owner
+    _, _, left = daily_prompt_state(user)
+    free = daily_prompt_covers(cents) and left > 0
+    if charge_ai_usage(user, cents, note="ImageZ — AI background removal", count_daily=True) is None:
+        return None
+    if free:
+        return 0
+    credit_owner(user, cents, "ImageZ — AI background removal")
+    return cents
+
+
 def state(user):
-    cost = ai_cost("standard")
+    from .models import ai_energy_cost
+    cost = MAX_CENTS
     _, _, left = daily_prompt_state(user)
     allowed = has_statz(user)
     return {
         "feature": FEATURE, "label": LABEL, "allowed": allowed, "locked_reason": "" if allowed else LOCKED,
-        "upgrade": UPGRADE, "what_it_does": WHAT_IT_DOES, "cost_cents": cost, "free_today": bool(cost) and left > 0,
+        "upgrade": UPGRADE, "what_it_does": WHAT_IT_DOES, "cost_cents": cost, "cost_min_cents": MIN_CENTS,
+        "cost_note": f"{MIN_CENTS}–{MAX_CENTS} 🏷️ — what the AI actually used, rounded up — or one free daily prompt.",
+        "energy_cost": ai_energy_cost(user), "free_today": bool(cost) and left > 0,
         "affordable": bool(not cost or left > 0 or can_afford_ai(user, cost)), "charged_on_failure": False,
         "configured": bool(_key()), "max_mb": MAX_BYTES // (1024 * 1024),
     }
@@ -158,7 +198,8 @@ class ImageZCutoutView(APIView):
                                        "Nothing was charged."}, status=status.HTTP_400_BAD_REQUEST)
         body = {"contents": [{"parts": [{"text": PROMPT},
                                         {"inline_data": {"mime_type": mime, "data": base64.b64encode(raw).decode()}}]}],
-                "generationConfig": {"temperature": 0.2, "thinkingConfig": {"thinkingBudget": 0}}}
+                "generationConfig": {"temperature": 0.2, "maxOutputTokens": MAX_OUTPUT_TOKENS,
+                                     "thinkingConfig": {"thinkingBudget": 0}}}
         try:
             resp, _tried = generate_content("text", body, key=_key(), timeout=90, label="ImageZ cut-out")
         except requests.RequestException:
@@ -169,12 +210,14 @@ class ImageZCutoutView(APIView):
             return Response({"detail": "The AI couldn't read that picture right now — nothing was charged."},
                             status=status.HTTP_502_BAD_GATEWAY)
         try:
-            text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+            payload = resp.json()
+            text = payload["candidates"][0]["content"]["parts"][0]["text"]
         except (KeyError, IndexError, ValueError):
-            text = ""
+            payload, text = {}, ""
         masks = clean_masks(_parse_json(text))
         if not masks:
             return Response({"masks": [], "cost_cents": 0,
                              "detail": "The AI found no clear subject to cut out — nothing was charged."})
-        charged = _bill(request.user, note="ImageZ — AI background removal", count_daily=True)
-        return Response({"masks": masks, "cost_cents": charged})
+        price = price_from_usage(payload.get("usageMetadata"))
+        charged = _charge(request.user, price)
+        return Response({"masks": masks, "cost_cents": charged, "price_cents": price})
