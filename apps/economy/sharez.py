@@ -92,6 +92,10 @@ class ShareZView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        if not request.query_params.get("ref"):
+            # Everything this member has shared of one kind, in one query (FileZ lists many files).
+            rows = SharedItem.objects.filter(owner=request.user, kind=request.query_params.get("kind")).values_list("ref", "token")
+            return Response({"who": WHO, "shared": {str(r): t for r, t in rows}})
         it = SharedItem.objects.filter(owner=request.user, kind=request.query_params.get("kind"),
                                        ref=_int(request.query_params.get("ref"))).first()
         return Response({"shared": bool(it), "token": it.token if it else "", "who": WHO,

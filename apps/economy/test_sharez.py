@@ -48,3 +48,7 @@ class ShareZTests(TestCase):
         self.piece.delete()
         self.assertEqual(self.anon.get(f"/api/economy/sharez/{tok}/").status_code, 404)
         self.assertEqual(SharedItem.objects.count(), 1)
+
+    def test_one_call_lists_everything_shared_of_a_kind(self):
+        tok = self.c.post("/api/economy/sharez/", {"kind": "sentence", "ref": self.piece.id}, format="json").data["token"]
+        self.assertEqual(self.c.get("/api/economy/sharez/", {"kind": "sentence"}).data["shared"], {str(self.piece.id): tok})
