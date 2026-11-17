@@ -299,6 +299,32 @@ INSPIRATION_WRAP = (
     "mood and general style. Do NOT copy it, trace it, or reproduce any person, face, logo, lettering, brand or "
     "recognisable artwork from it. Make a new, original picture for this request: ")
 
+# Edit mode (ImageZ's "Edit with AI", and Image ConnectZ's own "edit a picture"): the FIRST image is the
+# member's picture and the request changes only what it names. An optional second image is a reference
+# for the edit — a picture, or a frame the member grabbed from a video on their device — used the same
+# way Inspiration is: its look and its objects, never a person's likeness, a logo or lettering.
+EDIT_WRAP = (
+    "Edit the FIRST attached image. Change only what this request asks for and keep everything else as it "
+    "is — the composition, the people and their identity, the lighting and any text — unless the request "
+    "says otherwise. Return the whole edited picture. Request: ")
+EDIT_REF_WRAP = (
+    " The SECOND attached image is a reference for this edit: take from it the look, colours or the object "
+    "the request names. Do NOT copy any person, face, logo, lettering or recognisable artwork from it.")
+EDIT_NOTE = ("Edit with AI changes only what you describe and keeps the rest. Your picture (and a reference, if you "
+             "add one) is sent for this one edit and isn't kept, except the result in your images.")
+EDIT_MAX_BYTES = 8 * 1024 * 1024
+
+
+def _inline(data_url):
+    """A data URL as a Gemini inline part, or None if it is not a picture of a sane size."""
+    if not (isinstance(data_url, str) and data_url.startswith("data:image/") and "," in data_url):
+        return None
+    header, b64 = data_url.split(",", 1)
+    mime = header.split(";")[0].split(":")[-1]
+    if mime not in ("image/png", "image/jpeg", "image/webp") or len(b64) * 3 // 4 > EDIT_MAX_BYTES:
+        return None
+    return {"inlineData": {"mimeType": mime, "data": b64}}
+
 
 def self_faces(user):
     """The member's FaceZ photos that may stand for THEM: theirs, not tagged as anyone else."""
@@ -343,7 +369,7 @@ class GeminiImageView(APIView):
                          "cost_note": "Pictures aren't covered by the daily free prompts. A run that fails isn't charged.",
                          "daily_prompts": allowance, "daily_prompts_left": daily_left,
                          "configured": bool(_key()),
-                         "inspiration_note": INSPIRATION_IMAGE_NOTE, **imagez.catalogue(),
+                         "inspiration_note": INSPIRATION_IMAGE_NOTE, "edit_note": EDIT_NOTE, **imagez.catalogue(),
                          # Saved FaceZ photos the member may use as their own likeness: theirs, and
                          # not tagged as somebody else.
                          "faces": [{"id": f.id, "name": f.name, "url": request.build_absolute_uri(f.image.url)}
@@ -357,6 +383,20 @@ class GeminiImageView(APIView):
             return Response({"detail": "Pick what it's for, or describe the picture."},
                             status=status.HTTP_400_BAD_REQUEST)
         likeness = str(data.get("reference_mode", "")).lower() == "me"
+        edit = str(data.get("edit", "")).lower() in ("1", "true", "yes", "on")
+        if edit:
+            if not prompt:
+                return Response({"detail": "Say what to change. Nothing was charged."}, status=status.HTTP_400_BAD_REQUEST)
+            if not _inline(data.get("reference")):
+                return Response({"detail": "Send the picture to edit (PNG, JPEG or WebP, up to 8 MB). Nothing was charged."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if data.get("reference2") and not _inline(data.get("reference2")):
+                return Response({"detail": "The reference must be a picture (PNG, JPEG or WebP, up to 8 MB) — "
+                                           "grab a frame from a video. Nothing was charged."}, status=status.HTTP_400_BAD_REQUEST)
+            if str(data.get("confirm_own", "")).lower() not in ("1", "true", "yes", "on"):
+                return Response({"detail": "Confirm the picture is yours to edit — your own photo or one you have the rights to."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            likeness = False
         if likeness:
             if not imagez.KINDS.get(kind, {}).get("likeness"):
                 return Response({"detail": "Your photo can only be used on a picture that's of you — "
@@ -387,12 +427,20 @@ class GeminiImageView(APIView):
         if inspiration and not (request.data or {}).get("reference"):
             return Response({"detail": "Pick a picture for Inspiration first.", "image": None},
                             status=status.HTTP_400_BAD_REQUEST)
-        if likeness:
+        if likeness or edit:
             inspiration = False
         framed = imagez.build_prompt(prompt, kind, style, mood, colours, words) + priorities_clause("image", (request.data or {}).get("priorities"))
-        wrap = INSPIRATION_WRAP if inspiration else imagez.LIKENESS_WRAP if likeness else ""
-        parts = [{"text": wrap + framed}]
-        aspect = imagez.KINDS.get(kind, {}).get("aspect")
+        if edit:
+            # The member's words lead: in an edit the picture type only frames them, it never replaces them.
+            ref2 = _inline(data.get("reference2"))
+            parts = [_inline(data.get("reference")), *([ref2] if ref2 else []),
+                     {"text": EDIT_WRAP + framed + (EDIT_REF_WRAP if ref2 else "")}]
+            data = {**data, "reference": None}
+        else:
+            wrap = INSPIRATION_WRAP if inspiration else imagez.LIKENESS_WRAP if likeness else ""
+            parts = [{"text": wrap + framed}]
+        # An edit keeps the picture's own shape; only a new picture takes the type's frame.
+        aspect = None if edit else imagez.KINDS.get(kind, {}).get("aspect")
         reference = data.get("reference")
         if isinstance(reference, str) and reference.startswith("data:") and "," in reference:
             header, b64 = reference.split(",", 1)
