@@ -119,18 +119,33 @@ UNLIMITED_CHARS = 10 ** 9
 # show. A recommendation, Corey's to move: 25 / 100 / 300. Nobody loses a link
 # when a number moves — a member already over a ceiling keeps what they have and
 # cannot add more (`social.links_over_cap`).
+#
+# `imagez_layers` is how many layers one ImageZ picture may hold. The editor is
+# free and runs on the member's device; this ladders how MUCH, never whether —
+# 3 still holds a background, a picture and its text, and merge down is always
+# there. Nothing is lost when it moves: a project over the ceiling still opens
+# with every layer, it just cannot add one. Corey's call: Free 3, Premium 6,
+# StatZ unlimited (None, like soundcloud_import).
+#
+# `imagez_fonts` is how many of ImageZ's fonts a text layer can use. Corey's call:
+# the same number as layers — Free 3, Premium 6, StatZ unlimited (every font plus
+# any installed on the member's device). Text itself is every tier's.
 TIER_LIMITS = {
     TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500, "embeds_per_post": 3,
-                "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 10, "profile_links": 25},
+                "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 10, "profile_links": 25,
+                "imagez_layers": 3, "imagez_fonts": 3},
     TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 15,
-                   "widgets_open": 12, "custom_groups": 5, "soundcloud_import": 25, "profile_links": 100},
+                   "widgets_open": 12, "custom_groups": 5, "soundcloud_import": 25, "profile_links": 100,
+                   "imagez_layers": 6, "imagez_fonts": 6},
     # StatZ writes without a character cap (Corey's call). It was 5,000 for a
     # day; nothing was lost either way, since the cap is applied on write.
     TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999,
-                 "widgets_open": 40, "custom_groups": 20, "soundcloud_import": None, "profile_links": 300},
+                 "widgets_open": 40, "custom_groups": 20, "soundcloud_import": None, "profile_links": 300,
+                 "imagez_layers": None, "imagez_fonts": None},
     # Owner god-mode: effectively unlimited.
     TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760, "embeds_per_post": 999,
-                 "widgets_open": 999, "custom_groups": 999, "soundcloud_import": None, "profile_links": 999},
+                 "widgets_open": 999, "custom_groups": 999, "soundcloud_import": None, "profile_links": 999,
+                 "imagez_layers": None, "imagez_fonts": None},
 }
 
 

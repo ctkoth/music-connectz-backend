@@ -205,3 +205,19 @@ class PublishedNumbersTests(TestCase):
         for key in ("upload_mb", "storage_mb", "embeds_per_post"):
             vals = [tiers[t][key] for t in order]
             self.assertEqual(vals, sorted(vals), f"{key} does not increase: {vals}")
+
+
+class ImageZLayersTests(TestCase):
+    """Corey's call: Free 3 layers, Premium 6, StatZ unlimited (None) — and as many fonts."""
+
+    def test_the_ladder(self):
+        from .catalog import limits_for
+        self.assertEqual(limits_for("free")["imagez_layers"], 3)
+        self.assertEqual(limits_for("premium")["imagez_layers"], 6)
+        self.assertIsNone(limits_for("statz")["imagez_layers"])
+
+    def test_fonts(self):
+        from .catalog import limits_for
+        # Corey: every tier gets as many fonts as layers.
+        for t in ("free", "premium", "statz"):
+            self.assertEqual(limits_for(t)["imagez_fonts"], limits_for(t)["imagez_layers"])

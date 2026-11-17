@@ -65,6 +65,12 @@ FEATURES = [
     # The gate is client-side like rest_alerts (it spends nothing of ours), and what was
     # ticked during a sample stays ticked.
     {"key": "select_all", "label": "Select all on every list", "tab": "singz", "target": "bosstake-options"},
+    # ImageZ's magic eraser and background eraser (Corey's call: StatZ). The editor itself,
+    # its layers, masks and the plain eraser are free at every tier, so nobody loses a way to
+    # edit — these are the fast way to cut something out. Client-side like lipsync (it runs on
+    # the member's device and spends nothing of ours), and a picture cut out during the sample
+    # is the member's.
+    {"key": "imagez_erasers", "label": "Magic eraser and background eraser in ImageZ", "tab": "imagez", "target": "imagez-erasers"},
 ]
 
 # THE AUDIT: every place StatZ is the difference, and whether the daily sample covers it.
@@ -89,6 +95,7 @@ DRIVERS = [
     {"key": "lipsync", "sampled": True, "modules": []},
     {"key": "video_develop", "sampled": True, "modules": ["videodevelop"]},
     {"key": "select_all", "sampled": True, "modules": []},
+    {"key": "imagez_erasers", "sampled": True, "modules": []},
     {"key": "instrumental_mix", "sampled": False, "modules": ["instrumentalz"],
      "why_not": "A kept set of levels is a saved preference on a stored piece — a sample that left one behind would be a permanent grant wearing a timer."},
     {"key": "mix_presets", "sampled": False, "modules": [],
