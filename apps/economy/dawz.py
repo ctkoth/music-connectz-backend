@@ -135,9 +135,8 @@ BUILT = {"arsenal": "arsenal", "fruity_mobius": "fruitymobius", "formulawon": "f
 # page. What a browser can run is a plugin written for the web (Web Audio Modules), and third-party
 # plugin code would run with the member's own sign-in — so only the built-in effects ship now.
 PLUGIN_NOTE = ("Effects are built in: EQ, compressor, delay, reverb, filter and gain, on every "
-               "track, free. VST plugins can't run in a browser or the phone app — they are "
-               "desktop programs. Loading outside plugins is planned for the Windows app, where "
-               "they can run safely.")
+               "track, free. Your own VST3 effects work in the Windows app (the VST tab in every DAW); "
+               "a browser or the phone app can't load a desktop plugin.")
 
 
 class DawVote(models.Model):
