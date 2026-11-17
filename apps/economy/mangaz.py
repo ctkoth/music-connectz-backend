@@ -28,7 +28,38 @@ logger = logging.getLogger(__name__)
 STYLES = ["shonen", "shojo", "seinen", "chibi", "western comic", "noir", "watercolor"]
 PANELS_MIN, PANELS_MAX = 3, 8
 IDEA_MAX = 2000
-MAX_CHARACTERS = 6
+MAX_CHARACTERS = 10   # the most one drawing can keep consistent; StatZ's "unlimited" is this
+
+
+def chars_for(user):
+    """Characters on one page, by Corey's numbers (Free 3, Premium 6, StatZ every one up to MAX_CHARACTERS)."""
+    from .catalog import limits_for
+    from .models import membership_for
+    cap = limits_for(membership_for(user).tier).get("facez_faces")
+    return MAX_CHARACTERS if cap is None else min(cap, MAX_CHARACTERS)
+
+
+def _box(v):
+    """A panel's place on the page as [x, y, w, h] fractions, or None."""
+    if not (isinstance(v, list) and len(v) == 4):
+        return None
+    try:
+        x, y, w, h = (max(0.0, min(1.0, float(n))) for n in v)
+    except (TypeError, ValueError):
+        return None
+    return [round(x, 4), round(y, 4), round(max(0.03, min(w, 1 - x)), 4), round(max(0.03, min(h, 1 - y)), 4)] if w and h else None
+
+
+def _bubbles(v, n_lines):
+    out = []
+    for b in (v if isinstance(v, list) else [])[:6]:
+        try:
+            i, x, y = int(b.get("i")), float(b.get("x")), float(b.get("y"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if 0 <= i < n_lines:
+            out.append({"i": i, "x": round(max(0.0, min(1.0, x)), 4), "y": round(max(0.0, min(1.0, y)), 4)})
+    return out
 AI_LABEL = "AI-made page: your characters and idea, drawn and written by AI."
 
 
@@ -68,7 +99,9 @@ def clean_panels(raw, names, n_max=PANELS_MAX):
         out.append({"n": i, "shot": str(p.get("shot") or "")[:40], "setting": str(p.get("setting") or "")[:200],
                     "action": str(p.get("action") or "")[:300],
                     "characters": [c for c in (p.get("characters") or []) if c in names][:MAX_CHARACTERS],
-                    "dialogue": dl, "image": p.get("image") or ""})
+                    "dialogue": dl, "image": p.get("image") or "",
+                    # The page designer's layout: where the panel sits and where each line's bubble is.
+                    "box": _box(p.get("box")), "bubbles": _bubbles(p.get("bubbles"), len(dl))})
     return out
 
 
@@ -84,7 +117,7 @@ class MangaPagesView(APIView):
     def get(self, request):
         return Response({"pages": [page_dict(p) for p in MangaPage.objects.filter(user=request.user)[:30]],
                          "styles": STYLES, "panels_min": PANELS_MIN, "panels_max": PANELS_MAX,
-                         "idea_max": IDEA_MAX, "max_characters": MAX_CHARACTERS, "ai_label": AI_LABEL,
+                         "idea_max": IDEA_MAX, "max_characters": chars_for(request.user), "ai_label": AI_LABEL,
                          **price(request.user)})
 
     def post(self, request):
@@ -94,7 +127,11 @@ class MangaPagesView(APIView):
             return Response({"detail": "Give the page an idea — what happens."}, status=status.HTTP_400_BAD_REQUEST)
         if len(idea) > IDEA_MAX:
             return Response({"detail": f"Keep the idea under {IDEA_MAX:,} characters."}, status=status.HTTP_400_BAD_REQUEST)
-        ids = [i for i in (d.get("character_ids") or []) if isinstance(i, int)][:MAX_CHARACTERS]
+        cap = chars_for(request.user)
+        ids = [i for i in (d.get("character_ids") or []) if isinstance(i, int)]
+        if len(ids) > cap:
+            return Response({"detail": f"Your tier puts {cap} characters on a page — pick fewer, or upgrade "
+                                       "(Premium 6; StatZ every one)."}, status=status.HTTP_403_FORBIDDEN)
         chars = list(Character.objects.filter(user=request.user, id__in=ids))
         if not chars:
             return Response({"detail": "Pick at least one of your characters."}, status=status.HTTP_400_BAD_REQUEST)

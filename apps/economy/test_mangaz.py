@@ -98,3 +98,27 @@ class MangaDrawTests(_Base):
         self.assertEqual(r.status_code, 200, r.data)
         self.assertIn("/media/", r.data["page_image"])
         self.assertEqual(r.data["panels"][0].get("image", ""), "")
+
+
+class PageDesignerTests(TestCase):
+    """The page designer's layout rides in the panels, cleaned; characters per page ladder 3/6/all."""
+
+    def test_box_and_bubbles_are_cleaned(self):
+        from apps.economy.mangaz import clean_panels
+        out = clean_panels([{"action": "x", "dialogue": [{"who": "Ana", "line": "hi"}],
+                             "box": [0.5, 0.5, 0.9, 0.9], "bubbles": [{"i": 0, "x": 2, "y": 0.1}, {"i": 5, "x": 0, "y": 0}]},
+                            {"action": "y", "box": "nope"}], ["Ana"])
+        self.assertEqual(out[0]["box"], [0.5, 0.5, 0.5, 0.5])
+        self.assertEqual(out[0]["bubbles"], [{"i": 0, "x": 1.0, "y": 0.1}])
+        self.assertIsNone(out[1]["box"])
+
+    def test_characters_per_page_follow_the_tier(self):
+        from django.contrib.auth import get_user_model
+        from apps.economy.mangaz import MAX_CHARACTERS, chars_for
+        from apps.economy.models import Membership, TIER_PREMIUM, TIER_STATZ
+        u = get_user_model().objects.create_user("mangak", password="pw12345!x")
+        self.assertEqual(chars_for(u), 3)
+        Membership.objects.update_or_create(user=u, defaults={"tier": TIER_PREMIUM})
+        self.assertEqual(chars_for(u), 6)
+        Membership.objects.update_or_create(user=u, defaults={"tier": TIER_STATZ})
+        self.assertEqual(chars_for(u), MAX_CHARACTERS)
