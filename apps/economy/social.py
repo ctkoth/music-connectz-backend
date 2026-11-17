@@ -804,12 +804,15 @@ def _playlist_owner(ref):
 # Where each kind's PUBLIC page lives (the frontend's own routes). A kind with no
 # address cannot be shared as a link, and the bar says so instead of offering a
 # button that copies nothing.
-SHARE_PATHS = {"post": "/p/{ref}", "score": "/s/{ref}", "battle": "/b/{ref}", "playlist": "/pl/{ref}"}
+SHARE_PATHS = {"post": "/p/{ref}", "score": "/s/{ref}", "battle": "/b/{ref}", "playlist": "/pl/{ref}",
+               # Anything a maker made and its maker shared (sharez.py): pictures, videos, manga, pieces, files.
+               "shared": "/x/{ref}"}
 
 ITEM_KINDS = {
     "score": {"label": "take", "resolve": _score_owner},
     "battle": {"label": "battle", "resolve": _battle_owner},
     "playlist": {"label": "playlist", "resolve": _playlist_owner},
+    "shared": {"label": "piece", "resolve": lambda ref: __import__("apps.economy.sharez", fromlist=["owner_of"]).owner_of(ref)},
 }
 
 
@@ -859,6 +862,12 @@ def opens_for(item):
                 {"label": "Send it in a message", "tab": "messagez", "target": ""}]
     if kind == "post":
         return [{"label": "Open it in the feed", "tab": "postz", "target": ""}]
+    if kind == "shared":
+        from .models import SharedItem
+        from .sharez import OPENS
+        k = SharedItem.objects.filter(token=ref).values_list("kind", flat=True).first()
+        return [{"label": a, "tab": t, "target": ""} for a, t in OPENS.get(k, [])] + \
+            [{"label": "Send it in a message", "tab": "messagez", "target": ""}]
     return []
 
 

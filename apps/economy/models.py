@@ -8657,3 +8657,25 @@ class UiString(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["lang", "key"], name="uistring_lang_key")]
+
+
+class SharedItem(models.Model):
+    """Something a member made in one of the makers (a picture, a video, a manga page, a
+    written piece, a FileZ file), shared by its maker so other members can open it and use
+    the social bar on it — karma, reactions, ratings, comments, share, open in.
+
+    Nothing a maker makes is visible to anyone else until its maker presses Share: that is
+    what this row records. The token is the item's address and is not guessable, so an id
+    in a URL can never be walked to somebody's private work. Deleting the row unshares it.
+    """
+
+    KINDS = ("upload", "image", "video", "manga", "sentence")
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="shared_items")
+    kind = models.CharField(max_length=10)
+    ref = models.PositiveIntegerField()
+    token = models.CharField(max_length=24, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("owner", "kind", "ref")
+        ordering = ["-created_at"]
