@@ -51,7 +51,10 @@ class LilithAutoTests(TestCase):
         for t in rows:
             self.assertTrue(t.note.startswith(lilith_auto.NOTE_PREFIX))
             self.assertTrue(t.action)                      # verified: Lilith ticks it herself
-        self.assertEqual(self.c.get(BOARD).data["auto"]["added"], [])   # not more the same day
+        again = self.c.get(BOARD).data["auto"]["added"]                  # still said on the next open, not more added
+        self.assertEqual(sorted(a["id"] for a in again), sorted(a["id"] for a in added))
+        self.assertTrue(all(a["why"] for a in again))
+        self.assertEqual(LilithTask.objects.filter(user=self.me, source="auto").count(), 3)
 
     def test_a_deleted_one_never_comes_back(self):
         self.tier("statz")
@@ -67,7 +70,8 @@ class LilithAutoTests(TestCase):
     def test_off_means_off(self):
         self.tier("statz")
         self.assertEqual(self.c.post("/api/economy/lilith/auto/", {"on": False}, format="json").status_code, 200)
-        self.assertEqual(self.c.get(BOARD).data["auto"]["added"], [])
+        self.c.get(BOARD)
+        self.assertFalse(LilithTask.objects.filter(user=self.me, source="auto").exists())
         self.assertFalse(LilithAuto.objects.get(user=self.me).on)
 
     def test_an_automatic_task_pays_no_spinaz(self):

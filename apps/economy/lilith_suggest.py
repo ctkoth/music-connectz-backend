@@ -82,7 +82,7 @@ PERSONA_TASKS = {
 # cross-pollination rule as a to-do. `{n}` is how many of `have` in the window.
 TASK_GAPS = [
     ("image_made", "manga_page", "manga_page", "You've made {n} picture{s} lately. Put them on a manga page."),
-    ("manga_page", "video_saved", "cut_video", "You've made {n} manga page{s}. Cut them into a motion comic in VideoZ."),
+    ("manga_page", "video_saved", "cut_video", "You've made {n} manga page{s}. Cut {them} into a motion comic in VideoZ."),
     ("instrumental_made", "mix_made", "master_mix", "You've made {n} instrumental{s}. Master one so it's ready to release."),
     ("picture_saved", "post_made", "post_finished", "You've finished {n} picture{s} and posted none. A post is how anyone finds you."),
 ]
@@ -278,7 +278,7 @@ def suggest(user, on_board_routines=(), on_board_tasks=(), task_limit=MAX_TASK_S
     for have_a, lack_a, tk, sentence in TASK_GAPS:
         n = counts.get(have_a, 0)
         if n >= 1 and counts.get(lack_a, 0) == 0:
-            offer_task(tk, 7, "activity", sentence.format(n=n, s="" if n == 1 else "s"))
+            offer_task(tk, 7, "activity", sentence.format(n=n, s="" if n == 1 else "s", them="it" if n == 1 else "them"))
     for app, how, n in instruments_of(user)[:1]:
         if f"take_{app}" in ST.TASK_KEYS and how == "takes":
             offer_task(f"take_{app}", 5, "instrument", f"You work in {ST._label(app)} — record today's take.")

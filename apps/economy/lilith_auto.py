@@ -38,10 +38,20 @@ def is_on(user):
     return True if row is None else row.on
 
 
+def recent(user):
+    """What she added in the last 24 hours and is still open, with the reason — read from the rows,
+    so the screen can say it on any open, not only the one request that happened to add them."""
+    from .lilith_taskz import LilithTask
+    since = timezone.now() - timedelta(hours=24)
+    rows = LilithTask.objects.filter(user=user, source="auto", created_at__gte=since, done_at__isnull=True).exclude(bucket="trash")
+    return [{"id": t.pk, "title": t.title,
+             "why": (t.note.split("\n", 1)[0][len(NOTE_PREFIX):] if t.note.startswith(NOTE_PREFIX) else "")} for t in rows]
+
+
 def state(user, added=()):
     ok = allowed(user)
     return {
-        "allowed": ok, "on": is_on(user), "per_day": PER_DAY, "added": list(added),
+        "allowed": ok, "on": is_on(user), "per_day": PER_DAY, "added": recent(user) if ok else [],
         "what": ("Lilith adds up to %d tasks a day by herself, from your personas and what you've been making, "
                  "each with the reason on it. Delete one and she won't bring it back." % PER_DAY),
         "locked": "" if ok else "Automatic tasks are a StatZ feature — Lilith still suggests them below, for you to add.",

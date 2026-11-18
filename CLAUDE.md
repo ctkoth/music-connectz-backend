@@ -3343,3 +3343,15 @@ during a sample stays in the session and keeps playing and bouncing; only drawin
 track), replacing 1 / 5 / 10. `quota_for` adds `next_unlimited` so Premium is told StatZ has no cap
 (None in `next_per_month` alone could not say that). LabelGrid is the planned distributor API; until
 then a submission still goes to the owner's queue, as `HOW_IT_WORKS` says.
+
+## Lilith adds tasks by herself on StatZ, from personas and activity (Corey's call)
+
+`lilith_auto.py`: on StatZ (or the sample, `statz_trial` feature `lilith_auto`), Lilith adds up to `PER_DAY`
+(3) tasks a day before the board is drawn, chosen by the same engine as "Lilith suggests"
+(`lilith_suggest.suggest`): `PERSONA_TASKS` (a Designer gets Image ConnectZ, ImageZ, MangaZ and FaceZ tasks),
+`TASK_GAPS` (what they made and the next app it opens in: pictures → a manga page → a cut in VideoZ), and the
+existing profile and activity gaps. Every one is a VERIFIED task (new actions `image_made`, `picture_saved`,
+`manga_page`, `face_made`, `video_saved`, read off real rows), `source="auto"` (XP only, never 🍥 — automation may
+not mint), and carries its reason in its note. A task the member trashed, or did in the last `REST_DAYS`, is never
+re-added; the open-task ceiling still holds; `LilithAuto.on` switches it off (on by default). Below StatZ the
+suggestions are the same and the member adds them.
