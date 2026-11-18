@@ -228,7 +228,7 @@ def _auth(key):
     return {"x-goog-api-key": key}
 
 
-def _bill(user, note, count_daily=False):
+def _bill(user, note, count_daily=False, engine=None):
     """Charge the AI minimum (PromptZ→cash) and route it to the owner.
 
     Returns what the member was ACTUALLY charged, which is 0 when a free daily
@@ -241,6 +241,11 @@ def _bill(user, note, count_daily=False):
     AIChargeView applies. It defaults False because image and video generation
     run far more expensive models than the allowance is priced for; a flat text
     run like the vocal coach should pass True.
+
+    `engine` names the Claude engine that wrote the answer, when one did (the coach's second pass). It decides two
+    things the price already depends on everywhere else: whether a free daily prompt may cover the run (an engine
+    dearer than DAILY_PROMPT_MAX_CENTS for a typical message is not covered — Fable, today) and how much ⚡ the run
+    takes (engine base × tier). None is a Gemini-only run, priced as before.
     """
     cost = ai_cost("standard")
     if not cost:
@@ -250,8 +255,8 @@ def _bill(user, note, count_daily=False):
     covered_free = False
     if count_daily:
         _, _, daily_left = daily_prompt_state(user)
-        covered_free = daily_prompt_covers(cost) and daily_left > 0
-    remaining = charge_ai_usage(user, cost, note=note, count_daily=count_daily)
+        covered_free = daily_prompt_covers(cost, engine) and daily_left > 0
+    remaining = charge_ai_usage(user, cost, note=note, count_daily=count_daily, engine=engine)
     if remaining is None:
         return None
     if covered_free:

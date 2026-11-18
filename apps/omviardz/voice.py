@@ -166,6 +166,8 @@ def explain(step, option, text="", track=None, facts=None, slang=False, suggest=
             max_tokens=MAX_TOKENS,
             system=system,
             messages=[{"role": "user", "content": prompt}],
+            # Haiku 5.5 thinks by default and the thinking counts against MAX_TOKENS; one short answer cannot afford it.
+            **AI_MODELS["haiku"].get("short", {}),
         )
         out = "".join(
             b.text for b in resp.content if getattr(b, "type", "") == "text"

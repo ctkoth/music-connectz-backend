@@ -754,9 +754,11 @@ class VoicePreviewView(APIView):
         deadline = Deadline(PREVIEW_BUDGET_SECONDS)
         try:
             import anthropic
+            # Haiku 5.5 thinks by default, and thinking counts against max_tokens: a 300-token preview cannot afford it.
             resp = _client().messages.create(model=spec["id"], max_tokens=300, system=system,
                                              timeout=deadline.remaining(),
-                                             messages=[{"role": "user", "content": PREVIEW_ASK}])
+                                             messages=[{"role": "user", "content": PREVIEW_ASK}],
+                                             **spec.get("short", {}))
         except Expired:
             return _refuse("The preview took too long. Nothing was charged.", status.HTTP_504_GATEWAY_TIMEOUT,
                            code="timed_out", charged=0)

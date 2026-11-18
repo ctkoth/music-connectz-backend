@@ -635,39 +635,39 @@ def ai_cost(model):
 # calls with a project in context; a flat per-message price there is a promise
 # the data doesn't support, which is the exact failure this codebase keeps
 # having to fix. See `ai_run_cost_cents`.
+# Which tier reaches which engine is Corey's ladder (Nov 2026): Free picks Haiku or Sonnet, Premium reaches Opus,
+# StatZ reaches Fable. Each tier keeps every rung below its own, so upgrading only ever adds. The models are the
+# current generation of each (Haiku 5.5, Sonnet 5.5, Opus 5.5, Fable 5.2), at their list prices. All four take
+# `effort` and task budgets now; none of them accepts `temperature`, a forced tool_choice, a prefill or a thinking
+# budget, and nothing here sends any of those. Haiku 5.5 thinks by default, which a 300-token reply cannot afford, so
+# its short calls send `short` (thinking off at low effort — allowed on Haiku 5.5 at effort `high` or below).
 AI_MODELS = {
     "haiku": {
-        "id": "claude-haiku-4-5", "name": "Haiku", "emoji": "⚡",
+        "id": "claude-haiku-5-5", "name": "Haiku", "emoji": "⚡",
         "tier": TIER_FREE, "cost_cents": AI_TASK_PROMPTZ,
-        "in_cents_mtok": 100, "out_cents_mtok": 500,       # $1 / $5
-        # Haiku 4.5 predates both controls and returns 400 for either. Declared
-        # per model rather than assumed, because "every model takes effort" is
-        # true of the three below and false of the one the FREE tier uses — so
-        # assuming it would break the agent for exactly the members least able
-        # to work around it.
-        "effort": False, "task_budget": False,
+        "in_cents_mtok": 10, "out_cents_mtok": 50,         # $0.10 / $0.50
+        "effort": True, "task_budget": True,
+        "short": {"thinking": {"type": "disabled"}, "output_config": {"effort": "low"}},
         "blurb": "Fast and cheap. Plenty for chat, translation and quick answers.",
     },
     "sonnet": {
-        "id": "claude-sonnet-5", "name": "Sonnet", "emoji": "🎼",
-        "tier": TIER_PREMIUM, "cost_cents": AI_TASK_PROMPTZ,
-        # List price, not the introductory rate. The intro expires and a price
-        # built on it would quietly start losing money on the day it does.
-        "in_cents_mtok": 300, "out_cents_mtok": 1500,      # $3 / $15
+        "id": "claude-sonnet-5-5", "name": "Sonnet", "emoji": "🎼",
+        "tier": TIER_FREE, "cost_cents": AI_TASK_PROMPTZ,
+        "in_cents_mtok": 200, "out_cents_mtok": 1000,      # $2 / $10
         "effort": True, "task_budget": True,
         "blurb": "The balanced one. Near-flagship work at a fraction of the price.",
     },
     "opus": {
-        "id": "claude-opus-5", "name": "Opus", "emoji": "🎹",
-        "tier": TIER_STATZ, "cost_cents": AI_TASK_PROMPTZ,
-        "in_cents_mtok": 500, "out_cents_mtok": 2500,      # $5 / $25
+        "id": "claude-opus-5-5", "name": "Opus", "emoji": "🎹",
+        "tier": TIER_PREMIUM, "cost_cents": AI_TASK_PROMPTZ,
+        "in_cents_mtok": 400, "out_cents_mtok": 2000,      # $4 / $20
         "effort": True, "task_budget": True,
         "blurb": "Flagship. Long-horizon work, code, and anything that has to be right.",
     },
     "fable": {
-        "id": "claude-fable-5", "name": "Fable", "emoji": "📖",
+        "id": "claude-fable-5-2", "name": "Fable", "emoji": "📖",
         "tier": TIER_STATZ, "cost_cents": AI_TASK_PROMPTZ,
-        "in_cents_mtok": 1000, "out_cents_mtok": 5000,     # $10 / $50
+        "in_cents_mtok": 800, "out_cents_mtok": 4000,      # $8 / $40
         "effort": True, "task_budget": True,
         "blurb": "The most capable model there is. The hardest problems, at the highest price.",
     },

@@ -52,6 +52,7 @@ def _rows():
     from .lilith_taskz import tier_limits as lilith
     from .releasez import PER_MONTH
     from .sonday import BOARDS as SONDAY
+    from .catalog import AI_MODELS, default_ai_model
     from .models import AI_ENERGY_PER_PROMPT, ENERGY_FLOOR_PER_HOUR, PROMPT_ALLOWANCE
     wav = lambda t: {0: "MP3 only", 16: "16-bit WAV", 24: "24-bit WAV"}.get(C.MASTERING[t]["wav_bits"], "MP3 only")
     heaviest = lambda t: ", ".join(C.MASTERING_INTENSITY_LABELS[i] for i in C.MASTERING[t]["intensities"])
@@ -59,6 +60,10 @@ def _rows():
         # (group, key, label, tab, target, reader, unit, source)
         ("Everywhere", "daily_prompts", "Free AI prompts a day", "membershipz", "", _from(PROMPT_ALLOWANCE), "", "PROMPT_ALLOWANCE"),
         ("Everywhere", "ai_energy", "Energy one AI prompt takes (less is better)", "membershipz", "", _from(AI_ENERGY_PER_PROMPT), "⚡", "AI_ENERGY_PER_PROMPT"),
+        # Gemini reads; Claude writes the answer. The best engine each plan may pick (the member may always pick a
+        # lower one): Corey's ladder, read off AI_MODELS so the table and the gate cannot disagree.
+        ("Everywhere", "ai_engine", "Best Claude engine that writes the AI's answers", "occ", "",
+         lambda t: AI_MODELS[default_ai_model(t)]["name"], "", "AI_MODELS.tier"),
         ("Everywhere", "energy_floor", "Energy back every hour, at least", "membershipz", "", _from(ENERGY_FLOOR_PER_HOUR), "⚡", "ENERGY_FLOOR_PER_HOUR"),
         ("Everywhere", "char_limit", "Characters in a post", "postz", "post-compose", _lim("char_limit"), "", "tier_limits:char_limit"),
         ("Everywhere", "upload_mb", "Biggest single upload", "filez", "", _lim("upload_mb"), "MB", "tier_limits:upload_mb"),

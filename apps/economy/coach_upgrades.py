@@ -61,7 +61,9 @@ from .instruments import WIT_KEYS, profile_for_app, scores_for
 
 logger = logging.getLogger(__name__)
 
-MODEL = os.environ.get("COACH_UPGRADES_MODEL", COACH_THINK_MODEL)
+# Pinned to Sonnet: this pass is not the member's answer, so it does not follow their engine. COACH_THINK_MODEL is
+# blank unless an operator pins one, and an empty model id would be a 400 on every run.
+MODEL = os.environ.get("COACH_UPGRADES_MODEL") or COACH_THINK_MODEL or "claude-sonnet-5-5"
 MAX_SEARCHES = 4
 MAX_OUTPUT_TOKENS = 5000
 MAX_CALLS = 2                      # one call + at most one pause_turn resend

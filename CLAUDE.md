@@ -3456,3 +3456,39 @@ StatZ unlimited sessions a rolling 24 hours** (`TIER_LIMITS["bodiez_float"]`, a 
 - **Stated before the press**: `GET /bodiez/float/` serves `limit/used/left/next_limit/ladder/cost` and the open session's
   `{id, floated}`; `POST /bodiez/sessions/<id>/float/` is the press. Only a live, non-backfilled session of your own.
 - **Costs no ⚡ 🍥 🏷️** (a test fails if the module names a spend primitive), so `credit_outcomes` has nothing to declare.
+
+## Gemini reads, Claude answers, and the plan caps which Claude (Corey, Nov 2026)
+
+No Claude model takes audio, so **Gemini does the reading** (it hears the take, `vocalcoach.score_take`) and **Claude writes
+the answer** (`coach_think`, the second pass). Claude is now the member's own engine — `Profile.ai_model`, the same choice the
+OCC / ModelZ picker sets — capped by the plan: **Free picks Haiku or Sonnet, Premium reaches Opus, StatZ reaches Fable**
+(`catalog.AI_MODELS[*]["tier"]`). A member who never chose gets the best their plan reaches; a pick above the plan falls back
+to that; a logged-out trial is a Free member who has not chosen, so Sonnet, as before.
+
+- **One resolver, three readers.** `coach_think.coach_engine(user)` is read by the run, by the bill and by the price stated
+  before the press (`crosspost.coach_price`, the coach GET's `free_today` and `think`), so they cannot name different engines.
+  `think.engine` on a result names the Claude that WROTE the answer and is absent when none did (no key, timeout, refusal):
+  that take is billed as a plain run, never at the dearer engine's rate.
+- **The models are the current generation**: Haiku 5.5, Sonnet 5.5, Opus 5.5, Fable 5.2 at list prices ($0.10/$0.50, $2/$10,
+  $4/$20, $8/$40 per MTok). None of them takes `temperature`, a forced `tool_choice`, a prefill or a thinking budget; nothing
+  sends them. Haiku 5.5 thinks by default and the thinking counts against `max_tokens`, so its two 300-token calls (VoiceZ
+  preview, OmviardZ) send `AI_MODELS["haiku"]["short"]` (thinking off at low effort). `COACH_THINK_MODEL` is now an operator
+  override, blank by default; `coach_upgrades` stays pinned to Sonnet (it is not the member's answer).
+- **The price follows the engine through rules that already existed.** The take is still 1 🏷️. A free daily prompt covers it
+  only when a typical message on the engine is within `DAILY_PROMPT_MAX_CENTS` (`daily_prompt_covers(cost, engine)`): Haiku,
+  Sonnet and Opus are covered, **Fable is not**. The run's ⚡ is engine base × tier (Haiku 1, Sonnet 2, Opus 4, Fable 8).
+  LadderZ has an `ai_engine` row.
+
+**Cost exposure, said plainly — the price is Corey's call, not changed here.** The coach's Claude pass is ~4.5k tokens in and
+at most 2,500 out (thinking + answer, effort `low`):
+
+    engine   typical (1.5k out)   worst (2.5k out)   charged
+    Haiku    ~0.1c                ~0.2c              free prompt or 1 🏷️
+    Sonnet   ~2.4c                ~3.4c              free prompt or 1 🏷️      (as before)
+    Opus     ~4.8c                ~6.8c              free prompt or 1 🏷️
+    Fable    ~9.6c                ~13.6c             1 🏷️ (no free prompt)
+
+So a Premium member coaching on Opus with all 7 free prompts a day costs ~$10/month at typical length against $7, and every
+Fable take loses ~8-9c. **Recommendation, not applied:** bill Opus and Fable takes on their real usage
+(`ai_run_charge_cents`, which agent runs already use) and state that estimate before the press. Not run against Anthropic: CI
+has no key; `tools/coach_think_live_check.sh` can.

@@ -114,7 +114,8 @@ class PassTwoRequestTests(TestCase):
         # invented id and a low-confidence observation are both demoted
         self.assertEqual(d[2]["anchor"], "general")
         self.assertEqual(d[3]["anchor"], "general")
-        self.assertEqual(out["think"], {"used": True, "model": "claude-sonnet-5-5"})
+        self.assertEqual(out["think"], {"used": True, "model": "claude-sonnet-5-5",
+                                        "engine": {"key": "sonnet", "name": "Sonnet", "emoji": "🎼"}})
         self.assertEqual(out["listener_notes"]["fixes"], ["prop your ribcage upright"])
 
     def test_unscorable_skips_pass_two(self):

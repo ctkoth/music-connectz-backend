@@ -45,18 +45,25 @@ def coach_price(user):
     serves up to 100 posts and every one of them offers SingZ and RapZ — pricing
     each card on its own would be 200 wallet reads to print the same number.
     """
+    from . import coach_think
     from .catalog import ai_cost
-    from .models import can_afford_ai, daily_prompt_state
+    from .models import can_afford_ai, daily_prompt_covers, daily_prompt_state
 
     cost = ai_cost("standard")
     _allowance, _used, left = daily_prompt_state(user)
+    # The Claude that will write this member's answer (their pick, capped by their tier). It is part of the price:
+    # a free daily prompt covers an engine only when a typical message on it is within the allowance (Fable is not),
+    # and the run's ⚡ scales with it. Without a key there is no second pass, so no engine is priced in.
+    engine_key, engine = coach_think.coach_engine(user)
+    priced = engine_key if coach_think.has_key() else None
     return {
         "resource": "promptz",
         "amount": cost,
+        "engine": ({"key": engine_key, "name": engine["name"], "emoji": engine.get("emoji", "")} if priced else None),
         # A free daily prompt covers the whole run before any balance is
         # touched, so the price a member actually pays today is often nothing —
         # and saying "−1 🏷️" at somebody whose take is free is its own small lie.
-        "free_today": bool(cost) and left > 0,
+        "free_today": bool(cost) and left > 0 and daily_prompt_covers(cost, priced),
         "daily_remaining": left,
         "affordable": bool(not cost or left > 0 or can_afford_ai(user, cost)),
         # A take the coach can't read is never billed — vocalcoach.py bills only

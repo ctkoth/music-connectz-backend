@@ -47,6 +47,7 @@ from .models import (
     TIER_STATZ,
     OBS_COACH,
     can_afford_ai,
+    daily_prompt_covers,
     daily_prompt_state,
     mark_upload_missing,
     membership_for,
@@ -998,6 +999,32 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
     return result, None
 
 
+def _priced_engine(user):
+    """The engine a take is priced on: the member's, when the second pass can run at all, else none."""
+    from . import coach_think
+    return coach_think.coach_engine(user)[0] if coach_think.has_key() else None
+
+
+def _think_info(user):
+    """Pass 2, before the press: which Claude writes this member's answer, and which they could pick instead."""
+    from . import coach_think
+    from .catalog import AI_MODELS, AI_MODEL_ORDER, ai_models_for
+    from .models import membership_for
+    key, spec = coach_think.coach_engine(user)
+    tier = membership_for(user).tier if getattr(user, "is_authenticated", False) else "free"
+    allowed = set(ai_models_for(tier))
+    return {
+        "model": coach_think._model_id(spec),
+        "configured": coach_think.has_key(),
+        "in_price": True,
+        "engine": {"key": key, "name": spec["name"], "emoji": spec.get("emoji", "")},
+        "engines": [{"key": k, "name": AI_MODELS[k]["name"], "emoji": AI_MODELS[k].get("emoji", ""),
+                     "allowed": k in allowed, "required_tier": AI_MODELS[k]["tier"]} for k in AI_MODEL_ORDER],
+        "note": ("Gemini listens to the take; Claude writes the answer. Your plan reaches "
+                 + ", ".join(AI_MODELS[k]["name"] for k in AI_MODEL_ORDER if k in allowed) + "."),
+    }
+
+
 def record_coaching_observations(user, payload, song_key=None, song_bpm=None):
     """Cross-pollination: low scores suggest practice tools with drill context.
 
@@ -1250,8 +1277,9 @@ class SingZCoachView(APIView):
             "required_tier": None,
             "configured": bool(_key()),
             "cost_cents": cost,
-            # A free daily prompt covers the whole run before any paid balance.
-            "free_today": daily_left > 0,
+            # A free daily prompt covers the whole run before any paid balance — unless the Claude that will write
+            # the answer is dearer than the allowance is priced for (Fable). Judged on that engine, as it is billed.
+            "free_today": daily_left > 0 and daily_prompt_covers(cost, _priced_engine(request.user)),
             "daily_remaining": daily_left,
             "daily_allowance": allowance,
             "tier": tier,
@@ -1330,9 +1358,9 @@ class SingZCoachView(APIView):
             "caveat": profile["caveat"],
             # The second pass and the opt-in gear advice, priced BEFORE either
             # is pressed. The logic check is inside the take's price.
-            "think": {"model": __import__("apps.economy.coach_think", fromlist=["x"]).COACH_THINK_MODEL,
-                      "configured": __import__("apps.economy.coach_think", fromlist=["x"]).has_key(),
-                      "in_price": True},
+            # `engine` is the Claude that will write THIS member's answer (their own pick, capped by their tier) and
+            # `engines` the ladder to change it from, so the screen names both before the press.
+            "think": _think_info(request.user),
             "reference": {
                 "available": True, "label": "Reference listen",
                 "cost_cents": cost, "free_today": daily_left > 0,
@@ -1590,7 +1618,11 @@ class SingZCoachView(APIView):
         if energy_cost:
             spend_energy(request.user, energy_cost, f"Coach a post — {post.title[:50]}",
                          app_key=self.app_key, target=f"post:{post.id}")
-        charged = _bill(request.user, note=note, count_daily=True)
+        # Billed on the engine that WROTE the answer — only when Claude's pass ran. A take whose answer is the
+        # listener's own (no key, timed out, refused) was written by no engine and is never billed as Fable.
+        wrote = (payload.get("think") or {}).get("engine") or {}
+        note += f" · answered by {wrote['name']}" if wrote.get("name") else ""
+        charged = _bill(request.user, note=note, count_daily=True, engine=wrote.get("key"))
         if not energy_cost and post is None and stored is None:
             # A freshly recorded take: take what is there, up to the price. Never a wall.
             want = coach_take_energy(request.user)

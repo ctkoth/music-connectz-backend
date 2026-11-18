@@ -59,16 +59,36 @@ from .instruments import profile_for_app, scores_for
 
 logger = logging.getLogger(__name__)
 
-COACH_THINK_MODEL = os.environ.get("COACH_THINK_MODEL", "claude-sonnet-5-5")
+# WHICH CLAUDE WRITES THE ANSWER is the member's own engine (Profile.ai_model, the ModelZ / OCC picker), capped by
+# their tier — Corey's ladder: Free picks Haiku or Sonnet, Premium reaches Opus, StatZ reaches Fable (catalog.AI_MODELS).
+# Gemini still does all of the READING (it hears the take; no Claude model takes audio). `coach_engine` is the one
+# resolver, used by the run, the bill and the price stated before the press, so the three cannot name different
+# engines. A stranger on the trial is a Free member who has not chosen: Sonnet, as it always was.
+# COACH_THINK_MODEL, when set, is an operator override that pins one model id for everybody (an incident lever);
+# unset — the normal case — the member's engine decides.
+COACH_THINK_MODEL = os.environ.get("COACH_THINK_MODEL", "")
 THINK_MAX_TOKENS = int(os.environ.get("COACH_THINK_MAX_TOKENS", "2500"))
 THINK_CAP_SECONDS = 40
 # "low" and 2500 (were "medium" and 4000) by Corey's call, to cut the worst case. A
 # typical answer is ~1.5k tokens; a run that hits the cap falls back to the listener's
 # notes, as before. Both are env vars so a quality complaint can be answered without a deploy.
 THINK_EFFORT = os.environ.get("COACH_THINK_EFFORT", "low")
-# cents per token: $2 and $10 per MTok.
-IN_CENTS_PER_TOKEN = 200 / 1_000_000
-OUT_CENTS_PER_TOKEN = 1000 / 1_000_000
+
+
+def coach_engine(user):
+    """(engine_key, spec) — the Claude that writes this member's coach answer. Never raises."""
+    from .catalog import AI_MODELS, ai_model_for
+    from .models import TIER_FREE, membership_for, profile_for
+    try:
+        if user is None or not getattr(user, "is_authenticated", False):
+            return ai_model_for(None, TIER_FREE)
+        return ai_model_for(profile_for(user).ai_model, membership_for(user).tier)
+    except Exception:  # a missing profile or membership row must not cost the member their answer
+        return "sonnet", AI_MODELS["sonnet"]
+
+
+def _model_id(spec):
+    return COACH_THINK_MODEL or spec["id"]
 
 NOT_USED_LINE = "Listener's notes only — the logic check wasn't available this time."
 ANCHORS = ("heard", "score", "general")
@@ -251,13 +271,18 @@ def classify(anthropic, exc):
     return "error", type(exc).__name__
 
 
-def usage_cents(usage):
+def usage_cents(usage, spec=None):
+    """What this run cost the platform, in cents, at the engine's own list price (Sonnet when none is named)."""
+    from .catalog import AI_MODELS
+    spec = spec or AI_MODELS["sonnet"]
+    cin, cout = spec["in_cents_mtok"] / 1_000_000, spec["out_cents_mtok"] / 1_000_000
+
     def f(n):
         return int(getattr(usage, n, 0) or 0)
-    return (f("input_tokens") * IN_CENTS_PER_TOKEN
-            + f("cache_read_input_tokens") * IN_CENTS_PER_TOKEN * 0.1
-            + f("cache_creation_input_tokens") * IN_CENTS_PER_TOKEN * 1.25
-            + f("output_tokens") * OUT_CENTS_PER_TOKEN)
+    return (f("input_tokens") * cin
+            + f("cache_read_input_tokens") * cin * 0.1
+            + f("cache_creation_input_tokens") * cin * 1.25
+            + f("output_tokens") * cout)
 
 
 def validate(data, payload):
@@ -317,13 +342,19 @@ def _checked_practice(raw):
     return clean_practice(rated)
 
 
-def _meta(used, reason="", slug=""):
-    return {"used": used, "model": COACH_THINK_MODEL if used else "",
-            **({} if used else {"reason": reason or NOT_USED_LINE, "why": slug})}
+def _meta(used, reason="", slug="", key="", spec=None):
+    """What the screen says about pass 2. `engine` names the Claude that WROTE the answer — present only when it did,
+    because a take whose answer is the listener's own was not written by any engine and is not billed as one."""
+    out = {"used": used, "model": _model_id(spec) if (used and spec) else "",
+           **({} if used else {"reason": reason or NOT_USED_LINE, "why": slug})}
+    if used and spec:
+        out["engine"] = {"key": key, "name": spec["name"], "emoji": spec.get("emoji", "")}
+    return out
 
 
 def run(app_key, payload, *, user, genre, target, difficulty, style, deadline, trial):
     """(merged_fields_or_None, think_meta). Never raises."""
+    key, spec = coach_engine(user)
     if not enabled(trial):
         return None, _meta(False, NOT_USED_LINE, "off")
     if not has_key():
@@ -339,9 +370,9 @@ def run(app_key, payload, *, user, genre, target, difficulty, style, deadline, t
         if hasattr(client, "with_options"):
             client = client.with_options(max_retries=0)
         # No thinking param (the model's default), no sampling params, no
-        # prefill, no forced tool_choice: each of those is a 400 on this model.
+        # prefill, no forced tool_choice: each of those is a 400 on every engine the ladder offers.
         resp = client.messages.create(
-            model=COACH_THINK_MODEL,
+            model=_model_id(spec),
             max_tokens=THINK_MAX_TOKENS,
             system=system_prompt(user),
             messages=[{"role": "user", "content": build_input(
@@ -359,7 +390,7 @@ def run(app_key, payload, *, user, genre, target, difficulty, style, deadline, t
     u = getattr(resp, "usage", None)
     if u is not None:
         logger.info("coach_think: in=%s out=%s ~%.2fc model=%s", getattr(u, "input_tokens", "?"),
-                    getattr(u, "output_tokens", "?"), usage_cents(u), COACH_THINK_MODEL)
+                    getattr(u, "output_tokens", "?"), usage_cents(u, spec), _model_id(spec))
     if getattr(resp, "stop_reason", None) == "refusal":
         return None, _meta(False, NOT_USED_LINE, "refusal")
     if getattr(resp, "stop_reason", None) == "max_tokens":
@@ -372,7 +403,7 @@ def run(app_key, payload, *, user, genre, target, difficulty, style, deadline, t
         merged = None
     if not merged:
         return None, _meta(False, NOT_USED_LINE, "unreadable")
-    return merged, _meta(True)
+    return merged, _meta(True, key=key, spec=spec)
 
 
 def apply(app_key, payload, **kw):
