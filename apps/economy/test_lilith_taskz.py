@@ -311,7 +311,9 @@ class TierTests(TestCase):
             self.assertEqual(lim["automation_rules"], 0)
         self.assertGreater(statz["auto_schedule_days"], 0)
         self.assertIsNone(statz["automation_rules"])
-        for key in ("recurring_quests", "active_tasks", "routines"):
+        self.assertEqual((free["routines"], prem["routines"], statz["routines"]), (3, 6, None),
+                         "Corey's numbers: Free 3, Premium 6, StatZ unlimited")
+        for key in ("recurring_quests", "active_tasks"):
             self.assertGreater(free[key], 0, f"free gets no {key}")
             self.assertGreater(statz[key], free[key], f"{key} does not ladder")
 

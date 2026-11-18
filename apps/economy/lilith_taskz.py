@@ -121,6 +121,11 @@ HELP_GRADUATED_SPINAZ = 5
 HELP_GRADUATED_DAILY_CAP = 3
 
 
+def routines_full(count, limits):
+    """At the routine ceiling? None is unlimited (StatZ)."""
+    return limits["routines"] is not None and count >= limits["routines"]
+
+
 def tier_limits(tier):
     """What each tier gets, per the blueprint's automation boundaries.
 
@@ -132,7 +137,10 @@ def tier_limits(tier):
     t = (tier or "free").lower()
     return {
         "active_tasks": {"free": 50, "premium": 250}.get(t, 1000),
-        "routines": {"free": 3, "premium": 12}.get(t, 50),
+        # Corey's numbers (Nov 2026): Free 3, Premium 6, StatZ unlimited (None). Lowering Premium from 12
+        # takes nothing away: the ceiling only stops a NEW routine, so a member already over it keeps
+        # every one, keeps them running, and can move, trash and restore them under the count.
+        "routines": {"free": 3, "premium": 6}.get(t),
 
         # These five were `t == "statz"` — five booleans directly under a
         # docstring promising a ladder of how many and how clever, "never
@@ -862,7 +870,7 @@ def board(user):
             "combo_at": 3,
         },
         "at_task_limit": len(open_list) >= limits["active_tasks"],
-        "at_routine_limit": len(routines) >= limits["routines"],
+        "at_routine_limit": routines_full(len(routines), limits),
     }
 
 
@@ -1052,7 +1060,7 @@ class LilithRoutineListView(APIView):
         if not title:
             return Response({"detail": "A routine needs a title."}, status=400)
         limits = tier_limits(membership_for(request.user).tier)
-        if live_routines(request.user).count() >= limits["routines"]:
+        if routines_full(live_routines(request.user).count(), limits):
             return Response({
                 "detail": f"{limits['routines']} routines is this tier's ceiling. "
                           "A tier up raises it.",
@@ -1198,7 +1206,7 @@ class LilithStarterAddView(APIView):
                 back.trashed_at = None
                 back.save(update_fields=["trashed_at"])
                 return Response({**_routine_dict(back), "restored": True}, status=200)
-            if live_routines(request.user).count() >= limits["routines"]:
+            if routines_full(live_routines(request.user).count(), limits):
                 return Response({"detail": f"{limits['routines']} routines is this tier's ceiling. "
                                            "A tier up raises it.", "at_limit": True},
                                 status=status.HTTP_402_PAYMENT_REQUIRED)
@@ -1304,7 +1312,7 @@ class LilithMoveView(APIView):
                 t.save(update_fields=["bucket", "trashed_at"])
                 return Response({"moved": "trash" if to == "trash" else "bucket", "task": _task_dict(t)})
             if to in CADENCES:
-                if live_routines(request.user).count() >= limits["routines"]:
+                if routines_full(live_routines(request.user).count(), limits):
                     return Response({"detail": f"{limits['routines']} routines is this tier's ceiling. "
                                                "A tier up raises it.", "at_limit": True},
                                     status=status.HTTP_402_PAYMENT_REQUIRED)
@@ -1324,7 +1332,7 @@ class LilithMoveView(APIView):
                 r.save(update_fields=["trashed_at"])
                 return Response({"moved": "trash", "routine": _routine_dict(r)})
             if r.trashed_at and to in CADENCES + ("task",) \
-                    and live_routines(request.user).count() >= limits["routines"] and to != "task":
+                    and routines_full(live_routines(request.user).count(), limits) and to != "task":
                 return Response({"detail": f"{limits['routines']} routines is this tier's ceiling — "
                                            "there's no room to bring it back.", "at_limit": True},
                                 status=status.HTTP_402_PAYMENT_REQUIRED)

@@ -32,26 +32,40 @@ class SondayBoardCreationTests(APITestCase):
         Membership.objects.create(user=self.premium_user, tier=TIER_PREMIUM)
         Wallet.objects.create(user=self.premium_user, spinaz=1000)
 
-    def test_free_user_gets_one_board_not_none(self):
-        """Free keeps one board; the second asks for Premium and says why.
+    def test_boards_are_coreys_numbers(self):
+        """Free 3, Premium 6, StatZ unlimited; the one past the ceiling is refused and says what's next.
 
-        It used to be Premium-only — a limit that said "whether", which the
-        tier rules forbid. A Free member now has a board to try it with.
+        It used to be Premium-only — a limit that said "whether", which the tier rules forbid.
         """
+        from apps.economy.models import TIER_STATZ
+        from apps.economy.sonday import BOARDS
+        self.assertEqual(BOARDS, {TIER_FREE: 3, TIER_PREMIUM: 6})
         self.client.force_authenticate(user=self.free_user)
-        first = self.client.post("/api/economy/sonday/", {"name": "One"})
-        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
-        second = self.client.post("/api/economy/sonday/", {"name": "Two"})
-        self.assertEqual(second.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertIn("Premium", second.data["detail"])
-        self.assertEqual(second.data["quota"]["left"], 0)
+        for i in range(3):
+            self.assertEqual(self.client.post("/api/economy/sonday/", {"name": f"B{i}"}).status_code, status.HTTP_201_CREATED)
+        refused = self.client.post("/api/economy/sonday/", {"name": "Four"})
+        self.assertEqual(refused.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn("Premium keeps 6", refused.data["detail"])
+        self.assertEqual(refused.data["quota"]["left"], 0)
+        Membership.objects.filter(user=self.free_user).update(tier=TIER_STATZ)
+        self.assertEqual(self.client.post("/api/economy/sonday/", {"name": "Four"}).status_code, status.HTTP_201_CREATED)
+
+    def test_a_member_over_the_ceiling_keeps_every_board(self):
+        from apps.economy.models import SondayBoard
+        for i in range(8):
+            SondayBoard.objects.create(user=self.premium_user, name=f"Old {i}")
+        self.client.force_authenticate(user=self.premium_user)
+        self.assertEqual(len(self.client.get("/api/economy/sonday/").data), 8)
+        self.assertEqual(self.client.post("/api/economy/sonday/", {"name": "Nine"}).status_code, status.HTTP_403_FORBIDDEN)
 
     def test_the_quota_is_served_before_the_button(self):
         self.client.force_authenticate(user=self.free_user)
         q = self.client.get("/api/economy/sonday/meta/").data["quota"]
-        self.assertEqual((q["per_tier"], q["used"], q["left"]), (1, 0, 1))
+        self.assertEqual((q["per_tier"], q["used"], q["left"], q["next_tier"], q["next_per_tier"]),
+                         (3, 0, 3, TIER_PREMIUM, 6))
         self.client.force_authenticate(user=self.premium_user)
-        self.assertIsNone(self.client.get("/api/economy/sonday/meta/").data["quota"]["left"])
+        q = self.client.get("/api/economy/sonday/meta/").data["quota"]
+        self.assertEqual((q["per_tier"], q["left"], q["next_per_tier"]), (6, 6, None))
 
     def test_premium_user_can_create_board(self):
         """Premium users can create Sonday boards."""

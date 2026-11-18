@@ -51,7 +51,7 @@ def _fmt(v, unit=""):
 def _rows():
     from .lilith_taskz import tier_limits as lilith
     from .releasez import PER_MONTH
-    from .sonday import FREE_BOARDS as SONDAY_FREE
+    from .sonday import BOARDS as SONDAY
     from .models import AI_ENERGY_PER_PROMPT, ENERGY_FLOOR_PER_HOUR, PROMPT_ALLOWANCE
     wav = lambda t: {0: "MP3 only", 16: "16-bit WAV", 24: "24-bit WAV"}.get(C.MASTERING[t]["wav_bits"], "MP3 only")
     heaviest = lambda t: ", ".join(C.MASTERING_INTENSITY_LABELS[i] for i in C.MASTERING[t]["intensities"])
@@ -90,7 +90,7 @@ def _rows():
         ("Organise", "journal_attachments", "Attachments on a journal entry", "journalz", "journalz-composer", _from(C.JOURNAL_LIMITS, "attachments"), "", "JOURNAL_LIMITS"),
         ("Organise", "lilith_routines", "Lilith routines", "lilith", "", lambda t: lilith(t)["routines"], "", "lilith.routines"),
         ("Organise", "lilith_tasks", "Lilith open tasks", "lilith", "", lambda t: lilith(t)["active_tasks"], "", "lilith.active_tasks"),
-        ("Organise", "sonday_boards", "Sonday boards", "sonday", "", lambda t: SONDAY_FREE if t == TIER_FREE else None, "", "sonday.FREE_BOARDS"),
+        ("Organise", "sonday_boards", "Sonday boards", "sonday", "", lambda t: SONDAY.get(t), "", "sonday.BOARDS"),
         ("Organise", "parcel", "Parcel Primate campaigns a week", "parcel", "", _from(C.PARCEL_PER_WEEK), "", "PARCEL_PER_WEEK"),
         ("Code", "occ_projects", "OCC projects", "occ", "", _from(C.OCC_PROJECTS), "", "OCC_PROJECTS"),
         ("Code", "occ_files", "Files in an OCC project", "occ", "", _from(C.OCC_PROJECT_FILES), "", "OCC_PROJECT_FILES"),

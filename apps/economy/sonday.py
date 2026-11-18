@@ -14,8 +14,9 @@ card is only ever reached through a board the caller can see.
 Three more things it does differently from what shipped:
 
 * **Free gets a board.** It was Premium-only, which is a limit that says
-  "whether" — the one shape the tier rules forbid. Free has `FREE_BOARDS` (1);
-  Premium and StatZ have as many as they like. The count is served before the
+  "whether" — the one shape the tier rules forbid. Boards are Corey's numbers
+  (`BOARDS`: Free 3, Premium 6, StatZ unlimited); a member over the count keeps
+  every board and only a NEW one is refused. The count is served before the
   New board button, not discovered by pressing it.
 * **Deleting is soft, and says so.** A board or card is stamped `deleted_at`
   rather than dropped — the activity log hangs off the card, and a hard delete
@@ -38,6 +39,8 @@ from rest_framework.viewsets import ViewSet
 from apps.economy.catalog import over_char_limit
 from apps.economy.models import (
     TIER_FREE,
+    TIER_PREMIUM,
+    TIER_STATZ,
     SondayActivity,
     SondayBoard,
     SondayCard,
@@ -49,7 +52,8 @@ from apps.economy.models import (
 
 User = get_user_model()
 
-FREE_BOARDS = 1
+BOARDS = {TIER_FREE: 3, TIER_PREMIUM: 6}          # StatZ (and debug): unlimited
+FREE_BOARDS = BOARDS[TIER_FREE]
 DEFAULT_COLUMNS = [
     ("draft", "Drafts"),
     ("inprogress", "In Progress"),
@@ -93,9 +97,10 @@ def quota_for(user):
     """How many boards this member may own, how many they do, how many are left."""
     tier = membership_for(user).tier
     used = SondayBoard.objects.filter(user=user, deleted_at__isnull=True).count()
-    if tier != TIER_FREE:
-        return {"tier": tier, "per_tier": None, "used": used, "left": None}
-    return {"tier": tier, "per_tier": FREE_BOARDS, "used": used, "left": max(0, FREE_BOARDS - used)}
+    cap = BOARDS.get(tier)
+    nxt = {TIER_FREE: TIER_PREMIUM, TIER_PREMIUM: TIER_STATZ}.get(tier)
+    return {"tier": tier, "per_tier": cap, "used": used, "left": None if cap is None else max(0, cap - used),
+            "next_tier": nxt, "next_per_tier": BOARDS.get(nxt) if nxt else None}
 
 
 def _deny(msg="Board not found", code=status.HTTP_404_NOT_FOUND):
@@ -241,7 +246,10 @@ class SondayBoardViewSet(ViewSet):
         q = quota_for(request.user)
         if q["left"] is not None and q["left"] <= 0:
             return Response({
-                "detail": f"Free keeps {FREE_BOARDS} board — Premium keeps as many as you like.",
+                "detail": (f"{q['per_tier']} boards is your plan's ceiling — "
+                           + (f"Premium keeps {BOARDS[TIER_PREMIUM]}, StatZ as many as you like." if q["tier"] == TIER_FREE
+                              else "StatZ keeps as many as you like.")
+                           + " Every board you have stays."),
                 "quota": q,
             }, status=status.HTTP_403_FORBIDDEN)
         name = str(request.data.get("name") or "").strip()[:255] or "Untitled Board"

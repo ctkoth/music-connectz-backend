@@ -51,3 +51,11 @@ class LadderListTests(TestCase):
         self.assertEqual(d["mine"], "")
         c = APIClient(); c.force_authenticate(U.objects.create_user("m", password="pw12345!x"))
         self.assertEqual(c.get("/api/economy/ladders/").data["mine"], "free")
+
+
+class CoreysNumbersReachedTests(TestCase):
+    def test_lilith_routines_and_sonday_boards_are_3_6_unlimited(self):
+        from apps.economy.ladders import ladders
+        rows = {r["key"]: r for r in ladders()}
+        for key in ("lilith_routines", "sonday_boards"):
+            self.assertTrue(rows[key]["coreys_numbers"], (key, rows[key]["values"]))

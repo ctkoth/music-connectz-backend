@@ -3383,3 +3383,10 @@ OCC, Sonday, `features.FEATURES`, the StatZ features), so the table MembershipZ 
 not a real tab. Count rows carry `coreys_numbers` (Free 3 / Premium 6 / StatZ unlimited, true or false) so the limits
 that differ are visible in one place; moving any of them is Corey's call, not this list's. Open logged-out; `mine` says
 which column is the caller's.
+
+## Lilith routines and Sonday boards are 3 / 6 / unlimited (Corey, Nov 2026)
+
+`lilith_taskz.tier_limits` routines and `sonday.BOARDS` are Free 3, Premium 6, StatZ unlimited (None;
+`routines_full` is the one comparison). Premium routines dropped from 12 and Sonday Free rose from 1. A
+ceiling only refuses a NEW routine or board: anybody already over keeps every one, running and editable.
+Sonday's quota serves `next_tier` / `next_per_tier` so the screen states the next plan's number.
