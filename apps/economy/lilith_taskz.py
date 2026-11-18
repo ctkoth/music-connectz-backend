@@ -143,8 +143,12 @@ def tier_limits(tier):
         # persona automation and AI breakdowns" on every visit. A capability
         # named and withheld is how somebody decides an app is not for them,
         # and they decide it before the feature they were refused even exists.
-        "auto_schedule_days": {"free": 1, "premium": 7}.get(t, 30),
-        "automation_rules": {"free": 2, "premium": 10}.get(t, 50),
+        # Automations are StatZ's on every app (Corey's call, Nov 2026 — as OCC suggestions are
+        # Premium's), so auto-schedule and automation rules are 0 below StatZ. Neither is BUILT yet,
+        # and the screen no longer names them: a number for a feature that does not exist is the
+        # substance rule's failure case. These are the numbers they ship with.
+        "auto_schedule_days": 30 if t in ("statz", "debug") else 0,
+        "automation_rules": None if t in ("statz", "debug") else 0,
         "recurring_quests": {"free": 1, "premium": 5}.get(t, 25),
         # Priced per run out of the member's daily AI allowance, like every
         # other model call — so the ladder here is the allowance, not a flag.

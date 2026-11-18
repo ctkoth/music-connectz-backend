@@ -1,4 +1,8 @@
-"""Tone presets: a member saves an effect chain from the DAW under a name and uses it anywhere.
+"""Presets: a member saves a setting under a name and uses it anywhere — one ceiling PER KIND.
+
+Kinds (`KINDS`): a track TONE and a track FX chain (both a DAW effect chain), and a MASTER (Mix
+ConnectZ's mastering settings). Corey: presets of each type get the same numbers, so saving FX never
+impedes on tones — each kind counts on its own against the tier's `tone_presets` (3 / 6 / unlimited).
 
 Corey: let members save tone presets, with the tier numbers, so they can make voice presets of
 their own. A preset is the chain a DAW track already carries — EQ, compressor, delay, reverb, filter,
@@ -60,6 +64,23 @@ def clean_chain(raw):
     return out
 
 
+def clean_master(raw):
+    """A mastering preset is Mix ConnectZ's settings, kept by the same rule as a saved master."""
+    from .mixz import clean_settings
+    out = clean_settings(raw)
+    for k in ("bitDepth", "dither", "format", "kbps", "exportRate"):   # export choices are not the sound
+        out.pop(k, None)
+    return out
+
+
+# Each kind: what it is called on screen, and how its stored value is cleaned. A new kind is one row.
+KINDS = {
+    "tone": {"label": "Track tone", "clean": clean_chain},
+    "fx": {"label": "Track FX", "clean": clean_chain},
+    "master": {"label": "Mastering", "clean": clean_master},
+}
+
+
 def cap_for(user):
     from .catalog import limits_for
     from .models import membership_for
@@ -67,15 +88,19 @@ def cap_for(user):
 
 
 def _row(p):
-    return {"id": p.id, "name": p.name, "note": p.note, "chain": p.chain, "updated_at": p.updated_at.isoformat()}
+    return {"id": p.id, "kind": p.kind, "name": p.name, "note": p.note, "chain": p.chain, "updated_at": p.updated_at.isoformat()}
 
 
 def _state(user):
     rows = list(TonePreset.objects.filter(owner=user))
     cap = cap_for(user)
     from .catalog import limits_for
-    return {"presets": [_row(p) for p in rows], "count": len(rows), "limit": cap,
-            "full": cap is not None and len(rows) >= cap, "who": WHO, "cost": "Free",
+    kinds = {}
+    for k, spec in KINDS.items():
+        n = sum(1 for p in rows if p.kind == k)
+        kinds[k] = {"label": spec["label"], "count": n, "full": cap is not None and n >= cap}
+    return {"presets": [_row(p) for p in rows], "kinds": kinds, "limit": cap, "per_kind": True,
+            "who": WHO, "cost": "Free",
             "ladder": {t: limits_for(t)["tone_presets"] for t in ("free", "premium", "statz")}}
 
 
@@ -92,17 +117,23 @@ class ToneZView(APIView):
         name = " ".join(str(d.get("name") or "").split())[:NAME_MAX]
         if not name:
             return Response({"detail": "Give the preset a name, like “My vocal”."}, status=status.HTTP_400_BAD_REQUEST)
-        chain = clean_chain(d.get("chain"))
+        kind = str(d.get("kind") or "tone")
+        if kind not in KINDS:
+            return Response({"detail": "Save it as a track tone, track FX or mastering preset."}, status=status.HTTP_400_BAD_REQUEST)
+        chain = KINDS[kind]["clean"](d.get("chain"))
         if not chain:
-            return Response({"detail": "There are no effects on this track to save. Add one in the Mix window first."},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "There's nothing to save yet: add an effect first." if kind != "master"
+                             else "There are no settings to save yet."}, status=status.HTTP_400_BAD_REQUEST)
         note = " ".join(str(d.get("note") or "").split())[:NOTE_MAX]
-        mine = TonePreset.objects.filter(owner=request.user)
+        mine = TonePreset.objects.filter(owner=request.user, kind=kind)
         existing = None
         if d.get("id"):
-            existing = mine.filter(pk=d.get("id")).first()
+            existing = TonePreset.objects.filter(owner=request.user, pk=d.get("id")).first()
             if existing is None:
                 return Response({"detail": "That preset isn't yours, or was deleted."}, status=status.HTTP_404_NOT_FOUND)
+            if existing.kind != kind:
+                return Response({"detail": "A preset keeps its kind — save this as a new one instead."},
+                                status=status.HTTP_400_BAD_REQUEST)
         if mine.filter(name__iexact=name).exclude(pk=existing.pk if existing else None).exists():
             return Response({"detail": f"You already have a preset called “{name}”. Pick another name, or update that one."},
                             status=status.HTTP_409_CONFLICT)
@@ -111,11 +142,11 @@ class ToneZView(APIView):
             if cap is not None and mine.count() >= cap:
                 from .catalog import limits_for
                 nxt = limits_for("premium")["tone_presets"]
-                return Response({"detail": f"Your plan keeps {cap} tone presets. Update or delete one to make room, "
+                return Response({"detail": f"Your plan keeps {cap} {KINDS[kind]['label'].lower()} presets. Update or delete one to make room, "
                                            f"or upgrade (Premium keeps {nxt}; StatZ is unlimited).", "limit": cap},
                                 status=status.HTTP_403_FORBIDDEN)
             existing = TonePreset(owner=request.user)
-        existing.name, existing.chain, existing.note = name, chain, note
+        existing.kind, existing.name, existing.chain, existing.note = kind, name, chain, note
         existing.save()
         return Response({"preset": _row(existing), **_state(request.user)}, status=status.HTTP_201_CREATED)
 

@@ -26,6 +26,11 @@ class CalloutFilterTests(TestCase):
         self.f = client(self.foe)
         self.post = Post.objects.create(author=self.foe, title="verse", genre="Trap")
 
+    def statz(self, user):
+        from apps.economy.models import Membership, membership_for
+        membership_for(user)
+        Membership.objects.filter(user=user).update(tier="statz")
+
     def energy(self):
         return wallet_for(self.me).energy
 
@@ -81,6 +86,7 @@ class CalloutFilterTests(TestCase):
         self.assertEqual(r.data["filtered"], "range")
 
     def test_auto_accept_opens_the_battle_at_once(self):
+        self.statz(self.foe)
         self.f.put(FILTERS, {"auto_accept": True}, format="json")
         r = self.c.post(CH, {"opponent": "foe"}, format="json")
         self.assertEqual(r.status_code, 201, r.content)
@@ -90,14 +96,29 @@ class CalloutFilterTests(TestCase):
         self.assertEqual(self.energy(), 50 - BATTLE_CALLOUT_ENERGY)
 
     def test_auto_accept_never_overrides_a_filter(self):
+        self.statz(self.foe)
         self.f.put(FILTERS, {"auto_accept": True, "genres": ["Drill"]}, format="json")
         r = self.c.post(CH, {"opponent": "foe", "genre": "Pop"}, format="json")
         self.assertEqual(r.status_code, 403)
         self.assertFalse(Battle.objects.exists())
 
     def test_paused_defender_does_not_auto_accept_even_with_the_flag_set(self):
+        self.statz(self.foe)
         self.f.put(FILTERS, {"auto_accept": True, "paused": True}, format="json")
         self.assertEqual(self.c.post(CH, {"opponent": "foe"}, format="json").status_code, 403)
+
+    def test_auto_accept_is_statz_and_stops_when_statz_does(self):
+        r = self.f.put(FILTERS, {"auto_accept": True}, format="json")
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("StatZ", r.data["detail"])
+        self.assertFalse(self.f.get(FILTERS).data["auto_accept_allowed"])
+        self.statz(self.foe)
+        self.assertEqual(self.f.put(FILTERS, {"auto_accept": True}, format="json").status_code, 200)
+        from apps.economy.models import Membership
+        Membership.objects.filter(user=self.foe).update(tier="free")
+        r = self.c.post(CH, {"opponent": "foe"}, format="json")
+        self.assertEqual(Battle.objects.get(pk=r.data["id"]).status, Battle.STATUS_PENDING)   # kept, but does nothing
+        self.assertTrue(ChallengeFilter.objects.get(user=self.foe).auto_accept)
 
     def test_manual_accept_still_works_and_still_refunds_on_decline(self):
         r = self.c.post(CH, {"opponent": "foe"}, format="json")
@@ -116,10 +137,15 @@ class FilterEndpointTests(TestCase):
 
     def test_get_with_no_row_is_the_open_default(self):
         d = self.c.get(FILTERS).data
-        self.assertEqual(d, {"paused": False, "genres": [], "gates": {}, "muted": [], "auto_accept": False})
+        self.assertEqual({k: d[k] for k in ("paused", "genres", "gates", "muted", "auto_accept")},
+                         {"paused": False, "genres": [], "gates": {}, "muted": [], "auto_accept": False})
+        self.assertFalse(d["auto_accept_allowed"])
         self.assertFalse(ChallengeFilter.objects.exists())
 
     def test_put_replaces_everything_and_round_trips(self):
+        from apps.economy.models import Membership, membership_for
+        membership_for(self.me)
+        Membership.objects.filter(user=self.me).update(tier="statz")
         self.c.put(FILTERS, {"genres": ["Trap", "trap", " Drill "], "muted": ["@pal", "nobody", "me"],
                              "auto_accept": True}, format="json")
         d = self.c.get(FILTERS).data
@@ -187,3 +213,18 @@ class SharedInstrumentalTests(TestCase):
     def test_no_instrumental_means_each_side_brings_their_own(self):
         r = self.c.post(CH, {"opponent": "foe"}, format="json")
         self.assertFalse(r.data["same_instrumental"])
+
+
+class AutoAcceptLapseTests(TestCase):
+    def test_a_lapsed_member_can_still_save_their_other_filters(self):
+        from apps.economy.models import Membership, membership_for
+        me = User.objects.create_user("lapsed", "l@x.com", "pw12345678")
+        membership_for(me)
+        Membership.objects.filter(user=me).update(tier="statz")
+        c = client(me)
+        self.assertEqual(c.put(FILTERS, {"auto_accept": True}, format="json").status_code, 200)
+        Membership.objects.filter(user=me).update(tier="free")
+        r = c.put(FILTERS, {"auto_accept": True, "genres": ["Drill"]}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["genres"], ["Drill"])
+        self.assertFalse(r.data["auto_accept_allowed"])

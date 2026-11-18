@@ -66,15 +66,30 @@ def door_check(defender, challenger, genre=""):
     return None
 
 
+# Auto-accept is an automation, and every automation on the platform is StatZ's (Corey's call — as
+# OCC suggestions are Premium's). It is read at USE time, so a member whose StatZ lapses stops
+# auto-accepting at once: the setting is kept, it just does nothing until they are on StatZ again.
+AUTO_ACCEPT_LOCKED = ("Auto-accept is a StatZ feature: it accepts for you while you're away. "
+                      "Your other filters work on every plan.")
+
+
+def auto_accept_allowed(user):
+    # StatZ, or the daily sample while it runs (checked when a challenge arrives, so it stops with it).
+    from .statz_trial import has_statz
+    return has_statz(user)
+
+
 def auto_accepts(defender):
     f = filter_for(defender)
-    return bool(f and f.auto_accept and not f.paused)
+    return bool(f and f.auto_accept and not f.paused and auto_accept_allowed(defender))
 
 
-def filter_dict(f):
+def filter_dict(f, user=None):
+    allowed = auto_accept_allowed(user) if user is not None else False
+    extra = {"auto_accept_allowed": allowed, "auto_accept_note": "" if allowed else AUTO_ACCEPT_LOCKED}
     if f is None:
-        return {"paused": False, "genres": [], "gates": {}, "muted": [], "auto_accept": False}
-    return {
+        return {"paused": False, "genres": [], "gates": {}, "muted": [], "auto_accept": False, **extra}
+    return {**extra,
         "paused": f.paused,
         "genres": list(f.genres or []),
         "gates": f.gates or {},
@@ -92,7 +107,7 @@ class ChallengeFilterView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response(filter_dict(filter_for(request.user)))
+        return Response(filter_dict(filter_for(request.user), request.user))
 
     def put(self, request):
         d = request.data or {}
@@ -106,12 +121,18 @@ class ChallengeFilterView(APIView):
                      .exclude(pk=request.user.pk))
         f, _ = ChallengeFilter.objects.get_or_create(user=request.user)
         f.paused = bool(d.get("paused", False))
-        f.auto_accept = bool(d.get("auto_accept", False))
+        want = bool(d.get("auto_accept", False))
+        # Turning it ON needs StatZ. A setting kept from a lapsed StatZ may be saved back unchanged,
+        # so a member can still edit their other filters.
+        if want and not f.auto_accept and not auto_accept_allowed(request.user):
+            return Response({"detail": AUTO_ACCEPT_LOCKED, "upgrade": {"tab": "membershipz", "target": "membershipz-plans"}},
+                            status=status.HTTP_403_FORBIDDEN)
+        f.auto_accept = want
         f.genres = genres
         f.gates = clean_gates(d.get("gates"))
         f.save()
         f.muted.set(muted)
-        return Response(filter_dict(f))
+        return Response(filter_dict(f, request.user))
 
 
 def _card(b, request):

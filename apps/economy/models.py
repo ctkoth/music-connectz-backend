@@ -8682,11 +8682,13 @@ class SharedItem(models.Model):
 
 
 class TonePreset(models.Model):
-    """A member's own saved tone: an effect chain from the DAW (EQ, compressor, delay, reverb, filter,
-    gain), named — "My vocal", "Rap ad-libs". It is the member's, so it follows them to every DAW and
-    every device. How many they may keep is the tier's (`catalog.TIER_LIMITS["tone_presets"]`)."""
+    """A member's own saved preset, of one KIND (`tonez.KINDS`): a track TONE or a track FX chain from
+    the DAW, or a MASTER (Mix ConnectZ's mastering settings). It is the member's, so it follows them to
+    every app and every device. Each kind has its own ceiling — the tier's `tone_presets` count, per
+    kind — so saving FX chains never uses up room for tones."""
 
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="tone_presets")
+    kind = models.CharField(max_length=10, default="tone")
     name = models.CharField(max_length=60)
     note = models.CharField(max_length=200, blank=True, default="")
     chain = models.JSONField(default=list)
@@ -8695,4 +8697,4 @@ class TonePreset(models.Model):
 
     class Meta:
         ordering = ["-updated_at"]
-        constraints = [models.UniqueConstraint(fields=["owner", "name"], name="tonepreset_owner_name")]
+        constraints = [models.UniqueConstraint(fields=["owner", "kind", "name"], name="tonepreset_owner_kind_name")]

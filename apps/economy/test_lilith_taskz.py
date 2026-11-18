@@ -303,13 +303,15 @@ class TierTests(TestCase):
         self.assertGreater(free["active_tasks"], 0)
         self.assertGreater(free["routines"], 0)
 
-    def test_automation_is_what_a_tier_buys(self):
-        """It buys HOW MUCH. These were five booleans sitting under a docstring
-        promising "never whether" — and the tab rendered the refusal, so a free
-        member was told each visit that auto-schedule was not for them."""
-        free, statz = L.tier_limits("free"), L.tier_limits("statz")
-        for key in ("auto_schedule_days", "automation_rules", "recurring_quests",
-                    "active_tasks", "routines"):
+    def test_automations_are_statz(self):
+        """Corey: every automation is StatZ's, whatever the app. The counts still ladder."""
+        free, prem, statz = L.tier_limits("free"), L.tier_limits("premium"), L.tier_limits("statz")
+        for lim in (free, prem):
+            self.assertEqual(lim["auto_schedule_days"], 0)
+            self.assertEqual(lim["automation_rules"], 0)
+        self.assertGreater(statz["auto_schedule_days"], 0)
+        self.assertIsNone(statz["automation_rules"])
+        for key in ("recurring_quests", "active_tasks", "routines"):
             self.assertGreater(free[key], 0, f"free gets no {key}")
             self.assertGreater(statz[key], free[key], f"{key} does not ladder")
 

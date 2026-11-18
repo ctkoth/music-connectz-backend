@@ -82,6 +82,9 @@ FEATURES = [
     # the member's device), and a lane drawn during a sample stays in the session and keeps playing and
     # bouncing — only drawing and writing lock again.
     {"key": "daw_automation", "label": "Automation in every DAW: draw volume and pan, write fader rides", "tab": "arsenal", "target": "daw-automation"},
+    # Auto-accepting challenges is an automation (Corey: every automation is StatZ's). Read when a
+    # challenge arrives, so it stops the moment StatZ or the sample does; the setting itself is kept.
+    {"key": "challenge_auto_accept", "label": "Auto-accept challenges that clear your filters", "tab": "battlez", "target": "challengez-filters"},
 ]
 
 # THE AUDIT: every place StatZ is the difference, and whether the daily sample covers it.
@@ -110,6 +113,7 @@ DRIVERS = [
     {"key": "imagez_cutout", "sampled": True, "modules": ["imagez_cutout"]},
     {"key": "imagez_actions", "sampled": True, "modules": []},
     {"key": "daw_automation", "sampled": True, "modules": []},
+    {"key": "challenge_auto_accept", "sampled": True, "modules": ["callouts"]},
     {"key": "instrumental_mix", "sampled": False, "modules": ["instrumentalz"],
      "why_not": "A kept set of levels is a saved preference on a stored piece — a sample that left one behind would be a permanent grant wearing a timer."},
     {"key": "mix_presets", "sampled": False, "modules": [],

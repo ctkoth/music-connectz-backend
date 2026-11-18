@@ -27,7 +27,7 @@ class ToneZTests(TestCase):
         r = self.save("My vocal", note="for the verses")
         self.assertEqual(r.status_code, 201)
         pid = r.data["preset"]["id"]
-        self.assertEqual(r.data["count"], 1)
+        self.assertEqual(r.data["kinds"]["tone"]["count"], 1)
         self.assertEqual(r.data["limit"], 3)
         g = self.c.get("/api/economy/tonez/").data
         self.assertEqual(g["presets"][0]["name"], "My vocal")
@@ -44,7 +44,7 @@ class ToneZTests(TestCase):
             self.assertEqual(self.save(f"Tone {i}").status_code, 201)
         r = self.save("Tone 4")
         self.assertEqual(r.status_code, 403)
-        self.assertIn("3 tone presets", r.data["detail"])
+        self.assertIn("3 track tone presets", r.data["detail"])
         self.assertIn("Premium keeps 6", r.data["detail"])
         # an update is never refused by the ceiling
         pid = TonePreset.objects.first().id
@@ -57,8 +57,8 @@ class ToneZTests(TestCase):
             self.save(f"Tone {i}")
         Membership.objects.filter(user=self.me).update(tier="free")
         g = self.c.get("/api/economy/tonez/").data
-        self.assertEqual(g["count"], 5)
-        self.assertTrue(g["full"])
+        self.assertEqual(g["kinds"]["tone"]["count"], 5)
+        self.assertTrue(g["kinds"]["tone"]["full"])
         self.assertEqual(self.save("Another").status_code, 403)
 
     def test_statz_is_unlimited(self):
@@ -80,7 +80,7 @@ class ToneZTests(TestCase):
         pid = self.save("Mine").data["preset"]["id"]
         other = U.objects.create_user("rapper", password="pw12345!x")
         c2 = APIClient(); c2.force_authenticate(other)
-        self.assertEqual(c2.get("/api/economy/tonez/").data["count"], 0)
+        self.assertEqual(len(c2.get("/api/economy/tonez/").data["presets"]), 0)
         self.assertEqual(c2.delete(f"/api/economy/tonez/{pid}/").status_code, 404)
         self.assertEqual(c2.post("/api/economy/tonez/", {"name": "x", "chain": VOCAL, "id": pid}, format="json").status_code, 404)
         self.assertEqual(APIClient().get("/api/economy/tonez/").status_code, 401)
@@ -97,3 +97,46 @@ class ToneZTests(TestCase):
 
     def test_limits_endpoint_serves_the_number(self):
         self.assertEqual(self.c.get("/api/economy/limits/").data.get("tone_presets"), 3)
+
+
+class PresetKindTests(TestCase):
+    """Corey: presets of each type get the same numbers, so FX never impede on tones."""
+
+    def setUp(self):
+        self.me = U.objects.create_user("producer", password="pw12345!x")
+        self.c = APIClient(); self.c.force_authenticate(self.me)
+
+    def save(self, kind, name, chain=VOCAL, **extra):
+        return self.c.post("/api/economy/tonez/", {"kind": kind, "name": name, "chain": chain, **extra}, format="json")
+
+    def test_each_kind_has_its_own_three(self):
+        for i in range(3):
+            self.assertEqual(self.save("tone", f"T{i}").status_code, 201)
+        self.assertEqual(self.save("tone", "T4").status_code, 403)
+        for i in range(3):
+            self.assertEqual(self.save("fx", f"F{i}").status_code, 201)
+        master = {"style": "warm", "intensity": "medium", "target": "streaming", "trims": {"low": 1, "mid": 0, "high": -1}, "bitDepth": 24}
+        for i in range(3):
+            self.assertEqual(self.save("master", f"M{i}", chain=master).status_code, 201)
+        r = self.save("fx", "F4")
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("3 track fx presets", r.data["detail"])
+        k = self.c.get("/api/economy/tonez/").data["kinds"]
+        self.assertEqual({n: v["count"] for n, v in k.items()}, {"tone": 3, "fx": 3, "master": 3})
+
+    def test_the_same_name_may_live_in_two_kinds(self):
+        self.assertEqual(self.save("tone", "Vocal").status_code, 201)
+        self.assertEqual(self.save("fx", "Vocal").status_code, 201)
+        self.assertEqual(self.save("fx", "vocal").status_code, 409)
+
+    def test_a_master_preset_keeps_the_sound_not_the_export(self):
+        r = self.save("master", "Loud", chain={"style": "warm", "intensity": "high", "bitDepth": 24, "dither": True, "junk": 1})
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data["preset"]["chain"], {"style": "warm", "intensity": "high"})
+
+    def test_a_preset_cannot_change_kind_to_dodge_a_ceiling(self):
+        pid = self.save("tone", "Mine").data["preset"]["id"]
+        self.assertEqual(self.save("fx", "Mine", id=pid).status_code, 400)
+
+    def test_an_unknown_kind_is_refused(self):
+        self.assertEqual(self.save("hacks", "x").status_code, 400)
