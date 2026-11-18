@@ -8679,3 +8679,20 @@ class SharedItem(models.Model):
     class Meta:
         unique_together = ("owner", "kind", "ref")
         ordering = ["-created_at"]
+
+
+class TonePreset(models.Model):
+    """A member's own saved tone: an effect chain from the DAW (EQ, compressor, delay, reverb, filter,
+    gain), named — "My vocal", "Rap ad-libs". It is the member's, so it follows them to every DAW and
+    every device. How many they may keep is the tier's (`catalog.TIER_LIMITS["tone_presets"]`)."""
+
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="tone_presets")
+    name = models.CharField(max_length=60)
+    note = models.CharField(max_length=200, blank=True, default="")
+    chain = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        constraints = [models.UniqueConstraint(fields=["owner", "name"], name="tonepreset_owner_name")]
