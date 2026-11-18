@@ -300,14 +300,14 @@ class FailuresStaySafe(Base):
 class TheRequestSuitsTheModel(Base):
     """Two parameters 400 on Haiku 4.5 — which is the FREE tier's model."""
 
-    def test_haiku_is_sent_neither_effort_nor_task_budget(self):
+    def test_haiku_is_sent_effort_and_never_a_beta(self):
+        # Haiku 5.5 takes effort (Haiku 4.5 returned a 400 for it). The task-budget beta still is not sent: on the
+        # plain endpoint it would 400 every real request while a fake client accepted it.
         fake = FakeClient([reply([text_block("hi")])])
         with patch.object(occ_agent, "_client", return_value=fake):
             run_agent(self.user, "hi", model_key="haiku")
         sent = fake.calls[0]
-        # Either one is a 400 on Haiku 4.5, and a 400 here means the FREE tier's
-        # agent never runs at all.
-        self.assertNotIn("output_config", sent)
+        self.assertIn("effort", sent["output_config"])
         self.assertNotIn("betas", sent)
 
     def test_opus_is_sent_effort(self):
@@ -377,7 +377,7 @@ class FreeTierRuns(Base):
 
     def test_a_free_member_is_put_on_a_model_their_tier_owns(self):
         out = self.run_with([reply([text_block("done")])])
-        self.assertEqual(out["engine"], "haiku")
+        self.assertEqual(out["engine"], "sonnet")
 
 
 class TheChargeNeverPassesTheCeilingShown(Base):

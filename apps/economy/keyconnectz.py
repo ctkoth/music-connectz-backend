@@ -102,7 +102,9 @@ def _first_json(raw):
 # TranslateZ (translate.py) stays on Opus deliberately: it transcreates UI and
 # content in batches, it is a paid action, and it has brand rules to get right.
 # That is a different job than turning one message into another language.
-TRANSLATE_MODEL = "claude-haiku-4-5"
+# The Haiku engine, read from the catalogue so the two cannot drift (test_ai_models holds it).
+from .catalog import AI_MODELS as _AI_MODELS  # noqa: E402
+TRANSLATE_MODEL = _AI_MODELS["haiku"]["id"]
 
 # Enough to cover the rooms this app is actually in, with `auto` on the source
 # side so nobody has to name the language they're already typing.
@@ -375,6 +377,8 @@ class KeyTranslateView(APIView):
                 system=_system("" if source == "auto" else LANG_NAME.get(source, source),
                                LANG_NAME.get(target, target)),
                 messages=[{"role": "user", "content": text}],
+                # Haiku 5.5 thinks by default; a translation needs none of it, and it would eat max_tokens.
+                **_AI_MODELS["haiku"].get("short", {}),
             )
             raw = "".join(b.text for b in resp.content
                           if getattr(b, "type", "") == "text").strip()

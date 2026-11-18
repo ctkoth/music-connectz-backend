@@ -372,4 +372,7 @@ class TheRefusalCarriesTheWayForward(Base):
         as_tier(self.user, TIER_FREE)
         r = self.client.patch(MODELS, {"model": "opus"}, format="json")
         self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.data["required_tier"], "premium")
+        r = self.client.patch(MODELS, {"model": "fable"}, format="json")
+        self.assertEqual(r.status_code, 403)
         self.assertEqual(r.data["required_tier"], "statz")

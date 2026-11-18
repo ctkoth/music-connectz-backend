@@ -166,8 +166,8 @@ class PriceTests(HubBase):
         self.assertEqual(p["kind"], "prompt")
         self.assertEqual(p["cost_cents"], spec["cost_cents"])
         self.assertEqual(p["engine"], spec["name"])
-        # Haiku, the Free engine, sits under what one free prompt may cover.
-        self.assertEqual(key, "haiku")
+        # Sonnet, the best engine Free reaches (Corey's ladder), sits under what one free prompt may cover.
+        self.assertEqual(key, "sonnet")
         self.assertTrue(p["free_today"])
 
     def test_occ_on_a_dear_engine_is_one_promptz_and_free_today_under_the_flat_rule(self):
@@ -191,7 +191,7 @@ class PriceTests(HubBase):
         p.ai_model = "fable"
         p.save()
         price = self.app("occ")["price"]
-        self.assertEqual(price["engine"], "Haiku")
+        self.assertEqual(price["engine"], "Sonnet")
 
     def test_video_is_a_fixed_price(self):
         self.assertEqual(self.app("videoconnectz")["price"],

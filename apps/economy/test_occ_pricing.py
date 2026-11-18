@@ -59,10 +59,10 @@ class TheRatesAreTheRealOnes(TestCase):
 
 class TheArithmeticIsRight(TestCase):
     def test_a_known_run_prices_correctly(self):
-        # Opus 5: $5/MTok in, $25/MTok out. 1M in + 1M out = $30 = 3000 cents.
+        # Opus 5.5: $4/MTok in, $20/MTok out. 1M in + 1M out = $24 = 2400 cents.
         cents = ai_run_cost_cents("opus", usage(input_tokens=1_000_000,
                                                 output_tokens=1_000_000))
-        self.assertEqual(cents, 3000)
+        self.assertEqual(cents, 2400)
 
     def test_cached_input_is_billed_at_a_tenth(self):
         fresh = ai_run_cost_cents("opus", usage(input_tokens=1_000_000))

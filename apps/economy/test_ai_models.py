@@ -48,11 +48,12 @@ class Base(TestCase):
 
 
 class TheLadderTests(Base):
-    def test_free_gets_the_cheap_engine_only(self):
-        self.assertEqual(ai_models_for(TIER_FREE), ["haiku"])
+    def test_free_picks_haiku_or_sonnet(self):
+        # Corey's ladder (Nov 2026): Free picks Haiku or Sonnet, Premium reaches Opus, StatZ reaches Fable.
+        self.assertEqual(ai_models_for(TIER_FREE), ["haiku", "sonnet"])
 
-    def test_premium_reaches_sonnet_and_statz_adds_opus_and_fable(self):
-        self.assertEqual(ai_models_for(TIER_PREMIUM), ["haiku", "sonnet"])
+    def test_premium_reaches_opus_and_statz_adds_fable(self):
+        self.assertEqual(ai_models_for(TIER_PREMIUM), ["haiku", "sonnet", "opus"])
         self.assertEqual(ai_models_for(TIER_STATZ), ["haiku", "sonnet", "opus", "fable"])
 
     def test_only_statz_reaches_fable(self):
@@ -114,19 +115,19 @@ class TheDefaultTests(Base):
     def test_a_member_who_never_chose_gets_the_best_rung_they_own(self):
         # They paid for the tier. Quietly serving them the cheapest engine
         # would be selling a thing and then not handing it over.
-        self.assertEqual(default_ai_model(TIER_FREE), "haiku")
-        self.assertEqual(default_ai_model(TIER_PREMIUM), "sonnet")
+        self.assertEqual(default_ai_model(TIER_FREE), "sonnet")
+        self.assertEqual(default_ai_model(TIER_PREMIUM), "opus")
         self.assertEqual(default_ai_model(TIER_STATZ), "fable")
 
     def test_a_choice_above_your_tier_falls_back_rather_than_breaking(self):
         # A lapsed StatZ member still has 'fable' stored. That must not 500 or
         # 402 them on a screen they didn't come to fix.
         key, spec = ai_model_for("fable", TIER_FREE)
-        self.assertEqual(key, "haiku")
-        self.assertEqual(spec["cost_cents"], AI_MODELS["haiku"]["cost_cents"])
+        self.assertEqual(key, "sonnet")
+        self.assertEqual(spec["cost_cents"], AI_MODELS["sonnet"]["cost_cents"])
 
     def test_junk_falls_back_too(self):
-        self.assertEqual(ai_model_for("", TIER_FREE)[0], "haiku")
+        self.assertEqual(ai_model_for("", TIER_FREE)[0], "sonnet")
         self.assertEqual(ai_model_for("gpt-9", TIER_STATZ)[0], "fable")
 
 
@@ -252,13 +253,13 @@ class OccRunsTheChosenEngineTests(Base):
             return self.client.post("/api/economy/ai/occ/",
                                     {"prompt": "hi", "model": "corey-gpt"}, format="json")
 
-    def test_a_free_member_runs_the_cheap_engine(self):
+    def test_a_free_member_who_never_chose_runs_the_best_engine_free_reaches(self):
         seen = []
         resp = self.ask(seen)
         self.assertEqual(resp.status_code, 200, resp.data)
-        self.assertEqual(seen, [AI_MODELS["haiku"]["id"]])
-        self.assertEqual(resp.data["cost_cents"], AI_MODELS["haiku"]["cost_cents"])
-        self.assertEqual(resp.data["engine"], "haiku")
+        self.assertEqual(seen, [AI_MODELS["sonnet"]["id"]])
+        self.assertEqual(resp.data["cost_cents"], AI_MODELS["sonnet"]["cost_cents"])
+        self.assertEqual(resp.data["engine"], "sonnet")
 
     def test_a_statz_member_who_picked_fable_runs_fable_and_pays_for_it(self):
         as_tier(self.user, TIER_STATZ)
@@ -287,4 +288,4 @@ class OccRunsTheChosenEngineTests(Base):
                                      {"prompt": "hi", "model": voice}, format="json")
             costs.append(r.data["cost_cents"])
         self.assertEqual(costs[0], costs[1])
-        self.assertEqual(set(seen), {AI_MODELS["haiku"]["id"]})
+        self.assertEqual(set(seen), {AI_MODELS["sonnet"]["id"]})
