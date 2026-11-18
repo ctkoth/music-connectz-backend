@@ -19,9 +19,10 @@ says is ever allowed to reach a score, a price or a ledger — those are compute
 in code. Likewise "never claim to be a real named person" is an instruction to
 the model, not something enforced.
 
-Tier: presets are everyone's. Creating and using custom voices is StatZ's (the
-real tier, not the free sample — a standing creation is not something a timer
-should leave behind). With no StatZ, `resolve` quietly falls back to the
+Tier: presets are everyone's. Creating and using custom voices is Premium's and
+StatZ's (Corey: Premium or StatZ can change voices from Corey's; how many is the tier
+numbers — Premium 6, StatZ unlimited). The real tier, not the free sample — a standing
+creation is not something a timer should leave behind. With no StatZ, `resolve` quietly falls back to the
 member's `style` and the screen says their voices are paused, not deleted.
 """
 import os
@@ -34,7 +35,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import personalityz
-from .catalog import AI_MODELS, TIER_DEBUG, TIER_STATZ, custom_voice_limit
+from .catalog import AI_MODELS, CUSTOM_VOICE_LIMITS, TIER_DEBUG, TIER_PREMIUM, TIER_STATZ, custom_voice_limit
 from .deadline import Deadline, Expired
 from .models import (CustomVoice, daily_prompt_covers, daily_prompt_state, can_afford_ai,
                      charge_ai_usage, membership_for, voice_prefs_for)
@@ -301,7 +302,7 @@ def summary(v):
 def can_use_custom(user):
     if user is None or not getattr(user, "is_authenticated", False):
         return False
-    return membership_for(user).tier in (TIER_STATZ, TIER_DEBUG)
+    return membership_for(user).tier in (TIER_PREMIUM, TIER_STATZ, TIER_DEBUG)
 
 
 @dataclass
@@ -467,8 +468,9 @@ def state_for(user):
         "presets": PRESETS,
         "voices": [voice_dict(cv, used_by.get(cv.pk, [])) for cv in owned],
         "surfaces": surfaces_payload(user),
-        "limits": {"voices": ceiling, "used": len(owned), "can_make": ok and len(owned) < ceiling,
-                   "statz_voices": custom_voice_limit(TIER_STATZ), "can_use_custom": ok},
+        "limits": {"voices": None if CUSTOM_VOICE_LIMITS.get(tier, 0) is None else ceiling, "used": len(owned), "can_make": ok and len(owned) < ceiling,
+                   "statz_voices": CUSTOM_VOICE_LIMITS.get(TIER_STATZ), "premium_voices": CUSTOM_VOICE_LIMITS.get(TIER_PREMIUM),
+                   "unlimited": CUSTOM_VOICE_LIMITS.get(tier, 0) is None, "can_use_custom": ok},
         "caps": CAPS,
         "dials": dials_payload(),
         "custom_paused": bool(owned) and not ok,
@@ -484,8 +486,8 @@ def _refuse(detail, http=status.HTTP_400_BAD_REQUEST, **extra):
     return Response({"detail": detail, **extra}, status=http)
 
 
-NOT_STATZ = ("Making and using your own voices is StatZ's. The three built-in voices stay yours at every "
-             "tier, and any voices you already wrote are kept, not deleted.")
+NOT_STATZ = ("Making and using your own voices is Premium's and StatZ's. Corey's voice and the built-in voices "
+             "stay yours at every tier, and any voices you already wrote are kept, not deleted.")
 
 
 def _name_taken(user, name, exclude=None):

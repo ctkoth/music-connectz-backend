@@ -123,7 +123,8 @@ class ApiTests(TestCase):
                   "custom_paused", "preview_cost_cents", "free_today", "caps"):
             self.assertIn(k, d)
         self.assertEqual({s["key"] for s in d["surfaces"]}, {"coach", "writer", "occ"})
-        self.assertEqual(d["limits"]["voices"], 20)
+        self.assertIsNone(d["limits"]["voices"], "StatZ keeps unlimited voices (Corey: the tier numbers)")
+        self.assertTrue(d["limits"]["unlimited"])
 
     def test_bare_free_account_get(self):
         f = mk("free1", "free")
@@ -151,11 +152,21 @@ class ApiTests(TestCase):
         self.assertEqual(r.data["voice"]["bio"], "abc")
 
     def test_ceiling_and_over_ceiling_keeps_everything(self):
-        for i in range(20):
-            make(self.u, f"v{i}")
-        r = self.c.post(BASE + "voices/", self.body(), format="json")
-        self.assertEqual(r.status_code, 403); self.assertIn("20", r.data["detail"])
-        self.assertEqual(CustomVoice.objects.filter(user=self.u).count(), 20)
+        p = mk("prem1", "premium"); pc = cl(p)
+        for i in range(6):
+            make(p, f"v{i}")
+        r = pc.post(BASE + "voices/", self.body(), format="json")
+        self.assertEqual(r.status_code, 403); self.assertIn("6", r.data["detail"])
+        self.assertEqual(CustomVoice.objects.filter(user=p).count(), 6)
+
+    def test_premium_can_change_voices_and_statz_is_unlimited(self):
+        from apps.economy.catalog import CUSTOM_VOICE_LIMITS
+        self.assertEqual([CUSTOM_VOICE_LIMITS[t] for t in ("free", "premium", "statz")], [0, 6, None])
+        prem = cl(mk("prem2", "premium"))
+        self.assertEqual(prem.post(BASE + "voices/", self.body(), format="json").status_code, 201)
+        for i in range(25):
+            make(self.u, f"s{i}")
+        self.assertEqual(self.c.post(BASE + "voices/", self.body(), format="json").status_code, 201)
 
     def test_lapse_pauses_never_erases(self):
         cv = make(self.u); m = membership_for(self.u); m.tier = "free"; m.save()

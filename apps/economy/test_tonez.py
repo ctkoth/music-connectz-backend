@@ -178,4 +178,4 @@ class StripPresetTests(TestCase):
         self.assertEqual(r.status_code, 400)
 
     def test_album_songs_are_coreys_numbers(self):
-        self.assertEqual([limits_for(t)["album_songs"] for t in ("free", "premium", "statz")], [3, 6, None])
+        self.assertEqual([limits_for(t)["album_songs"] for t in ("free", "premium", "statz")], [8, 11, None])

@@ -143,8 +143,8 @@ UNLIMITED_CHARS = 10 ** 9
 # middle, highs); a tier buys how many more, never whether. The low cut is a filter, not a band, and is not counted.
 # Nothing is lost when it moves: an EQ already over the count keeps playing every band and only adding one locks.
 #
-# `album_songs` is how many songs one Mix ConnectZ album master holds (Corey's numbers: Free 3 — an EP's worth —
-# Premium 6, StatZ unlimited). Mastering runs on the member's device and is free; the tier says how many songs are
+# `album_songs` is how many songs one Mix ConnectZ album master holds — Corey's numbers PLUS FIVE (his call, Nov 2026):
+# Free 8, Premium 11, StatZ unlimited, so Free holds a whole EP and Premium an album. Mastering runs on the member's device and is free; the tier says how many songs are
 # brought to one loudness and tone together, never whether a song can be mastered (one at a time is every tier's).
 #
 # `facez_faces` is how many faces a member may keep in FaceZ, by the same numbers (Corey's call).
@@ -152,10 +152,10 @@ UNLIMITED_CHARS = 10 ** 9
 TIER_LIMITS = {
     TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500, "embeds_per_post": 3,
                 "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 10, "profile_links": 25,
-                "imagez_layers": 3, "imagez_fonts": 3, "facez_faces": 3, "tone_presets": 3, "anime_shots": 3, "eq_bands": 3, "album_songs": 3},
+                "imagez_layers": 3, "imagez_fonts": 3, "facez_faces": 3, "tone_presets": 3, "anime_shots": 3, "eq_bands": 3, "album_songs": 8},
     TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 15,
                    "widgets_open": 12, "custom_groups": 5, "soundcloud_import": 25, "profile_links": 100,
-                   "imagez_layers": 6, "imagez_fonts": 6, "facez_faces": 6, "tone_presets": 6, "anime_shots": 6, "eq_bands": 6, "album_songs": 6},
+                   "imagez_layers": 6, "imagez_fonts": 6, "facez_faces": 6, "tone_presets": 6, "anime_shots": 6, "eq_bands": 6, "album_songs": 11},
     # StatZ writes without a character cap (Corey's call). It was 5,000 for a
     # day; nothing was lost either way, since the cap is applied on write.
     TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999,
@@ -331,11 +331,18 @@ WRITER_BRIEF_CHARS = {
 # MAKING and USING a custom voice is StatZ's, a capability on top of one
 # everybody already has. A lapse pauses voices and never erases them, and a
 # member over a ceiling keeps everything they wrote.
-CUSTOM_VOICE_LIMITS = {TIER_FREE: 0, TIER_PREMIUM: 0, TIER_STATZ: 20, TIER_DEBUG: 20}
+# Writing voices of a member's own (VoiceZ). Corey: Premium or StatZ can change the voice from Corey's, and how many
+# is the tier numbers — Premium 6, StatZ unlimited (None; `VOICES_MAX` is the engine's bound). Free writes in Corey's
+# voice and the built-in voices, which are everyone's. Lowered from StatZ 20 to unlimited: nobody loses one.
+CUSTOM_VOICE_LIMITS = {TIER_FREE: 0, TIER_PREMIUM: 6, TIER_STATZ: None, TIER_DEBUG: None}
+VOICES_MAX = 50
 
 
 def custom_voice_limit(tier):
-    return CUSTOM_VOICE_LIMITS.get(tier, 0)
+    """How many voices of their own this tier keeps: a number, or VOICES_MAX for unlimited (so every
+    comparison stays a plain `>=`). `CUSTOM_VOICE_LIMITS` holds None for the ladder to print "Unlimited"."""
+    v = CUSTOM_VOICE_LIMITS.get(tier, 0)
+    return VOICES_MAX if v is None else v
 
 
 def writer_brief_chars(tier):

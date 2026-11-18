@@ -72,5 +72,5 @@ class AlbumRowTests(TestCase):
     def test_album_songs_are_on_the_ladder_at_coreys_numbers(self):
         from apps.economy.ladders import ladders
         row = next(r for r in ladders() if r["key"] == "album_songs")
-        self.assertTrue(row["coreys_numbers"], row["values"])
+        self.assertEqual(row["values"], {"free": "8", "premium": "11", "statz": "Unlimited"}, "Corey: the tier numbers plus five")
         self.assertEqual(row["target"], "mixz-album")

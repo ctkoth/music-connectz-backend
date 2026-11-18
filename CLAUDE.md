@@ -3404,3 +3404,19 @@ an EQ insert's `bands` (known type, finite f / gain / q, at most `MAX_BANDS`), s
 loudness and tone (the frontend's `src/mastering/album.js` does the work on the device; nothing is uploaded or charged).
 `tonez.KINDS["strip"]` is a TrackZ channel strip preset (`clean_strip`: low cut, EQ bands, compressor; the shape here,
 the ranges in the frontend's `strip.js`), with its own 3 / 6 / unlimited room like every other kind.
+
+## Songs per album are the tier numbers + 5, and Premium may write in its own voices (Corey, Nov 2026)
+
+`album_songs` is Free 8, Premium 11, StatZ unlimited (Corey: the tier numbers plus five). `CUSTOM_VOICE_LIMITS` is
+Free 0, Premium 6, StatZ unlimited (None; `custom_voice_limit` returns `VOICES_MAX`, 50, so comparisons stay `>=`, and
+VoiceZ serves `voices: None` + `unlimited`). Corey's voice and the built-in voices stay every tier's. Premium was 0 and
+StatZ 20; nobody loses a voice.
+
+## Mix ConnectZ AI listen (`mixz_ai.py`, `GET/POST mixz/ai/`)
+
+The eMastered headline: the AI hears ~90 s from the middle of the song, picks its genre from `GENRES` and adjusts that
+genre's preset with at most six moves from `MOVES`, each with a reason. Keys outside the list are dropped and values
+are clamped to the engine's own ranges (the frontend's `cleanSettings` clamps again). The genre presets themselves are
+free and served on GET beside the price. Billed only after a readable answer (`_bill`, daily prompt first); the clip is
+inline in the one request and never kept; nothing is mastered until the member presses Master it. Never run against
+Google (CI has no key) — the request shape is the KeyConnectZ transcriber's, which takes inline audio the same way.

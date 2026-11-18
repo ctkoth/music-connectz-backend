@@ -72,6 +72,16 @@ CREDIT_OUTCOMES = {
         "ephemeral_reason": "The reference is somebody else's record, so it is never stored, and a gap to "
                             "it is not a measurement of you; the read is shown once to act on.",
         "free_way": COACH_FREE},
+    "mixz_ai": {
+        "resource": "promptz", "label": "Mix ConnectZ AI listen",
+        "buys": "The AI hears your song, names its genre and sets the master — every move with its reason, on your "
+                "controls, before anything is mastered.",
+        "outcomes": ["understandable", "learnable", "tangible"],
+        "lands_in": ["mixconnectz"],
+        "ephemeral_reason": "The clip is not kept; what it buys is the settings, which go on the controls and into "
+                            "the master you save.",
+        "free_way": {"label": "The genre presets beside it are free and set the same controls; mastering itself is free.",
+                     "tab": "mixconnectz"}},
     "coach_upgrades": {
         "resource": "promptz", "label": "Gear and settings advice",
         "buys": "Named gear and settings advice tied to the reasons in one take.",
