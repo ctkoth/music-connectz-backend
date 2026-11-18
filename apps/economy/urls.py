@@ -220,6 +220,7 @@ from .views import (
     InstrumentLeaderboardView,
 )
 from .habits import HabitCreateView, HabitCompleteView
+from .bodiez_float import BodieZFloatStateView, BodieZSessionFloatView
 from .bodiez import (
     BodieZAccessView, BodieZBoardView, BodieZCustomDaysView, BodieZStepsView, BodieZCustomExerciseView, BodieZCustomExerciseDetailView, BodieZPastSessionView, BodieZSessionLogView, BodieZRoutinePlanView, BodieZStepCoachView, BodieZCustomDayDetailView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
     BodieZGoalDetailView, BodieZGoalsView, BodieZRecoveryView, BodieZRoutinesView,
@@ -653,6 +654,8 @@ urlpatterns = [
          name="economy-bodiez-session-routine"),
     path("bodiez/routines/<int:routine_id>/", BodieZRoutineDetailView.as_view(),
          name="economy-bodiez-routine"),
+    path("bodiez/float/", BodieZFloatStateView.as_view(), name="economy-bodiez-float"),
+    path("bodiez/sessions/<int:session_id>/float/", BodieZSessionFloatView.as_view(), name="economy-bodiez-session-float"),
     path("bodiez/sessions/", BodieZSessionsView.as_view(), name="economy-bodiez-sessions"),
     path("bodiez/routines/plan/", BodieZRoutinePlanView.as_view(), name="economy-bodiez-routine-plan"),
     path("bodiez/sessions/log/", BodieZSessionLogView.as_view(), name="economy-bodiez-session-log"),

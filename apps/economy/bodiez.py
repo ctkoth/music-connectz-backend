@@ -436,6 +436,7 @@ def _session_dict(sess, sets=None):
         "backfilled": sess.backfilled,
         "notes": sess.notes,
         "superset_pairs": list(sess.superset_pairs or []),
+        "floated_at": sess.floated_at.isoformat() if sess.floated_at else None,
         "sets": [_set_dict(s) for s in sets],
     }
 

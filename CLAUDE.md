@@ -3439,3 +3439,20 @@ why it matters to the member, J decides and plans, P offers ways in), and `PAIR_
 SP. `personality_lines` puts all of it in every voice's prompt — Lilith, Leemy, every member's own voice and every
 CharacterZ character — in plain words, never the code or a type name. VoiceZ serves `letter_styles` so the form shows what
 the letters will do before the voice is saved. Behaviour only: it never changes a number, a score, a price or a fact.
+
+## A live BodieZ session can stay on screen over other apps; the tier buys how OFTEN (Corey, Nov 2026)
+
+`apps/economy/bodiez_float.py`, `BodieZSession.floated_at` (migration 0243, additive). A member keeps the session they are
+logging running on screen while other apps are open (the client holds BodieZ mounted and draws a bar). **Free 3, Premium 6,
+StatZ unlimited sessions a rolling 24 hours** (`TIER_LIMITS["bodiez_float"]`, a recommendation of Corey's usual numbers for
+"how many times used", reversible in one line; it has a `ladders.py` row).
+
+- **A tier says how often, never whether.** The session, its rest clock and its beep run in BodieZ at every tier; past the
+  number the session is untouched ("open BodieZ and it is where you left it") and the refusal says nothing was charged.
+- **A session counts once.** The count is rows with `floated_at` set in the last 24h, not a counter, so nothing drifts; the
+  set is a conditional `update(floated_at__isnull=True)`, so two presses at once set it once, and a press on a session already
+  kept is free (`already`). Switching it off and on again is the device's, never a second use.
+- **Rolling, not a calendar day**, for the reason `StatzTrial` gives (a UTC midnight is early evening in New York).
+- **Stated before the press**: `GET /bodiez/float/` serves `limit/used/left/next_limit/ladder/cost` and the open session's
+  `{id, floated}`; `POST /bodiez/sessions/<id>/float/` is the press. Only a live, non-backfilled session of your own.
+- **Costs no ⚡ 🍥 🏷️** (a test fails if the module names a spend primitive), so `credit_outcomes` has nothing to declare.

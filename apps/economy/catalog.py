@@ -147,24 +147,29 @@ UNLIMITED_CHARS = 10 ** 9
 # Free 8, Premium 11, StatZ unlimited, so Free holds a whole EP and Premium an album. Mastering runs on the member's device and is free; the tier says how many songs are
 # brought to one loudness and tone together, never whether a song can be mastered (one at a time is every tier's).
 #
+# `bodiez_float` is how many sessions a day (rolling 24 hours) a member may keep RUNNING ON SCREEN over other apps —
+# Corey's numbers again: Free 3, Premium 6, StatZ unlimited. A live BodieZ session counts once however long it floats;
+# pressing it again on the same session is free. It says how OFTEN, never whether: the session itself, its rest clock and
+# its beep run in BodieZ at every tier, and a member who has used today's number just reopens BodieZ to see them.
+#
 # `facez_faces` is how many faces a member may keep in FaceZ, by the same numbers (Corey's call).
 # Nobody loses a face when it moves: over the ceiling, a member keeps every face and cannot add.
 TIER_LIMITS = {
     TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500, "embeds_per_post": 3,
                 "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 10, "profile_links": 25,
-                "imagez_layers": 3, "imagez_fonts": 3, "facez_faces": 3, "tone_presets": 3, "anime_shots": 3, "eq_bands": 3, "album_songs": 8},
+                "imagez_layers": 3, "imagez_fonts": 3, "facez_faces": 3, "tone_presets": 3, "anime_shots": 3, "eq_bands": 3, "album_songs": 8, "bodiez_float": 3},
     TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 15,
                    "widgets_open": 12, "custom_groups": 5, "soundcloud_import": 25, "profile_links": 100,
-                   "imagez_layers": 6, "imagez_fonts": 6, "facez_faces": 6, "tone_presets": 6, "anime_shots": 6, "eq_bands": 6, "album_songs": 11},
+                   "imagez_layers": 6, "imagez_fonts": 6, "facez_faces": 6, "tone_presets": 6, "anime_shots": 6, "eq_bands": 6, "album_songs": 11, "bodiez_float": 6},
     # StatZ writes without a character cap (Corey's call). It was 5,000 for a
     # day; nothing was lost either way, since the cap is applied on write.
     TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999,
                  "widgets_open": 40, "custom_groups": 20, "soundcloud_import": None, "profile_links": 300,
-                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None, "anime_shots": None, "eq_bands": None, "album_songs": None},
+                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None, "anime_shots": None, "eq_bands": None, "album_songs": None, "bodiez_float": None},
     # Owner god-mode: effectively unlimited.
     TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760, "embeds_per_post": 999,
                  "widgets_open": 999, "custom_groups": 999, "soundcloud_import": None, "profile_links": 999,
-                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None, "anime_shots": None, "eq_bands": None, "album_songs": None},
+                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None, "anime_shots": None, "eq_bands": None, "album_songs": None, "bodiez_float": None},
 }
 
 

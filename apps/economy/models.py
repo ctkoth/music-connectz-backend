@@ -6785,6 +6785,10 @@ class BodieZSession(models.Model):
     # Cleaned on every write (`bodiez.clean_pairs`): two distinct lifts, each in at most one pair. Saving the session as
     # a routine turns these into the routine's own adjacent `group` pairs, so a superset made while logging is not lost.
     superset_pairs = models.JSONField(default=list, blank=True)
+    # When the member chose to keep THIS session running on screen over other apps (`bodiez_float`). Null = never
+    # chosen. Set once, by a conditional update, and never cleared: it is the row the tier's daily number counts,
+    # and a counter you can reset is not a count. See `bodiez_float.py`.
+    floated_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ("-started_at",)

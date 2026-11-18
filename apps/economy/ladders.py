@@ -90,6 +90,7 @@ def _rows():
         ("Voice & keyboard", "coach_speak", "Characters the coach reads aloud a day", "singz", "", _from(C.COACH_SPEAK_DAILY_CHARS), "", "COACH_SPEAK_DAILY_CHARS"),
         ("Organise", "journal_per_day", "Journal entries a day", "journalz", "journalz-composer", _from(C.JOURNAL_LIMITS, "per_day"), "", "JOURNAL_LIMITS"),
         ("Organise", "journal_attachments", "Attachments on a journal entry", "journalz", "journalz-composer", _from(C.JOURNAL_LIMITS, "attachments"), "", "JOURNAL_LIMITS"),
+        ("Organise", "bodiez_float", "BodieZ sessions kept on screen over other apps, a day", "bodiez", "today-float", _lim("bodiez_float"), "", "tier_limits:bodiez_float"),
         ("Organise", "lilith_routines", "Lilith routines", "lilith", "", lambda t: lilith(t)["routines"], "", "lilith.routines"),
         ("Organise", "lilith_tasks", "Lilith open tasks", "lilith", "", lambda t: lilith(t)["active_tasks"], "", "lilith.active_tasks"),
         ("Organise", "sonday_boards", "Sonday boards", "sonday", "", lambda t: SONDAY.get(t), "", "sonday.BOARDS"),
