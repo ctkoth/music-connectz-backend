@@ -122,7 +122,7 @@ class PresetKindTests(TestCase):
         self.assertEqual(r.status_code, 403)
         self.assertIn("3 track fx presets", r.data["detail"])
         k = self.c.get("/api/economy/tonez/").data["kinds"]
-        self.assertEqual({n: v["count"] for n, v in k.items()}, {"tone": 3, "fx": 3, "master": 3})
+        self.assertEqual({n: v["count"] for n, v in k.items()}, {"tone": 3, "fx": 3, "master": 3, "strip": 0})
 
     def test_the_same_name_may_live_in_two_kinds(self):
         self.assertEqual(self.save("tone", "Vocal").status_code, 201)
@@ -154,3 +154,28 @@ class EqBandTests(TestCase):
         self.assertEqual(bands[0], {"type": "peaking", "f": 1000.0, "gain": -3.0, "q": 1.0})
         self.assertEqual(len(bands), 32)              # the engine's bound; unknown types and bands with no frequency dropped
         self.assertNotIn("bands", clean_chain([{"type": "comp", "bands": [{"type": "peaking", "f": 1}]}])[0])
+
+
+class StripPresetTests(TestCase):
+    def setUp(self):
+        self.u = get_user_model().objects.create_user("stripper", password="pw12345!x")
+        self.c = APIClient(); self.c.force_authenticate(self.u)
+
+    def test_a_channel_strip_saves_as_its_own_kind_with_its_own_room(self):
+        strip = {"hp": 90, "bands": [{"type": "peaking", "f": 2500, "gain": 3, "q": 1.2}, {"type": "x", "f": 1}],
+                 "comp": {"on": True, "thresholdDb": -24, "ratio": 3, "speed": "fast", "makeupDb": 2, "evil": "<b>"}}
+        r = self.c.post("/api/economy/tonez/", {"kind": "strip", "name": "Vocal strip", "chain": strip}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        saved = r.data["preset"]["chain"]
+        self.assertEqual(saved["hp"], 90.0)
+        self.assertEqual(saved["bands"], [{"type": "peaking", "f": 2500.0, "gain": 3.0, "q": 1.2}])
+        self.assertEqual(saved["comp"], {"on": True, "thresholdDb": -24.0, "ratio": 3.0, "makeupDb": 2.0, "speed": "fast"})
+        self.assertEqual(r.data["kinds"]["strip"]["count"], 1)
+        self.assertEqual(r.data["kinds"]["tone"]["count"], 0)
+
+    def test_a_blank_strip_is_not_a_preset(self):
+        r = self.c.post("/api/economy/tonez/", {"kind": "strip", "name": "Nothing", "chain": {"comp": "x"}}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_album_songs_are_coreys_numbers(self):
+        self.assertEqual([limits_for(t)["album_songs"] for t in ("free", "premium", "statz")], [3, 6, None])

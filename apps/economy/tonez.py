@@ -102,11 +102,46 @@ def clean_master(raw):
     return out
 
 
+STRIP_SPEEDS = ("fast", "medium", "slow")
+
+
+def clean_strip(raw):
+    """A TrackZ channel strip (Mix ConnectZ): its low cut, its EQ bands and its compressor. The SHAPE is
+    kept here; the ranges are strip.js's (`cleanStrip` clamps as a preset is applied), same rule as a chain.
+    Empty when nothing in it is a number, so a blank strip cannot be saved as a preset."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    try:
+        hp = float(raw.get("hp"))
+        if math.isfinite(hp):
+            out["hp"] = hp
+    except (TypeError, ValueError):
+        pass
+    if isinstance(raw.get("bands"), list):
+        out["bands"] = clean_bands(raw["bands"])
+    c = raw.get("comp")
+    if isinstance(c, dict):
+        comp = {"on": c.get("on") is True}
+        for k in ("thresholdDb", "ratio", "makeupDb"):
+            try:
+                v = float(c.get(k))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(v):
+                comp[k] = v
+        if c.get("speed") in STRIP_SPEEDS:
+            comp["speed"] = c["speed"]
+        out["comp"] = comp
+    return out if (out.get("bands") or "hp" in out or out.get("comp")) else {}
+
+
 # Each kind: what it is called on screen, and how its stored value is cleaned. A new kind is one row.
 KINDS = {
     "tone": {"label": "Track tone", "clean": clean_chain},
     "fx": {"label": "Track FX", "clean": clean_chain},
     "master": {"label": "Mastering", "clean": clean_master},
+    "strip": {"label": "Channel strip", "clean": clean_strip},
 }
 
 
@@ -148,7 +183,7 @@ class ToneZView(APIView):
             return Response({"detail": "Give the preset a name, like “My vocal”."}, status=status.HTTP_400_BAD_REQUEST)
         kind = str(d.get("kind") or "tone")
         if kind not in KINDS:
-            return Response({"detail": "Save it as a track tone, track FX or mastering preset."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Save it as a track tone, track FX, mastering or channel strip preset."}, status=status.HTTP_400_BAD_REQUEST)
         chain = KINDS[kind]["clean"](d.get("chain"))
         if not chain:
             return Response({"detail": "There's nothing to save yet: add an effect first." if kind != "master"

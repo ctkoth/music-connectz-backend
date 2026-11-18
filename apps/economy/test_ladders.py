@@ -66,3 +66,11 @@ class EqBandsRowTests(TestCase):
         from apps.economy.ladders import ladders
         row = next(r for r in ladders() if r["key"] == "eq_bands")
         self.assertTrue(row["coreys_numbers"], row["values"])
+
+
+class AlbumRowTests(TestCase):
+    def test_album_songs_are_on_the_ladder_at_coreys_numbers(self):
+        from apps.economy.ladders import ladders
+        row = next(r for r in ladders() if r["key"] == "album_songs")
+        self.assertTrue(row["coreys_numbers"], row["values"])
+        self.assertEqual(row["target"], "mixz-album")

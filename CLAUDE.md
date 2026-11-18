@@ -3397,3 +3397,10 @@ Sonday's quota serves `next_tier` / `next_per_tier` so the screen states the nex
 (the frontend's `src/eqbands.js` is the one band model; 32 is the engine's bound). The low cut is a filter, not a band.
 Applied on the device, like tracks per session; an EQ over the count keeps playing every band. `tonez.clean_chain` keeps
 an EQ insert's `bands` (known type, finite f / gain / q, at most `MAX_BANDS`), so a saved tone keeps every band it had.
+
+## Album mastering and saved channel strips: Mix ConnectZ against eMastered (Nov 2026)
+
+`TIER_LIMITS["album_songs"]` is Free 3, Premium 6, StatZ unlimited — how many songs one album master brings to one
+loudness and tone (the frontend's `src/mastering/album.js` does the work on the device; nothing is uploaded or charged).
+`tonez.KINDS["strip"]` is a TrackZ channel strip preset (`clean_strip`: low cut, EQ bands, compressor; the shape here,
+the ranges in the frontend's `strip.js`), with its own 3 / 6 / unlimited room like every other kind.
