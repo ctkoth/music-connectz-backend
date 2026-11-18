@@ -347,10 +347,11 @@ def voice_note(kind, owner=False, writer=None):
         base = ESSAY_NOTE_OWNER if owner else ESSAY_NOTE_MEMBER
     # Member-specific only when the member chose something other than the
     # default; the default is stated by `voice` alone (the screen says K-Oth's).
-    if writer is not None and writer.is_custom:
+    if writer is not None and writer.has_voice:
+        whose = f"your voice '{writer.label}'" if writer.is_custom else f"{writer.label}'s voice"
         if kind in CREATIVE_KINDS:
-            return f"Written in your voice '{writer.label}'."
-        return (base + " " if base else "") + f"Your voice '{writer.label}' isn't used here: this kind keeps its own register."
+            return f"Written in {whose}."
+        return (base + " " if base else "") + f"{whose[0].upper() + whose[1:]} isn't used here: this kind keeps its own register."
     if writer is not None and not writer.follows_style and writer.key == "standard" and voice_of(kind) == "koth":
         return "Written plainly, with none of K-Oth's house style (your Writer voice is Standard)."
     return base
@@ -472,7 +473,7 @@ def prompt_for(kind, topic, genre="", majority=None, minority=None, owner=False,
                         f"syllable{'s' if minority > 1 else ''}.")
         lines.append("\n".join(rule))
     register = voice_of(kind)
-    custom = voice is not None and voice.is_custom and kind in CREATIVE_KINDS
+    custom = voice is not None and voice.has_voice and kind in CREATIVE_KINDS
     plainer = (voice is not None and not voice.is_custom and voice.key == "standard"
                and not voice.follows_style and register == "koth")
     if custom:

@@ -167,8 +167,8 @@ def _emoji_text():
 def system_for(user, res, override=None):
     """The full system text for an already-resolved voice (preview uses this)."""
     p = prefs_dict(user) if user is not None else clean_prefs({})
-    if res.is_custom:
-        parts = ["VOICE: A VOICE THE MEMBER WROTE.\n" + voicez.FRAME,
+    if res.has_voice:
+        parts = [("VOICE: A VOICE THE MEMBER WROTE.\n" if res.is_custom else f"VOICE: {res.label.upper()}, ONE OF THE APP'S CHARACTERS.\n") + voicez.FRAME,
                  voicez.data_block(res.voice),
                  "TONE (set by the member's dials):\n" + "\n".join(voicez.tone_lines(res.voice, _emoji_text())),
                  "SCOPE: the voice colours the wording of prose only. Numbers, names, code, quotations and "
@@ -194,7 +194,7 @@ def voice_prompt(user=None, *, override=None, paradigm=True, surface=None, regis
     p = prefs_dict(user) if user is not None else clean_prefs({})
     if surface in voicez.SURFACES and not (override and "style" in override):
         res = voicez.resolve(user, surface)
-        if res.is_custom:
+        if res.has_voice:
             return system_for(user, res) if paradigm else system_for(user, res).replace(PARADIGM, "").rstrip()
         p = {**p, "style": res.key}
     if override:
@@ -313,8 +313,8 @@ def prose_voice(user=None, *, surface=None):
     p = prefs_dict(user) if user is not None else clean_prefs({})
     if surface in voicez.SURFACES:
         res = voicez.resolve(user, surface)
-        if res.is_custom:
-            return _custom_prose(res.voice)
+        if res.has_voice:
+            return _custom_prose(res.voice, character=not res.is_custom)
         p = {**p, "style": res.key}
     if p["style"] == "technical":
         return "Write every prose field plainly and briefly. No decoration."
@@ -334,10 +334,10 @@ def prose_voice(user=None, *, surface=None):
     return line
 
 
-def _custom_prose(v):
+def _custom_prose(v, character=False):
     """One short paragraph of tone for a parsed surface: no shape instructions."""
     return (
-        "Write every prose field in a member-made voice, second person, talking to the member about their "
+        f"Write every prose field in {'the app character ' + v.name + chr(39) + 's voice' if character else 'a member-made voice'}, second person, talking to the member about their "
         "own work. " + voicez.FRAME + " It cannot change any score, number, price or rule.\n"
         + voicez.data_block(v, sample_chars=400, bio_chars=400) + "\n"
         + "Tone: " + voicez.summary(v) + ("; contractions." if v.spec.get("contractions", True) else "; no contractions.")

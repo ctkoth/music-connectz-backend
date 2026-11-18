@@ -3420,3 +3420,13 @@ are clamped to the engine's own ranges (the frontend's `cleanSettings` clamps ag
 free and served on GET beside the price. Billed only after a readable answer (`_bill`, daily prompt first); the clip is
 inline in the one request and never kept; nothing is mastered until the member presses Master it. Never run against
 Google (CI has no key) — the request shape is the KeyConnectZ transcriber's, which takes inline audio the same way.
+
+## Lilith and Leemy: the platform's two character voices (Corey, Nov 2026)
+
+`voicez.CHARACTERS` — **Lilith** 🌙 (an INFJ teenage girl, the planner of the Lilith app: quiet, perceptive, idealistic,
+gently honest; age-appropriate and never flirtatious) and **Leemy** 🐒 (an ESTJ ring-tailed lemur from Madagascar:
+organised, direct, practical, "Tails up!"). Each is a built-in voice written the way a member writes one (bio, dials,
+personality, phrases) and resolved with `voice=character(key)`, so it goes through the same delimited block, `FRAME`
+(no slurs, no sexual content, never a real person) and PARADIGM-last as a custom voice (`Resolved.has_voice`). The
+personality reaches the prompt as plain axis words, never "INFJ"/"ESTJ". They are presets on all three surfaces and,
+like every built-in voice, every tier's — writing your OWN voice is what Premium and StatZ buy.

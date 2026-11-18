@@ -121,16 +121,62 @@ def dials_payload():
 
 # ---- surfaces
 SURFACES = {
-    "coach": {"label": "Coach", "presets": ("corey", "standard", "technical"), "default": None},
-    "writer": {"label": "Writer", "presets": ("corey", "standard"), "default": "corey"},
-    "occ": {"label": "OCC", "presets": ("corey", "standard", "technical"), "default": None},
+    "coach": {"label": "Coach", "presets": ("corey", "standard", "technical", "lilith", "leemy"), "default": None},
+    "writer": {"label": "Writer", "presets": ("corey", "standard", "lilith", "leemy"), "default": "corey"},
+    "occ": {"label": "OCC", "presets": ("corey", "standard", "technical", "lilith", "leemy"), "default": None},
 }
-PRESET_LABEL = {"corey": "Corey", "standard": "Standard", "technical": "Technical"}
+PRESET_LABEL = {"corey": "Corey", "standard": "Standard", "technical": "Technical", "lilith": "Lilith", "leemy": "Leemy"}
 PRESETS = [
     {"key": "corey", "label": "Corey", "desc": "The founder voice: long-short-long, lived examples, emoji."},
     {"key": "standard", "label": "Standard", "desc": "Clear and neutral. No house style."},
     {"key": "technical", "label": "Technical", "desc": "Terse and code-first. No preamble."},
+    {"key": "lilith", "label": "Lilith", "emoji": "🌙",
+     "desc": "A teenage girl who notices what you meant, not just what you said: quiet, warm, idealistic, gently honest."},
+    {"key": "leemy", "label": "Leemy", "emoji": "🐒",
+     "desc": "A ring-tailed lemur from Madagascar who runs a tight ship: organised, direct, practical, tail always up."},
 ]
+
+
+# ---- the platform's characters (Corey's: Lilith and Leemy)
+# Each is a built-in voice written the way a member writes one — who is talking, the dials, a personality
+# and a few phrases — so it goes through the SAME delimited block, the same FRAME and the same PARADIGM-last
+# rule as any custom voice. They are characters: neither claims to be a real person, and FRAME forbids
+# slurs and sexual content whatever the description says. The personality is stated as plain axis words
+# (`personality_line`), never the four-letter code or a type name. Like every built-in voice, they are
+# every tier's — only voices a member WRITES are Premium's and StatZ's.
+CHARACTERS = {
+    "lilith": dict(
+        name="Lilith",
+        bio=("Lilith, a teenage girl and the planner who keeps your days in order in this app. Quiet, "
+             "perceptive and idealistic: she notices what you meant as well as what you said, cares about "
+             "why something matters to you, and says the hard part gently but honestly. Thoughtful rather "
+             "than bubbly; she believes you can do the thing and says so without flattery. Age-appropriate, "
+             "kind, never flirtatious."),
+        personality="INFJ",
+        spec={"register": "conversational", "energy": "calm", "humour": "warm", "directness": "gentle",
+              "warmth": "warm", "sentence_length": "mixed", "vocabulary": "everyday", "emoji": "light",
+              "contractions": True,
+              "signature_phrases": ["Okay, so here's what I'm noticing", "Small steps still count", "I think you already know this one"],
+              "avoid_words": ["babe", "sexy"]}),
+    "leemy": dict(
+        name="Leemy",
+        bio=("Leemy, a ring-tailed lemur from Madagascar who runs a tight ship. Organised, decisive and "
+             "practical: plans in numbered steps, likes rules that work, says plainly what is on track and "
+             "what is not, and gets things done before lunch. Proud of the forests of Madagascar and the "
+             "troop; a dry joke now and then, tail always up. Speaks as a lemur character, never as a person."),
+        personality="ESTJ",
+        spec={"register": "playful", "energy": "high", "humour": "dry", "directness": "blunt",
+              "warmth": "friendly", "sentence_length": "short", "vocabulary": "plain", "emoji": "light",
+              "contractions": True,
+              "signature_phrases": ["Tails up!", "Here's the plan, step by step", "Straight from Madagascar:"],
+              "avoid_words": []}),
+}
+
+
+def character(key):
+    """The built-in VoiceSpec for Lilith or Leemy, or None for any other preset."""
+    c = CHARACTERS.get(key)
+    return VoiceSpec.from_fields(c) if c else None
 
 
 # ---- cleaning
@@ -320,6 +366,11 @@ class Resolved:
         return self.kind == "custom"
 
     @property
+    def has_voice(self):
+        """A written voice to speak in: the member's own, or one of the platform's characters."""
+        return self.voice is not None
+
+    @property
     def choice(self):
         return f"{self.kind}:{self.key}"
 
@@ -348,7 +399,7 @@ def resolve(user, surface, prefs=None):
         kind, _, key = raw.partition(":")
         if kind == "preset":
             if key in SURFACES[surface]["presets"]:
-                return Resolved(surface, "preset", key, PRESET_LABEL[key], follows_style=False)
+                return Resolved(surface, "preset", key, PRESET_LABEL[key], voice=character(key), follows_style=False)
             base.note = "invalid"
             return base
         if kind == "custom" and key.isdigit():
@@ -394,7 +445,8 @@ def _tail(surface, writer_stay):
 
 def _voice_phrase(kind, key, name):
     return f"your voice '{name}'" if kind == "custom" else {
-        "corey": "Corey's voice", "standard": "a clear, neutral voice", "technical": "a terse, technical voice"}[key]
+        "corey": "Corey's voice", "standard": "a clear, neutral voice", "technical": "a terse, technical voice",
+        "lilith": "Lilith's voice", "leemy": "Leemy's voice"}[key]
 
 
 def _writer_kinds():
@@ -411,6 +463,8 @@ def result_sentence(surface, kind, key, name=""):
         head = f"The coach will word the written part of every take's feedback in {who}."
     elif surface == "occ":
         head = f"OCC will word its replies in {who}."
+    elif kind == "preset" and key in CHARACTERS:
+        head = f"{', '.join(take[:-1])} and {take[-1]} will be written in {who}."
     elif kind == "preset" and key == "corey":
         head = "Lyrics, captions and posts are written in K-Oth's voice, as they always were. Poems are written plainly."
     elif kind == "preset":
@@ -635,7 +689,7 @@ class VoicePreviewView(APIView):
                 return _refuse(str(e))
             res = Resolved("coach", "custom", "0", f["name"], VoiceSpec.from_fields(f), follows_style=False)
         elif isinstance(raw, str) and raw.startswith("preset:") and raw[7:] in PRESET_LABEL:
-            res = Resolved("occ", "preset", raw[7:], PRESET_LABEL[raw[7:]], follows_style=False)
+            res = Resolved("occ", "preset", raw[7:], PRESET_LABEL[raw[7:]], voice=character(raw[7:]), follows_style=False)
         elif isinstance(raw, str) and raw.startswith("custom:") and raw[7:].isdigit():
             if not can_use_custom(u):
                 return _refuse(NOT_STATZ, status.HTTP_403_FORBIDDEN)

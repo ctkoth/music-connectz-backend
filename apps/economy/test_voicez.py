@@ -280,3 +280,42 @@ class WriterTests(TestCase):
         u = mk(); choose(u, writer="preset:standard")
         p = sentencez.prompt_for("lyrics", "rain", voice=voicez.resolve(u, "writer"))
         self.assertNotIn("radically transparent", p)
+
+
+class CharacterVoiceTests(TestCase):
+    """Lilith (an INFJ teenage girl) and Leemy (an ESTJ ring-tailed lemur from Madagascar) — Corey's characters."""
+
+    def test_both_are_built_in_on_every_surface_and_every_tier(self):
+        from apps.economy import voicez
+        for key in ("lilith", "leemy"):
+            for s in voicez.SURFACES.values():
+                self.assertIn(key, s["presets"])
+            self.assertIn(key, [p["key"] for p in voicez.PRESETS])
+        free = mk("chfree", "free")
+        r = cl(free).patch(BASE, {"surface_voices": {"writer": "preset:lilith", "coach": "preset:leemy"}}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(voicez.resolve(free, "writer").voice.name, "Lilith")
+
+    def test_the_prompt_carries_the_character_and_its_personality_as_words_not_a_code(self):
+        from apps.economy import voice as V, voicez
+        u = mk("chprompt", "free")
+        cl(u).patch(BASE, {"surface_voices": {"occ": "preset:lilith", "coach": "preset:leemy"}}, format="json")
+        lil = V.voice_prompt(u, surface="occ")
+        self.assertIn("LILITH, ONE OF THE APP'S CHARACTERS", lil)
+        self.assertIn("teenage girl", lil)
+        self.assertIn("never flirtatious", lil)
+        self.assertNotIn("INFJ", lil)
+        self.assertTrue(lil.rstrip().endswith(V.PARADIGM.rstrip()), "the four rules stay last")
+        lee = V.prose_voice(u, surface="coach")
+        self.assertIn("Leemy", lee); self.assertIn("Madagascar", lee); self.assertNotIn("ESTJ", lee)
+
+    def test_the_writer_writes_creative_kinds_in_the_character_and_says_so(self):
+        from apps.economy import sentencez, voicez
+        u = mk("chwriter", "free")
+        cl(u).patch(BASE, {"surface_voices": {"writer": "preset:leemy"}}, format="json")
+        res = voicez.resolve(u, "writer")
+        self.assertEqual(sentencez.voice_note("lyrics", writer=res), "Written in Leemy's voice.")
+        self.assertIn("Leemy's voice isn't used here", sentencez.voice_note("resume", writer=res))
+        prompt = sentencez.prompt_for("lyrics", "a song about rain", "", 0, 0, voice=res) if "voice" in sentencez.prompt_for.__code__.co_varnames else ""
+        if prompt:
+            self.assertIn("Leemy", prompt)
