@@ -59,3 +59,10 @@ class CoreysNumbersReachedTests(TestCase):
         rows = {r["key"]: r for r in ladders()}
         for key in ("lilith_routines", "sonday_boards"):
             self.assertTrue(rows[key]["coreys_numbers"], (key, rows[key]["values"]))
+
+
+class EqBandsRowTests(TestCase):
+    def test_eq_bands_are_on_the_ladder_at_coreys_numbers(self):
+        from apps.economy.ladders import ladders
+        row = next(r for r in ladders() if r["key"] == "eq_bands")
+        self.assertTrue(row["coreys_numbers"], row["values"])

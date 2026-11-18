@@ -3390,3 +3390,10 @@ which column is the caller's.
 `routines_full` is the one comparison). Premium routines dropped from 12 and Sonday Free rose from 1. A
 ceiling only refuses a NEW routine or board: anybody already over keeps every one, running and editable.
 Sonday's quota serves `next_tier` / `next_per_tier` so the screen states the next plan's number.
+
+## EQ bands are the tier numbers (Corey, Nov 2026)
+
+`TIER_LIMITS["eq_bands"]` is Free 3, Premium 6, StatZ unlimited, for TrackZ's channel strip and every DAW's EQ effect
+(the frontend's `src/eqbands.js` is the one band model; 32 is the engine's bound). The low cut is a filter, not a band.
+Applied on the device, like tracks per session; an EQ over the count keeps playing every band. `tonez.clean_chain` keeps
+an EQ insert's `bands` (known type, finite f / gain / q, at most `MAX_BANDS`), so a saved tone keeps every band it had.

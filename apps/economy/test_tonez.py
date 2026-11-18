@@ -140,3 +140,17 @@ class PresetKindTests(TestCase):
 
     def test_an_unknown_kind_is_refused(self):
         self.assertEqual(self.save("hacks", "x").status_code, 400)
+
+
+class EqBandTests(TestCase):
+    def test_eq_bands_are_coreys_numbers(self):
+        self.assertEqual([limits_for(t)["eq_bands"] for t in ("free", "premium", "statz")], [3, 6, None])
+
+    def test_a_preset_keeps_its_eq_bands_cleaned(self):
+        chain = clean_chain([{"type": "eq", "params": {}, "bands": [
+            {"type": "peaking", "f": 1000, "gain": -3, "q": 1}, {"type": "evil", "f": 1}, {"type": "lowshelf", "gain": 2},
+            {"type": "highshelf", "f": "nan", "gain": 1}] + [{"type": "peaking", "f": 500}] * 40}])
+        bands = chain[0]["bands"]
+        self.assertEqual(bands[0], {"type": "peaking", "f": 1000.0, "gain": -3.0, "q": 1.0})
+        self.assertEqual(len(bands), 32)              # the engine's bound; unknown types and bands with no frequency dropped
+        self.assertNotIn("bands", clean_chain([{"type": "comp", "bands": [{"type": "peaking", "f": 1}]}])[0])

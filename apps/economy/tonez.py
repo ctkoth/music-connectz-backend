@@ -38,6 +38,32 @@ PARAMS = {
     "gain": ("db",),
 }
 MAX_INSERTS = 8
+# An EQ's bands ride beside its params: how many is the tier's (`eq_bands`, said on the screen, applied there),
+# the engine's own bound is MAX_BANDS, and each band is a known type with finite numbers. A preset keeps every
+# band it was saved with, like a member over a ceiling keeps what they have.
+BAND_TYPES = ("lowshelf", "peaking", "highshelf")
+BAND_KEYS = ("f", "gain", "q")
+MAX_BANDS = 32
+
+
+def clean_bands(raw):
+    out = []
+    for b in raw if isinstance(raw, list) else []:
+        if not isinstance(b, dict) or b.get("type") not in BAND_TYPES:
+            continue
+        band = {"type": b["type"]}
+        for k in BAND_KEYS:
+            try:
+                v = float(b.get(k))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(v):
+                band[k] = v
+        if "f" in band:
+            out.append(band)
+        if len(out) >= MAX_BANDS:
+            break
+    return out
 NAME_MAX = 60
 NOTE_MAX = 200
 WHO = "Your presets are yours: they follow you to every DAW and every device. Nobody else sees them."
@@ -58,7 +84,10 @@ def clean_chain(raw):
                 continue
             if math.isfinite(v):
                 params[k] = v
-        out.append({"type": ins["type"], "on": ins.get("on") is not False, "params": params})
+        row = {"type": ins["type"], "on": ins.get("on") is not False, "params": params}
+        if ins["type"] == "eq" and isinstance(ins.get("bands"), list):
+            row["bands"] = clean_bands(ins["bands"])
+        out.append(row)
         if len(out) >= MAX_INSERTS:
             break
     return out

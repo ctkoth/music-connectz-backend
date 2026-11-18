@@ -76,6 +76,7 @@ def _rows():
         ("Make", "daw_tracks", "Tracks in a DAW session", "arsenal", "", _lim("imagez_layers"), "", "tier_limits:imagez_layers"),
         ("Make", "daw_vst", "VST effects on a track (Windows app)", "arsenal", "", _lim("imagez_layers"), "", "tier_limits:imagez_layers"),
         ("Make", "mix_tracks", "Tracks in a Mix ConnectZ mix", "mixconnectz", "mixz-tracks", _lim("imagez_layers"), "", "tier_limits:imagez_layers"),
+        ("Make", "eq_bands", "EQ bands (TrackZ and every DAW's EQ)", "mixconnectz", "mixz-tracks", _lim("eq_bands"), "", "tier_limits:eq_bands"),
         ("Make", "tone_presets", "Presets of each kind (track tone, track FX, mastering)", "mixconnectz", "mixz-presets", _lim("tone_presets"), "", "tier_limits:tone_presets"),
         ("Make", "wav_bits", "Mastered export", "mixconnectz", "mixz-settings", wav, "", "MASTERING.wav_bits"),
         ("Make", "intensities", "Mastering intensities", "mixconnectz", "mixz-settings", heaviest, "", "MASTERING.intensities"),
