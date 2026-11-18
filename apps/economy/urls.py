@@ -97,6 +97,7 @@ from .imagez_cutout import ImageZCutoutView
 from .sharez import ShareZDetailView, ShareZView
 from .tonez import ToneZDetailView, ToneZView
 from .lilith_auto import LilithAutoView
+from .ladders import LaddersView
 from .animez import AnimeConnectZView, AnimePlanView, AnimeRenderView, AnimeWorkView
 from .videostitch import VideoStitchDetailView, VideoStitchView
 from .instrumentalz import InstrumentalAIPresetView, InstrumentalApplyPresetView, InstrumentalInspirationView, InstrumentalMidiView, InstrumentalMixPresetsView, InstrumentalMixSheetView, InstrumentalMixView, InstrumentalMoodView, InstrumentalView
@@ -273,6 +274,7 @@ urlpatterns = [
     path("videoz/<int:pk>/", VideoDetailView.as_view(), name="economy-videoz-detail"),
     path("videoz/develop/", VideoDevelopView.as_view(), name="economy-videoz-develop"),
     path("imagez/cutout/", ImageZCutoutView.as_view(), name="economy-imagez-cutout"),
+    path("ladders/", LaddersView.as_view(), name="economy-ladders"),
     path("tonez/", ToneZView.as_view(), name="economy-tonez"),
     path("tonez/<int:pk>/", ToneZDetailView.as_view(), name="economy-tonez-detail"),
     path("sharez/", ShareZView.as_view(), name="economy-sharez"),

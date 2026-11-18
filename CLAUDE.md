@@ -3374,3 +3374,12 @@ voiced dialogue. A client can never assign a render to a shot (PATCH clears `wor
   `VIDEO_CONNECTZ_CENTS` raises the per-shot price without a code deploy.
 - Never run against Veo (CI has no key); `test_animez` pins the plan cleaning, the ladder, the up-front refusal, the
   concurrency and the join with stubs.
+
+## LadderZ: every tier gate in one list (`ladders.py`, `GET /api/economy/ladders/`)
+
+Each row READS the constant that gates the thing (`TIER_LIMITS`, `PROMPT_ALLOWANCE`, `MASTERING`, releases, Lilith,
+OCC, Sonday, `features.FEATURES`, the StatZ features), so the table MembershipZ draws and the gate cannot disagree.
+`test_ladders` fails when a `TIER_LIMITS` key, a plan feature or a StatZ feature has no row, and when a row's tab is
+not a real tab. Count rows carry `coreys_numbers` (Free 3 / Premium 6 / StatZ unlimited, true or false) so the limits
+that differ are visible in one place; moving any of them is Corey's call, not this list's. Open logged-out; `mine` says
+which column is the caller's.
