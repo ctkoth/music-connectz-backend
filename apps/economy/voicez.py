@@ -283,9 +283,49 @@ class VoiceSpec:
                    {**DIAL_DEFAULTS, **(f.get("spec") or {})}, f.get("sample", ""))
 
 
+# Corey: voices heavily based on the four letters. Each declared letter is turned into concrete WRITING behaviour —
+# what the voice notices first, how it reasons, how it decides, how it closes — so two voices with the same dials and
+# different letters read differently. Said in plain words: never the four-letter code, never a type name or a
+# nickname (somebody else's trademark), and never a claim about a real person. It shapes HOW things are said and what
+# the voice notices; it never changes a number, a score, a price or what is true.
+LETTER_STYLE = {
+    "E": "Outward and talkative: thinks out loud with the member, uses 'we' and 'let's', asks a quick question back, brings energy to the opening line.",
+    "I": "Inward and reflective: says less and means it, pauses on one point instead of five, quiet confidence, no hype, invites rather than rallies.",
+    "S": "Concrete and present: names the specific thing (the bar, the second, the lift, the word), gives real examples and exact next steps, distrusts vague talk.",
+    "N": "Big-picture and imaginative: connects this to where it is going, uses a vivid image or metaphor, notices patterns and possibilities before details.",
+    "T": "Logical and frank: leads with cause and effect, says what works and what does not without padding, judges the work by whether it does its job.",
+    "F": "Values-led and warm: notices how the member feels about it and why it matters to them, encourages honestly, frames fixes around what they care about.",
+    "J": "Structured and decisive: gives a clear plan in order, makes a call instead of listing options, closes with a definite next step and when.",
+    "P": "Open and adaptable: offers a couple of ways in, stays curious, keeps the plan loose enough to follow what is working, closes with an invitation to try.",
+}
+# The letter pairs that most shape a voice, stated as a way of talking (plain words, no group names).
+PAIR_STYLE = {
+    ("N", "F"): "Together: an idealist who talks about meaning, growth and who the member is becoming.",
+    ("N", "T"): "Together: a strategist who talks about systems, leverage and getting better on purpose.",
+    ("S", "J"): "Together: a dependable organiser who talks about routine, standards and doing it right every time.",
+    ("S", "P"): "Together: a hands-on doer who talks about what to try right now and what it feels like in the moment.",
+}
+
+
+def personality_lines(code):
+    """The declared letters as writing behaviour, one line each, plus the pair line. [] when nothing is declared."""
+    picked = personalityz.as_dict(code)
+    letters = [picked.get(a["key"]) for a in personalityz.AXES if picked.get(a["key"])]
+    if not letters:
+        return []
+    out = ["PERSONALITY the voice's author declared — let it drive what the voice notices first, how it reasons and "
+           "decides, and how it ends a reply (a leaning, not a score; it never changes what is true):"]
+    out += ["- " + LETTER_STYLE[x] for x in letters if x in LETTER_STYLE]
+    sn = picked.get("ns") or next((x for x in letters if x in ("S", "N")), None)
+    for (a, b), line in PAIR_STYLE.items():
+        if sn == a and b in letters:
+            out.append("- " + line)
+    return out
+
+
 def personality_line(code):
     """Declared axes as plain words from personalityz's own labels. Never the
-    four-letter code and never a type name."""
+    four-letter code and never a type name. Kept for screens that summarise a voice in one line."""
     picked = personalityz.as_dict(code)
     bits = []
     for a in personalityz.AXES:
@@ -302,9 +342,7 @@ def tone_lines(v, emoji_text):
     lines = [_PROMPT[k][s.get(k, DIAL_DEFAULTS[k])] for k in DIAL_KEYS if _PROMPT[k][s.get(k, DIAL_DEFAULTS[k])]]
     lines.append(emoji_text[s.get("emoji", "light")])
     lines.append("CONTRACTIONS: " + ("use them." if s.get("contractions", True) else "never; spell them out."))
-    p = personality_line(v.personality)
-    if p:
-        lines.append(p)
+    lines += personality_lines(v.personality)
     if s.get("signature_phrases"):
         lines.append("SIGNATURE PHRASES (listed in the block): use at most one per reply, only where it "
                      "fits, never forced, never where it would change a number or a name.")
@@ -527,6 +565,8 @@ def state_for(user):
                    "unlimited": CUSTOM_VOICE_LIMITS.get(tier, 0) is None, "can_use_custom": ok},
         "caps": CAPS,
         "dials": dials_payload(),
+        # What each declared letter makes a voice do, so the form says it before the voice is saved.
+        "letter_styles": LETTER_STYLE,
         "custom_paused": bool(owned) and not ok,
         "preview_cost_cents": cost,
         "free_today": left > 0 and daily_prompt_covers(cost),

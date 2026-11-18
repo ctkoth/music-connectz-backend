@@ -319,3 +319,27 @@ class CharacterVoiceTests(TestCase):
         prompt = sentencez.prompt_for("lyrics", "a song about rain", "", 0, 0, voice=res) if "voice" in sentencez.prompt_for.__code__.co_varnames else ""
         if prompt:
             self.assertIn("Leemy", prompt)
+
+
+class LettersDriveTheVoiceTests(TestCase):
+    """Corey: voices heavily based on the four letters — as behaviour, in plain words, never the code."""
+
+    def test_each_letter_becomes_writing_behaviour_and_the_pair_line(self):
+        from apps.economy import voicez
+        lil = "\n".join(voicez.personality_lines("INFJ"))
+        for phrase in ("Inward and reflective", "Big-picture", "Values-led", "Structured and decisive", "idealist"):
+            self.assertIn(phrase, lil)
+        lee = "\n".join(voicez.personality_lines("ESTJ"))
+        for phrase in ("Outward and talkative", "Concrete and present", "Logical and frank", "dependable organiser"):
+            self.assertIn(phrase, lee)
+        self.assertNotIn("INFJ", lil); self.assertNotIn("ESTJ", lee)
+        self.assertEqual(voicez.personality_lines(""), [])
+        half = "\n".join(voicez.personality_lines("I---"))
+        self.assertIn("Inward", half); self.assertNotIn("Together", half)
+
+    def test_two_voices_differing_only_in_letters_get_different_prompts(self):
+        from apps.economy import voicez
+        a = voicez.VoiceSpec.from_fields({"name": "A", "personality": "INFP"})
+        b = voicez.VoiceSpec.from_fields({"name": "A", "personality": "ESTJ"})
+        emoji = {"none": "", "light": "", "heavy": ""}
+        self.assertNotEqual(voicez.tone_lines(a, emoji), voicez.tone_lines(b, emoji))

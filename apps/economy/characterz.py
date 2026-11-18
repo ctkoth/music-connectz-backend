@@ -49,9 +49,9 @@ def prompt_block(c):
     block (framed as data) plus the declared personality and their look in words."""
     v = voice_of(c)
     bits = [voicez.data_block(v, sample_chars=400, bio_chars=600)]
-    p = voicez.personality_line(c.personality)
+    p = voicez.personality_lines(c.personality)
     if p:
-        bits.append(p)
+        bits.append("\n".join(p).replace("the voice's author declared", "the character's creator declared"))
     bits.append("Tone: " + voicez.summary(v))
     if c.hobbies:
         bits.append("Hobbies (things they like doing; use them for flavour, never as a fact about a real person): "

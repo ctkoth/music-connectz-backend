@@ -3430,3 +3430,12 @@ personality, phrases) and resolved with `voice=character(key)`, so it goes throu
 (no slurs, no sexual content, never a real person) and PARADIGM-last as a custom voice (`Resolved.has_voice`). The
 personality reaches the prompt as plain axis words, never "INFJ"/"ESTJ". They are presets on all three surfaces and,
 like every built-in voice, every tier's — writing your OWN voice is what Premium and StatZ buy.
+
+### Voices are heavily based on the four letters (Corey)
+
+`voicez.LETTER_STYLE` turns each declared letter into concrete writing behaviour (E talks it through with "we", I says
+less and means it, S names the specific thing, N reaches for the bigger picture, T leads with cause and effect, F with
+why it matters to the member, J decides and plans, P offers ways in), and `PAIR_STYLE` adds the line for NF, NT, SJ and
+SP. `personality_lines` puts all of it in every voice's prompt — Lilith, Leemy, every member's own voice and every
+CharacterZ character — in plain words, never the code or a type name. VoiceZ serves `letter_styles` so the form shows what
+the letters will do before the voice is saved. Behaviour only: it never changes a number, a score, a price or a fact.
