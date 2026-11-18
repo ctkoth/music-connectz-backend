@@ -3355,3 +3355,22 @@ existing profile and activity gaps. Every one is a VERIFIED task (new actions `i
 not mint), and carries its reason in its note. A task the member trashed, or did in the last `REST_DAYS`, is never
 re-added; the open-task ceiling still holds; `LilithAuto.on` switches it off (on by default). Below StatZ the
 suggestions are the same and the member adds them.
+
+## Anime ConnectZ: a plan, then shots that are Video ConnectZ clips (`animez.py`)
+
+`AnimeWork` (migration 0242) holds an editable shot plan from the member's CharacterZ cast; rendering turns each shot
+into an ordinary `VideoWork` through `videoz.start_render` (new kind `anime`), so every shot is priced, held, refused
+and refunded by the clip code. The plan is billed like a MangaZ script (only for a usable plan). Render refuses UP
+FRONT when the wallet cannot cover shots × the clip price, starts `CONCURRENT` (4) shots and the rest as earlier ones
+finish (on each GET), then joins what landed with ffmpeg stream copy (re-encode only if refused), keeping the model's
+voiced dialogue. A client can never assign a render to a shot (PATCH clears `work_id`/`failed`).
+
+- **Formats** use DirectZ's names with honest lengths: PromptZ 1 shot, ReelZ 2-8, EpisodeZ 6-24 (a chapter), MovieZ
+  24-60 (a scene). Full-length works are pieces joined in the frontend's AnimeZ.
+- **`anime_shots`** on `TIER_LIMITS` is Free 3, Premium 6, StatZ unlimited (to the format's ceiling); a format whose
+  minimum is above the tier's number is served `allowed: false` with the sentence why.
+- **Cost exposure, said plainly:** every shot is one Veo render at `price_cents()` (1 PromptZ by Corey's call, BELOW
+  what the provider charges — see `videoz.DEFAULT_PRICE`). A 60-shot MovieZ scene is 60 subsidised renders.
+  `VIDEO_CONNECTZ_CENTS` raises the per-shot price without a code deploy.
+- Never run against Veo (CI has no key); `test_animez` pins the plan cleaning, the ladder, the up-front refusal, the
+  concurrency and the join with stubs.
