@@ -217,31 +217,42 @@ class QuotaAndQueueTests(ReleaseBase):
     def ready_release(self):
         return self.distribute(self.make_post()).data
 
-    def test_free_sends_one_a_month_and_is_told_before_and_after(self):
+    def test_free_sends_three_a_month_and_is_told_before_and_after(self):
         m = membership_for(self.user); m.tier = "free"; m.save(update_fields=["tier", "updated_at"])
         q = self.client.get(RELEASES).data["quota"]
-        self.assertEqual((q["per_month"], q["left"]), (1, 1))
-        first, second = self.ready_release(), self.ready_release()
-        self.assertEqual(self.client.post(f"{RELEASES}{first['id']}/submit/", {}, format="json").status_code, 200)
+        self.assertEqual((q["per_month"], q["left"], q["next_per_month"]), (3, 3, 6))
+        for _ in range(3):
+            rel = self.ready_release()
+            self.assertEqual(self.client.post(f"{RELEASES}{rel['id']}/submit/", {}, format="json").status_code, 200)
+        second = self.ready_release()
         r = self.client.post(f"{RELEASES}{second['id']}/submit/", {}, format="json")
         self.assertEqual(r.status_code, 403)
         self.assertEqual(r.data["quota"]["left"], 0)
         self.assertEqual(Release.objects.get(pk=second["id"]).status, Release.STATUS_READY)
 
-    def test_the_ladder_is_1_5_10_and_the_owner_is_uncapped(self):
-        for tier, cap in (("free", 1), ("premium", 5), ("statz", 10)):
+    def test_the_ladder_is_3_6_unlimited_and_the_owner_is_uncapped(self):
+        for tier, cap in (("free", 3), ("premium", 6), ("statz", None)):
             m = membership_for(self.user); m.tier = tier; m.save(update_fields=["tier", "updated_at"])
             self.assertEqual(self.client.get(RELEASES).data["quota"]["per_month"], cap, tier)
         m = membership_for(self.user); m.tier = "debug"; m.save(update_fields=["tier", "updated_at"])
         self.assertIsNone(self.client.get(RELEASES).data["quota"]["per_month"])
 
-    def test_premium_stops_at_five(self):
+    def test_premium_stops_at_six_and_points_at_statz(self):
         m = membership_for(self.user); m.tier = "premium"; m.save(update_fields=["tier", "updated_at"])
-        for _ in range(5):
+        self.assertTrue(self.client.get(RELEASES).data["quota"]["next_unlimited"])
+        for _ in range(6):
             rel = self.ready_release()
             self.assertEqual(self.client.post(f"{RELEASES}{rel['id']}/submit/", {}, format="json").status_code, 200)
         rel = self.ready_release()
-        self.assertEqual(self.client.post(f"{RELEASES}{rel['id']}/submit/", {}, format="json").status_code, 403)
+        r = self.client.post(f"{RELEASES}{rel['id']}/submit/", {}, format="json")
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("StatZ sends as many as you like", r.data["detail"])
+
+    def test_statz_is_unlimited(self):
+        m = membership_for(self.user); m.tier = "statz"; m.save(update_fields=["tier", "updated_at"])
+        for _ in range(12):
+            rel = self.ready_release()
+            self.assertEqual(self.client.post(f"{RELEASES}{rel['id']}/submit/", {}, format="json").status_code, 200)
 
     def test_the_list_says_what_submitting_actually_does(self):
         self.assertIn("RoyaltieZ", self.client.get(RELEASES).data["how_it_works"])

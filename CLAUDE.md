@@ -3327,3 +3327,19 @@ landing page. The per-step rows and `pct_of_base` are unchanged.
 - **`shell`** is ambient (web, inapp, android, android-old, desktop, desktop-old; junk dropped) and `shells` splits by it.
 - The client sends nothing for a self-declared bot, so counts from before that change include crawler renders and
   counts after do not. A window spanning the change mixes the two.
+
+## The DAWs are free; their features ladder (Corey's rule)
+
+Every DAW opens at every tier. What a tier buys is HOW MUCH of a feature, never whether the DAW
+exists. The numbers are the platform's own (`imagez_layers` on `/limits/`: Free 3, Premium 6,
+StatZ unlimited): tracks per session, VST effects per track, stems sent to Mix ConnectZ, and
+`tone_presets` (`tonez.py`: a member's saved effect chains). **Automation is StatZ's**:
+`statz_trial` feature `daw_automation`, sampled, client-side like the ImageZ erasers. A lane drawn
+during a sample stays in the session and keeps playing and bouncing; only drawing and writing lock.
+
+## Releases a month are the same numbers (Corey, Nov 2026)
+
+`releasez.PER_MONTH` is Free 3, Premium 6, StatZ unlimited tracks a calendar month (a release is one
+track), replacing 1 / 5 / 10. `quota_for` adds `next_unlimited` so Premium is told StatZ has no cap
+(None in `next_per_month` alone could not say that). LabelGrid is the planned distributor API; until
+then a submission still goes to the owner's queue, as `HOW_IT_WORKS` says.

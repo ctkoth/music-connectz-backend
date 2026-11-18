@@ -77,6 +77,11 @@ FEATURES = [
     # client-side like the erasers, and a picture edited during the sample is the member's.
     {"key": "imagez_cutout", "label": "Remove background with AI in ImageZ", "tab": "imagez", "target": "imagez-cutout"},
     {"key": "imagez_actions", "label": "Record and replay edits (Actions) in ImageZ", "tab": "imagez", "target": "imagez-actions"},
+    # DAW automation — drawing volume / pan lanes and writing fader rides (Corey's call: StatZ). The
+    # DAWs themselves are free to open; their features ladder. Client-side like the erasers (it runs on
+    # the member's device), and a lane drawn during a sample stays in the session and keeps playing and
+    # bouncing — only drawing and writing lock again.
+    {"key": "daw_automation", "label": "Automation in every DAW: draw volume and pan, write fader rides", "tab": "arsenal", "target": "daw-automation"},
 ]
 
 # THE AUDIT: every place StatZ is the difference, and whether the daily sample covers it.
@@ -104,6 +109,7 @@ DRIVERS = [
     {"key": "imagez_erasers", "sampled": True, "modules": []},
     {"key": "imagez_cutout", "sampled": True, "modules": ["imagez_cutout"]},
     {"key": "imagez_actions", "sampled": True, "modules": []},
+    {"key": "daw_automation", "sampled": True, "modules": []},
     {"key": "instrumental_mix", "sampled": False, "modules": ["instrumentalz"],
      "why_not": "A kept set of levels is a saved preference on a stored piece — a sample that left one behind would be a permanent grant wearing a timer."},
     {"key": "mix_presets", "sampled": False, "modules": [],

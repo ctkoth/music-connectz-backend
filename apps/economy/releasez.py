@@ -39,13 +39,12 @@ from .postz import media_slots
 HOW_IT_WORKS = ("Submitting sends the release to the Music ConnectZ team, who put it out to "
                 "the stores and credit what it earns to your RoyaltieZ, tagged with this release.")
 
-# Free sends one release a calendar month; Premium and StatZ, as many as they
-# like. The ladder rule: a tier says how OFTEN, never whether — a Free member
-# can always release.
+# How many tracks a member may send out a calendar month. A release is one track (one master).
+# The ladder rule: a tier says how OFTEN, never whether — a Free member can always release.
 #
-# Corey's ladder: Free 1, Premium 5, StatZ 10 releases a calendar month. The owner's
-# own tier (debug) is uncapped.
-PER_MONTH = {TIER_FREE: 1, "premium": 5, "statz": 10}
+# Corey's ladder (Nov 2026, replacing 1 / 5 / 10): the platform's own numbers — Free 3, Premium 6,
+# StatZ unlimited (None) tracks a calendar month. The owner's own tier (debug) is uncapped.
+PER_MONTH = {TIER_FREE: 3, "premium": 6, "statz": None}
 FREE_PER_MONTH = PER_MONTH[TIER_FREE]
 
 
@@ -61,9 +60,12 @@ def quota_for(user):
     used = Release.objects.filter(user=user, status=Release.STATUS_SUBMITTED,
                                   submitted_at__year=now.year, submitted_at__month=now.month).count()
     order = list(PER_MONTH)
-    nxt = PER_MONTH[order[order.index(tier) + 1]] if order.index(tier) + 1 < len(order) else None
+    has_next = order.index(tier) + 1 < len(order)
+    nxt = PER_MONTH[order[order.index(tier) + 1]] if has_next else None
+    # `next_unlimited`: the next plan has no monthly cap at all (Premium -> StatZ), which a
+    # None in `next_per_month` alone cannot tell apart from "there is no next plan".
     return {"tier": tier, "per_month": cap, "used": used, "left": max(0, cap - used),
-            "next_per_month": nxt}
+            "next_per_month": nxt, "next_unlimited": has_next and nxt is None}
 
 
 def release_dict(r):
@@ -286,7 +288,8 @@ class ReleaseSubmitView(APIView):
             return Response(
                 {"detail": f"Your plan sends {q['per_month']} release{'s' if q['per_month'] != 1 else ''} a month "
                            "and this month's are used. It stays ready here — send it next month"
-                           + (f", or the next plan sends {q['next_per_month']} a month." if q["next_per_month"] else "."),
+                           + (f", or the next plan sends {q['next_per_month']} a month." if q["next_per_month"]
+                              else ", or StatZ sends as many as you like." if q.get("next_unlimited") else "."),
                  "quota": q, "upgrade": {"tab": "membershipz", "target": "membershipz-plans"}},
                 status=status.HTTP_403_FORBIDDEN,
             )
