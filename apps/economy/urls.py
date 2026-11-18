@@ -97,6 +97,7 @@ from .imagez_cutout import ImageZCutoutView
 from .sharez import ShareZDetailView, ShareZView
 from .tonez import ToneZDetailView, ToneZView
 from .lilith_auto import LilithAutoView
+from .animez import AnimeConnectZView, AnimePlanView, AnimeRenderView, AnimeWorkView
 from .videostitch import VideoStitchDetailView, VideoStitchView
 from .instrumentalz import InstrumentalAIPresetView, InstrumentalApplyPresetView, InstrumentalInspirationView, InstrumentalMidiView, InstrumentalMixPresetsView, InstrumentalMixSheetView, InstrumentalMixView, InstrumentalMoodView, InstrumentalView
 from .intelligencez import IntelligenceHubView
@@ -518,6 +519,10 @@ urlpatterns = [
     path("writecoach/", WriteCoachView.as_view(), name="economy-writecoach"),
     path("characterz/", CharactersView.as_view(), name="economy-characterz"),
     path("characterz/<int:pk>/", CharacterDetailView.as_view(), name="economy-character"),
+    path("animez/", AnimeConnectZView.as_view(), name="economy-animez"),
+    path("animez/plan/", AnimePlanView.as_view(), name="economy-animez-plan"),
+    path("animez/<int:pk>/", AnimeWorkView.as_view(), name="economy-animez-work"),
+    path("animez/<int:pk>/render/", AnimeRenderView.as_view(), name="economy-animez-render"),
     path("mangaz/", MangaPagesView.as_view(), name="economy-mangaz"),
     path("mangaz/<int:pk>/", MangaPageView.as_view(), name="economy-manga-page"),
     path("mangaz/<int:pk>/panel/<int:n>/draw/", MangaPanelDrawView.as_view(), name="economy-manga-draw"),

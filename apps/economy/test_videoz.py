@@ -45,7 +45,7 @@ class VideoTests(TestCase):
         d = self.c.get(URL).json()
         self.assertEqual(d["price_cents"], 400)
         self.assertTrue(d["can_afford"])
-        self.assertEqual(len(d["kinds"]), 3)
+        self.assertEqual(len(d["kinds"]), 4)          # music, bio, promo — and anime (Anime ConnectZ shares the renderer)
 
     def test_starting_holds_promptz_first_then_cash(self, _):
         r, _post = self.start()

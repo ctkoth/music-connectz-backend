@@ -83,6 +83,9 @@ KINDS = {
             "ask": "A personal artist bio piece: intimate, documentary feel, the artist in their world."},
     "promo": {"label": "Promo video", "emoji": "📣",
               "ask": "A short promotional clip for a release or show: bold, punchy, made to stop a scroll."},
+    "anime": {"label": "Anime", "emoji": "🌸",
+              "ask": "Japanese anime, 2D hand-drawn cel animation: clean line art, flat cel shading, expressive eyes, "
+                     "painted backgrounds, anime camera work. Never photoreal, never 3D."},
 }
 
 

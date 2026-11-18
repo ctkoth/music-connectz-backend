@@ -8708,3 +8708,30 @@ class LilithAuto(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="lilith_auto")
     on = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class AnimeWork(models.Model):
+    """An Anime ConnectZ piece: the member's idea and characters planned into shots (editable before
+    anything renders), then each shot rendered as an ordinary `VideoWork` (priced, held and refunded
+    exactly as a Video ConnectZ clip) and joined in order with the dialogue the model voiced.
+    `shots` is [{n, camera, setting, action, characters, dialogue: [{who, line}], work_id, failed}]."""
+
+    STATUS_PLANNED, STATUS_RENDERING, STATUS_DONE, STATUS_FAILED = "planned", "rendering", "done", "failed"
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="anime_works")
+    title = models.CharField(max_length=120, blank=True, default="")
+    fmt = models.CharField(max_length=10, default="reelz")
+    aspect = models.CharField(max_length=8, default="16:9")
+    style = models.CharField(max_length=40, blank=True, default="")
+    idea = models.TextField(blank=True, default="")
+    character_ids = models.JSONField(default=list, blank=True)
+    shots = models.JSONField(default=list, blank=True)
+    status = models.CharField(max_length=10, default=STATUS_PLANNED)
+    upload = models.ForeignKey("Upload", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    error = models.CharField(max_length=200, blank=True, default="")
+    claim = models.CharField(max_length=40, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]

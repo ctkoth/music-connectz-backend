@@ -135,24 +135,27 @@ UNLIMITED_CHARS = 10 ** 9
 # Same numbers (Corey's call: Free 3, Premium 6, StatZ unlimited). Nobody loses a preset when it
 # moves: over the ceiling, a member keeps, uses, renames and deletes every one and cannot add.
 #
+# `anime_shots` is how many 8-second shots one Anime ConnectZ render may hold (Corey's numbers: Free 3,
+# Premium 6, StatZ unlimited — up to the format's own ceiling). It says how LONG, never whether.
+#
 # `facez_faces` is how many faces a member may keep in FaceZ, by the same numbers (Corey's call).
 # Nobody loses a face when it moves: over the ceiling, a member keeps every face and cannot add.
 TIER_LIMITS = {
     TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500, "embeds_per_post": 3,
                 "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 10, "profile_links": 25,
-                "imagez_layers": 3, "imagez_fonts": 3, "facez_faces": 3, "tone_presets": 3},
+                "imagez_layers": 3, "imagez_fonts": 3, "facez_faces": 3, "tone_presets": 3, "anime_shots": 3},
     TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 15,
                    "widgets_open": 12, "custom_groups": 5, "soundcloud_import": 25, "profile_links": 100,
-                   "imagez_layers": 6, "imagez_fonts": 6, "facez_faces": 6, "tone_presets": 6},
+                   "imagez_layers": 6, "imagez_fonts": 6, "facez_faces": 6, "tone_presets": 6, "anime_shots": 6},
     # StatZ writes without a character cap (Corey's call). It was 5,000 for a
     # day; nothing was lost either way, since the cap is applied on write.
     TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999,
                  "widgets_open": 40, "custom_groups": 20, "soundcloud_import": None, "profile_links": 300,
-                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None},
+                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None, "anime_shots": None},
     # Owner god-mode: effectively unlimited.
     TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760, "embeds_per_post": 999,
                  "widgets_open": 999, "custom_groups": 999, "soundcloud_import": None, "profile_links": 999,
-                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None},
+                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None, "anime_shots": None},
 }
 
 

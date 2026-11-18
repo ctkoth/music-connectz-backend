@@ -84,6 +84,12 @@ CREDIT_OUTCOMES = {
         "outcomes": ["tangible", "shareable", "braggable"],
         "lands_in": ["postz", "filez", "merchz"],
         "free_way": {"label": "A daily free prompt covers a script; making characters is free.", "tab": "characterz"}},
+    "animez": {
+        "resource": "promptz", "label": "Anime ConnectZ",
+        "buys": "A shot-by-shot anime plan from your characters and idea, editable before anything renders; each shot then renders at the Video ConnectZ clip price and is joined into one video.",
+        "outcomes": ["tangible", "shareable", "braggable"],
+        "lands_in": ["animez", "videoz", "postz", "filez", "directz"],
+        "free_way": {"label": "AnimeZ makes a motion comic from your MangaZ pages on your device, free.", "tab": "animez"}},
     "writecoach": {
         "resource": "promptz", "label": "Writing coach",
         "buys": "Your written lyrics scored on five dimensions, each with the reason and the fix, kept so you see them move.",
