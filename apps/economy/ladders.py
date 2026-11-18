@@ -115,6 +115,9 @@ def _access_rows():
         out.append({"group": "Plans open", "key": f"feature:{key}", "label": f"{f.get('emoji', '')} {f['label']}".strip(),
                     "kind": "access", "tab": "", "target": "", "source": f"features.{key}", "note": f.get("blurb", ""),
                     "values": {t: ("✓" if TIER_ORDER.index(t) >= need else "—") for t in TIERS}})
+    out.append({"group": "Plans open", "key": "specz", "label": "📐 SpecZ notes on any app", "kind": "access", "tab": "specz",
+                "target": "", "source": "views.SpecZView", "note": "Priced in 🍥 on the button.",
+                "values": {t: ("✓" if t == TIER_STATZ else "—") for t in TIERS}})
     sample = "Daily sample"
     for f in statz_trial.FEATURES:
         out.append({"group": "StatZ", "key": f"statz:{f['key']}", "label": f["label"], "kind": "access",
