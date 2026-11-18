@@ -240,6 +240,36 @@ INSTRUMENT_PACKS = {
 # works on (a rapper's weekly challenge is in RapZ), defaulting to the starter's own.
 INSTRUMENT_AWARE = {"weekly_challenge", "weak_spot", "monthly_recap", "fix_weakest", "share_card"}
 
+# The makers' tasks — what a Designer, Videographer or Producer does here, each one verified from the
+# platform's own records, so Lilith ticks it herself. These are what persona-led and automatic tasks
+# draw from (`lilith_suggest.PERSONA_TASKS`).
+TASKS.extend([
+    {"key": "make_image", "title": "Make a picture in Image ConnectZ", "kind": "standard", "bucket": "today",
+     "action": "image_made", "goal": 1, "app_key": "imageconnectz", "target": "imagez-make",
+     "note": "Describe it, or start from a photo or a face. The price is on the button before you press it."},
+    {"key": "edit_picture", "title": "Finish a picture in ImageZ", "kind": "deep", "bucket": "upcoming",
+     "action": "picture_saved", "goal": 1, "app_key": "imagez", "target": "",
+     "note": "Layers, text and cut-outs, on your device and free. It counts once it's saved to FileZ."},
+    {"key": "manga_page", "title": "Make a manga page", "kind": "deep", "bucket": "upcoming",
+     "action": "manga_page", "goal": 1, "app_key": "mangaz", "target": "mangaz-new",
+     "note": "Panels, your characters' voices and faces, one page. A page is the start of a chapter, and an AnimeZ later."},
+    {"key": "make_face", "title": "Add a face for your cast", "kind": "quick", "bucket": "anytime",
+     "action": "face_made", "goal": 1, "app_key": "facez", "target": "",
+     "note": "A face you keep in FaceZ can be drawn into pictures and manga panels again and again."},
+    {"key": "cut_video", "title": "Cut a video in VideoZ", "kind": "deep", "bucket": "upcoming",
+     "action": "video_saved", "goal": 1, "app_key": "videoz", "target": "videoz-add",
+     "note": "Tracks, titles and crossfades on your device, free. It counts once the cut is saved to FileZ."},
+    {"key": "make_video", "title": "Make a video with Video ConnectZ", "kind": "standard", "bucket": "upcoming",
+     "action": "video_made", "goal": 1, "app_key": "videoconnectz", "target": "",
+     "note": "From a prompt, a picture or your own track. The price is on the button, and a failed render is not charged."},
+    {"key": "make_instrumental", "title": "Make an instrumental", "kind": "standard", "bucket": "upcoming",
+     "action": "instrumental_made", "goal": 1, "app_key": "instrumentalconnectz", "target": "",
+     "note": "A beat to write to, or one to sell. It's yours to post, battle on or send to a DAW."},
+    {"key": "master_mix", "title": "Master a mix", "kind": "standard", "bucket": "upcoming",
+     "action": "mix_made", "goal": 1, "app_key": "mixconnectz", "target": "mixz-start",
+     "note": "Free and on your device. Every move the master makes says why."},
+])
+
 TASK_KEYS = {t["key"] for t in TASKS}
 ROUTINE_KEYS = {r["key"] for r in ROUTINES}
 # Task and routine keys may overlap ("weekly_challenge"); the add endpoint names which it means.

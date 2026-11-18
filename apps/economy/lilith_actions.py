@@ -76,6 +76,17 @@ def _specs():
                               qs=lambda u: M.Playlist.objects.filter(owner=u), time="created_at"),
         "upload_made": dict(label="Upload a file", unit="upload", app_key="postz", target="post-compose",
                             qs=lambda u: M.Upload.objects.filter(user=u), time="created_at"),
+        # ---- pictures, pages and cuts (designers, videographers)
+        "image_made": dict(label="Make a picture with Image ConnectZ", unit="picture", app_key="imageconnectz", target="imagez-make",
+                           qs=lambda u: M.GeneratedImage.objects.filter(user=u), time="created_at"),
+        "picture_saved": dict(label="Save a picture to FileZ", unit="picture", app_key="imagez", target="",
+                              qs=lambda u: M.Upload.objects.filter(user=u, content_type__startswith="image/"), time="created_at"),
+        "manga_page": dict(label="Make a manga page", unit="page", app_key="mangaz", target="mangaz-new",
+                           qs=lambda u: M.MangaPage.objects.filter(user=u), time="created_at"),
+        "face_made": dict(label="Add a face in FaceZ", unit="face", app_key="facez", target="",
+                          qs=lambda u: M.Face.objects.filter(owner=u), time="created_at"),
+        "video_saved": dict(label="Save a video cut to FileZ", unit="video", app_key="videoz", target="videoz-export",
+                            qs=lambda u: M.Upload.objects.filter(user=u, content_type__startswith="video/"), time="created_at"),
         # ---- people
         "message_sent": dict(label="Send a message", unit="message", app_key="messagez", target="messagez-compose",
                              qs=lambda u: M.Message.objects.filter(sender=u), time="created_at"),

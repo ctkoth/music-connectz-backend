@@ -8698,3 +8698,13 @@ class TonePreset(models.Model):
     class Meta:
         ordering = ["-updated_at"]
         constraints = [models.UniqueConstraint(fields=["owner", "kind", "name"], name="tonepreset_owner_kind_name")]
+
+
+class LilithAuto(models.Model):
+    """Whether Lilith may add tasks to this member's board by herself (`lilith_auto`). StatZ's, like
+    every automation; on by default for a StatZ member, and the member can switch it off. One row per
+    member, made the first time they touch the switch — no row means the default."""
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="lilith_auto")
+    on = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)

@@ -96,6 +96,7 @@ from .videodevelop import VideoDevelopView
 from .imagez_cutout import ImageZCutoutView
 from .sharez import ShareZDetailView, ShareZView
 from .tonez import ToneZDetailView, ToneZView
+from .lilith_auto import LilithAutoView
 from .videostitch import VideoStitchDetailView, VideoStitchView
 from .instrumentalz import InstrumentalAIPresetView, InstrumentalApplyPresetView, InstrumentalInspirationView, InstrumentalMidiView, InstrumentalMixPresetsView, InstrumentalMixSheetView, InstrumentalMixView, InstrumentalMoodView, InstrumentalView
 from .intelligencez import IntelligenceHubView
@@ -607,6 +608,7 @@ urlpatterns = [
     path("lilith/", LilithBoardView.as_view(), name="economy-lilith"),
     path("lilith/tasks/", LilithTaskListView.as_view(), name="economy-lilith-tasks"),
     path("lilith/starters/", LilithStarterAddView.as_view(), name="economy-lilith-starters"),
+    path("lilith/auto/", LilithAutoView.as_view(), name="economy-lilith-auto"),
     path("lilith/move/", LilithMoveView.as_view(), name="economy-lilith-move"),
     path("lilith/budget/", LilithBudgetView.as_view(), name="economy-lilith-budget"),
     path("lilith/tasks/<int:task_id>/goahead/", LilithGoAheadView.as_view(), name="economy-lilith-goahead"),

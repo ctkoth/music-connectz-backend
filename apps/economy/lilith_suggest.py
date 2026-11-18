@@ -30,7 +30,7 @@ from . import lilith_starters as ST
 WINDOW_DAYS = 14
 HABIT_AT = 3           # this many in the window and it is a habit waiting to be a streak
 MAX_SUGGESTIONS = 5
-MAX_TASK_SUGGESTIONS = 4
+MAX_TASK_SUGGESTIONS = 6
 CACHE_SECONDS = 600
 
 # persona key (letters only, lower-case — `sentencez.persona_keys` form) → starter routines, in
@@ -64,7 +64,35 @@ GAPS = [
      "You post on your own. A collab puts a second pair of ears on the work."),
 ]
 
+# persona → one-off TASKS, in the order they matter (Corey: a Designer gets MangaZ, ImageZ and Image
+# ConnectZ tasks). A declaration only decides what is SUGGESTED (or, on StatZ, added — lilith_auto).
+PERSONA_TASKS = {
+    ("designer",): ["make_image", "edit_picture", "manga_page", "make_face"],
+    ("videographer", "director"): ["cut_video", "make_video", "make_image"],
+    ("producer",): ["make_instrumental", "master_mix", "post_finished"],
+    ("mixengineer",): ["master_mix", "post_finished"],
+    ("ghostwriter",): ["write_hook", "journal_one"],
+    ("indieartist", "independentartist"): ["post_finished", "weekly_challenge", "release_day"],
+    ("manager", "arscout"): ["message_member", "start_collab", "check_results"],
+    ("dancer", "actor", "actress", "mime"): ["cut_video", "post_finished"],
+    ("weightlifter",): ["log_workout"],
+}
+
+# (have, lack, task key, sentence): something they make, and the next app it opens in — the
+# cross-pollination rule as a to-do. `{n}` is how many of `have` in the window.
+TASK_GAPS = [
+    ("image_made", "manga_page", "manga_page", "You've made {n} picture{s} lately. Put them on a manga page."),
+    ("manga_page", "video_saved", "cut_video", "You've made {n} manga page{s}. Cut them into a motion comic in VideoZ."),
+    ("instrumental_made", "mix_made", "master_mix", "You've made {n} instrumental{s}. Master one so it's ready to release."),
+    ("picture_saved", "post_made", "post_finished", "You've finished {n} picture{s} and posted none. A post is how anyone finds you."),
+]
+
 DEFAULTS = ["daily_singz", "three_ears", "ship_one"]
+
+
+def _a(name):
+    """"a Designer", "an Independent Artist"."""
+    return f"{'an' if str(name)[:1].lower() in 'aeiou' else 'a'} {name}"
 
 
 def _routine_keys_with_action():
@@ -78,7 +106,8 @@ def recent_counts(user):
     if got is not None:
         return got
     since = timezone.now() - timedelta(days=WINDOW_DAYS)
-    needed = {r["action"] for r in ST.ROUTINES if r.get("action")} | {g[0] for g in GAPS} | {g[1] for g in GAPS}
+    needed = ({r["action"] for r in ST.ROUTINES if r.get("action")} | {g[0] for g in GAPS} | {g[1] for g in GAPS}
+              | {g[0] for g in TASK_GAPS} | {g[1] for g in TASK_GAPS})
     out = {a: len(A.events(user, a, since)) for a in needed}
     cache.set(key, out, CACHE_SECONDS)
     return out
@@ -161,7 +190,7 @@ def instruments_of(user):
     return out
 
 
-def suggest(user, on_board_routines=(), on_board_tasks=()):
+def suggest(user, on_board_routines=(), on_board_tasks=(), task_limit=MAX_TASK_SUGGESTIONS):
     """Up to MAX_SUGGESTIONS routines, best first, each with the reason it was picked.
 
     `on_board_*` are the template keys already on the member's board; those are dropped here, so
@@ -181,7 +210,7 @@ def suggest(user, on_board_routines=(), on_board_tasks=()):
         for plist, routines in PERSONA_ROUTINES.items():
             if keys & set(plist):
                 for i, rk in enumerate(routines):
-                    offer(rk, 6 - i * 0.5, "persona", f"You're a {name}.")
+                    offer(rk, 6 - i * 0.5, "persona", f"You're {_a(name)}.")
 
     # 1b. the instrument they work on — a rapper gets RapZ, freestyle and bars; a drummer DrumZ
     for app, how, n in instruments_of(user)[:2]:
@@ -239,6 +268,17 @@ def suggest(user, on_board_routines=(), on_board_tasks=()):
         offer_task("start_collab", 4.5, "activity", "You post on your own. A collab puts a second pair of ears on the work.")
     if not sig["ever_invited"] and sig["ever_posted"]:
         offer_task("invite_musician", 3, "activity", "You haven't invited anyone. Your handle is the code and you're both paid.")
+    # what they said they are (a Designer gets ImageZ, Image ConnectZ, MangaZ and FaceZ tasks)
+    for name, keys in _persona_names(user):
+        for plist, tkeys in PERSONA_TASKS.items():
+            if keys & set(plist):
+                for i, tk in enumerate(tkeys):
+                    offer_task(tk, 4.8 - i * 0.4, "persona", f"You're {_a(name)}.")
+    # what they made, and where it goes next
+    for have_a, lack_a, tk, sentence in TASK_GAPS:
+        n = counts.get(have_a, 0)
+        if n >= 1 and counts.get(lack_a, 0) == 0:
+            offer_task(tk, 7, "activity", sentence.format(n=n, s="" if n == 1 else "s"))
     for app, how, n in instruments_of(user)[:1]:
         if f"take_{app}" in ST.TASK_KEYS and how == "takes":
             offer_task(f"take_{app}", 5, "instrument", f"You work in {ST._label(app)} — record today's take.")
@@ -257,7 +297,7 @@ def suggest(user, on_board_routines=(), on_board_tasks=()):
                     "cadence": r["cadence"], "app_key": app_key, "target": r["target"],
                     "action": r.get("action", ""), "goal": r.get("goal", 1),
                     "why": why, "because": kind})
-    for key, (score, kind, why) in sorted(tasks.items(), key=lambda kv: -kv[1][0])[:MAX_TASK_SUGGESTIONS]:
+    for key, (score, kind, why) in sorted(tasks.items(), key=lambda kv: -kv[1][0])[:task_limit]:
         t = ST.task_by_key(key)
         app_key = main if (main and key in ST.INSTRUMENT_AWARE) else t["app_key"]
         out.append({"kind": "task", "key": key, "title": t["title"], "note": t["note"], "cadence": "",

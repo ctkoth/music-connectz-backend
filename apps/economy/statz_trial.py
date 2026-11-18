@@ -85,6 +85,9 @@ FEATURES = [
     # Auto-accepting challenges is an automation (Corey: every automation is StatZ's). Read when a
     # challenge arrives, so it stops the moment StatZ or the sample does; the setting itself is kept.
     {"key": "challenge_auto_accept", "label": "Auto-accept challenges that clear your filters", "tab": "battlez", "target": "challengez-filters"},
+    # Lilith adding tasks to the board by herself, from personas and activity — an automation, so
+    # StatZ's. A task she added during a sample stays on the board; she just stops adding more.
+    {"key": "lilith_auto", "label": "Lilith adds tasks for you from your personas and what you make", "tab": "lilith", "target": "lilith-auto"},
 ]
 
 # THE AUDIT: every place StatZ is the difference, and whether the daily sample covers it.
@@ -114,6 +117,7 @@ DRIVERS = [
     {"key": "imagez_actions", "sampled": True, "modules": []},
     {"key": "daw_automation", "sampled": True, "modules": []},
     {"key": "challenge_auto_accept", "sampled": True, "modules": ["callouts"]},
+    {"key": "lilith_auto", "sampled": True, "modules": ["lilith_auto"]},
     {"key": "instrumental_mix", "sampled": False, "modules": ["instrumentalz"],
      "why_not": "A kept set of levels is a saved preference on a stored piece — a sample that left one behind would be a permanent grant wearing a timer."},
     {"key": "mix_presets", "sampled": False, "modules": [],

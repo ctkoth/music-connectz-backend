@@ -821,6 +821,12 @@ def board(user):
     # every call is idempotent.)
     purge_trash(user)
     swept, progress = sweep(user)
+    # StatZ: Lilith adds today's automatic tasks before the board is drawn (lilith_auto).
+    from . import lilith_auto
+    try:
+        auto_added = lilith_auto.run(user)
+    except Exception:           # an automation must never take the board down
+        auto_added = []
 
     tasks = list(LilithTask.objects.filter(user=user).select_related()[:500])
     open_list = [t for t in tasks if not t.done_at and t.bucket != "trash"]
@@ -844,6 +850,7 @@ def board(user):
         "swept": swept,
         "actions": A.catalogue(),
         "suggested": _suggested(user, routines),
+        "auto": lilith_auto.state(user, auto_added),
         "starters": starters_for(user, [t for t in tasks if t.bucket != "trash"], routines),
         "rewards": rewards_table(),
         # The caps, as counters rather than rules, so a member can see how
