@@ -82,6 +82,7 @@ def _rows():
         ("Make", "daw_vst", "VST effects on a track (Windows app)", "arsenal", "", _lim("imagez_layers"), "", "tier_limits:imagez_layers"),
         ("Make", "mix_tracks", "Tracks in a Mix ConnectZ mix", "mixconnectz", "mixz-tracks", _lim("imagez_layers"), "", "tier_limits:imagez_layers"),
         ("Make", "eq_bands", "EQ bands (TrackZ and every DAW's EQ)", "mixconnectz", "mixz-tracks", _lim("eq_bands"), "", "tier_limits:eq_bands"),
+        ("Make", "glow_colors", "Glow colors you can choose from (the neon on buttons)", "profilez", "glow-color", _lim("glow_colors"), "", "tier_limits:glow_colors"),
         ("Make", "album_songs", "Songs mastered together as an album (Mix ConnectZ)", "mixconnectz", "mixz-album", _lim("album_songs"), "", "tier_limits:album_songs"),
         ("Make", "tone_presets", "Presets of each kind (track tone, track FX, mastering, channel strip)", "mixconnectz", "mixz-presets", _lim("tone_presets"), "", "tier_limits:tone_presets"),
         ("Make", "wav_bits", "Mastered export", "mixconnectz", "mixz-settings", wav, "", "MASTERING.wav_bits"),

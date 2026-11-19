@@ -74,3 +74,12 @@ class AlbumRowTests(TestCase):
         row = next(r for r in ladders() if r["key"] == "album_songs")
         self.assertEqual(row["values"], {"free": "8", "premium": "11", "statz": "Unlimited"}, "Corey: the tier numbers plus five")
         self.assertEqual(row["target"], "mixz-album")
+
+
+class GlowColorsRowTests(TestCase):
+    def test_glow_colors_are_coreys_numbers_and_on_the_ladder(self):
+        from apps.economy.catalog import limits_for
+        from apps.economy.ladders import ladders
+        self.assertEqual([limits_for(t)["glow_colors"] for t in ("free", "premium", "statz")], [3, 6, None])
+        row = next(r for r in ladders() if r["key"] == "glow_colors")
+        self.assertTrue(row["coreys_numbers"], row["values"])
