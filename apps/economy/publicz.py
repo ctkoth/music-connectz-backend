@@ -190,3 +190,59 @@ class PublicProfileView(APIView):
         if not p:
             return Response({"detail": "profile not found"}, status=status.HTTP_404_NOT_FOUND)
         return Response(public_profile_dict(p, request))
+
+
+# ---- Browse without an account (Corey's call) ----
+#
+# The note at the top of this file said "by link, not by browse". Corey asked for a visitor to be able to
+# look around before joining, so this is the narrowest browse that answers it:
+#
+# * PUBLIC posts only, newest first, paged. Members-only and private stay behind the login.
+# * A light card (title, author, a description snippet, what kind of media), never the full read: the
+#   card links to /p/<id>, which already decides what a stranger may see of the coach's read.
+# * NO member search. It carries age, location and attractiveness data that stays inside the login.
+# * Posts by members we know are under 18 are left out of this stranger-facing list. Their posts are
+#   still public by link, as before; this only stops an anonymous feed from surfacing teenagers to
+#   anybody on the internet. Unknown ages count as adults, matching `is_minor`.
+BROWSE_PAGE = 24
+BROWSE_SNIPPET = 160
+
+
+def browse_card(p):
+    d = " ".join((p.description or "").split())
+    return {"id": p.id, "author": p.author.username, "title": p.title or "",
+            "snippet": d[:BROWSE_SNIPPET] + ("…" if len(d) > BROWSE_SNIPPET else ""),
+            "media_type": p.media_type or "", "genre": getattr(p, "genre", "") or "",
+            "created_at": p.created_at.isoformat(), "open": f"/p/{p.id}"}
+
+
+class PublicBrowseView(APIView):
+    """GET /api/economy/public/browse/?before=<id> — public posts for a visitor, newest first."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from .models import profile_is_minor
+        qs = (Post.objects.filter(visibility="public").select_related("author", "author__mcz_profile")
+              .order_by("-id"))
+        try:
+            before = int(request.query_params.get("before") or 0)
+        except ValueError:
+            before = 0
+        if before > 0:
+            qs = qs.filter(id__lt=before)
+        cards, last = [], None
+        # Read a few pages' worth so dropping posts by minors cannot leave a page empty.
+        for p in qs[: BROWSE_PAGE * 3]:
+            last = p.id
+            prof = getattr(p.author, "mcz_profile", None)
+            if prof is not None and profile_is_minor(prof):
+                continue
+            cards.append(browse_card(p))
+            if len(cards) >= BROWSE_PAGE:
+                break
+        more = qs.filter(id__lt=last).exists() if last else False
+        resp = Response({"posts": cards, "next": last if more else None,
+                         "note": "Public posts from members. Join free to rate, comment, and get your own take scored."})
+        resp["Cache-Control"] = "public, max-age=60"
+        return resp

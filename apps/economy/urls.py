@@ -14,7 +14,7 @@ from .budgetz import (BudgetBankLinkView, BudgetBankSessionView, BudgetBankSyncV
 from .derivedroyalty import DerivedTermsView
 from .postz import (PostBoostView, PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView, PostProgressionView, DiscoveryFeedView, PostSaleView)
-from .publicz import PublicPostView, PublicProfileView
+from .publicz import PublicBrowseView, PublicPostView, PublicProfileView
 from .gallery import GalleryView
 from .aienergy import AiEnergyView
 from .writecoach import WriteCoachView
@@ -521,6 +521,7 @@ urlpatterns = [
     # No account needed — a public post by link, and the author behind it.
     path("postz/<int:pk>/", PublicPostView.as_view(), name="economy-postz-public"),
     path("public/members/<str:username>/", PublicProfileView.as_view(), name="economy-public-member"),
+    path("public/browse/", PublicBrowseView.as_view(), name="economy-public-browse"),
     path("gallery/<str:username>/", GalleryView.as_view(), name="economy-gallery"),
     path("ai/energy/", AiEnergyView.as_view(), name="economy-ai-energy"),
     path("writecoach/", WriteCoachView.as_view(), name="economy-writecoach"),
