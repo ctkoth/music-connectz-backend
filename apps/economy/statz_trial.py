@@ -86,6 +86,10 @@ FEATURES = [
     # measurements). It acts for the member, so it is StatZ's; each run is still paid, so it switches off cleanly,
     # and levels applied during a sample stay on the faders.
     {"key": "daw_stage", "label": "AI gain staging and stereo field for your stems, from a prompt", "tab": "arsenal", "target": "daw-stage"},
+    # Fixing timing and polarity across a session's tracks (Corey: timing, for StatZ). Measured on the member's
+    # device and costs nothing of ours, so the gate is client-side like daw_automation; a fix applied during a
+    # sample stays in the session.
+    {"key": "daw_align", "label": "Fix timing and polarity across your tracks in every DAW", "tab": "arsenal", "target": "daw-timing"},
     # Auto-accepting challenges is an automation (Corey: every automation is StatZ's). Read when a
     # challenge arrives, so it stops the moment StatZ or the sample does; the setting itself is kept.
     {"key": "challenge_auto_accept", "label": "Auto-accept challenges that clear your filters", "tab": "battlez", "target": "challengez-filters"},
@@ -121,6 +125,7 @@ DRIVERS = [
     {"key": "imagez_actions", "sampled": True, "modules": []},
     {"key": "daw_automation", "sampled": True, "modules": []},
     {"key": "daw_stage", "sampled": True, "modules": ["mixz_stage"]},
+    {"key": "daw_align", "sampled": True, "modules": []},
     {"key": "challenge_auto_accept", "sampled": True, "modules": ["callouts"]},
     {"key": "lilith_auto", "sampled": True, "modules": ["lilith_auto"]},
     {"key": "instrumental_mix", "sampled": False, "modules": ["instrumentalz"],
