@@ -687,7 +687,11 @@ class OnboardCompleteView(APIView):
 
     def get(self, request):
         from apps.economy.models import profile_for
-        return Response({"onboarded": profile_for(request.user).onboarded})
+        # The member's first scored take, or None: the onboarding screen leads with getting one, because a score
+        # is the moment the product proves itself. Here rather than on /me, which every page load calls.
+        t = request.user.take_scores.order_by("created_at").values("app_key", "created_at").first()
+        return Response({"onboarded": profile_for(request.user).onboarded,
+                         "first_take": {"app_key": t["app_key"], "at": t["created_at"].isoformat()} if t else None})
 
     def post(self, request):
         from apps.economy.models import (

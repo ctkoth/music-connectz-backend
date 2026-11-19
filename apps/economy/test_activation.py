@@ -19,7 +19,7 @@ class ActivationTests(TestCase):
         TakeScore.objects.filter(pk=t.pk).update(created_at=timezone.now() + timedelta(days=3))
         c = APIClient(); c.force_authenticate(owner)
         me = APIClient(); me.force_authenticate(quick)
-        self.assertEqual(me.get("/api/auth/me/").data["first_take"]["app_key"], "rapz")
+        self.assertEqual(me.get("/api/auth/onboard/complete/").data["first_take"]["app_key"], "rapz")
         from unittest import mock
         with mock.patch("apps.economy.views.is_owner", return_value=True):
             r = c.get("/api/auth/funnel/summary/")
