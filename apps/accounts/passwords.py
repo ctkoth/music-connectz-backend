@@ -28,7 +28,9 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import ratelimit
 from .serializers import issue_tokens
+from apps.economy.clientip import client_ip
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -64,6 +66,10 @@ def reset_link_for(user):
     return f"{base}/reset-password?uid={uid}&token={token}"
 
 
+RESET_PER_ACCOUNT = 3     # reset emails one account may be sent per 15 minutes
+RESET_PER_ADDRESS = 20    # reset requests one connection may make per 15 minutes
+
+
 class ForgotPasswordView(APIView):
     """POST /api/auth/password/forgot/ — {identifier} -> emails a reset link."""
 
@@ -71,7 +77,21 @@ class ForgotPasswordView(APIView):
     authentication_classes = []
 
     def post(self, request):
+        # Rate limited both ways, or anyone could flood a member's inbox with reset emails (and spend our
+        # mail quota). Too many from one connection is a 429, which says nothing about any account. Too many
+        # for one ACCOUNT answers exactly as a send would and sends nothing, so the limit cannot be used to
+        # find out which accounts exist.
+        ip = client_ip(request)
+        if ratelimit.failures("reset_ip", ip) >= RESET_PER_ADDRESS:
+            return Response({"detail": "Too many reset requests from this connection. Wait a few minutes and try again."},
+                            status=status.HTTP_429_TOO_MANY_REQUESTS)
+        ratelimit.note_failure("reset_ip", ip)
         user = _user_for_identifier((request.data or {}).get("identifier"))
+        if user and ratelimit.failures("reset_id", user.pk) >= RESET_PER_ACCOUNT:
+            logger.warning("Password reset for %r skipped: too many in the window.", user.username)
+            return Response({"detail": SENT_DETAIL})
+        if user:
+            ratelimit.note_failure("reset_id", user.pk)
 
         # An account with no email address on file has nowhere to send the link.
         # Still answer with SENT_DETAIL so the response reveals nothing.

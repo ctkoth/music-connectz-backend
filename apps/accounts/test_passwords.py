@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from django.contrib.auth import get_user_model
 from django.core import mail
 from django.test import TestCase, override_settings
@@ -24,6 +25,7 @@ def link_parts(user):
                    FRONTEND_URL="https://musicconnectz.net")
 class ForgotPasswordTests(TestCase):
     def setUp(self):
+        cache.clear()  # the reset limiter counts per connection; tests share one
         self.client = APIClient()
         self.user = User.objects.create_user("member", "member@example.com", OLD)
         Profile.objects.create(user=self.user, phone="+15550001111")
@@ -63,6 +65,7 @@ class ForgotPasswordTests(TestCase):
 @override_settings(FRONTEND_URL="https://musicconnectz.net")
 class ResetPasswordTests(TestCase):
     def setUp(self):
+        cache.clear()  # the reset limiter counts per connection; tests share one
         self.client = APIClient()
         self.user = User.objects.create_user("member", "member@example.com", OLD)
 
@@ -134,6 +137,7 @@ class ForgotPasswordLoggingTests(TestCase):
     identical whether delivery worked, failed, or the account didn't exist."""
 
     def setUp(self):
+        cache.clear()
         self.client = APIClient()
         self.user = User.objects.create_user("member", "member@example.com", OLD)
 
