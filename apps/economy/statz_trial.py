@@ -90,6 +90,9 @@ FEATURES = [
     # device and costs nothing of ours, so the gate is client-side like daw_automation; a fix applied during a
     # sample stays in the session.
     {"key": "daw_align", "label": "Fix timing and polarity across your tracks in every DAW", "tab": "arsenal", "target": "daw-timing"},
+    # Mix check: headroom staging, frequency-clash dips and ducking the beat under the vocal, measured on the
+    # member's device (client-side like daw_align); what a sample applied stays in the session.
+    {"key": "daw_mixcheck", "label": "Mix check in every DAW: headroom, frequency clashes, ducking", "tab": "arsenal", "target": "daw-mixcheck"},
     # Auto-accepting challenges is an automation (Corey: every automation is StatZ's). Read when a
     # challenge arrives, so it stops the moment StatZ or the sample does; the setting itself is kept.
     {"key": "challenge_auto_accept", "label": "Auto-accept challenges that clear your filters", "tab": "battlez", "target": "challengez-filters"},
@@ -126,6 +129,7 @@ DRIVERS = [
     {"key": "daw_automation", "sampled": True, "modules": []},
     {"key": "daw_stage", "sampled": True, "modules": ["mixz_stage"]},
     {"key": "daw_align", "sampled": True, "modules": []},
+    {"key": "daw_mixcheck", "sampled": True, "modules": []},
     {"key": "challenge_auto_accept", "sampled": True, "modules": ["callouts"]},
     {"key": "lilith_auto", "sampled": True, "modules": ["lilith_auto"]},
     {"key": "instrumental_mix", "sampled": False, "modules": ["instrumentalz"],
