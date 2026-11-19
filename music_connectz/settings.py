@@ -407,3 +407,13 @@ PAYPAL_API_BASE = (
 )
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+# Production is HTTPS-only (Render terminates TLS and redirects http at its edge), so cookies are marked
+# Secure and browsers are told to stay on https. HSTS starts at one day with no subdomains and no preload:
+# preload cannot be undone quickly, and a subdomain served over plain http would break. Raise it once the
+# whole domain is confirmed https. SECURE_SSL_REDIRECT is left to Render's edge: Django redirecting too
+# would risk the platform's internal health check (plain http, no forwarded header) answering 301.
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = int(os.environ.get("SECURE_HSTS_SECONDS", "86400"))
+    SECURE_CONTENT_TYPE_NOSNIFF = True
