@@ -82,6 +82,10 @@ FEATURES = [
     # the member's device), and a lane drawn during a sample stays in the session and keeps playing and
     # bouncing — only drawing and writing lock again.
     {"key": "daw_automation", "label": "Automation in every DAW: draw volume and pan, write fader rides", "tab": "arsenal", "target": "daw-automation"},
+    # Gain staging and stereo-field suggestions for a DAW session, from a prompt (Corey: StatZ, through Mix ConnectZ's
+    # measurements). It acts for the member, so it is StatZ's; each run is still paid, so it switches off cleanly,
+    # and levels applied during a sample stay on the faders.
+    {"key": "daw_stage", "label": "AI gain staging and stereo field for your stems, from a prompt", "tab": "arsenal", "target": "daw-stage"},
     # Auto-accepting challenges is an automation (Corey: every automation is StatZ's). Read when a
     # challenge arrives, so it stops the moment StatZ or the sample does; the setting itself is kept.
     {"key": "challenge_auto_accept", "label": "Auto-accept challenges that clear your filters", "tab": "battlez", "target": "challengez-filters"},
@@ -116,6 +120,7 @@ DRIVERS = [
     {"key": "imagez_cutout", "sampled": True, "modules": ["imagez_cutout"]},
     {"key": "imagez_actions", "sampled": True, "modules": []},
     {"key": "daw_automation", "sampled": True, "modules": []},
+    {"key": "daw_stage", "sampled": True, "modules": ["mixz_stage"]},
     {"key": "challenge_auto_accept", "sampled": True, "modules": ["callouts"]},
     {"key": "lilith_auto", "sampled": True, "modules": ["lilith_auto"]},
     {"key": "instrumental_mix", "sampled": False, "modules": ["instrumentalz"],

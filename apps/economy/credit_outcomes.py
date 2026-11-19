@@ -82,6 +82,16 @@ CREDIT_OUTCOMES = {
                             "the master you save.",
         "free_way": {"label": "The genre presets beside it are free and set the same controls; mastering itself is free.",
                      "tab": "mixconnectz"}},
+    "mixz_stage": {
+        "resource": "promptz", "label": "Mix ConnectZ gain staging",
+        "buys": "A level and a place in the stereo field for each of your stems, with the reason, ready to apply to the "
+                "faders and pans — nothing changes until you press Apply.",
+        "outcomes": ["understandable", "learnable", "tangible"],
+        "lands_in": ["arsenal", "mixconnectz"],
+        "ephemeral_reason": "Only measurements and your brief are sent; what it buys is the fader and pan settings, "
+                            "which go into your session.",
+        "free_way": {"label": "Suggest a balance in Mix ConnectZ's TrackZ sets levels and pans from the same measurements, free.",
+                     "tab": "mixconnectz"}},
     "coach_upgrades": {
         "resource": "promptz", "label": "Gear and settings advice",
         "buys": "Named gear and settings advice tied to the reasons in one take.",
