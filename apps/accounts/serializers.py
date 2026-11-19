@@ -28,6 +28,7 @@ class PublicUserSerializer(serializers.ModelSerializer):
     spinaz = serializers.SerializerMethodField()
     energy = serializers.SerializerMethodField()
     onboarded = serializers.SerializerMethodField()
+    first_take = serializers.SerializerMethodField()
     personas = serializers.SerializerMethodField()
     nationalities = serializers.SerializerMethodField()
     birthday = serializers.SerializerMethodField()
@@ -121,6 +122,13 @@ class PublicUserSerializer(serializers.ModelSerializer):
     def get_onboarded(self, obj):
         return self._economy(obj, "profile").onboarded
 
+    def get_first_take(self, obj):
+        # The member's first scored take, or None. A new member's first screen leads with getting one, because
+        # a score is the moment the product proves itself; one indexed query, on the row that is already the
+        # coach's own history.
+        t = obj.take_scores.order_by("created_at").values("app_key", "created_at").first()
+        return {"app_key": t["app_key"], "at": t["created_at"].isoformat()} if t else None
+
     def get_personas(self, obj):
         # Through the normalizer, not straight off the column: a row that was
         # written before the write path was fixed still holds a persona as the
@@ -136,7 +144,7 @@ class PublicUserSerializer(serializers.ModelSerializer):
         model = User
         fields = (
             "id", "username", "email", "phone", "avatar_url", "is_owner",
-            "tier", "spinaz", "energy", "onboarded", "personas", "nationalities",
+            "tier", "spinaz", "energy", "onboarded", "first_take", "personas", "nationalities",
             "birthday", "age", "zodiac", "zodiac_cn", "voice", "connections",
             "first_name", "last_name", "visibility",
         )

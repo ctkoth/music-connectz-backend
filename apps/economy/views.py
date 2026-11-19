@@ -865,7 +865,21 @@ class FunnelSummaryView(APIView):
             reasons[rk] = sorted(({"why": k, "unique": len(v)} for k, v in seen.items()),
                                  key=lambda r: -r["unique"])
 
+        # Activation: of the accounts made in the window, how many got a scored take within a day of joining.
+        # A score is the moment the product proves itself, so this is the one number the first screen is built to
+        # move. Counted on accounts (not browsers): it is the step after the funnel, where there is a person.
+        from django.contrib.auth import get_user_model
+        from django.db.models import Min
+        joined = (get_user_model().objects.filter(date_joined__gte=since)
+                  .annotate(first=Min("take_scores__created_at")).values_list("date_joined", "first"))
+        joined = list(joined)
+        activated = sum(1 for j, f in joined if f and f - j <= timedelta(hours=24))
+        activation = {"label": "Joined → first scored take within 24h", "from": len(joined), "to": activated,
+                      "pct": round(100 * activated / len(joined), 1) if joined else None,
+                      "note": "Accounts made in this window that had a take scored within a day of joining."}
+
         return {
+            "activation": activation,
             "reasons": reasons,
             "days": days,
             "since": since,
