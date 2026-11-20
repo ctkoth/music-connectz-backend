@@ -66,7 +66,8 @@ class AllowanceCeilingTests(TestCase):
         from apps.economy.catalog import engine_typical_cents
         for key, spec in AI_MODELS.items():
             covered = daily_prompt_covers(spec["cost_cents"], key)
-            self.assertEqual(covered, engine_typical_cents(key) <= DAILY_PROMPT_MAX_CENTS, key)
+            fits = engine_typical_cents(key) <= DAILY_PROMPT_MAX_CENTS and key not in ("opus", "fable")
+            self.assertEqual(covered, fits, key)
         self.assertTrue(daily_prompt_covers(AI_MODELS["haiku"]["cost_cents"], "haiku"))
         self.assertFalse(daily_prompt_covers(AI_MODELS["fable"]["cost_cents"], "fable"))
         # A run with no engine (the coach, the writer) is judged on its price alone.

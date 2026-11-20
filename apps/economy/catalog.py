@@ -908,11 +908,14 @@ def ai_models_for(tier):
 def default_ai_model(tier):
     """What a member gets before they choose: the best rung their tier owns.
 
-    The top rung rather than the bottom because the tier was paid for. A StatZ
-    member who never opens the picker should not be quietly served Haiku.
+    The best rung the free daily prompts still cover (Sonnet once a tier reaches
+    it): Opus and Fable cost extra PromptZ (ENGINE_PROMPTZ), and a member who never
+    opened the picker must not start paying for an engine they never chose. Picking
+    one is always open to them, at the price shown.
     """
     allowed = ai_models_for(tier)
-    return allowed[-1] if allowed else "haiku"
+    covered = [k for k in allowed if k not in ENGINE_PROMPTZ]
+    return (covered or allowed or ["haiku"])[-1]
 
 
 def ai_model_for(key, tier):
