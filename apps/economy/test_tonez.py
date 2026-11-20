@@ -122,7 +122,7 @@ class PresetKindTests(TestCase):
         self.assertEqual(r.status_code, 403)
         self.assertIn("3 track fx presets", r.data["detail"])
         k = self.c.get("/api/economy/tonez/").data["kinds"]
-        self.assertEqual({n: v["count"] for n, v in k.items()}, {"tone": 3, "fx": 3, "master": 3, "strip": 0})
+        self.assertEqual({n: v["count"] for n, v in k.items()}, {"tone": 3, "fx": 3, "master": 3, "strip": 0, "vst": 0})
 
     def test_the_same_name_may_live_in_two_kinds(self):
         self.assertEqual(self.save("tone", "Vocal").status_code, 201)
@@ -179,3 +179,51 @@ class StripPresetTests(TestCase):
 
     def test_album_songs_are_coreys_numbers(self):
         self.assertEqual([limits_for(t)["album_songs"] for t in ("free", "premium", "statz")], [8, 11, None])
+
+
+class PluginPresetTests(TestCase):
+    """A VST3 plugin's saved state, counted per plugin: a compressor and an EQ each get the tier's number."""
+
+    COMP, EQ = "ABCD1234ABCD1234", "EEEE5678EEEE5678"
+
+    def setUp(self):
+        self.me = U.objects.create_user("producer", password="pw12345!x")
+        self.c = APIClient()
+        self.c.force_authenticate(self.me)
+
+    def save(self, name, uid, state="QUJDREVGRw==", **extra):
+        return self.c.post("/api/economy/tonez/", {"kind": "vst", "name": name,
+                           "chain": {"uid": uid, "plugin": "Pro-C", "vendor": "FabFilter", "state": state}, **extra}, format="json")
+
+    def test_each_plugin_has_its_own_room(self):
+        for i in range(3):
+            self.assertEqual(self.save(f"Comp {i}", self.COMP).status_code, 201)
+        r = self.save("Comp 4", self.COMP)
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("for this plugin", r.data["detail"])
+        self.assertEqual(self.save("EQ 1", self.EQ).status_code, 201)       # another plugin is untouched
+        g = self.c.get("/api/economy/tonez/").data
+        self.assertEqual(g["per_plugin"], {self.COMP: 3, self.EQ: 1})
+
+    def test_two_plugins_can_share_a_name_but_one_plugin_cannot(self):
+        self.assertEqual(self.save("Warm", self.COMP).status_code, 201)
+        self.assertEqual(self.save("Warm", self.EQ).status_code, 201)
+        self.assertEqual(self.save("warm", self.COMP).status_code, 409)
+
+    def test_an_update_is_never_refused_and_cannot_move_a_preset_to_another_plugin(self):
+        for i in range(3):
+            self.save(f"Comp {i}", self.COMP)
+        pid = TonePreset.objects.filter(kind="vst").first().id
+        self.assertEqual(self.save("Renamed", self.COMP, id=pid).status_code, 201)
+        self.assertEqual(self.save("Renamed", self.EQ, id=pid).status_code, 400)
+
+    def test_junk_state_is_not_stored(self):
+        for bad in ("", "not base64!!", "A" * 400_001):
+            self.assertEqual(self.save("x", self.COMP, state=bad).status_code, 400)
+        self.assertEqual(self.save("x", "bad uid").status_code, 400)
+
+    def test_statz_is_unlimited_per_plugin(self):
+        membership_for(self.me)
+        Membership.objects.filter(user=self.me).update(tier="statz")
+        for i in range(8):
+            self.assertEqual(self.save(f"Comp {i}", self.COMP).status_code, 201)

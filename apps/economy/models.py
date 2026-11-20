@@ -8737,7 +8737,9 @@ class TonePreset(models.Model):
 
     class Meta:
         ordering = ["-updated_at"]
-        constraints = [models.UniqueConstraint(fields=["owner", "kind", "name"], name="tonepreset_owner_kind_name")]
+        # A plugin preset is named within its plugin (the app checks that), so two plugins may each have a "Warm".
+        constraints = [models.UniqueConstraint(fields=["owner", "kind", "name"], condition=~models.Q(kind="vst"),
+                                               name="tonepreset_owner_kind_name")]
 
 
 class LilithAuto(models.Model):

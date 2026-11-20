@@ -85,7 +85,7 @@ def _rows():
         ("Make", "split_opens", "PaneZ: times a day you can open a split page", "toolz", "", _lim("split_opens"), "", "tier_limits:split_opens"),
         ("Make", "glow_colors", "Glow colors you can choose from (the neon on buttons)", "profilez", "glow-color", _lim("glow_colors"), "", "tier_limits:glow_colors"),
         ("Make", "album_songs", "Songs mastered together as an album (Mix ConnectZ)", "mixconnectz", "mixz-album", _lim("album_songs"), "", "tier_limits:album_songs"),
-        ("Make", "tone_presets", "Presets of each kind (track tone, track FX, mastering, channel strip)", "mixconnectz", "mixz-presets", _lim("tone_presets"), "", "tier_limits:tone_presets"),
+        ("Make", "tone_presets", "Presets of each kind (track tone, track FX, mastering, channel strip; plugin presets per plugin)", "mixconnectz", "mixz-presets", _lim("tone_presets"), "", "tier_limits:tone_presets"),
         ("Make", "wav_bits", "Mastered export", "mixconnectz", "mixz-settings", wav, "", "MASTERING.wav_bits"),
         ("Make", "intensities", "Mastering intensities", "mixconnectz", "mixz-settings", heaviest, "", "MASTERING.intensities"),
         ("Make", "facez_faces", "Faces kept in FaceZ, and characters cast in MangaZ / Anime ConnectZ", "facez", "", _lim("facez_faces"), "", "tier_limits:facez_faces"),
