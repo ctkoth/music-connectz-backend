@@ -80,7 +80,10 @@ _APA = ("Cite in full APA 7 in-text and end with an APA 7 References section, bu
         "listed in the brief, with their exact details; never invent a source. Where a claim needs a "
         "citation the brief doesn't supply, write [CITATION NEEDED].")
 # What every member's essay gets: a plain academic register and the citation rules.
-ACADEMIC_PLAIN = "Write in a clear, formal academic register. Headings are plain text on their own line. " + _APA
+# Corey's register for everybody (his call): emoji, contractions, em dashes. NOT the
+# Music ConnectZ running example, which is the owner's alone (see below).
+ACADEMIC_PLAIN = ("Open every heading and every paragraph with an emoji. Headings are plain text on their own line. "
+                  "Use contractions — conversational, not stiff — and em dashes freely. " + _APA)
 # Corey's own academic register — an emoji on every heading and paragraph,
 # contractions, em dashes, and this platform as the running example. It is HIS
 # voice, so only the platform owner's essays are written in it; handing it to a
@@ -93,7 +96,8 @@ ACADEMIC_VOICE = (
 )
 # Said on the screen, per the essay kind, so what the member is told is what the
 # prompt actually does.
-ESSAY_NOTE_MEMBER = ("Clear academic register, APA 7. It cites only the sources you list in the brief — it never "
+ESSAY_NOTE_MEMBER = ("K-Oth's academic register: an emoji opens every heading and paragraph, contractions and em "
+                     "dashes. APA 7. It cites only the sources you list in the brief — it never "
                      "makes one up, and writes [CITATION NEEDED] where a claim has no source from you.")
 ESSAY_NOTE_OWNER = ("Your own academic register: an emoji opens every heading and paragraph, contractions and em "
                     "dashes, and Music ConnectZ as the running example. APA 7, citing only the sources you list.")
