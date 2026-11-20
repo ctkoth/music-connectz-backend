@@ -1,0 +1,25 @@
+from django.contrib.auth import get_user_model
+from django.test import TestCase
+from rest_framework.test import APIClient
+
+from apps.economy.models import Membership
+
+
+class PaneZTests(TestCase):
+    def setUp(self):
+        self.u = get_user_model().objects.create_user("splitter", password="pw-long-enough-1")
+        self.c = APIClient(); self.c.force_authenticate(self.u)
+
+    def test_free_opens_three_a_day_then_is_told_when(self):
+        for _ in range(3):
+            self.assertEqual(self.c.post("/api/economy/panez/", {"app": "sentencez"}, format="json").status_code, 200)
+        r = self.c.post("/api/economy/panez/", {"app": "sentencez"}, format="json")
+        self.assertEqual(r.status_code, 429)
+        self.assertIn("frees up in", r.data["detail"]); self.assertIn("Premium opens 6", r.data["detail"])
+        self.assertEqual(self.c.get("/api/economy/panez/").data["left"], 0)
+
+    def test_statz_is_unlimited(self):
+        m = Membership.objects.get_or_create(user=self.u)[0]; m.tier = "statz"; m.save()
+        for _ in range(10):
+            self.assertEqual(self.c.post("/api/economy/panez/", {}, format="json").status_code, 200)
+        self.assertIsNone(self.c.get("/api/economy/panez/").data["left"])

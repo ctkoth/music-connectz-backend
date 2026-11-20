@@ -8762,3 +8762,11 @@ class AnimeWork(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class PaneOpen(models.Model):
+    """One split page (PaneZ) opened. Corey: a tier is how many times a day — Free 3, Premium 6, StatZ unlimited
+    (`split_opens`), over a rolling 24 hours, counted here so a cleared browser does not reset it."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="pane_opens")
+    app_key = models.CharField(max_length=32, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)

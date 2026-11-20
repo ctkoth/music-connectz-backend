@@ -83,3 +83,11 @@ class GlowColorsRowTests(TestCase):
         self.assertEqual([limits_for(t)["glow_colors"] for t in ("free", "premium", "statz")], [3, 6, None])
         row = next(r for r in ladders() if r["key"] == "glow_colors")
         self.assertTrue(row["coreys_numbers"], row["values"])
+
+
+class SplitOpensRowTests(TestCase):
+    def test_split_opens_are_coreys_numbers_and_on_the_ladder(self):
+        from apps.economy.catalog import limits_for
+        from apps.economy.ladders import ladders
+        self.assertEqual([limits_for(t)["split_opens"] for t in ("free", "premium", "statz")], [3, 6, None])
+        self.assertTrue(next(r for r in ladders() if r["key"] == "split_opens")["coreys_numbers"])

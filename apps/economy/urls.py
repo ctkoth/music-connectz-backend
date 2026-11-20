@@ -107,6 +107,7 @@ from .skillzhub import SkillZHubView
 from .mixz import MixDetailView, MixView
 from .mixz_ai import MixAIView
 from .mixz_stage import MixStageView
+from .panez import PaneZView
 from .intelligence_royalty import IntelligenceTargetsView, IntelligenceUseDetailView, IntelligenceUsesView
 from .keyconnectz import (KeyboardView, KeySpeakView, KeyTranscribeView,
                           KeyTranslateView)
@@ -305,6 +306,7 @@ urlpatterns = [
     path("mixz/<int:pk>/", MixDetailView.as_view(), name="economy-mixz-detail"),
     path("mixz/ai/", MixAIView.as_view(), name="economy-mixz-ai"),
     path("mixz/stage/", MixStageView.as_view(), name="economy-mixz-stage"),
+    path("panez/", PaneZView.as_view(), name="economy-panez"),
     path("intelligencez/", IntelligenceHubView.as_view(), name="economy-intelligencez"),
     # SkillZ — the front door of the seven instrument coaches (and the Home of the
     # standalone SkillZ app): the price of a take before any coach is opened.
