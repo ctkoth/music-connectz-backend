@@ -100,6 +100,8 @@ from .tonez import ToneZDetailView, ToneZView
 from .lilith_auto import LilithAutoView
 from .ladders import LaddersView
 from .animez import AnimeConnectZView, AnimePlanView, AnimeRenderView, AnimeWorkView
+from .artistmsg import (ArtistMessagePlanView, ArtistMessageRenderView, ArtistMessageView,
+                        ArtistMessageWorkView)
 from .videostitch import VideoStitchDetailView, VideoStitchView
 from .instrumentalz import InstrumentalAIPresetView, InstrumentalApplyPresetView, InstrumentalInspirationView, InstrumentalMidiView, InstrumentalMixPresetsView, InstrumentalMixSheetView, InstrumentalMixView, InstrumentalMoodView, InstrumentalView
 from .intelligencez import IntelligenceHubView
@@ -536,6 +538,10 @@ urlpatterns = [
     path("animez/plan/", AnimePlanView.as_view(), name="economy-animez-plan"),
     path("animez/<int:pk>/", AnimeWorkView.as_view(), name="economy-animez-work"),
     path("animez/<int:pk>/render/", AnimeRenderView.as_view(), name="economy-animez-render"),
+    path("artistmsg/", ArtistMessageView.as_view(), name="economy-artistmsg"),
+    path("artistmsg/plan/", ArtistMessagePlanView.as_view(), name="economy-artistmsg-plan"),
+    path("artistmsg/<int:pk>/", ArtistMessageWorkView.as_view(), name="economy-artistmsg-work"),
+    path("artistmsg/<int:pk>/render/", ArtistMessageRenderView.as_view(), name="economy-artistmsg-render"),
     path("mangaz/", MangaPagesView.as_view(), name="economy-mangaz"),
     path("mangaz/<int:pk>/", MangaPageView.as_view(), name="economy-manga-page"),
     path("mangaz/<int:pk>/panel/<int:n>/draw/", MangaPanelDrawView.as_view(), name="economy-manga-draw"),

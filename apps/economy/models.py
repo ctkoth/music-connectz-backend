@@ -8770,6 +8770,9 @@ class AnimeWork(models.Model):
     upload = models.ForeignKey("Upload", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     error = models.CharField(max_length=200, blank=True, default="")
     claim = models.CharField(max_length=40, blank=True, default="")
+    # What a piece needs that is not an anime's: for an artist message (fmt "message", artistmsg.py) the
+    # caption, the speaker's name, and the FaceZ photo and VoiceZ voice it was built from. {} for anime.
+    meta = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

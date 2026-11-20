@@ -177,7 +177,13 @@ def _start_some(work, chars):
             break
         if s.get("work_id") or s.get("failed"):
             continue
-        w, refused = start_render(work.user, "anime", render_prompt(work, s, chars), work.aspect)
+        if work.fmt == "message":
+            # An artist message renders as its own kind, from the speaker's own FaceZ photo (artistmsg.py).
+            from . import artistmsg
+            w, refused = start_render(work.user, "message", artistmsg.render_prompt(work, s),
+                                      work.aspect, artistmsg.face_for(work))
+        else:
+            w, refused = start_render(work.user, "anime", render_prompt(work, s, chars), work.aspect)
         if refused is not None:
             s["failed"] = True
         else:
@@ -267,7 +273,7 @@ def advance(work):
             return
         if data is not None:
             from .models import Upload
-            up = Upload(user=work.user, name=f"anime-{work.pk}.mp4", size_bytes=len(data), content_type="video/mp4")
+            up = Upload(user=work.user, name=f"{'message' if work.fmt == 'message' else 'anime'}-{work.pk}.mp4", size_bytes=len(data), content_type="video/mp4")
             up.file.save(up.name, ContentFile(data), save=False)
             up.save()
         row.upload, row.status, row.error, row.claim = up, AnimeWork.STATUS_DONE, "", ""
@@ -298,7 +304,7 @@ class AnimeConnectZView(APIView):
             "characters": chars, "idea_max": IDEA_MAX, "ai_label": AI_LABEL,
             "promptz": w.promptz or 0, "money_cents": w.money_cents, "owner_free": is_platform_owner(request.user),
             "can_join": bool(ffmpeg_exe()), "configured": bool(_key()),
-            "works": [work_dict(x, request) for x in AnimeWork.objects.filter(user=request.user)[:20]],
+            "works": [work_dict(x, request) for x in AnimeWork.objects.filter(user=request.user).exclude(fmt="message")[:20]],
         })
 
 
@@ -371,7 +377,9 @@ class AnimeWorkView(APIView):
     permission_classes = [IsAuthenticated]
 
     def _get(self, request, pk):
-        return AnimeWork.objects.filter(pk=pk, user=request.user).first()
+        # Artist messages are a different piece (artistmsg.py): this view never opens one, because the
+        # anime editor would clean its lines against a cast it does not have.
+        return AnimeWork.objects.filter(pk=pk, user=request.user).exclude(fmt="message").first()
 
     def get(self, request, pk):
         work = self._get(request, pk)
@@ -414,15 +422,18 @@ class AnimeRenderView(APIView):
     """POST — render every shot (shots × the clip price, said before the press). Refuses up front when the
     balance can't cover every shot, so a piece never stops half-paid; a shot that fails is refunded."""
     permission_classes = [IsAuthenticated]
+    product = "Anime ConnectZ"             # what the refusals call it
+    message = False                         # the artist-message subclass renders only fmt="message"
 
     def post(self, request, pk):
-        work = AnimeWork.objects.filter(pk=pk, user=request.user).first()
+        works = AnimeWork.objects.filter(pk=pk, user=request.user)
+        work = (works.filter(fmt="message") if self.message else works.exclude(fmt="message")).first()
         if not work:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         if work.status != AnimeWork.STATUS_PLANNED:
             return Response({"detail": "This one is already rendering or done."}, status=status.HTTP_409_CONFLICT)
         if not _key():
-            return Response({"detail": "Anime ConnectZ isn't switched on yet."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            return Response({"detail": f"{self.product} isn't switched on yet."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         if len(work.shots) > 1 and not ffmpeg_exe():
             return Response({"detail": "The server can't join shots right now. Nothing was charged."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         total = len(work.shots) * price_cents()

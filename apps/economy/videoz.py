@@ -88,6 +88,21 @@ KINDS = {
                      "painted backgrounds, anime camera work. Never photoreal, never 3D."},
 }
 
+# Kinds a member cannot pick on this screen: they exist for a planned piece that renders its own shots
+# through `start_render` (an artist message, artistmsg.py). Kept out of KINDS so VideoView neither lists
+# them nor accepts them from a request body.
+PLANNED_KINDS = {
+    "message": {"label": "Artist message", "emoji": "💬",
+                "ask": "A vertical phone video message. The artist speaks straight to camera in a close, steady "
+                       "selfie frame, in natural light, and means it. Only their own voice is heard: NO music, "
+                       "no background score, no sound effects. NO on-screen text, captions or subtitles; NO logos "
+                       "or watermarks; NO filters, effects or colour-grade overlays. Plain, real, unedited."},
+}
+
+
+def kind_info(kind):
+    return KINDS.get(kind) or PLANNED_KINDS.get(kind) or {}
+
 
 # A clip was 1 PromptZ (under a cent) against a Veo render costing very roughly $1-6, so every render was a large
 # subsidy any tier could run without limit. Corey (Nov 2026) asked for it priced near cost: VIDEO_CLIP_PROMPTZ
@@ -255,7 +270,7 @@ def start_failure(resp):
 
 
 def _work_dict(w, request):
-    return {"id": w.id, "kind": w.kind, "label": KINDS.get(w.kind, {}).get("label", w.kind), "prompt": w.prompt,
+    return {"id": w.id, "kind": w.kind, "label": kind_info(w.kind).get("label", w.kind), "prompt": w.prompt,
             "aspect": w.aspect, "status": w.status,
             # A pending row's `error` is the download claim (see FETCH_CLAIM),
             # never something to show; a reason exists only once it has failed.
@@ -348,7 +363,7 @@ def start_render(user, kind, prompt, aspect, face=None):
                         status=status.HTTP_402_PAYMENT_REQUIRED)
     work = VideoWork.objects.create(user=user, kind=kind, prompt=prompt, aspect=aspect, face=face,
                                     held_promptz=held[0], held_cash=held[1])
-    instance = {"prompt": f"{KINDS[kind]['ask']} {prompt}"}
+    instance = {"prompt": f"{kind_info(kind)['ask']} {prompt}"}
     if face:
         try:
             face.image.open("rb")

@@ -118,6 +118,12 @@ CREDIT_OUTCOMES = {
         "outcomes": ["tangible", "shareable", "braggable"],
         "lands_in": ["animez", "videoz", "postz", "filez", "directz"],
         "free_way": {"label": "AnimeZ makes a motion comic from your MangaZ pages on your device, free.", "tab": "animez"}},
+    "artistmsg": {
+        "resource": "promptz", "label": "Artist message",
+        "buys": "A vertical message to your fans, planned by the coach from your CharacterZ, FaceZ and VoiceZ — the lines and a caption, editable before anything renders; each shot then renders at the Video ConnectZ clip price and is joined into one video.",
+        "outcomes": ["tangible", "shareable", "braggable"],
+        "lands_in": ["videoz", "postz", "filez", "directz"],
+        "free_way": {"label": "A daily free prompt covers the plan; you can always record a real one on your phone, and writing the lines yourself is free in Sentence ConnectZ.", "tab": "sentencez"}},
     "writecoach": {
         "resource": "promptz", "label": "Writing coach",
         "buys": "Your written lyrics scored on five dimensions, each with the reason and the fix, kept so you see them move.",

@@ -3608,3 +3608,40 @@ imports is a fixed floor per worker; if Render's metrics show the baseline near 
 bigger instance, not more code. `--max-requests 500` already recycles a leaking worker. Also not bounded:
 `videoz` holds a whole downloaded video in memory (`r.content`) and the coach's inline path base64s up to
 14MB — both small beside this, both worth streaming if the metrics point at them.
+
+## Artist messages: a short vertical video from the coach, built from CharacterZ, FaceZ and VoiceZ (Nov 2026)
+
+`apps/economy/artistmsg.py`, `GET/POST /api/economy/artistmsg/`, migration 0246 (additive: `AnimeWork.meta`).
+Spotify for Artists asked for a Wrapped "artist message" — vertical video under 30 seconds, no music,
+logos, text or filters, caption under 100 characters — and Corey asked for the coach to make one in Video
+ConnectZ from the member's own CharacterZ, FaceZ and VoiceZ. It is Anime ConnectZ's machine with a
+different front: plan → edit → render, and an `AnimeWork` with `fmt="message"` (so `animez.advance` polls,
+starts and joins it) whose `meta` holds the caption, the speaker, and the FaceZ photo and VoiceZ voice it
+was built from. Anime's list and editor never open one (`exclude(fmt="message")`) and the message views never
+open an anime piece; `test_artistmsg.StaysApartFromAnime` pins both directions.
+
+- **Enforced, not trusted:** vertical (9:16 is the only shape), length (`MAX_SHOTS` = 3 × 8 s = 24 s — strictly
+  under 30, which is why the arithmetic is `(30 - 1) // CLIP_SECONDS` and not `30 // 8`), and the caption (cut to
+  99 at plan and on every edit; the model is never trusted to count). A model that returns 8 shots gets 3.
+- **Asked, NOT checked:** no music / logos / text / filters are in every shot's prompt (`videoz.PLANNED_KINDS
+  ["message"]`) and nothing looks at the finished clip. `spec.asked_not_checked` and `check_note` say so on the
+  screen, and the done state tells the member to watch it all the way through. Do not turn that line into "compliant".
+- **VoiceZ shapes the WORDS, not the sound.** The voice heard is Veo's own; there is no clone (see `coachvoice`).
+  `AI_LABEL` says so. A saved VoiceZ voice is Premium's/StatZ's like everywhere else (`voicez.can_use_custom`), a
+  CHARACTER carries its own voice free, and the refusal names that free way. Any one of character / face / voice
+  is enough.
+- **Likeness:** the member's own FaceZ photo only, and never one tagged as another member (`face_ok`, the
+  `characterz.LIKENESS` rule applied to a face about to speak). The photo is the first frame of every shot
+  (`start_render(face=)`); with none, the character's `looks` are described instead.
+- **Nothing invented:** the plan prompt says use ONLY what the brief says — no numbers, rankings, awards, dates or
+  quotes. A message that makes up a stream count is the substance rule's failure in the artist's own mouth.
+- **Priced like anime:** the plan is billed only for a usable plan (`_bill`, declared in `credit_outcomes` as
+  `artistmsg`); the render is shots × the clip price, refused up front when the balance cannot cover every shot,
+  a failed shot refunded. A message is up to 3 shots, so Free's 3 (`anime_shots`) covers all of it — the tier buys
+  how many, never whether.
+- **`videoz.KINDS` is what the single-clip screen offers; `PLANNED_KINDS` is what only a planned piece may start.**
+  `kind_info` reads both, and `POST /videoz/ {kind: "message"}` is a 400.
+- **Not done / not known:** never run against Veo (CI has no key) — whether image-to-video holds a face across three
+  shots, and whether speech lands without a score under it, is unverified. Whether Spotify accepts an AI-rendered
+  artist message at all is theirs to say and the screen says "check the current brief"; the Wrapped deadline in the
+  brief (Nov 13) has passed and is deliberately not in the code.
