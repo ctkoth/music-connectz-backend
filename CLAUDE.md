@@ -3559,3 +3559,27 @@ is now subtracted in `attractiveness_shown_medians` and `attractiveness_stats`, 
 other reader. And a searcher who is a known minor has `attr_min` / `attr_max` ignored in `MembersView`: the range is an adult's standard to set.
 The member's own switch (`attractiveness_public`) still hides their number from everybody. Unknown age counts as adult, as everywhere else.
 `test_attractiveness_adults_only` pins all of it. Still not built, on purpose: any rating of a minor's looks, by people or AI.
+
+## Steps from Health Connect: a native screen, a token, and a number that pays nothing
+
+`apps/economy/healthsync.py`, `HealthLink` + `StepDay` (migration 0245). The Android app is a Trusted Web Activity, i.e.
+Chrome, and neither a web page nor Chrome can read a watch or Health Connect — so `android/app/src/health/` is a small
+**native** screen (`HealthLinkActivity`) compiled into the **mcz and bodiez flavors only**. SkillZ and IntelligenceZ ship none
+of it and do not declare the permission (`AndroidScopeTests` holds that). It asks for exactly one permission, `READ_STEPS`.
+
+- **Pairing, not logging in.** BodieZ shows a code (`health/pair/`, 8 characters, ten minutes, single use); the phone swaps it
+  for a long token (`health/link/`, open logged-out because the phone has no login; wrong codes are counted per connection,
+  8 per 15 minutes). Only the token's hash is stored. The phone sends days with `X-Health-Token` (`health/steps/`).
+- **Aggregate, so a phone and a watch are not double counted.** The app asks Health Connect for its per-day aggregate. A day with
+  no record is left out, never sent as 0 (not recorded is not zero steps). The server drops junk rows rather than clamping them
+  into a believable number (negative, over 200,000, or outside the last fourteen days).
+- **It pays nothing and moves nothing** — no XP, 🍥, ⚡, rating, badge, level or leaderboard. A device-reported count the server
+  cannot check is the first thing anyone farms by shaking a phone. `test_steps_are_read_by_nothing_else` fails if another module
+  names `StepDay`. Private to the member; account deletion cascades; **Unlink deletes every day** and kills the token.
+- **No weight, no reps.** No watch can sense what is on a bar. Reps and weight stay what the member logs; a future rep
+  *suggestion* would never be saved without a tap.
+- **Not compiled or run here.** There is no Android SDK in this environment, so the Kotlin and the Gradle wiring were written
+  carefully and checked only by reading and by the tests above. Build `assembleBodiezDebug` in CI and try it on a phone with
+  Health Connect before relying on it. Play will also want a Health Connect permission declaration, and the Data safety form and
+  privacy policy must name step data (the frontend's `play/bodiez/` and `public/privacy.html`).
+- The app now declares `INTERNET` in those two flavors (the native screen makes its own request); the TWA still needs none.

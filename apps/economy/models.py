@@ -8783,3 +8783,30 @@ class PaneOpen(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="pane_opens")
     app_key = models.CharField(max_length=32, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+
+class HealthLink(models.Model):
+    """A member's phone, linked so Health Connect step counts can be sent here. One per member.
+
+    The phone app holds a long random token and the server holds only its hash; the short pairing code is typed on
+    the phone once and is single-use (cleared when exchanged), so nothing a member reads off a screen is a credential
+    for longer than ten minutes."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="health_link")
+    code_hash = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    code_expires = models.DateTimeField(null=True, blank=True)
+    token_hash = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    linked_at = models.DateTimeField(null=True, blank=True)
+    last_sync_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class StepDay(models.Model):
+    """One day's step count as Health Connect reported it. Private to the member; pays nothing and moves no rating."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="step_days")
+    day = models.DateField()
+    steps = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = (("user", "day"),)
+        ordering = ["-day"]

@@ -151,3 +151,10 @@ and [`config_snippets/assetlinks_frontend.md`](../config_snippets/assetlinks_fro
 Read [GOOGLE_PLAY.md](../GOOGLE_PLAY.md). The short version of the risk: selling
 Premium/StatZ/wallet top-ups inside the Android app requires **Google Play
 Billing**, not Stripe. That's the most likely reason this app gets rejected.
+
+## Steps (Health Connect) — Music ConnectZ and BodieZ only
+
+`app/src/health/` is a native screen that reads daily steps from Health Connect and sends them to the member's account
+(`apps/economy/healthsync.py`). It is compiled into the `mcz` and `bodiez` flavors only; those two declare
+`READ_STEPS` and `INTERNET`, and SkillZ and IntelligenceZ declare neither. BodieZ opens it with
+`intent://link#Intent;scheme=mczhealth;package=<app id>;end`. API host: `-PapiUrl` (default `https://admin.musicconnectz.net`).

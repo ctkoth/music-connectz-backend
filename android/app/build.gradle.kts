@@ -26,6 +26,9 @@ val intelligencezUrl: String = (project.findProperty("intelligencezUrl") as Stri
 // or membership screens, and nothing it sells.
 //   ./gradlew bundleSkillzRelease -PskillzUrl=https://skillz.example.net
 val skillzUrl: String = (project.findProperty("skillzUrl") as String?) ?: "https://skillz.musicconnectz.net"
+// Where the steps screen sends data (the API host, not the site the TWA opens). Only the two apps that carry that
+// screen use it; the other flavors have no health code.
+val apiUrl: String = (project.findProperty("apiUrl") as String?) ?: "https://admin.musicconnectz.net"
 fun hostOf(url: String): String = url.removePrefix("https://").removePrefix("http://").trimEnd('/')
 
 android {
@@ -87,6 +90,7 @@ android {
             manifestPlaceholders["siteHost"] = hostOf(siteUrl)
             // A first install of the whole platform opens OmviardZ's guided tour.
             buildConfigField("boolean", "FIRST_LAUNCH_TOUR", "true")
+            buildConfigField("String", "API_BASE", "\"$apiUrl\"")
         }
         create("bodiez") {
             dimension = "app"
@@ -96,6 +100,7 @@ android {
             // Someone who installed a fitness tracker is not here for a tour of
             // a music platform, and the BodieZ-only shell has no tour to open.
             buildConfigField("boolean", "FIRST_LAUNCH_TOUR", "false")
+            buildConfigField("String", "API_BASE", "\"$apiUrl\"")
         }
         create("intelligencez") {
             dimension = "app"
@@ -155,6 +160,12 @@ android {
     buildFeatures {
         buildConfig = true
     }
+
+    // The steps screen (Health Connect) is compiled into these two apps only.
+    sourceSets {
+        getByName("mcz").java.srcDir("src/health/java")
+        getByName("bodiez").java.srcDir("src/health/java")
+    }
 }
 
 // Each app's asset_statements string has to name the same site that app opens.
@@ -199,4 +210,13 @@ dependencies {
     // itself needs no library: Android 12+ uses the platform attributes in
     // values-v31, older versions use the window background.
     implementation("androidx.core:core-ktx:1.13.1")
+}
+
+// Health Connect, for the steps screen. Declared per flavor so SkillZ and IntelligenceZ ship none of it.
+dependencies {
+    listOf("mczImplementation", "bodiezImplementation").forEach { cfg ->
+        add(cfg, "androidx.health.connect:connect-client:1.1.0")
+        add(cfg, "androidx.activity:activity-ktx:1.9.3")
+        add(cfg, "androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    }
 }
