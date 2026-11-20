@@ -3547,3 +3547,15 @@ sharpness and colour; the prompt forbids any comment on the person's face, body,
 `overall: None` (a number beside a face reads as a score on the face) and the caveat says so. Any age may use it for that reason. It is
 priced like any one-picture read and not charged when unreadable. It is the safe answer to "feedback on my profile photo"; rating anybody's
 looks remains adults-only, own photo, in LookZMaxZ. Never run against Google (CI has no key).
+
+## Attractiveness is a filterable ADULT metric, and the wall now covers the READ side (Corey, Nov 2026)
+
+Corey wants attractiveness as a filterable metric for artistic presentation, adults only. It already was one (`gates.py` `attract`, the
+community median on cards, VybeZ / Social ConnectZ / gated deals), and the WRITE side already refused a minor as rater or target
+(`AttractivenessRateView`, `ProfileRateView`, `FaceRateView`). The hole was the READ side: a rating row that existed for somebody who is now a
+minor (written before the wall, or before a birthday was set) was still served on their card, filterable and used to class them.
+`minor_user_ids` (one query, `profile_is_minor`: a stated teen birthday, never an unknown age, and a verified 18+ outranks a typed birthday)
+is now subtracted in `attractiveness_shown_medians` and `attractiveness_stats`, which feed the card, the gate, ThuroZ / SeXi and every
+other reader. And a searcher who is a known minor has `attr_min` / `attr_max` ignored in `MembersView`: the range is an adult's standard to set.
+The member's own switch (`attractiveness_public`) still hides their number from everybody. Unknown age counts as adult, as everywhere else.
+`test_attractiveness_adults_only` pins all of it. Still not built, on purpose: any rating of a minor's looks, by people or AI.

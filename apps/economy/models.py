@@ -1064,6 +1064,18 @@ def attractiveness_median(user):
     return _median(scores)
 
 
+def minor_user_ids(user_ids):
+    """Which of these members are KNOWN to be under 18 (`profile_is_minor`, one query). A member's looks are an
+    adult-only metric in BOTH directions: the rating endpoints refuse a minor as rater or target, and this is the READ
+    side of the same wall — a number that predates a birthday being set, or a rating written before the wall existed,
+    must never be shown, filtered on or used to class a minor."""
+    ids = list(user_ids)
+    if not ids:
+        return set()
+    return {p.user_id for p in Profile.objects.filter(user_id__in=ids).only("user_id", "birthday", "verified_18plus")
+            if profile_is_minor(p)}
+
+
 def attractiveness_shown_medians(user_ids):
     """`attractiveness_medians`, minus anyone who chose not to show theirs.
 
@@ -1075,7 +1087,7 @@ def attractiveness_shown_medians(user_ids):
     ids = list(user_ids)
     medians = attractiveness_medians(ids)
     hidden = set(Membership.objects.filter(user_id__in=ids, attractiveness_public=False)
-                 .values_list("user_id", flat=True))
+                 .values_list("user_id", flat=True)) | minor_user_ids(medians)
     return {k: v for k, v in medians.items() if k not in hidden}
 
 
@@ -1093,7 +1105,8 @@ def attractiveness_stats(user_ids):
     for uid, score in (FaceRating.objects.filter(face__owner_id__in=ids)
                        .values_list("face__owner_id", "score")):
         scores.setdefault(uid, []).append(score)
-    return {k: (_median(v), len(v)) for k, v in scores.items()}
+    minors = minor_user_ids(scores)
+    return {k: (_median(v), len(v)) for k, v in scores.items() if k not in minors}
 
 
 def attractiveness_medians(user_ids):

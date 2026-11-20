@@ -1644,10 +1644,13 @@ class MembersView(APIView):
         # All five ranges through one spec, so search and a gated post agree
         # about what "outside the range" means. Skill rating and skill price
         # were missing entirely.
+        # The attractiveness range is an ADULT's standard to set: a searcher who is a known minor has it ignored
+        # (the number is not served for minors either — `attractiveness_shown_medians`).
+        _attr = [None, None] if is_minor(request.user) else [num("attr_min"), num("attr_max")]
         gates = clean_gates({
             "rating": [num("rating_min"), num("rating_max")],
             "price": [num("price_min"), num("price_max")],
-            "attract": [num("attr_min"), num("attr_max")],
+            "attract": _attr,
             "age": [num("age_min"), num("age_max")],
             "km": [None, num("max_km")],
             # ThuroZ / SeXi: the rating gate with the number chosen once (classz.py).
