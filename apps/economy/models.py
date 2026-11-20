@@ -2327,13 +2327,33 @@ ONBOARD_REWARD_SPINAZ = 150
 ONBOARD_REWARD_ENERGY = 50
 
 
+ONBOARD_RATINGS = 3
+
+
+def onboarding_progress(user):
+    """The three things the onboarding bonus pays for, read from the rows they leave — never from the screen."""
+    return {"score": user.take_scores.exists(),
+            "post": Post.objects.filter(author=user).exists(),
+            "ratings": min(ONBOARD_RATINGS, ItemRating.objects.filter(user=user).count()),
+            "ratings_needed": ONBOARD_RATINGS}
+
+
+def onboarding_done(progress):
+    return progress["score"] and progress["post"] and progress["ratings"] >= progress["ratings_needed"]
+
+
 def complete_onboarding(user):
-    """Mark onboarding done and grant the one-time reward. Idempotent — returns
-    the amounts granted (zeros if already onboarded)."""
+    """Mark onboarding done and grant the one-time reward, only once a scored take, a post and 3 ratings exist.
+    Idempotent — returns the amounts granted (zeros if already onboarded), or `missing` when not yet earned.
+
+    It used to grant on the screen's word alone, so anybody could POST and take the bonus without doing anything."""
     from django.utils import timezone
     p = profile_for(user)
     if p.onboarded:
         return {"spinaz": 0, "energy": 0, "already": True}
+    prog = onboarding_progress(user)
+    if not onboarding_done(prog):
+        return {"spinaz": 0, "energy": 0, "already": False, "missing": prog}
     p.onboarded = True
     p.onboarded_at = timezone.now()
     p.save(update_fields=["onboarded", "onboarded_at", "updated_at"])
