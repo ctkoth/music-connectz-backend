@@ -236,3 +236,29 @@ class ExperienceBesideTheRatingTests(DeclaredSkillsBase):
         s = self.skills()["mixing"]
         self.assertIsNone(s["learned"])
         self.assertEqual(s["periods"], [])
+
+
+class WhoRatedIsStatzTests(DeclaredSkillsBase):
+    """The numbers are everybody's; naming who gave them is StatZ's (or the sample's)."""
+
+    def _rated(self):
+        self.learn("mixing")
+        post = self.make_post(["mixing"])
+        self.rate(self.fans[0], post, 8)
+        return post
+
+    def test_a_free_member_gets_the_count_and_the_lock_but_no_names(self):
+        self._rated()
+        s = self.skills()["mixing"]
+        self.assertEqual(s["count"], 1)
+        self.assertTrue(s["raters_locked"])
+        self.assertNotIn("raters", s)
+
+    def test_statz_sees_who_rated_and_on_which_post(self):
+        post = self._rated()
+        m = membership_for(self.maker)
+        m.tier = "statz"
+        m.save()
+        s = self.skills()["mixing"]
+        self.assertFalse(s["raters_locked"])
+        self.assertEqual(s["raters"], [{"username": "fan0", "score": 8, "post_id": post.id, "title": "Midnight"}])

@@ -84,6 +84,7 @@ def skills_of(user):
 
 
 WORK_PER_SKILL = 5      # how many pieces of work are named beside a skill's rating
+RATERS_PER_SKILL = 10   # named raters beside a skill (StatZ)
 WORK_SCAN = 600         # newest rating rows read in total — bounds the work one request can do
 
 DECLARED_NOTE = (
@@ -121,9 +122,13 @@ def declared_skills(user):
 
     # Which posts gave each skill its rating: one query for the rows, one for the posts.
     rows = list(SkillRating.objects.filter(subject=user, skill__in=names, item_id__startswith="post:")
-                .order_by("-created_at").values_list("skill", "item_id", "score")[:WORK_SCAN])
+                .order_by("-created_at").values_list("skill", "item_id", "score", "rater__username")[:WORK_SCAN])
     by_pair = {}
-    for skill, item_id, score in rows:
+    raters_of = {}          # skill -> [(post id, rater, score)], newest first
+    for skill, item_id, score, rater in rows:
+        _pid = item_id.split(":", 1)[1]
+        if _pid.isdigit():
+            raters_of.setdefault(skill, []).append((int(_pid), rater, score))
         pid = item_id.split(":", 1)[1]
         if pid.isdigit():
             by_pair.setdefault((skill, int(pid)), []).append(score)
@@ -141,6 +146,10 @@ def declared_skills(user):
             "count": n,
         })
 
+    # WHO rated is StatZ's (or the sample's); the numbers and counts stay everybody's. A rater is
+    # named only beside a post the owner may open, so this never names someone on a hidden post.
+    from .statz_trial import has_statz
+    show_raters = has_statz(user)
     out, claimed = [], set()
     for persona in personas:
         skills = []
@@ -185,6 +194,11 @@ def declared_skills(user):
                 "approximate": any(x.get("precision") == "year" or x.get("end_precision") == "year" for x in stints),
                 "work": pieces[:WORK_PER_SKILL],
                 "work_total": len(pieces),
+                "raters_locked": not show_raters,
+                **({"raters": [{"username": u, "score": sc, "post_id": pid, "title": posts[pid].title}
+                               for pid, u, sc in raters_of.get(name, [])
+                               if pid in posts and can_view_post(posts[pid], user)][:RATERS_PER_SKILL]}
+                   if show_raters else {}),
             })
         if skills:
             out.append({"key": persona.get("key") or persona.get("name") or "",
