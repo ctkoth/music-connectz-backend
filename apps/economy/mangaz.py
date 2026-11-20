@@ -16,7 +16,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .catalog import ai_cost
+from .catalog import IMAGE_PROMPTZ, ai_cost
 from .characterz import prompt_block
 from . import refinput
 from .gemini import _bill, _key, generate_content
@@ -118,7 +118,9 @@ class MangaPagesView(APIView):
         return Response({"pages": [page_dict(p) for p in MangaPage.objects.filter(user=request.user)[:30]],
                          "styles": STYLES, "panels_min": PANELS_MIN, "panels_max": PANELS_MAX,
                          "idea_max": IDEA_MAX, "max_characters": chars_for(request.user), "ai_label": AI_LABEL,
-                         **price(request.user)})
+                         **price(request.user),
+                         # A panel is a picture, priced as one (the script above is text, priced as a prompt).
+                         "panel_cost_cents": IMAGE_PROMPTZ})
 
     def post(self, request):
         d = request.data
@@ -242,7 +244,7 @@ class MangaPanelDrawView(APIView):
         key = _key()
         if not key:
             return Response({"detail": "MangaZ isn't switched on yet."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        cost = ai_cost("standard")
+        cost = IMAGE_PROMPTZ
         if cost and not can_afford_ai(request.user, cost):
             return Response({"detail": "Not enough PromptZ or balance for a panel.", "cost_cents": cost},
                             status=status.HTTP_402_PAYMENT_REQUIRED)
@@ -266,7 +268,7 @@ class MangaPanelDrawView(APIView):
         if not img:
             return Response({"detail": "That panel didn't come back. Nothing was charged — try again."},
                             status=status.HTTP_502_BAD_GATEWAY)
-        if _bill(request.user, "MangaZ · whole page" if whole else f"MangaZ · panel {n}") is None:
+        if _bill(request.user, "MangaZ · whole page" if whole else f"MangaZ · panel {n}", cost=IMAGE_PROMPTZ) is None:
             return Response({"detail": "Not enough PromptZ or balance for a panel."}, status=status.HTTP_402_PAYMENT_REQUIRED)
         raw = base64.b64decode(img)
         name = f"manga-{page.id}-{'page' if whole else 'p' + str(n)}-{int(time.time())}.png"

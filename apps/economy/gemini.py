@@ -25,7 +25,7 @@ from rest_framework.views import APIView
 
 from .priorities import clause as priorities_clause
 from . import imagez
-from .catalog import ai_cost
+from .catalog import IMAGE_PROMPTZ, ai_cost
 from .media import stable_media_url
 from .models import (GeneratedImage, Upload, can_afford_ai, charge_ai_usage,
                      daily_prompt_covers, daily_prompt_state, wallet_for)
@@ -228,7 +228,7 @@ def _auth(key):
     return {"x-goog-api-key": key}
 
 
-def _bill(user, note, count_daily=False, engine=None):
+def _bill(user, note, count_daily=False, engine=None, cost=None):
     """Charge the AI minimum (PromptZ→cash) and route it to the owner.
 
     Returns what the member was ACTUALLY charged, which is 0 when a free daily
@@ -247,7 +247,10 @@ def _bill(user, note, count_daily=False, engine=None):
     dearer than DAILY_PROMPT_MAX_CENTS for a typical message is not covered — Fable, today) and how much ⚡ the run
     takes (engine base × tier). None is a Gemini-only run, priced as before.
     """
-    cost = ai_cost("standard")
+    # `cost` lets a run that costs the platform more (a picture) say so; an engine prices its own run.
+    if cost is None:
+        from .catalog import engine_cost
+        cost = engine_cost(engine) if engine else ai_cost("standard")
     if not cost:
         return 0
     # Read the allowance before spending it: charge_ai_usage returns the same
@@ -370,7 +373,7 @@ class GeminiImageView(APIView):
         return Response({"images": [_image_dict(w, request) for w in works],
                          # A picture is never covered by the daily free prompts (see _bill):
                          # saying "free today" here would be a price that turns into a bill.
-                         "cost_cents": ai_cost("standard"), "free_today": False,
+                         "cost_cents": IMAGE_PROMPTZ, "free_today": False,
                          "cost_note": "Pictures aren't covered by the daily free prompts. A run that fails isn't charged.",
                          "daily_prompts": allowance, "daily_prompts_left": daily_left,
                          "configured": bool(_key()),
@@ -421,7 +424,7 @@ class GeminiImageView(APIView):
         if not key:
             return Response({"detail": "Image generation isn't configured — set GEMINI_API_KEY on the backend.", "image": None},
                             status=status.HTTP_503_SERVICE_UNAVAILABLE)
-        cost = ai_cost("standard")
+        cost = IMAGE_PROMPTZ
         if cost and not can_afford_ai(request.user, cost):
             return Response({"detail": "Not enough PromptZ / balance.", "cost_cents": cost}, status=status.HTTP_402_PAYMENT_REQUIRED)
 
@@ -488,7 +491,7 @@ class GeminiImageView(APIView):
             logger.exception("Image ConnectZ: the Gemini call failed")
             return Response({"detail": IMAGE_DOWN, "image": None}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
-        cost = _bill(request.user, f"Image ConnectZ (Gemini)")
+        cost = _bill(request.user, f"Image ConnectZ (Gemini)", cost=IMAGE_PROMPTZ)
 
         # The spend is already charged above — a storage failure past this
         # point must not look like a refusal, so it's logged, never raised.

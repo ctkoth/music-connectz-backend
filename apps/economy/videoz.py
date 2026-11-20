@@ -89,12 +89,12 @@ KINDS = {
 }
 
 
-# Corey's call: a video costs 1 PromptZ a clip (a stitched one, 1 per shot), not
-# hundreds. This is BELOW what the provider charges per clip, so every render is a
-# subsidy; VIDEO_CONNECTZ_CENTS raises it without a deploy of code.
-from .catalog import AI_TASK_PROMPTZ
+# A clip was 1 PromptZ (under a cent) against a Veo render costing very roughly $1-6, so every render was a large
+# subsidy any tier could run without limit. Corey (Nov 2026) asked for it priced near cost: VIDEO_CLIP_PROMPTZ
+# (250, about $2), still per shot for stitched and anime pieces. VIDEO_CONNECTZ_CENTS overrides it without a deploy.
+from .catalog import VIDEO_CLIP_PROMPTZ
 
-DEFAULT_PRICE = AI_TASK_PROMPTZ
+DEFAULT_PRICE = VIDEO_CLIP_PROMPTZ
 
 
 def price_cents():

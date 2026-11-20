@@ -812,6 +812,9 @@ def daily_prompt_covers(cost_cents, engine=None):
     """
     if not 0 < int(cost_cents or 0) <= DAILY_PROMPT_MAX_CENTS:
         return False
+    from .catalog import ENGINE_PROMPTZ
+    if str(engine or "").lower() in ENGINE_PROMPTZ:
+        return False          # Opus and Fable are paid at what they cost; the free prompts are for Haiku and Sonnet
     if engine:
         from .catalog import engine_typical_cents
         typical = engine_typical_cents(engine)

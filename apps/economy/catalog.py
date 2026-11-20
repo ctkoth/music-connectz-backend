@@ -517,6 +517,20 @@ PLAYLIST_RECENCY_BOOST_MULTIPLIER = 1.5 # fresh content earns 50% more
 # engines, so it is a subsidy by design; the daily prompts (PROMPT_ALLOWANCE) still come first.
 AI_TASK_PROMPTZ = 1
 
+# Corey (Nov 2026), on the margin audit: what costs the platform real money is priced near what it costs, not 1.
+# 1 PromptZ is about 0.8¢ (PROMPTZ_BONUS). The numbers are recommendations, reversible here (video also by env).
+VIDEO_CLIP_PROMPTZ = 250          # one ~8 s Veo clip: Google charges very roughly $1-6; 250 PromptZ is about $2.00
+IMAGE_PROMPTZ = 5                 # one generated picture: about 4¢ to make; 5 PromptZ is about 4¢
+# The coach's dearer engines are paid at about what one take costs on them, and the free daily prompts do not
+# cover them (Haiku and Sonnet still are). Opus ~4.8¢ a typical take, Fable ~9.6¢.
+ENGINE_PROMPTZ = {"opus": 6, "fable": 12}
+
+
+def engine_cost(engine):
+    """PromptZ for one AI run written by this engine: the engine's own price, or the standard one."""
+    return ENGINE_PROMPTZ.get(str(engine or "").lower(), AI_TASK_PROMPTZ)
+
+
 AI_MODEL_COSTS = {
     "corey-gpt": AI_TASK_PROMPTZ,
     "standard": AI_TASK_PROMPTZ,
