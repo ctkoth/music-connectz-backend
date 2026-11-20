@@ -227,3 +227,18 @@ class PluginPresetTests(TestCase):
         Membership.objects.filter(user=self.me).update(tier="statz")
         for i in range(8):
             self.assertEqual(self.save(f"Comp {i}", self.COMP).status_code, 201)
+
+
+class ProEffectsInPresetsTests(TestCase):
+    def test_a_statz_chain_keeps_every_pro_effect(self):
+        me = U.objects.create_user("statzer", password="pw12345!x")
+        c = APIClient(); c.force_authenticate(me)
+        chain = [{"type": "deess", "on": True, "params": {"freq": 6500, "threshold": -28, "ratio": 5}},
+                 {"type": "limiter", "on": True, "params": {"drive": 4, "ceiling": -1, "release": 80}},
+                 {"type": "glue", "on": True, "params": {"threshold": -18, "ratio": 3, "attack": 30, "release": 150, "makeup": 2, "mix": 60}},
+                 {"type": "widen", "on": True, "params": {"width": 130}}]
+        r = c.post("/api/economy/tonez/", {"name": "Pro vocal", "kind": "fx", "chain": chain}, format="json")
+        self.assertEqual(r.status_code, 201)
+        kept = r.data["preset"]["chain"]
+        self.assertEqual([i["type"] for i in kept], ["deess", "limiter", "glue", "widen"])
+        self.assertEqual(kept[1]["params"], {"drive": 4.0, "ceiling": -1.0, "release": 80.0})

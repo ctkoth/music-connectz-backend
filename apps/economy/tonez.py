@@ -37,6 +37,17 @@ PARAMS = {
     "reverb": ("decay", "predelay", "mix"),
     "filter": ("mode", "freq", "q"),
     "gain": ("db",),
+    # StatZ's plugin-grade effects (mirrors the `statz: true` entries of PLUGINS). A chain keeps them so a StatZ
+    # member's vocal chain survives being saved; whether a member may ADD one is the screen's gate, as it is for a
+    # track, and a preset applied without the plan is refused there, not here.
+    "saturate": ("drive", "tone", "mix"),
+    "chorus": ("rate", "depth", "mix"),
+    "deess": ("freq", "threshold", "ratio"),
+    "limiter": ("drive", "ceiling", "release"),
+    "glue": ("threshold", "ratio", "attack", "release", "makeup", "mix"),
+    "proverb": ("type", "decay", "predelay", "damp", "width", "mix"),
+    "prodelay": ("time", "sync", "feedback", "lowcut", "highcut", "mix"),
+    "widen": ("width",),
 }
 MAX_INSERTS = 8
 # An EQ's bands ride beside its params: how many is the tier's (`eq_bands`, said on the screen, applied there),
