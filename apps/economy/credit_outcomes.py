@@ -92,6 +92,14 @@ CREDIT_OUTCOMES = {
                             "which go into your session.",
         "free_way": {"label": "Suggest a balance in Mix ConnectZ's TrackZ sets levels and pans from the same measurements, free.",
                      "tab": "mixconnectz"}},
+    "imagez_rate": {
+        "resource": "promptz", "label": "ImageZ score",
+        "buys": "Your picture scored on composition, light, colour, sharpness, editing and impact — each with why and "
+                "the one change that would raise it.",
+        "outcomes": ["learnable", "understandable", "braggable"],
+        "lands_in": ["imagez"],
+        "ephemeral_reason": "The picture is not kept; what it buys is the read, shown to act on in the editor.",
+        "free_way": {"label": "Members rate your posted pictures for free, and rating theirs earns ⚡.", "tab": "postz"}},
     "coach_upgrades": {
         "resource": "promptz", "label": "Gear and settings advice",
         "buys": "Named gear and settings advice tied to the reasons in one take.",

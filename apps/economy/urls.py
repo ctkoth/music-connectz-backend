@@ -94,6 +94,7 @@ from .metricz import HoroscopeView, MetricZView, SubstanceScaleView
 from .videoz import VideoDetailView, VideoView
 from .videodevelop import VideoDevelopView
 from .imagez_cutout import ImageZCutoutView
+from .imagez_rate import ImageZRateView
 from .sharez import ShareZDetailView, ShareZView
 from .tonez import ToneZDetailView, ToneZView
 from .lilith_auto import LilithAutoView
@@ -277,6 +278,7 @@ urlpatterns = [
     path("videoz/<int:pk>/", VideoDetailView.as_view(), name="economy-videoz-detail"),
     path("videoz/develop/", VideoDevelopView.as_view(), name="economy-videoz-develop"),
     path("imagez/cutout/", ImageZCutoutView.as_view(), name="economy-imagez-cutout"),
+    path("imagez/rate/", ImageZRateView.as_view(), name="economy-imagez-rate"),
     path("ladders/", LaddersView.as_view(), name="economy-ladders"),
     path("tonez/", ToneZView.as_view(), name="economy-tonez"),
     path("tonez/<int:pk>/", ToneZDetailView.as_view(), name="economy-tonez-detail"),
