@@ -3530,3 +3530,20 @@ a query budget every page load pays).
 - Forgot-password is rate limited (3 emails per account, 20 per connection, 15 min) and a limited account answers
   exactly like a sent one, so the limit cannot enumerate accounts.
 - Production cookies are Secure and HSTS is one day with no preload (`settings.py`); raise it once the whole domain is https.
+
+## ID checks that never ended, and a profile photo judged as a photograph
+
+**Stuck checks.** `identity.refresh` used to skip any check older than two days, so one that ended while the webhook was not listening (or
+never reached it) stayed "still checking" for weeks, and a stale `processing` row also made POST answer "pending" instead of starting a new
+check. Now every open check is re-asked of Stripe whatever its age (newest five); a session Stripe no longer knows (`resource_missing`) is
+closed; a link nobody finished in `STALE_STARTED_HOURS` (48, the link's own life) is closed as abandoned; `_result` tells the three open
+states apart — `pending` (Stripe is working), `needs_you` (the member has not finished) and `stale` (a "processing" check older than
+`STALE_PROCESSING_HOURS` (3), with how long) — and only a recent processing check holds the door to a new one. A stale one is still
+refreshed, so if Stripe ever finishes it, it counts (it is deliberately NOT marked cancelled, because a cancelled row ignores a late pass).
+`StuckChecksTests` pins all six.
+
+**`imagez/rate/` with `purpose: "profile"`** judges a profile photo as a PHOTOGRAPH: `PROFILE_DIMENSIONS` are framing, light, background,
+sharpness and colour; the prompt forbids any comment on the person's face, body, weight, age, expression or looks; `clean` returns
+`overall: None` (a number beside a face reads as a score on the face) and the caveat says so. Any age may use it for that reason. It is
+priced like any one-picture read and not charged when unreadable. It is the safe answer to "feedback on my profile photo"; rating anybody's
+looks remains adults-only, own photo, in LookZMaxZ. Never run against Google (CI has no key).

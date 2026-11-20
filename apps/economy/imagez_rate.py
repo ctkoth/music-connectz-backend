@@ -40,11 +40,37 @@ DIMENSIONS = {
     "editing": {"label": "Editing ✂️", "what": "Crops, retouching, text and layers: clean, or showing the seams."},
     "impact": {"label": "Impact 🔥", "what": "Whether it stops a scroll and says something."},
 }
+# A PROFILE PHOTO is judged as a photo, for the things its maker can change in a minute: how it is framed, the light,
+# what is behind them, whether it is sharp, and whether it reads at the size it is shown. Nothing here is about the
+# person in it — not their face, body, age, expression or looks — and there is NO overall number, because one number
+# beside a face reads as a score on the face. Any age may use it for that reason.
+PROFILE_DIMENSIONS = {
+    "framing": {"label": "Framing & crop 📐", "what": "Is the subject well placed and cropped so it reads at thumbnail size, with room around it and nothing cut off awkwardly?"},
+    "light": {"label": "Lighting 💡", "what": "Is the exposure right and the light even, without harsh shadows or a blown-out window behind?"},
+    "background": {"label": "Background 🖼️", "what": "Is what is behind the subject tidy and uncluttered, and does it help rather than distract?"},
+    "sharpness": {"label": "Sharpness 🔍", "what": "Is the photo in focus where it matters, free of blur and noise?"},
+    "color": {"label": "Colour & contrast 🎨", "what": "Do the colours and contrast look natural and clear, with nothing muddy or over-filtered?"},
+}
+PROFILE_CAVEAT = ("This is feedback on the PHOTO — framing, light, background, focus and colour — and nothing about you. It never "
+                  "judges a face, body, age, expression or looks, and there is deliberately no overall score.")
 CAVEAT = ("A score of the picture's craft, from one look at it — not of anybody in it. It never rates how a person "
           "looks; that is LookZMaxZ's, for adults rating their own photo.")
 
 
-def prompt():
+def prompt(purpose=""):
+    if purpose == "profile":
+        dims = "\n".join(f"- {k}: {d['what']}" for k, d in PROFILE_DIMENSIONS.items())
+        return (
+            "You are a photo editor advising on a PROFILE PHOTO as a photograph. Score each dimension 1-10 on this scale: "
+            "1-4 is getting in the way, 5-7 is solid, 8-9 is strong, 10 is exceptional. A dimension the photo does not let "
+            "you judge is null, never guessed.\n" + dims + "\n"
+            "For each give `why` (what in THIS photo earned the number, one sentence) and `how` (the one change the maker can "
+            "make in a minute — move, crop, window, background, a setting — to raise it, one sentence). You are judging the "
+            "photograph, never the person: NEVER comment on or score anybody's face, body, weight, age, expression, "
+            "attractiveness or appearance, and never suggest changing how a person looks. Then one sentence `verdict` about "
+            "the photo and the single best `next` step.\n"
+            'Return JSON only: {"scores": {key: {"score": n|null, "why": s, "how": s}}, "verdict": s, "next": s}'
+        )
     dims = "\n".join(f"- {k}: {d['what']}" for k, d in DIMENSIONS.items())
     return (
         "You are an art director scoring one picture for its maker. Score each dimension 1-10 on this scale: "
@@ -58,12 +84,14 @@ def prompt():
     )
 
 
-def clean(raw):
-    """Only declared dimensions, scores 1-10 or None, text bounded; the overall is ours. None if nothing scored."""
+def clean(raw, purpose=""):
+    """Only declared dimensions, scores 1-10 or None, text bounded; the overall is ours. None if nothing scored.
+    A profile photo has no overall at all (see PROFILE_DIMENSIONS)."""
     if not isinstance(raw, dict):
         return None
+    profile = purpose == "profile"
     out = {}
-    for k, d in DIMENSIONS.items():
+    for k, d in (PROFILE_DIMENSIONS if profile else DIMENSIONS).items():
         r = (raw.get("scores") or {}).get(k) if isinstance(raw.get("scores"), dict) else None
         if not isinstance(r, dict):
             continue
@@ -81,9 +109,10 @@ def clean(raw):
     scored = [v["score"] for v in out.values() if v["score"] is not None]
     if not scored:
         return None
-    return {"scores": out, "overall": round(sum(scored) / len(scored), 1),
+    return {"scores": out, "overall": None if profile else round(sum(scored) / len(scored), 1),
             "verdict": " ".join(str(raw.get("verdict") or "").split())[:300],
-            "next": " ".join(str(raw.get("next") or "").split())[:240], "caveat": CAVEAT}
+            "next": " ".join(str(raw.get("next") or "").split())[:240],
+            "caveat": PROFILE_CAVEAT if profile else CAVEAT, **({"purpose": "profile"} if profile else {})}
 
 
 def _price(user):
@@ -101,9 +130,11 @@ class ImageZRateView(APIView):
 
     def get(self, request):
         return Response({"price": _price(request.user), "configured": bool(_key()), "max_mb": MAX_MB, "caveat": CAVEAT,
-                         "dimensions": [{"key": k, **d} for k, d in DIMENSIONS.items()]})
+                         "dimensions": [{"key": k, **d} for k, d in DIMENSIONS.items()],
+                         "profile": {"caveat": PROFILE_CAVEAT, "dimensions": [{"key": k, **d} for k, d in PROFILE_DIMENSIONS.items()]}})
 
     def post(self, request):
+        purpose = "profile" if str((request.data or {}).get("purpose") or "") == "profile" else ""
         mime, raw = _decode(str((request.data or {}).get("image") or ""))
         if not raw:
             return Response({"detail": "Send the picture as a PNG, JPEG or WebP. Nothing was charged."}, status=status.HTTP_400_BAD_REQUEST)
@@ -116,7 +147,7 @@ class ImageZRateView(APIView):
         if not price["free_today"] and not can_afford_ai(request.user, price["cost_cents"]):
             return Response({"detail": "Not enough PromptZ or balance for a score. Nothing was charged.", **price},
                             status=status.HTTP_402_PAYMENT_REQUIRED)
-        body = {"contents": [{"parts": [{"text": prompt()}, {"inline_data": {"mime_type": mime, "data": base64.b64encode(raw).decode()}}]}],
+        body = {"contents": [{"parts": [{"text": prompt(purpose)}, {"inline_data": {"mime_type": mime, "data": base64.b64encode(raw).decode()}}]}],
                 "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"}}
         try:
             resp, _tried = generate_content("text", body, key=_key(), timeout=90, label="ImageZ score")
@@ -129,7 +160,7 @@ class ImageZRateView(APIView):
             text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
         except (ValueError, KeyError, IndexError, TypeError):
             text = ""
-        got = clean(_parse(text))
+        got = clean(_parse(text), purpose)
         if not got:
             return Response({"detail": "The AI's answer couldn't be read — nothing was charged. Try again."}, status=status.HTTP_502_BAD_GATEWAY)
         charged = _bill(request.user, "ImageZ score", count_daily=True)

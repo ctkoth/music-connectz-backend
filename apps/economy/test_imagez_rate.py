@@ -51,3 +51,36 @@ class ViewTests(TestCase):
             r = self.c.post("/api/economy/imagez/rate/", {"image": PNG}, format="json")
         self.assertEqual(r.status_code, 502)
         self.assertEqual(Transaction.objects.filter(user=self.u, note__startswith="ImageZ score").count(), 1)
+
+
+class ProfilePhotoTests(TestCase):
+    """A profile photo is judged as a PHOTO — framing, light, background, focus, colour — never the person, with no overall."""
+
+    def test_the_dimensions_are_about_the_photograph_and_none_is_about_the_person(self):
+        from apps.economy.imagez_rate import PROFILE_DIMENSIONS
+        self.assertEqual(set(PROFILE_DIMENSIONS), {"framing", "light", "background", "sharpness", "color"})
+        for bad in ("face", "attract", "body", "skin", "expression", "weight", "age"):
+            self.assertFalse(any(bad in (k + d["what"]).lower() and "age" != bad for k, d in PROFILE_DIMENSIONS.items()), bad)
+
+    def test_the_profile_prompt_forbids_judging_the_person(self):
+        from apps.economy.imagez_rate import prompt
+        p = prompt("profile").lower()
+        for needle in ("never the person", "attractiveness", "expression", "age"):
+            self.assertIn(needle, p)
+
+    def test_there_is_no_overall_number_and_the_caveat_says_so(self):
+        from apps.economy.imagez_rate import clean
+        raw = {"scores": {"framing": {"score": 8, "why": "Centred", "how": "Crop tighter"},
+                          "light": {"score": 6, "why": "Flat", "how": "Face the window"},
+                          "face": {"score": 9, "why": "x", "how": "y"}}, "verdict": "Clear", "next": "Crop"}
+        got = clean(raw, "profile")
+        self.assertIsNone(got["overall"])
+        self.assertEqual(set(got["scores"]), {"framing", "light"})     # an undeclared key (face) is dropped
+        self.assertEqual(got["purpose"], "profile")
+        self.assertIn("nothing about you", got["caveat"])
+
+    def test_a_normal_picture_still_gets_its_overall(self):
+        from apps.economy.imagez_rate import clean
+        got = clean({"scores": {"composition": {"score": 8, "why": "a", "how": "b"}}}, "")
+        self.assertEqual(got["overall"], 8.0)
+        self.assertNotIn("purpose", got)
