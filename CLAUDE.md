@@ -3583,3 +3583,28 @@ of it and do not declare the permission (`AndroidScopeTests` holds that). It ask
   Health Connect before relying on it. Play will also want a Health Connect permission declaration, and the Data safety form and
   privacy policy must name step data (the frontend's `play/bodiez/` and `public/privacy.html`).
 - The app now declares `INTERNET` in those two flavors (the native screen makes its own request); the TWA still needs none.
+
+## The take analyser's memory grew with the take, and Render restarted for it (Nov 2026)
+
+Render reported `music-connectz-backend` over its memory limit and auto-restarted it (Oct 18 and Nov 20 —
+a recurrence, so a cause and not a spike). `GET /takes/<id>/analysis/` runs `take_analyzer`, and it was
+unbounded three ways, all measured before the fix (synthetic takes, peak above the bare process):
+
+- **`pyin` over the whole take** — ~830MB for 3 minutes, ~1.8GB for 10. `pyin` allocates per FRAME, so
+  length is the cost; the file's own sample rate multiplies it. It runs in `CHUNK_SECONDS` (30) slices now,
+  timestamps offset back onto the take's clock.
+- **`beat_track` over the whole envelope** — +846MB for 5 minutes, to produce ONE number (the tempo). It is
+  given a minute from the middle (`TEMPO_WINDOW_SECONDS`); a take under a minute is passed whole, as before.
+  The onset envelope is built in slices too (`_onset_envelope`, identical to the whole-take curve, tested).
+- **No ceiling and no single-flight.** A row stayed "pending" while it ran, so each poll from each open tab
+  started its own copy. One analysis runs at a time per worker (`_SLOT`) and a waiter re-reads the row.
+
+`MAX_ANALYZE_SECONDS` (300, `TAKE_ANALYSIS_MAX_SECONDS`) bounds what is read, and the result SAYS so:
+`timing_issues.truncated` / `seconds_analyzed` — a score for the first five minutes must not read as a
+score for the take. A five-minute take now peaks ~560MB total against ~2.5GB for ten before.
+
+What this does NOT settle: the instance's size. Two workers x four threads plus librosa/numpy/modal/boto3
+imports is a fixed floor per worker; if Render's metrics show the baseline near the limit, the answer is a
+bigger instance, not more code. `--max-requests 500` already recycles a leaking worker. Also not bounded:
+`videoz` holds a whole downloaded video in memory (`r.content`) and the coach's inline path base64s up to
+14MB — both small beside this, both worth streaming if the metrics point at them.

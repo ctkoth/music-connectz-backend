@@ -427,3 +427,122 @@ class Endpoint(TestCase):
         self.assertEqual(TakeAnalysis.objects.filter(upload=self.up).count(), 1)
         self.assertEqual(TakeAnalysis.objects.get(upload=self.up).analysis_status,
                          stamp)
+
+
+class MemoryIsBounded(TestCase):
+    """The analysis must not grow with the length of the take.
+
+    Measured before the fix: `pyin` over a whole take peaked ~830MB above the
+    bare process for 3 minutes and ~1.8GB for ten; `beat_track` added another
+    ~850MB for five. The endpoint is a GET any open tab can repeat, so a few
+    members opening their history pushed a Render instance over its memory
+    limit and it restarted. These tests pin the shape of the fix, not the
+    megabytes (those depend on the host): slices that agree with the whole,
+    a cap that is said out loud, and one analysis at a time.
+    """
+
+    def setUp(self):
+        if not take_analyzer.HAS_LIBROSA:
+            self.skipTest("librosa not installed")
+
+    def _tones(self, freqs, secs, sr=22050):
+        import numpy as np
+        parts = [0.5 * np.sin(2 * np.pi * f * np.linspace(0, secs, int(sr * secs), endpoint=False))
+                 for f in freqs]
+        return np.concatenate(parts).astype("float32"), sr
+
+    def test_slicing_pyin_hears_the_same_notes_on_the_takes_own_clock(self):
+        y, sr = self._tones([440.0, 330.0], secs=4.0)
+        whole = take_analyzer.detect_pitch_contour(y, sr)
+        old = take_analyzer.CHUNK_SECONDS
+        take_analyzer.CHUNK_SECONDS = 2.0          # forces several slices
+        try:
+            sliced = take_analyzer.detect_pitch_contour(y, sr)
+        finally:
+            take_analyzer.CHUNK_SECONDS = old
+        from collections import Counter
+
+        def held(rows):                            # notes that fill the take, not transition flicker
+            return {n for n, c in Counter(r["note"] for r in rows).items() if c >= 20}
+        self.assertEqual(held(whole), held(sliced))
+        self.assertEqual(held(sliced), {"A4", "E4"})
+        stamps = [r["timestamp"] for r in sliced]
+        self.assertEqual(stamps, sorted(stamps), "timestamps went backwards across a slice")
+        self.assertGreater(max(stamps), 7.0, "later slices were not offset onto the take's clock")
+        # the pitch tracker restarts at a boundary: a frame or two may differ, no more
+        self.assertLess(abs(len(whole) - len(sliced)), 6)
+
+    def test_the_sliced_onset_curve_is_the_whole_takes_curve(self):
+        import numpy as np
+        rng = np.random.default_rng(3)
+        sr = 22050
+        n = sr * 20
+        t = np.arange(n) / sr
+        y = (0.3 * np.sin(2 * np.pi * 330 * t) * (np.sin(2 * np.pi * 2.3 * t) > 0)
+             + 0.02 * rng.standard_normal(n)).astype("float32")
+        whole = take_analyzer.librosa.onset.onset_strength(y=y, sr=sr, hop_length=512)
+        old = take_analyzer.CHUNK_SECONDS
+        take_analyzer.CHUNK_SECONDS = 3.0
+        try:
+            sliced = take_analyzer._onset_envelope(y, sr, 512)
+        finally:
+            take_analyzer.CHUNK_SECONDS = old
+        self.assertEqual(whole.shape, sliced.shape)
+        self.assertLess(float(np.abs(whole - sliced).max()), 1e-4)
+
+    def test_a_take_over_the_cap_says_it_was_cut_short(self):
+        import io
+        import soundfile as sf
+        y, sr = self._tones([440.0], secs=6.0)
+        buf = io.BytesIO()
+        sf.write(buf, y, sr, format="WAV")
+        user = User.objects.create_user(username="long", password="pw")
+        up = _upload(user, body=buf.getvalue())
+        old = take_analyzer.MAX_ANALYZE_SECONDS
+        take_analyzer.MAX_ANALYZE_SECONDS = 3.0
+        try:
+            a = take_analyzer.analyze_take_audio(up.id)
+        finally:
+            take_analyzer.MAX_ANALYZE_SECONDS = old
+        self.assertEqual(a.analysis_status, "done")
+        self.assertTrue(a.timing_issues["truncated"])
+        self.assertLessEqual(a.timing_issues["seconds_analyzed"], 3.1)
+
+    def test_a_take_under_the_cap_is_not_marked_cut_short(self):
+        import io
+        import soundfile as sf
+        y, sr = self._tones([440.0], secs=2.0)
+        buf = io.BytesIO()
+        sf.write(buf, y, sr, format="WAV")
+        user = User.objects.create_user(username="short", password="pw")
+        a = take_analyzer.analyze_take_audio(_upload(user, body=buf.getvalue()).id)
+        self.assertEqual(a.analysis_status, "done")
+        self.assertFalse(a.timing_issues["truncated"])
+
+    def test_a_second_asker_does_not_redo_a_finished_analysis(self):
+        """The row stayed 'pending' while it ran, so every poll started its own."""
+        user = User.objects.create_user(username="twice", password="pw")
+        up = _upload(user)
+        first = take_analyzer.analyze_take_audio(up.id)       # fails on junk bytes: a final state
+        self.assertIn(first.analysis_status, ("done", "failed"))
+        calls = []
+        real = take_analyzer._load_audio
+        take_analyzer._load_audio = lambda u: calls.append(1) or real(u)
+        try:
+            # a caller that saw "pending" before the first finished and arrives after it
+            TakeAnalysis.objects.filter(pk=first.pk).update(analysis_status="pending")
+            stale = TakeAnalysis.objects.get(pk=first.pk)
+            TakeAnalysis.objects.filter(pk=first.pk).update(analysis_status=first.analysis_status)
+            take_analyzer.analyze_take_audio(up.id)
+        finally:
+            take_analyzer._load_audio = real
+        self.assertEqual(calls, [], "a finished analysis was run again")
+        self.assertIsNotNone(stale)
+
+    def test_one_analysis_at_a_time_per_worker(self):
+        self.assertTrue(take_analyzer._SLOT.acquire(blocking=False))
+        try:
+            self.assertFalse(take_analyzer._SLOT.acquire(blocking=False),
+                             "a second analysis could start while one was running")
+        finally:
+            take_analyzer._SLOT.release()

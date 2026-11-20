@@ -21,6 +21,8 @@ Two things here are load-bearing and neither is decoration:
   moved, not because the silence did.
 """
 import math
+import os
+import threading
 
 try:
     import librosa
@@ -41,6 +43,24 @@ from .models import TakeAnalysis, Upload
 # The weak notes and the accuracy are what a member reads; the contour is kept
 # only as a bounded sample so a future screen can draw it.
 MAX_STORED_NOTES = 400
+
+# What one analysis may hold in memory. Measured, not guessed: `pyin` builds a
+# probability matrix per FRAME, so its peak grows with the length of the take —
+# a 3-minute take at 44.1kHz peaked ~830MB over the bare process, ten minutes
+# ~1.8GB, and the file's own sample rate multiplies it. Nothing capped any of
+# it, and the endpoint is a GET that any open tab can repeat, so a few members
+# looking at their history was enough to push a Render instance over its limit
+# (it restarted; that is the "exceeded its memory limit" notice).
+#
+# So: at most MAX_ANALYZE_SECONDS of the take is read (and the result SAYS so —
+# a score for the first five minutes must not read as a score for the take),
+# `pyin` runs CHUNK_SECONDS at a time so its peak stops depending on the take's
+# length, and one analysis runs at a time per worker (_SLOT).
+MAX_ANALYZE_SECONDS = float(os.environ.get("TAKE_ANALYSIS_MAX_SECONDS", "300"))
+CHUNK_SECONDS = 30
+SLOT_WAIT_SECONDS = 60
+TEMPO_WINDOW_SECONDS = 60
+_SLOT = threading.BoundedSemaphore(1)
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 A4_FREQ = 440.0
@@ -87,29 +107,46 @@ def analyze_take_audio(upload_id):
         analysis.save(update_fields=["analysis_status", "error_message"])
         return analysis
 
+    # One at a time per worker. The row used to stay "pending" while it ran, so
+    # every poll from every open tab saw "not done" and started its own copy of
+    # a ~1GB computation. Whoever waited re-reads the row: if the one ahead of
+    # it finished this take, that is the answer and there is nothing to redo.
+    if not _SLOT.acquire(timeout=SLOT_WAIT_SECONDS):
+        return analysis                        # still "pending": ask again later
     try:
-        y, sr = _load_audio(upload)
+        analysis.refresh_from_db()
+        if analysis.analysis_status in ("done", "failed"):
+            return analysis
+        try:
+            y, sr = _load_audio(upload)
+            seconds = len(y) / float(sr) if sr else 0.0
 
-        voiced = detect_pitch_contour(y, sr)
-        analysis.weak_notes = identify_weak_notes(voiced)
-        analysis.timing_issues = detect_timing_issues(y, sr)
-        events = note_events(voiced)
-        analysis.overall_pitch_accuracy = calculate_pitch_accuracy(voiced)
-        # The count travels with the score so the member can check it, and so
-        # a null accuracy can say "4 notes — sing a bit more" rather than
-        # leaving a blank nobody can act on.
-        analysis.timing_issues = dict(analysis.timing_issues or {},
-                                      notes_counted=len(events),
-                                      notes_needed=MIN_NOTES_FOR_ACCURACY)
-        analysis.detected_notes = _sampled(voiced, MAX_STORED_NOTES)
-        analysis.analysis_status = "done"
-        analysis.error_message = ""
-        analysis.analyzed_at = timezone.now()
-        analysis.save()
-    except Exception as e:
-        analysis.analysis_status = "failed"
-        analysis.error_message = _why(e)
-        analysis.save(update_fields=["analysis_status", "error_message"])
+            voiced = detect_pitch_contour(y, sr)
+            analysis.weak_notes = identify_weak_notes(voiced)
+            analysis.timing_issues = detect_timing_issues(y, sr)
+            events = note_events(voiced)
+            analysis.overall_pitch_accuracy = calculate_pitch_accuracy(voiced)
+            # The count travels with the score so the member can check it, and so
+            # a null accuracy can say "4 notes — sing a bit more" rather than
+            # leaving a blank nobody can act on. `truncated` says the take was
+            # longer than we read: the score is for the part we heard.
+            analysis.timing_issues = dict(
+                analysis.timing_issues or {},
+                notes_counted=len(events),
+                notes_needed=MIN_NOTES_FOR_ACCURACY,
+                seconds_analyzed=round(seconds, 1),
+                truncated=seconds >= MAX_ANALYZE_SECONDS - 0.5)
+            analysis.detected_notes = _sampled(voiced, MAX_STORED_NOTES)
+            analysis.analysis_status = "done"
+            analysis.error_message = ""
+            analysis.analyzed_at = timezone.now()
+            analysis.save()
+        except Exception as e:
+            analysis.analysis_status = "failed"
+            analysis.error_message = _why(e)
+            analysis.save(update_fields=["analysis_status", "error_message"])
+    finally:
+        _SLOT.release()
 
     return analysis
 
@@ -142,7 +179,8 @@ def _load_audio(upload):
     import tempfile
 
     try:
-        return librosa.load(upload.file.path, sr=None, mono=True)
+        return librosa.load(upload.file.path, sr=None, mono=True,
+                            duration=MAX_ANALYZE_SECONDS)
     except (NotImplementedError, AttributeError, ValueError):
         pass
 
@@ -156,7 +194,8 @@ def _load_audio(upload):
         finally:
             upload.file.close()
         tmp.close()
-        return librosa.load(tmp.name, sr=None, mono=True)
+        return librosa.load(tmp.name, sr=None, mono=True,
+                            duration=MAX_ANALYZE_SECONDS)
     finally:
         try:
             os.unlink(tmp.name)
@@ -170,21 +209,31 @@ def detect_pitch_contour(y, sr, hop_length=512, fmin=65, fmax=1200):
     `pyin` is slower than `yin` and returns what `yin` cannot: whether a frame
     is a note at all. Everything downstream depends on that distinction.
     """
-    f0, voiced_flag, _ = librosa.pyin(
-        y, fmin=fmin, fmax=fmax, sr=sr, hop_length=hop_length)
-    times = librosa.times_like(f0, sr=sr, hop_length=hop_length)
-
+    # Chunked: pyin's working set is per frame, so one pass over a long take is
+    # what ran the process out of memory. Each slice is independent (the pitch
+    # tracker restarts at a boundary, which costs at most a frame) and the
+    # timestamps are offset back onto the take's own clock.
     out = []
-    for t, freq, is_voiced in zip(times, f0, voiced_flag):
-        if not is_voiced or freq is None or not np.isfinite(freq) or freq <= 0:
-            continue
-        note_name, cents_off = freq_to_note(freq)
-        out.append({
-            "note": note_name,
-            "freq": float(freq),
-            "cents_off": cents_off,
-            "timestamp": round(float(t), 3),
-        })
+    step = int(CHUNK_SECONDS * sr)
+    # A multiple of the hop, so every slice's frames line up with the whole take's.
+    step = max(hop_length, (step // hop_length) * hop_length)
+    for start in range(0, len(y), step):
+        piece = y[start:start + step]
+        if len(piece) < 2048:                  # too short to hold one frame
+            break
+        f0, voiced_flag, _ = librosa.pyin(
+            piece, fmin=fmin, fmax=fmax, sr=sr, hop_length=hop_length)
+        times = librosa.times_like(f0, sr=sr, hop_length=hop_length) + start / float(sr)
+        for t, freq, is_voiced in zip(times, f0, voiced_flag):
+            if not is_voiced or freq is None or not np.isfinite(freq) or freq <= 0:
+                continue
+            note_name, cents_off = freq_to_note(freq)
+            out.append({
+                "note": note_name,
+                "freq": float(freq),
+                "cents_off": cents_off,
+                "timestamp": round(float(t), 3),
+            })
     return out
 
 
@@ -289,6 +338,35 @@ def note_events(rows, min_frames=3):
     return out
 
 
+def _onset_envelope(y, sr, hop_length=512):
+    """`librosa.onset.onset_strength`, one slice at a time.
+
+    The envelope of a whole take is a full-length STFT underneath (+745MB for
+    five minutes, measured), and it is only read as a 1-D curve afterwards. Each
+    slice carries `PAD` samples of the audio either side so its edge frames see
+    what the whole-take computation would have, then keeps only its own frames:
+    the result is the same curve, to rounding, with a peak that no longer grows
+    with the take.
+    """
+    pad = 8 * hop_length                       # well past the STFT window and the lag
+    step = max(hop_length, (int(CHUNK_SECONDS * sr) // hop_length) * hop_length)
+    n = len(y)
+    if n <= step + 2 * pad:
+        return librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+    total = n // hop_length + 1                # frames in the whole-take curve
+    out = []
+    for a in range(0, n, step):
+        last = a + step >= n
+        i0 = a // hop_length
+        i1 = total if last else (a + step) // hop_length
+        s0 = max(0, a - pad)                   # a multiple of the hop either way
+        e0 = n if last else min(n, a + step + pad)
+        env = librosa.onset.onset_strength(y=y[s0:e0], sr=sr, hop_length=hop_length)
+        off = s0 // hop_length
+        out.append(env[i0 - off:i1 - off])
+    return np.concatenate(out)
+
+
 def detect_timing_issues(y, sr, hop_length=512):
     """Onsets that land early or late against the take's OWN pulse.
 
@@ -313,15 +391,23 @@ def detect_timing_issues(y, sr, hop_length=512):
     quiet = {"rushing_count": 0, "dragging_count": 0, "tempo_bpm": None,
              "onsets": 0, "pulse": False, "detail": ""}
     try:
-        env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+        env = _onset_envelope(y, sr, hop_length)
         onsets = librosa.onset.onset_detect(onset_envelope=env, sr=sr,
                                             hop_length=hop_length)
         if len(onsets) < 4:
             return quiet
 
         try:
+            # Only the tempo NUMBER is read from beat_track, and its tempogram
+            # over a whole take was the single largest allocation in the
+            # analysis (+846MB for five minutes, measured). A minute from the
+            # middle of the take says the same BPM; a take shorter than that
+            # is passed whole, exactly as before.
+            span = int(TEMPO_WINDOW_SECONDS * sr / hop_length)
+            mid = max(0, (len(env) - span) // 2)
             tempo = float(np.atleast_1d(librosa.beat.beat_track(
-                onset_envelope=env, sr=sr, hop_length=hop_length)[0])[0])
+                onset_envelope=env[mid:mid + span], sr=sr,
+                hop_length=hop_length)[0])[0])
         except Exception:
             tempo = 0.0
 
