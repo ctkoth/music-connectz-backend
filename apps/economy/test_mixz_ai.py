@@ -60,7 +60,7 @@ class ListenTests(TestCase):
 
     def test_get_states_the_price_and_the_free_presets(self):
         d = self.c.get("/api/economy/mixz/ai/").data
-        self.assertEqual(len(d["genres"]), len(M.GENRES))
+        self.assertEqual(len([g for g in d["genres"] if g["group"] == "Genre"]), len(M.GENRES))
         self.assertIn("cost_cents", d["price"]); self.assertIn("energy", d["price"])
         self.assertIn("not charged", d["note"])
 
@@ -85,3 +85,35 @@ class ListenTests(TestCase):
         with mock.patch.object(M, "generate_content") as g:
             r = self.c.post("/api/economy/mixz/ai/", {"clip": SimpleUploadedFile("x.exe", b"MZ", content_type="application/octet-stream")}, format="multipart")
         self.assertEqual(r.status_code, 400); g.assert_not_called()
+
+
+class MastersByCoachListTests(TestCase):
+    """Masters by rap style and singing range are keyed by the coaches' own slugs, and are not genres the AI may pick."""
+
+    def test_every_rap_style_and_every_range_has_a_master(self):
+        from apps.economy.instruments import RAP_STYLES, VOCAL_RANGES
+        self.assertEqual(set(M.RAP_MASTERS), {k for k, _ in RAP_STYLES})
+        self.assertEqual(set(M.RANGE_MASTERS), {k for k, _ in VOCAL_RANGES})
+
+    def test_they_are_served_in_their_own_groups_and_stay_out_of_the_ais_choices(self):
+        groups = {}
+        for g in M.genres_payload():
+            groups.setdefault(g["group"], []).append(g["key"])
+        self.assertEqual(set(groups), {"Genre", "Rap style", "Singing range"})
+        self.assertEqual(tuple(groups["Genre"]), M.GENRE_KEYS)
+        self.assertTrue(all(k.startswith("rap:") for k in groups["Rap style"]))
+        self.assertTrue(all(k not in M.GENRE_KEYS for k in groups["Singing range"]))
+
+    def test_a_low_voice_gets_a_bigger_centre_lift_than_a_high_one_and_a_high_one_an_eased_top(self):
+        r = M.RANGE_MASTERS
+        self.assertGreater(r["bass"][2]["vocal"], r["soprano"][2]["vocal"])
+        self.assertLess(r["soprano"][2]["trims"]["high"], 0)
+
+    def test_every_setting_is_one_the_engine_reads(self):
+        from apps.economy.mixz import clean_settings
+        for table in (M.RAP_MASTERS, M.RANGE_MASTERS):
+            for k, (_, _, s, _) in table.items():
+                self.assertIn(s["style"], M.STYLES, k)
+                self.assertIn(s["intensity"], M.INTENSITIES, k)
+                self.assertIn(s["target"], M.TARGETS, k)
+                self.assertEqual(clean_settings(s).get("vocal", s.get("vocal")), s.get("vocal"), k)
