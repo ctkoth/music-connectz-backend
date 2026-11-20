@@ -93,6 +93,11 @@ FEATURES = [
     # Mix check: headroom staging, frequency-clash dips and ducking the beat under the vocal, measured on the
     # member's device (client-side like daw_align); what a sample applied stays in the session.
     {"key": "daw_mixcheck", "label": "Mix check in every DAW: headroom, frequency clashes, ducking", "tab": "arsenal", "target": "daw-mixcheck"},
+    # The plugin-grade track effects (saturation, chorus, de-esser, limiter, glue compressor, pro reverb, pro delay,
+    # widener) and autotune, in every DAW (Corey: StatZ effects that compete with VSTs). Built on the member's device;
+    # one already on a track keeps playing after a lapse, and a tuned take is the member's.
+    {"key": "daw_pro_fx", "label": "Pro track effects in every DAW: saturation, chorus, de-esser, limiter, glue, pro reverb & delay, widener", "tab": "arsenal", "target": "daw-mix"},
+    {"key": "daw_autotune", "label": "Autotune: snap a voice to the key, hard or natural", "tab": "arsenal", "target": "daw-autotune"},
     # Auto-accepting challenges is an automation (Corey: every automation is StatZ's). Read when a
     # challenge arrives, so it stops the moment StatZ or the sample does; the setting itself is kept.
     {"key": "challenge_auto_accept", "label": "Auto-accept challenges that clear your filters", "tab": "battlez", "target": "challengez-filters"},
@@ -130,6 +135,8 @@ DRIVERS = [
     {"key": "daw_stage", "sampled": True, "modules": ["mixz_stage"]},
     {"key": "daw_align", "sampled": True, "modules": []},
     {"key": "daw_mixcheck", "sampled": True, "modules": []},
+    {"key": "daw_pro_fx", "sampled": True, "modules": []},
+    {"key": "daw_autotune", "sampled": True, "modules": []},
     {"key": "challenge_auto_accept", "sampled": True, "modules": ["callouts"]},
     {"key": "lilith_auto", "sampled": True, "modules": ["lilith_auto"]},
     {"key": "instrumental_mix", "sampled": False, "modules": ["instrumentalz"],
