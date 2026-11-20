@@ -3492,3 +3492,41 @@ So a Premium member coaching on Opus with all 7 free prompts a day costs ~$10/mo
 Fable take loses ~8-9c. **Recommendation, not applied:** bill Opus and Fable takes on their real usage
 (`ai_run_charge_cents`, which agent runs already use) and state that estimate before the press. Not run against Anthropic: CI
 has no key; `tools/coach_think_live_check.sh` can.
+
+## Pricing what costs real money near its cost (Corey, Nov 2026 — the margin audit)
+
+Membership is profitable at normal use; the losses were three places priced far under cost. Corey said "do 1 and 2,
+your numbers", so these are recommendations he approved, reversible in `catalog.py`:
+
+- **A video clip is `VIDEO_CLIP_PROMPTZ` (250, about $2)**, per shot for stitched and Anime ConnectZ pieces. It was 1
+  PromptZ (~0.8¢) against a Veo render costing very roughly $1-6, so any tier with bought PromptZ could cost hundreds.
+  `VIDEO_CONNECTZ_CENTS` still overrides it without a deploy. Check Google's bill before moving it.
+- **A generated picture is `IMAGE_PROMPTZ` (5, ~4¢)**: Image ConnectZ and MangaZ panels (`_bill(cost=...)`); a MangaZ
+  script stays a prompt. ImageZ cut-out is already metered on real tokens.
+- **Opus and Fable coach takes cost `ENGINE_PROMPTZ` (6 and 12) and the free daily prompts never cover them**
+  (`daily_prompt_covers` refuses them; Haiku and Sonnet stay covered). Premium on Opus every day was ~$10/mo of model
+  fees against $6.50 kept. `crosspost.coach_price` and the coach GET read `engine_cost`, so the price is on the button.
+- **Not touched, on purpose:** the tier ladders (3/6/unlimited), the daily prompts, $7/$60, StatZ unlimited characters.
+  They are not where the money goes. Still open: StatZ storage (100 GB) on Render's disk costs ~$25/mo if filled; a
+  bucket (R2) is the fix and needs Corey's account.
+
+## The onboarding bonus pays for rows, not for the screen's word
+
+`complete_onboarding` grants the +150 🍥 +50 ⚡ only when `onboarding_progress` finds a scored take, a post and
+`ONBOARD_RATINGS` (3) ratings given; otherwise the view answers 409 with what is left. It used to grant whenever the
+client POSTed. Members who already claimed keep it. The GET serves `progress` and `first_take` (not on `/me`, which has
+a query budget every page load pays).
+
+## Small things worth knowing
+
+- `public/browse/` (`PublicBrowseView`): logged-out browse of PUBLIC posts, newest first, never a known minor's, no
+  member search. The "by link, not by browse" rule at the top of `publicz.py` is superseded by Corey's ask, narrowly.
+- `mixz/stage/`: StatZ gain staging + stereo field from measurements and a brief; no audio sent; bass/drums held centre.
+- `imagez/rate/`: a picture's craft scored with why and how. **It never rates anybody's looks**, at any age — Corey asked
+  for attractiveness for every age including teens and it was refused (harm, and the Families-policy commitment).
+  LookZMaxZ stays adults-only, own photo. Do not add a looks dimension here.
+- `glow_colors` (3/6/unlimited) ladders the neon colour picker; `daw_stage`, `daw_align`, `daw_mixcheck` are sampled
+  StatZ features (client-side gates).
+- Forgot-password is rate limited (3 emails per account, 20 per connection, 15 min) and a limited account answers
+  exactly like a sent one, so the limit cannot enumerate accounts.
+- Production cookies are Secure and HSTS is one day with no preload (`settings.py`); raise it once the whole domain is https.
