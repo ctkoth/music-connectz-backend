@@ -51,7 +51,7 @@ FEATURES = [
     # ViewZ: who viewed a post by name and every visit as a track on a clock, with what
     # each viewer did. It is a READ of what already happened, so it switches off cleanly.
     {"key": "viewz_tracks", "label": "Who viewed your posts, as DAW tracks", "tab": "viewz", "target": "viewz-tracks"},
-    {"key": "skill_raters", "label": "Who rated each of your skills, and on which post", "tab": "personaz", "target": ""},
+    {"key": "skill_raters", "label": "Who rated each of your skills, and on which post", "tab": "postz", "target": "skills-used"},
     # VideoZ: a photo's mouth moving with a voice. It runs on the member's device and
     # spends nothing of ours, so the gate is client-side (like rest_alerts) and a
     # video exported during the sample is the member's, like a routine the Coach paired.

@@ -5,6 +5,7 @@ from .directz_app import (DirectZCopyrightView, DirectZWorksView,
                           DirectZRateView)
 from .media import MediaFileView
 from .uploadcheck import UploadCheckView
+from .uploadrestore import UploadRestoreView
 from .questz import QuestBoardView, QuestClaimView
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
@@ -429,6 +430,7 @@ urlpatterns = [
     path("uploads/", UploadsView.as_view(), name="economy-uploads"),
     path("uploads/check/", UploadCheckView.as_view(), name="economy-uploads-check"),
     path("uploads/<int:pk>/", UploadDetailView.as_view(), name="economy-upload-detail"),
+    path("uploads/<int:pk>/restore/", UploadRestoreView.as_view(), name="economy-upload-restore"),
     # The address an upload is HANDED OUT under, and the only one anything
     # stores. Resolved to wherever the bytes are on every request, so a signed
     # bucket URL is minted fresh instead of being frozen into a post that then
