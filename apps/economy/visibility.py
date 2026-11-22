@@ -79,6 +79,11 @@ DEFAULTS = {
     # private takes you off every list, though you still see your own standing.
     "superfan": MEMBER,
 
+    # The best score each AI coach has given the member (skillzhub.best_scores), shown on their profile.
+    # Members by default — a score is what the profile is for, and the same number is already public on any
+    # post the member chose to share the read of — and private takes it off every card but their own.
+    "coach_best": MEMBER,
+
     # What a member's gear and clothes are WORTH (InVenTorieZ). Members only by
     # default, never the logged-out page: a price list beside "kept at home" is a
     # shopping list for a burglar, and the inventory itself is already public.

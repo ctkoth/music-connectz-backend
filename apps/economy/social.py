@@ -696,6 +696,7 @@ def _profile_card(p, request=None, badges=None, audience=None, batched=None):
 
 
 def _profile_full(p, request, recheck=False):
+    from .skillzhub import best_scores
     """The whole profile. `recheck` re-runs the badge checks first.
 
     Opening your own ProfileZ is the moment to find out you earned something,
@@ -737,6 +738,8 @@ def _profile_full(p, request, recheck=False):
         # Cross-pollination: the badges are shown here and changed in BadgeZ,
         # so the card carries the way there.
         "badges_open_in": "badgez",
+        # The best score each coach has given them; redacted below unless their setting lets this viewer see it.
+        "coach_best": best_scores(p.user),
     })
     # The keys added just above (substances, birthday, location) went on AFTER
     # `_profile_card` ran `redact`, so for anybody who was not the owner they
