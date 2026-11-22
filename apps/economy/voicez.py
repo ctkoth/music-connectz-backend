@@ -108,14 +108,160 @@ _OPTS = {d[0]: [o[0] for o in d[4]] for d in _D}
 _LABEL = {d[0]: d[1] for d in _D}
 
 
+# The voice paradigm (Corey's eight sections), made definable. Each section is a hard rule or a binary
+# choice, so each is a switch or a three-way choice and never free text: a free-text rule is a second place a
+# prompt can be injected, and these lines are ours. Everything defaults OFF, so no voice that existed before
+# this changes by a word. A section a member turns on is stated to the model in the paradigm's own words.
+# group key -> (label, [(key, label, question, result-for-the-form, prompt-line)])
+_PG = [
+    ("principle", "0 · Generating principle", [
+        ("principle", "Cut what isn't true or building", "Is every sentence the truth or a brick?",
+         "Every sentence is the actual truth of the thing or a brick in something being built. Otherwise it goes.",
+         "GENERATING PRINCIPLE: every sentence is either the actual truth of the thing or a brick in something being built. "
+         "If it is neither, cut it. Every other rule here is downstream of this one. When a rule conflicts with a "
+         "specific request, follow the request, but keep this principle."),
+    ]),
+    ("stance", "1 · Stance — what gets said", [
+        ("values_first", "Values before mechanism", "Why it matters, then how it works?",
+         "Says why it matters first, then how it works.",
+         "STANCE: values before mechanism. Say why it matters, then how it works."),
+        ("transparency", "Radical transparency", "Names the real constraint, cost or failure?",
+         "Names the real constraint, cost or failure. No image management.",
+         "STANCE: radical transparency. Name the real constraint, cost or failure. No image management."),
+        ("legacy", "Legacy framing", "Is the horizon years?",
+         "Default horizon is years, not this week.",
+         "STANCE: legacy framing. The default horizon is years."),
+        ("real_stakes", "Real stakes over hypotheticals", "Anchors in things actually built, shipped, broken or fixed?",
+         "Anchors in what was actually built, shipped, broken or fixed.",
+         "STANCE: real stakes over hypotheticals. Anchor in things actually built, shipped, broken or fixed, "
+         "and only ones the member gave you; never invent an example to fill the slot."),
+        ("anchor_mcz", "Music ConnectZ as the anchor", "Is Music ConnectZ the standing real-world example?",
+         "Music ConnectZ is the example it reaches for, when it genuinely fits.",
+         "STANCE: Music ConnectZ is the standing real-world anchor. Use it as the example when it genuinely fits "
+         "and never claim anything about it that you were not given."),
+        ("ownership", "Ownership", "First person, active voice, decisions attributed?",
+         "First person, active voice; every decision has an owner.",
+         "STANCE: ownership. First person, active voice. Attribute decisions to who made them."),
+    ]),
+    ("mechanics", "2 · Mechanics — how it lands", [
+        ("short_claims", "Load-bearing short sentences", "Does the core claim get its own short sentence?",
+         "The core claim gets its own short sentence. Longer ones only chain reasoning, then a short one closes.",
+         "MECHANICS: load-bearing short sentences. The core claim gets its own short sentence. Longer sentences only "
+         "chain reasoning, and then a short one closes."),
+        ("em_dashes", "Em dashes for pivots", "Em dashes for pivots and asides?",
+         "Em dashes mark pivots and asides.",
+         "MECHANICS: em dashes for pivots and asides."),
+        ("plain_verbs", "Plain vocabulary, direct verbs", "Built, not leveraged?",
+         "Built, not leveraged. Broke, not experienced a failure state.",
+         "MECHANICS: plain vocabulary and direct verbs. Built, not leveraged. Broke, not experienced a failure state."),
+        ("conclusion_first", "Conclusion first", "Point, then support?",
+         "The point comes first, the support after it.",
+         "MECHANICS: conclusion first. The point, then the support."),
+        ("one_example", "One example, not three", "A single example?",
+         "One example, never a list of three.",
+         "MECHANICS: one example, not three."),
+    ]),
+    ("structure", "3 · Structure of a piece", [
+        ("open_claim", "Open with the claim", "No warm-up?",
+         "The first sentence is the point. No warm-up.",
+         "STRUCTURE: open with the claim. No warm-up. The middle is mechanism, evidence or one real example."),
+        ("close_forward", "Close with forward weight", "End on what it changes, not a summary?",
+         "Ends on what it means going forward, what it changes, what it costs. Never a summary.",
+         "STRUCTURE: close with forward weight: what it means going forward, what it changes, what it costs. "
+         "Not a summary."),
+    ]),
+    ("no_filler", "5 · Negative constraints", [
+        ("no_filler", "Cut the filler", "Hedging, motivation, padding, faux humility?",
+         "No hedging scaffolds, motivational filler, padding, faux humility or restating the question.",
+         "NEGATIVE CONSTRAINTS: no hedging scaffolds, no motivational filler, no explaining what the reader already "
+         "knows, no restating the prompt, no padding, no faux humility, no generic placeholder where a real example "
+         "exists, no game metaphors as decoration, and no clarifying question where a decision could be made and "
+         "explained afterwards."),
+    ]),
+    ("working", "6 · Working behaviour", [
+        ("terse_full", "Terse input means full output", "A short directive is \"go do it\"?",
+         "A short instruction is read as: go and do all of it.",
+         "WORKING BEHAVIOUR: terse input means full output. A short directive is \"go do it.\""),
+        ("make_the_call", "Make the call, then justify it", "Decides, then says why?",
+         "Decides first, then gives the reason.",
+         "WORKING BEHAVIOUR: make the call, then justify it."),
+        ("max_per_turn", "Maximum per turn", "Does the obvious next step without waiting?",
+         "Delivers the most it can in one reply and does the obvious next step.",
+         "WORKING BEHAVIOUR: deliver the maximum per turn. Do the obvious next step without waiting."),
+        ("diagnose_fix", "Diagnose, then fix only that", "When correcting, no rewrite?",
+         "When correcting text it names the specific error and fixes that. It does not rewrite.",
+         "WORKING BEHAVIOUR: when correcting existing text, diagnose the specific error and fix that. Do not rewrite."),
+    ]),
+    ("self_check", "7 · Self-check before returning", [
+        ("self_check", "Check the draft", "Four questions before it answers?",
+         "Before replying it asks: is the first sentence the point, is this the real reason, is there a concrete "
+         "anchor, and what can be cut.",
+         "SELF-CHECK before returning: (1) is the first sentence the actual point? (2) did I say the real reason, or a "
+         "safer version of it? (3) is there a concrete anchor, or is this floating? (4) what can be cut without losing "
+         "meaning? Cut it. Do not show this check."),
+    ]),
+]
+PARADIGM_BOOLS = [b for _g, _l, rows in _PG for b in rows]
+PARADIGM_BOOL_KEYS = [b[0] for b in PARADIGM_BOOLS]
+_PARADIGM_PROMPT = {b[0]: b[4] for b in PARADIGM_BOOLS}
+_PARADIGM_LABEL = {b[0]: b[1] for b in PARADIGM_BOOLS}
+
+# 4 · Register switch: two registers, never blended. Three answers, because "not set" must exist.
+# Academic never invents a source: a citation made up to fit is the substance rule's worst case.
+_REGISTER_PG = ("paradigm_register", "4 · Register switch", "Personal or academic? They never blend.", "off", [
+    ("off", "Not set", "No register rule.", None),
+    ("infer", "Infer from context", "Picks one of the two from what is being asked, and never blends them.",
+     "REGISTER SWITCH: there are two registers and they are never blended. Infer which from context. PERSONAL / "
+     "WORKING: no emoji, no citations, no headings unless length demands them. ACADEMIC: an emoji opens every "
+     "heading and paragraph, plain-text centered headings, APA 7 in-text citations and a full APA 7 reference list. "
+     "This overrides the emoji setting for the piece."),
+    ("personal", "Personal / working", "No emoji, no citations, no headings unless length demands them.",
+     "REGISTER: personal / working. No emoji, no citations, no headings unless the length demands them. "
+     "This overrides the emoji setting."),
+    ("academic", "Academic", "Emoji open every heading and paragraph; APA 7 citations and references.",
+     "REGISTER: academic. An emoji opens every heading and every paragraph. Plain-text centered headings. "
+     "Contractions kept. APA 7 in-text citations and a full APA 7 reference list that matches the reading list the "
+     "member supplied exactly. Cite only sources the member supplied; if none was supplied, say so instead of "
+     "inventing one. This overrides the emoji setting."),
+])
+
+
+DIAL_DEFAULTS["paradigm_register"] = "off"
+DIAL_DEFAULTS.update({k: False for k in PARADIGM_BOOL_KEYS})
+_OPTS["paradigm_register"] = [o[0] for o in _REGISTER_PG[4]]
+_PROMPT["paradigm_register"] = {o[0]: o[3] for o in _REGISTER_PG[4]}
+_LABEL["paradigm_register"] = "Register switch"
+
+
+def _bool_dial(key, label, question, result, group, group_label, on_result=None):
+    return {"key": key, "label": label, "question": question, "type": "bool", "default": DIAL_DEFAULTS[key],
+            "group": group, "group_label": group_label,
+            "options": [{"key": True, "label": "On", "result": result},
+                        {"key": False, "label": "Off", "result": "Not a rule for this voice."}]}
+
+
 def dials_payload():
+    """Every dial, in the order a form should draw them, each carrying its section.
+
+    The tone dials come first (`tone`), then the paradigm's sections 0-7 in order. The contractions switch is
+    the paradigm's own mechanics rule, so it opens section 2 rather than sitting alone under the tone."""
     out = [{"key": k, "label": lab, "question": q, "type": "choice", "default": dflt,
+            "group": "tone", "group_label": "Tone",
             "options": [{"key": o[0], "label": o[1], "result": o[2]} for o in opts]}
            for k, lab, q, dflt, opts in _D]
-    out.append({"key": "contractions", "label": "Contractions", "question": "Does it say \"don't\" or \"do not\"?",
-                "type": "bool", "default": True,
-                "options": [{"key": True, "label": "Use them", "result": "\"Don't\", \"it's\", \"you'll\"."},
-                            {"key": False, "label": "Spell them out", "result": "\"Do not\", \"it is\", \"you will\"."}]})
+    contractions = {"key": "contractions", "label": "Contractions", "question": "Does it say \"don't\" or \"do not\"?",
+                    "type": "bool", "default": True, "group": "mechanics", "group_label": "2 · Mechanics — how it lands",
+                    "options": [{"key": True, "label": "Use them", "result": "\"Don't\", \"it's\", \"you'll\"."},
+                                {"key": False, "label": "Spell them out", "result": "\"Do not\", \"it is\", \"you will\"."}]}
+    for gkey, glabel, rows in _PG:
+        if gkey == "mechanics":
+            out.append(contractions)
+        if gkey == "no_filler":        # section 4 sits between structure and the negative constraints
+            k, lab, q, dflt, opts = _REGISTER_PG
+            out.append({"key": k, "label": lab, "question": q, "type": "choice", "default": dflt,
+                        "group": "register", "group_label": "4 · Register switch",
+                        "options": [{"key": o[0], "label": o[1], "result": o[2]} for o in opts]})
+        out += [_bool_dial(r[0], r[1], r[2], r[3], gkey, glabel) for r in rows]
     return out
 
 
@@ -250,9 +396,9 @@ def clean_payload(data, current=None):
                 if v not in _OPTS[k]:
                     raise Invalid(f"{_LABEL[k]} can be {', '.join(_OPTS[k])}; \"{str(v)[:30]}\" isn't one.")
                 spec[k] = v
-            elif k == "contractions":
+            elif k == "contractions" or k in PARADIGM_BOOL_KEYS:
                 if not isinstance(v, bool):
-                    raise Invalid("Contractions is on or off.")
+                    raise Invalid(f"{_PARADIGM_LABEL.get(k, 'Contractions')} is on or off.")
                 spec[k] = v
             elif k == "signature_phrases":
                 spec[k] = _list("Signature phrases", v, PHRASES_MAX, PHRASE_CHARS)
@@ -337,12 +483,32 @@ def personality_line(code):
             "and how it decides, never what is true): " + "; ".join(bits) + ".") if bits else ""
 
 
+def paradigm_lines(v):
+    """The member's switched-on paradigm sections, in section order, in the paradigm's own words.
+
+    Only what is ON is said, so a voice that sets none of them reads exactly as it did before. These lines
+    are ours, from the closed lists above; nothing a member typed reaches them. They shape wording and
+    structure and cannot change a number, a price, a rule or what is true (FRAME and PARADIGM follow)."""
+    s = v.spec
+    lines = [_PARADIGM_PROMPT[k] for k in PARADIGM_BOOL_KEYS[:1] if s.get(k)]
+    for k in PARADIGM_BOOL_KEYS[1:]:
+        if s.get(k) and k not in ("no_filler", "terse_full", "make_the_call", "max_per_turn", "diagnose_fix", "self_check"):
+            lines.append(_PARADIGM_PROMPT[k])
+    line = _PROMPT["paradigm_register"].get(s.get("paradigm_register", "off"))
+    if line:
+        lines.append(line)
+    lines += [_PARADIGM_PROMPT[k] for k in ("no_filler", "terse_full", "make_the_call", "max_per_turn",
+                                            "diagnose_fix", "self_check") if s.get(k)]
+    return lines
+
+
 def tone_lines(v, emoji_text):
     s = v.spec
     lines = [_PROMPT[k][s.get(k, DIAL_DEFAULTS[k])] for k in DIAL_KEYS if _PROMPT[k][s.get(k, DIAL_DEFAULTS[k])]]
     lines.append(emoji_text[s.get("emoji", "light")])
     lines.append("CONTRACTIONS: " + ("use them." if s.get("contractions", True) else "never; spell them out."))
     lines += personality_lines(v.personality)
+    lines += paradigm_lines(v)
     if s.get("signature_phrases"):
         lines.append("SIGNATURE PHRASES (listed in the block): use at most one per reply, only where it "
                      "fits, never forced, never where it would change a number or a name.")
