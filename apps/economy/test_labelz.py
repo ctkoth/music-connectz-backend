@@ -12,7 +12,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from apps.economy.models import (TIER_FREE, TIER_PREMIUM, Label, LabelContract, LabelTeamMember,
+from apps.economy.models import (TIER_FREE, TIER_PREMIUM, Label, LabelContract,
                                  Membership, Notification, profile_for)
 
 User = get_user_model()
@@ -313,54 +313,51 @@ class AdvanceZTests(TestCase):
             self.assertEqual(self._add(**bad).status_code, 400)
 
 
-class TeamZTests(TestCase):
+class TermZTests(TestCase):
     def setUp(self):
-        self.owner = member("boss2", tier=TIER_PREMIUM)
-        self.pal = member("pal")
-        self.label = Label.objects.create(owner=self.owner, name="Crew Records")
-        self.oc, self.pc = APIClient(), APIClient()
-        self.oc.force_authenticate(self.owner); self.pc.force_authenticate(self.pal)
-        self.url = f"/api/economy/labelz/{self.label.id}/team/"
+        self.owner = member("boss3", tier=TIER_PREMIUM)
+        self.artist = member("art3")
+        self.label = Label.objects.create(owner=self.owner, name="Term Records")
+        self.oc, self.ac = APIClient(), APIClient()
+        self.oc.force_authenticate(self.owner); self.ac.force_authenticate(self.artist)
 
-    def test_invite_accept_then_it_shows_on_the_public_card_only_once_accepted(self):
-        r = self.oc.post(self.url, {"username": "pal", "role": "producer"}, format="json")
+    def _offer(self, terms):
+        return self.oc.post("/api/economy/labelz/contracts/", {
+            "label_id": self.label.id, "artist": "art3", "terms_text": "the agreement", "signed_name": "Boss Name",
+            "terms": terms}, format="json")
+
+    def test_terms_are_cleaned_said_in_sentences_and_served_before_signing(self):
+        r = self._offer({"artist_split_pct": 60, "advance_cents": None, "advance": "x", "recoup_pct": "50",
+                         "recoup_scope": "advance_and_costs", "term_months": 24, "territory": "worldwide",
+                         "termination_notice_days": 30, "reversion_months": 12, "evil": 1})
         self.assertEqual(r.status_code, 201)
-        listed = lambda: self.pc.get("/api/economy/labelz/").data["labels"][0]["team"]
-        self.assertEqual(listed(), [])
-        self.assertEqual(self.pc.post(f"/api/economy/labelz/team/{r.data['id']}/accept/").status_code, 200)
-        self.assertEqual(listed(), [{"username": "pal", "role": "producer", "role_label": "Producer"}])
+        self.assertEqual(r.data["terms"], {"artist_split_pct": 60, "recoup_pct": 50, "recoup_scope": "advance_and_costs",
+                                           "term_months": 24, "territory": "worldwide", "termination_notice_days": 30,
+                                           "reversion_months": 12})
+        text = " ".join(r.data["terms_lines"])
+        self.assertIn("60% of net receipts; the label 40%", text)
+        self.assertIn("50% of the artist's earnings go to recouping the advance and agreed costs", text)
+        seen = self.ac.get("/api/economy/labelz/contracts/").data["as_artist"][0]
+        self.assertEqual(seen["status"], "offered")
+        self.assertTrue(seen["terms_lines"])                      # visible while it is still only an offer
 
-    def test_closed_roles_adults_and_owner_only(self):
-        self.assertEqual(self.oc.post(self.url, {"username": "pal", "role": "ceo"}, format="json").status_code, 400)
-        kid = member("kid", age=15)
-        self.assertEqual(self.oc.post(self.url, {"username": "kid", "role": "manager"}, format="json").status_code, 403)
-        self.assertEqual(self.pc.post(self.url, {"username": "pal", "role": "manager"}, format="json").status_code, 404)
-        self.assertEqual(self.oc.post(self.url, {"username": "boss2", "role": "manager"}, format="json").status_code, 400)
+    def test_junk_is_dropped_not_clamped(self):
+        r = self._offer({"artist_split_pct": 150, "recoup_pct": -5, "term_months": 0, "territory": "mars",
+                         "recoup_scope": "everything", "termination_notice_days": "abc", "advance_cents": "-3"})
+        self.assertEqual(r.data["terms"], {})
 
-    def test_decline_leave_and_remove(self):
-        mid = self.oc.post(self.url, {"username": "pal", "role": "a_and_r"}, format="json").data["id"]
-        self.assertEqual(self.oc.post(self.url, {"username": "pal", "role": "a_and_r"}, format="json").status_code, 409)
-        self.pc.post(f"/api/economy/labelz/team/{mid}/decline/")
-        self.assertEqual(self.pc.get("/api/economy/labelz/team/mine/").data["mine"], [])
-        self.assertEqual(self.oc.post(self.url, {"username": "pal", "role": "booking"}, format="json").status_code, 201)   # can be re-invited
-        self.assertEqual(self.pc.delete(f"/api/economy/labelz/team/{mid}/").status_code, 204)
+    def test_the_terms_are_part_of_the_hash_so_a_signature_proves_them(self):
+        a = self._offer({"artist_split_pct": 50}).data["doc_sha256"]
+        b = self._offer({"artist_split_pct": 51}).data["doc_sha256"]
+        self.assertNotEqual(a, b)
 
-    def test_membership_grants_no_access_to_contracts_or_advances(self):
-        mid = self.oc.post(self.url, {"username": "pal", "role": "manager"}, format="json").data["id"]
-        self.pc.post(f"/api/economy/labelz/team/{mid}/accept/")
-        artist = member("art2")
-        c = LabelContract.objects.create(label=self.label, artist=artist, terms_text="secret", status="signed")
-        self.assertEqual(self.pc.get(f"/api/economy/labelz/contracts/{c.id}/advances/").status_code, 404)
-        self.assertEqual(self.pc.get("/api/economy/labelz/contracts/").data["as_owner"], [])
+    def test_advancez_shows_what_the_terms_promise_beside_what_was_confirmed(self):
+        c = self._offer({"advance_cents": "1500"}).data           # dollars, stored as cents
+        self.assertEqual(c["terms"]["advance_cents"], 150000)
+        LabelContract.objects.filter(pk=c["id"]).update(status="signed")
+        r = self.oc.get(f"/api/economy/labelz/contracts/{c['id']}/advances/")
+        self.assertEqual((r.data["promised_cents"], r.data["advanced_cents"]), (150000, 0))
 
-    def test_the_list_costs_the_same_queries_with_one_label_or_many(self):
-        from django.db import connection
-        from django.test.utils import CaptureQueriesContext
-        def cost():
-            with CaptureQueriesContext(connection) as q: self.pc.get("/api/economy/labelz/")
-            return len(q)
-        base = cost()
-        for i in range(5):
-            l = Label.objects.create(owner=self.owner, name=f"L{i}")
-            LabelTeamMember.objects.create(label=l, user=self.pal, role="manager", status="accepted")
-        self.assertEqual(cost(), base)
+    def test_the_field_list_is_served_for_the_screen(self):
+        d = self.oc.get("/api/economy/labelz/").data
+        self.assertIn("artist_split_pct", [f["key"] for f in d["term_fields"]])

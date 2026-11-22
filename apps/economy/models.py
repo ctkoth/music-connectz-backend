@@ -2585,6 +2585,9 @@ class LabelContract(models.Model):
     title = models.CharField(max_length=200, default="Artist Agreement")
     terms_text = models.TextField()
     advance_display = models.CharField(max_length=80, blank=True, default="")
+    # TermZ: the structured terms (see labelz.TERM_FIELDS). Cleaned on write; the free-text `terms_text` stays the
+    # agreement the parties sign, and these are the numbers in it, said in plain sentences before anyone signs.
+    terms = models.JSONField(default=dict, blank=True)
     doc_sha256 = models.CharField(max_length=64, blank=True, default="")
     owner_signed_name = models.CharField(max_length=200, blank=True, default="")
     artist_signed_name = models.CharField(max_length=200, blank=True, default="")
@@ -2616,21 +2619,6 @@ class LabelAdvance(models.Model):
 
     class Meta:
         ordering = ["on", "id"]
-
-
-class LabelTeamMember(models.Model):
-    """TeamZ: who works for a label. The owner invites an adult member in a named role; they accept or decline.
-    A roster and a title — it grants no access to contracts, terms or advances, which stay owner and artist."""
-    STATUS_INVITED, STATUS_ACCEPTED, STATUS_DECLINED = "invited", "accepted", "declined"
-    label = models.ForeignKey(Label, on_delete=models.CASCADE, related_name="team")
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="label_teams")
-    role = models.CharField(max_length=16)
-    status = models.CharField(max_length=10, default=STATUS_INVITED)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["created_at"]
-        unique_together = [("label", "user")]
 
 
 # ---- DupeZ: one person, more than one account ----

@@ -48,7 +48,7 @@ from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView, DupeZVerify
                     DupeZReviewView, DupeZView)
 from .callz import CallDetailView, CallRateView, CallsView
 from .labelz import (AdvanceLineView, AdvanceView, LabelContractActionView, LabelContractsView, LabelDetailView,
-                     LabelListCreateView, TeamActionView, TeamMineView, TeamView)
+                     LabelListCreateView)
 from .sharecard import post_card, profile_card
 from .scoreshare import ScoreShareHumanView, ScoreShareMediaView, ScoreShareView, score_card_png
 from .coachshare import PostCoachView, post_coach_card
@@ -757,10 +757,6 @@ urlpatterns = [
     # route existed before this; every load of the tab 404'd.
     path("labelz/", LabelListCreateView.as_view(), name="economy-labelz"),
     path("labelz/<int:pk>/", LabelDetailView.as_view(), name="economy-label"),
-    path("labelz/team/mine/", TeamMineView.as_view(), name="economy-label-team-mine"),
-    path("labelz/team/<int:pk>/", TeamActionView.as_view(), name="economy-label-team-row"),
-    path("labelz/team/<int:pk>/<str:action>/", TeamActionView.as_view(), name="economy-label-team-action"),
-    path("labelz/<int:pk>/team/", TeamView.as_view(), name="economy-label-team"),
     path("labelz/contracts/<int:pk>/advances/", AdvanceView.as_view(), name="economy-label-advances"),
     path("labelz/advances/<int:pk>/", AdvanceLineView.as_view(), name="economy-label-advance-line"),
     path("labelz/advances/<int:pk>/confirm/", AdvanceLineView.as_view(), name="economy-label-advance-confirm"),

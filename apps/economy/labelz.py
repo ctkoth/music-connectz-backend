@@ -19,13 +19,16 @@ label." Nothing else writes membership; there is no separate join request.
 contract. The label writes a line, the artist confirms it, and only confirmed lines count; the balance is
 confirmed advances minus confirmed recoups, and a recoup can't exceed what is outstanding. Nothing moves —
 no money, no SpinaZ, no automatic cut of anybody's royalties: deducting from earnings is a payment decision
-and a legal one, and is not made here. **TeamZ** (`LabelTeamMember`) is the roster: the owner invites adults
-in a named role from a closed list, they accept; membership grants no access to contracts or advances.
+and a legal one, and is not made here. **TermZ** (`LabelContract.terms`) is the numbers in an agreement —
+split, advance, recoup share and scope, length, territory, notice, reversion — as a closed list (`TERM_FIELDS`)
+the screen reads, cleaned on write and said in plain sentences (`terms_lines`) before anybody signs. They sit
+beside the signed free text, are part of the hash, and move nothing by themselves.
 
 Contracts are 18+, matching the frontend's own "Contracts: adults only"
 pill: offering one and signing one both check `is_minor`.
 """
 import hashlib
+import json
 
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -39,7 +42,7 @@ import datetime as dt
 from django.db.models import Sum
 
 from .models import (TIER_DEBUG, TIER_PREMIUM, TIER_STATZ, Label, LabelAdvance, LabelContract,
-                     LabelTeamMember, is_minor, membership_for, notify)
+                     is_minor, membership_for, notify)
 from .sentencez import CONTRACT_PERSONAS, persona_keys
 
 User = get_user_model()
@@ -56,34 +59,90 @@ def can_create_label(user):
     return bool(persona_keys(user) & set(CONTRACT_PERSONAS))
 
 
-TEAM_ROLES = {"manager": "Manager", "a_and_r": "A&R", "producer": "Producer", "engineer": "Engineer",
-              "marketing": "Marketing", "booking": "Booking"}
-MAX_TEAM = 50
 MAX_CENTS = 100_000_000
 
+# TermZ: the numbers in an agreement, as a closed list the screen reads (never retyped there). Every key is optional;
+# an unknown key or an out-of-range value is dropped rather than kept, so a stored term always means what it says.
+TERM_FIELDS = [
+    {"key": "artist_split_pct", "label": "Artist's share of net receipts", "kind": "int", "min": 0, "max": 100, "unit": "%"},
+    {"key": "recoup_pct", "label": "Share of the artist's earnings applied to recoup the advance", "kind": "int", "min": 0, "max": 100, "unit": "%"},
+    {"key": "recoup_scope", "label": "What can be recouped", "kind": "choice",
+     "options": [{"key": "advance_only", "label": "The advance only"}, {"key": "advance_and_costs", "label": "The advance and agreed costs"}]},
+    {"key": "advance_cents", "label": "Advance", "kind": "money"},
+    {"key": "term_months", "label": "Length of the agreement", "kind": "int", "min": 1, "max": 600, "unit": "months"},
+    {"key": "territory", "label": "Territory", "kind": "choice",
+     "options": [{"key": "worldwide", "label": "Worldwide"}, {"key": "regional", "label": "Named regions (written in the terms)"}]},
+    {"key": "termination_notice_days", "label": "Notice to end it", "kind": "int", "min": 0, "max": 365, "unit": "days"},
+    {"key": "reversion_months", "label": "Rights return to the artist after", "kind": "int", "min": 0, "max": 600, "unit": "months"},
+]
+_BY_KEY = {f["key"]: f for f in TERM_FIELDS}
 
-def _label_dict(label, user, counts, team=None):
+
+def clean_terms(raw):
+    """Only known keys, with values inside their range. Junk is dropped, never clamped into a believable number."""
+    out = {}
+    for k, v in (raw.items() if isinstance(raw, dict) else []):
+        f = _BY_KEY.get(k)
+        if not f or v in (None, ""):
+            continue
+        if f["kind"] == "choice":
+            if v in {o["key"] for o in f["options"]}:
+                out[k] = v
+        elif f["kind"] == "money":
+            try:
+                c = int(round(float(v) * 100))
+            except (TypeError, ValueError):
+                continue
+            if 0 < c <= MAX_CENTS:
+                out[k] = c
+        else:
+            try:
+                n = int(v)
+            except (TypeError, ValueError):
+                continue
+            if f["min"] <= n <= f["max"]:
+                out[k] = n
+    return out
+
+
+def terms_lines(t):
+    """The terms as plain sentences — what the artist reads BEFORE signing. Built from the stored numbers, nothing more."""
+    t = t or {}
+    L = []
+    if "artist_split_pct" in t:
+        L.append(f"The artist receives {t['artist_split_pct']}% of net receipts; the label {100 - t['artist_split_pct']}%.")
+    if "advance_cents" in t:
+        L.append(f"Advance: ${t['advance_cents'] / 100:,.2f}.")
+    if "recoup_pct" in t:
+        scope = " and agreed costs" if t.get("recoup_scope") == "advance_and_costs" else ""
+        L.append(f"{t['recoup_pct']}% of the artist's earnings go to recouping the advance{scope} until it is repaid.")
+    elif t.get("recoup_scope"):
+        L.append("Recoupable: " + ("the advance and agreed costs." if t["recoup_scope"] == "advance_and_costs" else "the advance only."))
+    if "term_months" in t:
+        L.append(f"The agreement runs {t['term_months']} months.")
+    if "territory" in t:
+        L.append("Territory: " + ("worldwide." if t["territory"] == "worldwide" else "the regions named in the terms."))
+    if "termination_notice_days" in t:
+        L.append(f"Either side may end it with {t['termination_notice_days']} days' notice.")
+    if "reversion_months" in t:
+        L.append(f"Rights return to the artist {t['reversion_months']} months after it ends.")
+    return L
+
+
+def _label_dict(label, user, counts):
     return {
         "id": label.id, "name": label.name, "bio": label.bio,
         "owner": label.owner.username, "i_own": label.owner_id == user.id,
         "member_count": counts.get(label.id, 0),
-        "team": (team or {}).get(label.id, []),
     }
-
-
-def _team_by_label(label_ids):
-    """Accepted team members for many labels in ONE query — the public list shows them."""
-    out = {}
-    for m in LabelTeamMember.objects.filter(label_id__in=label_ids, status=LabelTeamMember.STATUS_ACCEPTED).select_related("user"):
-        out.setdefault(m.label_id, []).append({"username": m.user.username, "role": m.role, "role_label": TEAM_ROLES.get(m.role, m.role)})
-    return out
 
 
 def _contract_dict(c):
     return {
         "id": c.id, "label": c.label.name, "label_id": c.label_id,
         "artist": c.artist.username, "title": c.title, "terms_text": c.terms_text,
-        "advance_display": c.advance_display, "doc_sha256": c.doc_sha256,
+        "advance_display": c.advance_display, "terms": c.terms or {}, "terms_lines": terms_lines(c.terms),
+        "doc_sha256": c.doc_sha256,
         "owner_signed_name": c.owner_signed_name, "artist_signed_name": c.artist_signed_name,
         "status": c.status, "created_at": c.created_at.isoformat(),
     }
@@ -105,10 +164,9 @@ class LabelListCreateView(APIView):
                 label_id__in=[l.id for l in labels], status=LabelContract.STATUS_SIGNED)
                 .order_by().values_list("label_id", "artist_id").distinct()):
             counts[row[0]] = counts.get(row[0], 0) + 1
-        team = _team_by_label([l.id for l in labels])
         return Response({
-            "labels": [_label_dict(l, request.user, counts, team) for l in labels],
-            "team_roles": [{"key": k, "label": v} for k, v in TEAM_ROLES.items()],
+            "labels": [_label_dict(l, request.user, counts) for l in labels],
+            "term_fields": TERM_FIELDS,
             "can_create": can_create_label(request.user),
         })
 
@@ -194,10 +252,11 @@ class LabelContractsView(APIView):
         title = str(d.get("title", "")).strip()[:200] or "Artist Agreement"
         advance_display = str(d.get("advance_display", "")).strip()[:80]
 
-        doc = "\n".join([label.name, artist.username, title, terms_text, advance_display])
+        terms = clean_terms(d.get("terms"))
+        doc = "\n".join([label.name, artist.username, title, terms_text, advance_display, json.dumps(terms, sort_keys=True)])
         contract = LabelContract.objects.create(
             label=label, artist=artist, title=title, terms_text=terms_text,
-            advance_display=advance_display, owner_signed_name=owner_signed_name,
+            advance_display=advance_display, terms=terms, owner_signed_name=owner_signed_name,
             doc_sha256=hashlib.sha256(doc.encode()).hexdigest(),
         )
         notify(artist, "labelz",
@@ -253,6 +312,8 @@ def _advance_state(contract):
     return {
         "contract_id": contract.id, "label": contract.label.name, "artist": contract.artist.username,
         "advanced_cents": adv, "recouped_cents": rec, "outstanding_cents": adv - rec,
+        "promised_cents": (c_terms.get("advance_cents") if (c_terms := (contract.terms or {})) else None),
+        "terms_lines": terms_lines(contract.terms),
         "waiting_cents": sum(l.amount_cents for l in lines if not l.confirmed_at),
         "lines": [{"id": l.id, "kind": l.kind, "amount_cents": l.amount_cents, "on": l.on.isoformat(),
                    "note": l.note, "confirmed": bool(l.confirmed_at)} for l in lines],
@@ -334,82 +395,3 @@ class AdvanceLineView(APIView):
             return Response({"detail": "The artist has confirmed this line, so it stays. Record a correcting line instead."}, status=status.HTTP_409_CONFLICT)
         c = l.contract; l.delete()
         return Response({**_advance_state(c), "i_own": True})
-
-
-# ---------------------------------------------------------------- TeamZ
-
-def _team_row(m):
-    return {"id": m.id, "label_id": m.label_id, "label": m.label.name, "username": m.user.username,
-            "role": m.role, "role_label": TEAM_ROLES.get(m.role, m.role), "status": m.status}
-
-
-class TeamView(APIView):
-    """GET the roster of a label you own (all statuses). POST invites an adult member in a role from `TEAM_ROLES`."""
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, pk):
-        label = Label.objects.filter(pk=pk, owner=request.user).first()
-        if not label:
-            return Response({"detail": "Label not found."}, status=status.HTTP_404_NOT_FOUND)
-        return Response({"team": [_team_row(m) for m in label.team.select_related("user", "label")],
-                         "roles": [{"key": k, "label": v} for k, v in TEAM_ROLES.items()]})
-
-    def post(self, request, pk):
-        label = Label.objects.filter(pk=pk, owner=request.user).first()
-        if not label:
-            return Response({"detail": "Label not found."}, status=status.HTTP_404_NOT_FOUND)
-        d = request.data or {}
-        role = d.get("role")
-        if role not in TEAM_ROLES:
-            return Response({"detail": "Pick a role from the list."}, status=status.HTTP_400_BAD_REQUEST)
-        who = User.objects.filter(username__iexact=str(d.get("username", "")).strip()).first()
-        if not who:
-            return Response({"detail": "That username wasn't found."}, status=status.HTTP_404_NOT_FOUND)
-        if who.id == request.user.id:
-            return Response({"detail": "You own this label already."}, status=status.HTTP_400_BAD_REQUEST)
-        if is_minor(who) or is_minor(request.user):
-            return Response({"detail": "Label teams are 18+."}, status=status.HTTP_403_FORBIDDEN)
-        if label.team.count() >= MAX_TEAM:
-            return Response({"detail": f"A label team holds up to {MAX_TEAM}."}, status=status.HTTP_400_BAD_REQUEST)
-        m, made = LabelTeamMember.objects.get_or_create(label=label, user=who, defaults={"role": role})
-        if not made:
-            if m.status == LabelTeamMember.STATUS_INVITED:
-                return Response({"detail": "They've been invited already."}, status=status.HTTP_409_CONFLICT)
-            m.role, m.status = role, LabelTeamMember.STATUS_INVITED
-            m.save(update_fields=["role", "status"])
-        notify(who, "labelz", f"🤝 {label.name} invited you to its team as {TEAM_ROLES[role]}.", actor=request.user)
-        return Response(_team_row(m), status=status.HTTP_201_CREATED)
-
-
-class TeamMineView(APIView):
-    """GET the invitations and teams you are on."""
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        rows = LabelTeamMember.objects.filter(user=request.user).exclude(status=LabelTeamMember.STATUS_DECLINED).select_related("label", "user")
-        return Response({"mine": [_team_row(m) for m in rows]})
-
-
-class TeamActionView(APIView):
-    """POST .../accept|decline/ (the invitee). DELETE — the owner removes someone, or you leave a team you are on."""
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, pk, action):
-        if action not in ("accept", "decline"):
-            return Response({"detail": "Unknown action."}, status=status.HTTP_404_NOT_FOUND)
-        m = LabelTeamMember.objects.filter(pk=pk, user=request.user, status=LabelTeamMember.STATUS_INVITED).select_related("label", "user").first()
-        if not m:
-            return Response({"detail": "Invitation not found."}, status=status.HTTP_404_NOT_FOUND)
-        if action == "accept" and is_minor(request.user):
-            return Response({"detail": "Label teams are 18+."}, status=status.HTTP_403_FORBIDDEN)
-        m.status = LabelTeamMember.STATUS_ACCEPTED if action == "accept" else LabelTeamMember.STATUS_DECLINED
-        m.save(update_fields=["status"])
-        notify(m.label.owner, "labelz", f"{request.user.username} {action}ed the {TEAM_ROLES.get(m.role, m.role)} role on {m.label.name}.", actor=request.user)
-        return Response(_team_row(m))
-
-    def delete(self, request, pk):
-        m = LabelTeamMember.objects.filter(pk=pk).select_related("label", "user").first()
-        if not m or request.user.id not in (m.user_id, m.label.owner_id):
-            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
-        m.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
