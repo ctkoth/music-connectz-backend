@@ -167,6 +167,12 @@ LOGICZ_TABS = [
          _app("Image ConnectZ", "🖼️",
               "Pictures made by AI for a use: profile picture, avatar, song and album "
               "covers, banners, wallpapers, thumbnails, flyers and merch.", True, tab="imageconnectz"),
+         _app("MangaZ", "📚",
+              "Your characters and idea, made into a manga page — you edit the script before "
+              "anything is drawn.", True, tab="mangaz"),
+         _app("Anime ConnectZ", "🌸",
+              "Plan shots from your idea and characters, then render them as clips joined "
+              "with the dialogue.", True, tab="animeconnectz"),
      ]},
     {"key": "keyconnectz", "name": "KeyConnectZ", "emoji": "⌨️", "icon": "keyconnectz.png",
      "desc": "The keyboard. Premium buys the wallpaper; everybody gets to be understood.",

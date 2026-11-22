@@ -28,7 +28,8 @@ from rest_framework.views import APIView
 from . import videoz
 from .catalog import ai_cost, ai_model_for
 from .gemini import _key
-from .models import (Face, GeneratedImage, InstrumentalWork, MasterWork, OccOutput, SentenceWork, VideoWork,
+from .models import (AnimeWork, Face, GeneratedImage, InstrumentalWork, MangaPage, MasterWork, OccOutput, SentenceWork,
+                     VideoWork,
                      daily_prompt_covers, daily_prompt_state, membership_for, profile_for)
 from .sentencez import KINDS as SENTENCE_KINDS
 
@@ -83,6 +84,10 @@ APPS = [
      "The photos Video ConnectZ can start from.", True),
     ("imageconnectz", "Image ConnectZ", "🖼️", "imageconnectz.png",
      "Profile pictures, avatars, song and album covers, banners, wallpapers, thumbnails and flyers — pick what it's for.", True),
+    ("mangaz", "MangaZ", "📚", "mangaz.png",
+     "Your characters and idea, made into a manga page — you edit the script before anything is drawn.", True),
+    ("animeconnectz", "Anime ConnectZ", "🌸", "animeconnectz.png",
+     "Plan shots from your idea and characters, then render them as clips joined with the dialogue.", True),
 ]
 
 # The data-tour anchor each shelf row lands on in its own app.
@@ -118,6 +123,9 @@ def _prices(user, tier, daily_left):
         # A picture runs a dearer model than the daily allowance is priced for, so it
         # is never covered by it (gemini._bill, count_daily=False) — a fixed price.
         "imageconnectz": {"kind": "fixed", "cost_cents": standard},
+        # The script / shot plan is a prompt; every panel or shot drawn after it is priced on its own button.
+        "mangaz": _prompt_price(standard, daily_left),
+        "animeconnectz": _prompt_price(standard, daily_left),
     }
 
 
@@ -133,6 +141,8 @@ def _configured():
         # Photos are stored, not generated.
         "facez": True,
         "imageconnectz": gemini,
+        "mangaz": gemini,
+        "animeconnectz": gemini,
     }
 
 
@@ -145,6 +155,8 @@ def _counts(user):
         "videoconnectz": VideoWork.objects.filter(user=user).count(),
         "facez": Face.objects.filter(owner=user).count(),
         "imageconnectz": GeneratedImage.objects.filter(user=user).count(),
+        "mangaz": MangaPage.objects.filter(user=user).count(),
+        "animeconnectz": AnimeWork.objects.filter(user=user).count(),
     }
 
 

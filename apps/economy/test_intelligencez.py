@@ -30,7 +30,7 @@ URL = "/api/economy/intelligencez/"
 PW = "pw12345!"
 
 ORDER = ["sentenceconnectz", "occ", "instrumentalconnectz", "mixconnectz",
-         "videoconnectz", "facez", "imageconnectz"]
+         "videoconnectz", "facez", "imageconnectz", "mangaz", "animeconnectz"]
 
 
 def stamp(obj, minutes_ago):
@@ -87,8 +87,9 @@ class ShapeTests(HubBase):
             "sentenceconnectz": "sentencez.png", "occ": "occ.png",
             "instrumentalconnectz": "instrumentalconnectz.png", "mixconnectz": "mixconnectz.png",
             "videoconnectz": "videoconnectz.png", "facez": "facez.png",
-            "imageconnectz": "imageconnectz.png"})
-        self.assertEqual([apps[k]["emoji"] for k in ORDER], ["✍️", "👁️", "🎹", "🎚️", "🎬", "🙂", "🖼️"])
+            "imageconnectz": "imageconnectz.png", "mangaz": "mangaz.png",
+            "animeconnectz": "animeconnectz.png"})
+        self.assertEqual([apps[k]["emoji"] for k in ORDER], ["✍️", "👁️", "🎹", "🎚️", "🎬", "🙂", "🖼️", "📚", "🌸"])
         self.assertEqual(apps["mixconnectz"]["label"], "Mix ConnectZ")
         self.assertIn("album", apps["imageconnectz"]["desc"])
 
@@ -101,7 +102,7 @@ class ShapeTests(HubBase):
         got = {a["key"]: a["in_app"] for a in self.get()["apps"]}
         self.assertEqual(got, {"sentenceconnectz": True, "occ": True, "instrumentalconnectz": True,
                                "mixconnectz": True, "videoconnectz": False, "facez": False,
-                               "imageconnectz": False})
+                               "imageconnectz": False, "mangaz": False, "animeconnectz": False})
 
     def test_standalone_is_the_same_answer_as_in_app(self):
         for a in self.get()["apps"]:
@@ -263,7 +264,8 @@ class CountTests(HubBase):
         OccOutput.objects.create(user=self.me, title="w")
         got = {a["key"]: a["count"] for a in self.get()["apps"]}
         self.assertEqual(got, {"sentenceconnectz": 2, "occ": 1, "instrumentalconnectz": 1,
-                               "mixconnectz": 3, "videoconnectz": 1, "facez": 1, "imageconnectz": 0})
+                               "mixconnectz": 3, "videoconnectz": 1, "facez": 1, "imageconnectz": 0,
+                               "mangaz": 0, "animeconnectz": 0})
 
 
 class RecentTests(HubBase):
