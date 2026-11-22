@@ -343,3 +343,56 @@ class LettersDriveTheVoiceTests(TestCase):
         b = voicez.VoiceSpec.from_fields({"name": "A", "personality": "ESTJ"})
         emoji = {"none": "", "light": "", "heavy": ""}
         self.assertNotEqual(voicez.tone_lines(a, emoji), voicez.tone_lines(b, emoji))
+
+
+class ParadigmDialsTests(TestCase):
+    """Corey's eight-section voice paradigm, definable per voice (0 principle … 7 self-check)."""
+    EMOJI = {"none": "", "light": "", "heavy": ""}
+
+    def test_every_section_zero_to_seven_is_served_in_order(self):
+        groups = []
+        for d in voicez.dials_payload():
+            if d["group"] not in groups:
+                groups.append(d["group"])
+        self.assertEqual(groups, ["tone", "principle", "stance", "mechanics", "structure", "register",
+                                  "no_filler", "working", "self_check"])
+        nums = [d["group_label"][0] for d in voicez.dials_payload() if d["group"] != "tone"]
+        self.assertEqual(sorted(set(nums)), sorted(set("012345 67".replace(" ", ""))))
+
+    def test_nothing_is_on_by_default_so_old_voices_do_not_change(self):
+        v = voicez.VoiceSpec.from_fields({"name": "Old", "spec": {"humour": "dry"}})
+        self.assertEqual(voicez.paradigm_lines(v), [])
+        for k in voicez.PARADIGM_BOOL_KEYS:
+            self.assertIs(voicez.DIAL_DEFAULTS[k], False)
+
+    def test_only_what_is_on_is_said_and_in_section_order(self):
+        v = voicez.VoiceSpec.from_fields({"spec": {"self_check": True, "principle": True, "ownership": True,
+                                                   "paradigm_register": "personal"}})
+        lines = voicez.paradigm_lines(v)
+        self.assertEqual([l.split(":")[0] for l in lines],
+                         ["GENERATING PRINCIPLE", "STANCE", "REGISTER", "SELF-CHECK before returning"])
+
+    def test_academic_never_licenses_an_invented_source(self):
+        v = voicez.VoiceSpec.from_fields({"spec": {"paradigm_register": "academic"}})
+        text = " ".join(voicez.paradigm_lines(v))
+        self.assertIn("APA 7", text)
+        self.assertIn("instead of inventing", text)
+
+    def test_the_paradigm_reaches_the_tone_block_and_a_character(self):
+        v = voicez.VoiceSpec.from_fields({"name": "A", "spec": {"conclusion_first": True}})
+        self.assertIn("conclusion first", "\n".join(voicez.tone_lines(v, self.EMOJI)))
+
+    def test_validation_refuses_junk_and_keeps_booleans_boolean(self):
+        voicez.clean_payload({"name": "a", "spec": {"principle": True, "paradigm_register": "academic"}})
+        for bad in ({"principle": "yes"}, {"paradigm_register": "both"}, {"em_dashes": 1}):
+            with self.assertRaises(voicez.Invalid):
+                voicez.clean_payload({"name": "a", "spec": bad})
+
+    def test_it_round_trips_through_the_api(self):
+        u = mk("pdm"); c = cl(u)
+        r = c.post(BASE + "voices/", {"name": "Paradigm", "spec": {"principle": True, "short_claims": True,
+                                                                   "paradigm_register": "personal"}}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        spec = CustomVoice.objects.get(user=u).spec
+        self.assertTrue(spec["principle"]); self.assertEqual(spec["paradigm_register"], "personal")
+        self.assertFalse(spec["self_check"])
