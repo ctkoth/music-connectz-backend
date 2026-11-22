@@ -90,7 +90,7 @@ class AdvanceTests(TestCase):
 
     def test_the_deal_says_who_and_how_much_before_anything_is_pressed(self):
         adv = self.c.get(f"/api/economy/collab/{self.deal.id}/").data["advance"]
-        self.assertEqual(adv["to"], [{"username": "mate", "max_cents": 19000}])
+        self.assertEqual([(t["username"], t["max_cents"]) for t in adv["to"]], [("mate", 19000)])
         self.assertIn("cannot be taken back", adv["note"])
         self.assertEqual(self.m.get(f"/api/economy/collab/{self.deal.id}/").data["advance"], {})   # the payee is offered nothing
 
@@ -100,3 +100,59 @@ class AdvanceTests(TestCase):
         self.c.post(self.url, {"to": "mate", "amount": "25.50"}, format="json")
         self.assertEqual(wallet_for(self.mate).money_cents, 7550)
         self.assertEqual(Transaction.objects.filter(user=self.mate, amount_cents=5000).first().note[:34], "CollabZ advance from @payer: Beat"[:34])
+
+
+class AdvanceSkillsAndLabelTests(TestCase):
+    def setUp(self):
+        from apps.economy.models import Label, LabelContract, profile_for
+        self.payer = User.objects.create_user("lbl", "l@e.com", PW)
+        self.mate = User.objects.create_user("prod", "p@e.com", PW)
+        for u in (self.payer, self.mate):
+            Membership.objects.get_or_create(user=u, defaults={"tier": TIER_PREMIUM})
+        p = profile_for(self.mate)
+        p.personas = [{"key": "producer", "name": "Producer", "skills": [
+            {"name": "Mixing", "rate_cents": 5000, "rate_unit": "work"}, {"name": "Mastering", "rate_cents": 3000}, {"name": "Drums", "rate_cents": 900}]}]
+        p.save()
+        self.deal = CollabDeal.objects.create(
+            initiator=self.payer, title="EP", currency="money", status="funded", held_cents=20000,
+            needs=[{"slot": "mix", "skill": "Mixing"}, {"slot": "master", "skill": "Mastering"}],
+            participants=[{"username": "lbl", "pays_cents": 20000, "receives_cents": 0, "funded": True, "accepted_at": "x"},
+                          {"username": "prod", "pays_cents": 0, "receives_cents": 19000, "funded": True, "accepted_at": "x"}])
+        self.c = APIClient(); self.c.force_authenticate(self.payer)
+        self.Label, self.LabelContract = Label, LabelContract
+
+    def _opts(self):
+        return self.c.get(f"/api/economy/collab/{self.deal.id}/").data["advance"]["to"][0]
+
+    def test_the_suggestion_is_the_payees_own_price_of_the_skills_the_deal_needs_and_only_those(self):
+        o = self._opts()
+        self.assertEqual(o["skill_price_cents"], 8000)                       # Mixing 5000 + Mastering 3000, not Drums
+        self.assertEqual(sorted(l["skill"] for l in o["skill_lines"]), ["Mastering", "Mixing"])
+        self.assertIsNone(o["label"])                                         # not on a label: works the same
+
+    def test_no_matching_skill_means_no_suggested_amount_never_an_invented_one(self):
+        self.deal.needs = [{"slot": "x", "skill": "Tuba"}]; self.deal.save()
+        o = self._opts()
+        self.assertIsNone(o["skill_price_cents"]); self.assertEqual(o["skill_lines"], [])
+
+    def test_the_suggestion_never_exceeds_what_can_be_advanced(self):
+        self.deal.participants[1]["receives_cents"] = 6000; self.deal.save()
+        self.assertEqual(self._opts()["skill_price_cents"], 6000)
+
+    def test_a_label_signed_artist_gets_the_advance_on_their_labelz_record_only_when_asked_and_unconfirmed(self):
+        from apps.economy.models import LabelAdvance
+        lab = self.Label.objects.create(owner=self.payer, name="Neon")
+        self.LabelContract.objects.create(label=lab, artist=self.mate, terms_text="t", status="signed")
+        self.assertEqual(self._opts()["label"]["label"], "Neon")
+        url = f"/api/economy/collab/{self.deal.id}/advance/"
+        self.assertEqual(self.c.post(url, {"to": "prod", "amount": "50"}, format="json").status_code, 200)
+        self.assertEqual(LabelAdvance.objects.count(), 0)                     # not unless asked
+        self.assertEqual(self.c.post(url, {"to": "prod", "amount": "50", "record_in_labelz": True}, format="json").status_code, 200)
+        line = LabelAdvance.objects.get()
+        self.assertEqual((line.amount_cents, line.confirmed_at, line.kind), (5000, None, "advance"))
+        self.assertEqual(wallet_for(self.mate).money_cents, 10000)            # both really paid
+
+    def test_asking_for_labelz_without_a_signed_contract_with_that_label_records_nothing(self):
+        from apps.economy.models import LabelAdvance
+        self.c.post(f"/api/economy/collab/{self.deal.id}/advance/", {"to": "prod", "amount": "5", "record_in_labelz": True}, format="json")
+        self.assertEqual(LabelAdvance.objects.count(), 0)

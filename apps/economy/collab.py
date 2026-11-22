@@ -397,6 +397,26 @@ def advance_left(deal, payer_entry, payee_entry):
     return max(0, min(held_by_payer, owed_to_payee, int(deal.held_cents or 0)))
 
 
+def _skill_price_for(deal, user):
+    """What the payee's OWN priced skills that this deal is looking for come to: [{skill, cents, unit}] and the total.
+    Their rates, read from their profile — never the request's, never a guess. A deal that names no matching skill gets
+    no suggestion (the member types an amount), because a made-up default is not a price."""
+    from .postz import skill_price_units, skill_prices
+    wanted = {str(n.get("skill") or "").strip() for n in (deal.needs or []) if isinstance(n, dict)}
+    prices, units = skill_prices(user), skill_price_units(user)
+    lines = [{"skill": k, "cents": v, "unit": units.get(k, "hour")} for k, v in prices.items() if k in wanted]
+    return lines, sum(l["cents"] for l in lines)
+
+
+def _label_for(deal, payer, payee_user):
+    """LabelZ: the payer's label that the payee is signed to, if any — `{contract_id, label}` — whether or not the
+    payee is on a label at all is just None, and the advance works the same either way."""
+    from .models import LabelContract
+    c = (LabelContract.objects.filter(label__owner=payer, artist=payee_user, status=LabelContract.STATUS_SIGNED)
+         .select_related("label").order_by("-signed_at").first())
+    return {"contract_id": c.id, "label": c.label.name} if c else None
+
+
 def advance_options(deal, me):
     """For a funded, money, worth-split deal: who the viewer may advance to and the most they may. {} otherwise."""
     if me is None or deal.currency != CollabDeal.CURRENCY_MONEY or deal.split_mode == CollabDeal.SPLIT_RATING:
@@ -412,7 +432,11 @@ def advance_options(deal, me):
             continue
         cap = advance_left(deal, mine, p)
         if cap > 0:
-            to.append({"username": p["username"], "max_cents": cap})
+            who = User.objects.filter(username=p["username"]).first()
+            lines, price = _skill_price_for(deal, who) if who else ([], 0)
+            to.append({"username": p["username"], "max_cents": cap,
+                       "skill_price_cents": min(price, cap) if price else None, "skill_lines": lines,
+                       "label": _label_for(deal, me, who) if who else None})
     return {"to": to, "note": ADVANCE_NOTE} if to else {}
 
 
@@ -893,6 +917,14 @@ class CollabAdvanceView(APIView):
             deal.held_cents -= cents
             deal.save(update_fields=["held_cents", "participants", "updated_at"])
             note = f"CollabZ advance from @{request.user.username}: {deal.title}"[:200]
+            # LabelZ: if they're signed to this payer's label, the advance can also go on their AdvanceZ record — as a
+            # line THEY confirm (the money has moved, but a record is only shared once both sides say it's right).
+            label = _label_for(deal, request.user, who)
+            if label and (request.data or {}).get("record_in_labelz"):
+                import datetime as _dt
+                from .models import LabelAdvance
+                LabelAdvance.objects.create(contract_id=label["contract_id"], kind=LabelAdvance.KIND_ADVANCE, amount_cents=cents,
+                                            on=_dt.date.today(), note=f"CollabZ: {deal.title}"[:160])
             Transaction.objects.create(user=who, kind=Transaction.KIND_REWARD, amount_cents=cents, dev_tax_cents=0, note=note)
             RoyaltyEntry.objects.create(user=who, kind=RoyaltyEntry.KIND_ACCRUAL, amount_cents=cents, source=f"CollabZ: {deal.title}"[:200])
         notify(who, "collab", f"💵 @{request.user.username} advanced you ${cents / 100:,.2f} on {deal.title or 'a collab'}.", actor=request.user)
