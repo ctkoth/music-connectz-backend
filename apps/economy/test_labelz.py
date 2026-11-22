@@ -12,7 +12,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from apps.economy.models import (TIER_FREE, TIER_PREMIUM, Label, LabelContract,
+from apps.economy.models import (TIER_FREE, TIER_PREMIUM, Label, LabelContract, LabelTeamMember,
                                  Membership, Notification, profile_for)
 
 User = get_user_model()
@@ -256,3 +256,111 @@ class LabelContractRespondTests(TestCase):
     def test_an_unknown_action_is_not_found(self):
         r = self.c.post(self._url("approve"), {}, format="json")
         self.assertEqual(r.status_code, 404)
+
+
+class AdvanceZTests(TestCase):
+    """A shared record, confirmed by the artist, that moves nothing."""
+
+    def setUp(self):
+        self.owner = member("boss", tier=TIER_PREMIUM)
+        self.artist = member("artist1")
+        self.label = Label.objects.create(owner=self.owner, name="Neon Records")
+        self.c = LabelContract.objects.create(label=self.label, artist=self.artist, terms_text="t", status="signed")
+        self.oc, self.ac = APIClient(), APIClient()
+        self.oc.force_authenticate(self.owner); self.ac.force_authenticate(self.artist)
+        self.url = f"/api/economy/labelz/contracts/{self.c.id}/advances/"
+
+    def _add(self, **kw):
+        return self.oc.post(self.url, {"on": "2026-10-01", **kw}, format="json")
+
+    def test_only_confirmed_lines_count_and_nothing_moves(self):
+        from apps.economy.models import Transaction, wallet_for
+        before = wallet_for(self.artist).spinaz
+        r = self._add(kind="advance", amount="500")
+        self.assertEqual((r.data["advanced_cents"], r.data["waiting_cents"]), (0, 50000))
+        lid = r.data["lines"][0]["id"]
+        r = self.ac.post(f"/api/economy/labelz/advances/{lid}/confirm/")
+        self.assertEqual((r.data["advanced_cents"], r.data["outstanding_cents"]), (50000, 50000))
+        self.assertEqual(Transaction.objects.count(), 0)
+        self.assertEqual(wallet_for(self.artist).spinaz, before)
+
+    def test_a_recoup_cannot_exceed_what_is_outstanding(self):
+        lid = self._add(kind="advance", amount="100").data["lines"][0]["id"]
+        self.assertEqual(self._add(kind="recoup", amount="50").status_code, 400)      # nothing confirmed yet
+        self.ac.post(f"/api/economy/labelz/advances/{lid}/confirm/")
+        self.assertEqual(self._add(kind="recoup", amount="60").status_code, 201)
+        self.assertEqual(self._add(kind="recoup", amount="60").status_code, 400)      # 60 pending + 60 > 100
+
+    def test_only_the_parties_see_it_only_the_owner_writes_only_the_artist_confirms(self):
+        stranger = APIClient(); stranger.force_authenticate(member("rando"))
+        self.assertEqual(stranger.get(self.url).status_code, 404)
+        self.assertEqual(self.ac.post(self.url, {"kind": "advance", "amount": "5"}, format="json").status_code, 404)
+        lid = self._add(kind="advance", amount="5").data["lines"][0]["id"]
+        self.assertEqual(self.oc.post(f"/api/economy/labelz/advances/{lid}/confirm/").status_code, 404)
+
+    def test_confirmed_lines_stay_unconfirmed_ones_can_be_withdrawn(self):
+        a = self._add(kind="advance", amount="5").data["lines"][0]["id"]
+        self.assertEqual(self.oc.delete(f"/api/economy/labelz/advances/{a}/").status_code, 200)
+        b = self._add(kind="advance", amount="5").data["lines"][0]["id"]
+        self.ac.post(f"/api/economy/labelz/advances/{b}/confirm/")
+        self.assertEqual(self.oc.delete(f"/api/economy/labelz/advances/{b}/").status_code, 409)
+
+    def test_not_on_an_unsigned_contract_and_junk_is_refused(self):
+        self.c.status = "offered"; self.c.save()
+        self.assertEqual(self._add(kind="advance", amount="5").status_code, 409)
+        self.c.status = "signed"; self.c.save()
+        for bad in ({"kind": "gift", "amount": "5"}, {"kind": "advance", "amount": "-1"}, {"kind": "advance", "amount": "x"}):
+            self.assertEqual(self._add(**bad).status_code, 400)
+
+
+class TeemZTests(TestCase):
+    def setUp(self):
+        self.owner = member("boss2", tier=TIER_PREMIUM)
+        self.pal = member("pal")
+        self.label = Label.objects.create(owner=self.owner, name="Crew Records")
+        self.oc, self.pc = APIClient(), APIClient()
+        self.oc.force_authenticate(self.owner); self.pc.force_authenticate(self.pal)
+        self.url = f"/api/economy/labelz/{self.label.id}/team/"
+
+    def test_invite_accept_then_it_shows_on_the_public_card_only_once_accepted(self):
+        r = self.oc.post(self.url, {"username": "pal", "role": "producer"}, format="json")
+        self.assertEqual(r.status_code, 201)
+        listed = lambda: self.pc.get("/api/economy/labelz/").data["labels"][0]["team"]
+        self.assertEqual(listed(), [])
+        self.assertEqual(self.pc.post(f"/api/economy/labelz/team/{r.data['id']}/accept/").status_code, 200)
+        self.assertEqual(listed(), [{"username": "pal", "role": "producer", "role_label": "Producer"}])
+
+    def test_closed_roles_adults_and_owner_only(self):
+        self.assertEqual(self.oc.post(self.url, {"username": "pal", "role": "ceo"}, format="json").status_code, 400)
+        kid = member("kid", age=15)
+        self.assertEqual(self.oc.post(self.url, {"username": "kid", "role": "manager"}, format="json").status_code, 403)
+        self.assertEqual(self.pc.post(self.url, {"username": "pal", "role": "manager"}, format="json").status_code, 404)
+        self.assertEqual(self.oc.post(self.url, {"username": "boss2", "role": "manager"}, format="json").status_code, 400)
+
+    def test_decline_leave_and_remove(self):
+        mid = self.oc.post(self.url, {"username": "pal", "role": "a_and_r"}, format="json").data["id"]
+        self.assertEqual(self.oc.post(self.url, {"username": "pal", "role": "a_and_r"}, format="json").status_code, 409)
+        self.pc.post(f"/api/economy/labelz/team/{mid}/decline/")
+        self.assertEqual(self.pc.get("/api/economy/labelz/team/mine/").data["mine"], [])
+        self.assertEqual(self.oc.post(self.url, {"username": "pal", "role": "booking"}, format="json").status_code, 201)   # can be re-invited
+        self.assertEqual(self.pc.delete(f"/api/economy/labelz/team/{mid}/").status_code, 204)
+
+    def test_membership_grants_no_access_to_contracts_or_advances(self):
+        mid = self.oc.post(self.url, {"username": "pal", "role": "manager"}, format="json").data["id"]
+        self.pc.post(f"/api/economy/labelz/team/{mid}/accept/")
+        artist = member("art2")
+        c = LabelContract.objects.create(label=self.label, artist=artist, terms_text="secret", status="signed")
+        self.assertEqual(self.pc.get(f"/api/economy/labelz/contracts/{c.id}/advances/").status_code, 404)
+        self.assertEqual(self.pc.get("/api/economy/labelz/contracts/").data["as_owner"], [])
+
+    def test_the_list_costs_the_same_queries_with_one_label_or_many(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        def cost():
+            with CaptureQueriesContext(connection) as q: self.pc.get("/api/economy/labelz/")
+            return len(q)
+        base = cost()
+        for i in range(5):
+            l = Label.objects.create(owner=self.owner, name=f"L{i}")
+            LabelTeamMember.objects.create(label=l, user=self.pal, role="manager", status="accepted")
+        self.assertEqual(cost(), base)

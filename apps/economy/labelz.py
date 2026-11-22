@@ -15,6 +15,13 @@ A label's roster (`member_count`) is the count of distinct artists with a
 SIGNED contract to it — the only thing in this model that means "on the
 label." Nothing else writes membership; there is no separate join request.
 
+**AdvanceZ** (`LabelAdvance`) is a shared RECORD of an advance and what was recouped against it, on a signed
+contract. The label writes a line, the artist confirms it, and only confirmed lines count; the balance is
+confirmed advances minus confirmed recoups, and a recoup can't exceed what is outstanding. Nothing moves —
+no money, no SpinaZ, no automatic cut of anybody's royalties: deducting from earnings is a payment decision
+and a legal one, and is not made here. **TeemZ** (`LabelTeamMember`) is the roster: the owner invites adults
+in a named role from a closed list, they accept; membership grants no access to contracts or advances.
+
 Contracts are 18+, matching the frontend's own "Contracts: adults only"
 pill: offering one and signing one both check `is_minor`.
 """
@@ -27,8 +34,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import (TIER_DEBUG, TIER_PREMIUM, TIER_STATZ, Label, LabelContract,
-                     is_minor, membership_for, notify)
+import datetime as dt
+
+from django.db.models import Sum
+
+from .models import (TIER_DEBUG, TIER_PREMIUM, TIER_STATZ, Label, LabelAdvance, LabelContract,
+                     LabelTeamMember, is_minor, membership_for, notify)
 from .sentencez import CONTRACT_PERSONAS, persona_keys
 
 User = get_user_model()
@@ -45,12 +56,27 @@ def can_create_label(user):
     return bool(persona_keys(user) & set(CONTRACT_PERSONAS))
 
 
-def _label_dict(label, user, counts):
+TEAM_ROLES = {"manager": "Manager", "a_and_r": "A&R", "producer": "Producer", "engineer": "Engineer",
+              "marketing": "Marketing", "booking": "Booking"}
+MAX_TEAM = 50
+MAX_CENTS = 100_000_000
+
+
+def _label_dict(label, user, counts, team=None):
     return {
         "id": label.id, "name": label.name, "bio": label.bio,
         "owner": label.owner.username, "i_own": label.owner_id == user.id,
         "member_count": counts.get(label.id, 0),
+        "team": (team or {}).get(label.id, []),
     }
+
+
+def _team_by_label(label_ids):
+    """Accepted team members for many labels in ONE query — the public list shows them."""
+    out = {}
+    for m in LabelTeamMember.objects.filter(label_id__in=label_ids, status=LabelTeamMember.STATUS_ACCEPTED).select_related("user"):
+        out.setdefault(m.label_id, []).append({"username": m.user.username, "role": m.role, "role_label": TEAM_ROLES.get(m.role, m.role)})
+    return out
 
 
 def _contract_dict(c):
@@ -79,8 +105,10 @@ class LabelListCreateView(APIView):
                 label_id__in=[l.id for l in labels], status=LabelContract.STATUS_SIGNED)
                 .order_by().values_list("label_id", "artist_id").distinct()):
             counts[row[0]] = counts.get(row[0], 0) + 1
+        team = _team_by_label([l.id for l in labels])
         return Response({
-            "labels": [_label_dict(l, request.user, counts) for l in labels],
+            "labels": [_label_dict(l, request.user, counts, team) for l in labels],
+            "team_roles": [{"key": k, "label": v} for k, v in TEAM_ROLES.items()],
             "can_create": can_create_label(request.user),
         })
 
@@ -213,3 +241,175 @@ class LabelContractActionView(APIView):
         notify(contract.label.owner, "labelz",
               f"✅ {request.user.username} signed {contract.title}.", actor=request.user)
         return Response(_contract_dict(contract))
+
+
+# ---------------------------------------------------------------- AdvanceZ
+
+def _advance_state(contract):
+    lines = list(contract.advance_lines.all())
+    conf = [l for l in lines if l.confirmed_at]
+    adv = sum(l.amount_cents for l in conf if l.kind == LabelAdvance.KIND_ADVANCE)
+    rec = sum(l.amount_cents for l in conf if l.kind == LabelAdvance.KIND_RECOUP)
+    return {
+        "contract_id": contract.id, "label": contract.label.name, "artist": contract.artist.username,
+        "advanced_cents": adv, "recouped_cents": rec, "outstanding_cents": adv - rec,
+        "waiting_cents": sum(l.amount_cents for l in lines if not l.confirmed_at),
+        "lines": [{"id": l.id, "kind": l.kind, "amount_cents": l.amount_cents, "on": l.on.isoformat(),
+                   "note": l.note, "confirmed": bool(l.confirmed_at)} for l in lines],
+        "note": "A shared record of an advance and what was recouped. Nothing is paid or taken from anyone's earnings "
+                "here; the money is settled between the two of you, off the platform. Only lines the artist has "
+                "confirmed count.",
+    }
+
+
+def _party_contract(user, pk):
+    c = LabelContract.objects.filter(pk=pk).select_related("label", "artist", "label__owner").first()
+    if not c or user.id not in (c.artist_id, c.label.owner_id):
+        return None
+    return c
+
+
+class AdvanceView(APIView):
+    """GET the record on a contract (owner or artist). POST a line (owner only, signed contracts only)."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        c = _party_contract(request.user, pk)
+        if not c:
+            return Response({"detail": "Contract not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({**_advance_state(c), "i_own": c.label.owner_id == request.user.id})
+
+    def post(self, request, pk):
+        c = _party_contract(request.user, pk)
+        if not c or c.label.owner_id != request.user.id:
+            return Response({"detail": "Contract not found."}, status=status.HTTP_404_NOT_FOUND)
+        if c.status != LabelContract.STATUS_SIGNED:
+            return Response({"detail": "An advance is recorded on a signed contract."}, status=status.HTTP_409_CONFLICT)
+        d = request.data or {}
+        kind = d.get("kind")
+        if kind not in (LabelAdvance.KIND_ADVANCE, LabelAdvance.KIND_RECOUP):
+            return Response({"detail": "Say whether this is an advance or a recoup."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            cents = int(round(float(d.get("amount")) * 100))
+        except (TypeError, ValueError):
+            cents = 0
+        if not 0 < cents <= MAX_CENTS:
+            return Response({"detail": "Enter an amount above zero."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            day = dt.date.fromisoformat(str(d.get("on") or dt.date.today().isoformat()))
+        except ValueError:
+            return Response({"detail": "That date isn't valid."}, status=status.HTTP_400_BAD_REQUEST)
+        if kind == LabelAdvance.KIND_RECOUP:
+            owed = _advance_state(c)["outstanding_cents"]
+            pending = sum(l.amount_cents for l in c.advance_lines.filter(kind=LabelAdvance.KIND_RECOUP, confirmed_at__isnull=True))
+            if cents + pending > owed:
+                return Response({"detail": "That is more than is outstanding on confirmed advances."}, status=status.HTTP_400_BAD_REQUEST)
+        LabelAdvance.objects.create(contract=c, kind=kind, amount_cents=cents, on=day, note=str(d.get("note", "")).strip()[:160])
+        notify(c.artist, "labelz", f"💵 {c.label.name} recorded a {kind} on {c.title} — confirm it if it is right.", actor=request.user)
+        return Response({**_advance_state(c), "i_own": True}, status=status.HTTP_201_CREATED)
+
+
+class AdvanceLineView(APIView):
+    """POST .../confirm/ — the artist confirms a line. DELETE — the owner withdraws a line the artist hasn't confirmed."""
+    permission_classes = [IsAuthenticated]
+
+    def _line(self, request, pk):
+        l = LabelAdvance.objects.filter(pk=pk).select_related("contract__label", "contract__artist").first()
+        return l if l and request.user.id in (l.contract.artist_id, l.contract.label.owner_id) else None
+
+    def post(self, request, pk):
+        l = self._line(request, pk)
+        if not l or l.contract.artist_id != request.user.id:
+            return Response({"detail": "Line not found."}, status=status.HTTP_404_NOT_FOUND)
+        if not l.confirmed_at:
+            l.confirmed_at = timezone.now(); l.save(update_fields=["confirmed_at"])
+            notify(l.contract.label.owner, "labelz", f"{request.user.username} confirmed a {l.kind} on {l.contract.title}.", actor=request.user)
+        return Response({**_advance_state(l.contract), "i_own": False})
+
+    def delete(self, request, pk):
+        l = self._line(request, pk)
+        if not l or l.contract.label.owner_id != request.user.id:
+            return Response({"detail": "Line not found."}, status=status.HTTP_404_NOT_FOUND)
+        if l.confirmed_at:
+            return Response({"detail": "The artist has confirmed this line, so it stays. Record a correcting line instead."}, status=status.HTTP_409_CONFLICT)
+        c = l.contract; l.delete()
+        return Response({**_advance_state(c), "i_own": True})
+
+
+# ---------------------------------------------------------------- TeemZ
+
+def _team_row(m):
+    return {"id": m.id, "label_id": m.label_id, "label": m.label.name, "username": m.user.username,
+            "role": m.role, "role_label": TEAM_ROLES.get(m.role, m.role), "status": m.status}
+
+
+class TeamView(APIView):
+    """GET the roster of a label you own (all statuses). POST invites an adult member in a role from `TEAM_ROLES`."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        label = Label.objects.filter(pk=pk, owner=request.user).first()
+        if not label:
+            return Response({"detail": "Label not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"team": [_team_row(m) for m in label.team.select_related("user", "label")],
+                         "roles": [{"key": k, "label": v} for k, v in TEAM_ROLES.items()]})
+
+    def post(self, request, pk):
+        label = Label.objects.filter(pk=pk, owner=request.user).first()
+        if not label:
+            return Response({"detail": "Label not found."}, status=status.HTTP_404_NOT_FOUND)
+        d = request.data or {}
+        role = d.get("role")
+        if role not in TEAM_ROLES:
+            return Response({"detail": "Pick a role from the list."}, status=status.HTTP_400_BAD_REQUEST)
+        who = User.objects.filter(username__iexact=str(d.get("username", "")).strip()).first()
+        if not who:
+            return Response({"detail": "That username wasn't found."}, status=status.HTTP_404_NOT_FOUND)
+        if who.id == request.user.id:
+            return Response({"detail": "You own this label already."}, status=status.HTTP_400_BAD_REQUEST)
+        if is_minor(who) or is_minor(request.user):
+            return Response({"detail": "Label teams are 18+."}, status=status.HTTP_403_FORBIDDEN)
+        if label.team.count() >= MAX_TEAM:
+            return Response({"detail": f"A label team holds up to {MAX_TEAM}."}, status=status.HTTP_400_BAD_REQUEST)
+        m, made = LabelTeamMember.objects.get_or_create(label=label, user=who, defaults={"role": role})
+        if not made:
+            if m.status == LabelTeamMember.STATUS_INVITED:
+                return Response({"detail": "They've been invited already."}, status=status.HTTP_409_CONFLICT)
+            m.role, m.status = role, LabelTeamMember.STATUS_INVITED
+            m.save(update_fields=["role", "status"])
+        notify(who, "labelz", f"🤝 {label.name} invited you to its team as {TEAM_ROLES[role]}.", actor=request.user)
+        return Response(_team_row(m), status=status.HTTP_201_CREATED)
+
+
+class TeamMineView(APIView):
+    """GET the invitations and teams you are on."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        rows = LabelTeamMember.objects.filter(user=request.user).exclude(status=LabelTeamMember.STATUS_DECLINED).select_related("label", "user")
+        return Response({"mine": [_team_row(m) for m in rows]})
+
+
+class TeamActionView(APIView):
+    """POST .../accept|decline/ (the invitee). DELETE — the owner removes someone, or you leave a team you are on."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk, action):
+        if action not in ("accept", "decline"):
+            return Response({"detail": "Unknown action."}, status=status.HTTP_404_NOT_FOUND)
+        m = LabelTeamMember.objects.filter(pk=pk, user=request.user, status=LabelTeamMember.STATUS_INVITED).select_related("label", "user").first()
+        if not m:
+            return Response({"detail": "Invitation not found."}, status=status.HTTP_404_NOT_FOUND)
+        if action == "accept" and is_minor(request.user):
+            return Response({"detail": "Label teams are 18+."}, status=status.HTTP_403_FORBIDDEN)
+        m.status = LabelTeamMember.STATUS_ACCEPTED if action == "accept" else LabelTeamMember.STATUS_DECLINED
+        m.save(update_fields=["status"])
+        notify(m.label.owner, "labelz", f"{request.user.username} {action}ed the {TEAM_ROLES.get(m.role, m.role)} role on {m.label.name}.", actor=request.user)
+        return Response(_team_row(m))
+
+    def delete(self, request, pk):
+        m = LabelTeamMember.objects.filter(pk=pk).select_related("label", "user").first()
+        if not m or request.user.id not in (m.user_id, m.label.owner_id):
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        m.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

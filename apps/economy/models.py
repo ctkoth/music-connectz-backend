@@ -2601,6 +2601,38 @@ class LabelContract(models.Model):
         return f"LabelContract<{self.id}> {self.label_id}->{self.artist_id} {self.status}"
 
 
+class LabelAdvance(models.Model):
+    """AdvanceZ: one line in the record a label and an artist keep of an advance — either money the label says it
+    advanced, or an amount it says was recouped against it. **A record, never a transfer**: nothing here moves a
+    resource, and the artist confirms every line (`confirmed_at`) before it counts. Only on a SIGNED contract."""
+    KIND_ADVANCE, KIND_RECOUP = "advance", "recoup"
+    contract = models.ForeignKey(LabelContract, on_delete=models.CASCADE, related_name="advance_lines")
+    kind = models.CharField(max_length=8, default=KIND_ADVANCE)
+    amount_cents = models.PositiveIntegerField()
+    on = models.DateField()
+    note = models.CharField(max_length=160, blank=True, default="")
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["on", "id"]
+
+
+class LabelTeamMember(models.Model):
+    """TeemZ: who works for a label. The owner invites an adult member in a named role; they accept or decline.
+    A roster and a title — it grants no access to contracts, terms or advances, which stay owner and artist."""
+    STATUS_INVITED, STATUS_ACCEPTED, STATUS_DECLINED = "invited", "accepted", "declined"
+    label = models.ForeignKey(Label, on_delete=models.CASCADE, related_name="team")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="label_teams")
+    role = models.CharField(max_length=16)
+    status = models.CharField(max_length=10, default=STATUS_INVITED)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        unique_together = [("label", "user")]
+
+
 # ---- DupeZ: one person, more than one account ----
 #
 # Two accounts belonging to the same person is not, by itself, misconduct — it
