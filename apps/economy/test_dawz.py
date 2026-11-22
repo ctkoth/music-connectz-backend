@@ -27,7 +27,7 @@ class TheCatalogTests(Base):
         self.assertEqual(len(d), 8)
         built = {row["id"]: row["tab"] for row in d if row["built"]}
         self.assertEqual(built, {"arsenal": "arsenal", "fruity_mobius": "fruitymobius", "formulawon": "formulawon", "intuition": "intuition",
-                                 "witchcraft": "witchcraft", "azrael": "azrael"})
+                                 "witchcraft": "witchcraft", "azrael": "azrael", "trump_toupee": "trumptoupee"})
         self.assertTrue(all(row["tab"] == "" for row in d if not row["built"]))
 
     def test_corey_s_six_are_named_as_he_named_them(self):
