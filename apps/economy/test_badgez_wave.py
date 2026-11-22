@@ -89,6 +89,16 @@ class CoachBadges(TestCase):
             record(self.u, "rapz", {"score": 8, "scores": {}})
         self.assertTrue(Badge.objects.filter(user=self.u, key="hot_barz").exists())
 
+    def test_progress_is_read_fresh_and_never_passes_the_need(self):
+        self.assertEqual(W.hot_progress(self.u, "singz")["have"], 0)
+        self.take(8); self.take(9); self.take(7); self.take(8, days_ago=W.HOT_DAYS + 1)
+        p = W.hot_progress(self.u, "singz")
+        self.assertEqual((p["have"], p["need"], p["held"], p["key"]), (2, 3, False, "high_notez"))
+        self.take(10); self.take(10)
+        p = W.hot_progress(self.u, "singz")
+        self.assertEqual((p["have"], p["held"]), (3, True))      # shown as 3 of 3, not 4 of 3
+        self.assertIsNone(W.hot_progress(self.u, "not_a_coach"))
+
     def test_the_perk_is_in_the_price_the_screen_shows(self):
         before = ai_energy_cost(self.u, "fable")
         grant_badge(self.u, "high_notez")

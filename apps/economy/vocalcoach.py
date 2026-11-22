@@ -1750,6 +1750,14 @@ class SingZCoachView(APIView):
             )
             out["xp_awarded"] = landed = profile.add_xp(coach_xp_base(out.get("score_exact", out.get("score"))))
             profile.save(update_fields=["xp"])
+            # Where the member stands, for the result screen: the XP total and how far into the
+            # level it is (500 a level, `_level_for_xp`), and the coach's badge progress.
+            from . import badgez_wave
+            out["progress"] = {
+                "xp": {"total": profile.xp, "level": profile.level, "into_level": profile.xp_into_level,
+                       "level_size": 500},
+                "badge": badgez_wave.hot_progress(request.user, self.app_key),
+            }
             TrainingEvent.objects.create(
                 profile=profile,
                 drill_key="coached_take",
