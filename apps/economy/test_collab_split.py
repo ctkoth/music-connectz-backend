@@ -288,3 +288,28 @@ class RatingSplitTests(TestCase):
         self.assertEqual(royalties[0]["amount_cents"], 600)
         self.assertEqual(royalties[0]["amount"], 6.0)
         self.assertIn("Paid Collab", royalties[0]["source"])
+
+
+class CreditSplitForTheCard(TestCase):
+    """`credit_split` is what the deal card shows: whole percents, always summing to 100."""
+
+    def deal(self, parts):
+        from types import SimpleNamespace
+        return SimpleNamespace(participants=parts)
+
+    def test_it_sums_to_exactly_one_hundred(self):
+        from .collab import credit_split
+        got = credit_split(self.deal([{"username": n, "receives_cents": 100} for n in "abc"]))
+        self.assertEqual(sum(x["pct"] for x in got), 100)
+        self.assertEqual(sorted(x["pct"] for x in got), [33, 33, 34])
+
+    def test_it_follows_what_each_receives_then_worth_then_equal(self):
+        from .collab import credit_split
+        got = credit_split(self.deal([{"username": "a", "receives_cents": 500}, {"username": "b", "receives_cents": 300},
+                                      {"username": "c", "receives_cents": 200}]))
+        self.assertEqual([x["pct"] for x in got], [50, 30, 20])
+        got = credit_split(self.deal([{"username": "a", "worth_cents": 100}, {"username": "b", "worth_cents": 300}]))
+        self.assertEqual([x["pct"] for x in got], [25, 75])
+        got = credit_split(self.deal([{"username": "a"}, {"username": "b"}]))
+        self.assertEqual([x["pct"] for x in got], [50, 50])
+        self.assertEqual(credit_split(self.deal([])), [])

@@ -88,6 +88,28 @@ def stake_for(deal, user):
     return stake
 
 
+def credit_split(deal):
+    """[{username, pct}] — each participant's share of what the deal pays out, in whole percents that
+    add to exactly 100 (largest remainder), for the deal card. It is the settlement's own figure:
+    what each side receives (`receives_cents`), else what each put a worth on (`worth_cents`), else an
+    equal split — never a number a screen works out for itself. Empty for a deal with nobody in it."""
+    rows = [p for p in (deal.participants or []) if isinstance(p, dict) and p.get("username")]
+    if not rows:
+        return []
+    for key in ("receives_cents", "worth_cents"):
+        weights = [max(0, int(p.get(key) or 0)) for p in rows]
+        if sum(weights) > 0:
+            break
+    else:
+        weights = [1] * len(rows)
+    total = sum(weights)
+    raw = [w * 100 / total for w in weights]
+    pcts = [int(r) for r in raw]
+    for i in sorted(range(len(rows)), key=lambda i: raw[i] - pcts[i], reverse=True)[:100 - sum(pcts)]:
+        pcts[i] += 1
+    return [{"username": p["username"], "pct": pct} for p, pct in zip(rows, pcts)]
+
+
 def deal_dict(deal, me=None, days_cache=None, marks=None):
     # Thorough marks by name (thoroughz.py). A list hands in one batch; without
     # one, they are remembered in the same shared cache the escrow window uses
@@ -125,6 +147,7 @@ def deal_dict(deal, me=None, days_cache=None, marks=None):
         "items": deal.items or [],
         "split_mode": deal.split_mode,
         "split_snapshot": deal.split_snapshot or {},
+        "credit_split": credit_split(deal),
         # Where each contributor is rated — the same item space RateZ serves.
         "rating_keys": {p.get("username"): contributor_item_key(deal.id, p.get("username"))
                         for p in deal.participants},
