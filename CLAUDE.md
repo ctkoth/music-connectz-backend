@@ -3583,3 +3583,17 @@ of it and do not declare the permission (`AndroidScopeTests` holds that). It ask
   Health Connect before relying on it. Play will also want a Health Connect permission declaration, and the Data safety form and
   privacy policy must name step data (the frontend's `play/bodiez/` and `public/privacy.html`).
 - The app now declares `INTERNET` in those two flavors (the native screen makes its own request); the TWA still needs none.
+
+## The voice paradigm is definable, per voice (Corey's eight sections)
+
+`voicez.py` serves sections 0-7 as dials: principle, stance (six), mechanics (contractions plus five), structure (two), the
+register switch (off / infer / personal / academic), negative constraints, working behaviour (four) and the self-check. Each
+carries `group` and `group_label` so a screen draws the section, and `VoiceZ.jsx` and `CharacterZ.jsx` render whatever is served.
+
+- **Switches, never free text.** The lines are ours, from closed lists; a member-typed rule would be a second place a prompt can be
+  injected. Everything defaults OFF, so no voice that existed before changes by a word (`ParadigmDialsTests` pins it).
+- **Academic never licenses an invented source.** It cites only what the member supplied and says so when nothing was supplied. A
+  citation made up to fit is the substance rule's worst case.
+- **Parsed surfaces do not get them.** `_custom_prose` (the coach, DirectZ) is JSON-shaped; structure rules there would risk an
+  unparseable take. `tone_lines` (the writer, OCC) and a character's `prompt_block` do.
+- A voice's paradigm sits UNDER the platform's four rules and FRAME, which are appended last and cannot be switched off.

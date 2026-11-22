@@ -53,6 +53,9 @@ def prompt_block(c):
     if p:
         bits.append("\n".join(p).replace("the voice's author declared", "the character's creator declared"))
     bits.append("Tone: " + voicez.summary(v))
+    rules = voicez.paradigm_lines(v)
+    if rules:
+        bits.append("Rules this character writes by:\n" + "\n".join(rules))
     if c.hobbies:
         bits.append("Hobbies (things they like doing; use them for flavour, never as a fact about a real person): "
                     + ", ".join(voicez._defang(h) for h in clean_hobbies(c.hobbies)))
