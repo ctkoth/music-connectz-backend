@@ -83,6 +83,10 @@ FEATURES = [
     # the member's device), and a lane drawn during a sample stays in the session and keeps playing and
     # bouncing — only drawing and writing lock again.
     {"key": "daw_automation", "label": "Automation in every DAW: draw volume and pan, write fader rides", "tab": "arsenal", "target": "daw-automation"},
+    # Clean ConnectZ — free space on the member's own device by a target percent or size. It runs entirely on
+    # the device (the folder is read in the browser and nothing is uploaded), so it is client-side like the
+    # erasers; a plan made during a sample is still theirs to carry out.
+    {"key": "cleanconnectz", "label": "Clean ConnectZ: free space by target percent or size, from a folder you pick", "tab": "cleanconnectz", "target": "cleanconnectz:main"},
     # Gain staging and stereo-field suggestions for a DAW session, from a prompt (Corey: StatZ, through Mix ConnectZ's
     # measurements). It acts for the member, so it is StatZ's; each run is still paid, so it switches off cleanly,
     # and levels applied during a sample stay on the faders.
@@ -134,6 +138,7 @@ DRIVERS = [
     {"key": "imagez_cutout", "sampled": True, "modules": ["imagez_cutout"]},
     {"key": "imagez_actions", "sampled": True, "modules": []},
     {"key": "daw_automation", "sampled": True, "modules": []},
+    {"key": "cleanconnectz", "sampled": True, "modules": []},
     {"key": "daw_stage", "sampled": True, "modules": ["mixz_stage"]},
     {"key": "daw_align", "sampled": True, "modules": []},
     {"key": "daw_mixcheck", "sampled": True, "modules": []},
