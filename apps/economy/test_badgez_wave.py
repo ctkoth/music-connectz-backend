@@ -99,6 +99,16 @@ class CoachBadges(TestCase):
         self.assertEqual((p["have"], p["held"]), (3, True))      # shown as 3 of 3, not 4 of 3
         self.assertIsNone(W.hot_progress(self.u, "not_a_coach"))
 
+    def test_badge_totals_count_what_is_worth_chasing_and_never_a_penalty(self):
+        t0 = W.badge_totals(self.u)
+        self.assertEqual(t0["held"], 0)
+        self.assertEqual(t0["total"], len([k for k, s in BADGES.items() if not s.get("penalty")]))
+        grant_badge(self.u, "high_notez")
+        pen = next((k for k, s in BADGES.items() if s.get("penalty")), None)
+        if pen:
+            grant_badge(self.u, pen)
+        self.assertEqual(W.badge_totals(self.u)["held"], 1)
+
     def test_the_perk_is_in_the_price_the_screen_shows(self):
         before = ai_energy_cost(self.u, "fable")
         grant_badge(self.u, "high_notez")

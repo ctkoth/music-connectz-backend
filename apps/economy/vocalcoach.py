@@ -1757,6 +1757,7 @@ class SingZCoachView(APIView):
                 "xp": {"total": profile.xp, "level": profile.level, "into_level": profile.xp_into_level,
                        "level_size": 500},
                 "badge": badgez_wave.hot_progress(request.user, self.app_key),
+                "badges": badgez_wave.badge_totals(request.user),
             }
             TrainingEvent.objects.create(
                 profile=profile,

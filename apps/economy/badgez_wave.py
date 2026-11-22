@@ -107,6 +107,14 @@ def hot_progress(user, app_key):
             "held": have >= HOT_TAKES, "min_score": HOT_SCORE, "window_days": HOT_DAYS}
 
 
+def badge_totals(user):
+    """{held, total} over the badges worth going after. A penalty is not one (it is hidden by default and
+    "Not yours yet" must never read as something to chase), so it is in neither number."""
+    from .models import BADGES, badges_for
+    chase = {k for k, spec in BADGES.items() if not spec.get("penalty")}
+    return {"held": sum(1 for b in badges_for(user) if b.key in chase), "total": len(chase)}
+
+
 def is_hot(user, app_key):
     return hot_counts(user).get(app_key, 0) >= HOT_TAKES
 
