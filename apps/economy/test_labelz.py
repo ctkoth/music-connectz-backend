@@ -313,7 +313,7 @@ class AdvanceZTests(TestCase):
             self.assertEqual(self._add(**bad).status_code, 400)
 
 
-class TeemZTests(TestCase):
+class TeamZTests(TestCase):
     def setUp(self):
         self.owner = member("boss2", tier=TIER_PREMIUM)
         self.pal = member("pal")

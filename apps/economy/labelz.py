@@ -19,7 +19,7 @@ label." Nothing else writes membership; there is no separate join request.
 contract. The label writes a line, the artist confirms it, and only confirmed lines count; the balance is
 confirmed advances minus confirmed recoups, and a recoup can't exceed what is outstanding. Nothing moves —
 no money, no SpinaZ, no automatic cut of anybody's royalties: deducting from earnings is a payment decision
-and a legal one, and is not made here. **TeemZ** (`LabelTeamMember`) is the roster: the owner invites adults
+and a legal one, and is not made here. **TeamZ** (`LabelTeamMember`) is the roster: the owner invites adults
 in a named role from a closed list, they accept; membership grants no access to contracts or advances.
 
 Contracts are 18+, matching the frontend's own "Contracts: adults only"
@@ -336,7 +336,7 @@ class AdvanceLineView(APIView):
         return Response({**_advance_state(c), "i_own": True})
 
 
-# ---------------------------------------------------------------- TeemZ
+# ---------------------------------------------------------------- TeamZ
 
 def _team_row(m):
     return {"id": m.id, "label_id": m.label_id, "label": m.label.name, "username": m.user.username,

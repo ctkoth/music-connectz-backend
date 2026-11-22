@@ -2619,7 +2619,7 @@ class LabelAdvance(models.Model):
 
 
 class LabelTeamMember(models.Model):
-    """TeemZ: who works for a label. The owner invites an adult member in a named role; they accept or decline.
+    """TeamZ: who works for a label. The owner invites an adult member in a named role; they accept or decline.
     A roster and a title — it grants no access to contracts, terms or advances, which stay owner and artist."""
     STATUS_INVITED, STATUS_ACCEPTED, STATUS_DECLINED = "invited", "accepted", "declined"
     label = models.ForeignKey(Label, on_delete=models.CASCADE, related_name="team")
