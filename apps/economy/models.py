@@ -7216,7 +7216,7 @@ BUCKETS = (
     ("anytime", "Anytime 👐🏼"),
     ("someday", "Someday ❓"),
     ("logbook", "Logbook 🧾"),
-   ("trash", "Trash 🗑️"),
+    ("trash", "Trash 🚮"),
 )
 
 # WHERE a task came from, which is the whole basis of what it may pay.
