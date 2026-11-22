@@ -11,7 +11,7 @@ from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
 from .embedplays import EmbedPlayView
 from .budgetz import (BudgetBankLinkView, BudgetBankSessionView, BudgetBankSyncView, BudgetBankUnlinkView,
-                      BudgetLimitView, BudgetLineView, BudgetView)
+                      BudgetLimitView, BudgetLineView, BudgetView, EarningsImportView)
 from .derivedroyalty import DerivedTermsView
 from .postz import (PostBoostView, PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView, PostProgressionView, DiscoveryFeedView, PostSaleView)
@@ -514,6 +514,7 @@ urlpatterns = [
     path("ratez/queue/", RateQueueView.as_view(), name="economy-ratez-queue"),
     path("budgetz/", BudgetView.as_view(), name="economy-budgetz"),
     path("budgetz/line/<int:pk>/", BudgetLineView.as_view(), name="economy-budgetz-line"),
+    path("budgetz/earnings/", EarningsImportView.as_view(), name="economy-budgetz-earnings"),
     path("budgetz/limit/", BudgetLimitView.as_view(), name="economy-budgetz-limit"),
     path("budgetz/bank/session/", BudgetBankSessionView.as_view(), name="economy-budgetz-session"),
     path("budgetz/bank/link/", BudgetBankLinkView.as_view(), name="economy-budgetz-link"),
