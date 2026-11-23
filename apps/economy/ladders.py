@@ -75,6 +75,7 @@ def _rows():
         ("PostZ & profile", "custom_groups", "Your own groups", "groupz", "", _lim("custom_groups"), "", "tier_limits:custom_groups"),
         ("PostZ & profile", "soundcloud_import", "SoundCloud tracks imported", "profilez", "", _lim("soundcloud_import"), "", "tier_limits:soundcloud_import"),
         ("PostZ & profile", "releases", "Tracks released a month (DistributeZ)", "distributez", "distributez-releases", _from(PER_MONTH), "", "releasez.PER_MONTH"),
+        ("Make", "clean_modes", "Clean ConnectZ ways to choose what goes (the duplicate finder opens with the 2nd)", "cleanconnectz", "cleanconnectz:main", _lim("clean_modes"), "", "tier_limits:clean_modes"),
         ("Make", "imagez_layers", "ImageZ layers in a picture", "imagez", "", _lim("imagez_layers"), "", "tier_limits:imagez_layers"),
         ("Make", "imagez_lists", "ImageZ filters, blend modes and adjustment presets", "imagez", "", _lim("imagez_layers"), "", "tier_limits:imagez_layers"),
         ("Make", "imagez_fonts", "ImageZ fonts", "imagez", "", _lim("imagez_fonts"), "", "tier_limits:imagez_fonts"),
