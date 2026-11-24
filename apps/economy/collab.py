@@ -417,8 +417,10 @@ def _label_for(deal, payer, payee_user):
     return {"contract_id": c.id, "label": c.label.name} if c else None
 
 
-def advance_options(deal, me):
-    """For a funded, money, worth-split deal: who the viewer may advance to and the most they may. {} otherwise."""
+def advance_options(deal, me, detail=False):
+    """For a funded, money, worth-split deal: who the viewer may advance to and the most they may. {} otherwise.
+    The LIST carries only names and caps (no query per card — a feed of deals re-polls); `detail=True`, asked for by
+    the one deal being paid on, adds the payee's skill prices and the label link."""
     if me is None or deal.currency != CollabDeal.CURRENCY_MONEY or deal.split_mode == CollabDeal.SPLIT_RATING:
         return {}
     if deal.status not in (CollabDeal.STATUS_FUNDED, CollabDeal.STATUS_DELIVERED):
@@ -432,17 +434,19 @@ def advance_options(deal, me):
             continue
         cap = advance_left(deal, mine, p)
         if cap > 0:
-            who = User.objects.filter(username=p["username"]).first()
-            lines, price = _skill_price_for(deal, who) if who else ([], 0)
-            to.append({"username": p["username"], "max_cents": cap,
-                       "skill_price_cents": min(price, cap) if price else None, "skill_lines": lines,
-                       "label": _label_for(deal, me, who) if who else None})
+            row = {"username": p["username"], "max_cents": cap}
+            if detail:
+                who = User.objects.filter(username=p["username"]).first()
+                lines, price = _skill_price_for(deal, who) if who else ([], 0)
+                row.update(skill_price_cents=min(price, cap) if price else None, skill_lines=lines,
+                           label=_label_for(deal, me, who) if who else None)
+            to.append(row)
     return {"to": to, "note": ADVANCE_NOTE} if to else {}
 
 
 def _accepted(deal, entry):
     """Naming somebody on a deal is not consent: the starter has accepted by starting, everyone else presses accept."""
-    return bool(entry.get("accepted_at")) or User.objects.filter(pk=deal.initiator_id, username=entry.get("username")).exists()
+    return bool(entry.get("accepted_at")) or entry.get("username") == deal.initiator.username
 
 
 @transaction.atomic
@@ -871,11 +875,19 @@ class CollabFundView(APIView):
 
 
 class CollabAdvanceView(APIView):
+    """GET: who you may advance to, with their skill prices and any label link (the list carries names and caps only).
+    POST: pay it."""
     """A paying collaborator advances part of their held share to somebody on the deal, now. Real money, so it is
     narrow: money deals only, funded and not disputed, a payee who has accepted, never more than the payer still holds
     or the payee is still owed, and never while the split is by rating (the shares are not frozen until release)."""
 
     permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        deal = CollabDeal.objects.select_related("initiator").filter(pk=pk).first()
+        if not deal or not _entry_for(deal, request.user.username):
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response(advance_options(deal, request.user, detail=True))
 
     def post(self, request, pk):
         try:

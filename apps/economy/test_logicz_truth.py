@@ -139,7 +139,8 @@ class ABuiltAppNamesItsDoorTests(TestCase):
         # its own and the hub tab is the one place LogicZ describes them.
         extra = {"vybez", "profilez", "soundcloudengagementz",
                  "sentenceconnectz", "instrumentalconnectz", "mixconnectz",
-                 "videoconnectz", "facez", "voicez", "lookmaxz", "imageconnectz"}
+                 "videoconnectz", "facez", "voicez", "lookmaxz", "imageconnectz",
+                 "mangaz", "animeconnectz", "animez"}   # MangaZ / Anime ConnectZ rows on the IntelligenceZ hub
         for app in apps_by_name().values():
             if app["tab"]:
                 self.assertIn(app["tab"], keys | extra,

@@ -122,7 +122,7 @@ class AdvanceSkillsAndLabelTests(TestCase):
         self.Label, self.LabelContract = Label, LabelContract
 
     def _opts(self):
-        return self.c.get(f"/api/economy/collab/{self.deal.id}/").data["advance"]["to"][0]
+        return self.c.get(f"/api/economy/collab/{self.deal.id}/advance/").data["to"][0]
 
     def test_the_suggestion_is_the_payees_own_price_of_the_skills_the_deal_needs_and_only_those(self):
         o = self._opts()
@@ -156,3 +156,19 @@ class AdvanceSkillsAndLabelTests(TestCase):
         from apps.economy.models import LabelAdvance
         self.c.post(f"/api/economy/collab/{self.deal.id}/advance/", {"to": "prod", "amount": "5", "record_in_labelz": True}, format="json")
         self.assertEqual(LabelAdvance.objects.count(), 0)
+
+
+class AdvanceListCostTests(TestCase):
+    def test_the_list_carries_names_and_caps_only_and_costs_no_query_per_card(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        from apps.economy.collab import advance_options
+        payer = User.objects.create_user("pp", "pp@e.com", PW); mate = User.objects.create_user("mm", "mm@e.com", PW)
+        deals = [CollabDeal.objects.create(initiator=payer, title=f"d{i}", currency="money", status="funded", held_cents=1000,
+                 participants=[{"username": "pp", "pays_cents": 1000, "funded": True, "accepted_at": "x"},
+                               {"username": "mm", "receives_cents": 900, "funded": True, "accepted_at": "x"}]) for i in range(6)]
+        deals = list(CollabDeal.objects.select_related("initiator").filter(pk__in=[d.pk for d in deals]))
+        with CaptureQueriesContext(connection) as q:
+            rows = [advance_options(d, payer) for d in deals]
+        self.assertEqual(rows[0]["to"], [{"username": "mm", "max_cents": 900}])    # no skills/label here
+        self.assertEqual(len(q), 0)                                                 # nothing asked of the database, per card or at all
