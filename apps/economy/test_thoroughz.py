@@ -42,8 +42,8 @@ def _lifts(n):
 
 class TheRungs(TestCase):
     def test_corey_numbers(self):
-        self.assertEqual([thoroughz.tier_for(r) for r in (None, 1, 5, 6, 6.8, 6.9, 7.4, 7.5, 8.5, 9.5, 9.9, 10)],
-                         [None, None, None, None, None, "thorough", "thorough", "decent", "legendary", "supreme", "supreme", "perfect"])
+        self.assertEqual([thoroughz.tier_for(r) for r in (None, 1, 5, 6, 6.8, 6.9, 7.4, 7.5, 8.8, 8.9, 9.4, 9.8, 9.9, 10)],
+                         [None, None, None, None, None, "thorough", "thorough", "decent", "decent", "legendary", "supreme", "supreme", "perfect", "perfect"])
 
     def test_nothing_below_6_9_means_anything(self):
         # 6.5 used to round to 7 and wear a badge; the rungs read the unrounded mean now.

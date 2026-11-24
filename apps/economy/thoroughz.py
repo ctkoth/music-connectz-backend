@@ -4,15 +4,15 @@ Corey's tiers, on the member's Thorough rating (BodieZ, 1 to 10):
 
     6.9  💯 Thorough     (nothing below 6.9 means anything here)
     7.5  🥈 Decent
-    8.5  🥇 Legendary
-    9.5  🌟 Supreme
-    10   💎 Perfect
+    8.9  🥇 Legendary
+    9.4  🌟 Supreme
+    9.9  💎 Perfect
 
 Corey: Thorough only means something at 6.9 or more. The rungs are read off the UNROUNDED mean now, because
 rounding is what let a 5.5 wear a badge ("anything above 5"). The old 6 / 7 / 8 / 9 / 10 were rounded numbers,
-so the bands moved with the floor: what used to be Decent from 6.5 now starts at 6.9, and Decent, Legendary and
-Supreme each start where the next rounded band always did (7.5, 8.5, 9.5). The cost: Perfect now needs a mean
-of exactly 10 (it was 9.5), and a member who held a rung on a mean between 5.5 and 6.9 loses it at the next
+so the bands moved with the floor: what used to be Decent from 6.5 now starts at 6.9. Corey then set Legendary at
+8.9 or higher and Perfect at 9.9 or higher; Decent (7.5) and Supreme (9.4, midway between his two) are mine. The cost: Perfect now needs a mean
+of 9.9 (it was 9.5), and a member who held a rung on a mean between 5.5 and 6.9 loses it at the next
 recheck. Reversible in TIERS.
 
 THE NUMBER IS THE SAME NUMBER. A member's rating is the mean of the Thorough
@@ -54,9 +54,9 @@ MIN_LIFTS = 3
 # (rating, key, name, emoji) — highest first. The emoji are Corey's placeholders
 # until his art arrives; `icon` stays "" so the client falls back to the emoji.
 TIERS = [
-    (10, "perfect", "Perfect", "💎"),
-    (9.5, "supreme", "Supreme", "🌟"),
-    (8.5, "legendary", "Legendary", "🥇"),
+    (9.9, "perfect", "Perfect", "💎"),
+    (9.4, "supreme", "Supreme", "🌟"),
+    (8.9, "legendary", "Legendary", "🥇"),
     (7.5, "decent", "Decent", "🥈"),
     (6.9, "thorough", "Thorough", "💯"),
 ]
