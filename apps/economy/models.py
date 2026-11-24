@@ -8842,3 +8842,26 @@ class StepDay(models.Model):
     class Meta:
         unique_together = (("user", "day"),)
         ordering = ["-day"]
+
+
+class DawSession(models.Model):
+    """A DAW session a member chose to keep on their account, so it opens on another device.
+
+    DAW sessions live in the browser's IndexedDB (`src/daw/store.js`); this is the opt-in second copy.
+    `data` is the session JSON the editor already writes; `audio` maps each source id in it to the
+    `Upload` that holds its sound, so the audio is ordinary stored files under the member's own storage
+    quota and visible in FileZ, never a second store with a second price. `sid` is the client's session id,
+    so the same session on two devices is one row."""
+
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="daw_sessions")
+    sid = models.CharField(max_length=60)
+    app = models.CharField(max_length=30, blank=True, default="")
+    name = models.CharField(max_length=60, blank=True, default="")
+    data = models.JSONField(default=dict)
+    audio = models.JSONField(default=dict)
+    updated_ms = models.BigIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_ms"]
+        constraints = [models.UniqueConstraint(fields=["owner", "sid"], name="dawsession_owner_sid")]
