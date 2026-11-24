@@ -1,4 +1,4 @@
-"""ThuroZ and SeXi: above 6.9, from enough members, as one word."""
+"""ThuroZ, SeXi and Thorough: above 6.9, as one word."""
 from django.contrib.auth import get_user_model
 from django.db import connection
 from django.test import TestCase
@@ -190,7 +190,7 @@ class TheEndpointTests(Base):
         self.rate(self.me, [8, 8, 8])
         d = self.c.get("/api/economy/classz/").data
         self.assertEqual((d["above"], d["min_ratings"]), (ABOVE, MIN_RATINGS))
-        self.assertEqual({c["key"] for c in d["classes"]}, {"thuro", "sexi"})
+        self.assertEqual({c["key"] for c in d["classes"]}, {"thuro", "sexi", "thorough"})
         self.assertTrue(d["mine"]["thuro"]["is"])
         self.assertIn("pays nothing", d["note"])
 
@@ -204,3 +204,32 @@ class TheEndpointTests(Base):
             if f.name.startswith("test_") or f.name in allowed:
                 continue
             self.assertIsNone(re.search(r"from \.classz|import classz|classes_for\(", f.read_text(encoding="utf-8")), f.name)
+
+
+class ThoroughClassTests(Base):
+    """Thorough: the BodieZ badge (6.9+) as a one-tap "only" filter, read as it is worn."""
+
+    def test_a_worn_thorough_badge_is_in_the_class_a_hidden_one_is_not(self):
+        from .models import Badge
+        worn, hidden, none = self.member("worn"), self.member("hid"), self.member("none")
+        Badge.objects.create(user=worn, key="thorough", visible=True)
+        Badge.objects.create(user=hidden, key="decent", visible=False)
+        got = classes_for([profile_for(u) for u in (worn, hidden, none)])
+        self.assertIn("thorough", got[worn.id])
+        self.assertNotIn(hidden.id, got)
+        self.assertNotIn(none.id, got)
+
+    def test_it_is_an_exclusive_gate_and_says_so(self):
+        from .models import Badge
+        worn, none = self.member("worn"), self.member("none")
+        Badge.objects.create(user=worn, key="legendary", visible=True)
+        gates = clean_gates({"thorough": True})
+        self.assertEqual(gates, {"thorough": True})
+        self.assertIsNone(failing_gate(member_metrics(profile_for(worn)), gates))
+        self.assertEqual(failing_gate(member_metrics(profile_for(none)), gates), "thorough")
+        self.assertIn("Thorough only", describe("thorough", gates))
+
+    def test_it_is_published_with_where_i_stand(self):
+        r = self.c.get("/api/economy/classz/")
+        self.assertIn("thorough", [c["key"] for c in r.data["classes"]])
+        self.assertIn("lifts logged", r.data["mine"]["thorough"]["line"])

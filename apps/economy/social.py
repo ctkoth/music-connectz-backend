@@ -1659,6 +1659,7 @@ class MembersView(APIView):
             # ThuroZ / SeXi: the rating gate with the number chosen once (classz.py).
             "thuro": request.query_params.get("thuro") in ("1", "true"),
             "sexi": request.query_params.get("sexi") in ("1", "true"),
+            "thorough": request.query_params.get("thorough") in ("1", "true"),
         })
         exp_min, exp_max = num("exp_min"), num("exp_max")  # years-of-experience range
 
@@ -1748,10 +1749,10 @@ class MembersView(APIView):
             metrics = member_metrics(p, origin)
             # The classes are already known for the whole page; hand them to the gate
             # so "ThuroZ only" costs no read per member.
-            for _ck in ("thuro", "sexi"):
+            for _ck in ("thuro", "sexi", "thorough"):
                 metrics._cache[_ck] = _ck in batched["classes"].get(p.user_id, ())
             if gates and failing_gate(metrics, gates):
-                if any(gates.get(k) and not metrics.get(k) for k in ("thuro", "sexi")):
+                if any(gates.get(k) and not metrics.get(k) for k in ("thuro", "sexi", "thorough")):
                     class_skipped += 1
                 continue
             if exp_min is not None or exp_max is not None:

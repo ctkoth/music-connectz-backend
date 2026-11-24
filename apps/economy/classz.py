@@ -60,6 +60,15 @@ CLASSES = {
         "earn_tab": "ratez",
     },
 }
+CLASSES["thorough"] = {
+    "label": "Thorough", "emoji": "\U0001f4af", "icon": "thorough.png",
+    "metric": "Thorough rating",
+    "rule": (f"a Thorough rating of {ABOVE:g} or more from finished BodieZ training in the last 28 days, "
+             "with the badge shown"),
+    "what": ("Members whose training is Thorough: 6.9 or more over at least 3 lifts. A badge for how completely "
+             "somebody trains, not for how good their music is. Only members who show the badge are in it."),
+    "earn_tab": "bodiez",
+}
 NOTE = ("A class is read from members' ratings when you ask and is never stored. It pays nothing "
         "and changes no rating, price or royalty: it only decides who you see or let in.")
 
@@ -129,6 +138,12 @@ def classes_for(profiles, overall=None, attract=None, coach=None):
     maybe_sexi = [i for i in ids if in_class(*attract.get(i, (None, 0)))]
     hidden = (set(Membership.objects.filter(user_id__in=maybe_sexi, attractiveness_public=False)
                   .values_list("user_id", flat=True)) if maybe_sexi else set())
+    # Thorough is the BodieZ badge, read as it is WORN: a hidden badge is a disclosure, so it is no entry here
+    # either (the same `visible=True` rule every mark follows). One query for the whole page.
+    from .models import Badge
+    from .thoroughz import KEYS as THOROUGH_KEYS
+    thorough = set(Badge.objects.filter(user_id__in=ids, key__in=THOROUGH_KEYS, visible=True)
+                   .values_list("user_id", flat=True))
     out = {}
     for p in profiles:
         keys = []
@@ -137,6 +152,8 @@ def classes_for(profiles, overall=None, attract=None, coach=None):
             keys.append("thuro")
         if (p.user_id in maybe_sexi and p.user_id not in hidden and not profile_is_minor(p)):
             keys.append("sexi")
+        if p.user_id in thorough:
+            keys.append("thorough")
         if keys:
             out[p.user_id] = keys
     return out
@@ -167,6 +184,19 @@ def state_for(user):
     else:
         row["line"] = f"Your median is {t_median:g} from {who}. ThuroZ is above {ABOVE:g}."
     out["thuro"] = row
+    from .thoroughz import member_rating
+    mr = member_rating(user)
+    row = {"is": "thorough" in held, "median": mr["exact"], "count": mr["lifts"], "members": 0,
+           "coach": None, "coach_votes": 0, "ratings_needed": 0}
+    if row["is"]:
+        row["line"] = f"You are Thorough: {mr['exact']:g} over {mr['lifts']} lifts."
+    elif mr["exact"] is None:
+        row["line"] = f"{mr['lifts']} of 3 lifts logged in the last 28 days. Thorough needs 3 and a rating of {ABOVE:g} or more."
+    elif mr["exact"] >= ABOVE:
+        row["line"] = f"Your rating is {mr['exact']:g}, but your Thorough badge is hidden, so you are not listed. Showing it is your choice."
+    else:
+        row["line"] = f"Your rating is {mr['exact']:g}. Thorough is {ABOVE:g} or more."
+    out["thorough"] = row
     if not profile_is_minor(p):            # SeXi: not offered, explained or counted for a minor
         row = {"is": "sexi" in held, "median": a_median, "count": a_count, "members": a_count,
                "coach": None, "coach_votes": 0, "ratings_needed": max(0, MIN_RATINGS - a_count)}
