@@ -269,3 +269,19 @@ class SynthPatchKindTests(TestCase):
         r = self.c.post("/api/economy/tonez/", {"kind": "synth", "name": "K", "chain": {"oscs": [{"shape": "saw"}], "evil": "<script>"}}, format="json")
         self.assertEqual(r.status_code, 201)
         self.assertNotIn("evil", r.data["preset"]["chain"])
+
+
+class BlendAmountTests(TestCase):
+    """An effect's blend (StatZ) is part of what a saved preset keeps."""
+
+    def test_the_amount_is_kept_clamped_and_absent_at_full(self):
+        out = clean_chain([
+            {"type": "comp", "on": True, "params": {}, "amount": 50},
+            {"type": "comp", "on": True, "params": {}, "amount": 100},
+            {"type": "comp", "on": True, "params": {}, "amount": -20},
+            {"type": "comp", "on": True, "params": {}, "amount": "junk"},
+        ])
+        self.assertEqual(out[0]["amount"], 50)
+        self.assertNotIn("amount", out[1])
+        self.assertEqual(out[2]["amount"], 0)
+        self.assertNotIn("amount", out[3])

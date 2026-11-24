@@ -99,6 +99,14 @@ def clean_chain(raw):
         row = {"type": ins["type"], "on": ins.get("on") is not False, "params": params}
         if ins["type"] == "eq" and isinstance(ins.get("bands"), list):
             row["bands"] = clean_bands(ins["bands"])
+        # StatZ's blend: how much of the effect is heard against the untouched sound. Kept only when it is not
+        # the full 100, so a chain saved before it existed reads exactly as it did.
+        try:
+            amt = float(ins.get("amount"))
+        except (TypeError, ValueError):
+            amt = 100.0
+        if math.isfinite(amt) and amt < 100:
+            row["amount"] = max(0.0, amt)
         out.append(row)
         if len(out) >= MAX_INSERTS:
             break
