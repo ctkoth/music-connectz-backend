@@ -454,3 +454,11 @@ class SampleReadingTests(TestCase):
     def test_the_real_reading_is_still_closed_to_a_visitor(self):
         from rest_framework.test import APIClient
         self.assertIn(APIClient().get("/api/economy/lookmaxz/").status_code, (401, 403))
+
+
+class BodyDoorsTests(TestCase):
+    def test_a_member_with_no_training_gets_no_doors_and_the_plain_one(self):
+        u = get_user_model().objects.create_user("lifter", password="pw12345!x")
+        b = lm.body_sector(u)
+        self.assertEqual(b["doors"], [])
+        self.assertEqual(b["open_in"]["tab"], "bodiez")

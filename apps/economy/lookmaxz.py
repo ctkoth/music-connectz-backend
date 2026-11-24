@@ -742,6 +742,12 @@ def body_sector(user):
     ratings = muscle_coach_ratings(sets)
     rated = [r["rating"] for r in ratings.values() if r["rating"] is not None]
     score = _mean(rated)
+    # Every muscle group still under WORK_BELOW is a door into BodieZ's builder for THAT muscle, lowest first:
+    # the number says where, and the button is where to go. Read off the same ratings, never a second formula.
+    low = sorted((r["rating"], m) for m, r in ratings.items() if r["rating"] is not None and r["rating"] < WORK_BELOW)
+    doors = [{"factor": m, "label": m.replace("_", " ").title(), "score": sc, "muscles": [m],
+              "open_in": {"tab": "bodiez", "muscle": m, "label": f"Build a {m.replace('_', ' ')} day in BodieZ"}}
+             for sc, m in low[:4]]
     sessions = BodieZSession.objects.filter(
         user=user, ended_at__isnull=False,
         started_at__gte=now - timedelta(days=BODY_SESSIONS_DAYS)).count()
@@ -750,7 +756,7 @@ def body_sector(user):
         "why": (f"{len(rated)} muscle group{'s' if len(rated) != 1 else ''} compared against "
                 "your own earlier best." if rated else
                 "Needs two logged sessions of the same exercise before anything can be compared."),
-        "sessions_28d": sessions,
+        "sessions_28d": sessions, "doors": doors,
         "open_in": {"tab": "bodiez", "label": "Log a session in BodieZ"},
     }
 
