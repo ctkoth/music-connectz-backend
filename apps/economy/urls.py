@@ -226,6 +226,7 @@ from .views import (
 )
 from .habits import HabitCreateView, HabitCompleteView
 from .bodiez_float import BodieZFloatStateView, BodieZSessionFloatView
+from .cleandupes import CleanDupesView
 from .healthsync import HealthLinkView, HealthPairView, HealthStateView, HealthStepsView
 from .bodiez import (
     BodieZAccessView, BodieZBoardView, BodieZCustomDaysView, BodieZStepsView, BodieZCustomExerciseView, BodieZCustomExerciseDetailView, BodieZPastSessionView, BodieZSessionLogView, BodieZRoutinePlanView, BodieZStepCoachView, BodieZCustomDayDetailView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
@@ -802,6 +803,7 @@ urlpatterns = [
     path("parcel/", ParcelCampaignView.as_view(), name="economy-parcel"),
     path("parcel/email-pref/", ParcelEmailPrefView.as_view(), name="economy-parcel-email-pref"),
     path("parcel/unsubscribe/", ParcelUnsubscribeView.as_view(), name="economy-parcel-unsubscribe"),
+    path("cleanconnectz/dupes/", CleanDupesView.as_view(), name="economy-clean-dupes"),
     path("autotopup/", AutoTopUpView.as_view(), name="economy-autotopup"),
     path("autotopup/<int:pk>/cancel/", AutoTopUpCancelView.as_view(), name="economy-autotopup-cancel"),
     path("identity/", IdentityView.as_view(), name="economy-identity"),

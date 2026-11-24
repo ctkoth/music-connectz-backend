@@ -2621,6 +2621,16 @@ class LabelAdvance(models.Model):
         ordering = ["on", "id"]
 
 
+class CleanDupeRun(models.Model):
+    """One finished duplicate scan in Clean ConnectZ (Windows app), for the day's count (`clean_dupe_runs`). Just a time:
+    what was scanned never reaches the server. The count is rows in a rolling 24 hours, so nothing can drift."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="clean_dupe_runs")
+    at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-at"]
+
+
 # ---- DupeZ: one person, more than one account ----
 #
 # Two accounts belonging to the same person is not, by itself, misconduct — it
