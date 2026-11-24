@@ -828,3 +828,33 @@ def inspire_look(fileobj, content_type):
     if parsed.get("none"):
         return {"summary": "", "parts": [], "why": str(parsed["none"])[:300]}, None
     return clean_inspiration(parsed), None
+
+
+# ---- the sample reading: what a reading looks like, for somebody who has no account or no ID check ----
+# A real reading scores a photo of a real face, which is why it is 18+ and verified. A visitor cannot be
+# age-checked, so what they get is an EXAMPLE: a fixed, invented reading with no photo behind it. Nobody's
+# face is scored and nothing about a person is inferred, so there is no age question to get wrong. Fixed
+# scores (not random, not model-written) so the example reads the same every time and cannot be mistaken
+# for a measurement of whoever is looking.
+SAMPLE_SCORES = {
+    ("face", "hair"): 7, ("face", "facial_hair"): 6, ("face", "brows"): 8,
+    ("skin", "texture"): 6, ("skin", "hydration"): 5, ("skin", "blemishes"): 7, ("skin", "sun_care"): 6, ("skin", "evenness"): 7,
+    ("teeth", "staining"): 6, ("teeth", "cleanliness"): 8, ("teeth", "gums"): 7,
+    ("styling", "fit"): 5, ("styling", "colour"): 8, ("styling", "condition"): 7,
+}
+SAMPLE_ADVICE = {
+    "face": ["Example: a trim every three weeks keeps a fade looking intentional.", "Example: tidy the brow line, don't reshape it."],
+    "skin": ["Example: hydration is the lowest factor, so a moisturiser after washing is the first move.", "Example: daily SPF is the cheapest sun-damage fix."],
+    "teeth": ["Example: cleanliness is strong; staining is the one to work on."],
+    "styling": ["Example: fit is the lowest, and a tailor fixes fit for a few dollars."],
+}
+SAMPLE_NOTE = ("This is an EXAMPLE reading, not a reading of you or of any real person: there is no photo behind it and the "
+               "numbers are made up to show the layout. A real reading is of your own photo and is for verified adults.")
+
+
+def sample_reading():
+    sectors = {}
+    for k in DEFAULT_SECTORS:
+        scores = {f: SAMPLE_SCORES.get((k, f)) for f in SECTORS[k]["factors"]}
+        sectors[k] = {"scores": scores, "score": _mean(scores.values()), "advice": SAMPLE_ADVICE.get(k, [])}
+    return {"sectors": sectors, "overall": overall_of(sectors), "sample": True, "note": SAMPLE_NOTE}

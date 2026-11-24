@@ -62,7 +62,7 @@ from .dawsessions import DawSessionDetailView, DawSessionsView
 from .attractivenessz_view import AttractivenessZView
 from .lookask import LookAskOneView, LookAskView
 from .lookshare import LookInviteView, LookShareDetailView, LookSharePostView, LookShareView
-from .lookmaxz_view import LookInspireView, LookmaxZMarketsView, LookmaxZShopView, LookmaxZView
+from .lookmaxz_view import LookInspireView, LookSampleView, LookmaxZMarketsView, LookmaxZShopView, LookmaxZView
 from .soundcloud_engagement import SoundCloudEngagementView
 from .appversion import AppVersionView
 from .soundcloud_import import SoundCloudImportView
@@ -403,6 +403,7 @@ urlpatterns = [
     path("dawz/sessions/<str:sid>/", DawSessionDetailView.as_view(), name="economy-daw-session"),
     path("attractivenessz/", AttractivenessZView.as_view(), name="economy-attractivenessz"),
     path("lookmaxz/", LookmaxZView.as_view(), name="economy-lookmaxz"),
+    path("lookmaxz/sample/", LookSampleView.as_view(), name="economy-lookmaxz-sample"),
     path("lookmaxz/shop/", LookmaxZShopView.as_view(), name="economy-lookmaxz-shop"),
     path("lookmaxz/inspire/", LookInspireView.as_view(), name="economy-lookmaxz-inspire"),
     path("lookmaxz/markets/", LookmaxZMarketsView.as_view(), name="economy-lookmaxz-markets"),
