@@ -2,11 +2,18 @@
 
 Corey's tiers, on the member's Thorough rating (BodieZ, 1 to 10):
 
-    6   💯 Thorough     (anything above 5)
-    7   🥈 Decent
-    8   🥇 Legendary
-    9   🌟 Supreme
-    10  💎 Perfect
+    6.9  💯 Thorough     (nothing below 6.9 means anything here)
+    7.5  🥈 Decent
+    8.5  🥇 Legendary
+    9.5  🌟 Supreme
+    10   💎 Perfect
+
+Corey: Thorough only means something at 6.9 or more. The rungs are read off the UNROUNDED mean now, because
+rounding is what let a 5.5 wear a badge ("anything above 5"). The old 6 / 7 / 8 / 9 / 10 were rounded numbers,
+so the bands moved with the floor: what used to be Decent from 6.5 now starts at 6.9, and Decent, Legendary and
+Supreme each start where the next rounded band always did (7.5, 8.5, 9.5). The cost: Perfect now needs a mean
+of exactly 10 (it was 9.5), and a member who held a rung on a mean between 5.5 and 6.9 loses it at the next
+recheck. Reversible in TIERS.
 
 THE NUMBER IS THE SAME NUMBER. A member's rating is the mean of the Thorough
 rating of each lift they logged in the last 28 days (`bodiez.lift_thoroughness`,
@@ -48,10 +55,10 @@ MIN_LIFTS = 3
 # until his art arrives; `icon` stays "" so the client falls back to the emoji.
 TIERS = [
     (10, "perfect", "Perfect", "💎"),
-    (9, "supreme", "Supreme", "🌟"),
-    (8, "legendary", "Legendary", "🥇"),
-    (7, "decent", "Decent", "🥈"),
-    (6, "thorough", "Thorough", "💯"),
+    (9.5, "supreme", "Supreme", "🌟"),
+    (8.5, "legendary", "Legendary", "🥇"),
+    (7.5, "decent", "Decent", "🥈"),
+    (6.9, "thorough", "Thorough", "💯"),
 ]
 KEYS = tuple(t[1] for t in TIERS)
 GROUP_NAME = "Thorough 💯"
@@ -62,13 +69,13 @@ CAVEAT = (
     "Thorough is how completely you train, from your finished sessions in the "
     "last 28 days — days trained, working sets a week, and whether each lift is "
     "going up against your own earlier best. It is not how strong you are next "
-    "to anyone else, it pays nothing, and it needs at least "
+    "to anyone else, it pays nothing, it means nothing below 6.9, and it needs at least "
     f"{MIN_LIFTS} different lifts in those 28 days."
 )
 
 
 def tier_for(rating):
-    """The badge key for a rating, or None at 5 and under (and None itself)."""
+    """The badge key for a rating (pass the UNROUNDED mean), or None below 6.9 (and None itself)."""
     if rating is None:
         return None
     for floor, key, _name, _emoji in TIERS:
@@ -78,7 +85,9 @@ def tier_for(rating):
 
 
 def member_rating(user, now=None):
-    """{"rating": int|None, "lifts": n} — the member's Thorough rating.
+    """{"rating": int|None, "exact": float|None, "lifts": n} — the member's Thorough rating.
+
+    `rating` is the whole number shown on screen; `exact` (one decimal) is what the rungs read.
 
     None (never 0) when fewer than MIN_LIFTS lifts were logged in the window.
     The two sides of a one-arm lift are one lift, as in the routine rating.
@@ -92,9 +101,10 @@ def member_rating(user, now=None):
     for r in lift_thoroughness(sets, now).values():
         per_lift[r["exercise_id"]].append(r["rating"])
     if len(per_lift) < MIN_LIFTS:
-        return {"rating": None, "lifts": len(per_lift)}
+        return {"rating": None, "exact": None, "lifts": len(per_lift)}
     lifts = [sum(v) / len(v) for v in per_lift.values()]
-    return {"rating": max(1, min(10, round(sum(lifts) / len(lifts)))), "lifts": len(lifts)}
+    mean = max(1, min(10, sum(lifts) / len(lifts)))
+    return {"rating": round(mean), "exact": round(mean, 1), "lifts": len(lifts)}
 
 
 def badge_key_for(user):
@@ -103,7 +113,7 @@ def badge_key_for(user):
     cached = getattr(user, "_thorough_key", None)
     if cached is not None and cached[0] > timezone.now().timestamp() - 5:
         return cached[1]
-    key = tier_for(member_rating(user)["rating"])
+    key = tier_for(member_rating(user)["exact"])
     try:
         user._thorough_key = (timezone.now().timestamp(), key)
     except Exception:
@@ -204,7 +214,7 @@ class ThoroughZView(APIView):
     def get(self, request):
         from .models import Badge, Post, can_view_post
         mine = member_rating(request.user)
-        my_key = tier_for(mine["rating"])
+        my_key = tier_for(mine["exact"])
         wearing = marks_for([request.user.id]).get(request.user.id)
 
         order = {k: i for i, k in enumerate(KEYS)}
@@ -243,9 +253,9 @@ class ThoroughZView(APIView):
             "group": {"name": GROUP_NAME, "emoji": GROUP_EMOJI, "icon": ""},
             "caveat": CAVEAT,
             "min_lifts": MIN_LIFTS,
-            "mine": {"rating": mine["rating"], "lifts": mine["lifts"], "tier": my_key,
+            "mine": {"rating": mine["rating"], "exact": mine["exact"], "lifts": mine["lifts"], "tier": my_key,
                      "wearing": wearing,
-                     "next": _next_rung(mine["rating"]),
+                     "next": _next_rung(mine["exact"]),
                      "open_in": "badgez"},
             "tiers": tiers,
             # Group posts first: the page exists to be a room, and a room is its work.

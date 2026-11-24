@@ -42,8 +42,13 @@ def _lifts(n):
 
 class TheRungs(TestCase):
     def test_corey_numbers(self):
-        self.assertEqual([thoroughz.tier_for(r) for r in (None, 1, 5, 6, 7, 8, 9, 10)],
-                         [None, None, None, "thorough", "decent", "legendary", "supreme", "perfect"])
+        self.assertEqual([thoroughz.tier_for(r) for r in (None, 1, 5, 6, 6.8, 6.9, 7.4, 7.5, 8.5, 9.5, 9.9, 10)],
+                         [None, None, None, None, None, "thorough", "thorough", "decent", "legendary", "supreme", "supreme", "perfect"])
+
+    def test_nothing_below_6_9_means_anything(self):
+        # 6.5 used to round to 7 and wear a badge; the rungs read the unrounded mean now.
+        self.assertIsNone(thoroughz.tier_for(6.89))
+        self.assertEqual(thoroughz.tier_for(6.9), "thorough")
 
     def test_the_placeholder_emoji(self):
         self.assertEqual({k: BADGES[k]["emoji"] for k in thoroughz.KEYS},
@@ -71,7 +76,7 @@ class EarningIt(TestCase):
 
     def test_two_lifts_are_not_enough_however_hard(self):
         _train(self.u, _lifts(2))
-        self.assertEqual(thoroughz.member_rating(self.u), {"rating": None, "lifts": 2})
+        self.assertEqual(thoroughz.member_rating(self.u), {"rating": None, "exact": None, "lifts": 2})
         recheck_badges(self.u)
         self.assertFalse(Badge.objects.filter(user=self.u, key__in=thoroughz.KEYS).exists())
 
@@ -209,4 +214,4 @@ class TheGroup(TestCase):
     def test_mine_says_what_the_next_rung_takes(self):
         r = self.c.get("/api/economy/thoroughz/")
         self.assertIsNone(r.data["mine"]["rating"])
-        self.assertEqual(r.data["mine"]["next"], {"rating": 6, "label": "Thorough 💯"})
+        self.assertEqual(r.data["mine"]["next"], {"rating": 6.9, "label": "Thorough 💯"})
