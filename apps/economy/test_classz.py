@@ -1,4 +1,4 @@
-"""ThuroZ, SeXi and Thorough: above 6.9, as one word."""
+"""ThuroZ, SeXi and Thorough: 6.9 or more, as one word."""
 from django.contrib.auth import get_user_model
 from django.db import connection
 from django.test import TestCase
@@ -33,7 +33,8 @@ class TheBarTests(Base):
     def test_above_six_point_nine_with_enough_members_behind_it(self):
         self.assertTrue(in_class(7, MIN_RATINGS))
         self.assertTrue(in_class(6.95, 3))
-        self.assertFalse(in_class(ABOVE, 9), "6.9 itself is not above 6.9")
+        self.assertTrue(in_class(ABOVE, 9), "6.9 is 6.9 or more")
+        self.assertFalse(in_class(6.89, 9))
         self.assertFalse(in_class(6.5, 9))
         self.assertFalse(in_class(None, 9))
 

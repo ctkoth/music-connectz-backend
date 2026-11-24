@@ -1,4 +1,7 @@
-"""ThuroZ and SeXi: a rating above 6.9, from enough members, as ONE word.
+"""ThuroZ, SeXi and Thorough: a rating of 6.9 or more, as ONE word.
+
+Corey: SeXi is Thorough on attractiveness, so all three read the same bar — 6.9 OR MORE (it was strictly above,
+which made a member sitting exactly on 6.9 Thorough in BodieZ and not ThuroZ or SeXi).
 
 Corey: classify anything above 6.9 as Thuro, and make it a filter everywhere a member
 decides who they see or work with. The five range gates already do that with numbers
@@ -48,15 +51,15 @@ CLASSES = {
     "thuro": {
         "label": "ThuroZ", "emoji": "\u203c\ufe0f", "icon": "thuroz.jpg",
         "metric": "overall rating",
-        "rule": f"overall rating above {ABOVE:g} from at least {MIN_RATINGS} voices (members, or the AI coach as {COACH_VOTES})",
-        "what": "Members the room rates above 6.9 overall. One word instead of a number in a box.",
+        "rule": f"overall rating of {ABOVE:g} or more from at least {MIN_RATINGS} voices (members, or the AI coach as {COACH_VOTES})",
+        "what": "Members the room rates 6.9 or more overall. One word instead of a number in a box.",
         "earn_tab": "ratez",
     },
     "sexi": {
         "label": "SeXi", "emoji": "\U0001f525", "icon": "sexi.png",
         "metric": "attractiveness",
-        "rule": f"attractiveness above {ABOVE:g} from at least {MIN_RATINGS} members, shown by them",
-        "what": "Members the room rates above 6.9 on looks, who chose to show their number. Adults only.",
+        "rule": f"attractiveness of {ABOVE:g} or more from at least {MIN_RATINGS} members, shown by them",
+        "what": "Members the room rates 6.9 or more on looks, who chose to show their number. Adults only.",
         "earn_tab": "ratez",
     },
 }
@@ -75,7 +78,7 @@ NOTE = ("A class is read from members' ratings when you ask and is never stored.
 
 def in_class(median, count):
     """Above the bar, with enough voices behind the number."""
-    return median is not None and (count or 0) >= MIN_RATINGS and median > ABOVE
+    return median is not None and (count or 0) >= MIN_RATINGS and median >= ABOVE
 
 
 def coach_voices(user_ids):
@@ -179,10 +182,10 @@ def state_for(user):
         row["line"] = f"You are ThuroZ: {t_median:g} from {who}."
     elif t_voices < MIN_RATINGS:
         row["line"] = (f"{t_voices} of {MIN_RATINGS} voices so far ({who}). ThuroZ needs {MIN_RATINGS} and a "
-                       f"median above {ABOVE:g}. The AI coach counts as {COACH_VOTES} once it has scored "
+                       f"median of {ABOVE:g} or more. The AI coach counts as {COACH_VOTES} once it has scored "
                        f"{MIN_COACH_TAKES} of your takes, so that alone is enough.")
     else:
-        row["line"] = f"Your median is {t_median:g} from {who}. ThuroZ is above {ABOVE:g}."
+        row["line"] = f"Your median is {t_median:g} from {who}. ThuroZ is {ABOVE:g} or more."
     out["thuro"] = row
     from .thoroughz import member_rating
     mr = member_rating(user)
@@ -204,11 +207,11 @@ def state_for(user):
             row["line"] = f"You are SeXi: {a_median:g} from {a_count} members."
         elif a_count < MIN_RATINGS:
             row["line"] = (f"{a_count} of {MIN_RATINGS} ratings so far. SeXi needs {MIN_RATINGS} members' "
-                           f"ratings and a median above {ABOVE:g}. No AI counts here: a reading of a face is never stored.")
+                           f"ratings and a median of {ABOVE:g} or more. No AI counts here: a reading of a face is never stored.")
         elif not membership_for(user).attractiveness_public:
             row["line"] = "Your number is hidden, so you are not listed as SeXi. Showing it is your choice."
         else:
-            row["line"] = f"Your median is {a_median:g} from {a_count} members. SeXi is above {ABOVE:g}."
+            row["line"] = f"Your median is {a_median:g} from {a_count} members. SeXi is {ABOVE:g} or more."
         out["sexi"] = row
     return out
 
