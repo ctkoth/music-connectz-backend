@@ -56,3 +56,25 @@ class CleanDupesTests(TestCase):
         a.post(URL)
         self.assertEqual(b.get(URL).data["used"], 0)
         self.assertEqual(APIClient().get(URL).status_code, 401)
+
+
+class UpgradeNudgeTests(TestCase):
+    def test_the_nudge_appears_only_when_one_is_left_or_none_and_never_on_the_top_plan(self):
+        c, _ = client("free")
+        self.assertFalse(c.get(URL).data["near"])                       # 3 left: plenty
+        c.post(URL)
+        self.assertFalse(c.get(URL).data["near"])                       # 2 left
+        c.post(URL)
+        d = c.get(URL).data
+        self.assertTrue(d["near"]); self.assertEqual(d["upgrade"], {"tab": "membershipz", "target": "membershipz-plans"})
+        c.post(URL)
+        self.assertTrue(c.get(URL).data["near"])                        # none left
+        s, _ = client("statz")
+        for _ in range(8):
+            s.post(URL)
+        d = s.get(URL).data
+        self.assertFalse(d["near"]); self.assertIsNone(d["upgrade"])    # unlimited: nothing to sell
+        p, _ = client("premium")
+        for _ in range(5):
+            p.post(URL)
+        self.assertTrue(p.get(URL).data["near"])                        # premium nudges toward StatZ at 5 of 6

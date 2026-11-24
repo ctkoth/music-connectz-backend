@@ -53,6 +53,10 @@ def state(user):
         "left": None if cap is None else max(0, cap - used),
         "can": cap is None or used < cap,
         "next_limit": nxt,                 # False on the top plan; None = unlimited
+        # Approaching the number (one left or none): the screen offers the upgrade THEN, not before — a plan pitch on a
+        # member who has plenty left is noise. Where it lands is the control, not the tab (`goToSpot`).
+        "near": cap is not None and used >= cap - 1,
+        "upgrade": ({"tab": "membershipz", "target": "membershipz-plans"} if nxt is not False else None),
         "window_hours": WINDOW_HOURS,
         "cost": "Free — no ⚡, 🍥 or 🏷️. A scan that finishes uses one of today's.",
         "note": "Cancelled or failed scans aren't counted. Nothing about your files is sent anywhere.",
