@@ -169,6 +169,38 @@ def clean_vst(raw):
     return {"uid": uid, "plugin": clip("plugin"), "vendor": clip("vendor"), "state": state}
 
 
+SYNTH_KEYS = {"name", "oscs", "sub", "noise", "filter", "amp", "env2", "lfo1", "lfo2", "mods", "fx", "gain", "voices"}
+SYNTH_MAX_JSON = 8000
+SYNTH_MAX_DEPTH = 4
+
+
+def _synth_clean(v, depth=0):
+    """Plain JSON only: finite numbers, short strings, booleans, bounded lists and dicts. The SHAPE is kept here and the
+    RANGES are the synth's (src/daw/synth/patch.js `cleanPatch` clamps whatever is stored when a patch is loaded)."""
+    if depth > SYNTH_MAX_DEPTH:
+        return None
+    if isinstance(v, bool) or v is None:
+        return v
+    if isinstance(v, (int, float)):
+        return v if v == v and abs(v) < 1e9 else 0
+    if isinstance(v, str):
+        return v[:40]
+    if isinstance(v, list):
+        return [_synth_clean(x, depth + 1) for x in v[:16]]
+    if isinstance(v, dict):
+        return {str(k)[:24]: _synth_clean(x, depth + 1) for k, x in list(v.items())[:24]}
+    return None
+
+
+def clean_synth(raw):
+    """A synth patch (the DAW's synth engine). Empty when it holds no oscillators, so a blank cannot be saved."""
+    import json
+    if not isinstance(raw, dict) or not isinstance(raw.get("oscs"), list) or not raw["oscs"]:
+        return {}
+    out = {k: _synth_clean(v) for k, v in raw.items() if k in SYNTH_KEYS}
+    return out if len(json.dumps(out)) <= SYNTH_MAX_JSON else {}
+
+
 # Each kind: what it is called on screen, and how its stored value is cleaned. A new kind is one row.
 KINDS = {
     "tone": {"label": "Track tone", "clean": clean_chain},
@@ -176,6 +208,7 @@ KINDS = {
     "master": {"label": "Mastering", "clean": clean_master},
     "strip": {"label": "Channel strip", "clean": clean_strip},
     "vst": {"label": "Plugin", "clean": clean_vst, "per_plugin": True},
+    "synth": {"label": "Synth patch", "clean": clean_synth},
 }
 
 
@@ -232,7 +265,7 @@ class ToneZView(APIView):
             return Response({"detail": "Save it as a track tone, track FX, mastering, channel strip or plugin preset."}, status=status.HTTP_400_BAD_REQUEST)
         chain = KINDS[kind]["clean"](d.get("chain"))
         if not chain:
-            return Response({"detail": "There's nothing to save yet: add an effect first." if kind not in ("master", "vst")
+            return Response({"detail": "There's nothing to save yet: add an effect first." if kind not in ("master", "vst", "synth")
                              else "There are no settings to save yet."}, status=status.HTTP_400_BAD_REQUEST)
         note = " ".join(str(d.get("note") or "").split())[:NOTE_MAX]
         mine = _in_scope(list(TonePreset.objects.filter(owner=request.user, kind=kind)), kind, chain)

@@ -65,6 +65,10 @@ FEATURES = [
     # FAST, never whether: every row can still be ticked by hand, and Clear is never gated.
     # The gate is client-side like rest_alerts (it spends nothing of ours), and what was
     # ticked during a sample stays ticked.
+    # DAW take lanes: a lane the member empties by deleting its last region is removed by itself (a lane that is
+    # merely new, e.g. made by an overdub to record into, is never touched). It acts for the member, so it is StatZ's;
+    # on the device and free of cost, so client-side like daw_automation. The manual "Remove empty takes" stays free.
+    {"key": "daw_autoclean", "label": "DAW take lanes that empty themselves out are deleted automatically", "tab": "arsenal", "target": "daw-select-tracks"},
     {"key": "select_all", "label": "Select all on every list", "tab": "singz", "target": "bosstake-options"},
     # ImageZ's magic eraser and background eraser (Corey's call: StatZ). The editor itself,
     # its layers, masks and the plain eraser are free at every tier, so nobody loses a way to
@@ -134,6 +138,7 @@ DRIVERS = [
     {"key": "imagez_cutout", "sampled": True, "modules": ["imagez_cutout"]},
     {"key": "imagez_actions", "sampled": True, "modules": []},
     {"key": "daw_automation", "sampled": True, "modules": []},
+    {"key": "daw_autoclean", "sampled": True, "modules": []},
     {"key": "daw_stage", "sampled": True, "modules": ["mixz_stage"]},
     {"key": "daw_align", "sampled": True, "modules": []},
     {"key": "daw_mixcheck", "sampled": True, "modules": []},

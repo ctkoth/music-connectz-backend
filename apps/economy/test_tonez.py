@@ -122,7 +122,7 @@ class PresetKindTests(TestCase):
         self.assertEqual(r.status_code, 403)
         self.assertIn("3 track fx presets", r.data["detail"])
         k = self.c.get("/api/economy/tonez/").data["kinds"]
-        self.assertEqual({n: v["count"] for n, v in k.items()}, {"tone": 3, "fx": 3, "master": 3, "strip": 0, "vst": 0})
+        self.assertEqual({n: v["count"] for n, v in k.items()}, {"tone": 3, "fx": 3, "master": 3, "strip": 0, "vst": 0, "synth": 0})
 
     def test_the_same_name_may_live_in_two_kinds(self):
         self.assertEqual(self.save("tone", "Vocal").status_code, 201)
@@ -242,3 +242,30 @@ class ProEffectsInPresetsTests(TestCase):
         kept = r.data["preset"]["chain"]
         self.assertEqual([i["type"] for i in kept], ["deess", "limiter", "glue", "widen"])
         self.assertEqual(kept[1]["params"], {"drive": 4.0, "ceiling": -1.0, "release": 80.0})
+
+
+class SynthPatchKindTests(TestCase):
+    def setUp(self):
+        from rest_framework.test import APIClient
+        self.c = APIClient()
+        self.u = get_user_model().objects.create_user("synther", password="pw12345!x")
+        self.c.force_authenticate(self.u)
+
+    def test_a_synth_patch_saves_as_its_own_kind_and_comes_back(self):
+        patch = {"name": "Mine", "oscs": [{"shape": "saw", "unison": 5, "detune": 20}], "filter": {"cutoff": 1200}, "mods": [{"src": "lfo1", "dst": "cutoff", "amount": 0.4}]}
+        r = self.c.post("/api/economy/tonez/", {"kind": "synth", "name": "Mine", "chain": patch}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        got = [p for p in self.c.get("/api/economy/tonez/").data["presets"] if p["kind"] == "synth"]
+        self.assertEqual(got[0]["chain"]["oscs"][0]["unison"], 5)
+
+    def test_junk_and_oversize_are_not_saved(self):
+        for bad in ({}, {"oscs": []}, {"oscs": "x"}, {"oscs": [{}], "name": "x", "mods": [{"a": "x" * 50}] * 16, "filter": {str(i): "y" * 40 for i in range(24)},
+                                                       "lfo1": {str(i): "y" * 40 for i in range(24)}, "lfo2": {str(i): "y" * 40 for i in range(24)}, "amp": {str(i): "y" * 40 for i in range(24)},
+                                                       "env2": {str(i): "y" * 40 for i in range(24)}, "fx": {str(i): "y" * 40 for i in range(24)}, "sub": {str(i): "y" * 40 for i in range(24)}}):
+            r = self.c.post("/api/economy/tonez/", {"kind": "synth", "name": "Bad", "chain": bad}, format="json")
+            self.assertEqual(r.status_code, 400, bad)
+
+    def test_unknown_keys_are_dropped(self):
+        r = self.c.post("/api/economy/tonez/", {"kind": "synth", "name": "K", "chain": {"oscs": [{"shape": "saw"}], "evil": "<script>"}}, format="json")
+        self.assertEqual(r.status_code, 201)
+        self.assertNotIn("evil", r.data["preset"]["chain"])
