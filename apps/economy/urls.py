@@ -58,7 +58,7 @@ from .priorities import PrioritiesView
 from .coachvoice import CoachVoiceView, CoachSpeakView
 from .coach_upgrades import CoachMarketsView
 from .dawz import DawZView
-from .dawsessions import DawSessionDetailView, DawSessionsView
+from .dawsessions import DawSessionAudioView, DawSessionDetailView, DawSessionsView
 from .attractivenessz_view import AttractivenessZView
 from .lookask import LookAskOneView, LookAskView
 from .lookshare import LookInviteView, LookShareDetailView, LookSharePostView, LookShareView
@@ -400,6 +400,7 @@ urlpatterns = [
     path("coachvoice/speak/", CoachSpeakView.as_view(), name="economy-coachvoice-speak"),
     path("dawz/", DawZView.as_view(), name="economy-dawz"),
     path("dawz/sessions/", DawSessionsView.as_view(), name="economy-daw-sessions"),
+    path("dawz/sessions/<str:sid>/audio/<str:src>/", DawSessionAudioView.as_view(), name="economy-daw-session-audio"),
     path("dawz/sessions/<str:sid>/", DawSessionDetailView.as_view(), name="economy-daw-session"),
     path("attractivenessz/", AttractivenessZView.as_view(), name="economy-attractivenessz"),
     path("lookmaxz/", LookmaxZView.as_view(), name="economy-lookmaxz"),

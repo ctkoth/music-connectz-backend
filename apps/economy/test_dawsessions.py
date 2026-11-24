@@ -63,3 +63,18 @@ class DawSessionTests(TestCase):
         self.assertTrue(Upload.objects.filter(pk=a.id).exists())   # "two" still plays it
         self.c.delete("/api/economy/dawz/sessions/two/")
         self.assertFalse(Upload.objects.filter(pk=a.id).exists())
+
+    def test_a_sound_can_be_fetched_through_the_api_without_the_bucket(self):
+        u = self.up(self.me)
+        self.put(audio={"src1": u.id})
+        d = self.c.get("/api/economy/dawz/sessions/ses_1/").data
+        r = self.c.get(d["audio"]["src1"]["via_api"])
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(b"".join(r.streaming_content), b"RIFFxxxx")
+
+    def test_that_door_is_yours_only(self):
+        u = self.up(self.me)
+        self.put(audio={"src1": u.id})
+        other = APIClient(); other.force_authenticate(self.other)
+        self.assertEqual(other.get("/api/economy/dawz/sessions/ses_1/audio/src1/").status_code, 404)
+        self.assertEqual(self.c.get("/api/economy/dawz/sessions/ses_1/audio/nope/").status_code, 404)

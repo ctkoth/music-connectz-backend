@@ -18,6 +18,8 @@ names one (a copy made in another DAW shares sources). It never touches the devi
 """
 import json
 
+from django.http import FileResponse
+
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -83,7 +85,8 @@ class DawSessionDetailView(APIView):
         for src, uid in (r.audio or {}).items():
             u = ups.get(int(uid)) if str(uid).isdigit() else None
             audio[src] = ({"id": u.id, "url": _upload_dict(u, request)["url"], "missing": bool(u.missing_since),
-                           "size_bytes": u.size_bytes} if u else {"id": None, "url": None, "missing": True, "size_bytes": 0})
+                           "size_bytes": u.size_bytes,
+                           "via_api": f"/api/economy/dawz/sessions/{sid}/audio/{src}/"} if u else {"id": None, "url": None, "missing": True, "size_bytes": 0})
         return Response({**_summary(r), "session": r.data, "audio": audio})
 
     def put(self, request, sid):
@@ -129,3 +132,27 @@ class DawSessionDetailView(APIView):
             _delete_unshared_audio(request.user, row)
             row.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class DawSessionAudioView(APIView):
+    """GET one sound of a cloud session, streamed through the API as the member.
+
+    The normal way to fetch a sound is its media address, which redirects to the bucket — and a browser can
+    only READ that response from another origin if the bucket's own CORS rules allow the app's domain, which
+    is a setting on the bucket that nothing in this codebase can see or check. This is the way that does not
+    depend on it: authenticated, owner only, same origin as every other API call. The client tries the direct
+    address first (no bytes through our servers) and comes here only when that is refused."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, sid, src):
+        row = DawSession.objects.filter(owner=request.user, sid=sid).first()
+        uid = (row.audio or {}).get(src) if row else None
+        u = Upload.objects.filter(user=request.user, pk=uid).first() if str(uid).isdigit() else None
+        if not u or u.missing_since:
+            return Response({"detail": "That sound isn't on your account."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            fh = u.file.open("rb")
+        except Exception:
+            return Response({"detail": "That sound isn't on your account."}, status=status.HTTP_404_NOT_FOUND)
+        return FileResponse(fh, content_type=u.content_type or "audio/wav")
