@@ -55,7 +55,7 @@ class ShopApiTests(TestCase):
         self.assertEqual(self.post(own_art="").status_code, 400)
 
     def test_bad_product_and_markup_refused(self):
-        self.assertEqual(self.post(product="mug").status_code, 400)
+        self.assertEqual(self.post(product="teapot").status_code, 400)
         self.assertEqual(self.post(markup_cents=str(merchshop.MAX_MARKUP + 1)).status_code, 400)
 
     def test_others_see_it_without_the_designers_range(self):
@@ -79,3 +79,11 @@ class ShopApiTests(TestCase):
         self.assertEqual(self.c.patch(f"/api/economy/merch/shop/{pk}/", {"markup_cents": 500}, format="json").data["design"]["markup_cents"], 500)
         self.assertEqual(self.c.delete(f"/api/economy/merch/shop/{pk}/").status_code, 204)
         self.assertFalse(PrintDesign.objects.get(pk=pk).active)
+
+
+class ProductListTests(TestCase):
+    def test_every_designer_product_has_a_cost_and_label(self):
+        # Mirrors PRODUCTS in the frontend's src/merchz.js; a product there with no cost here cannot be listed.
+        keys = {"shirt", "hoodie", "towel", "bandana", "wavecap", "durag", "mug", "phonecase", "baseballcap"}
+        self.assertEqual(set(merchshop.BASE_CENTS), keys)
+        self.assertEqual(set(merchshop.LABELS), keys)

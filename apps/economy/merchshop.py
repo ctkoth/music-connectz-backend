@@ -22,8 +22,8 @@ from rest_framework.views import APIView
 from .models import DEV_TAX, TIER_FREE, TIER_PREMIUM, TIER_STATZ, PrintDesign, membership_for, split_cents
 
 # Estimated printer cost per item, before shipping, in cents. Replace with the printer's live list once connected.
-BASE_CENTS = {"shirt": 1300, "hoodie": 2700, "towel": 2000, "bandana": 1200, "wavecap": 1200, "durag": 1200, "baseballcap": 1800}
-LABELS = {"shirt": "T-shirt", "hoodie": "Hoodie", "towel": "Towel", "bandana": "Bandana", "wavecap": "Wave cap", "durag": "Durag", "baseballcap": "Baseball cap"}
+BASE_CENTS = {"shirt": 1300, "hoodie": 2700, "towel": 2000, "bandana": 1200, "wavecap": 1200, "durag": 1200, "baseballcap": 1800, "mug": 900, "phonecase": 1300}
+LABELS = {"shirt": "T-shirt", "hoodie": "Hoodie", "towel": "Towel", "bandana": "Bandana", "wavecap": "Wave cap", "durag": "Durag", "baseballcap": "Baseball cap", "mug": "Mug", "phonecase": "Phone case"}
 MAX_MARKUP = 10000        # $100 over cost
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 PER_DESIGNER = 200
