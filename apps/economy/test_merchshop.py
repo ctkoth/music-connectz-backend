@@ -85,7 +85,7 @@ class ShopApiTests(TestCase):
 class ProductListTests(TestCase):
     def test_every_designer_product_has_a_cost_and_label(self):
         # Mirrors PRODUCTS in the frontend's src/merchz.js; a product there with no cost here cannot be listed.
-        keys = {"shirt", "hoodie", "towel", "bandana", "wavecap", "durag", "mug", "phonecase", "baseballcap"}
+        keys = {"shirt", "hoodie", "towel", "bandana", "wavecap", "durag", "mug", "phonecase", "sticker", "poster", "baseballcap"}
         self.assertEqual(set(merchshop.BASE_CENTS), keys)
         self.assertEqual(set(merchshop.LABELS), keys)
 
