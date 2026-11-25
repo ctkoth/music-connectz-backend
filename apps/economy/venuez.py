@@ -378,6 +378,40 @@ def _int(d, key, default, lo, hi):
         return default
 
 
+def _near_filter(request, events):
+    """Distance from the VIEWER to each venue's HOST, for the list's "within N km".
+
+    Both ends are positions members chose to share (ProfileZ → Share my approximate location,
+    stored rounded to about 1 km), so the number is shown whole. A viewer who has not shared
+    has no origin, so there is nothing to measure from: the list is NOT filtered and `note`
+    says why, rather than hiding venues behind a number that cannot be computed. A host who has
+    not shared cannot be measured, and under an active filter those venues are left out and
+    counted in `hidden_no_location`, so the screen can say so. Your own venues always show."""
+    from .models import Profile, haversine_km, profile_for
+    q = request.query_params.get("max_km", "")
+    try:
+        max_km = float(q) if q != "" else None
+    except ValueError:
+        max_km = None
+    if max_km is not None and not (0 < max_km <= 20000):
+        max_km = None
+    me = profile_for(request.user)
+    origin = (me.lat, me.lng) if (me.share_location and me.lat is not None and me.lng is not None) else None
+    out = {"origin": origin, "max_km": max_km, "km": {}, "hidden_far": 0, "hidden_no_location": 0, "note": ""}
+    if not origin:
+        if max_km is not None:
+            out["note"] = ("Share your approximate location in ProfileZ to filter by distance. "
+                           "Nothing is hidden until you do.")
+        return out
+    hosts = {p.user_id: p for p in Profile.objects.filter(user_id__in={e.host_id for e in events})}
+    for e in events:
+        hp = hosts.get(e.host_id)
+        if hp and hp.share_location and hp.lat is not None and hp.lng is not None:
+            out["km"][e.id] = round(haversine_km(origin[0], origin[1], hp.lat, hp.lng))
+    return out
+
+
+
 class VenueListView(APIView):
     """GET the venues worth showing; POST a new one."""
     permission_classes = [IsAuthenticated]
@@ -395,12 +429,31 @@ class VenueListView(APIView):
         seen, out = set(), []
         everything = list(rows) + list(mine)
         marks = marks_by_username({e.host.username for e in everything})
+        near = _near_filter(request, everything)
         for e in everything:
             if e.id in seen:
                 continue
             seen.add(e.id)
-            out.append(event_dict(e, request.user, marks))
-        return Response({"venues": out})
+            d = event_dict(e, request.user, marks)
+            if near["origin"]:
+                d["distance_km"] = near["km"].get(e.id)
+                if near["max_km"] is not None and e.host_id != request.user.id:
+                    km = near["km"].get(e.id)
+                    if km is None:
+                        near["hidden_no_location"] += 1
+                        continue
+                    if km > near["max_km"]:
+                        near["hidden_far"] += 1
+                        continue
+            out.append(d)
+        return Response({"venues": out, "near": {
+            "viewer_shares": bool(near["origin"]),
+            "max_km": near["max_km"] if near["origin"] else None,
+            "hidden_far": near["hidden_far"],
+            "hidden_no_location": near["hidden_no_location"],
+            "note": near["note"],
+            "open_in": {"tab": "profilez", "target": "location-share"},
+        }})
 
     def post(self, request):
         d = request.data or {}

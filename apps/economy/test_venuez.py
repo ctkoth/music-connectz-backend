@@ -853,3 +853,49 @@ class VenueEditTests(TestCase):
         self.client.force_login(self.host)
         r = self.client.patch(f"/api/economy/venuez/{ev.id}/", {}, "application/json")
         self.assertEqual(r.status_code, 400)
+
+
+class NearMe(TestCase):
+    """The list's "within N km": measured between two positions members CHOSE to share."""
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        self.me = User.objects.create_user(username="near_me", password="pw")
+        self.close = User.objects.create_user(username="near_close", password="pw")
+        self.far = User.objects.create_user(username="near_far", password="pw")
+        self.quiet = User.objects.create_user(username="near_quiet", password="pw")
+        self.c = APIClient(); self.c.force_authenticate(self.me)
+        for u, lat, lng, share in ((self.me, 39.74, -104.99, True), (self.close, 39.76, -104.99, True),
+                                   (self.far, 40.58, -105.08, True), (self.quiet, 39.75, -104.99, False)):
+            p = profile_for(u); p.share_location = share
+            p.lat, p.lng = (lat, lng) if share else (None, None); p.save()
+        self.e_close = _event(self.close, VenueEvent.KIND_FREE, title="Close")
+        self.e_far = _event(self.far, VenueEvent.KIND_FREE, title="Far")
+        self.e_quiet = _event(self.quiet, VenueEvent.KIND_FREE, title="Quiet")
+        self.e_mine = _event(self.me, VenueEvent.KIND_FREE, title="Mine")
+
+    def titles(self, **q):
+        r = self.c.get("/api/economy/venuez/", q)
+        self.assertEqual(r.status_code, 200)
+        return {v["title"] for v in r.data["venues"]}, r.data["near"], {v["title"]: v for v in r.data["venues"]}
+
+    def test_distances_are_shown_whole_and_nothing_is_hidden_without_a_filter(self):
+        titles, near, by = self.titles()
+        self.assertEqual(titles, {"Close", "Far", "Quiet", "Mine"})
+        self.assertIsInstance(by["Close"]["distance_km"], int)
+        self.assertLess(by["Close"]["distance_km"], by["Far"]["distance_km"])
+        self.assertIsNone(by["Quiet"]["distance_km"])
+
+    def test_within_n_km_hides_the_far_and_the_unmeasurable_and_says_so(self):
+        titles, near, _ = self.titles(max_km=25)
+        self.assertEqual(titles, {"Close", "Mine"})          # your own venue always shows
+        self.assertEqual(near["hidden_far"], 1)
+        self.assertEqual(near["hidden_no_location"], 1)
+
+    def test_a_viewer_who_has_not_shared_is_not_filtered_and_is_told_why(self):
+        p = profile_for(self.me); p.share_location = False; p.lat = p.lng = None; p.save()
+        titles, near, by = self.titles(max_km=25)
+        self.assertEqual(len(titles), 4)
+        self.assertFalse(near["viewer_shares"])
+        self.assertIn("Share your approximate location", near["note"])
+        self.assertNotIn("distance_km", by["Close"])
