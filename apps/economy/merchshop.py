@@ -19,7 +19,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import DEV_TAX, TIER_FREE, TIER_PREMIUM, TIER_STATZ, PrintDesign, membership_for, split_cents
+from .models import TIER_DEBUG, TIER_FREE, TIER_PREMIUM, TIER_STATZ, PrintDesign, membership_for, split_cents
+
+# Corey's merch dev tax (Nov 2026), by the BUYER's plan. Merch only; the app-wide DEV_TAX is unchanged.
+DEV_TAX = {TIER_FREE: 0.10, TIER_PREMIUM: 0.06, TIER_STATZ: 0.03, TIER_DEBUG: 0.0}
+
+
+def rate_for(user):
+    return DEV_TAX.get(membership_for(user).tier, DEV_TAX[TIER_FREE])
 
 # Estimated printer cost per item, before shipping, in cents. Replace with the printer's live list once connected.
 BASE_CENTS = {"shirt": 1300, "hoodie": 2700, "towel": 2000, "bandana": 1200, "wavecap": 1200, "durag": 1200, "baseballcap": 1800, "mug": 900, "phonecase": 1300}
@@ -47,7 +54,7 @@ def designer_range(product, markup_cents):
 
 
 def _dict(d, request):
-    rate = membership_for(request.user).dev_tax_rate
+    rate = rate_for(request.user)
     out = {"id": d.id, "designer": d.designer.username, "product": d.product, "product_label": LABELS.get(d.product, d.product),
            "color": d.color, "title": d.title, "image": request.build_absolute_uri(d.image.url) if d.image else "",
            "markup_cents": d.markup_cents, "mine": d.designer_id == request.user.id,

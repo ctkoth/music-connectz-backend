@@ -7,7 +7,8 @@ from PIL import Image
 from rest_framework.test import APIClient
 
 from . import merchshop
-from .models import DEV_TAX, TIER_FREE, TIER_STATZ, PrintDesign, wallet_for
+from .merchshop import DEV_TAX
+from .models import TIER_FREE, TIER_PREMIUM, TIER_STATZ, PrintDesign, wallet_for
 
 
 def png():
@@ -87,3 +88,8 @@ class ProductListTests(TestCase):
         keys = {"shirt", "hoodie", "towel", "bandana", "wavecap", "durag", "mug", "phonecase", "baseballcap"}
         self.assertEqual(set(merchshop.BASE_CENTS), keys)
         self.assertEqual(set(merchshop.LABELS), keys)
+
+
+class RateTests(TestCase):
+    def test_coreys_merch_rates(self):
+        self.assertEqual((DEV_TAX[TIER_FREE], DEV_TAX[TIER_PREMIUM], DEV_TAX[TIER_STATZ]), (0.10, 0.06, 0.03))
