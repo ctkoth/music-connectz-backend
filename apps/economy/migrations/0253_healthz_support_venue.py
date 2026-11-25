@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("economy", "0251_print_design"),
+        ("economy", "0252_seed_uitext_customer_support"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
