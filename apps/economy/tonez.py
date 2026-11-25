@@ -20,6 +20,7 @@ Nobody loses a preset when the ceiling moves: over it, every preset stays usable
 deletable; only adding a NEW one is refused, with the number.
 """
 import math
+import re
 
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -36,6 +37,17 @@ PARAMS = {
     "reverb": ("decay", "predelay", "mix"),
     "filter": ("mode", "freq", "q"),
     "gain": ("db",),
+    # StatZ's plugin-grade effects (mirrors the `statz: true` entries of PLUGINS). A chain keeps them so a StatZ
+    # member's vocal chain survives being saved; whether a member may ADD one is the screen's gate, as it is for a
+    # track, and a preset applied without the plan is refused there, not here.
+    "saturate": ("drive", "tone", "mix"),
+    "chorus": ("rate", "depth", "mix"),
+    "deess": ("freq", "threshold", "ratio"),
+    "limiter": ("drive", "ceiling", "release"),
+    "glue": ("threshold", "ratio", "attack", "release", "makeup", "mix"),
+    "proverb": ("type", "decay", "predelay", "damp", "width", "mix"),
+    "prodelay": ("time", "sync", "feedback", "lowcut", "highcut", "mix"),
+    "widen": ("width",),
 }
 MAX_INSERTS = 8
 # An EQ's bands ride beside its params: how many is the tier's (`eq_bands`, said on the screen, applied there),
@@ -87,6 +99,14 @@ def clean_chain(raw):
         row = {"type": ins["type"], "on": ins.get("on") is not False, "params": params}
         if ins["type"] == "eq" and isinstance(ins.get("bands"), list):
             row["bands"] = clean_bands(ins["bands"])
+        # StatZ's blend: how much of the effect is heard against the untouched sound. Kept only when it is not
+        # the full 100, so a chain saved before it existed reads exactly as it did.
+        try:
+            amt = float(ins.get("amount"))
+        except (TypeError, ValueError):
+            amt = 100.0
+        if math.isfinite(amt) and amt < 100:
+            row["amount"] = max(0.0, amt)
         out.append(row)
         if len(out) >= MAX_INSERTS:
             break
@@ -136,13 +156,76 @@ def clean_strip(raw):
     return out if (out.get("bands") or "hp" in out or out.get("comp")) else {}
 
 
+# A VST3 plugin preset: the plugin's own saved state (the base64 blob the Windows app's host returns), kept
+# under the plugin's id. The blob is opaque — only that plugin can read it — so the server keeps its SHAPE
+# (base64, a size bound) and nothing about what is inside. Counted PER PLUGIN: a member's compressor and
+# their EQ each get the tier's number, the way a plugin's own preset browser belongs to that plugin.
+VST_STATE_MAX = 400_000          # characters of base64 (~300 KB); a heavy plugin's state is well under this
+_B64 = re.compile(r"^[A-Za-z0-9+/=]+$")
+_UID = re.compile(r"^[A-Za-z0-9]{8,64}$")
+
+
+def clean_vst(raw):
+    if not isinstance(raw, dict):
+        return {}
+    uid = str(raw.get("uid") or "").strip()
+    state = "".join(str(raw.get("state") or "").split())
+    if not _UID.match(uid) or not state or len(state) > VST_STATE_MAX or not _B64.match(state):
+        return {}
+    def clip(k):
+        return " ".join(str(raw.get(k) or "").split())[:80]
+    return {"uid": uid, "plugin": clip("plugin"), "vendor": clip("vendor"), "state": state}
+
+
+SYNTH_KEYS = {"name", "oscs", "sub", "noise", "filter", "amp", "env2", "lfo1", "lfo2", "mods", "fx", "gain", "voices"}
+SYNTH_MAX_JSON = 8000
+SYNTH_MAX_DEPTH = 4
+
+
+def _synth_clean(v, depth=0):
+    """Plain JSON only: finite numbers, short strings, booleans, bounded lists and dicts. The SHAPE is kept here and the
+    RANGES are the synth's (src/daw/synth/patch.js `cleanPatch` clamps whatever is stored when a patch is loaded)."""
+    if depth > SYNTH_MAX_DEPTH:
+        return None
+    if isinstance(v, bool) or v is None:
+        return v
+    if isinstance(v, (int, float)):
+        return v if v == v and abs(v) < 1e9 else 0
+    if isinstance(v, str):
+        return v[:40]
+    if isinstance(v, list):
+        return [_synth_clean(x, depth + 1) for x in v[:16]]
+    if isinstance(v, dict):
+        return {str(k)[:24]: _synth_clean(x, depth + 1) for k, x in list(v.items())[:24]}
+    return None
+
+
+def clean_synth(raw):
+    """A synth patch (the DAW's synth engine). Empty when it holds no oscillators, so a blank cannot be saved."""
+    import json
+    if not isinstance(raw, dict) or not isinstance(raw.get("oscs"), list) or not raw["oscs"]:
+        return {}
+    out = {k: _synth_clean(v) for k, v in raw.items() if k in SYNTH_KEYS}
+    return out if len(json.dumps(out)) <= SYNTH_MAX_JSON else {}
+
+
 # Each kind: what it is called on screen, and how its stored value is cleaned. A new kind is one row.
 KINDS = {
     "tone": {"label": "Track tone", "clean": clean_chain},
     "fx": {"label": "Track FX", "clean": clean_chain},
     "master": {"label": "Mastering", "clean": clean_master},
     "strip": {"label": "Channel strip", "clean": clean_strip},
+    "vst": {"label": "Plugin", "clean": clean_vst, "per_plugin": True},
+    "synth": {"label": "Synth patch", "clean": clean_synth},
 }
+
+
+def _in_scope(rows, kind, chain):
+    """The rows one ceiling counts: the whole kind, or — for a plugin preset — that plugin's own."""
+    same = [p for p in rows if p.kind == kind]
+    if KINDS[kind].get("per_plugin"):
+        return [p for p in same if isinstance(p.chain, dict) and p.chain.get("uid") == chain.get("uid")]
+    return same
 
 
 def cap_for(user):
@@ -162,8 +245,12 @@ def _state(user):
     kinds = {}
     for k, spec in KINDS.items():
         n = sum(1 for p in rows if p.kind == k)
-        kinds[k] = {"label": spec["label"], "count": n, "full": cap is not None and n >= cap}
-    return {"presets": [_row(p) for p in rows], "kinds": kinds, "limit": cap, "per_kind": True,
+        kinds[k] = {"label": spec["label"], "count": n, "full": cap is not None and n >= cap and not spec.get("per_plugin")}
+    plugins = {}
+    for p in rows:
+        if p.kind == "vst" and isinstance(p.chain, dict) and p.chain.get("uid"):
+            plugins[p.chain["uid"]] = plugins.get(p.chain["uid"], 0) + 1
+    return {"presets": [_row(p) for p in rows], "kinds": kinds, "limit": cap, "per_kind": True, "per_plugin": plugins,
             "who": WHO, "cost": "Free",
             "ladder": {t: limits_for(t)["tone_presets"] for t in ("free", "premium", "statz")}}
 
@@ -183,30 +270,33 @@ class ToneZView(APIView):
             return Response({"detail": "Give the preset a name, like “My vocal”."}, status=status.HTTP_400_BAD_REQUEST)
         kind = str(d.get("kind") or "tone")
         if kind not in KINDS:
-            return Response({"detail": "Save it as a track tone, track FX, mastering or channel strip preset."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Save it as a track tone, track FX, mastering, channel strip or plugin preset."}, status=status.HTTP_400_BAD_REQUEST)
         chain = KINDS[kind]["clean"](d.get("chain"))
         if not chain:
-            return Response({"detail": "There's nothing to save yet: add an effect first." if kind != "master"
+            return Response({"detail": "There's nothing to save yet: add an effect first." if kind not in ("master", "vst", "synth")
                              else "There are no settings to save yet."}, status=status.HTTP_400_BAD_REQUEST)
         note = " ".join(str(d.get("note") or "").split())[:NOTE_MAX]
-        mine = TonePreset.objects.filter(owner=request.user, kind=kind)
+        mine = _in_scope(list(TonePreset.objects.filter(owner=request.user, kind=kind)), kind, chain)
         existing = None
         if d.get("id"):
             existing = TonePreset.objects.filter(owner=request.user, pk=d.get("id")).first()
             if existing is None:
                 return Response({"detail": "That preset isn't yours, or was deleted."}, status=status.HTTP_404_NOT_FOUND)
+            if kind == "vst" and (not isinstance(existing.chain, dict) or existing.chain.get("uid") != chain["uid"]):
+                return Response({"detail": "A preset belongs to the plugin it was saved from — save this as a new one instead."},
+                                status=status.HTTP_400_BAD_REQUEST)
             if existing.kind != kind:
                 return Response({"detail": "A preset keeps its kind — save this as a new one instead."},
                                 status=status.HTTP_400_BAD_REQUEST)
-        if mine.filter(name__iexact=name).exclude(pk=existing.pk if existing else None).exists():
+        if any(p.name.lower() == name.lower() and (existing is None or p.pk != existing.pk) for p in mine):
             return Response({"detail": f"You already have a preset called “{name}”. Pick another name, or update that one."},
                             status=status.HTTP_409_CONFLICT)
         if existing is None:
             cap = cap_for(request.user)
-            if cap is not None and mine.count() >= cap:
+            if cap is not None and len(mine) >= cap:
                 from .catalog import limits_for
                 nxt = limits_for("premium")["tone_presets"]
-                return Response({"detail": f"Your plan keeps {cap} {KINDS[kind]['label'].lower()} presets. Update or delete one to make room, "
+                return Response({"detail": f"Your plan keeps {cap} {KINDS[kind]['label'].lower()} presets{' for this plugin' if KINDS[kind].get('per_plugin') else ''}. Update or delete one to make room, "
                                            f"or upgrade (Premium keeps {nxt}; StatZ is unlimited).", "limit": cap},
                                 status=status.HTTP_403_FORBIDDEN)
             existing = TonePreset(owner=request.user)

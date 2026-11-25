@@ -432,3 +432,33 @@ class PhysiqueTests(Base):
     def test_every_factor_is_described(self):
         for f in lm.SECTORS["physique"]["factors"]:
             self.assertIn(("physique", f), lm.FACTORS)
+
+
+class SampleReadingTests(TestCase):
+    """A visitor with no account or ID check sees an example — and it scores nobody."""
+
+    def test_open_logged_out_and_every_factor_has_a_score_and_a_meaning(self):
+        from rest_framework.test import APIClient
+        r = APIClient().get("/api/economy/lookmaxz/sample/")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.data["sample"])
+        self.assertIn("EXAMPLE", r.data["note"])
+        for k, sec in r.data["sectors"].items():
+            self.assertEqual(set(sec["scores"]), set(r.data["catalogue"][k]["factors"]))
+            self.assertNotIn(None, sec["scores"].values())
+            for f in sec["scores"]:
+                self.assertTrue(r.data["catalogue"][k]["factor_info"][f]["how"])
+        self.assertNotIn("physique", r.data["sectors"])      # opt-in sectors are never in the example
+        self.assertNotIn("body", r.data["sectors"])
+
+    def test_the_real_reading_is_still_closed_to_a_visitor(self):
+        from rest_framework.test import APIClient
+        self.assertIn(APIClient().get("/api/economy/lookmaxz/").status_code, (401, 403))
+
+
+class BodyDoorsTests(TestCase):
+    def test_a_member_with_no_training_gets_no_doors_and_the_plain_one(self):
+        u = get_user_model().objects.create_user("lifter", password="pw12345!x")
+        b = lm.body_sector(u)
+        self.assertEqual(b["doors"], [])
+        self.assertEqual(b["open_in"]["tab"], "bodiez")

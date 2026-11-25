@@ -11,7 +11,7 @@ a rating gate — it is a suggestion.
 GATE_KEYS = ("rating", "price", "attract", "age", "km")
 # One-tap classes (classz.py): a yes/no on a rating that enough members gave. Stored on
 # a gates dict as `{"thuro": true}` beside the ranges, and exclusive like them.
-CLASS_KEYS = ("thuro", "sexi")
+CLASS_KEYS = ("thuro", "sexi", "thorough")
 
 LABEL = {
     "rating": "skill rating", "price": "skill price", "attract": "attractiveness",

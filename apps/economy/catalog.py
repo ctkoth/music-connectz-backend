@@ -154,22 +154,28 @@ UNLIMITED_CHARS = 10 ** 9
 #
 # `facez_faces` is how many faces a member may keep in FaceZ, by the same numbers (Corey's call).
 # Nobody loses a face when it moves: over the ceiling, a member keeps every face and cannot add.
+# `clean_modes` is how much of Clean ConnectZ a tier holds, in ONE number: how many of its three ways of choosing what
+# goes (Size, then Frequency, then Priority) are open — Free 1, Premium 2, StatZ all three. It says how MUCH, never whether: every tier can pick a folder, see every file
+# and clear space by a target percent or size. A recommendation of Corey's rule, reversible in one line.
+# `clean_dupe_runs` is how many duplicate scans (Windows app) a member may run in a rolling 24 hours — Corey's numbers:
+# Free 3, Premium 6, StatZ unlimited. The finder is open on every plan; the tier says how OFTEN. A scan counts once it has
+# finished (a cancelled or failed one costs nothing), and `cleandupes.py` serves the number before the button is pressed.
 TIER_LIMITS = {
     TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500, "embeds_per_post": 3,
                 "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 10, "profile_links": 25,
-                "imagez_layers": 3, "imagez_fonts": 3, "facez_faces": 3, "tone_presets": 3, "anime_shots": 3, "eq_bands": 3, "glow_colors": 3, "album_songs": 8, "bodiez_float": 3},
+                "imagez_layers": 3, "imagez_fonts": 3, "facez_faces": 3, "tone_presets": 3, "anime_shots": 3, "eq_bands": 3, "glow_colors": 3, "split_opens": 3, "album_songs": 8, "bodiez_float": 3, "clean_modes": 1, "clean_dupe_runs": 3},
     TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 15,
                    "widgets_open": 12, "custom_groups": 5, "soundcloud_import": 25, "profile_links": 100,
-                   "imagez_layers": 6, "imagez_fonts": 6, "facez_faces": 6, "tone_presets": 6, "anime_shots": 6, "eq_bands": 6, "glow_colors": 6, "album_songs": 11, "bodiez_float": 6},
+                   "imagez_layers": 6, "imagez_fonts": 6, "facez_faces": 6, "tone_presets": 6, "anime_shots": 6, "eq_bands": 6, "glow_colors": 6, "split_opens": 6, "album_songs": 11, "bodiez_float": 6, "clean_modes": 2, "clean_dupe_runs": 6},
     # StatZ writes without a character cap (Corey's call). It was 5,000 for a
     # day; nothing was lost either way, since the cap is applied on write.
     TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999,
                  "widgets_open": 40, "custom_groups": 20, "soundcloud_import": None, "profile_links": 300,
-                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None, "anime_shots": None, "eq_bands": None, "glow_colors": None, "album_songs": None, "bodiez_float": None},
+                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None, "anime_shots": None, "eq_bands": None, "glow_colors": None, "split_opens": None, "album_songs": None, "bodiez_float": None, "clean_modes": None, "clean_dupe_runs": None},
     # Owner god-mode: effectively unlimited.
     TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760, "embeds_per_post": 999,
                  "widgets_open": 999, "custom_groups": 999, "soundcloud_import": None, "profile_links": 999,
-                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None, "anime_shots": None, "eq_bands": None, "glow_colors": None, "album_songs": None, "bodiez_float": None},
+                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None, "anime_shots": None, "eq_bands": None, "glow_colors": None, "split_opens": None, "album_songs": None, "bodiez_float": None, "clean_modes": None, "clean_dupe_runs": None},
 }
 
 
@@ -471,12 +477,12 @@ def journal_limits_for(tier):
 
 
 # Royalty cashout tax by plan. Weekly is its own per-tier schedule
-# (Free 10% / Premium 5% / StatZ 3%) — matches the StatZ developer-tax rate.
+# (Free 10% / Premium 6% / StatZ 3%) — matches the developer-tax rates.
 # The others are flat.
 CASHOUT_INSTANT = 0.15
 CASHOUT_MONTHLY = 0.01
 CASHOUT_QUARTERLY = 0.0
-CASHOUT_WEEKLY = {TIER_FREE: 0.10, TIER_PREMIUM: 0.05, TIER_STATZ: 0.03, TIER_DEBUG: 0.0}
+CASHOUT_WEEKLY = {TIER_FREE: 0.10, TIER_PREMIUM: 0.06, TIER_STATZ: 0.03, TIER_DEBUG: 0.0}
 
 
 def cashout_rate(plan, tier):
@@ -516,6 +522,20 @@ PLAYLIST_RECENCY_BOOST_MULTIPLIER = 1.5 # fresh content earns 50% more
 # PromptZ for every task in it. This is below the provider's real cost on the dearer
 # engines, so it is a subsidy by design; the daily prompts (PROMPT_ALLOWANCE) still come first.
 AI_TASK_PROMPTZ = 1
+
+# Corey (Nov 2026), on the margin audit: what costs the platform real money is priced near what it costs, not 1.
+# 1 PromptZ is about 0.8¢ (PROMPTZ_BONUS). The numbers are recommendations, reversible here (video also by env).
+VIDEO_CLIP_PROMPTZ = 250          # one ~8 s Veo clip: Google charges very roughly $1-6; 250 PromptZ is about $2.00
+IMAGE_PROMPTZ = 5                 # one generated picture: about 4¢ to make; 5 PromptZ is about 4¢
+# The coach's dearer engines are paid at about what one take costs on them, and the free daily prompts do not
+# cover them (Haiku and Sonnet still are). Opus ~4.8¢ a typical take, Fable ~9.6¢.
+ENGINE_PROMPTZ = {"opus": 6, "fable": 12}
+
+
+def engine_cost(engine):
+    """PromptZ for one AI run written by this engine: the engine's own price, or the standard one."""
+    return ENGINE_PROMPTZ.get(str(engine or "").lower(), AI_TASK_PROMPTZ)
+
 
 AI_MODEL_COSTS = {
     "corey-gpt": AI_TASK_PROMPTZ,
@@ -894,11 +914,14 @@ def ai_models_for(tier):
 def default_ai_model(tier):
     """What a member gets before they choose: the best rung their tier owns.
 
-    The top rung rather than the bottom because the tier was paid for. A StatZ
-    member who never opens the picker should not be quietly served Haiku.
+    The best rung the free daily prompts still cover (Sonnet once a tier reaches
+    it): Opus and Fable cost extra PromptZ (ENGINE_PROMPTZ), and a member who never
+    opened the picker must not start paying for an engine they never chose. Picking
+    one is always open to them, at the price shown.
     """
     allowed = ai_models_for(tier)
-    return allowed[-1] if allowed else "haiku"
+    covered = [k for k in allowed if k not in ENGINE_PROMPTZ]
+    return (covered or allowed or ["haiku"])[-1]
 
 
 def ai_model_for(key, tier):

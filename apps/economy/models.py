@@ -3,7 +3,7 @@ Economy layer: membership tier, wallet (money/energy/spinaz), and a
 transaction ledger. The developer tax (platform's cut on every money
 transaction) is enforced here, server-side, so the client can't bypass it.
 
-Rates match the frontend: Free 10% · Premium 5% · StatZ 2%.
+Rates: Free 10% · Premium 6% · StatZ 3% (Premium 6% is Corey's call, Nov 2026).
 """
 import logging
 import os
@@ -29,7 +29,7 @@ TIER_CHOICES = [
 ]
 
 # Developer tax (platform cut) per tier, as a fraction of the transaction.
-DEV_TAX = {TIER_FREE: 0.10, TIER_PREMIUM: 0.05, TIER_STATZ: 0.03, TIER_DEBUG: 0.0}
+DEV_TAX = {TIER_FREE: 0.10, TIER_PREMIUM: 0.06, TIER_STATZ: 0.03, TIER_DEBUG: 0.0}
 
 
 def split_cents(amount_cents, rate):
@@ -812,6 +812,9 @@ def daily_prompt_covers(cost_cents, engine=None):
     """
     if not 0 < int(cost_cents or 0) <= DAILY_PROMPT_MAX_CENTS:
         return False
+    from .catalog import ENGINE_PROMPTZ
+    if str(engine or "").lower() in ENGINE_PROMPTZ:
+        return False          # Opus and Fable are paid at what they cost; the free prompts are for Haiku and Sonnet
     if engine:
         from .catalog import engine_typical_cents
         typical = engine_typical_cents(engine)
@@ -1061,6 +1064,18 @@ def attractiveness_median(user):
     return _median(scores)
 
 
+def minor_user_ids(user_ids):
+    """Which of these members are KNOWN to be under 18 (`profile_is_minor`, one query). A member's looks are an
+    adult-only metric in BOTH directions: the rating endpoints refuse a minor as rater or target, and this is the READ
+    side of the same wall — a number that predates a birthday being set, or a rating written before the wall existed,
+    must never be shown, filtered on or used to class a minor."""
+    ids = list(user_ids)
+    if not ids:
+        return set()
+    return {p.user_id for p in Profile.objects.filter(user_id__in=ids).only("user_id", "birthday", "verified_18plus")
+            if profile_is_minor(p)}
+
+
 def attractiveness_shown_medians(user_ids):
     """`attractiveness_medians`, minus anyone who chose not to show theirs.
 
@@ -1072,7 +1087,7 @@ def attractiveness_shown_medians(user_ids):
     ids = list(user_ids)
     medians = attractiveness_medians(ids)
     hidden = set(Membership.objects.filter(user_id__in=ids, attractiveness_public=False)
-                 .values_list("user_id", flat=True))
+                 .values_list("user_id", flat=True)) | minor_user_ids(medians)
     return {k: v for k, v in medians.items() if k not in hidden}
 
 
@@ -1090,7 +1105,8 @@ def attractiveness_stats(user_ids):
     for uid, score in (FaceRating.objects.filter(face__owner_id__in=ids)
                        .values_list("face__owner_id", "score")):
         scores.setdefault(uid, []).append(score)
-    return {k: (_median(v), len(v)) for k, v in scores.items()}
+    minors = minor_user_ids(scores)
+    return {k: (_median(v), len(v)) for k, v in scores.items() if k not in minors}
 
 
 def attractiveness_medians(user_ids):
@@ -2327,13 +2343,33 @@ ONBOARD_REWARD_SPINAZ = 150
 ONBOARD_REWARD_ENERGY = 50
 
 
+ONBOARD_RATINGS = 3
+
+
+def onboarding_progress(user):
+    """The three things the onboarding bonus pays for, read from the rows they leave — never from the screen."""
+    return {"score": user.take_scores.exists(),
+            "post": Post.objects.filter(author=user).exists(),
+            "ratings": min(ONBOARD_RATINGS, ItemRating.objects.filter(user=user).count()),
+            "ratings_needed": ONBOARD_RATINGS}
+
+
+def onboarding_done(progress):
+    return progress["score"] and progress["post"] and progress["ratings"] >= progress["ratings_needed"]
+
+
 def complete_onboarding(user):
-    """Mark onboarding done and grant the one-time reward. Idempotent — returns
-    the amounts granted (zeros if already onboarded)."""
+    """Mark onboarding done and grant the one-time reward, only once a scored take, a post and 3 ratings exist.
+    Idempotent — returns the amounts granted (zeros if already onboarded), or `missing` when not yet earned.
+
+    It used to grant on the screen's word alone, so anybody could POST and take the bonus without doing anything."""
     from django.utils import timezone
     p = profile_for(user)
     if p.onboarded:
         return {"spinaz": 0, "energy": 0, "already": True}
+    prog = onboarding_progress(user)
+    if not onboarding_done(prog):
+        return {"spinaz": 0, "energy": 0, "already": False, "missing": prog}
     p.onboarded = True
     p.onboarded_at = timezone.now()
     p.save(update_fields=["onboarded", "onboarded_at", "updated_at"])
@@ -2549,6 +2585,9 @@ class LabelContract(models.Model):
     title = models.CharField(max_length=200, default="Artist Agreement")
     terms_text = models.TextField()
     advance_display = models.CharField(max_length=80, blank=True, default="")
+    # TermZ: the structured terms (see labelz.TERM_FIELDS). Cleaned on write; the free-text `terms_text` stays the
+    # agreement the parties sign, and these are the numbers in it, said in plain sentences before anyone signs.
+    terms = models.JSONField(default=dict, blank=True)
     doc_sha256 = models.CharField(max_length=64, blank=True, default="")
     owner_signed_name = models.CharField(max_length=200, blank=True, default="")
     artist_signed_name = models.CharField(max_length=200, blank=True, default="")
@@ -2563,6 +2602,33 @@ class LabelContract(models.Model):
 
     def __str__(self):
         return f"LabelContract<{self.id}> {self.label_id}->{self.artist_id} {self.status}"
+
+
+class LabelAdvance(models.Model):
+    """AdvanceZ: one line in the record a label and an artist keep of an advance — either money the label says it
+    advanced, or an amount it says was recouped against it. **A record, never a transfer**: nothing here moves a
+    resource, and the artist confirms every line (`confirmed_at`) before it counts. Only on a SIGNED contract."""
+    KIND_ADVANCE, KIND_RECOUP = "advance", "recoup"
+    contract = models.ForeignKey(LabelContract, on_delete=models.CASCADE, related_name="advance_lines")
+    kind = models.CharField(max_length=8, default=KIND_ADVANCE)
+    amount_cents = models.PositiveIntegerField()
+    on = models.DateField()
+    note = models.CharField(max_length=160, blank=True, default="")
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["on", "id"]
+
+
+class CleanDupeRun(models.Model):
+    """One finished duplicate scan in Clean ConnectZ (Windows app), for the day's count (`clean_dupe_runs`). Just a time:
+    what was scanned never reaches the server. The count is rows in a rolling 24 hours, so nothing can drift."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="clean_dupe_runs")
+    at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-at"]
 
 
 # ---- DupeZ: one person, more than one account ----
@@ -7184,7 +7250,7 @@ BUCKETS = (
     ("anytime", "Anytime 👐🏼"),
     ("someday", "Someday ❓"),
     ("logbook", "Logbook 🧾"),
-   ("trash", "Trash 🗑️"),
+    ("trash", "Trash 🚮"),
 )
 
 # WHERE a task came from, which is the whole basis of what it may pay.
@@ -8705,7 +8771,9 @@ class TonePreset(models.Model):
 
     class Meta:
         ordering = ["-updated_at"]
-        constraints = [models.UniqueConstraint(fields=["owner", "kind", "name"], name="tonepreset_owner_kind_name")]
+        # A plugin preset is named within its plugin (the app checks that), so two plugins may each have a "Warm".
+        constraints = [models.UniqueConstraint(fields=["owner", "kind", "name"], condition=~models.Q(kind="vst"),
+                                               name="tonepreset_owner_kind_name")]
 
 
 class LilithAuto(models.Model):
@@ -8815,3 +8883,82 @@ class SupportMessage(models.Model):
 
     class Meta:
         ordering = ["created_at", "id"]
+
+
+class PaneOpen(models.Model):
+    """One split page (PaneZ) opened. Corey: a tier is how many times a day — Free 3, Premium 6, StatZ unlimited
+    (`split_opens`), over a rolling 24 hours, counted here so a cleared browser does not reset it."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="pane_opens")
+    app_key = models.CharField(max_length=32, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+
+class HealthLink(models.Model):
+    """A member's phone, linked so Health Connect step counts can be sent here. One per member.
+
+    The phone app holds a long random token and the server holds only its hash; the short pairing code is typed on
+    the phone once and is single-use (cleared when exchanged), so nothing a member reads off a screen is a credential
+    for longer than ten minutes."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="health_link")
+    code_hash = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    code_expires = models.DateTimeField(null=True, blank=True)
+    token_hash = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    linked_at = models.DateTimeField(null=True, blank=True)
+    last_sync_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class StepDay(models.Model):
+    """One day's step count as Health Connect reported it. Private to the member; pays nothing and moves no rating."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="step_days")
+    day = models.DateField()
+    steps = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = (("user", "day"),)
+        ordering = ["-day"]
+
+
+class DawSession(models.Model):
+    """A DAW session a member chose to keep on their account, so it opens on another device.
+
+    DAW sessions live in the browser's IndexedDB (`src/daw/store.js`); this is the opt-in second copy.
+    `data` is the session JSON the editor already writes; `audio` maps each source id in it to the
+    `Upload` that holds its sound, so the audio is ordinary stored files under the member's own storage
+    quota and visible in FileZ, never a second store with a second price. `sid` is the client's session id,
+    so the same session on two devices is one row."""
+
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="daw_sessions")
+    sid = models.CharField(max_length=60)
+    app = models.CharField(max_length=30, blank=True, default="")
+    name = models.CharField(max_length=60, blank=True, default="")
+    data = models.JSONField(default=dict)
+    audio = models.JSONField(default=dict)
+    updated_ms = models.BigIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_ms"]
+        constraints = [models.UniqueConstraint(fields=["owner", "sid"], name="dawsession_owner_sid")]
+
+
+def print_design_path(instance, filename):
+    return f"merch/designs/{instance.designer_id}/{filename}"
+
+
+class PrintDesign(models.Model):
+    """A member's design offered in their shop as a print-on-demand product (merchshop.py).
+    Nothing is held in stock: a sale would be made and shipped by the printer."""
+    designer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="print_designs")
+    product = models.CharField(max_length=16)
+    color = models.CharField(max_length=7, default="#111111")
+    title = models.CharField(max_length=120)
+    image = models.ImageField(upload_to=print_design_path)
+    markup_cents = models.PositiveIntegerField(default=0)
+    own_art = models.BooleanField(default=False)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]

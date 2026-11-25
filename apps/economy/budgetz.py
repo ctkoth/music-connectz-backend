@@ -10,6 +10,10 @@ the budget — a member who cannot link a bank loses nothing they could do by ha
   Stripe's account id and a label (`BudgetBank`) and the lines it brings (`BudgetLine`).
 * **A re-import never doubles** (`ext_id`), and a bank line the member deletes stays deleted only
   until the next sync — the screen says so rather than pretending otherwise.
+* **Your Music ConnectZ money comes in free** (`EarningsImportView`): royalties, rewards and what you paid
+  members are read from the platform's own ledger — real rows, once each (`ext_id` `tx:<id>`). Moving cash
+  into the wallet, cashing out to a bank and transfers between accounts are NOT income or spending, so they
+  are left out rather than counted twice (the bank lines already show the cash-out).
 * **Bank linking has never run against Stripe** (CI has no key). It refuses without
   `STRIPE_SECRET_KEY` rather than answering "linked".
 * Erasing the account erases all of it (every table cascades from the user).
@@ -23,7 +27,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import BudgetBank, BudgetLimit, BudgetLine, TIER_DEBUG, TIER_STATZ, membership_for
+from .models import BudgetBank, BudgetLimit, BudgetLine, TIER_DEBUG, TIER_STATZ, Transaction, membership_for
 
 DEFAULT_CATEGORIES = ["Housing", "Food", "Transport", "Gear", "Studio time", "Software", "Bills", "Fun", "Savings", "Other"]
 MAX_CENTS = 100_000_000
@@ -242,3 +246,32 @@ def afford(user, cost_cents, category="", first=None, month_data=None):
                 "reason": f"It fits the month but not your {category} limit (${max(cat_left, 0) / 100:.2f} left of it)."}
     return {**out, "affordable": True,
             "reason": f"${cost / 100:.2f} of ${left / 100:.2f} left this month" + (f", inside your {category} limit." if cat_left is not None else ".")}
+
+
+# Ledger kinds that are real money in / out. Add-funds, payout and transfer only MOVE cash, so they are not here.
+_EARN_KINDS = (Transaction.KIND_ROYALTY, Transaction.KIND_REWARD, Transaction.KIND_INTELLIGENCE)
+_SPEND_KINDS = (Transaction.KIND_PURCHASE, Transaction.KIND_SPEND)
+
+
+class EarningsImportView(APIView):
+    """Free at every tier. Imports the caller's own money-ledger rows as income / expense, once each."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        rows = Transaction.objects.filter(user=request.user, resource=Transaction.RES_MONEY,
+                                          kind__in=_EARN_KINDS + _SPEND_KINDS).exclude(amount_cents=0)
+        seen = set(BudgetLine.objects.filter(user=request.user, source="mcz").values_list("ext_id", flat=True))
+        added = 0
+        for t in rows.order_by("-created_at")[:MAX_LINES_PER_MONTH]:
+            ext = f"tx:{t.id}"
+            if ext in seen:
+                continue
+            income = t.amount_cents > 0
+            if (income and t.kind not in _EARN_KINDS) or (not income and t.kind not in _SPEND_KINDS):
+                continue
+            BudgetLine.objects.create(user=request.user, kind="income" if income else "expense",
+                                      category="Music ConnectZ", amount_cents=abs(t.amount_cents),
+                                      on=t.created_at.date(), note=(t.note or t.get_kind_display())[:120],
+                                      source="mcz", ext_id=ext)
+            added += 1
+        return Response({**summary(request.user, _month(request.query_params.get("month"))), "added": added})

@@ -264,3 +264,21 @@ class LookInspireView(APIView):
         charge_ai_usage(request.user, price["cost_cents"], note="LookZMaxZ look inspiration", count_daily=True)
         return Response({**look, "charged": True, "cost_cents": price["cost_cents"], "rule": INSPIRE_RULE,
                          "shop": {"tab": "lookmaxz", "sectors": ["face", "styling"]}})
+
+
+class LookSampleView(APIView):
+    """GET an example reading and what every factor means. Open logged-out and to any age: it scores nobody.
+
+    The real reading needs a verified adult and a photo of themselves (LookmaxZView); this exists so somebody
+    with no account, or no ID check yet, can see exactly what they would get before deciding to."""
+    permission_classes = []
+    authentication_classes = []
+
+    def get(self, request):
+        return Response({
+            **lm.sample_reading(),
+            "catalogue": {k: v for k, v in _catalogue().items() if k in lm.DEFAULT_SECTORS},
+            "scale": lm.SCALE, "caveat": lm.CAVEAT, "care_note": lm.CARE_NOTE, "rating_rule": lm.RATING_RULE,
+            "real_reading": ("Your own reading is for verified adults (18+), of a photo of yourself, and is read once and "
+                             "kept nowhere unless you choose."),
+        })

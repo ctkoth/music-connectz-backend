@@ -101,6 +101,11 @@ def _verified_dob(session):
 
 MAX_FAILED_PER_DAY = 3
 REUSE_OPEN_MINUTES = 30
+# Stripe says a check normally ends within minutes. Past this, "still checking" is no longer an honest
+# thing to tell somebody, and a stuck check must not keep a new one from starting.
+STALE_PROCESSING_HOURS = 3
+# A hosted verification link is dead after about two days. A check the member never finished is over then.
+STALE_STARTED_HOURS = 48
 
 REASONS = {
     "document_expired": "The ID has expired. Use one that is still valid.",
@@ -189,15 +194,32 @@ def mark_18plus_from_session(session):
     apply_session(session)
 
 
+def _how_long(delta):
+    """A span in words the screen can say: '5 days', '3 hours', 'a while'."""
+    mins = int(delta.total_seconds() // 60)
+    if mins >= 2 * 24 * 60:
+        return f"{mins // (24 * 60)} days"
+    if mins >= 24 * 60:
+        return "a day"
+    if mins >= 120:
+        return f"{mins // 60} hours"
+    return "a while"
+
+
 def refresh(user):
-    """Ask Stripe about this member's sessions that have not ended. Best effort: a Stripe
-    outage leaves them open, which the screen reports as 'still checking'."""
+    """Ask Stripe about this member's checks that have not ended. Best effort: a Stripe outage
+    leaves them open, which the screen reports honestly.
+
+    There is NO age limit on which open checks are asked about. This used to skip anything older
+    than two days, so a check that ended while the webhook was not listening (or never reached the
+    webhook at all) stayed "still checking" for ever — weeks, in one member's case — and was never
+    re-read even though Stripe had long since decided. A check Stripe no longer knows about is
+    closed, and a link nobody finished in two days is closed as abandoned."""
     from .models import IdentityCheck
     if not settings.STRIPE_SECRET_KEY:
         return
-    cutoff = timezone.now() - datetime.timedelta(days=2)
     open_rows = list(IdentityCheck.objects.filter(
-        user=user, status__in=[*IdentityCheck.OPEN, IdentityCheck.UNREADABLE], created_at__gte=cutoff)[:5])
+        user=user, status__in=[*IdentityCheck.OPEN, IdentityCheck.UNREADABLE])[:5])
     if not open_rows:
         return
     import stripe
@@ -205,10 +227,24 @@ def refresh(user):
     for row in open_rows:
         try:
             full = stripe.identity.VerificationSession.retrieve(row.session_id, expand=EXPAND)
-        except Exception:
+        except Exception as e:
+            if getattr(e, "code", "") == "resource_missing":
+                row.status, row.reason = IdentityCheck.CANCELED, "canceled"
+                row.save(update_fields=["status", "reason", "updated_at"])
+                continue
             logger.exception("identity: could not refresh session %s", row.session_id)
             continue
-        apply_session(full, user=user)
+        row = apply_session(full, user=user) or row
+        if row.status == IdentityCheck.STARTED and \
+                row.created_at < timezone.now() - datetime.timedelta(hours=STALE_STARTED_HOURS):
+            row.status, row.reason = IdentityCheck.CANCELED, "abandoned"
+            row.save(update_fields=["status", "reason", "updated_at"])
+
+
+def _stale_processing(row):
+    from .models import IdentityCheck
+    return bool(row and row.status == IdentityCheck.PROCESSING
+                and row.created_at < timezone.now() - datetime.timedelta(hours=STALE_PROCESSING_HOURS))
 
 
 def _last(user):
@@ -223,7 +259,16 @@ def _result(row):
         return None
     if row.status == IdentityCheck.VERIFIED:
         return {"result": "success", "detail": "Your ID was checked and you are verified 18+.", "reason": "", "at": row.updated_at.isoformat()}
+    if row.status == IdentityCheck.STARTED:
+        # Not "Stripe is checking": nothing has been sent yet. The member opened the check and has not finished it.
+        return {"result": "pending", "needs_you": True, "detail": "You started a check but have not finished it. Open it again to finish, or start a new one.",
+                "reason": "", "at": row.created_at.isoformat()}
     if row.status in IdentityCheck.OPEN:
+        if _stale_processing(row):
+            from django.utils import timezone as _tz
+            return {"result": "pending", "stale": True,
+                    "detail": f"Stripe has had this check for {_how_long(_tz.now() - row.created_at)}. That is far longer than it should take, so you can start a new one.",
+                    "reason": "", "at": row.created_at.isoformat()}
         return {"result": "pending", "detail": "Stripe is still checking your ID. This usually takes a minute or two.", "reason": "", "at": row.created_at.isoformat()}
     return {"result": "failure", "detail": reason_sentence(row.reason) or "The check did not pass.",
             "reason": row.reason, "at": row.updated_at.isoformat()}
@@ -270,7 +315,9 @@ class IdentityView(APIView):
                              "last": last}, status=status.HTTP_429_TOO_MANY_REQUESTS)
         # A check still open (waiting on Stripe, or started but not finished) is picked up, not duplicated.
         row = _last(request.user)
-        if row and row.status == IdentityCheck.PROCESSING:
+        # Only a RECENT check holds the door: a "processing" one that has outlived any normal wait must not keep
+        # a member out of starting another (it is still refreshed, so if Stripe ever does finish it, it counts).
+        if row and row.status == IdentityCheck.PROCESSING and not _stale_processing(row):
             return Response({"pending": True, "last": _result(row), "detail": _result(row)["detail"]})
         if row and row.status == IdentityCheck.STARTED and row.url and \
                 row.created_at >= timezone.now() - datetime.timedelta(minutes=REUSE_OPEN_MINUTES):

@@ -88,6 +88,33 @@ def hot_counts(user):
     return _cached(user, "_hot_counts", compute)
 
 
+def hot_progress(user, app_key):
+    """Where this member stands on the coach's badge right now, for the result screen.
+
+    Read FRESH (never the per-recheck cache): it is asked straight after a take was recorded,
+    and a cached count from before that take would show the badge one take behind. None for a
+    coach with no badge, so the screen draws nothing rather than a bar to nowhere."""
+    spec = COACH_BADGES.get(app_key)
+    if not spec:
+        return None
+    from django.utils import timezone
+    from .models import TakeScore
+    since = timezone.now() - timedelta(days=HOT_DAYS)
+    have = TakeScore.objects.filter(user=user, app_key=app_key, overall__gte=HOT_SCORE,
+                                    created_at__gte=since).count()
+    key, name, emoji = spec
+    return {"key": key, "name": name, "emoji": emoji, "have": min(have, HOT_TAKES), "need": HOT_TAKES,
+            "held": have >= HOT_TAKES, "min_score": HOT_SCORE, "window_days": HOT_DAYS}
+
+
+def badge_totals(user):
+    """{held, total} over the badges worth going after. A penalty is not one (it is hidden by default and
+    "Not yours yet" must never read as something to chase), so it is in neither number."""
+    from .models import BADGES, badges_for
+    chase = {k for k, spec in BADGES.items() if not spec.get("penalty")}
+    return {"held": sum(1 for b in badges_for(user) if b.key in chase), "total": len(chase)}
+
+
 def is_hot(user, app_key):
     return hot_counts(user).get(app_key, 0) >= HOT_TAKES
 

@@ -448,3 +448,19 @@ class MixPresetTests(InstrumentMixTests):
         from . import mix_presets as mp
         out = mp.clean_nudges({"drums": {"gain": 99, "bogus": 1}, "evil": {"gain": 1}})
         self.assertEqual(out, {"drums": {"gain": 0.5}})
+
+
+class InstrumentalPresetsTests(TestCase):
+    def test_every_preset_fills_only_what_the_form_accepts(self):
+        from apps.economy import instrumental_presets as P
+        self.assertEqual(P.validate(), [])
+
+    def test_there_is_a_preset_for_every_rap_style_and_every_range(self):
+        from apps.economy import instrumental_presets as P
+        from apps.economy.instruments import RAP_STYLES, VOCAL_RANGES
+        self.assertEqual({p["key"] for p in P.RAP_STYLE_PRESETS}, {k for k, _ in RAP_STYLES})
+        self.assertEqual({p["key"] for p in P.RANGE_PRESETS}, {k for k, _ in VOCAL_RANGES})
+
+    def test_every_preset_gives_its_reason_and_a_brief(self):
+        from apps.economy import instrumental_presets as P
+        self.assertTrue(all(len(p["why"]) > 30 and len(p["brief"]) > 20 for p in P.PRESETS))

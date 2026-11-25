@@ -50,9 +50,12 @@ RANGES = {"punch": (-50, 50), "width": (50, 150), "trims.low": (-4, 4), "trims.m
           "vocal": (0, 6)}
 
 
-def _p(style, intensity, target, punch=0, multiband=False, low=0, mid=0, high=0, width=None):
-    return {"style": style, "intensity": intensity, "target": target, "punch": punch, "multiband": multiband,
-            "width": width, "trims": {"low": low, "mid": mid, "high": high}}
+def _p(style, intensity, target, punch=0, multiband=False, low=0, mid=0, high=0, width=None, vocal=None):
+    out = {"style": style, "intensity": intensity, "target": target, "punch": punch, "multiband": multiband,
+           "width": width, "trims": {"low": low, "mid": mid, "high": high}}
+    if vocal is not None:
+        out["vocal"] = vocal
+    return out
 
 
 # Each genre: the starting master and why. Ordered as a member scans them.
@@ -84,13 +87,50 @@ GENRES = {
 }
 GENRE_KEYS = tuple(GENRES)
 
+# Masters by RAP STYLE and by SINGING RANGE. Keyed by the coaches' own slugs (instruments.RAP_STYLES / VOCAL_RANGES — a test
+# holds the two lists equal), so a take scored as Drill or sung as a Baritone can offer its own master. They are NOT in
+# GENRE_KEYS: the AI picks a genre from that list and these are not genres.
+#   A STYLE decides how the master is pushed: how hard it is glued, whether the drums are punched, whether the lows are
+#   split from the vocal, how wide it sits. A RANGE decides where the voice needs help: a low voice sits where the bass
+#   and the kick live, so it is masked first and gets the bigger centre lift and a nudge in the mids; a high voice is
+#   already forward, so it gets a smaller lift and the top is eased instead of boosted, because sibilance and harshness
+#   are what a bright master makes worse. Starting points, said as such; the AI listen can still move them.
+RAP_MASTERS = {
+    "boom-bap": ("Boom Bap", "🥁", _p("warm", "medium", "streaming", 10, False, low=0.5, vocal=2), "Dusty and punchy: a warm tilt, medium glue and a little punch so the snare keeps its crack."),
+    "trap": ("Trap", "🏚️", _p("balanced", "high", "streaming", 15, True, low=1, vocal=3), "808s and a vocal that has to cut: multiband keeps the low end from pumping the vocal."),
+    "drill": ("Drill", "⚔️", _p("balanced", "high", "streaming", 20, True, low=1.5, vocal=3), "The sliding 808 carries it: lows lifted, multiband so it doesn't pull the hats and vocal down."),
+    "cloud-rap": ("Cloud Rap", "☁️", _p("warm", "low", "streaming", -10, False, high=-1, vocal=1.5), "Soft edges are the sound: light compression, a warm tilt, the top rolled off a touch."),
+    "lyrical": ("Lyrical", "🧠", _p("balanced", "medium", "streaming", 0, False, mid=0.5, vocal=3), "Every word has to be heard: a firmer vocal lift and mids that keep consonants clear."),
+    "storytelling": ("Storytelling", "📖", _p("warm", "low", "apple", 0, False, mid=0.5, vocal=2), "Dynamics carry the story: light compression and the quieter Apple target."),
+    "freestyle": ("Freestyle", "🌀", _p("balanced", "medium", "streaming", 5, False, vocal=2), "Even-handed: nothing pushed, so the take sounds like the take."),
+    "melodic": ("Melodic", "🎶", _p("open", "medium", "streaming", 5, True, high=0.5, vocal=2), "Sung-rap needs air: an open tilt, medium glue, multiband to keep the bass out of the hook."),
+    "double-time": ("Double-Time", "⚡", _p("balanced", "high", "streaming", 10, False, mid=0.5, vocal=3), "Fast syllables smear first: firm glue and a midrange nudge keep them separate."),
+    "old-school": ("Old School", "📻", _p("warm", "medium", "streaming", 10, False, high=-0.5, width=90, vocal=2), "A little narrower and warmer, like a record from then, with punch on the drums."),
+    "conscious": ("Conscious", "✊", _p("warm", "low", "apple", 0, False, mid=0.5, vocal=2.5), "The message leads: warm, spacious, and a vocal that stays clear."),
+    "mumble": ("Mumble", "😶‍🌫️", _p("warm", "high", "streaming", 10, True, low=1, high=-1, vocal=2), "Heavy and hazy: dense glue, multiband for the bass, the top eased so it doesn't turn brittle."),
+}
+RANGE_MASTERS = {
+    "bass": ("Bass", "🧔‍♂️", _p("balanced", "medium", "streaming", 0, False, mid=0.5, vocal=3.5), "The lowest voice sits where the kick and bass live, so it is masked first: the biggest centre lift and a nudge in the mids."),
+    "baritone": ("Baritone", "🎙️", _p("balanced", "medium", "streaming", 0, False, mid=0.5, vocal=3), "Still under the low end of most mixes: a firm centre lift and a little mid."),
+    "tenor": ("Tenor", "🎤", _p("balanced", "medium", "streaming", 0, False, vocal=2.5), "Sits in the middle of the mix: a moderate lift, no tone moves."),
+    "countertenor": ("Countertenor", "🕊️", _p("open", "medium", "streaming", 0, False, vocal=2), "Already forward: a lighter lift and an open top."),
+    "contralto": ("Contralto", "🎻", _p("warm", "medium", "streaming", 0, False, mid=0.5, vocal=3), "A low female voice meets the same masking a baritone does: a firm lift and a warm tilt."),
+    "alto": ("Alto", "🎶", _p("balanced", "medium", "streaming", 0, False, vocal=2.5), "Balanced: a moderate lift, nothing else."),
+    "mezzo-soprano": ("Mezzo-Soprano", "🌊", _p("balanced", "medium", "streaming", 0, False, high=-0.5, vocal=2), "Forward already: a lighter lift and the top eased a touch."),
+    "soprano": ("Soprano", "☀️", _p("warm", "medium", "streaming", 0, False, high=-1, vocal=1.5), "The brightest voice: the smallest lift, and the top eased because a bright master makes harshness worse."),
+}
+
 # The moves the AI may make on top of its genre's preset. Anything else it says is dropped.
 MOVES = ("style", "intensity", "target", "punch", "multiband", "width", "trims.low", "trims.mid", "trims.high", "vocal")
 MAX_MOVES = 6
 
 
 def genres_payload():
-    return [{"key": k, **{f: g[f] for f in ("label", "emoji", "settings", "why")}} for k, g in GENRES.items()]
+    out = [{"key": k, "group": "Genre", **{f: g[f] for f in ("label", "emoji", "settings", "why")}} for k, g in GENRES.items()]
+    for group, table in (("Rap style", RAP_MASTERS), ("Singing range", RANGE_MASTERS)):
+        out += [{"key": f"{group.split()[0].lower()}:{k}", "group": group, "label": f"{label} master", "emoji": emoji, "settings": settings, "why": why}
+                for k, (label, emoji, settings, why) in table.items()]
+    return out
 
 
 def prompt():

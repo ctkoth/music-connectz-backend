@@ -51,6 +51,7 @@ FEATURES = [
     # ViewZ: who viewed a post by name and every visit as a track on a clock, with what
     # each viewer did. It is a READ of what already happened, so it switches off cleanly.
     {"key": "viewz_tracks", "label": "Who viewed your posts, as DAW tracks", "tab": "viewz", "target": "viewz-tracks"},
+    {"key": "skill_raters", "label": "Who rated each of your skills, and on which post", "tab": "postz", "target": "skills-used"},
     # VideoZ: a photo's mouth moving with a voice. It runs on the member's device and
     # spends nothing of ours, so the gate is client-side (like rest_alerts) and a
     # video exported during the sample is the member's, like a routine the Coach paired.
@@ -64,6 +65,10 @@ FEATURES = [
     # FAST, never whether: every row can still be ticked by hand, and Clear is never gated.
     # The gate is client-side like rest_alerts (it spends nothing of ours), and what was
     # ticked during a sample stays ticked.
+    # DAW take lanes: a lane the member empties by deleting its last region is removed by itself (a lane that is
+    # merely new, e.g. made by an overdub to record into, is never touched). It acts for the member, so it is StatZ's;
+    # on the device and free of cost, so client-side like daw_automation. The manual "Remove empty takes" stays free.
+    {"key": "daw_autoclean", "label": "DAW take lanes that empty themselves out are deleted automatically", "tab": "arsenal", "target": "daw-select-tracks"},
     {"key": "select_all", "label": "Select all on every list", "tab": "singz", "target": "bosstake-options"},
     # ImageZ's magic eraser and background eraser (Corey's call: StatZ). The editor itself,
     # its layers, masks and the plain eraser are free at every tier, so nobody loses a way to
@@ -86,6 +91,18 @@ FEATURES = [
     # measurements). It acts for the member, so it is StatZ's; each run is still paid, so it switches off cleanly,
     # and levels applied during a sample stay on the faders.
     {"key": "daw_stage", "label": "AI gain staging and stereo field for your stems, from a prompt", "tab": "arsenal", "target": "daw-stage"},
+    # Fixing timing and polarity across a session's tracks (Corey: timing, for StatZ). Measured on the member's
+    # device and costs nothing of ours, so the gate is client-side like daw_automation; a fix applied during a
+    # sample stays in the session.
+    {"key": "daw_align", "label": "Fix timing and polarity across your tracks in every DAW", "tab": "arsenal", "target": "daw-timing"},
+    # Mix check: headroom staging, frequency-clash dips and ducking the beat under the vocal, measured on the
+    # member's device (client-side like daw_align); what a sample applied stays in the session.
+    {"key": "daw_mixcheck", "label": "Mix check in every DAW: headroom, frequency clashes, ducking", "tab": "arsenal", "target": "daw-mixcheck"},
+    # The plugin-grade track effects (saturation, chorus, de-esser, limiter, glue compressor, pro reverb, pro delay,
+    # widener) and autotune, in every DAW (Corey: StatZ effects that compete with VSTs). Built on the member's device;
+    # one already on a track keeps playing after a lapse, and a tuned take is the member's.
+    {"key": "daw_pro_fx", "label": "Pro track effects in every DAW: saturation, chorus, de-esser, limiter, glue, pro reverb & delay, widener", "tab": "arsenal", "target": "daw-mix"},
+    {"key": "daw_autotune", "label": "Autotune: snap a voice to the key, hard or natural", "tab": "arsenal", "target": "daw-autotune"},
     # Auto-accepting challenges is an automation (Corey: every automation is StatZ's). Read when a
     # challenge arrives, so it stops the moment StatZ or the sample does; the setting itself is kept.
     {"key": "challenge_auto_accept", "label": "Auto-accept challenges that clear your filters", "tab": "battlez", "target": "challengez-filters"},
@@ -113,6 +130,7 @@ DRIVERS = [
     {"key": "coach_pairing", "sampled": True, "modules": ["superset", "bodiez"]},
     {"key": "rest_alerts", "sampled": True, "modules": []},
     {"key": "viewz_tracks", "sampled": True, "modules": ["viewz"]},
+    {"key": "skill_raters", "sampled": True, "modules": ["ratez"]},
     {"key": "lipsync", "sampled": True, "modules": []},
     {"key": "video_develop", "sampled": True, "modules": ["videodevelop"]},
     {"key": "select_all", "sampled": True, "modules": []},
@@ -120,7 +138,12 @@ DRIVERS = [
     {"key": "imagez_cutout", "sampled": True, "modules": ["imagez_cutout"]},
     {"key": "imagez_actions", "sampled": True, "modules": []},
     {"key": "daw_automation", "sampled": True, "modules": []},
+    {"key": "daw_autoclean", "sampled": True, "modules": []},
     {"key": "daw_stage", "sampled": True, "modules": ["mixz_stage"]},
+    {"key": "daw_align", "sampled": True, "modules": []},
+    {"key": "daw_mixcheck", "sampled": True, "modules": []},
+    {"key": "daw_pro_fx", "sampled": True, "modules": []},
+    {"key": "daw_autotune", "sampled": True, "modules": []},
     {"key": "challenge_auto_accept", "sampled": True, "modules": ["callouts"]},
     {"key": "lilith_auto", "sampled": True, "modules": ["lilith_auto"]},
     {"key": "instrumental_mix", "sampled": False, "modules": ["instrumentalz"],

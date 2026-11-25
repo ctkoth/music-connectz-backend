@@ -52,7 +52,7 @@ def _rows():
     from .lilith_taskz import tier_limits as lilith
     from .releasez import PER_MONTH
     from .sonday import BOARDS as SONDAY
-    from .catalog import AI_MODELS, default_ai_model
+    from .catalog import AI_MODELS, ai_models_for
     from .models import AI_ENERGY_PER_PROMPT, ENERGY_FLOOR_PER_HOUR, PROMPT_ALLOWANCE
     wav = lambda t: {0: "MP3 only", 16: "16-bit WAV", 24: "24-bit WAV"}.get(C.MASTERING[t]["wav_bits"], "MP3 only")
     heaviest = lambda t: ", ".join(C.MASTERING_INTENSITY_LABELS[i] for i in C.MASTERING[t]["intensities"])
@@ -63,7 +63,7 @@ def _rows():
         # Gemini reads; Claude writes the answer. The best engine each plan may pick (the member may always pick a
         # lower one): Corey's ladder, read off AI_MODELS so the table and the gate cannot disagree.
         ("Everywhere", "ai_engine", "Best Claude engine that writes the AI's answers", "occ", "",
-         lambda t: AI_MODELS[default_ai_model(t)]["name"], "", "AI_MODELS.tier"),
+         lambda t: AI_MODELS[ai_models_for(t)[-1]]["name"], "", "AI_MODELS.tier"),
         ("Everywhere", "energy_floor", "Energy back every hour, at least", "membershipz", "", _from(ENERGY_FLOOR_PER_HOUR), "⚡", "ENERGY_FLOOR_PER_HOUR"),
         ("Everywhere", "char_limit", "Characters in a post", "postz", "post-compose", _lim("char_limit"), "", "tier_limits:char_limit"),
         ("Everywhere", "upload_mb", "Biggest single upload", "filez", "", _lim("upload_mb"), "MB", "tier_limits:upload_mb"),
@@ -75,6 +75,8 @@ def _rows():
         ("PostZ & profile", "custom_groups", "Your own groups", "groupz", "", _lim("custom_groups"), "", "tier_limits:custom_groups"),
         ("PostZ & profile", "soundcloud_import", "SoundCloud tracks imported", "profilez", "", _lim("soundcloud_import"), "", "tier_limits:soundcloud_import"),
         ("PostZ & profile", "releases", "Tracks released a month (DistributeZ)", "distributez", "distributez-releases", _from(PER_MONTH), "", "releasez.PER_MONTH"),
+        ("Make", "clean_modes", "Clean ConnectZ ways to choose what goes", "cleanconnectz", "cleanconnectz:main", _lim("clean_modes"), "", "tier_limits:clean_modes"),
+        ("Make", "clean_dupe_runs", "Clean ConnectZ duplicate scans a day (Windows app)", "cleanconnectz", "cleanconnectz:main", _lim("clean_dupe_runs"), "", "tier_limits:clean_dupe_runs"),
         ("Make", "imagez_layers", "ImageZ layers in a picture", "imagez", "", _lim("imagez_layers"), "", "tier_limits:imagez_layers"),
         ("Make", "imagez_lists", "ImageZ filters, blend modes and adjustment presets", "imagez", "", _lim("imagez_layers"), "", "tier_limits:imagez_layers"),
         ("Make", "imagez_fonts", "ImageZ fonts", "imagez", "", _lim("imagez_fonts"), "", "tier_limits:imagez_fonts"),
@@ -82,9 +84,10 @@ def _rows():
         ("Make", "daw_vst", "VST effects on a track (Windows app)", "arsenal", "", _lim("imagez_layers"), "", "tier_limits:imagez_layers"),
         ("Make", "mix_tracks", "Tracks in a Mix ConnectZ mix", "mixconnectz", "mixz-tracks", _lim("imagez_layers"), "", "tier_limits:imagez_layers"),
         ("Make", "eq_bands", "EQ bands (TrackZ and every DAW's EQ)", "mixconnectz", "mixz-tracks", _lim("eq_bands"), "", "tier_limits:eq_bands"),
+        ("Make", "split_opens", "PaneZ: times a day you can open a split page", "toolz", "", _lim("split_opens"), "", "tier_limits:split_opens"),
         ("Make", "glow_colors", "Glow colors you can choose from (the neon on buttons)", "profilez", "glow-color", _lim("glow_colors"), "", "tier_limits:glow_colors"),
         ("Make", "album_songs", "Songs mastered together as an album (Mix ConnectZ)", "mixconnectz", "mixz-album", _lim("album_songs"), "", "tier_limits:album_songs"),
-        ("Make", "tone_presets", "Presets of each kind (track tone, track FX, mastering, channel strip)", "mixconnectz", "mixz-presets", _lim("tone_presets"), "", "tier_limits:tone_presets"),
+        ("Make", "tone_presets", "Presets of each kind (track tone, track FX, mastering, channel strip; plugin presets per plugin)", "mixconnectz", "mixz-presets", _lim("tone_presets"), "", "tier_limits:tone_presets"),
         ("Make", "wav_bits", "Mastered export", "mixconnectz", "mixz-settings", wav, "", "MASTERING.wav_bits"),
         ("Make", "intensities", "Mastering intensities", "mixconnectz", "mixz-settings", heaviest, "", "MASTERING.intensities"),
         ("Make", "facez_faces", "Faces kept in FaceZ, and characters cast in MangaZ / Anime ConnectZ", "facez", "", _lim("facez_faces"), "", "tier_limits:facez_faces"),

@@ -1269,7 +1269,8 @@ class SingZCoachView(APIView):
         cap_mb, cap_is_tier = cap_for(request.user)
         allowance, _, daily_left = daily_prompt_state(request.user)
         w = wallet_for(request.user)
-        cost = ai_cost("standard")
+        from .catalog import engine_cost
+        cost = engine_cost(_priced_engine(request.user))
         # "Allowed" now means CAN YOU TAKE ONE RIGHT NOW — configured, and either
         # a free prompt left or the balance to cover it. It used to mean "are you
         # StatZ", which was a less useful answer to the only question the screen
@@ -1499,9 +1500,11 @@ class SingZCoachView(APIView):
         # too. Billing spends the allowance first (count_daily below), and this
         # gate did not know that — a StatZ member with prompts left but an
         # empty balance was refused a take that would have cost them nothing.
-        cost = ai_cost("standard")
+        from .catalog import engine_cost
+        cost = engine_cost(_priced_engine(request.user))
         _, _, daily_left = daily_prompt_state(request.user)
-        if cost and not daily_left and not can_afford_ai(request.user, cost):
+        # The free prompts don't cover Opus or Fable, so a take on them needs the balance whatever is left today.
+        if cost and (not daily_left or not daily_prompt_covers(cost, _priced_engine(request.user))) and not can_afford_ai(request.user, cost):
             return Response({"detail": "Not enough PromptZ / balance for a coached take.", "cost_cents": cost},
                             status=status.HTTP_402_PAYMENT_REQUIRED)
 
@@ -1753,6 +1756,15 @@ class SingZCoachView(APIView):
             )
             out["xp_awarded"] = landed = profile.add_xp(coach_xp_base(out.get("score_exact", out.get("score"))))
             profile.save(update_fields=["xp"])
+            # Where the member stands, for the result screen: the XP total and how far into the
+            # level it is (500 a level, `_level_for_xp`), and the coach's badge progress.
+            from . import badgez_wave
+            out["progress"] = {
+                "xp": {"total": profile.xp, "level": profile.level, "into_level": profile.xp_into_level,
+                       "level_size": 500},
+                "badge": badgez_wave.hot_progress(request.user, self.app_key),
+                "badges": badgez_wave.badge_totals(request.user),
+            }
             TrainingEvent.objects.create(
                 profile=profile,
                 drill_key="coached_take",

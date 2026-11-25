@@ -5,12 +5,13 @@ from .directz_app import (DirectZCopyrightView, DirectZWorksView,
                           DirectZRateView)
 from .media import MediaFileView
 from .uploadcheck import UploadCheckView
+from .uploadrestore import UploadRestoreView
 from .questz import QuestBoardView, QuestClaimView
 from .journalz import (JournalCostView, JournalEntryView, JournalExportView,
                        JournalLookbackView, JournalShareView, JournalZView)
 from .embedplays import EmbedPlayView
 from .budgetz import (BudgetBankLinkView, BudgetBankSessionView, BudgetBankSyncView, BudgetBankUnlinkView,
-                      BudgetLimitView, BudgetLineView, BudgetView)
+                      BudgetLimitView, BudgetLineView, BudgetView, EarningsImportView)
 from .derivedroyalty import DerivedTermsView
 from .postz import (PostBoostView, PostCostView, PostDeleteView, PostOpenView, PostsView,
                     PostJoinView, PostShareView, SubmissionsView, PostProgressionView, DiscoveryFeedView, PostSaleView)
@@ -46,7 +47,7 @@ from .voicez import VoiceDetailView, VoicePreviewView, VoicesView
 from .dupez import (DupeZClaimView, DupeZDeleteView, DupeZFlagsView, DupeZVerifyView,
                     DupeZReviewView, DupeZView)
 from .callz import CallDetailView, CallRateView, CallsView
-from .labelz import (LabelContractActionView, LabelContractsView, LabelDetailView,
+from .labelz import (AdvanceLineView, AdvanceView, LabelContractActionView, LabelContractsView, LabelDetailView,
                      LabelListCreateView)
 from .sharecard import post_card, profile_card
 from .scoreshare import ScoreShareHumanView, ScoreShareMediaView, ScoreShareView, score_card_png
@@ -57,10 +58,11 @@ from .priorities import PrioritiesView
 from .coachvoice import CoachVoiceView, CoachSpeakView
 from .coach_upgrades import CoachMarketsView
 from .dawz import DawZView
+from .dawsessions import DawSessionAudioView, DawSessionDetailView, DawSessionsView
 from .attractivenessz_view import AttractivenessZView
 from .lookask import LookAskOneView, LookAskView
 from .lookshare import LookInviteView, LookShareDetailView, LookSharePostView, LookShareView
-from .lookmaxz_view import LookInspireView, LookmaxZMarketsView, LookmaxZShopView, LookmaxZView
+from .lookmaxz_view import LookInspireView, LookSampleView, LookmaxZMarketsView, LookmaxZShopView, LookmaxZView
 from .soundcloud_engagement import SoundCloudEngagementView
 from .appversion import AppVersionView
 from .soundcloud_import import SoundCloudImportView
@@ -96,6 +98,7 @@ from .metricz import HoroscopeView, MetricZView, SubstanceScaleView
 from .videoz import VideoDetailView, VideoView
 from .videodevelop import VideoDevelopView
 from .imagez_cutout import ImageZCutoutView
+from .imagez_rate import ImageZRateView
 from .sharez import ShareZDetailView, ShareZView
 from .tonez import ToneZDetailView, ToneZView
 from .lilith_auto import LilithAutoView
@@ -105,9 +108,11 @@ from .videostitch import VideoStitchDetailView, VideoStitchView
 from .instrumentalz import InstrumentalAIPresetView, InstrumentalApplyPresetView, InstrumentalInspirationView, InstrumentalMidiView, InstrumentalMixPresetsView, InstrumentalMixSheetView, InstrumentalMixView, InstrumentalMoodView, InstrumentalView
 from .intelligencez import IntelligenceHubView
 from .skillzhub import SkillZHubView
+from .coachbest import CoachBestView
 from .mixz import MixDetailView, MixView
 from .mixz_ai import MixAIView
 from .mixz_stage import MixStageView
+from .panez import PaneZView
 from .intelligence_royalty import IntelligenceTargetsView, IntelligenceUseDetailView, IntelligenceUsesView
 from .keyconnectz import (KeyboardView, KeySpeakView, KeyTranscribeView,
                           KeyTranslateView)
@@ -132,11 +137,13 @@ from .collab import (
     CollabDealsView,
     CollabDetailView,
     CollabFundView,
+    CollabAdvanceView,
     CollabDeliverView,
     CollabReleaseView,
     CollabDisputeView,
     CollabRefundView,
 )
+from .merchshop import ShopBuyView, ShopDesignView, ShopView
 from .merch import MerchBuyView, MerchDetailView, MerchRefundView, MerchSalesView, MerchView
 from .occ import OccChatView
 from .occ_taskz import (OccSettingsView, OccSpecView, OccTaskDetailView,
@@ -224,6 +231,8 @@ from .views import (
 )
 from .habits import HabitCreateView, HabitCompleteView
 from .bodiez_float import BodieZFloatStateView, BodieZSessionFloatView
+from .cleandupes import CleanDupesView
+from .healthsync import HealthLinkView, HealthPairView, HealthStateView, HealthStepsView
 from .bodiez import (
     BodieZAccessView, BodieZBoardView, BodieZCustomDaysView, BodieZStepsView, BodieZCustomExerciseView, BodieZCustomExerciseDetailView, BodieZPastSessionView, BodieZSessionLogView, BodieZRoutinePlanView, BodieZStepCoachView, BodieZCustomDayDetailView, BodieZBodyMapView, BodieZCoachView, BodieZExerciseHistoryView, BodieZExercisesView,
     BodieZGoalDetailView, BodieZGoalsView, BodieZRecoveryView, BodieZRoutinesView,
@@ -288,6 +297,7 @@ urlpatterns = [
     path("videoz/<int:pk>/", VideoDetailView.as_view(), name="economy-videoz-detail"),
     path("videoz/develop/", VideoDevelopView.as_view(), name="economy-videoz-develop"),
     path("imagez/cutout/", ImageZCutoutView.as_view(), name="economy-imagez-cutout"),
+    path("imagez/rate/", ImageZRateView.as_view(), name="economy-imagez-rate"),
     path("ladders/", LaddersView.as_view(), name="economy-ladders"),
     path("tonez/", ToneZView.as_view(), name="economy-tonez"),
     path("tonez/<int:pk>/", ToneZDetailView.as_view(), name="economy-tonez-detail"),
@@ -314,10 +324,12 @@ urlpatterns = [
     path("mixz/<int:pk>/", MixDetailView.as_view(), name="economy-mixz-detail"),
     path("mixz/ai/", MixAIView.as_view(), name="economy-mixz-ai"),
     path("mixz/stage/", MixStageView.as_view(), name="economy-mixz-stage"),
+    path("panez/", PaneZView.as_view(), name="economy-panez"),
     path("intelligencez/", IntelligenceHubView.as_view(), name="economy-intelligencez"),
     # SkillZ — the front door of the seven instrument coaches (and the Home of the
     # standalone SkillZ app): the price of a take before any coach is opened.
     path("skillz/", SkillZHubView.as_view(), name="economy-skillz"),
+    path("coachbest/<str:username>/<str:app_key>/", CoachBestView.as_view(), name="economy-coachbest"),
     path("intelligence/targets/", IntelligenceTargetsView.as_view(), name="economy-intelligence-targets"),
     path("intelligence/uses/", IntelligenceUsesView.as_view(), name="economy-intelligence-uses"),
     path("intelligence/uses/<int:pk>/", IntelligenceUseDetailView.as_view(), name="economy-intelligence-use"),
@@ -401,8 +413,12 @@ urlpatterns = [
     path("coachvoice/", CoachVoiceView.as_view(), name="economy-coachvoice"),
     path("coachvoice/speak/", CoachSpeakView.as_view(), name="economy-coachvoice-speak"),
     path("dawz/", DawZView.as_view(), name="economy-dawz"),
+    path("dawz/sessions/", DawSessionsView.as_view(), name="economy-daw-sessions"),
+    path("dawz/sessions/<str:sid>/audio/<str:src>/", DawSessionAudioView.as_view(), name="economy-daw-session-audio"),
+    path("dawz/sessions/<str:sid>/", DawSessionDetailView.as_view(), name="economy-daw-session"),
     path("attractivenessz/", AttractivenessZView.as_view(), name="economy-attractivenessz"),
     path("lookmaxz/", LookmaxZView.as_view(), name="economy-lookmaxz"),
+    path("lookmaxz/sample/", LookSampleView.as_view(), name="economy-lookmaxz-sample"),
     path("lookmaxz/shop/", LookmaxZShopView.as_view(), name="economy-lookmaxz-shop"),
     path("lookmaxz/inspire/", LookInspireView.as_view(), name="economy-lookmaxz-inspire"),
     path("lookmaxz/markets/", LookmaxZMarketsView.as_view(), name="economy-lookmaxz-markets"),
@@ -435,6 +451,7 @@ urlpatterns = [
     path("uploads/", UploadsView.as_view(), name="economy-uploads"),
     path("uploads/check/", UploadCheckView.as_view(), name="economy-uploads-check"),
     path("uploads/<int:pk>/", UploadDetailView.as_view(), name="economy-upload-detail"),
+    path("uploads/<int:pk>/restore/", UploadRestoreView.as_view(), name="economy-upload-restore"),
     # The address an upload is HANDED OUT under, and the only one anything
     # stores. Resolved to wherever the bytes are on every request, so a signed
     # bucket URL is minted fresh instead of being frozen into a post that then
@@ -518,6 +535,7 @@ urlpatterns = [
     path("ratez/queue/", RateQueueView.as_view(), name="economy-ratez-queue"),
     path("budgetz/", BudgetView.as_view(), name="economy-budgetz"),
     path("budgetz/line/<int:pk>/", BudgetLineView.as_view(), name="economy-budgetz-line"),
+    path("budgetz/earnings/", EarningsImportView.as_view(), name="economy-budgetz-earnings"),
     path("budgetz/limit/", BudgetLimitView.as_view(), name="economy-budgetz-limit"),
     path("budgetz/bank/session/", BudgetBankSessionView.as_view(), name="economy-budgetz-session"),
     path("budgetz/bank/link/", BudgetBankLinkView.as_view(), name="economy-budgetz-link"),
@@ -669,6 +687,10 @@ urlpatterns = [
     path("bodiez/routines/<int:routine_id>/", BodieZRoutineDetailView.as_view(),
          name="economy-bodiez-routine"),
     path("bodiez/float/", BodieZFloatStateView.as_view(), name="economy-bodiez-float"),
+    path("health/", HealthStateView.as_view(), name="economy-health"),
+    path("health/pair/", HealthPairView.as_view(), name="economy-health-pair"),
+    path("health/link/", HealthLinkView.as_view(), name="economy-health-link"),
+    path("health/steps/", HealthStepsView.as_view(), name="economy-health-steps"),
     path("bodiez/sessions/<int:session_id>/float/", BodieZSessionFloatView.as_view(), name="economy-bodiez-session-float"),
     path("bodiez/sessions/", BodieZSessionsView.as_view(), name="economy-bodiez-sessions"),
     path("bodiez/routines/plan/", BodieZRoutinePlanView.as_view(), name="economy-bodiez-routine-plan"),
@@ -756,6 +778,9 @@ urlpatterns = [
     # route existed before this; every load of the tab 404'd.
     path("labelz/", LabelListCreateView.as_view(), name="economy-labelz"),
     path("labelz/<int:pk>/", LabelDetailView.as_view(), name="economy-label"),
+    path("labelz/contracts/<int:pk>/advances/", AdvanceView.as_view(), name="economy-label-advances"),
+    path("labelz/advances/<int:pk>/", AdvanceLineView.as_view(), name="economy-label-advance-line"),
+    path("labelz/advances/<int:pk>/confirm/", AdvanceLineView.as_view(), name="economy-label-advance-confirm"),
     path("labelz/contracts/", LabelContractsView.as_view(), name="economy-label-contracts"),
     path("labelz/contracts/<int:pk>/<str:action>/", LabelContractActionView.as_view(),
          name="economy-label-contract-action"),
@@ -782,6 +807,9 @@ urlpatterns = [
     path("directz/", DirectZWorksView.as_view(), name="economy-directz"),
     path("directz/<int:pk>/rate/", DirectZRateView.as_view(), name="economy-directz-rate"),
     path("merch/", MerchView.as_view(), name="economy-merch"),
+    path("merch/shop/", ShopView.as_view(), name="economy-merch-shop"),
+    path("merch/shop/<int:pk>/", ShopDesignView.as_view(), name="economy-merch-shop-design"),
+    path("merch/shop/<int:pk>/buy/", ShopBuyView.as_view(), name="economy-merch-shop-buy"),
     path("merch/sales/", MerchSalesView.as_view(), name="economy-merch-sales"),
     path("merch/<int:pk>/", MerchDetailView.as_view(), name="economy-merch-detail"),
     path("merch/<int:pk>/buy/", MerchBuyView.as_view(), name="economy-merch-buy"),
@@ -789,6 +817,7 @@ urlpatterns = [
     path("collab/", CollabDealsView.as_view(), name="economy-collab"),
     path("collab/<int:pk>/", CollabDetailView.as_view(), name="economy-collab-detail"),
     path("collab/<int:pk>/fund/", CollabFundView.as_view(), name="economy-collab-fund"),
+    path("collab/<int:pk>/advance/", CollabAdvanceView.as_view(), name="economy-collab-advance"),
     path("collab/<int:pk>/deliver/", CollabDeliverView.as_view(), name="economy-collab-deliver"),
     path("collab/<int:pk>/release/", CollabReleaseView.as_view(), name="economy-collab-release"),
     path("collab/<int:pk>/dispute/", CollabDisputeView.as_view(), name="economy-collab-dispute"),
@@ -796,6 +825,7 @@ urlpatterns = [
     path("parcel/", ParcelCampaignView.as_view(), name="economy-parcel"),
     path("parcel/email-pref/", ParcelEmailPrefView.as_view(), name="economy-parcel-email-pref"),
     path("parcel/unsubscribe/", ParcelUnsubscribeView.as_view(), name="economy-parcel-unsubscribe"),
+    path("cleanconnectz/dupes/", CleanDupesView.as_view(), name="economy-clean-dupes"),
     path("autotopup/", AutoTopUpView.as_view(), name="economy-autotopup"),
     path("autotopup/<int:pk>/cancel/", AutoTopUpCancelView.as_view(), name="economy-autotopup-cancel"),
     path("identity/", IdentityView.as_view(), name="economy-identity"),

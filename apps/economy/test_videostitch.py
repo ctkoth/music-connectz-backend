@@ -160,12 +160,11 @@ class OwnerShortBalanceTests(TestCase):
 
 
 class VideoPriceIsSmallTests(TestCase):
-    def test_a_clip_costs_one_promptz_and_a_stitched_video_one_per_shot(self):
+    def test_a_clip_is_priced_near_cost_and_a_stitched_video_per_shot(self):
+        from apps.economy.catalog import VIDEO_CLIP_PROMPTZ
         from apps.economy.videoz import price_cents
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("VIDEO_CONNECTZ_CENTS", None)
-            self.assertEqual(price_cents(), 1)
-            # Common sense: the dearest video must cost less than the best tier's
-            # whole day of prompts, or nobody could ever make it.
-            from apps.economy.models import PROMPT_ALLOWANCE
-            self.assertLess(videostitch.MAX_SHOTS * price_cents(), PROMPT_ALLOWANCE["statz"])
+            # Corey (Nov 2026): a Veo clip costs Google very roughly $1-6, so 1 PromptZ was an open-ended loss.
+            self.assertEqual(price_cents(), VIDEO_CLIP_PROMPTZ)
+            self.assertGreaterEqual(VIDEO_CLIP_PROMPTZ, 100)

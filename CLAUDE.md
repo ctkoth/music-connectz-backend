@@ -3492,3 +3492,123 @@ So a Premium member coaching on Opus with all 7 free prompts a day costs ~$10/mo
 Fable take loses ~8-9c. **Recommendation, not applied:** bill Opus and Fable takes on their real usage
 (`ai_run_charge_cents`, which agent runs already use) and state that estimate before the press. Not run against Anthropic: CI
 has no key; `tools/coach_think_live_check.sh` can.
+
+## Pricing what costs real money near its cost (Corey, Nov 2026 — the margin audit)
+
+Membership is profitable at normal use; the losses were three places priced far under cost. Corey said "do 1 and 2,
+your numbers", so these are recommendations he approved, reversible in `catalog.py`:
+
+- **A video clip is `VIDEO_CLIP_PROMPTZ` (250, about $2)**, per shot for stitched and Anime ConnectZ pieces. It was 1
+  PromptZ (~0.8¢) against a Veo render costing very roughly $1-6, so any tier with bought PromptZ could cost hundreds.
+  `VIDEO_CONNECTZ_CENTS` still overrides it without a deploy. Check Google's bill before moving it.
+- **A generated picture is `IMAGE_PROMPTZ` (5, ~4¢)**: Image ConnectZ and MangaZ panels (`_bill(cost=...)`); a MangaZ
+  script stays a prompt. ImageZ cut-out is already metered on real tokens.
+- **Opus and Fable coach takes cost `ENGINE_PROMPTZ` (6 and 12) and the free daily prompts never cover them**
+  (`daily_prompt_covers` refuses them; Haiku and Sonnet stay covered). Premium on Opus every day was ~$10/mo of model
+  fees against $6.50 kept. `crosspost.coach_price` and the coach GET read `engine_cost`, so the price is on the button.
+- **Not touched, on purpose:** the tier ladders (3/6/unlimited), the daily prompts, $7/$60, StatZ unlimited characters.
+  They are not where the money goes. Still open: StatZ storage (100 GB) on Render's disk costs ~$25/mo if filled; a
+  bucket (R2) is the fix and needs Corey's account.
+
+## The onboarding bonus pays for rows, not for the screen's word
+
+`complete_onboarding` grants the +150 🍥 +50 ⚡ only when `onboarding_progress` finds a scored take, a post and
+`ONBOARD_RATINGS` (3) ratings given; otherwise the view answers 409 with what is left. It used to grant whenever the
+client POSTed. Members who already claimed keep it. The GET serves `progress` and `first_take` (not on `/me`, which has
+a query budget every page load pays).
+
+## Small things worth knowing
+
+- `public/browse/` (`PublicBrowseView`): logged-out browse of PUBLIC posts, newest first, never a known minor's, no
+  member search. The "by link, not by browse" rule at the top of `publicz.py` is superseded by Corey's ask, narrowly.
+- `mixz/stage/`: StatZ gain staging + stereo field from measurements and a brief; no audio sent; bass/drums held centre.
+- `imagez/rate/`: a picture's craft scored with why and how. **It never rates anybody's looks**, at any age — Corey asked
+  for attractiveness for every age including teens and it was refused (harm, and the Families-policy commitment).
+  LookZMaxZ stays adults-only, own photo. Do not add a looks dimension here.
+- `glow_colors` (3/6/unlimited) ladders the neon colour picker; `daw_stage`, `daw_align`, `daw_mixcheck` are sampled
+  StatZ features (client-side gates).
+- Forgot-password is rate limited (3 emails per account, 20 per connection, 15 min) and a limited account answers
+  exactly like a sent one, so the limit cannot enumerate accounts.
+- Production cookies are Secure and HSTS is one day with no preload (`settings.py`); raise it once the whole domain is https.
+
+## ID checks that never ended, and a profile photo judged as a photograph
+
+**Stuck checks.** `identity.refresh` used to skip any check older than two days, so one that ended while the webhook was not listening (or
+never reached it) stayed "still checking" for weeks, and a stale `processing` row also made POST answer "pending" instead of starting a new
+check. Now every open check is re-asked of Stripe whatever its age (newest five); a session Stripe no longer knows (`resource_missing`) is
+closed; a link nobody finished in `STALE_STARTED_HOURS` (48, the link's own life) is closed as abandoned; `_result` tells the three open
+states apart — `pending` (Stripe is working), `needs_you` (the member has not finished) and `stale` (a "processing" check older than
+`STALE_PROCESSING_HOURS` (3), with how long) — and only a recent processing check holds the door to a new one. A stale one is still
+refreshed, so if Stripe ever finishes it, it counts (it is deliberately NOT marked cancelled, because a cancelled row ignores a late pass).
+`StuckChecksTests` pins all six.
+
+**`imagez/rate/` with `purpose: "profile"`** judges a profile photo as a PHOTOGRAPH: `PROFILE_DIMENSIONS` are framing, light, background,
+sharpness and colour; the prompt forbids any comment on the person's face, body, weight, age, expression or looks; `clean` returns
+`overall: None` (a number beside a face reads as a score on the face) and the caveat says so. Any age may use it for that reason. It is
+priced like any one-picture read and not charged when unreadable. It is the safe answer to "feedback on my profile photo"; rating anybody's
+looks remains adults-only, own photo, in LookZMaxZ. Never run against Google (CI has no key).
+
+## Attractiveness is a filterable ADULT metric, and the wall now covers the READ side (Corey, Nov 2026)
+
+Corey wants attractiveness as a filterable metric for artistic presentation, adults only. It already was one (`gates.py` `attract`, the
+community median on cards, VybeZ / Social ConnectZ / gated deals), and the WRITE side already refused a minor as rater or target
+(`AttractivenessRateView`, `ProfileRateView`, `FaceRateView`). The hole was the READ side: a rating row that existed for somebody who is now a
+minor (written before the wall, or before a birthday was set) was still served on their card, filterable and used to class them.
+`minor_user_ids` (one query, `profile_is_minor`: a stated teen birthday, never an unknown age, and a verified 18+ outranks a typed birthday)
+is now subtracted in `attractiveness_shown_medians` and `attractiveness_stats`, which feed the card, the gate, ThuroZ / SeXi and every
+other reader. And a searcher who is a known minor has `attr_min` / `attr_max` ignored in `MembersView`: the range is an adult's standard to set.
+The member's own switch (`attractiveness_public`) still hides their number from everybody. Unknown age counts as adult, as everywhere else.
+`test_attractiveness_adults_only` pins all of it. Still not built, on purpose: any rating of a minor's looks, by people or AI.
+
+## Steps from Health Connect: a native screen, a token, and a number that pays nothing
+
+`apps/economy/healthsync.py`, `HealthLink` + `StepDay` (migration 0245). The Android app is a Trusted Web Activity, i.e.
+Chrome, and neither a web page nor Chrome can read a watch or Health Connect — so `android/app/src/health/` is a small
+**native** screen (`HealthLinkActivity`) compiled into the **mcz and bodiez flavors only**. SkillZ and IntelligenceZ ship none
+of it and do not declare the permission (`AndroidScopeTests` holds that). It asks for exactly one permission, `READ_STEPS`.
+
+- **Pairing, not logging in.** BodieZ shows a code (`health/pair/`, 8 characters, ten minutes, single use); the phone swaps it
+  for a long token (`health/link/`, open logged-out because the phone has no login; wrong codes are counted per connection,
+  8 per 15 minutes). Only the token's hash is stored. The phone sends days with `X-Health-Token` (`health/steps/`).
+- **Aggregate, so a phone and a watch are not double counted.** The app asks Health Connect for its per-day aggregate. A day with
+  no record is left out, never sent as 0 (not recorded is not zero steps). The server drops junk rows rather than clamping them
+  into a believable number (negative, over 200,000, or outside the last fourteen days).
+- **It pays nothing and moves nothing** — no XP, 🍥, ⚡, rating, badge, level or leaderboard. A device-reported count the server
+  cannot check is the first thing anyone farms by shaking a phone. `test_steps_are_read_by_nothing_else` fails if another module
+  names `StepDay`. Private to the member; account deletion cascades; **Unlink deletes every day** and kills the token.
+- **No weight, no reps.** No watch can sense what is on a bar. Reps and weight stay what the member logs; a future rep
+  *suggestion* would never be saved without a tap.
+- **Not compiled or run here.** There is no Android SDK in this environment, so the Kotlin and the Gradle wiring were written
+  carefully and checked only by reading and by the tests above. Build `assembleBodiezDebug` in CI and try it on a phone with
+  Health Connect before relying on it. Play will also want a Health Connect permission declaration, and the Data safety form and
+  privacy policy must name step data (the frontend's `play/bodiez/` and `public/privacy.html`).
+- The app now declares `INTERNET` in those two flavors (the native screen makes its own request); the TWA still needs none.
+
+## The voice paradigm is definable, per voice (Corey's eight sections)
+
+`voicez.py` serves sections 0-7 as dials: principle, stance (six), mechanics (contractions plus five), structure (two), the
+register switch (off / infer / personal / academic), negative constraints, working behaviour (four) and the self-check. Each
+carries `group` and `group_label` so a screen draws the section, and `VoiceZ.jsx` and `CharacterZ.jsx` render whatever is served.
+
+- **Switches, never free text.** The lines are ours, from closed lists; a member-typed rule would be a second place a prompt can be
+  injected. Everything defaults OFF, so no voice that existed before changes by a word (`ParadigmDialsTests` pins it).
+- **Academic never licenses an invented source.** It cites only what the member supplied and says so when nothing was supplied. A
+  citation made up to fit is the substance rule's worst case.
+- **Parsed surfaces do not get them.** `_custom_prose` (the coach, DirectZ) is JSON-shaped; structure rules there would risk an
+  unparseable take. `tone_lines` (the writer, OCC) and a character's `prompt_block` do.
+- A voice's paradigm sits UNDER the platform's four rules and FRAME, which are appended last and cannot be switched off.
+
+## A profile's CoachZ best score opens the take behind it (`coachbest.py`)
+
+`GET /api/economy/coachbest/<username>/<app_key>/` is what tapping a "CoachZ best score" row opens: the highest-scored
+take on that coach (overall, then the exact score, then one with work to open, then newest), the work it scored when the
+viewer may open it, and the coach's read built the post-read-card way (`share_payload` → `coachshare.read_view`).
+
+- **Gated by the member's own `coach_best` setting**, the one that already decides whether the number is on their card.
+  The read is the reason behind the number, so it travels with it — **a widening, said plainly:** members whose setting
+  shows their best scores now also show the coach's feedback on those takes. VisibilitieZ's label says so. Hidden and
+  "no take" answer the same 404.
+- **The work is only ever something the viewer could already open**: a post through `can_view_post` (the post the take
+  was coached from, or one the member made carrying its read), or a YouTube take's public address. A recording made in
+  the coach, a FileZ file or a journal entry is never handed to anybody else; only the owner sees their kept file.
+- Nothing from a request reaches it; the paid gear advice (`upgrades`) and transcribed lyrics are not served. Free.

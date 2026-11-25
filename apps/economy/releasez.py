@@ -26,7 +26,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import (TIER_FREE, CollabDeal, Post, Release, membership_for,
+from .models import (DEV_TAX, TIER_FREE, CollabDeal, Post, Release, membership_for,
                      notify, profile_for)
 from .postz import media_slots
 
@@ -46,6 +46,19 @@ HOW_IT_WORKS = ("Submitting sends the release to the Music ConnectZ team, who pu
 # StatZ unlimited (None) tracks a calendar month. The owner's own tier (debug) is uncapped.
 PER_MONTH = {TIER_FREE: 3, "premium": 6, "statz": None}
 FREE_PER_MONTH = PER_MONTH[TIER_FREE]
+
+
+def release_tax_rate(user):
+    """The dev tax on a release's royalties: the app-wide rate at the ARTIST's plan (10% / 6% / 3%)."""
+    return membership_for(user).dev_tax_rate
+
+
+def royalty_tax(user):
+    """Stated on the releases screen before anything is submitted."""
+    r = release_tax_rate(user)
+    return {"rate": r, "ladder": {"free": DEV_TAX[TIER_FREE], "premium": DEV_TAX["premium"], "statz": DEV_TAX["statz"]},
+            "note": f"When a release earns, {round(r * 100):g}% of its royalties is the dev tax on your plan "
+                    f"(Free 10% · Premium 6% · StatZ 3%); the rest is credited to your RoyaltieZ."}
 
 
 def quota_for(user):
@@ -188,6 +201,7 @@ class ReleasesView(APIView):
             # month, and what sending actually does.
             "quota": quota_for(request.user),
             "how_it_works": HOW_IT_WORKS,
+            "royalty_tax": royalty_tax(request.user),
             "is_owner": bool(request.user.is_staff or request.user.is_superuser),
         })
 

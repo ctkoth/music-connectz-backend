@@ -101,7 +101,8 @@ class RoyaltyPayoutTests(TestCase):
         r = o.post("/api/economy/royalties/accrue/", {"amount_cents": 1000, "username": "alpha",
                                                       "release_id": release.id}, format="json")
         self.assertEqual(r.status_code, 200, r.content)
-        self.assertEqual(wallet_for(self.a).royalties_cents, 900)
+        # 10% IntelligenceZ share and 10% dev tax (a Free artist), both from the gross.
+        self.assertEqual(wallet_for(self.a).royalties_cents, 800)
         self.assertEqual(wallet_for(self.owner).royalties_cents, 100)
 
     def test_detaching_after_payout_is_refused(self):

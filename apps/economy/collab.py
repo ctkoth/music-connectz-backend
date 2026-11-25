@@ -88,6 +88,28 @@ def stake_for(deal, user):
     return stake
 
 
+def credit_split(deal):
+    """[{username, pct}] — each participant's share of what the deal pays out, in whole percents that
+    add to exactly 100 (largest remainder), for the deal card. It is the settlement's own figure:
+    what each side receives (`receives_cents`), else what each put a worth on (`worth_cents`), else an
+    equal split — never a number a screen works out for itself. Empty for a deal with nobody in it."""
+    rows = [p for p in (deal.participants or []) if isinstance(p, dict) and p.get("username")]
+    if not rows:
+        return []
+    for key in ("receives_cents", "worth_cents"):
+        weights = [max(0, int(p.get(key) or 0)) for p in rows]
+        if sum(weights) > 0:
+            break
+    else:
+        weights = [1] * len(rows)
+    total = sum(weights)
+    raw = [w * 100 / total for w in weights]
+    pcts = [int(r) for r in raw]
+    for i in sorted(range(len(rows)), key=lambda i: raw[i] - pcts[i], reverse=True)[:100 - sum(pcts)]:
+        pcts[i] += 1
+    return [{"username": p["username"], "pct": pct} for p, pct in zip(rows, pcts)]
+
+
 def deal_dict(deal, me=None, days_cache=None, marks=None):
     # Thorough marks by name (thoroughz.py). A list hands in one batch; without
     # one, they are remembered in the same shared cache the escrow window uses
@@ -125,6 +147,7 @@ def deal_dict(deal, me=None, days_cache=None, marks=None):
         "items": deal.items or [],
         "split_mode": deal.split_mode,
         "split_snapshot": deal.split_snapshot or {},
+        "credit_split": credit_split(deal),
         # Where each contributor is rated — the same item space RateZ serves.
         "rating_keys": {p.get("username"): contributor_item_key(deal.id, p.get("username"))
                         for p in deal.participants},
@@ -156,6 +179,7 @@ def deal_dict(deal, me=None, days_cache=None, marks=None):
         # thing that shortened it is the gain half of the cost/gain rule: the
         # benefit is only worth earning if somebody can see it arrive.
         "auto_release_partnerz": _all_payers_partner_every_payee(deal, days_cache),
+        "advance": advance_options(deal, me),
         "i_am_participant": bool(me and any(p.get("username") == me.username for p in deal.participants)),
         "i_am_payer": bool(me and any(p.get("username") == me.username and int(p.get("pays_cents") or 0) > 0 for p in deal.participants)),
     }
@@ -360,6 +384,71 @@ def rating_split(deal):
     return [by_name[p["username"]] for p in deal.participants], snapshot
 
 
+ADVANCE_NOTE = ("An advance is paid out of your held share to this person right now and cannot be taken back. "
+                "It counts toward what they are owed, so they receive that much less at release; if the deal is refunded, "
+                "you get back only what is still held.")
+
+
+def advance_left(deal, payer_entry, payee_entry):
+    """Cents `payer` may still advance to `payee`: bounded by what the payer still holds in escrow, what the payee is
+    still owed, and what the deal holds. All three, so the settlement arithmetic can never go negative."""
+    held_by_payer = int(payer_entry.get("pays_cents") or 0) - int(payer_entry.get("advanced_out_cents") or 0)
+    owed_to_payee = int(payee_entry.get("receives_cents") or 0) - int(payee_entry.get("advanced_in_cents") or 0)
+    return max(0, min(held_by_payer, owed_to_payee, int(deal.held_cents or 0)))
+
+
+def _skill_price_for(deal, user):
+    """What the payee's OWN priced skills that this deal is looking for come to: [{skill, cents, unit}] and the total.
+    Their rates, read from their profile — never the request's, never a guess. A deal that names no matching skill gets
+    no suggestion (the member types an amount), because a made-up default is not a price."""
+    from .postz import skill_price_units, skill_prices
+    wanted = {str(n.get("skill") or "").strip() for n in (deal.needs or []) if isinstance(n, dict)}
+    prices, units = skill_prices(user), skill_price_units(user)
+    lines = [{"skill": k, "cents": v, "unit": units.get(k, "hour")} for k, v in prices.items() if k in wanted]
+    return lines, sum(l["cents"] for l in lines)
+
+
+def _label_for(deal, payer, payee_user):
+    """LabelZ: the payer's label that the payee is signed to, if any — `{contract_id, label}` — whether or not the
+    payee is on a label at all is just None, and the advance works the same either way."""
+    from .models import LabelContract
+    c = (LabelContract.objects.filter(label__owner=payer, artist=payee_user, status=LabelContract.STATUS_SIGNED)
+         .select_related("label").order_by("-signed_at").first())
+    return {"contract_id": c.id, "label": c.label.name} if c else None
+
+
+def advance_options(deal, me, detail=False):
+    """For a funded, money, worth-split deal: who the viewer may advance to and the most they may. {} otherwise.
+    The LIST carries only names and caps (no query per card — a feed of deals re-polls); `detail=True`, asked for by
+    the one deal being paid on, adds the payee's skill prices and the label link."""
+    if me is None or deal.currency != CollabDeal.CURRENCY_MONEY or deal.split_mode == CollabDeal.SPLIT_RATING:
+        return {}
+    if deal.status not in (CollabDeal.STATUS_FUNDED, CollabDeal.STATUS_DELIVERED):
+        return {}
+    mine = next((p for p in deal.participants if p.get("username") == me.username), None)
+    if not mine or int(mine.get("pays_cents") or 0) <= 0 or not mine.get("funded"):
+        return {}
+    to = []
+    for p in deal.participants:
+        if p.get("username") == me.username or not _accepted(deal, p):
+            continue
+        cap = advance_left(deal, mine, p)
+        if cap > 0:
+            row = {"username": p["username"], "max_cents": cap}
+            if detail:
+                who = User.objects.filter(username=p["username"]).first()
+                lines, price = _skill_price_for(deal, who) if who else ([], 0)
+                row.update(skill_price_cents=min(price, cap) if price else None, skill_lines=lines,
+                           label=_label_for(deal, me, who) if who else None)
+            to.append(row)
+    return {"to": to, "note": ADVANCE_NOTE} if to else {}
+
+
+def _accepted(deal, entry):
+    """Naming somebody on a deal is not consent: the starter has accepted by starting, everyone else presses accept."""
+    return bool(entry.get("accepted_at")) or entry.get("username") == deal.initiator.username
+
+
 @transaction.atomic
 def release_deal(deal, note="collab release"):
     """Pay each recipient their net share from escrow, keep the platform tax
@@ -396,7 +485,8 @@ def release_deal(deal, note="collab release"):
         user = User.objects.filter(username=entry.get("username")).first()
         if not user:
             continue
-        recv = int(entry.get("receives_cents") or 0)
+        # What was already paid early as an advance comes off what is paid now; the held money fell by the same amount.
+        recv = max(0, int(entry.get("receives_cents") or 0) - int(entry.get("advanced_in_cents") or 0))
         stake = int(entry.get("stake_paid") or 0)
         # K-Oth's IntelligenceZ royalty comes out of THIS member's share only,
         # and only if they attached a piece to this deal themselves.
@@ -476,7 +566,7 @@ def refund_deal(deal, new_status=CollabDeal.STATUS_REFUNDED):
         user = User.objects.filter(username=entry.get("username")).first()
         if not user:
             continue
-        pays = int(entry.get("pays_cents") or 0)
+        pays = max(0, int(entry.get("pays_cents") or 0) - int(entry.get("advanced_out_cents") or 0))   # advances are gone
         stake = int(entry.get("stake_paid") or 0)
         w = _locked_wallet(user)
         if deal.currency == CollabDeal.CURRENCY_MONEY:
@@ -782,6 +872,75 @@ class CollabFundView(APIView):
             try_award(request.user, "collab_fund", stretch=most_owed > mine_worth)
 
             return Response(deal_dict(deal, request.user))
+
+
+class CollabAdvanceView(APIView):
+    """GET: who you may advance to, with their skill prices and any label link (the list carries names and caps only).
+    POST: pay it."""
+    """A paying collaborator advances part of their held share to somebody on the deal, now. Real money, so it is
+    narrow: money deals only, funded and not disputed, a payee who has accepted, never more than the payer still holds
+    or the payee is still owed, and never while the split is by rating (the shares are not frozen until release)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        deal = CollabDeal.objects.select_related("initiator").filter(pk=pk).first()
+        if not deal or not _entry_for(deal, request.user.username):
+            return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response(advance_options(deal, request.user, detail=True))
+
+    def post(self, request, pk):
+        try:
+            cents = int(round(float((request.data or {}).get("amount")) * 100))
+        except (TypeError, ValueError):
+            cents = 0
+        if cents <= 0:
+            return Response({"detail": "Enter an amount above zero."}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            deal = CollabDeal.objects.select_for_update().filter(pk=pk).first()
+            if not deal:
+                return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+            payer = _entry_for(deal, request.user.username)
+            if not payer or int(payer.get("pays_cents") or 0) <= 0 or not payer.get("funded"):
+                return Response({"detail": "Only a collaborator who has funded their share can pay an advance."}, status=status.HTTP_403_FORBIDDEN)
+            if deal.currency != CollabDeal.CURRENCY_MONEY:
+                return Response({"detail": "Advances are for money deals."}, status=status.HTTP_409_CONFLICT)
+            if deal.split_mode == CollabDeal.SPLIT_RATING:
+                return Response({"detail": "This deal splits by contribution rating, which isn't fixed until release, so an advance can't be counted against it."}, status=status.HTTP_409_CONFLICT)
+            if deal.status not in (CollabDeal.STATUS_FUNDED, CollabDeal.STATUS_DELIVERED):
+                return Response({"detail": f"can't advance on a {deal.status} deal"}, status=status.HTTP_409_CONFLICT)
+            payee = _entry_for(deal, str((request.data or {}).get("to", "")))
+            if not payee or payee.get("username") == request.user.username:
+                return Response({"detail": "Pick someone else on this deal."}, status=status.HTTP_400_BAD_REQUEST)
+            if not _accepted(deal, payee):
+                return Response({"detail": "They haven't accepted this deal yet."}, status=status.HTTP_409_CONFLICT)
+            who = User.objects.filter(username=payee["username"]).first()
+            from .intelligence_royalty import pct_for
+            if not who or pct_for(who, "collab", deal.pk):
+                return Response({"detail": "They attached a piece with an IntelligenceZ royalty, so pay them at release."}, status=status.HTTP_409_CONFLICT)
+            cap = advance_left(deal, payer, payee)
+            if cents > cap:
+                return Response({"detail": f"The most you can advance them is ${cap / 100:,.2f}.", "max_cents": cap}, status=status.HTTP_400_BAD_REQUEST)
+            w = _locked_wallet(who)
+            w.money_cents += cents
+            w.save(update_fields=["money_cents", "updated_at"])
+            payer["advanced_out_cents"] = int(payer.get("advanced_out_cents") or 0) + cents
+            payee["advanced_in_cents"] = int(payee.get("advanced_in_cents") or 0) + cents
+            deal.held_cents -= cents
+            deal.save(update_fields=["held_cents", "participants", "updated_at"])
+            note = f"CollabZ advance from @{request.user.username}: {deal.title}"[:200]
+            # LabelZ: if they're signed to this payer's label, the advance can also go on their AdvanceZ record — as a
+            # line THEY confirm (the money has moved, but a record is only shared once both sides say it's right).
+            label = _label_for(deal, request.user, who)
+            if label and (request.data or {}).get("record_in_labelz"):
+                import datetime as _dt
+                from .models import LabelAdvance
+                LabelAdvance.objects.create(contract_id=label["contract_id"], kind=LabelAdvance.KIND_ADVANCE, amount_cents=cents,
+                                            on=_dt.date.today(), note=f"CollabZ: {deal.title}"[:160])
+            Transaction.objects.create(user=who, kind=Transaction.KIND_REWARD, amount_cents=cents, dev_tax_cents=0, note=note)
+            RoyaltyEntry.objects.create(user=who, kind=RoyaltyEntry.KIND_ACCRUAL, amount_cents=cents, source=f"CollabZ: {deal.title}"[:200])
+        notify(who, "collab", f"💵 @{request.user.username} advanced you ${cents / 100:,.2f} on {deal.title or 'a collab'}.", actor=request.user)
+        return Response(deal_dict(deal, request.user))
 
 
 class CollabDeliverView(APIView):

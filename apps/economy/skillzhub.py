@@ -34,7 +34,7 @@ runs on the free daily prompts, falling back to PromptZ the member already holds
 """
 import re
 
-from django.db.models import Count
+from django.db.models import Count, Max
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -89,12 +89,23 @@ def _price(daily_left):
 
 
 def _stats(user):
-    counts = {r["app_key"]: r["n"] for r in
-              TakeScore.objects.filter(user=user).values("app_key").annotate(n=Count("id"))}
+    rows = list(TakeScore.objects.filter(user=user).values("app_key").annotate(n=Count("id"), top=Max("overall")))
+    counts = {r["app_key"]: r["n"] for r in rows}
+    best = {r["app_key"]: r["top"] for r in rows if r["top"] is not None}
     from apps.skillz.models import TrainingProfile
     prof = {p.app_key: p for p in
             TrainingProfile.objects.filter(user=user, app_key__in=[k for k, _, _ in COACHES])}
-    return counts, prof
+    return counts, prof, best
+
+
+def best_scores(user):
+    """[{app, label, emoji, best, takes}] — the highest overall each coach has given this member, best first,
+    for the profile. Only coaches with a scored take appear (a coach with none is absent, never a 0), and
+    `best` is the number the member was SHOWN. Who may see it is the `coach_best` visibility field."""
+    counts, _prof, best = _stats(user)
+    out = [{"app": key, "label": INSTRUMENTS[key]["label"], "emoji": emoji, "best": best[key], "takes": counts.get(key, 0)}
+           for key, emoji, _icon in COACHES if best.get(key) is not None]
+    return sorted(out, key=lambda r: -r["best"])
 
 
 def _snippet(row):
@@ -130,7 +141,7 @@ class SkillZHubView(APIView):
         tier = membership_for(user).tier
         allowance, used, remaining = daily_prompt_state(user)
         configured = bool(_key())
-        counts, prof = _stats(user)
+        counts, prof, best = _stats(user)
         price = _price(remaining)
         apps = []
         for key, emoji, icon in COACHES:
@@ -142,6 +153,8 @@ class SkillZHubView(APIView):
                 "configured": configured, "in_app": True, "standalone": True,
                 "price": price, "count": counts.get(key, 0),
                 "xp": xp, "level": 1 + xp // 500,
+                # The highest overall the coach has given a take here; None (never 0) before one is scored.
+                "best_score": best.get(key),
                 # The dimensions a take here is scored on, from the one place
                 # they are defined — never retyped on the screen.
                 "scores": list(scores_for(key).values()),

@@ -696,6 +696,7 @@ def _profile_card(p, request=None, badges=None, audience=None, batched=None):
 
 
 def _profile_full(p, request, recheck=False):
+    from .skillzhub import best_scores
     """The whole profile. `recheck` re-runs the badge checks first.
 
     Opening your own ProfileZ is the moment to find out you earned something,
@@ -737,6 +738,8 @@ def _profile_full(p, request, recheck=False):
         # Cross-pollination: the badges are shown here and changed in BadgeZ,
         # so the card carries the way there.
         "badges_open_in": "badgez",
+        # The best score each coach has given them; redacted below unless their setting lets this viewer see it.
+        "coach_best": best_scores(p.user),
     })
     # The keys added just above (substances, birthday, location) went on AFTER
     # `_profile_card` ran `redact`, so for anybody who was not the owner they
@@ -1671,15 +1674,19 @@ class MembersView(APIView):
         # All five ranges through one spec, so search and a gated post agree
         # about what "outside the range" means. Skill rating and skill price
         # were missing entirely.
+        # The attractiveness range is an ADULT's standard to set: a searcher who is a known minor has it ignored
+        # (the number is not served for minors either — `attractiveness_shown_medians`).
+        _attr = [None, None] if is_minor(request.user) else [num("attr_min"), num("attr_max")]
         gates = clean_gates({
             "rating": [num("rating_min"), num("rating_max")],
             "price": [num("price_min"), num("price_max")],
-            "attract": [num("attr_min"), num("attr_max")],
+            "attract": _attr,
             "age": [num("age_min"), num("age_max")],
             "km": [None, num("max_km")],
             # ThuroZ / SeXi: the rating gate with the number chosen once (classz.py).
             "thuro": request.query_params.get("thuro") in ("1", "true"),
             "sexi": request.query_params.get("sexi") in ("1", "true"),
+            "thorough": request.query_params.get("thorough") in ("1", "true"),
         })
         exp_min, exp_max = num("exp_min"), num("exp_max")  # years-of-experience range
 
@@ -1779,10 +1786,10 @@ class MembersView(APIView):
             metrics = member_metrics(p, origin)
             # The classes are already known for the whole page; hand them to the gate
             # so "ThuroZ only" costs no read per member.
-            for _ck in ("thuro", "sexi"):
+            for _ck in ("thuro", "sexi", "thorough"):
                 metrics._cache[_ck] = _ck in batched["classes"].get(p.user_id, ())
             if gates and failing_gate(metrics, gates):
-                if any(gates.get(k) and not metrics.get(k) for k in ("thuro", "sexi")):
+                if any(gates.get(k) and not metrics.get(k) for k in ("thuro", "sexi", "thorough")):
                     class_skipped += 1
                 continue
             if exp_min is not None or exp_max is not None:

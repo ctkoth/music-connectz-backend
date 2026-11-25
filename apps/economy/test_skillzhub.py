@@ -195,3 +195,40 @@ class QueryCountTests(HubBase):
 
     def test_and_it_is_a_handful(self):
         self.assertLessEqual(self._queries(), 8)
+
+
+class BestScoreTests(HubBase):
+    def test_best_score_is_the_highest_overall_and_none_before_a_take(self):
+        from .models import TakeScore
+        self.assertIsNone(self.app("singz")["best_score"])
+        for v in (6, 9, 7):
+            TakeScore.objects.create(user=self.me, app_key="singz", overall=v, scores={})
+        self.assertEqual(self.app("singz")["best_score"], 9)
+        self.assertIsNone(self.app("rapz")["best_score"])
+
+
+class ProfileCoachBestTests(HubBase):
+    def make(self, name):
+        from .models import TakeScore
+        u = User.objects.create_user(name, f"{name}@e.com", PW)
+        for app, v in (("singz", 7), ("singz", 9), ("rapz", 6)):
+            TakeScore.objects.create(user=u, app_key=app, overall=v, scores={})
+        return u
+
+    def test_best_scores_lists_only_scored_coaches_best_first(self):
+        from .skillzhub import best_scores
+        got = best_scores(self.make("star"))
+        self.assertEqual([(r["app"], r["best"], r["takes"]) for r in got], [("singz", 9, 2), ("rapz", 6, 1)])
+        self.assertEqual(best_scores(self.me), [])
+
+    def test_another_member_sees_it_by_default_and_not_once_it_is_private(self):
+        star = self.make("star")
+        r = self.c.get(f"/api/economy/members/{star.username}/")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["coach_best"][0]["best"], 9)
+        from .models import Profile
+        from .social import profile_for
+        p = profile_for(star)
+        p.visibility = {"coach_best": "private"}
+        p.save()
+        self.assertEqual(self.c.get(f"/api/economy/members/{star.username}/").json()["coach_best"], [])

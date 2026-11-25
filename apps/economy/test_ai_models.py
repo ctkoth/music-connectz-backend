@@ -116,8 +116,8 @@ class TheDefaultTests(Base):
         # They paid for the tier. Quietly serving them the cheapest engine
         # would be selling a thing and then not handing it over.
         self.assertEqual(default_ai_model(TIER_FREE), "sonnet")
-        self.assertEqual(default_ai_model(TIER_PREMIUM), "opus")
-        self.assertEqual(default_ai_model(TIER_STATZ), "fable")
+        self.assertEqual(default_ai_model(TIER_PREMIUM), "sonnet")
+        self.assertEqual(default_ai_model(TIER_STATZ), "sonnet")
 
     def test_a_choice_above_your_tier_falls_back_rather_than_breaking(self):
         # A lapsed StatZ member still has 'fable' stored. That must not 500 or
@@ -128,7 +128,7 @@ class TheDefaultTests(Base):
 
     def test_junk_falls_back_too(self):
         self.assertEqual(ai_model_for("", TIER_FREE)[0], "sonnet")
-        self.assertEqual(ai_model_for("gpt-9", TIER_STATZ)[0], "fable")
+        self.assertEqual(ai_model_for("gpt-9", TIER_STATZ)[0], "sonnet")
 
 
 class TheScreenTests(Base):

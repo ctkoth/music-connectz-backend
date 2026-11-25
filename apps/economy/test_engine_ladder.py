@@ -33,9 +33,9 @@ class LadderTests(TestCase):
         self.assertEqual(ai_models_for(TIER_PREMIUM), ["haiku", "sonnet", "opus"])
         self.assertEqual(ai_models_for(TIER_STATZ), ["haiku", "sonnet", "opus", "fable"])
 
-    def test_a_member_who_never_chose_gets_the_best_their_plan_reaches(self):
+    def test_a_member_who_never_chose_gets_the_best_engine_the_free_prompts_cover(self):
         self.assertEqual([default_ai_model(t) for t in (TIER_FREE, TIER_PREMIUM, TIER_STATZ)],
-                         ["sonnet", "opus", "fable"])
+                         ["sonnet", "sonnet", "sonnet"])
 
     def test_the_current_generation_of_each(self):
         self.assertEqual({k: v["id"] for k, v in AI_MODELS.items()},
@@ -52,7 +52,7 @@ class LadderTests(TestCase):
 
     def test_the_free_daily_prompt_covers_every_engine_but_fable(self):
         self.assertEqual([daily_prompt_covers(1, k) for k in ("haiku", "sonnet", "opus", "fable")],
-                         [True, True, True, False])
+                         [True, True, False, False])
 
 
 class CoachEngineTests(TestCase):
@@ -75,7 +75,9 @@ class CoachEngineTests(TestCase):
         self.assertEqual(meta["engine"]["key"], "sonnet")
 
     def test_statz_reaches_fable_and_a_member_who_never_chose_gets_it(self):
-        self.assertEqual(self.run_pass(member("z", TIER_STATZ))[0], "claude-fable-5-2")
+        # Unchosen is Sonnet (the free prompts cover it); Fable only when picked.
+        self.assertEqual(self.run_pass(member("z", TIER_STATZ))[0], "claude-sonnet-5-5")
+        self.assertEqual(self.run_pass(member("z1", TIER_STATZ, pick="fable"))[0], "claude-fable-5-2")
         self.assertEqual(self.run_pass(member("z2", TIER_STATZ, pick="haiku"))[0], "claude-haiku-5-5")
 
     def test_a_stranger_on_the_trial_gets_sonnet_as_before(self):
@@ -97,12 +99,15 @@ class CoachEngineTests(TestCase):
 class PriceBeforeThePressTests(TestCase):
     def test_the_price_names_the_engine_and_fable_is_not_free_today(self):
         with patch.dict(os.environ, KEY):
-            z = coach_price(member("zz", TIER_STATZ))
-            p = coach_price(member("pp", TIER_PREMIUM))
+            z = coach_price(member("zz", TIER_STATZ, pick="fable"))
+            p = coach_price(member("pp", TIER_PREMIUM, pick="opus"))
+            d = coach_price(member("pd", TIER_PREMIUM))
         self.assertEqual(z["engine"]["key"], "fable")
         self.assertFalse(z["free_today"])
         self.assertEqual(p["engine"]["key"], "opus")
-        self.assertTrue(p["free_today"])
+        self.assertFalse(p["free_today"])
+        self.assertEqual(d["engine"]["key"], "sonnet")
+        self.assertTrue(d["free_today"])
 
     def test_with_no_key_there_is_no_second_pass_to_price(self):
         with patch.dict(os.environ, {}, clear=False):
@@ -117,7 +122,7 @@ class PriceBeforeThePressTests(TestCase):
         c.force_authenticate(u)
         with patch.dict(os.environ, KEY):
             d = c.get("/api/singz/coach/").data
-        self.assertEqual(d["think"]["engine"]["key"], "opus")
+        self.assertEqual(d["think"]["engine"]["key"], "sonnet")
         self.assertEqual([e["key"] for e in d["think"]["engines"] if e["allowed"]], ["haiku", "sonnet", "opus"])
         self.assertIn("Gemini listens", d["think"]["note"])
 

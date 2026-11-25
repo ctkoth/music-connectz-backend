@@ -139,6 +139,7 @@ class EarnListTests(TestCase):
 
     def test_onboarding_drops_off_once_claimed(self):
         self.assertTrue(self.ways()["onboard"]["available"])
+        earn_onboarding(self.user)
         complete_onboarding(self.user)
         onboard = self.ways()["onboard"]
         self.assertFalse(onboard["available"])
@@ -167,3 +168,12 @@ class EarnListTests(TestCase):
         resp = self.client.get("/api/economy/earn/")
         self.assertEqual(resp.data["earned_total"]["energy"], RATING_REWARD_ENERGY)
         self.assertTrue(target.pk)
+
+
+def earn_onboarding(user):
+    """What the onboarding bonus now asks for: a scored take, a post and 3 ratings given."""
+    from apps.economy.models import ItemRating, Post, TakeScore
+    TakeScore.objects.create(user=user, app_key="singz", scores={})
+    Post.objects.create(author=user, title="first")
+    for i in range(3):
+        ItemRating.objects.create(user=user, item_id=f"post:{9000 + i}", score=7)

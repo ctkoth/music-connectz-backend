@@ -135,6 +135,8 @@ class RenderTests(_Base):
 
     def test_shots_start_a_few_at_a_time_as_anime_renders(self, *_):
         self.tier("statz")
+        from apps.economy.models import wallet_for
+        w = wallet_for(self.u); w.promptz = 10 ** 6; w.save()   # 6 shots at the clip price must be affordable
         pid = self.plan("episodez", 6).data["id"]
         with patch("apps.economy.videoz.requests.post", return_value=veo_ok()) as post:
             r = self.c.post(f"{BASE}{pid}/render/")

@@ -348,12 +348,14 @@ class EssayVoiceIsTheOwnersTests(TestCase):
         self.assertEqual(r.status_code, 201, r.content)
         return gen.call_args.args[1]["contents"][0]["parts"][0]["text"]
 
-    def test_a_members_essay_carries_neither_personal_instruction(self):
+    def test_a_members_essay_has_coreys_register_but_never_the_platform_example(self):
+        # Corey's call: members get his register (emoji, contractions). The platform as
+        # a running example stays his alone, so a student's essay never gains an app.
         p = self.sent_prompt(self.user)
-        self.assertNotIn(self.EMOJI, p.lower())
+        self.assertIn(self.EMOJI, p.lower())
+        self.assertIn("contractions", p)
         self.assertNotIn(self.PLATFORM, p)
         self.assertNotIn("author's own", p)
-        self.assertNotIn("contractions", p)
 
     def test_a_members_essay_keeps_apa_and_the_no_invented_sources_rule(self):
         p = self.sent_prompt(self.user)
@@ -376,7 +378,6 @@ class EssayVoiceIsTheOwnersTests(TestCase):
     def test_prompt_for_defaults_to_the_member_version(self):
         p = sentencez.prompt_for("essay", "streaming payouts")
         self.assertNotIn(self.PLATFORM, p)
-        self.assertNotIn(self.EMOJI, p.lower())
 
     def test_the_owner_voice_applies_to_essays_only(self):
         for kind in ("lyrics", "caption", "post", "resume", "poem", "contract"):

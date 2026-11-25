@@ -310,6 +310,7 @@ class InstrumentalView(APIView):
             "instruments": [{"id": k, "label": v["label"]} for k, v in INSTRUMENTS.items()],
             "keys": key_list(),
             "bpm": [BPM_MIN, BPM_MAX], "bars": list(BARS), "max_tracks": MAX_TRACKS,
+            "presets": __import__("apps.economy.instrumental_presets", fromlist=["presets_payload"]).presets_payload(),
             "budget_seconds": BUDGET_SECONDS,
             "cost_cents": cost, "free_today": free, "daily_remaining": daily_left,
             "daily_allowance": allowance,

@@ -56,6 +56,9 @@ def coach_price(user):
     # and the run's ⚡ scales with it. Without a key there is no second pass, so no engine is priced in.
     engine_key, engine = coach_think.coach_engine(user)
     priced = engine_key if coach_think.has_key() else None
+    if priced:
+        from .catalog import engine_cost
+        cost = engine_cost(priced)     # Opus and Fable are priced at what a take costs on them
     return {
         "resource": "promptz",
         "amount": cost,

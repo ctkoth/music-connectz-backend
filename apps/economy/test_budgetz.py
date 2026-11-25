@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from .models import BudgetLine, membership_for
+from .models import BudgetLine, Transaction, membership_for
 
 User = get_user_model()
 
@@ -107,3 +107,30 @@ class LilithGoAheadTests(TestCase):
         other = User.objects.create_user("x", "x@e.com", "pw-Long-enough-1")
         oc = APIClient(); oc.force_authenticate(other)
         self.assertEqual(oc.get("/api/economy/lilith/budget/").data["tasks"], [])
+
+
+class EarningsImportTests(TestCase):
+    def setUp(self):
+        self.u = User.objects.create_user("earner", "e@e.com", "pw-Long-enough-1")
+        self.c = APIClient(); self.c.force_authenticate(self.u)
+
+    def _tx(self, kind, cents):
+        return Transaction.objects.create(user=self.u, kind=kind, amount_cents=cents, note="x")
+
+    def test_real_money_in_and_out_comes_in_once_and_movements_do_not(self):
+        self._tx(Transaction.KIND_ROYALTY, 1200)
+        self._tx(Transaction.KIND_SPEND, -300)
+        self._tx(Transaction.KIND_ADD, 5000)        # cash moved INTO the wallet: not income
+        self._tx(Transaction.KIND_PAYOUT, -4000)    # cash moved OUT to a bank: not spending
+        r = self.c.post("/api/economy/budgetz/earnings/")
+        self.assertEqual(r.data["added"], 2)
+        self.assertEqual(self.c.post("/api/economy/budgetz/earnings/").data["added"], 0)   # never doubles
+        self.assertEqual(BudgetLine.objects.filter(user=self.u).count(), 2)
+        self.assertEqual(BudgetLine.objects.get(kind="income").amount_cents, 1200)
+        self.assertEqual(BudgetLine.objects.get(kind="expense").amount_cents, 300)
+
+    def test_only_the_callers_own_ledger_and_login_required(self):
+        other = User.objects.create_user("o2", "o2@e.com", "pw-Long-enough-1")
+        Transaction.objects.create(user=other, kind=Transaction.KIND_ROYALTY, amount_cents=999)
+        self.assertEqual(self.c.post("/api/economy/budgetz/earnings/").data["added"], 0)
+        self.assertEqual(APIClient().post("/api/economy/budgetz/earnings/").status_code, 401)

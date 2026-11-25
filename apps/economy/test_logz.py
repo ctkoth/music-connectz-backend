@@ -42,6 +42,7 @@ class ResourceMovesAreRecordedTests(TestCase):
         self.assertEqual(Transaction.objects.get(user=joinee, resource="spinaz").amount, 100)
 
     def test_onboarding_records_both_resources(self):
+        earn_onboarding(self.user)
         complete_onboarding(self.user)
         kinds = set(Transaction.objects.filter(user=self.user).values_list("resource", flat=True))
         self.assertEqual(kinds, {"spinaz", "energy"})
@@ -266,3 +267,12 @@ class LedgerOpensOntoWhatItBoughtTests(TestCase):
                                    note="forged", ref=f"take:{theirs.pk}")
         rows = {e["note"]: e for e in self.client.get(URL).json()["entries"]}
         self.assertIsNone(rows["forged"]["outcome"])               # somebody else's take is not shown
+
+
+def earn_onboarding(user):
+    """What the onboarding bonus now asks for: a scored take, a post and 3 ratings given."""
+    from apps.economy.models import ItemRating, Post, TakeScore
+    TakeScore.objects.create(user=user, app_key="singz", scores={})
+    Post.objects.create(author=user, title="first")
+    for i in range(3):
+        ItemRating.objects.create(user=user, item_id=f"post:{9000 + i}", score=7)
