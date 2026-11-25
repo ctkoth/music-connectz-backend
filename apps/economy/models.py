@@ -8865,3 +8865,24 @@ class DawSession(models.Model):
     class Meta:
         ordering = ["-updated_ms"]
         constraints = [models.UniqueConstraint(fields=["owner", "sid"], name="dawsession_owner_sid")]
+
+
+def print_design_path(instance, filename):
+    return f"merch/designs/{instance.designer_id}/{filename}"
+
+
+class PrintDesign(models.Model):
+    """A member's design offered in their shop as a print-on-demand product (merchshop.py).
+    Nothing is held in stock: a sale would be made and shipped by the printer."""
+    designer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="print_designs")
+    product = models.CharField(max_length=16)
+    color = models.CharField(max_length=7, default="#111111")
+    title = models.CharField(max_length=120)
+    image = models.ImageField(upload_to=print_design_path)
+    markup_cents = models.PositiveIntegerField(default=0)
+    own_art = models.BooleanField(default=False)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]

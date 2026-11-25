@@ -140,6 +140,7 @@ from .collab import (
     CollabDisputeView,
     CollabRefundView,
 )
+from .merchshop import ShopBuyView, ShopDesignView, ShopView
 from .merch import MerchBuyView, MerchDetailView, MerchRefundView, MerchSalesView, MerchView
 from .occ import OccChatView
 from .occ_taskz import (OccSettingsView, OccSpecView, OccTaskDetailView,
@@ -793,6 +794,9 @@ urlpatterns = [
     path("directz/", DirectZWorksView.as_view(), name="economy-directz"),
     path("directz/<int:pk>/rate/", DirectZRateView.as_view(), name="economy-directz-rate"),
     path("merch/", MerchView.as_view(), name="economy-merch"),
+    path("merch/shop/", ShopView.as_view(), name="economy-merch-shop"),
+    path("merch/shop/<int:pk>/", ShopDesignView.as_view(), name="economy-merch-shop-design"),
+    path("merch/shop/<int:pk>/buy/", ShopBuyView.as_view(), name="economy-merch-shop-buy"),
     path("merch/sales/", MerchSalesView.as_view(), name="economy-merch-sales"),
     path("merch/<int:pk>/", MerchDetailView.as_view(), name="economy-merch-detail"),
     path("merch/<int:pk>/buy/", MerchBuyView.as_view(), name="economy-merch-buy"),
