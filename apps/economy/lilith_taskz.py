@@ -804,6 +804,11 @@ def _suggested(user, routines):
         return []
 
 
+def _health_self(spec):
+    """A HealthZ starter nothing on the platform can verify (medication, treatment): XP only."""
+    return str(spec.get("key", "")).startswith("health_") and not spec.get("action")
+
+
 def starters_for(user, tasks, routines):
     """The ready-made tasks and routines, each marked if it is already on this board. Built from
     the rows `board` already fetched, so the catalogue costs no extra query."""
@@ -819,10 +824,14 @@ def starters_for(user, tasks, routines):
         "routines": [{**{k: r[k] for k in ("key", "title", "note", "cadence", "app_key", "target")},
                       "verified": bool(r.get("action")), "goal": r.get("goal", 1),
                       "on_board": r["key"] in have_r,
-                      "milestones": [{"periods": d, "unit": PERIOD_NOUN[r["cadence"]],
-                                      "spinaz": CADENCE_MILESTONES[r["cadence"]][d],
-                                      "energy": CADENCE_MILESTONE_ENERGY[r["cadence"]][d]}
-                                     for d in sorted(CADENCE_MILESTONES[r["cadence"]])]}
+                      # A self-reported health routine pays XP per kept period and no coin, so the screen must
+                      # not list milestones it will never pay (the cost/gain rule: say it before, and say it true).
+                      "milestones": [] if _health_self(r) else [
+                          {"periods": d, "unit": PERIOD_NOUN[r["cadence"]],
+                           "spinaz": CADENCE_MILESTONES[r["cadence"]][d],
+                           "energy": CADENCE_MILESTONE_ENERGY[r["cadence"]][d]}
+                          for d in sorted(CADENCE_MILESTONES[r["cadence"]])],
+                      "pays_xp": HEALTH_KEEP_XP if _health_self(r) else 0}
                      for r in ST.ROUTINES],
     }
 

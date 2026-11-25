@@ -277,3 +277,12 @@ class LilithHealthRoutines(TestCase):
         # lilith_actions only COUNTS nights (so Lilith can keep the routine); it never reads what was typed.
         src = (pathlib.Path(__file__).parent / "lilith_actions.py").read_text()
         self.assertNotIn("HealthCondition", src)
+
+    def test_the_starter_list_does_not_advertise_coin_a_health_routine_never_pays(self):
+        from . import lilith_taskz
+        by = {r["key"]: r for r in lilith_taskz.starters_for(None, [], [])["routines"]}
+        self.assertEqual(by["health_meds"]["milestones"], [])
+        self.assertEqual(by["health_treatment"]["milestones"], [])
+        self.assertEqual(by["health_meds"]["pays_xp"], lilith_taskz.HEALTH_KEEP_XP)
+        self.assertTrue(by["health_sleep"]["verified"])      # sleep keeps its milestones: Lilith can see the log
+        self.assertTrue(by["health_sleep"]["milestones"])
