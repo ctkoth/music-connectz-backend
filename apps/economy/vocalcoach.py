@@ -706,6 +706,12 @@ def score_take(app_key, f, content_type, *, genre, target, difficulty, style=Non
         # Before the contract, so the JSON instruction is still the last thing read.
         prompt = f"{part_block(my_part)}\n\n{prompt}"
     if not reference:
+        # HealthZ: only what the member switched on, and told to shape advice, never a score. The
+        # block is placed before the voice so the JSON contract is still the last thing the model reads.
+        from .healthz import coach_context
+        note = coach_context(user)
+        if note:
+            prompt = f"{note}\n\n{prompt}"
         prompt = f"{prose_voice(user, surface='coach')}\n\n{prompt}"
     # Normalise BEFORE the call. An unsupported container is a refusal we can
     # give instantly and explain, rather than a round trip that comes back as a

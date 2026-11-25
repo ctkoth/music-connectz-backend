@@ -8777,6 +8777,10 @@ class HealthCondition(models.Model):
     # an ADULT searching Social ConnectZ for this condition can find the member. Never listed,
     # never shown on a profile, never read by anything but that search (healthz.shared_map).
     shared = models.BooleanField(default=False)
+    # Off unless the member turns it on, one condition at a time: lets the AI that writes their coach advice
+    # (every coach, and BodieZ's workout read) be TOLD this, as a note about the member. It shapes advice only,
+    # never a score (healthz.coach_context says so to the model). Adults only.
+    coach_aware = models.BooleanField(default=False)
     # The member's own label, so a list can say which is which. Never inferred from the name.
     KIND_PHYSICAL, KIND_MENTAL, KIND_OTHER = "physical", "mental", "other"
     KIND_CHOICES = [(KIND_PHYSICAL, "Physical"), (KIND_MENTAL, "Mental health"), (KIND_OTHER, "Other")]

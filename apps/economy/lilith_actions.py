@@ -60,6 +60,8 @@ def _specs():
         # ---- make something
         "post_made": dict(label="Make a post", unit="post", app_key="postz", target="post-compose",
                           qs=lambda u: M.Post.objects.filter(author=u), time="created_at"),
+        "sleep_logged": dict(label="Log a night of sleep in HealthZ", unit="night", app_key="healthz", target="healthz-sleep",
+                             qs=lambda u: M.SleepLog.objects.filter(user=u), time="created_at"),
         "journal_entry": dict(label="Write a journal entry", unit="entry", app_key="journalz", target="journalz-composer",
                               qs=lambda u: M.JournalEntry.objects.filter(author=u), time="created_at"),
         "sentence_written": dict(label="Write something with Sentence ConnectZ", unit="piece", app_key="sentenceconnectz", target="sentencez-write",

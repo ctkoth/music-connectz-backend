@@ -1537,7 +1537,10 @@ class BodieZSessionAICoachView(BodieZSessionWriteView):
         from .sentencez import write_piece
         summary = session_summary(sess)
         title = summary.get("routine_title") or "ad-hoc"
-        return write_piece(request.user, "workout_read", workout_topic(summary),
+        from .healthz import coach_context
+        note = coach_context(request.user)
+        topic = workout_topic(summary) + (f"\n\n{note}" if note else "")
+        return write_piece(request.user, "workout_read", topic,
                            spend_note=f"AI coach — BodieZ workout ({title})",
                            extra_inputs={"bodiez_session": sess.pk})
 

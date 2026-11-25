@@ -198,6 +198,7 @@ VOICE = {
     "milestone": "{days}. That isn't luck.",
     "sponsor_paid": "{who} made their first collab. You had a hand in that.",
     "capped": "That's today's coin. The XP still counts, and so does tomorrow.",
+    "health_kept": "Kept. Looking after yourself counts for more than any run, and a missed day isn't a failure.",
 }
 
 # The four models live in models.py with every other model in this app.
@@ -319,6 +320,10 @@ def previous_period_start(start, cadence):
     return start - timedelta(days=1)
 
 
+# What a kept self-reported health routine pays, once per period: effort, in XP only.
+HEALTH_KEEP_XP = 10
+
+
 def kept_this_period(routine, today=None):
     today = today or timezone.localdate()
     c = routine.cadence if routine.cadence in CADENCES else "daily"
@@ -357,6 +362,16 @@ def keep_routine(routine, on=None):
     routine.streak = routine.streak + 1 if last_p == previous_period_start(now_p, cadence) else 1
     routine.longest = max(routine.longest, routine.streak)
     routine.last_done = today
+
+    # HealthZ routines (starters keyed `health_*`) pay XP and NOTHING else. A medication or treatment tick is
+    # self-reported — no row on this platform can confirm a dose — so there is no 🍥 or ⚡ milestone to earn by
+    # claiming one, and no streak message that could read as pressure. Sleep (verified) is a different thing
+    # and is handled by the sweep like every other verified routine.
+    if (routine.template or "").startswith("health_") and not routine.action:
+        _pay(routine.user, "health_keep", xp=HEALTH_KEEP_XP, ref=_stable_ref(routine, routine.streak))
+        routine.save(update_fields=["streak", "longest", "last_done"])
+        return {"streak": routine.streak, "longest": routine.longest, "cadence": cadence,
+                "milestone": None, "xp": HEALTH_KEEP_XP, "said": VOICE["health_kept"]}
 
     paid = None
     rungs = CADENCE_MILESTONES[cadence]

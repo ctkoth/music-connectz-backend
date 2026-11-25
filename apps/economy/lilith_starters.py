@@ -206,6 +206,20 @@ TASKS.extend([
      "note": "A freestyle or cypher battle. Judges outside the room decide it, and any stake is stated first."},
 ])
 ROUTINES.extend([
+    # HealthZ routines. Keeping your own care plan is worth turning up for, and these are the two ways
+    # Lilith can say so honestly: sleep is VERIFIED (a night is logged in HealthZ), and medication and
+    # treatment are SELF-reported because nothing here can see them. Self-reported health routines pay
+    # XP and nothing else — never 🍥 or ⚡, so there is no money in claiming a dose (lilith_taskz.keep_routine).
+    # The notes never tell anyone what to take: that is their prescriber's.
+    {"key": "health_sleep", "title": "Log Last Night's Sleep", "cadence": "daily",
+     "action": "sleep_logged", "goal": 1, "app_key": "healthz", "target": "healthz-sleep",
+     "note": "A night logged in HealthZ — Lilith keeps it from the log, so you don't tick it. Private to you. XP only."},
+    {"key": "health_meds", "title": "Take My Medication As Prescribed", "cadence": "daily",
+     "app_key": "healthz", "target": "healthz-conditions",
+     "note": "Follow your prescriber, always. Lilith can't see whether you did, so you tick it, and it earns XP and nothing else. A missed day isn't a failure — and never take extra to keep a run."},
+    {"key": "health_treatment", "title": "Do My Treatment Or Therapy", "cadence": "daily",
+     "app_key": "healthz", "target": "healthz-conditions",
+     "note": "Whatever your plan is — exercises, a session, a routine. You tick it, it earns XP and nothing else, and a missed day isn't a failure."},
     {"key": "off_the_top", "title": "Off the Top", "cadence": "weekly",
      "action": "freestyle_posted", "goal": 1, "app_key": "postz", "target": "post-freestyle",
      "note": "One freestyle a week. Unwritten on purpose — it trains the part of you the page can't."},
