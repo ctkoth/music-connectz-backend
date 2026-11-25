@@ -27,8 +27,8 @@ def rate_for(user):
     return membership_for(user).dev_tax_rate
 
 # Estimated printer cost per item, before shipping, in cents. Replace with the printer's live list once connected.
-BASE_CENTS = {"shirt": 1300, "hoodie": 2700, "towel": 2000, "bandana": 1200, "wavecap": 1200, "durag": 1200, "baseballcap": 1800, "mug": 900, "phonecase": 1300, "sticker": 300, "poster": 1200, "buckethat": 1800, "beanie": 1400}
-LABELS = {"shirt": "T-shirt", "hoodie": "Hoodie", "towel": "Towel", "bandana": "Bandana", "wavecap": "Wave cap", "durag": "Durag", "baseballcap": "Baseball cap", "mug": "Mug", "phonecase": "Phone case", "sticker": "Sticker", "poster": "Poster", "buckethat": "Bucket hat", "beanie": "Beanie"}
+BASE_CENTS = {"shirt": 1300, "hoodie": 2700, "towel": 2000, "bandana": 1200, "wavecap": 1200, "durag": 1200, "baseballcap": 1800, "mug": 900, "phonecase": 1300, "sticker": 300, "poster": 1200, "buckethat": 1800, "beanie": 1400, "tote": 1400}
+LABELS = {"shirt": "T-shirt", "hoodie": "Hoodie", "towel": "Towel", "bandana": "Bandana", "wavecap": "Wave cap", "durag": "Durag", "baseballcap": "Baseball cap", "mug": "Mug", "phonecase": "Phone case", "sticker": "Sticker", "poster": "Poster", "buckethat": "Bucket hat", "beanie": "Beanie", "tote": "Tote bag"}
 MAX_MARKUP = 10000        # $100 over cost
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 PER_DESIGNER = 200
