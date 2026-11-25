@@ -33,6 +33,7 @@ def stub(calls, reply=None):
 
 class UiTextTests(TestCase):
     def setUp(self):
+        UiString.objects.all().delete()   # the seed migration fills the table; these tests start from an empty one
         self.user = get_user_model().objects.create_user(username="lang", email="l@x.test", password="hunter2hunter2")
         self.member = APIClient()
         self.member.force_authenticate(self.user)
@@ -116,3 +117,23 @@ class UiTextTests(TestCase):
                                        "texts": ["Save routine"] + [f"Sentence number {chr(65 + i % 26)}{chr(65 + i // 26)}" for i in range(150)]}, format="json")
         self.assertEqual(r.data["translations"], {"Save routine": "SAVE ROUTINE"})
         self.assertEqual(len(calls), 1)
+
+
+class SeedTests(TestCase):
+    """The Customer Support dialog ships translated (migration 0252), served from the table alone."""
+
+    def test_seeded_strings_are_served_to_a_visitor_without_the_model(self):
+        r = APIClient().post(URL, {"lang": "ja", "known_only": True, "texts": ["Customer Support", "Next", "Analytics"]}, format="json")
+        self.assertEqual(r.data["translations"], {"Customer Support": "カスタマーサポート", "Next": "次へ", "Analytics": "分析"})
+
+    def test_every_language_is_one_the_app_offers_and_has_every_string(self):
+        import json
+        import os
+        from apps.economy.uitext import BY_CODE
+        with open(os.path.join(os.path.dirname(__file__), "uitext_seed", "customer_support.json"), encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(len(data["translations"]), 50)
+        for code, texts in data["translations"].items():
+            self.assertIn(code, BY_CODE)
+            self.assertEqual(len(texts), len(data["source"]), code)
+            self.assertTrue(all(t.strip() for t in texts), code)
