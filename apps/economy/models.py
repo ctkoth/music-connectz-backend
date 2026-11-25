@@ -8769,6 +8769,10 @@ class HealthCondition(models.Model):
     name = models.CharField(max_length=120)
     since_year = models.PositiveSmallIntegerField(null=True, blank=True)
     note = models.CharField(max_length=500, blank=True, default="")
+    # Off unless the member turns it on, one condition at a time. Shared means one thing only:
+    # an ADULT searching Social ConnectZ for this condition can find the member. Never listed,
+    # never shown on a profile, never read by anything but that search (healthz.shared_map).
+    shared = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

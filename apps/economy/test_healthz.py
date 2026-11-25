@@ -13,6 +13,15 @@ User = get_user_model()
 BASE = "/api/economy/healthz/"
 
 
+def member(name, age):
+    """A member of the given age, and their client."""
+    from .models import profile_for
+    u, c = client(name)
+    p = profile_for(u); today = datetime.date.today()
+    p.birthday = (today.replace(year=today.year - age) - datetime.timedelta(days=2)).isoformat(); p.save()
+    return u, c
+
+
 def client(name):
     u = User.objects.create_user(name, f"{name}@x.test", "hunter2hunter2")
     c = APIClient(); c.force_authenticate(u)
@@ -83,8 +92,70 @@ class Private(TestCase):
         # A condition or a night's sleep must never reach a rating, price, search or recommendation.
         here = pathlib.Path(__file__).parent
         for f in here.glob("*.py"):
-            if f.name in ("healthz.py", "models.py", "urls.py") or f.name.startswith("test_") or f.name == "test_healthz.py":
+            if f.name in ("healthz.py", "models.py", "urls.py") or f.name.startswith("test_"):
                 continue
             src = f.read_text()
             self.assertNotIn("SleepLog", src, f.name)
             self.assertNotIn("HealthCondition", src, f.name)
+
+
+class FindableByCondition(TestCase):
+    """The one exception to private: an adult chose, per condition, to be findable by adults."""
+
+    def names(self, c, **q):
+        r = c.get("/api/economy/members/", q)
+        self.assertEqual(r.status_code, 200)
+        return {m["username"]: m for m in r.data["members"]}
+
+    def setUp(self):
+        self.seeker, self.cs = client("hz_seeker"); self.seeker_p = self._adult(self.seeker)
+        self.opted, self.co = client("hz_opted"); self._adult(self.opted)
+        self.quiet, self.cq = client("hz_quiet"); self._adult(self.quiet)
+        self.co.post(BASE + "conditions/", {"name": "Asthma", "shared": True}, format="json")
+        self.co.post(BASE + "conditions/", {"name": "Migraine"}, format="json")      # private
+        self.cq.post(BASE + "conditions/", {"name": "Asthma"}, format="json")        # not shared
+
+    def _adult(self, u):
+        from .models import profile_for
+        p = profile_for(u); today = datetime.date.today()
+        p.birthday = (today.replace(year=today.year - 30) - datetime.timedelta(days=2)).isoformat(); p.save()
+        return p
+
+    def test_only_members_who_shared_that_condition_are_found(self):
+        found = self.names(self.cs, condition="asthma")
+        self.assertIn("hz_opted", found)
+        self.assertNotIn("hz_quiet", found)      # has it, did not share it
+        self.assertEqual(found["hz_opted"]["matched_conditions"], ["Asthma"])
+
+    def test_a_private_condition_is_never_found_or_revealed(self):
+        self.assertNotIn("hz_opted", self.names(self.cs, condition="migraine"))
+        card = self.names(self.cs, condition="asthma")["hz_opted"]
+        self.assertNotIn("Migraine", str(card))
+
+    def test_no_filter_means_no_condition_on_any_card(self):
+        for m in self.names(self.cs).values():
+            self.assertNotIn("matched_conditions", m)
+
+    def test_a_minor_cannot_share_one(self):
+        _, ct = member("hz_teen", 15)
+        r = ct.post(BASE + "conditions/", {"name": "Asthma", "shared": True}, format="json")
+        self.assertEqual(r.status_code, 403)
+        self.assertTrue(r.data["adult_only"])
+
+    def test_a_minor_owner_stored_as_shared_is_still_never_found(self):
+        u, _ = member("hz_teen2", 15)
+        HealthCondition.objects.create(user=u, name="Asthma", shared=True)
+        self.assertNotIn("hz_teen2", self.names(self.cs, condition="asthma"))
+
+    def test_a_minor_searcher_reads_nothing_of_anyones(self):
+        _, ct = member("hz_teen3", 15)
+        found = self.names(ct, condition="asthma")
+        for m in found.values():
+            self.assertNotIn("matched_conditions", m)
+        self.assertNotIn("hz_opted", found)
+
+    def test_toggling_shared_off_takes_the_member_out_of_the_search(self):
+        cid = HealthCondition.objects.get(user=self.opted, name="Asthma").id
+        r = self.co.patch(BASE + f"conditions/{cid}/", {"shared": False}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn("hz_opted", self.names(self.cs, condition="asthma"))

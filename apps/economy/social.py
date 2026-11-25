@@ -1632,6 +1632,10 @@ class MembersView(APIView):
         # PersonaZ: ?personas=producer,mixengineer — members who hold ANY of
         # them. The PersonaZ screen's "who else is a Producer" door.
         persona_keys = set(multi("personas"))
+        # HealthZ: ?condition=asthma — members who chose to let ADULTS find them by that condition.
+        # The terms are whatever the searcher typed, matched as text against shared conditions only
+        # (healthz.shared_map is the one reader and fails closed). Up to five.
+        condition_terms = [t.strip().lower() for t in multi("condition") if t.strip()][:5]
         adult_wall = bool(adult_only_reason(request.user))
         if (uses or attracted or substances) and adult_wall:
             # SubstanceZ and PreferenceZ are adult-only in BOTH directions. The
@@ -1639,6 +1643,8 @@ class MembersView(APIView):
             # up one frequency at a time reads a declared frequency off the
             # results, so it is inside the wall with `uses`.
             uses = attracted = substances = []
+        if condition_terms and adult_wall:
+            condition_terms = []     # a minor's search reads nothing of anyone's, so it can't filter on it
         # PersonalitieZ: ?ie=I&tf=F, or ?personality=INFP for all four.
         #
         # It lands HERE rather than in a dating screen of its own because
@@ -1712,9 +1718,17 @@ class MembersView(APIView):
             "classes": classes_for(qs, overall=_overall, attract=_attract),
         }
         class_skipped = 0
+        from .healthz import shared_map
+        shared_conditions = shared_map(qs, request.user) if condition_terms else {}
         for p in qs:
             if regions and not (set(regions) & set(p.regions or [])):
                 continue
+            matched_conditions = []
+            if condition_terms:
+                matched_conditions = [n for n in shared_conditions.get(p.user_id, [])
+                                      if any(t in n.lower() for t in condition_terms)]
+                if not matched_conditions:
+                    continue
             if genders and p.gender not in genders:
                 continue
             if signs and p.sign not in signs:
@@ -1776,6 +1790,9 @@ class MembersView(APIView):
                                  audience=aud, batched=batched)
             card["distance_km"] = dist
             card["classes"] = batched["classes"].get(p.user_id, [])
+            if matched_conditions:
+                # Only what THIS search asked about, never the member's other conditions.
+                card["matched_conditions"] = matched_conditions
             if uses:
                 # How often, for the substances THIS search asked about and no
                 # others — the card of a member found under THC says how often
