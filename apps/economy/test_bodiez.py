@@ -1699,6 +1699,18 @@ class BodieZSessionLogTests(TestCase):
     def get(self, **params):
         return self.client.get("/api/economy/bodiez/sessions/log/", params)
 
+    def test_muscles_can_be_included_or_excluded(self):
+        both = self.session([(self.press, 10, 20), (self.squat, 5, 60)], days_ago=3)
+        push = self.session([(self.press, 10, 20)], days_ago=2)
+        legs = self.session([(self.squat, 5, 60)], days_ago=1)
+        ids = lambda **q: {r["id"] for r in self.get(**q).data["sessions"]}
+        self.assertEqual(ids(muscle="chest"), {both.id, push.id})            # trained chest (any of them)
+        self.assertEqual(ids(muscle="chest,upper_legs"), {both.id, push.id, legs.id})
+        self.assertEqual(ids(not_muscle="upper_legs"), {push.id})            # anything that touched legs is out
+        self.assertEqual(ids(muscle="chest", not_muscle="upper_legs"), {push.id})
+        self.assertEqual(ids(muscle="nonsense"), set())                      # a stale key narrows, never breaks
+        self.assertEqual(self.get(muscle="chest").data["total"], 2)          # distinct: no duplicate rows from sets
+
     def test_a_routine_session_says_how_much_of_the_plan_was_done_and_a_custom_one_says_nothing(self):
         routine = BodieZRoutine.objects.create(user=self.user, title="Push", exercises=[
             {"exercise_id": self.press.id, "sets": 4, "reps": 10, "weight_kg": 20}])

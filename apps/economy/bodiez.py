@@ -1180,6 +1180,16 @@ class BodieZSessionLogView(APIView):
         q = (p.get("q") or "").strip()[:80]
         if q:
             qs = qs.filter(Q(routine__title__icontains=q) | Q(sets__exercise__name__icontains=q)).distinct()
+        # Muscles: ?muscle=chest,back keeps sessions that trained ANY of them; ?not_muscle=legs drops sessions
+        # that trained ANY of those. Group keys are the body map's own (`muscle_group`); an unknown key matches
+        # nothing, so a stale link narrows the list rather than breaking it.
+        inc = [m.strip() for m in (p.get("muscle") or "").split(",") if m.strip()][:30]
+        exc = [m.strip() for m in (p.get("not_muscle") or "").split(",") if m.strip()][:30]
+        if inc:
+            qs = qs.filter(sets__exercise__muscle_group__in=inc).distinct()
+        if exc:
+            qs = qs.exclude(pk__in=BodieZSet.objects.filter(
+                session__user=request.user, exercise__muscle_group__in=exc).values("session_id"))
         for key, lookup in (("since", "started_at__date__gte"), ("until", "started_at__date__lte")):
             raw = (p.get(key) or "").strip()
             if raw:
