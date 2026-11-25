@@ -8789,3 +8789,29 @@ class HealthCondition(models.Model):
 
     class Meta:
         ordering = ["name", "id"]
+
+
+class SupportTicket(models.Model):
+    """A member asking the owner for help, in-app. Private to the member and the owner.
+
+    The owner's queue is the only other reader. Not a public queue (BugZ is public on purpose) and
+    never joined to anything else: it is a conversation, deleted with the account (CASCADE)."""
+    STATUS_OPEN, STATUS_ANSWERED, STATUS_CLOSED = "open", "answered", "closed"
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="support_tickets")
+    subject = models.CharField(max_length=120)
+    status = models.CharField(max_length=10, default="open", db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+
+class SupportMessage(models.Model):
+    ticket = models.ForeignKey(SupportTicket, on_delete=models.CASCADE, related_name="messages")
+    from_owner = models.BooleanField(default=False)
+    body = models.TextField(max_length=2000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
