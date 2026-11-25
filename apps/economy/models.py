@@ -8739,3 +8739,37 @@ class AnimeWork(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class SleepLog(models.Model):
+    """One night's sleep, typed in by the member. HealthZ.
+
+    Entered, never inferred: nothing here is derived from activity, and nothing reads it
+    but its owner. No score, no streak — a number nobody can check, about their body,
+    is the substance rule's worst case."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sleep_logs")
+    night = models.DateField()  # the date they went to bed
+    hours = models.FloatField()
+    quality = models.PositiveSmallIntegerField(null=True, blank=True)  # 1-5, their own word for it
+    note = models.CharField(max_length=300, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("user", "night")]
+        ordering = ["-night"]
+
+
+class HealthCondition(models.Model):
+    """Something a member says they have been diagnosed with. HealthZ.
+
+    A declaration, in the member's own words, private to them: never inferred, never
+    suggested, never shown to anyone else, never read by a rating, price, search or
+    recommendation. Deleted with the account (CASCADE)."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="health_conditions")
+    name = models.CharField(max_length=120)
+    since_year = models.PositiveSmallIntegerField(null=True, blank=True)
+    note = models.CharField(max_length=500, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name", "id"]
