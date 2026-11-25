@@ -3597,3 +3597,18 @@ carries `group` and `group_label` so a screen draws the section, and `VoiceZ.jsx
 - **Parsed surfaces do not get them.** `_custom_prose` (the coach, DirectZ) is JSON-shaped; structure rules there would risk an
   unparseable take. `tone_lines` (the writer, OCC) and a character's `prompt_block` do.
 - A voice's paradigm sits UNDER the platform's four rules and FRAME, which are appended last and cannot be switched off.
+
+## A profile's CoachZ best score opens the take behind it (`coachbest.py`)
+
+`GET /api/economy/coachbest/<username>/<app_key>/` is what tapping a "CoachZ best score" row opens: the highest-scored
+take on that coach (overall, then the exact score, then one with work to open, then newest), the work it scored when the
+viewer may open it, and the coach's read built the post-read-card way (`share_payload` → `coachshare.read_view`).
+
+- **Gated by the member's own `coach_best` setting**, the one that already decides whether the number is on their card.
+  The read is the reason behind the number, so it travels with it — **a widening, said plainly:** members whose setting
+  shows their best scores now also show the coach's feedback on those takes. VisibilitieZ's label says so. Hidden and
+  "no take" answer the same 404.
+- **The work is only ever something the viewer could already open**: a post through `can_view_post` (the post the take
+  was coached from, or one the member made carrying its read), or a YouTube take's public address. A recording made in
+  the coach, a FileZ file or a journal entry is never handed to anybody else; only the owner sees their kept file.
+- Nothing from a request reaches it; the paid gear advice (`upgrades`) and transcribed lyrics are not served. Free.

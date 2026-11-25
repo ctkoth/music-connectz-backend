@@ -106,6 +106,7 @@ from .videostitch import VideoStitchDetailView, VideoStitchView
 from .instrumentalz import InstrumentalAIPresetView, InstrumentalApplyPresetView, InstrumentalInspirationView, InstrumentalMidiView, InstrumentalMixPresetsView, InstrumentalMixSheetView, InstrumentalMixView, InstrumentalMoodView, InstrumentalView
 from .intelligencez import IntelligenceHubView
 from .skillzhub import SkillZHubView
+from .coachbest import CoachBestView
 from .mixz import MixDetailView, MixView
 from .mixz_ai import MixAIView
 from .mixz_stage import MixStageView
@@ -317,6 +318,7 @@ urlpatterns = [
     # SkillZ — the front door of the seven instrument coaches (and the Home of the
     # standalone SkillZ app): the price of a take before any coach is opened.
     path("skillz/", SkillZHubView.as_view(), name="economy-skillz"),
+    path("coachbest/<str:username>/<str:app_key>/", CoachBestView.as_view(), name="economy-coachbest"),
     path("intelligence/targets/", IntelligenceTargetsView.as_view(), name="economy-intelligence-targets"),
     path("intelligence/uses/", IntelligenceUsesView.as_view(), name="economy-intelligence-uses"),
     path("intelligence/uses/<int:pk>/", IntelligenceUseDetailView.as_view(), name="economy-intelligence-use"),
