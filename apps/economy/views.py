@@ -1408,6 +1408,10 @@ class RoyaltiesView(APIView):
         })
 
 
+def usd_pct(part, whole):
+    return f"{round(100 * part / whole):g}%" if whole else "0%"
+
+
 class RoyaltyAccrueView(APIView):
     """Credit royalties to a member. OWNER ONLY.
 
@@ -1459,12 +1463,23 @@ class RoyaltyAccrueView(APIView):
             if not release:
                 return Response({"detail": "That release isn't theirs."}, status=status.HTTP_400_BAD_REQUEST)
             cut, pct = cut_of(target, "release", release.pk, amount_cents)
+        # A release's income also pays the dev tax at the ARTIST's plan (Corey: same rates as every sale,
+        # 10% / 6% / 3%), taken from the gross and stated on the releases screen before anything is sent.
+        dev = 0
+        if release_id:
+            from .releasez import release_tax_rate
+            dev = round(amount_cents * release_tax_rate(target))
+            if dev:
+                Transaction.objects.create(user=target, kind=Transaction.KIND_SPEND, amount_cents=0, dev_tax_cents=dev,
+                                           note=f"Dev tax on release #{release_id} royalties"[:200])
         source = str(request.data.get("source", ""))[:200]
+        if dev:
+            source = (source + f" · −{usd_pct(dev, amount_cents)} dev tax")[:200]
         w = wallet_for(target)
-        w.royalties_cents += amount_cents - cut
+        w.royalties_cents += amount_cents - cut - dev
         w.save(update_fields=["royalties_cents", "updated_at"])
         RoyaltyEntry.objects.create(
-            user=target, kind=RoyaltyEntry.KIND_ACCRUAL, amount_cents=amount_cents - cut,
+            user=target, kind=RoyaltyEntry.KIND_ACCRUAL, amount_cents=amount_cents - cut - dev,
             source=(source + (f" · −{pct:g}% IntelligenceZ royalty" if cut else ""))[:200],
         )
         if cut:
@@ -1476,7 +1491,7 @@ class RoyaltyAccrueView(APIView):
                 source=f"IntelligenceZ royalty {pct:g}% from @{target.username} — release #{release_id}"[:200],
             )
             record_paid(target, "release", int(release_id), cut, "money")
-        return Response({"username": target.username, "intelligence_cut_cents": cut,
+        return Response({"username": target.username, "intelligence_cut_cents": cut, "dev_tax_cents": dev,
                          "royalties_cents": w.royalties_cents, "royalties": w.royalties})
 
 
