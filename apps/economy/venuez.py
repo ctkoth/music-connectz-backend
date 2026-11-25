@@ -111,6 +111,15 @@ def quote_for(event, visitor, skills=None, hours=None):
     }
 
 
+FOR_CONDITION_MIN_AGE = 18
+FOR_CONDITION_NOTE = ("This room is for people who share this. It's a theme, not a check: any adult can come, "
+                      "and the host sees nothing about you beyond your booking.")
+
+
+def _for_condition(d):
+    return str(d.get("for_condition") or "").strip()[:80]
+
+
 def age_ok(user, event):
     """Whether this member clears the room's age rule.
 
@@ -347,6 +356,8 @@ def event_dict(event, viewer, marks=None):
         "capacity": event.capacity,
         "seats_left": seats_left(event),
         "min_age": event.min_age,
+        "for_condition": event.for_condition,
+        "for_condition_note": FOR_CONDITION_NOTE if event.for_condition else "",
         "status": event.status,
         # The price, stated before the button that agrees to it — and stated
         # in BOTH directions, because on a session the host is the one paying
@@ -424,6 +435,15 @@ class VenueListView(APIView):
         mine = VenueEvent.objects.filter(host=request.user)
         if cat in dict(VenueEvent.CATEGORY_CHOICES):
             rows, mine = rows.filter(category=cat), mine.filter(category=cat)
+        # HealthZ: ?for=asthma — rooms a host made for people who share that. Adults only, both ways:
+        # a minor's list never carries these rooms, whatever they ask for.
+        from .models import adult_only_reason
+        minor = bool(adult_only_reason(request.user))
+        for_term = request.query_params.get("for", "").strip()[:80]
+        if minor:
+            rows, mine = rows.filter(for_condition=""), mine.filter(for_condition="")
+        elif for_term:
+            rows, mine = rows.filter(for_condition__icontains=for_term), mine.filter(for_condition__icontains=for_term)
         rows = rows.select_related("host").prefetch_related("bookings__visitor")[:100]
         mine = mine.select_related("host").prefetch_related("bookings__visitor")[:100]
         seen, out = set(), []
@@ -475,6 +495,13 @@ class VenueListView(APIView):
         category = d.get("category") if d.get("category") in dict(VenueEvent.CATEGORY_CHOICES) \
             else VenueEvent.CATEGORY_MUSIC
 
+        for_condition = _for_condition(d)
+        if for_condition:
+            from .models import adult_only_reason
+            why = adult_only_reason(request.user)
+            if why:
+                return Response({"detail": why, "adult_only": True}, status=status.HTTP_403_FORBIDDEN)
+
         starts_at = parse_datetime(str(d.get("starts_at", "")))
         if not starts_at:
             return Response({"detail": "starts_at must be an ISO datetime."},
@@ -496,7 +523,8 @@ class VenueListView(APIView):
             address=str(d.get("address", "")).strip()[:300],
             starts_at=starts_at, hours=_int(d, "hours", 1, 1, 24), basis=basis,
             skills=skills, capacity=_int(d, "capacity", 1, 1, 500),
-            min_age=_int(d, "min_age", 0, 0, 99),
+            min_age=max(_int(d, "min_age", 0, 0, 99), FOR_CONDITION_MIN_AGE if for_condition else 0),
+            for_condition=for_condition,
             category=category, spinaz_price=spinaz_price,
             gates=clean_gates(d.get("gates")),
         )
@@ -584,6 +612,18 @@ class VenueDetailView(APIView):
         if "min_age" in d:
             event.min_age = _int(d, "min_age", event.min_age, 0, 99)
             fields.append("min_age")
+        if "for_condition" in d:
+            fc = _for_condition(d)
+            if fc:
+                from .models import adult_only_reason
+                why = adult_only_reason(request.user)
+                if why:
+                    return Response({"detail": why, "adult_only": True}, status=status.HTTP_403_FORBIDDEN)
+                event.min_age = max(event.min_age, FOR_CONDITION_MIN_AGE)
+                if "min_age" not in fields:
+                    fields.append("min_age")
+            event.for_condition = fc
+            fields.append("for_condition")
         if "gates" in d:
             event.gates = clean_gates(d["gates"])
             fields.append("gates")

@@ -899,3 +899,47 @@ class NearMe(TestCase):
         self.assertFalse(near["viewer_shares"])
         self.assertIn("Share your approximate location", near["note"])
         self.assertNotIn("distance_km", by["Close"])
+
+
+class ForCondition(TestCase):
+    """A room FOR people who share something: a theme the host names, adults only, never a check."""
+
+    def person(self, name, age):
+        import datetime
+        from rest_framework.test import APIClient
+        u = User.objects.create_user(username=name, password="pw")
+        p = profile_for(u); today = datetime.date.today()
+        p.birthday = (today.replace(year=today.year - age) - datetime.timedelta(days=2)).isoformat(); p.save()
+        c = APIClient(); c.force_authenticate(u)
+        return u, c
+
+    def body(self, **kw):
+        d = {"title": "Open mic", "area": "Denver", "kind": "free",
+             "starts_at": (timezone.now() + timedelta(days=2)).isoformat(), "for_condition": "Asthma"}
+        d.update(kw); return d
+
+    def test_an_adult_host_can_name_a_theme_and_the_room_becomes_adults_only(self):
+        _, c = self.person("fc_host", 30)
+        r = c.post("/api/economy/venuez/", self.body(), format="json")
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.data["for_condition"], "Asthma")
+        self.assertEqual(r.data["min_age"], 18)
+        self.assertIn("not a check", r.data["for_condition_note"])
+
+    def test_a_minor_cannot_host_one(self):
+        _, c = self.person("fc_teen_host", 15)
+        r = c.post("/api/economy/venuez/", self.body(), format="json")
+        self.assertEqual(r.status_code, 403)
+        self.assertTrue(r.data["adult_only"])
+
+    def test_the_list_filters_by_theme_and_a_minor_never_sees_these_rooms(self):
+        _, host = self.person("fc_host2", 30)
+        host.post("/api/economy/venuez/", self.body(title="For asthma"), format="json")
+        host.post("/api/economy/venuez/", self.body(title="Plain jam", for_condition=""), format="json")
+        _, adult = self.person("fc_adult", 28)
+        titles = lambda c, **q: {v["title"] for v in c.get("/api/economy/venuez/", q).data["venues"]}
+        self.assertEqual(titles(adult, **{"for": "asthma"}), {"For asthma"})
+        self.assertEqual(titles(adult), {"For asthma", "Plain jam"})
+        _, teen = self.person("fc_teen", 15)
+        self.assertEqual(titles(teen, **{"for": "asthma"}), {"Plain jam"})
+        self.assertEqual(titles(teen), {"Plain jam"})

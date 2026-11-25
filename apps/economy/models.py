@@ -3653,6 +3653,10 @@ class VenueEvent(models.Model):
     # adults-only says so here and the booking path enforces it, rather than
     # leaving it to a line in the description that nothing reads.
     min_age = models.PositiveSmallIntegerField(default=0)
+    # HealthZ: a room a host makes FOR people who share something ("Asthma", "Chronic pain"). A theme the
+    # host chose to name, never a check on a visitor: anyone 18+ may come, and nothing about a visitor is
+    # read or shown to the host. Setting it makes the room adults-only (venuez.FOR_CONDITION_MIN_AGE).
+    for_condition = models.CharField(max_length=80, blank=True, default="")
 
     status = models.CharField(max_length=12, choices=STATUS_CHOICES,
                               default=STATUS_OPEN, db_index=True)
