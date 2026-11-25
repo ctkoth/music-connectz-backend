@@ -144,7 +144,7 @@ LANGUAGES = [
     ("quz", "Quechua", "Runasimi", "🇵🇪", False),
     ("chr", "Cherokee", "ᏣᎳᎩ", "🇺🇸", False),
     # Added to cover every language Google Translate offers (Corey: "include all languages").
-    ("haw", "Hawaiian", "ʻŌlelo Hawaiʻi", "🌺", False),
+    ("haw", "Hawaiian", "ʻŌlelo Hawaiʻi", "🇺🇸", False),
     ("sm", "Samoan", "Gagana Sāmoa", "🇼🇸", False),
     ("to", "Tongan", "Lea faka-Tonga", "🇹🇴", False),
     ("fj", "Fijian", "Vosa Vakaviti", "🇫🇯", False),
@@ -234,7 +234,7 @@ LANGUAGES = [
     ("ltg", "Latgalian", "Latgalīšu", "🇱🇻", False),
     ("smj", "Sami (Lule)", "Julevsámegiella", "🇸🇪", False),
     ("rom", "Romani", "Romani čhib", "🌍", False),
-    ("la", "Latin", "Latina", "🏛️", False),
+    ("la", "Latin", "Latina", "🇻🇦", False),
     ("eo", "Esperanto", "Esperanto", "🟩", False),
     ("ht", "Haitian Creole", "Kreyòl ayisyen", "🇭🇹", False),
     ("pap", "Papiamento", "Papiamentu", "🇨🇼", False),
