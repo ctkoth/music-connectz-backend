@@ -32,6 +32,10 @@ from .models import HealthCondition, SleepLog
 SLEEP_KEPT = 90          # nights returned
 MAX_CONDITIONS = 100
 
+KINDS = [("physical", "Physical"), ("mental", "Mental health"), ("other", "Other")]
+CRISIS_NOTE = ("If you're in crisis or thinking about hurting yourself, contact your local emergency number or a "
+               "crisis line now. HealthZ is a record, not a place to get help in the moment.")
+
 NOTE = ("This is your own record, private to you. HealthZ doesn't diagnose, suggest a diagnosis, "
         "score your health or recommend treatment — it keeps what you tell it. For anything medical, "
         "talk to a clinician.")
@@ -67,7 +71,7 @@ def _sleep_dict(s):
 
 
 def _cond_dict(c):
-    return {"id": c.id, "name": c.name, "since_year": c.since_year, "note": c.note, "shared": c.shared}
+    return {"id": c.id, "name": c.name, "since_year": c.since_year, "note": c.note, "shared": c.shared, "kind": c.kind}
 
 
 def _num(v):
@@ -88,6 +92,8 @@ def board(user):
         "nights_7d": len(week),
         "conditions": [_cond_dict(c) for c in HealthCondition.objects.filter(user=user)],
         "private": True,
+        "kinds": [{"key": k, "label": l} for k, l in KINDS],
+        "crisis_note": CRISIS_NOTE,
     }
 
 
@@ -160,10 +166,13 @@ class ConditionView(APIView):
             if not 1900 <= since <= timezone.localdate().year:
                 return Response({"detail": "since_year must be a real year, or leave it blank."},
                                 status=status.HTTP_400_BAD_REQUEST)
+        kind = str(d.get("kind") or "physical")
+        if kind not in dict(KINDS):
+            return Response({"detail": "kind is physical, mental or other."}, status=status.HTTP_400_BAD_REQUEST)
         shared = bool(d.get("shared"))
         if shared and not _may_share(request.user):
             return Response({"detail": SHARE_MINOR_REASON, "adult_only": True}, status=status.HTTP_403_FORBIDDEN)
-        HealthCondition.objects.create(user=request.user, name=name, since_year=since,
+        HealthCondition.objects.create(user=request.user, name=name, since_year=since, kind=kind,
                                        note=str(d.get("note") or "")[:500], shared=shared)
         return Response(board(request.user), status=status.HTTP_201_CREATED)
 

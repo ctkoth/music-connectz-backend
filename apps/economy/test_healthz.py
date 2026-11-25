@@ -159,3 +159,18 @@ class FindableByCondition(TestCase):
         r = self.co.patch(BASE + f"conditions/{cid}/", {"shared": False}, format="json")
         self.assertEqual(r.status_code, 200)
         self.assertNotIn("hz_opted", self.names(self.cs, condition="asthma"))
+
+
+class Kinds(TestCase):
+    def test_physical_and_mental_are_both_recordable_and_labelled(self):
+        _, c = client("hz_kinds")
+        c.post(BASE + "conditions/", {"name": "Asthma", "kind": "physical"}, format="json")
+        r = c.post(BASE + "conditions/", {"name": "Anxiety", "kind": "mental"}, format="json")
+        self.assertEqual({x["name"]: x["kind"] for x in r.data["conditions"]}, {"Asthma": "physical", "Anxiety": "mental"})
+        self.assertEqual([k["key"] for k in r.data["kinds"]], ["physical", "mental", "other"])
+        self.assertIn("crisis", r.data["crisis_note"])
+
+    def test_kind_defaults_to_physical_and_junk_is_refused(self):
+        _, c = client("hz_kinds2")
+        self.assertEqual(c.post(BASE + "conditions/", {"name": "Eczema"}, format="json").data["conditions"][0]["kind"], "physical")
+        self.assertEqual(c.post(BASE + "conditions/", {"name": "x", "kind": "bogus"}, format="json").status_code, 400)
