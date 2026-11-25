@@ -196,11 +196,11 @@ class PlaylistRoyaltiesTests(TestCase):
         expected_tax = round(creator_entry.amount_cents * 0.10)
         self.assertAlmostEqual(creator_entry.tax_cents, expected_tax, delta=1)
 
-        # Check other_creator tax (TIER_PREMIUM = 5% dev tax)
+        # Check other_creator tax (TIER_PREMIUM = 6% dev tax)
         other_entry = RoyaltyEntry.objects.filter(user=self.other_creator).first()
         self.assertIsNotNone(other_entry)
-        # tax should be ~5% of amount
-        expected_tax = round(other_entry.amount_cents * 0.05)
+        # tax should be ~6% of amount
+        expected_tax = round(other_entry.amount_cents * 0.06)
         self.assertAlmostEqual(other_entry.tax_cents, expected_tax, delta=1)
 
     def test_transactions_logged(self):

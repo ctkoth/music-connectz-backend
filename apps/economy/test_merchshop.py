@@ -91,5 +91,5 @@ class ProductListTests(TestCase):
 
 
 class RateTests(TestCase):
-    def test_coreys_merch_rates(self):
+    def test_coreys_rates_premium_six(self):
         self.assertEqual((DEV_TAX[TIER_FREE], DEV_TAX[TIER_PREMIUM], DEV_TAX[TIER_STATZ]), (0.10, 0.06, 0.03))

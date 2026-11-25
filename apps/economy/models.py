@@ -3,7 +3,7 @@ Economy layer: membership tier, wallet (money/energy/spinaz), and a
 transaction ledger. The developer tax (platform's cut on every money
 transaction) is enforced here, server-side, so the client can't bypass it.
 
-Rates match the frontend: Free 10% · Premium 5% · StatZ 2%.
+Rates: Free 10% · Premium 6% · StatZ 3% (Premium 6% is Corey's call, Nov 2026).
 """
 import logging
 import os
@@ -29,7 +29,7 @@ TIER_CHOICES = [
 ]
 
 # Developer tax (platform cut) per tier, as a fraction of the transaction.
-DEV_TAX = {TIER_FREE: 0.10, TIER_PREMIUM: 0.05, TIER_STATZ: 0.03, TIER_DEBUG: 0.0}
+DEV_TAX = {TIER_FREE: 0.10, TIER_PREMIUM: 0.06, TIER_STATZ: 0.03, TIER_DEBUG: 0.0}
 
 
 def split_cents(amount_cents, rate):
