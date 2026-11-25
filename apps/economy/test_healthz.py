@@ -174,3 +174,20 @@ class Kinds(TestCase):
         _, c = client("hz_kinds2")
         self.assertEqual(c.post(BASE + "conditions/", {"name": "Eczema"}, format="json").data["conditions"][0]["kind"], "physical")
         self.assertEqual(c.post(BASE + "conditions/", {"name": "x", "kind": "bogus"}, format="json").status_code, 400)
+
+
+class HideByCondition(FindableByCondition):
+    """?condition_not= removes members who chose to be findable by that, from the searcher's own list."""
+
+    def test_exclude_hides_only_those_who_shared_it(self):
+        found = self.names(self.cs, condition_not="asthma")
+        self.assertNotIn("hz_opted", found)       # shared Asthma: hidden from this list
+        self.assertIn("hz_quiet", found)          # has it but did not share: unaffected, nothing revealed
+
+    def test_include_and_exclude_can_combine(self):
+        found = self.names(self.cs, condition="asthma", condition_not="migraine")
+        self.assertIn("hz_opted", found)          # migraine is private, so it can't exclude anyone
+
+    def test_a_minor_searcher_cannot_use_it(self):
+        _, ct = member("hz_teen4", 15)
+        self.assertNotIn("matched_conditions", str(self.names(ct, condition_not="asthma")))
