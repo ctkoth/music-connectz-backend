@@ -1489,26 +1489,43 @@ class FollowView(APIView):
         return Response({"username": target.username, **follow_counts(target), "relationship": relationship(request.user, target)})
 
 
+# Coordinates are kept to two decimals: about a kilometre. Distance is the only thing anyone
+# else is ever shown (a card's `distance_km`, a venue's range gate), and a distance computed from
+# an exact point, asked from enough places, narrows to the member's front door. Approximate is
+# what the screen promises, so it is what is stored.
+LOCATION_DECIMALS = 2
+LOCATION_MINOR_REASON = ("Location sharing is for members 18 and over. Nothing was stored, "
+                         "and everything else on your profile works as before.")
+
+
 class ProfileLocationView(APIView):
-    """Opt-in GPS location for in-person distance filtering.
-    POST {share: bool, lat, lng}. Turning share off clears the coordinates."""
+    """Opt-in approximate location for in-person distance filtering (CollabZ, VenueZ, BattleZ,
+    lessons, member search).
+    POST {share: bool, lat, lng}. Turning share off clears the coordinates.
+
+    Adults only: a minor's save is refused the same way orientation is, not stored. Coordinates
+    are rounded before they are kept (`LOCATION_DECIMALS`), never after."""
 
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         p = profile_for(request.user)
         share = bool(request.data.get("share", True))
+        if share and profile_is_minor(p):
+            return Response({"detail": LOCATION_MINOR_REASON, "adult_only": True},
+                            status=status.HTTP_403_FORBIDDEN)
         p.share_location = share
         if not share:
             p.lat = p.lng = None
         else:
             try:
-                p.lat = float(request.data.get("lat"))
-                p.lng = float(request.data.get("lng"))
+                lat = float(request.data.get("lat"))
+                lng = float(request.data.get("lng"))
             except (TypeError, ValueError):
                 return Response({"detail": "lat and lng required when sharing"}, status=status.HTTP_400_BAD_REQUEST)
-            if not (-90 <= p.lat <= 90 and -180 <= p.lng <= 180):
+            if not (-90 <= lat <= 90 and -180 <= lng <= 180):
                 return Response({"detail": "lat/lng out of range"}, status=status.HTTP_400_BAD_REQUEST)
+            p.lat, p.lng = round(lat, LOCATION_DECIMALS), round(lng, LOCATION_DECIMALS)
         p.save(update_fields=["share_location", "lat", "lng", "updated_at"])
         return Response({"share_location": p.share_location, "has_location": p.lat is not None})
 
