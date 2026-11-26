@@ -3612,3 +3612,10 @@ viewer may open it, and the coach's read built the post-read-card way (`share_pa
   was coached from, or one the member made carrying its read), or a YouTube take's public address. A recording made in
   the coach, a FileZ file or a journal entry is never handed to anybody else; only the owner sees their kept file.
 - Nothing from a request reaches it; the paid gear advice (`upgrades`) and transcribed lyrics are not served. Free.
+
+## Auto-trim a lift you moved on from (StatZ, `bodiez_autotrim`)
+
+A `statz_trial` feature, sampled, client-side like `rest_alerts` (no server module: it spends nothing). On the live logger,
+logging a set on one lift trims any lift left part-done to the sets done (3/5 reads 3/3), today only. The routine is never
+touched and **the end-of-session report still counts the routine's plan** — on purpose: a completion number every session
+trims itself to 100% of would stop measuring anything. Rules are in the frontend's `src/autoTrim.js`.
