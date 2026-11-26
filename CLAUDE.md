@@ -3623,3 +3623,13 @@ row per (session, lift), so a lift counts once a session; `POST sessions/<id>/au
 `refused` and a refusal writes nothing and says how to trim by hand. Spends no ⚡ 🍥 🏷️. The routine is never touched and **the
 end-of-session report still counts the routine's plan** — a completion number every session trims itself to 100% of would stop
 measuring anything. It was briefly a StatZ-only sampled feature; that row is gone (a limit is read from the tier, never the sample).
+
+## The tier numbers are four rungs: non-member 2, Free 3, Premium 6, StatZ unlimited (Corey, Nov 2026)
+
+Corey's standing ladder for "how many times used" limits. **Non-member 2** is a logged-out visitor, so it exists only where a visitor can
+do the thing at all: today the free trial takes (`TRIAL_PER_BROWSER`, 2 per browser, the number `/try` states before the recorder).
+Everything else needs an account, so its ladder starts at **Free 3**, then **Premium 6**, **StatZ unlimited** (`None`). Eleven
+`TIER_LIMITS` keys are already on 3 / 6 / None (imagez_layers, imagez_fonts, facez_faces, tone_presets, anime_shots, eq_bands,
+glow_colors, split_opens, bodiez_float, bodiez_autotrim, clean_dupe_runs); new "how often" limits start there. A limit that gives a
+non-member as much as Free is not a step up, and one that gives them more makes the account a wall in front of nothing — keep the
+rungs strictly increasing. Reversible in `catalog.py`; not applied to limits that need an account to reach.
