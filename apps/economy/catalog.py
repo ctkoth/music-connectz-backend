@@ -152,6 +152,10 @@ UNLIMITED_CHARS = 10 ** 9
 # pressing it again on the same session is free. It says how OFTEN, never whether: the session itself, its rest clock and
 # its beep run in BodieZ at every tier, and a member who has used today's number just reopens BodieZ to see them.
 #
+# `bodiez_autotrim` is how many lifts a rolling 24 hours BodieZ trims for the member when they move on part-done (3/5 reads
+# 3/3) — Corey's numbers: Free 3, Premium 6, StatZ unlimited. Trimming a lift by hand is free and uncounted at every tier;
+# what a tier buys is how often it is done FOR them. A lift counts once per session (`bodiez_autotrim.py`).
+#
 # `facez_faces` is how many faces a member may keep in FaceZ, by the same numbers (Corey's call).
 # Nobody loses a face when it moves: over the ceiling, a member keeps every face and cannot add.
 # `clean_modes` is how much of Clean ConnectZ a tier holds, in ONE number: how many of its three ways of choosing what
@@ -163,19 +167,19 @@ UNLIMITED_CHARS = 10 ** 9
 TIER_LIMITS = {
     TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500, "embeds_per_post": 3,
                 "widgets_open": 4, "custom_groups": 1, "soundcloud_import": 10, "profile_links": 25,
-                "imagez_layers": 3, "imagez_fonts": 3, "facez_faces": 3, "tone_presets": 3, "anime_shots": 3, "eq_bands": 3, "glow_colors": 3, "split_opens": 3, "album_songs": 8, "bodiez_float": 3, "clean_modes": 1, "clean_dupe_runs": 3},
+                "imagez_layers": 3, "imagez_fonts": 3, "facez_faces": 3, "tone_presets": 3, "anime_shots": 3, "eq_bands": 3, "glow_colors": 3, "split_opens": 3, "album_songs": 8, "bodiez_float": 3, "bodiez_autotrim": 3, "clean_modes": 1, "clean_dupe_runs": 3},
     TIER_PREMIUM: {"char_limit": 1500, "upload_mb": 1024, "storage_mb": 5120, "embeds_per_post": 15,
                    "widgets_open": 12, "custom_groups": 5, "soundcloud_import": 25, "profile_links": 100,
-                   "imagez_layers": 6, "imagez_fonts": 6, "facez_faces": 6, "tone_presets": 6, "anime_shots": 6, "eq_bands": 6, "glow_colors": 6, "split_opens": 6, "album_songs": 11, "bodiez_float": 6, "clean_modes": 2, "clean_dupe_runs": 6},
+                   "imagez_layers": 6, "imagez_fonts": 6, "facez_faces": 6, "tone_presets": 6, "anime_shots": 6, "eq_bands": 6, "glow_colors": 6, "split_opens": 6, "album_songs": 11, "bodiez_float": 6, "bodiez_autotrim": 6, "clean_modes": 2, "clean_dupe_runs": 6},
     # StatZ writes without a character cap (Corey's call). It was 5,000 for a
     # day; nothing was lost either way, since the cap is applied on write.
     TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999,
                  "widgets_open": 40, "custom_groups": 20, "soundcloud_import": None, "profile_links": 300,
-                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None, "anime_shots": None, "eq_bands": None, "glow_colors": None, "split_opens": None, "album_songs": None, "bodiez_float": None, "clean_modes": None, "clean_dupe_runs": None},
+                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None, "anime_shots": None, "eq_bands": None, "glow_colors": None, "split_opens": None, "album_songs": None, "bodiez_float": None, "bodiez_autotrim": None, "clean_modes": None, "clean_dupe_runs": None},
     # Owner god-mode: effectively unlimited.
     TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760, "embeds_per_post": 999,
                  "widgets_open": 999, "custom_groups": 999, "soundcloud_import": None, "profile_links": 999,
-                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None, "anime_shots": None, "eq_bands": None, "glow_colors": None, "split_opens": None, "album_songs": None, "bodiez_float": None, "clean_modes": None, "clean_dupe_runs": None},
+                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None, "anime_shots": None, "eq_bands": None, "glow_colors": None, "split_opens": None, "album_songs": None, "bodiez_float": None, "bodiez_autotrim": None, "clean_modes": None, "clean_dupe_runs": None},
 }
 
 

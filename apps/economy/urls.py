@@ -231,6 +231,7 @@ from .views import (
 )
 from .habits import HabitCreateView, HabitCompleteView
 from .bodiez_float import BodieZFloatStateView, BodieZSessionFloatView
+from .bodiez_autotrim import BodieZAutoTrimStateView, BodieZSessionAutoTrimView
 from .cleandupes import CleanDupesView
 from .healthsync import HealthLinkView, HealthPairView, HealthStateView, HealthStepsView
 from .bodiez import (
@@ -692,6 +693,8 @@ urlpatterns = [
     path("health/link/", HealthLinkView.as_view(), name="economy-health-link"),
     path("health/steps/", HealthStepsView.as_view(), name="economy-health-steps"),
     path("bodiez/sessions/<int:session_id>/float/", BodieZSessionFloatView.as_view(), name="economy-bodiez-session-float"),
+    path("bodiez/autotrim/", BodieZAutoTrimStateView.as_view(), name="economy-bodiez-autotrim"),
+    path("bodiez/sessions/<int:session_id>/autotrim/", BodieZSessionAutoTrimView.as_view(), name="economy-bodiez-session-autotrim"),
     path("bodiez/sessions/", BodieZSessionsView.as_view(), name="economy-bodiez-sessions"),
     path("bodiez/routines/plan/", BodieZRoutinePlanView.as_view(), name="economy-bodiez-routine-plan"),
     path("bodiez/sessions/log/", BodieZSessionLogView.as_view(), name="economy-bodiez-session-log"),

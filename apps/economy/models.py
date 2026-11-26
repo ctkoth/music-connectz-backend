@@ -6833,6 +6833,20 @@ class BodieZRoutine(models.Model):
         return f"{self.user} — {self.title}"
 
 
+class BodieZAutoTrim(models.Model):
+    """One lift BodieZ trimmed FOR the member in one session (`bodiez_autotrim.py`): left part-done when they moved on,
+    so its target became the sets done. A row per (session, lift), so a lift counts once however often it is re-trimmed;
+    the tier's number is a count of these over a rolling 24 hours. Nothing about the sets themselves lives here."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="bodiez_autotrims")
+    session = models.ForeignKey("BodieZSession", on_delete=models.CASCADE, related_name="autotrims")
+    exercise_id = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        unique_together = (("session", "exercise_id"),)
+        indexes = [models.Index(fields=["user", "created_at"])]
+
+
 class BodieZSession(models.Model):
     """One workout, live or finished. `ended_at` null means in progress —
     the same null-means-open shape `TakeAnalysis.analyzed_at` uses, so a

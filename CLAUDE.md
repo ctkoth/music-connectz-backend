@@ -3613,9 +3613,13 @@ viewer may open it, and the coach's read built the post-read-card way (`share_pa
   the coach, a FileZ file or a journal entry is never handed to anybody else; only the owner sees their kept file.
 - Nothing from a request reaches it; the paid gear advice (`upgrades`) and transcribed lyrics are not served. Free.
 
-## Auto-trim a lift you moved on from (StatZ, `bodiez_autotrim`)
+## Auto-trim a lift you moved on from — Free 3, Premium 6, StatZ unlimited a day (`bodiez_autotrim.py`)
 
-A `statz_trial` feature, sampled, client-side like `rest_alerts` (no server module: it spends nothing). On the live logger,
-logging a set on one lift trims any lift left part-done to the sets done (3/5 reads 3/3), today only. The routine is never
-touched and **the end-of-session report still counts the routine's plan** — on purpose: a completion number every session
-trims itself to 100% of would stop measuring anything. Rules are in the frontend's `src/autoTrim.js`.
+Logging a set on one lift trims any lift left part-done to the sets done (3/5 reads 3/3), today only. The WHEN is the
+frontend's (`src/autoTrim.js`: never between superset partners, never over a target set by hand); the NUMBER is here, Corey's
+tier numbers (`TIER_LIMITS["bodiez_autotrim"]`, a LadderZ row): lifts trimmed FOR the member a rolling 24 hours. Trimming by
+hand is free and uncounted at every tier — the tier says how often it is done for them, never whether. `BodieZAutoTrim` is one
+row per (session, lift), so a lift counts once a session; `POST sessions/<id>/autotrim/ {exercise_ids}` answers `granted` /
+`refused` and a refusal writes nothing and says how to trim by hand. Spends no ⚡ 🍥 🏷️. The routine is never touched and **the
+end-of-session report still counts the routine's plan** — a completion number every session trims itself to 100% of would stop
+measuring anything. It was briefly a StatZ-only sampled feature; that row is gone (a limit is read from the tier, never the sample).

@@ -48,10 +48,6 @@ FEATURES = [
     # by hand was never gated.
     {"key": "coach_pairing", "label": "Coach supersets: compound + isolation, push + pull", "tab": "bodiez", "target": "bodiez-pairing"},
     {"key": "rest_alerts", "label": "Rest alerts and a screen that stays awake", "tab": "bodiez", "target": "bodiez-rest-alerts"},
-    # Auto-trim: a lift left part-done when the member moves on to another has its target trimmed to the sets done
-    # (3/5 reads 3/3). It acts FOR the member, so it is StatZ's; client-side and free, like rest_alerts. Changing a
-    # target by hand stays free, the routine is never touched, and the end-of-session report still counts the plan.
-    {"key": "bodiez_autotrim", "label": "Auto-trim a lift you moved on from to the sets you did", "tab": "bodiez", "target": "bodiez-autotrim"},
     # ViewZ: who viewed a post by name and every visit as a track on a clock, with what
     # each viewer did. It is a READ of what already happened, so it switches off cleanly.
     {"key": "viewz_tracks", "label": "Who viewed your posts, as DAW tracks", "tab": "viewz", "target": "viewz-tracks"},
@@ -133,7 +129,6 @@ DRIVERS = [
     {"key": "advanced_horoscope", "sampled": True, "modules": ["metricz"]},
     {"key": "coach_pairing", "sampled": True, "modules": ["superset", "bodiez"]},
     {"key": "rest_alerts", "sampled": True, "modules": []},
-    {"key": "bodiez_autotrim", "sampled": True, "modules": []},
     {"key": "viewz_tracks", "sampled": True, "modules": ["viewz"]},
     {"key": "skill_raters", "sampled": True, "modules": ["ratez"]},
     {"key": "lipsync", "sampled": True, "modules": []},
