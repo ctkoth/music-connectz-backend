@@ -41,6 +41,7 @@ MAX_SUGGESTIONS = 5
 MAX_TASK_SUGGESTIONS = 6
 CACHE_SECONDS = 600
 NOT_NOW_DAYS = 14      # "Not now" sets a suggestion aside this long, then it may come back
+SKILLZ_STALE_DAYS = 14  # a declared persona and no SkillZ drill for this long: a routine to keep it on track
 
 # persona key (letters only, lower-case — `sentencez.persona_keys` form) → starter routines, in
 # the order they matter to that persona. Both the short key and the long name are listed because a
@@ -157,9 +158,17 @@ def signals(user):
         "collabs_waiting": waiting,
         "last_take": float(last.overall) if last and last.overall is not None else None,
         "last_take_app": last.app_key if last else "",
+        "skillz_last": _last_drill(user),
     }
     cache.set(key, out, CACHE_SECONDS)
     return out
+
+
+def _last_drill(user):
+    """When this member last finished a SkillZ drill (a training event that paid XP), or None."""
+    from apps.skillz.models import TrainingEvent
+    return (TrainingEvent.objects.filter(profile__user=user, xp_awarded__gt=0)
+            .order_by("-created_at").values_list("created_at", flat=True).first())
 
 
 def _persona_names(user):
@@ -224,6 +233,20 @@ def suggest(user, on_board_routines=(), on_board_tasks=(), task_limit=MAX_TASK_S
             if keys & set(plist):
                 for i, rk in enumerate(routines):
                     offer(rk, 6 - i * 0.5, "persona", f"You're {_a(name)}.")
+
+    # 1c. PersonaZ and SkillZ: a declared persona, and no drill lately. Observant, not a nag: one routine, and the
+    # record says how long it has been. Any SkillZ drill counts, so a member who has trained is not asked.
+    names = _persona_names(user)
+    if names and "weak_spot" not in have:
+        last = signals(user)["skillz_last"]
+        who = _a(names[0][0])
+        if last is None:
+            offer("weak_spot", 5.2, "persona", f"You're {who} in PersonaZ, and you haven't trained a SkillZ drill yet.")
+        else:
+            days = (timezone.now() - last).days
+            if days >= SKILLZ_STALE_DAYS:
+                offer("weak_spot", 5.2, "persona",
+                      f"You're {who} in PersonaZ, and your last SkillZ drill was {days} days ago.")
 
     # 1b. the instrument they work on — a rapper gets RapZ, freestyle and bars; a drummer DrumZ
     for app, how, n in instruments_of(user)[:2]:
@@ -313,13 +336,13 @@ def suggest(user, on_board_routines=(), on_board_tasks=(), task_limit=MAX_TASK_S
         out.append({"kind": "routine", "key": key, "title": r["title"], "note": r["note"],
                     "cadence": r["cadence"], "app_key": app_key, "target": r["target"],
                     "action": r.get("action", ""), "goal": r.get("goal", 1),
-                    "why": why, "because": kind, "say": V.say(style, kind, why)})
+                    "why": why, "because": kind, "say": V.say(style, kind, why, key)})
     for key, (score, kind, why) in sorted(tasks.items(), key=lambda kv: -kv[1][0])[:task_limit]:
         t = ST.task_by_key(key)
         app_key = main if (main and key in ST.INSTRUMENT_AWARE) else t["app_key"]
         out.append({"kind": "task", "key": key, "title": t["title"], "note": t["note"], "cadence": "",
                     "app_key": app_key, "target": t["target"], "action": t.get("action", ""),
-                    "goal": t.get("goal", 1), "why": why, "because": kind, "say": V.say(style, kind, why)})
+                    "goal": t.get("goal", 1), "why": why, "because": kind, "say": V.say(style, kind, why, key)})
     return out
 
 

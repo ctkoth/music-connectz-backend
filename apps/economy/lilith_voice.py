@@ -58,12 +58,26 @@ STYLES = {
 EXAMPLE_WHY = "You've sent four takes this month and posted none."
 
 
-def say(style, kind, why):
+# Some suggestions close on a sentence of their own, in each voice: a routine that keeps a member on track says so
+# in the way each voice would. Keyed by the suggestion's key, then by the voice.
+CALL_FOR = {
+    "weak_spot": {
+        "lilith": "Want a weekly routine for it, so we can keep on track?",
+        "plain": "Make it a weekly routine. Add it?",
+        "warm": "Shall we make it a weekly routine and keep on track together?",
+        "quiet": "A weekly routine, if you want one.",
+    },
+}
+
+
+def say(style, kind, why, key=""):
     """The conversational line for one suggestion: the record first, what it means to the member, then one call.
-    `kind` is the suggestion's `because` (persona, instrument, habit, gap, activity, profile, start)."""
+    `kind` is the suggestion's `because` (persona, instrument, habit, gap, activity, profile, start); `key` is the
+    suggestion's own key, so a routine can close on a sentence of its own."""
     s = STYLES.get(style) or STYLES[DEFAULT]
     feel = s["feel"].get(kind) or s["feel"].get("*") or ""
-    return " ".join(part for part in (str(why or "").strip(), feel, s["call"]) if part)
+    call = CALL_FOR.get(key, {}).get(style, s["call"]) if key else s["call"]
+    return " ".join(part for part in (str(why or "").strip(), feel, call) if part)
 
 
 def style_for(user):

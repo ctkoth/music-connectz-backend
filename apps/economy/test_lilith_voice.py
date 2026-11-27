@@ -12,7 +12,8 @@ from rest_framework.test import APIClient
 from apps.economy import lilith_suggest as SG
 from apps.economy import lilith_voice as V
 from apps.economy.models import (HealthCondition, LilithRoutine, LilithTask, LilithVoice, Membership,
-                                 OfferDismissal, TakeScore, membership_for)
+                                 OfferDismissal, TakeScore, membership_for, profile_for)
+from apps.skillz.models import TrainingEvent, TrainingProfile
 
 User = get_user_model()
 BOARD = "/api/economy/lilith/"
@@ -179,3 +180,42 @@ class HealthRecordsTests(TestCase):
         c = APIClient(); c.force_authenticate(s)
         c.get(BOARD)
         self.assertFalse(LilithRoutine.objects.filter(user=s, template="health_meds").exists())
+
+
+class PersonaSkillzTests(TestCase):
+    """A declared persona and no SkillZ drill lately: one routine to keep on track, said observantly. Any drill
+    counts, so a member who has trained recently is not asked."""
+
+    def _persona(self, u):
+        p = profile_for(u)
+        p.personas = [{"key": "indieartist", "name": "Independent Artist", "skills": []}]
+        p.save()
+
+    def _board(self, u):
+        cache.clear()
+        c = APIClient(); c.force_authenticate(u)
+        return c.get(BOARD).json()["suggested"]
+
+    def test_a_persona_who_has_never_drilled_gets_a_weekly_routine_said_observantly(self):
+        u = member("neverdrilled")
+        self._persona(u)
+        s = next(x for x in self._board(u) if x["key"] == "weak_spot")
+        self.assertIn("PersonaZ", s["why"])
+        self.assertIn("haven't trained a SkillZ drill yet", s["why"])
+        self.assertTrue(s["say"].endswith("Want a weekly routine for it, so we can keep on track?"))
+
+    def test_a_drill_lately_means_no_such_offer(self):
+        u = member("drilledlately")
+        self._persona(u)
+        prof = TrainingProfile.objects.create(user=u, app_key="singz")
+        TrainingEvent.objects.create(profile=prof, xp_awarded=10)
+        self.assertNotIn("weak_spot", {x["key"] for x in self._board(u)})
+
+    def test_a_drill_long_ago_is_named_by_how_many_days(self):
+        u = member("drilledlong")
+        self._persona(u)
+        prof = TrainingProfile.objects.create(user=u, app_key="singz")
+        ev = TrainingEvent.objects.create(profile=prof, xp_awarded=10)
+        TrainingEvent.objects.filter(pk=ev.pk).update(created_at=timezone.now() - timedelta(days=30))
+        s = next(x for x in self._board(u) if x["key"] == "weak_spot")
+        self.assertIn("your last SkillZ drill was 30 days ago", s["why"])
