@@ -109,6 +109,9 @@ FEATURES = [
     # Lilith adding tasks to the board by herself, from personas and activity — an automation, so
     # StatZ's. A task she added during a sample stays on the board; she just stops adding more.
     {"key": "lilith_auto", "label": "Lilith adds tasks for you from your personas and what you make", "tab": "lilith", "target": "lilith-auto"},
+    # How Lilith talks to a member when she suggests something: everyone hears the default; StatZ chooses another.
+    # A choice rests when StatZ lapses (the default is heard meanwhile), so it switches off honestly.
+    {"key": "lilith_voice", "label": "Choose how Lilith talks to you: Plain, Warm or Quiet", "tab": "lilith", "target": "lilith-voice"},
 ]
 
 # THE AUDIT: every place StatZ is the difference, and whether the daily sample covers it.
@@ -146,6 +149,7 @@ DRIVERS = [
     {"key": "daw_autotune", "sampled": True, "modules": []},
     {"key": "challenge_auto_accept", "sampled": True, "modules": ["callouts"]},
     {"key": "lilith_auto", "sampled": True, "modules": ["lilith_auto"]},
+    {"key": "lilith_voice", "sampled": True, "modules": ["lilith_voice"]},
     {"key": "instrumental_mix", "sampled": False, "modules": ["instrumentalz"],
      "why_not": "A kept set of levels is a saved preference on a stored piece — a sample that left one behind would be a permanent grant wearing a timer."},
     {"key": "mix_presets", "sampled": False, "modules": [],
