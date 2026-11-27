@@ -9002,3 +9002,22 @@ class PrintDesign(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+
+
+class WorkSave(models.Model):
+    """StatZ: one screen's unsaved work, kept on the member's account by itself (see worksaves.py).
+
+    `data` is the JSON the screen needs to put the work back. Pictures and sound are not in here: a screen that has them
+    keeps those as ordinary uploads and names them inside `data`, so a row stays small. One row per document: `wid` is the
+    screen's own id for it, and `updated_ms` is the client's stamp, which an older copy cannot overwrite."""
+
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="work_saves")
+    app = models.CharField(max_length=32)
+    wid = models.CharField(max_length=64)
+    name = models.CharField(max_length=120, blank=True, default="")
+    data = models.JSONField(default=dict)
+    updated_ms = models.BigIntegerField(default=0)
+
+    class Meta:
+        unique_together = ("owner", "app", "wid")
+        indexes = [models.Index(fields=["owner", "app"], name="work_save_owner_app")]
