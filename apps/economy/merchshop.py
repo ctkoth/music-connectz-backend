@@ -28,9 +28,10 @@ def rate_for(user):
     return membership_for(user).dev_tax_rate
 
 # Printer cost per item, before shipping, in cents: read from Printify's catalog by a test product for one size and
-# colour of each, on 27 Nov 2026. Bandana and durag are priced on a fleece headband, and the wave cap on a surf cap,
-# because Printify's catalog has no matching product for them. Do not open checkout for those three as they stand.
-BASE_CENTS = {"shirt": 968, "hoodie": 2499, "towel": 2370, "bandana": 1582, "wavecap": 2127, "durag": 1582,
+# colour of each, on 27 Nov 2026. The bandana is a 25-inch poly scarf, and the wave cap is a surf cap: both are stand-ins,
+# because Printify's catalog has no matching product for either. Durag has none, so it is hidden from new listings; its
+# old headband cost stays only so that any older listing still reads.
+BASE_CENTS = {"shirt": 968, "hoodie": 2499, "towel": 2370, "bandana": 1453, "wavecap": 2127, "durag": 1582,
               "baseballcap": 1538, "mug": 644, "phonecase": 1311, "sticker": 142, "poster": 1186, "buckethat": 2105,
               "beanie": 1526, "tote": 1874}
 LABELS = {"shirt": "T-shirt", "hoodie": "Hoodie", "towel": "Towel", "bandana": "Bandana", "wavecap": "Wave cap", "durag": "Durag", "baseballcap": "Baseball cap", "mug": "Mug", "phonecase": "Phone case", "sticker": "Sticker", "poster": "Poster", "buckethat": "Bucket hat", "beanie": "Beanie", "tote": "Tote bag"}
@@ -41,6 +42,8 @@ LABELS = {"shirt": "T-shirt", "hoodie": "Hoodie", "towel": "Towel", "bandana": "
 MARKUP_BY_PRODUCT = {"shirt": 1000, "hoodie": 1000, "towel": 1000, "bandana": 1000, "wavecap": 1000, "durag": 1000,
                      "baseballcap": 1000, "mug": 500, "phonecase": 1000, "sticker": 300, "poster": 1000,
                      "buckethat": 1000, "beanie": 1000, "tote": 1000}
+# Products the designer does not offer yet: no new listing can be made in them, though older listings still read.
+HIDDEN_PRODUCTS = {"durag"}
 MARKUP_NOTE = "Each product carries its own set markup, so leave the markup out when you list a design."
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 PER_DESIGNER = 200
@@ -120,6 +123,8 @@ class ShopView(APIView):
         product = str(d.get("product", ""))
         if product not in BASE_CENTS:
             return Response({"detail": "Pick one of the products in the designer."}, status=status.HTTP_400_BAD_REQUEST)
+        if product in HIDDEN_PRODUCTS:
+            return Response({"detail": f"{LABELS.get(product, product)} isn't on sale yet. Pick another product."}, status=status.HTTP_400_BAD_REQUEST)
         if str(d.get("own_art", "")).lower() not in ("1", "true", "yes"):
             return Response({"detail": OWN_ART_RULE + " Tick that the design is yours to list it."}, status=status.HTTP_400_BAD_REQUEST)
         title = str(d.get("title", "")).strip()[:120]

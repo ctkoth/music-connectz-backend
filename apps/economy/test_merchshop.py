@@ -66,6 +66,10 @@ class ShopApiTests(TestCase):
         self.assertEqual(self.post(product="teapot").status_code, 400)
         self.assertEqual(self.post(markup_cents=str(merchshop.markup_for("shirt") + 500)).status_code, 400)
 
+    def test_a_hidden_product_cannot_be_listed(self):
+        self.assertIn("durag", merchshop.HIDDEN_PRODUCTS)
+        self.assertEqual(self.post(product="durag").status_code, 400)
+
     def test_others_see_it_without_the_designers_range(self):
         self.post()
         o = APIClient(); o.force_authenticate(self.b)
@@ -91,8 +95,8 @@ class ShopApiTests(TestCase):
 
 
 class ProductListTests(TestCase):
-    def test_every_designer_product_has_a_cost_label_and_markup(self):
-        # Mirrors PRODUCTS in the frontend's src/merchz.js; a product there with no cost here cannot be listed.
+    def test_every_product_has_a_cost_label_and_markup(self):
+        # The frontend's src/merchz.js offers these 13; durag is also priced here, hidden, so older listings still read.
         keys = {"shirt", "hoodie", "towel", "bandana", "wavecap", "durag", "mug", "phonecase", "sticker", "poster", "buckethat", "beanie", "tote", "baseballcap"}
         self.assertEqual(set(merchshop.BASE_CENTS), keys)
         self.assertEqual(set(merchshop.LABELS), keys)
