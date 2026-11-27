@@ -30,7 +30,7 @@ STYLES = {
             "gap": "It's the quiet part of the work that makes the rest land.",
             "activity": "A step from what you just did is easier than starting over.",
             "profile": "Small details like this are what people trust first.",
-            "start": "Every practice begins with one small place.",
+            "start": "Every practice starts with something small.",
         },
         "call": "I'd start with this one. Want it on your board?",
     },

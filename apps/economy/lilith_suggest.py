@@ -324,7 +324,7 @@ def suggest(user, on_board_routines=(), on_board_tasks=(), task_limit=MAX_TASK_S
 
     ranked = sorted(scored.items(), key=lambda kv: -kv[1][0])[:MAX_SUGGESTIONS]
     if not ranked:                                   # a brand-new member with no signal at all
-        ranked = [(k, (1, "start", "A small place to begin.")) for k in DEFAULTS
+        ranked = [(k, (1, "start", "Nothing on your record points to a habit yet.")) for k in DEFAULTS
                   if k not in have and f"routine:{k}" not in skip][:MAX_SUGGESTIONS]
 
     inst = instruments_of(user)
