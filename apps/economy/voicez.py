@@ -21,7 +21,7 @@ the model, not something enforced.
 
 Tier: presets are everyone's. Creating and using custom voices is Premium's and
 StatZ's (Corey: Premium or StatZ can change voices from Corey's; how many is the tier
-numbers — Premium 6, StatZ unlimited). The real tier, not the free sample — a standing
+numbers — Premium 6, StatZ 12). The real tier, not the free sample — a standing
 creation is not something a timer should leave behind. With no StatZ, `resolve` quietly falls back to the
 member's `style` and the screen says their voices are paused, not deleted.
 """

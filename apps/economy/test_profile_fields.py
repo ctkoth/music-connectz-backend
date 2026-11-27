@@ -79,7 +79,7 @@ class PortfolioLinkLadderTests(TestCase):
         from apps.economy.catalog import limits_for
         free, prem, statz = (limits_for(t)["profile_links"] for t in ("free", "premium", "statz"))
         self.assertLess(free, prem)
-        self.assertLess(prem, statz)
+        self.assertIsNone(statz, "StatZ has no portfolio ceiling: 12 would sit below Premium's 100")
         self.assertGreater(free, 20)      # generous at the bottom: the work is why people visit
 
     def test_a_list_at_the_ceiling_saves_and_one_over_is_refused_with_the_number(self):
@@ -143,7 +143,7 @@ class PortfolioLinkLadderTests(TestCase):
         _, c = self.member("ladderseer")
         lim = c.get("/api/economy/limits/").json()
         self.assertEqual([lim["tiers"][t]["profile_links"] for t in ("free", "premium", "statz")],
-                         [25, 100, 300])
+                         [25, 100, None])
 
     def test_an_unsafe_link_is_still_dropped_before_it_is_counted(self):
         from apps.economy.models import Profile

@@ -429,7 +429,19 @@ class MeView(APIView):
             request.user.refresh_from_db()
         except Exception:
             pass
-        return Response(PublicUserSerializer(request.user).data)
+        data = dict(PublicUserSerializer(request.user).data)
+        # The member's OWN hourly Energy rate: the same number passive Energy is paid at. It is added here, on the
+        # self view, and not on PublicUserSerializer, which every member card and search row is built from.
+        try:
+            from apps.economy.models import energy_rate_per_hour
+            # The serializer above has just read the member's membership. Passing its tier means the rate does not
+            # read that row a second time: `/me/` is the page-load read, and its query ceiling counts every one.
+            data["energy_per_hour"] = energy_rate_per_hour(request.user, tier=data.get("tier"))
+        except Exception:
+            # A header's number must never take the whole /me/ payload down with it. The client shows nothing
+            # when the key is absent.
+            pass
+        return Response(data)
 
     def patch(self, request):
         """Update the member's editable profile fields (personas, birthday →

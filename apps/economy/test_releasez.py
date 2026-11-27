@@ -230,8 +230,8 @@ class QuotaAndQueueTests(ReleaseBase):
         self.assertEqual(r.data["quota"]["left"], 0)
         self.assertEqual(Release.objects.get(pk=second["id"]).status, Release.STATUS_READY)
 
-    def test_the_ladder_is_3_6_unlimited_and_the_owner_is_uncapped(self):
-        for tier, cap in (("free", 3), ("premium", 6), ("statz", None)):
+    def test_the_ladder_is_3_6_12_and_the_owner_is_uncapped(self):
+        for tier, cap in (("free", 3), ("premium", 6), ("statz", 12)):
             m = membership_for(self.user); m.tier = tier; m.save(update_fields=["tier", "updated_at"])
             self.assertEqual(self.client.get(RELEASES).data["quota"]["per_month"], cap, tier)
         m = membership_for(self.user); m.tier = "debug"; m.save(update_fields=["tier", "updated_at"])
@@ -239,16 +239,18 @@ class QuotaAndQueueTests(ReleaseBase):
 
     def test_premium_stops_at_six_and_points_at_statz(self):
         m = membership_for(self.user); m.tier = "premium"; m.save(update_fields=["tier", "updated_at"])
-        self.assertTrue(self.client.get(RELEASES).data["quota"]["next_unlimited"])
+        quota = self.client.get(RELEASES).data["quota"]
+        self.assertFalse(quota["next_unlimited"])      # StatZ has a number now: 12 a month (Nov 2026)
+        self.assertEqual(quota["next_per_month"], 12)
         for _ in range(6):
             rel = self.ready_release()
             self.assertEqual(self.client.post(f"{RELEASES}{rel['id']}/submit/", {}, format="json").status_code, 200)
         rel = self.ready_release()
         r = self.client.post(f"{RELEASES}{rel['id']}/submit/", {}, format="json")
         self.assertEqual(r.status_code, 403)
-        self.assertIn("StatZ sends as many as you like", r.data["detail"])
+        self.assertIn("or the next plan sends 12 a month", r.data["detail"])
 
-    def test_statz_is_unlimited(self):
+    def test_statz_submits_twelve_a_month(self):
         m = membership_for(self.user); m.tier = "statz"; m.save(update_fields=["tier", "updated_at"])
         for _ in range(12):
             rel = self.ready_release()

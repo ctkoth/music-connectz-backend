@@ -18,7 +18,9 @@ from .personaz import clean_tags
 from .media import stable_media_url
 from .models import Character, Face, Upload, membership_for
 
-CHARACTER_LIMIT = {"free": 3, "premium": 10, "statz": 50, "debug": 50}
+# StatZ 12 (Nov 2026, from 50). Premium's 10 does not follow the 6 used for every other
+# Premium count; it is flagged rather than changed, because a Premium number is Corey's to move.
+CHARACTER_LIMIT = {"free": 3, "premium": 10, "statz": 12, "debug": 50}
 LOOKS_MAX = 300
 LIKENESS = ("A character's look is a drawing, or your own face — never another real person's. "
             "Putting a real person into AI-made pages without their say-so is not something this does.")

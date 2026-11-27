@@ -313,9 +313,11 @@ class AnimePlanView(APIView):
             return Response({"detail": "Pick PromptZ, ReelZ, EpisodeZ or MovieZ."}, status=status.HTTP_400_BAD_REQUEST)
         rng = allowed_range(request.user, fmt)
         if rng is None:
-            from .catalog import limits_for
+            from .catalog import higher_tiers_keep, limits_for
+            words = higher_tiers_keep(lambda t: limits_for(t)["anime_shots"], membership_for(request.user).tier,
+                                      verb="holds", unit=" shots")
             return Response({"detail": f"{FORMATS[fmt]['label']} starts at {FORMATS[fmt]['min']} shots and your plan holds "
-                                       f"{shot_cap(request.user)} — Premium holds {limits_for('premium')['anime_shots']}, StatZ every one.",
+                                       f"{shot_cap(request.user)} shots" + (f" — {words}." if words else "."),
                              "upgrade": {"tab": "membershipz", "target": "membershipz-plans"}}, status=status.HTTP_403_FORBIDDEN)
         try:
             n = int(d.get("shots") or rng[0])
@@ -332,7 +334,11 @@ class AnimePlanView(APIView):
         cap = chars_for(request.user)
         ids = [i for i in (d.get("character_ids") or []) if isinstance(i, int)]
         if len(ids) > cap:
-            return Response({"detail": f"Your tier casts {cap} characters — pick fewer, or upgrade (Premium 6; StatZ every one)."},
+            from .catalog import higher_tiers_keep
+            from .mangaz import chars_for_tier
+            words = higher_tiers_keep(chars_for_tier, membership_for(request.user).tier)
+            return Response({"detail": f"Your tier casts {cap} characters — pick fewer"
+                                       + (f", or upgrade ({words})." if words else ".")},
                             status=status.HTTP_403_FORBIDDEN)
         chars = list(Character.objects.filter(user=request.user, id__in=ids))
         if not chars:

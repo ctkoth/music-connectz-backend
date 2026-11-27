@@ -1,7 +1,7 @@
 """Clean ConnectZ's duplicate finder: open on every plan, a few times a day.
 
 The finder runs in the Windows app on the member's own files and nothing about them is sent here. What the server holds is
-only the number: **a tier says how OFTEN, never whether** — Free 3, Premium 6, StatZ unlimited scans in a rolling 24 hours
+only the number: **a tier says how OFTEN, never whether** — Free 3, Premium 6, StatZ 12 scans in a rolling 24 hours
 (`catalog.TIER_LIMITS["clean_dupe_runs"]`, Corey's numbers). It costs no ⚡, 🍥 or 🏷️, and the screen reads `state()` BEFORE
 the button is pressed, because a limit is a price.
 

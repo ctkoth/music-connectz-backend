@@ -33,13 +33,13 @@ class SondayBoardCreationTests(APITestCase):
         Wallet.objects.create(user=self.premium_user, spinaz=1000)
 
     def test_boards_are_coreys_numbers(self):
-        """Free 3, Premium 6, StatZ unlimited; the one past the ceiling is refused and says what's next.
+        """Free 3, Premium 6, StatZ 12; the one past the ceiling is refused and says what's next.
 
         It used to be Premium-only — a limit that said "whether", which the tier rules forbid.
         """
         from apps.economy.models import TIER_STATZ
         from apps.economy.sonday import BOARDS
-        self.assertEqual(BOARDS, {TIER_FREE: 3, TIER_PREMIUM: 6})
+        self.assertEqual(BOARDS, {TIER_FREE: 3, TIER_PREMIUM: 6, TIER_STATZ: 12})
         self.client.force_authenticate(user=self.free_user)
         for i in range(3):
             self.assertEqual(self.client.post("/api/economy/sonday/", {"name": f"B{i}"}).status_code, status.HTTP_201_CREATED)
@@ -65,7 +65,7 @@ class SondayBoardCreationTests(APITestCase):
                          (3, 0, 3, TIER_PREMIUM, 6))
         self.client.force_authenticate(user=self.premium_user)
         q = self.client.get("/api/economy/sonday/meta/").data["quota"]
-        self.assertEqual((q["per_tier"], q["left"], q["next_per_tier"]), (6, 6, None))
+        self.assertEqual((q["per_tier"], q["left"], q["next_per_tier"]), (6, 6, 12))
 
     def test_premium_user_can_create_board(self):
         """Premium users can create Sonday boards."""

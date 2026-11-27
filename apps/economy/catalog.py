@@ -76,8 +76,9 @@ UNLIMITED_CHARS = 10 ** 9
 # over the new number — a quota that retroactively shrinks turns somebody's
 # stored work into an error message they didn't cause.
 # `soundcloud_import` — tracks one SoundCloud import may bring in at once.
-# None is "the whole catalogue" (StatZ, Corey's call): the importer follows
-# SoundCloud's pages to the end rather than stopping at a number.
+# None is "the whole catalogue", and it is StatZ's: the importer follows SoundCloud's
+# pages to the end. A StatZ 12 would sit BELOW Premium's 25, which is not a ladder, so
+# the top tier is unlimited here (a recommendation for Nov 2026, reversible in one line).
 #
 # Volume, not access: posting a SoundCloud link one at a time already works at
 # every tier, because WidgetZ reads the id out of the URL and frames the
@@ -116,53 +117,66 @@ UNLIMITED_CHARS = 10 ** 9
 # rides in the full-profile payload and on the public page — but it is generous at
 # the bottom: a Free member's work is the reason anybody visits their profile, and
 # a tier that rationed it would be rationing the thing the platform exists to
-# show. A recommendation, Corey's to move: 25 / 100 / 300. Nobody loses a link
-# when a number moves — a member already over a ceiling keeps what they have and
-# cannot add more (`social.links_over_cap`).
+# show. Free 25, Premium 100, StatZ unlimited (None). StatZ has no number because 12
+# would sit BELOW Premium's 100, and a top tier that holds fewer links than the one
+# under it is not a ladder. Its only bound is `social.LINKS_CEILING`, the work one
+# request may ask of the cleaner, which is not a tier. Nobody loses a link when a
+# number moves — a member already over a ceiling keeps what they have and cannot
+# add more (`social.links_over_cap`).
 #
-# `imagez_layers` is how many layers one ImageZ picture may hold. The editor is
-# free and runs on the member's device; this ladders how MUCH, never whether —
-# 3 still holds a background, a picture and its text, and merge down is always
-# there. Nothing is lost when it moves: a project over the ceiling still opens
-# with every layer, it just cannot add one. Corey's call: Free 3, Premium 6,
-# StatZ unlimited (None, like soundcloud_import).
+# `imagez_layers` is how many layers one ImageZ picture may hold, and the same
+# number counts the tracks in a DAW session, the tracks in a Mix ConnectZ master
+# and the VST plugins on one DAW track. The editor is free and runs on the member's
+# device; this ladders how MUCH, never whether — 3 still holds a background, a
+# picture and its text, and merge down is always there. Free 3, Premium 6, StatZ
+# unlimited (None). Unlimited is a recommendation for StatZ, not a 12: a real
+# session passes twelve tracks quickly (a drum kit alone can be eight microphones),
+# so a 12 would cap the flagship DAW exactly where a song needs it. The engine's own
+# bound (128 tracks) is the real ceiling. Nothing is lost when it moves: a project
+# over the ceiling still opens with every layer, it just cannot add one.
 #
 # `imagez_fonts` is how many of ImageZ's fonts a text layer can use. Corey's call:
 # the same number as layers — Free 3, Premium 6, StatZ unlimited (every font plus
 # any installed on the member's device). Text itself is every tier's.
 #
 # `tone_presets` is how many saved tones (an effect chain from the DAW, "My vocal") a member keeps.
-# Same numbers (Corey's call: Free 3, Premium 6, StatZ unlimited). Nobody loses a preset when it
+# Same numbers (Corey's call: Free 3, Premium 6, StatZ 12). Nobody loses a preset when it
 # moves: over the ceiling, a member keeps, uses, renames and deletes every one and cannot add.
 #
 # `anime_shots` is how many 8-second shots one Anime ConnectZ render may hold (Corey's numbers: Free 3,
 # Premium 6, StatZ unlimited — up to the format's own ceiling). It says how LONG, never whether.
+# StatZ is unlimited rather than 12 (a recommendation, Nov 2026): twelve shots is 96 seconds, and a MovieZ
+# scene runs to eight minutes, about sixty shots. A 12-shot cap would sell the top format and be unable to
+# deliver it.
 #
 # `eq_bands` is how many bands one EQ holds — TrackZ's channel strip in Mix ConnectZ and the EQ effect in every DAW
-# (Corey's numbers: Free 3, Premium 6, StatZ unlimited, which the engine runs to 32). Three is a whole EQ (lows, one
+# (Corey's numbers: Free 3, Premium 6, StatZ 12; the engine runs to 32). Three is a whole EQ (lows, one
 # middle, highs); a tier buys how many more, never whether. The low cut is a filter, not a band, and is not counted.
 # Nothing is lost when it moves: an EQ already over the count keeps playing every band and only adding one locks.
 #
-# `album_songs` is how many songs one Mix ConnectZ album master holds — Corey's numbers PLUS FIVE (his call, Nov 2026):
-# Free 8, Premium 11, StatZ unlimited, so Free holds a whole EP and Premium an album. Mastering runs on the member's device and is free; the tier says how many songs are
-# brought to one loudness and tone together, never whether a song can be mastered (one at a time is every tier's).
+# `album_songs` is how many songs one Mix ConnectZ album master holds: Free 8, Premium 11 (Corey's numbers
+# plus five, Nov 2026), so Free holds a whole EP and Premium an album. StatZ is unlimited (a recommendation,
+# Nov 2026), not 12: a deluxe album can run well past twelve tracks, and a cap of 12 would split one album
+# across two masters at two loudness targets, which is the thing album mastering exists to prevent. Mastering
+# runs on the member's device and is free; the tier says how many songs are brought to one loudness and tone
+# together, never whether a song can be mastered (one at a time is every tier's).
 #
 # `bodiez_float` is how many sessions a day (rolling 24 hours) a member may keep RUNNING ON SCREEN over other apps —
-# Corey's numbers again: Free 3, Premium 6, StatZ unlimited. A live BodieZ session counts once however long it floats;
+# Corey's numbers again: Free 3, Premium 6, StatZ 12. A live BodieZ session counts once however long it floats;
 # pressing it again on the same session is free. It says how OFTEN, never whether: the session itself, its rest clock and
 # its beep run in BodieZ at every tier, and a member who has used today's number just reopens BodieZ to see them.
 #
 # `bodiez_autotrim` is how many lifts a rolling 24 hours BodieZ trims for the member when they move on part-done (3/5 reads
-# 3/3) — Corey's numbers: Free 3, Premium 6, StatZ unlimited. Trimming a lift by hand is free and uncounted at every tier;
+# 3/3) — Corey's numbers: Free 3, Premium 6, StatZ 12. Trimming a lift by hand is free and uncounted at every tier;
 # what a tier buys is how often it is done FOR them. A lift counts once per session (`bodiez_autotrim.py`).
 #
-# `facez_faces` is how many faces a member may keep in FaceZ, by the same numbers (Corey's call).
+# `facez_faces` is how many faces a member may keep in FaceZ, by the same numbers (Corey's call: Free 3, Premium 6, StatZ 12).
 # Nobody loses a face when it moves: over the ceiling, a member keeps every face and cannot add.
 # `clean_modes` is how much of Clean ConnectZ a tier holds, in ONE number: how many of its three ways of choosing what
 # goes (Size, then Frequency, then Priority) are open — Free 1, Premium 2, StatZ all three. It says how MUCH, never whether: every tier can pick a folder, see every file
 # and clear space by a target percent or size. A recommendation of Corey's rule, reversible in one line.
 # `clean_dupe_runs` is how many duplicate scans (Windows app) a member may run in a rolling 24 hours — Corey's numbers:
-# Free 3, Premium 6, StatZ unlimited. The finder is open on every plan; the tier says how OFTEN. A scan counts once it has
+# Free 3, Premium 6, StatZ 12. The finder is open on every plan; the tier says how OFTEN. A scan counts once it has
 # finished (a cancelled or failed one costs nothing), and `cleandupes.py` serves the number before the button is pressed.
 TIER_LIMITS = {
     TIER_FREE: {"char_limit": 400, "upload_mb": 100, "storage_mb": 500, "embeds_per_post": 3,
@@ -173,9 +187,25 @@ TIER_LIMITS = {
                    "imagez_layers": 6, "imagez_fonts": 6, "facez_faces": 6, "tone_presets": 6, "anime_shots": 6, "eq_bands": 6, "glow_colors": 6, "split_opens": 6, "album_songs": 11, "bodiez_float": 6, "bodiez_autotrim": 6, "clean_modes": 2, "clean_dupe_runs": 6},
     # StatZ writes without a character cap (Corey's call). It was 5,000 for a
     # day; nothing was lost either way, since the cap is applied on write.
+    #
+    # StatZ counts are 12 (Corey, Nov 2026) wherever 12 is strictly above Premium's number. Two kinds of exception,
+    # each listed below with its reason: UNLIMITED (None), where 12 would sit below Premium's or cut the work a feature
+    # exists for; and a NUMBER that stays, where StatZ already held a count above Premium's. Those are recommendations
+    # for Nov 2026, each reversible in one line.
+    # Units (characters, MB, storage) are not counts and were never part of the 12.
+    #   widgets_open 40        12 would tie Premium's 12, and a tie is no ladder.
+    #   embeds_per_post 999    12 would sit below Premium's 15. 999 stays as it was.
+    #   profile_links None     12 would sit below Premium's 100 (see the note above).
+    #   soundcloud_import None 12 would sit below Premium's 25.
+    #   imagez_layers None     the DAW's track count; a real session passes twelve.
+    #   imagez_fonts None      12 would cap a list StatZ has always had in full: every built-in font, plus any installed.
+    #   album_songs None       a deluxe album can pass twelve tracks.
+    #   anime_shots None       a MovieZ scene is about sixty shots; twelve would be 96 seconds.
+    #   clean_modes None       there are three ways to choose; 12 would be a false number.
+    #   glow_colors None       the palette has 12 colours; a fixed 12 would lock a 13th colour added later.
     TIER_STATZ: {"char_limit": UNLIMITED_CHARS, "upload_mb": 10240, "storage_mb": 102400, "embeds_per_post": 999,
-                 "widgets_open": 40, "custom_groups": 20, "soundcloud_import": None, "profile_links": 300,
-                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": None, "tone_presets": None, "anime_shots": None, "eq_bands": None, "glow_colors": None, "split_opens": None, "album_songs": None, "bodiez_float": None, "bodiez_autotrim": None, "clean_modes": None, "clean_dupe_runs": None},
+                 "widgets_open": 40, "custom_groups": 12, "soundcloud_import": None, "profile_links": None,
+                 "imagez_layers": None, "imagez_fonts": None, "facez_faces": 12, "tone_presets": 12, "anime_shots": None, "eq_bands": 12, "glow_colors": None, "split_opens": 12, "album_songs": None, "bodiez_float": 12, "bodiez_autotrim": 12, "clean_modes": None, "clean_dupe_runs": 12},
     # Owner god-mode: effectively unlimited.
     TIER_DEBUG: {"char_limit": UNLIMITED_CHARS, "upload_mb": 1048576, "storage_mb": 10485760, "embeds_per_post": 999,
                  "widgets_open": 999, "custom_groups": 999, "soundcloud_import": None, "profile_links": 999,
@@ -229,6 +259,24 @@ def limits_for(tier):
     return TIER_LIMITS.get(tier, TIER_LIMITS[TIER_FREE])
 
 
+def higher_tiers_keep(read, tier, verb="keeps", unit=""):
+    """What the tiers ABOVE `tier` hold of one number, as words a refusal can say.
+
+    `read(t)` returns a tier's number, None meaning unlimited, so a refusal reads the value
+    the gate itself reads: "Premium keeps 6, StatZ keeps 12", "StatZ keeps as many as you
+    like" when the top tier is unlimited, and "" when there is no tier above to offer.
+    `unit` is appended to each number ("Premium opens 6 a day"). Nothing is typed here, so
+    a number moved in one place reads right in every refusal.
+    """
+    out = []
+    for t, name in ((TIER_PREMIUM, "Premium"), (TIER_STATZ, "StatZ")):
+        if _TIER_RANK[t] <= _TIER_RANK.get(tier, 0):
+            continue
+        n = read(t)
+        out.append(f"{name} {verb} {n}{unit}" if n is not None else f"{name} {verb} as many as you like")
+    return ", ".join(out)
+
+
 # ---- The keyboard's voice: speaking to it, and it speaking back ----
 #
 # Gated the way translate is gated, and for the same stated reason. The
@@ -254,14 +302,17 @@ def limits_for(tier):
 # per action, published by GET before either button is pressed.
 # Parcel Primate campaigns per rolling 7 days. A campaign can reach up to
 # parcel.MAX_RECIPIENTS people at once, so this is how OFTEN, never whether:
-# Free sends one a week, which is a real newsletter cadence.
+# Free sends one a week, which is a real newsletter cadence. StatZ is 12 a week (Nov 2026, from 21):
+# above Premium's 7, so the ladder holds. Campaigns already sent are kept; only a new one is refused.
 PARCEL_PER_WEEK = {
     TIER_FREE: 1,
     TIER_PREMIUM: 7,
-    TIER_STATZ: 21,
+    TIER_STATZ: 12,
     TIER_DEBUG: 10 ** 6,
 }
 
+# Clips a day to transcribe. StatZ's 300 is unchanged in Nov 2026: 12 would sit below Premium's 60, so StatZ keeps
+# its own number above Premium's (the ladder rule).
 KEY_TRANSCRIBE_DAILY_CLIPS = {
     TIER_FREE: 10,
     TIER_PREMIUM: 60,
@@ -275,6 +326,7 @@ KEY_TRANSCRIBE_DAILY_CLIPS = {
 # Yorùbá, Igbo, Hausa and Amharic before it is anything else. Gating that
 # behind a tier would mean English speakers read aloud free while Yorùbá
 # speakers pay, which is the inverse of what this keyboard is for.
+# Characters a day read aloud by the server. StatZ's 100,000 is unchanged in Nov 2026: 12 would sit below Premium's 20,000.
 KEY_SPEAK_DAILY_CHARS = {
     TIER_FREE: 2_000,
     TIER_PREMIUM: 20_000,
@@ -347,9 +399,10 @@ WRITER_BRIEF_CHARS = {
 # everybody already has. A lapse pauses voices and never erases them, and a
 # member over a ceiling keeps everything they wrote.
 # Writing voices of a member's own (VoiceZ). Corey: Premium or StatZ can change the voice from Corey's, and how many
-# is the tier numbers — Premium 6, StatZ unlimited (None; `VOICES_MAX` is the engine's bound). Free writes in Corey's
-# voice and the built-in voices, which are everyone's. Lowered from StatZ 20 to unlimited: nobody loses one.
-CUSTOM_VOICE_LIMITS = {TIER_FREE: 0, TIER_PREMIUM: 6, TIER_STATZ: None, TIER_DEBUG: None}
+# is the tier numbers — Premium 6, StatZ 12 (Nov 2026; `VOICES_MAX` is the engine's bound for unlimited, which only the
+# owner's tier holds now). Free writes in Corey's voice and the built-in voices, which are everyone's. A member over a
+# number keeps every voice they wrote and cannot add one.
+CUSTOM_VOICE_LIMITS = {TIER_FREE: 0, TIER_PREMIUM: 6, TIER_STATZ: 12, TIER_DEBUG: None}
 VOICES_MAX = 50
 
 
@@ -471,7 +524,10 @@ def edit_window_for(tier):
 JOURNAL_LIMITS = {
     TIER_FREE: {"attachments": 1, "tags": 5, "people": 3, "per_day": 3},
     TIER_PREMIUM: {"attachments": 4, "tags": 20, "people": 10, "per_day": 10},
-    TIER_STATZ: {"attachments": 10, "tags": 60, "people": 30, "per_day": 50},
+    # StatZ (Nov 2026): people and entries a day go to 12, from 30 and 50. Attachments stay at 10: an entry
+    # holds at most JOURNAL_MAX_ITEMS (10), so a 12 would be a number nothing could reach. Tags stay at 60,
+    # because 12 would sit below Premium's 20.
+    TIER_STATZ: {"attachments": 10, "tags": 60, "people": 12, "per_day": 12},
     TIER_DEBUG: {"attachments": 10, "tags": 60, "people": 30, "per_day": 500},
 }
 
@@ -1009,6 +1065,7 @@ OCC_IMAGE_TYPES = ("image/jpeg", "image/png", "image/gif", "image/webp")
 OCC_MAX_PATH_CHARS = 200            # "src/apps/BossTake.jsx" and then some
 OCC_MAX_FILE_CHARS = 200_000        # one file; matches modal_sandbox.MAX_SOURCE_CHARS
 OCC_MAX_PROJECT_NAME_CHARS = 80
+# StatZ's 4,000 files and 200 projects are unchanged in Nov 2026: 12 would sit below Premium's 400 and 20.
 OCC_PROJECT_FILES = {               # files per project, by tier
     TIER_FREE: 40,
     TIER_PREMIUM: 400,

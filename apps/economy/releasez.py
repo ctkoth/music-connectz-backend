@@ -42,9 +42,10 @@ HOW_IT_WORKS = ("Submitting sends the release to the Music ConnectZ team, who pu
 # How many tracks a member may send out a calendar month. A release is one track (one master).
 # The ladder rule: a tier says how OFTEN, never whether — a Free member can always release.
 #
-# Corey's ladder (Nov 2026, replacing 1 / 5 / 10): the platform's own numbers — Free 3, Premium 6,
-# StatZ unlimited (None) tracks a calendar month. The owner's own tier (debug) is uncapped.
-PER_MONTH = {TIER_FREE: 3, "premium": 6, "statz": None}
+# Corey's ladder (Nov 2026, replacing 1 / 5 / 10): Free 3, Premium 6, StatZ 12 tracks a calendar month.
+# A member over the count keeps every release already sent; only a new submission is refused. The
+# owner's own tier (debug) is uncapped.
+PER_MONTH = {TIER_FREE: 3, "premium": 6, "statz": 12}
 FREE_PER_MONTH = PER_MONTH[TIER_FREE]
 
 

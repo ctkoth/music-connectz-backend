@@ -123,8 +123,8 @@ class ApiTests(TestCase):
                   "custom_paused", "preview_cost_cents", "free_today", "caps"):
             self.assertIn(k, d)
         self.assertEqual({s["key"] for s in d["surfaces"]}, {"coach", "writer", "occ"})
-        self.assertIsNone(d["limits"]["voices"], "StatZ keeps unlimited voices (Corey: the tier numbers)")
-        self.assertTrue(d["limits"]["unlimited"])
+        self.assertEqual(d["limits"]["voices"], 12, "StatZ keeps 12 voices (Corey, Nov 2026)")
+        self.assertFalse(d["limits"]["unlimited"])
 
     def test_bare_free_account_get(self):
         f = mk("free1", "free")
@@ -159,14 +159,17 @@ class ApiTests(TestCase):
         self.assertEqual(r.status_code, 403); self.assertIn("6", r.data["detail"])
         self.assertEqual(CustomVoice.objects.filter(user=p).count(), 6)
 
-    def test_premium_can_change_voices_and_statz_is_unlimited(self):
+    def test_premium_can_change_voices_and_statz_keeps_twelve(self):
         from apps.economy.catalog import CUSTOM_VOICE_LIMITS
-        self.assertEqual([CUSTOM_VOICE_LIMITS[t] for t in ("free", "premium", "statz")], [0, 6, None])
+        self.assertEqual([CUSTOM_VOICE_LIMITS[t] for t in ("free", "premium", "statz")], [0, 6, 12])
         prem = cl(mk("prem2", "premium"))
         self.assertEqual(prem.post(BASE + "voices/", self.body(), format="json").status_code, 201)
-        for i in range(25):
+        have = CustomVoice.objects.filter(user=self.u).count()
+        for i in range(12 - have):
             make(self.u, f"s{i}")
-        self.assertEqual(self.c.post(BASE + "voices/", self.body(), format="json").status_code, 201)
+        self.assertEqual(CustomVoice.objects.filter(user=self.u).count(), 12)
+        self.assertEqual(self.c.post(BASE + "voices/", self.body(), format="json").status_code, 403)
+        self.assertEqual(CustomVoice.objects.filter(user=self.u).count(), 12)   # refused, and nothing was lost
 
     def test_lapse_pauses_never_erases(self):
         cv = make(self.u); m = membership_for(self.u); m.tier = "free"; m.save()

@@ -87,28 +87,50 @@ class AuthFlowTests(TestCase):
         with CaptureQueriesContext(connection) as queries:
             resp = self.client.get("/api/auth/me/")
         self.assertEqual(resp.status_code, 200)
-        # 6 for the rows above, +1 for `connections` — one SELECT for the whole
-        # list, not one per link. The number is a ceiling on fan-out, so it may
-        # rise when a field genuinely adds a read and must never rise because a
-        # field started reading per row.
-        self.assertLessEqual(len(queries), 7, [q["sql"] for q in queries])
+        # The rows above are read once each, and `connections` is one SELECT for
+        # the whole list, not one per link. The energy rate adds three constant
+        # reads on top: the follower rows, a profile row and the worn badges. Its
+        # membership read is not one of them, because the serializer above has
+        # already read the tier and the rate takes it from there. The number is a
+        # ceiling on fan-out, so it may rise when a field genuinely adds a read and
+        # must never rise because a field started reading per row.
+        self.assertLessEqual(len(queries), 10, [q["sql"] for q in queries])
 
     def test_connections_is_one_query_however_many_are_linked(self):
         """The ceiling above only means something if it holds at three links as
-        well as one — a per-row read passes at one and fans out in production."""
+        well as one — a per-row read passes at one and fans out in production.
+
+        So it is compared with a member who has NO links rather than with a
+        number: whatever the list costs, it must cost the same at none and at three."""
         from apps.accounts.models import OAuthIdentity
+
+        def me_queries(user):
+            self.client.force_authenticate(user)
+            self.client.get("/api/auth/me/")  # create the rows first
+            with CaptureQueriesContext(connection) as queries:
+                resp = self.client.get("/api/auth/me/")
+            self.assertEqual(resp.status_code, 200)
+            return resp, len(queries)
+
+        _, none_linked = me_queries(User.objects.create_user("bare", "bare@example.com", PASSWORD))
 
         user = User.objects.create_user("many", "many@example.com", PASSWORD)
         for n, provider in enumerate(("google", "spotify", "soundcloud")):
             OAuthIdentity.objects.create(user=user, provider=provider,
                                          provider_uid=f"uid-{n}", email="many@example.com")
-        self.client.force_authenticate(user)
-        self.client.get("/api/auth/me/")
-        with CaptureQueriesContext(connection) as queries:
-            resp = self.client.get("/api/auth/me/")
-        self.assertEqual(resp.status_code, 200)
+        resp, three_linked = me_queries(user)
         self.assertEqual(len(resp.data["connections"]), 3)
-        self.assertLessEqual(len(queries), 7, [q["sql"] for q in queries])
+        self.assertEqual(three_linked, none_linked,
+                         "the connections list costs more with links than without: that is a read per link")
+
+    def test_me_carries_the_members_own_energy_rate(self):
+        """The header's number is the one passive Energy is paid at: read from the same function, never retyped."""
+        from apps.economy.models import energy_rate_per_hour
+
+        user = User.objects.create_user("rate", "rate@example.com", PASSWORD)
+        self.client.force_authenticate(user)
+        resp = self.client.get("/api/auth/me/")
+        self.assertEqual(resp.data["energy_per_hour"], energy_rate_per_hour(user))
 
 
 class OAuthLinkingTests(TestCase):

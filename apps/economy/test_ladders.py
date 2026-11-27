@@ -27,8 +27,12 @@ class LadderListTests(TestCase):
 
     def test_coreys_numbers_read_as_he_said_them(self):
         rows = {r["key"]: r["values"] for r in ladders()}
-        for k in ("daw_tracks", "mix_tracks", "tone_presets", "anime_shots", "imagez_layers", "releases"):
+        # The unlimited set (named in catalog.py): the DAW and mix track counts, the layers and the anime shots.
+        for k in ("daw_tracks", "mix_tracks", "anime_shots", "imagez_layers"):
             self.assertEqual(rows[k], {"free": "3", "premium": "6", "statz": "Unlimited"}, k)
+        # The numeric StatZ 12: the presets of each kind, and releases a month.
+        for k in ("tone_presets", "releases"):
+            self.assertEqual(rows[k], {"free": "3", "premium": "6", "statz": "12"}, k)
         self.assertEqual(rows["wav_bits"], {"free": "MP3 only", "premium": "16-bit WAV", "statz": "24-bit WAV"})
         self.assertEqual(rows["char_limit"]["statz"], "Unlimited")         # Corey's fixed number
 
@@ -77,17 +81,47 @@ class AlbumRowTests(TestCase):
 
 
 class GlowColorsRowTests(TestCase):
-    def test_glow_colors_are_coreys_numbers_and_on_the_ladder(self):
+    def test_glow_colors_are_on_the_ladder_and_statz_is_a_named_exception(self):
         from apps.economy.catalog import limits_for
         from apps.economy.ladders import ladders
         self.assertEqual([limits_for(t)["glow_colors"] for t in ("free", "premium", "statz")], [3, 6, None])
         row = next(r for r in ladders() if r["key"] == "glow_colors")
-        self.assertTrue(row["coreys_numbers"], row["values"])
+        # StatZ is unlimited here, not Corey's 12 (the palette has 12 colours, and a fixed 12 would lock a colour
+        # added later). A named exception is shown as one: the row is not the standard numbers, and says so.
+        self.assertFalse(row["coreys_numbers"], row["values"])
+        self.assertEqual(row["values"], {"free": "3", "premium": "6", "statz": "Unlimited"})
 
 
 class SplitOpensRowTests(TestCase):
     def test_split_opens_are_coreys_numbers_and_on_the_ladder(self):
         from apps.economy.catalog import limits_for
         from apps.economy.ladders import ladders
-        self.assertEqual([limits_for(t)["split_opens"] for t in ("free", "premium", "statz")], [3, 6, None])
+        self.assertEqual([limits_for(t)["split_opens"] for t in ("free", "premium", "statz")], [3, 6, 12])
         self.assertTrue(next(r for r in ladders() if r["key"] == "split_opens")["coreys_numbers"])
+
+
+class StatZLadderRuleTests(TestCase):
+    """Corey's rule (Nov 2026): wherever Premium and StatZ are both numbers, StatZ holds strictly more.
+
+    A StatZ number at or below Premium's would make the top plan hold LESS of that thing than the one under it,
+    which is not a ladder. Where 12 would not clear Premium, StatZ is unlimited instead (see catalog.py). Sizes
+    (characters, MB, storage) are not counts and are left out.
+    """
+    SIZES = {"char_limit", "upload_mb", "storage_mb"}
+
+    def test_statz_is_strictly_above_premium_wherever_both_are_numbers(self):
+        prem, statz = catalog.limits_for("premium"), catalog.limits_for("statz")
+        bad = []
+        for key in catalog.TIER_LIMITS["free"]:
+            if key in self.SIZES:
+                continue
+            p, s = prem.get(key), statz.get(key)
+            if isinstance(p, bool) or isinstance(s, bool):
+                continue
+            if p is None:
+                if s is not None:                  # a capped top tier below an unlimited one is the wrong way round
+                    bad.append((key, p, s))
+                continue
+            if s is not None and not s > p:       # StatZ unlimited (None) is above every number
+                bad.append((key, p, s))
+        self.assertEqual(bad, [], "StatZ must sit strictly above Premium: (key, premium, statz)")

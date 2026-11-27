@@ -122,7 +122,7 @@ HELP_GRADUATED_DAILY_CAP = 3
 
 
 def routines_full(count, limits):
-    """At the routine ceiling? None is unlimited (StatZ)."""
+    """At the routine ceiling? None is unlimited (the owner's tier)."""
     return limits["routines"] is not None and count >= limits["routines"]
 
 
@@ -136,11 +136,13 @@ def tier_limits(tier):
     """
     t = (tier or "free").lower()
     return {
+        # Open tasks at once. StatZ's 1000 is a number, not unlimited and not 12: 12 would sit below Premium's 250, and
+        # the ladder rule (test_ladders.StatZLadderRuleTests) keeps StatZ above Premium wherever both are numbers. The
+        # owner's tier falls through to the same 1000 (no entry for it here). Unchanged in Nov 2026.
         "active_tasks": {"free": 50, "premium": 250}.get(t, 1000),
-        # Corey's numbers (Nov 2026): Free 3, Premium 6, StatZ unlimited (None). Lowering Premium from 12
-        # takes nothing away: the ceiling only stops a NEW routine, so a member already over it keeps
-        # every one, keeps them running, and can move, trash and restore them under the count.
-        "routines": {"free": 3, "premium": 6}.get(t),
+        # Corey's numbers (Nov 2026): Free 3, Premium 6, StatZ 12. The ceiling only stops a NEW routine: a member
+        # already over it keeps every one, keeps them running, and can move, trash and restore them under the count.
+        "routines": {"free": 3, "premium": 6, "statz": 12}.get(t),
 
         # These five were `t == "statz"` — five booleans directly under a
         # docstring promising a ladder of how many and how clever, "never
@@ -155,9 +157,13 @@ def tier_limits(tier):
         # Premium's), so auto-schedule and automation rules are 0 below StatZ. Neither is BUILT yet,
         # and the screen no longer names them: a number for a feature that does not exist is the
         # substance rule's failure case. These are the numbers they ship with.
+        # A horizon in DAYS: a unit, not a count. How far ahead Lilith may schedule. 30 for StatZ and the owner.
         "auto_schedule_days": 30 if t in ("statz", "debug") else 0,
-        "automation_rules": None if t in ("statz", "debug") else 0,
-        "recurring_quests": {"free": 1, "premium": 5}.get(t, 25),
+        # StatZ 12 (Corey, Nov 2026); the owner's tier stays unlimited.
+        "automation_rules": 12 if t == "statz" else (None if t == "debug" else 0),
+        # StatZ 12 (Corey, Nov 2026; was 25). Free 1 and Premium 5 are not numbers Corey set, so they stay.
+        # Nobody over the number loses a quest: a member keeps every one and cannot add until under it.
+        "recurring_quests": {"free": 1, "premium": 5, "statz": 12}.get(t, 25),
         # Priced per run out of the member's daily AI allowance, like every
         # other model call — so the ladder here is the allowance, not a flag.
         "ai_breakdown": True,

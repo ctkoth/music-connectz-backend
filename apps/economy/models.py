@@ -751,28 +751,21 @@ def award_promptz(user, amount, note="PromptZ", *, app_key="", target=""):
 # Prepaid PromptZ (Wallet.promptz) is separate and persists. Owner/debug is
 # effectively unlimited (their AI runs are already free anyway).
 #
-# StatZ is 10 rather than 20 because 20 does not pay for itself: at the 3c
-# AI_MODEL_COSTS["standard"] floor, 20/day is $18/mo of model cost against a
-# $15/mo subscription, and $18 against $7.50 for a founding seat. At 10/day it
-# is $9 against $15 — a real margin, and still twice what Premium gets. Anyone
-# who wants more buys prepaid PromptZ, which is priced to cover itself.
+# Free 3, Premium 6, StatZ 12 (Corey, Nov 2026: the tier numbers everywhere, and 12 daily for StatZ).
+# What the ceiling costs at DAILY_PROMPT_MAX_CENTS (3c a prompt, the floor of the standard model) for a
+# member who spends every free prompt every day:
+#   Free     3 x 30 days x $0.03 = $2.70/mo, with no subscription against it
+#   Premium  6 x 30 days x $0.03 = $5.40/mo, against $7
+#   StatZ   12 x 30 days x $0.03 = $10.80/mo, against $15
+# That is the ceiling, not the typical member, who uses far less. It is recorded so the next move is
+# made knowing it. Anyone who wants more buys prepaid PromptZ, which is priced to cover itself.
 #
-# Free is 3, not 1. One was the same allowance the ANONYMOUS trial door hands a
-# stranger (one scored take per IP per day, TRIAL_PER_IP_HOURS), so registering
-# bought nothing at all on the axis people arrive for — the account was strictly
-# more work for the same thing. Three is the smallest number that is visibly an
-# allowance rather than a demo: a take coached, a follow-up asked, a lyric
-# looked at, in one sitting. At DAILY_PROMPT_MAX_CENTS below that is 9c a day of
-# model cost for a member paying nothing, and only for one who spends all three
-# every day.
-#
-# Free 4, Premium 7, StatZ 12 (Corey's call, Oct 2026). The worst case — a
-# member who spends every free prompt every day at DAILY_PROMPT_MAX_CENTS — is
-# $3.60/mo for Free, $6.30/mo against Premium's $7, and $10.80/mo against
-# StatZ's $15 ($10.50 for a founding month, so a founding member who maxes it
-# daily costs slightly more than they pay). The typical member uses far less;
-# this records the ceiling so the next move is made knowing it.
-PROMPT_ALLOWANCE = {"free": 4, "premium": 7, "statz": 12, "debug": 10 ** 6}
+# Free is 3, not 1. One was the same allowance the ANONYMOUS trial door hands a stranger (one scored
+# take a day per browser, TRIAL_PER_IP_HOURS), so registering bought nothing at all on the axis people
+# arrive for. Three is the smallest number that is visibly an allowance rather than a demo: a take
+# coached, a follow-up asked, a lyric looked at, in one sitting. At DAILY_PROMPT_MAX_CENTS that is 9c a
+# day of model cost for a member paying nothing, and only for one who spends all three every day.
+PROMPT_ALLOWANCE = {"free": 3, "premium": 6, "statz": 12, "debug": 10 ** 6}
 
 # What ONE free daily prompt is allowed to be worth, in cents.
 #
@@ -909,7 +902,7 @@ AI_ENERGY_PER_PROMPT = {"free": 10, "premium": 6, "statz": 4, "debug": 4}
 # days of Free regeneration (ENERGY_FLOOR_PER_HOUR 2), so one prompt emptied any Free
 # wallet and left cold DMs, coaching a post, submission packs and boosts out of reach
 # for anyone who used the AI that day — a tier deciding WHETHER rather than how much.
-# At 10, four free prompts a day (40 ⚡) still fit inside a Free day's regeneration
+# At 10, three free prompts a day (30 ⚡) still fit inside a Free day's regeneration
 # (48), so the AI costs something real without closing the rest of the app.
 
 
@@ -1987,6 +1980,11 @@ BATTLE_RATING_THRESHOLD = 5
 # and what the author pays for must never change what counts as good enough.
 COLLAB_RATING_THRESHOLD = 7.0
 
+# Scored or creator submissions a day (Free 5 · Premium 15 · StatZ 50). StatZ is a numeric exception to the
+# Nov 2026 "12 for StatZ" rule: 12 would sit BELOW Premium's 15, and a top tier below the one under it is not a
+# ladder. Free and Premium stay as they were — Corey did not name them. If the whole ladder is to move to the
+# tier numbers (3 / 6 / 12), that is a cut for Premium and StatZ and needs his call; it refuses NEW submissions
+# only, and DailySubmission rows are kept as they are.
 SUBMISSION_DAILY_CAP = {"free": 5, "premium": 15, "statz": 50}
 
 
@@ -8900,7 +8898,7 @@ class SupportMessage(models.Model):
 
 
 class PaneOpen(models.Model):
-    """One split page (PaneZ) opened. Corey: a tier is how many times a day — Free 3, Premium 6, StatZ unlimited
+    """One split page (PaneZ) opened. Corey: a tier is how many times a day — Free 3, Premium 6, StatZ 12
     (`split_opens`), over a rolling 24 hours, counted here so a cleared browser does not reset it."""
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="pane_opens")
     app_key = models.CharField(max_length=32, blank=True, default="")

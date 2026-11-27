@@ -28,15 +28,24 @@ logger = logging.getLogger(__name__)
 STYLES = ["shonen", "shojo", "seinen", "chibi", "western comic", "noir", "watercolor"]
 PANELS_MIN, PANELS_MAX = 3, 8
 IDEA_MAX = 2000
-MAX_CHARACTERS = 10   # the most one drawing can keep consistent; StatZ's "unlimited" is this
+MAX_CHARACTERS = 10   # the most one drawing can keep consistent. StatZ's 12 is capped here: a page cannot hold more.
+
+
+def chars_for_tier(tier):
+    """Characters one page holds at a tier: the tier's cast size, never more than MAX_CHARACTERS.
+
+    Read per TIER rather than per member, so a refusal can say what the next tier holds on a page
+    (`higher_tiers_keep`). StatZ's 12 is capped here, so no refusal offers a page size it cannot have.
+    """
+    from .catalog import limits_for
+    cap = limits_for(tier).get("facez_faces")
+    return MAX_CHARACTERS if cap is None else min(cap, MAX_CHARACTERS)
 
 
 def chars_for(user):
-    """Characters on one page, by Corey's numbers (Free 3, Premium 6, StatZ every one up to MAX_CHARACTERS)."""
-    from .catalog import limits_for
+    """Characters on one page for this member."""
     from .models import membership_for
-    cap = limits_for(membership_for(user).tier).get("facez_faces")
-    return MAX_CHARACTERS if cap is None else min(cap, MAX_CHARACTERS)
+    return chars_for_tier(membership_for(user).tier)
 
 
 def _box(v):
@@ -132,8 +141,12 @@ class MangaPagesView(APIView):
         cap = chars_for(request.user)
         ids = [i for i in (d.get("character_ids") or []) if isinstance(i, int)]
         if len(ids) > cap:
-            return Response({"detail": f"Your tier puts {cap} characters on a page — pick fewer, or upgrade "
-                                       "(Premium 6; StatZ every one)."}, status=status.HTTP_403_FORBIDDEN)
+            from .catalog import higher_tiers_keep
+            from .models import membership_for
+            words = higher_tiers_keep(chars_for_tier, membership_for(request.user).tier)
+            return Response({"detail": f"Your tier puts {cap} characters on a page — pick fewer"
+                                       + (f", or upgrade ({words})." if words else ".")},
+                            status=status.HTTP_403_FORBIDDEN)
         chars = list(Character.objects.filter(user=request.user, id__in=ids))
         if not chars:
             return Response({"detail": "Pick at least one of your characters."}, status=status.HTTP_400_BAD_REQUEST)

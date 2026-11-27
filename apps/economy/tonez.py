@@ -2,7 +2,7 @@
 
 Kinds (`KINDS`): a track TONE and a track FX chain (both a DAW effect chain), and a MASTER (Mix
 ConnectZ's mastering settings). Corey: presets of each type get the same numbers, so saving FX never
-impedes on tones — each kind counts on its own against the tier's `tone_presets` (3 / 6 / unlimited).
+impedes on tones — each kind counts on its own against the tier's `tone_presets` (3 / 6 / 12).
 
 Corey: let members save tone presets, with the tier numbers, so they can make voice presets of
 their own. A preset is the chain a DAW track already carries — EQ, compressor, delay, reverb, filter,
@@ -10,7 +10,7 @@ gain — so a vocal sound dialled in once in Arsenal is one tap away on the next
 on another device. Nothing is rendered here and nothing is charged; it is a saved setting.
 
 What the server owns is the part that has to hold: whose it is, how many the tier keeps
-(`tone_presets`: Free 3, Premium 6, StatZ unlimited) and that a stored chain is the right SHAPE.
+(`tone_presets`: Free 3, Premium 6, StatZ 12) and that a stored chain is the right SHAPE.
 The parameter RANGES are the client's (`src/daw/plugins.js cleanInserts` clamps every value as a
 preset is applied), because they are properties of the effects, which live there; a second copy of
 every range here is the drift this repo keeps writing about. So this keeps: a known effect type,
@@ -294,10 +294,14 @@ class ToneZView(APIView):
         if existing is None:
             cap = cap_for(request.user)
             if cap is not None and len(mine) >= cap:
-                from .catalog import limits_for
-                nxt = limits_for("premium")["tone_presets"]
-                return Response({"detail": f"Your plan keeps {cap} {KINDS[kind]['label'].lower()} presets{' for this plugin' if KINDS[kind].get('per_plugin') else ''}. Update or delete one to make room, "
-                                           f"or upgrade (Premium keeps {nxt}; StatZ is unlimited).", "limit": cap},
+                from .catalog import higher_tiers_keep, limits_for
+                from .models import membership_for
+                words = higher_tiers_keep(lambda t: limits_for(t)["tone_presets"], membership_for(request.user).tier)
+                scope = " for this plugin" if KINDS[kind].get("per_plugin") else ""
+                return Response({"detail": f"Your plan keeps {cap} {KINDS[kind]['label'].lower()} presets{scope}. "
+                                           "Update or delete one to make room"
+                                           + (f", or upgrade ({words})." if words else "."),
+                                 "limit": cap},
                                 status=status.HTTP_403_FORBIDDEN)
             existing = TonePreset(owner=request.user)
         existing.kind, existing.name, existing.chain, existing.note = kind, name, chain, note
