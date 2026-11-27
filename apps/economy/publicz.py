@@ -37,6 +37,7 @@ from .models import (
     item_rating_median,
 )
 from .personaz import links_of, personas_of, rate_unit_of
+from .ratez import skills_of
 
 
 def public_post_dict(p, viewer=None):
@@ -94,16 +95,33 @@ def public_post_dict(p, viewer=None):
 from apps.economy.social import _pinned, cover_abs  # noqa: E402
 
 
+def _skill_name(s):
+    """The key a declared skill is rated under: trimmed and at most 60 characters, the cut
+    `postz.declared_skill_names` makes, because that is the width `SkillRating.skill` is stored at.
+    "" for anything that is not a named skill."""
+    if not isinstance(s, dict):
+        return ""
+    return str(s.get("name") or "").strip()[:60]
+
+
 def public_profile_dict(p, request=None):
     """A member's card as a stranger sees it — the work, not the person.
 
-    Skills carry names and rates, deliberately: what somebody does and what
-    they charge is the reason to look them up. Birthday, attractiveness,
-    location, substances and wallet are all absent — those exist for matching
-    inside the app and are nobody's business from outside it.
+    Skills carry names, rates and how each has been rated, deliberately: what
+    somebody does, what they charge and how it has landed are the reasons to look
+    them up. Birthday, attractiveness, location, substances and wallet are all
+    absent — those exist for matching inside the app and are nobody's business
+    from outside it.
     """
+    listed = personas_of(p)
+    # Every declared skill's rating, read once for the whole card. `skills_of` is THE rating
+    # (median, count, and the AI coach's share when the member opted in), so a card joins on the
+    # skill's name and never computes a second number. A card that names no skill reads none.
+    rated = {}
+    if any(_skill_name(s) for per in listed for s in (per.get("skills") or [])):
+        rated = {r["skill"]: r for r in skills_of(p.user)}
     personas = []
-    for persona in personas_of(p):
+    for persona in listed:
         skills = []
         for s in (persona.get("skills") or []):
             if isinstance(s, dict) and s.get("name"):
@@ -113,6 +131,13 @@ def public_profile_dict(p, request=None):
                     entry["rate_unit"] = rate_unit_of(s)
                 if s.get("genres"):
                     entry["genres"] = s["genres"]
+                # Unrated says so: `rating` None and `count` 0, never a 0 that reads as a verdict.
+                # `coached` says the AI coach is part of the number, so it is never unexplained.
+                key = _skill_name(s)
+                r = rated.get(key) if key else None
+                entry["rating"] = r["rating"] if r else None
+                entry["count"] = r["count"] if r else 0
+                entry["coached"] = bool(r and r.get("coach"))
                 skills.append(entry)
         personas.append({
             "key": persona.get("key", ""),

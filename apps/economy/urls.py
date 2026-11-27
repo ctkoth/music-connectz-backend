@@ -39,6 +39,7 @@ from .lilith_taskz import (LilithBoardView, LilithBudgetView, LilithGoAheadView,
                            LilithRoutineListView, LilithSponsorView,
                            LilithTaskCompleteView, LilithTaskDetailView,
                            LilithTaskListView)
+from .lilith_tags import LilithTagCreateView, LilithTagDetailView, LilithTagListView
 from .karmaz import KarmaRewardsView
 from .signbonus import SignBonusView
 from .interestz import InterestCatalogView, InterestSaveView, InterestScanView
@@ -660,6 +661,11 @@ urlpatterns = [
          name="economy-lilith-task"),
     path("lilith/tasks/<int:task_id>/complete/", LilithTaskCompleteView.as_view(),
          name="economy-lilith-task-complete"),
+    # Lilith tags — one more door on a task (lilith_tags.py). Owner-only, pays nothing.
+    path("lilith/tags/", LilithTagListView.as_view(), name="economy-lilith-tags"),
+    path("lilith/tag/", LilithTagCreateView.as_view(), name="economy-lilith-tag"),
+    path("lilith/tag/<int:tag_id>/", LilithTagDetailView.as_view(),
+         name="economy-lilith-tag-detail"),
     path("lilith/routines/", LilithRoutineListView.as_view(),
          name="economy-lilith-routines"),
     path("lilith/routines/<int:routine_id>/", LilithRoutineDetailView.as_view(),
