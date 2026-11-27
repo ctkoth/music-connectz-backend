@@ -1,7 +1,8 @@
 """Shops of members' own designs, printed on demand, and how a sale splits.
 
-A design shop listing is a PrintDesign: the member's mockup from the MercheZ designer, which product it goes
-on, and their MARKUP. The price a buyer pays is the printer's cost plus that markup, and the split is:
+A design shop listing is a PrintDesign: the member's mockup from the MercheZ designer and which product it goes
+on. Every design carries the same MARKUP, $10 over the printer's cost whatever the member's plan. The price a buyer
+pays is the printer's cost plus that markup, and the split is:
 
     printer's cost -> the printer (it makes and ships the item)
     dev tax        -> the platform, taken from the MARKUP only, at the BUYER's tier rate (as every MercheZ sale)
@@ -29,7 +30,11 @@ def rate_for(user):
 # Estimated printer cost per item, before shipping, in cents. Replace with the printer's live list once connected.
 BASE_CENTS = {"shirt": 1300, "hoodie": 2700, "towel": 2000, "bandana": 1200, "wavecap": 1200, "durag": 1200, "baseballcap": 1800, "mug": 900, "phonecase": 1300, "sticker": 300, "poster": 1200, "buckethat": 1800, "beanie": 1400, "tote": 1400}
 LABELS = {"shirt": "T-shirt", "hoodie": "Hoodie", "towel": "Towel", "bandana": "Bandana", "wavecap": "Wave cap", "durag": "Durag", "baseballcap": "Baseball cap", "mug": "Mug", "phonecase": "Phone case", "sticker": "Sticker", "poster": "Poster", "buckethat": "Bucket hat", "beanie": "Beanie", "tote": "Tote bag"}
-MAX_MARKUP = 10000        # $100 over cost
+# The markup every design carries over the printer's cost, whatever the member's plan (Corey's call). The plans differ
+# in the dev tax taken from it (models.DEV_TAX, at the BUYER's plan), not in the markup. A design listed before this
+# change still holds the markup it was listed with in the database; every read and every sale uses this one.
+MARKUP_CENTS = 1000
+MARKUP_NOTE = f"Every design carries the same ${MARKUP_CENTS // 100} markup, whatever your plan."
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 PER_DESIGNER = 200
 CHECKOUT_OPEN = False
@@ -51,28 +56,39 @@ def designer_range(product, markup_cents):
     return {"min": min(keeps), "max": max(keeps)}
 
 
+def _standard(raw):
+    """True when a client sent no markup, or the one markup every design carries. Anything else is refused, so no
+    client can list a design at a markup the rest of the shop does not carry."""
+    if raw in (None, ""):
+        return True
+    try:
+        return int(raw) == MARKUP_CENTS
+    except (TypeError, ValueError):
+        return False
+
+
 def _dict(d, request):
     rate = rate_for(request.user)
     out = {"id": d.id, "designer": d.designer.username, "product": d.product, "product_label": LABELS.get(d.product, d.product),
            "color": d.color, "title": d.title, "image": request.build_absolute_uri(d.image.url) if d.image else "",
-           "markup_cents": d.markup_cents, "mine": d.designer_id == request.user.id,
-           "split": split(d.product, d.markup_cents, rate)}
+           "markup_cents": MARKUP_CENTS, "mine": d.designer_id == request.user.id,
+           "split": split(d.product, MARKUP_CENTS, rate)}
     if out["mine"]:
-        out["designer_keeps"] = designer_range(d.product, d.markup_cents)
+        out["designer_keeps"] = designer_range(d.product, MARKUP_CENTS)
     return out
 
 
 def _meta():
-    return {"base_cents": BASE_CENTS, "labels": LABELS, "max_markup_cents": MAX_MARKUP, "checkout_open": CHECKOUT_OPEN,
+    return {"base_cents": BASE_CENTS, "labels": LABELS, "markup_cents": MARKUP_CENTS, "checkout_open": CHECKOUT_OPEN,
             "estimate_note": ESTIMATE_NOTE, "closed_note": CLOSED_NOTE, "own_art_rule": OWN_ART_RULE,
             "dev_tax": {"free": DEV_TAX[TIER_FREE], "premium": DEV_TAX[TIER_PREMIUM], "statz": DEV_TAX[TIER_STATZ]},
-            "split_rule": "Buyer pays the printer's cost plus your markup. The printer gets its cost; the dev tax comes out of "
-                          "your markup at the buyer's plan rate; you keep the rest."}
+            "split_rule": f"Buyer pays the printer's cost plus the ${MARKUP_CENTS // 100} markup on every design. The printer "
+                          "gets its cost; the dev tax comes out of the markup at the buyer's plan rate; you keep the rest."}
 
 
 class ShopView(APIView):
     """GET shops (?designer=<username>, ?mine=1); POST lists a design (multipart: image, product, color, title,
-    markup_cents, own_art)."""
+    own_art; markup_cents is optional and, if sent, must be the standard markup)."""
 
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
@@ -95,12 +111,8 @@ class ShopView(APIView):
         title = str(d.get("title", "")).strip()[:120]
         if not title:
             return Response({"detail": "Give the design a name."}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            markup = int(d.get("markup_cents"))
-        except (TypeError, ValueError):
-            return Response({"detail": "Set your markup in cents."}, status=status.HTTP_400_BAD_REQUEST)
-        if not 0 <= markup <= MAX_MARKUP:
-            return Response({"detail": f"Your markup can be $0 to ${MAX_MARKUP // 100}."}, status=status.HTTP_400_BAD_REQUEST)
+        if not _standard(d.get("markup_cents")):
+            return Response({"detail": MARKUP_NOTE}, status=status.HTTP_400_BAD_REQUEST)
         img = request.FILES.get("image")
         if not img or not str(getattr(img, "content_type", "")).startswith("image/") or img.size > MAX_IMAGE_BYTES:
             return Response({"detail": "Add the design's picture (an image under 8 MB)."}, status=status.HTTP_400_BAD_REQUEST)
@@ -110,12 +122,12 @@ class ShopView(APIView):
         if not (len(color) == 7 and color.startswith("#") and all(c in "0123456789abcdefABCDEF" for c in color[1:])):
             color = "#111111"
         pd = PrintDesign.objects.create(designer=request.user, product=product, color=color, title=title,
-                                        image=img, markup_cents=markup, own_art=True)
+                                        image=img, markup_cents=MARKUP_CENTS, own_art=True)
         return Response({"design": _dict(pd, request), **_meta()}, status=status.HTTP_201_CREATED)
 
 
 class ShopDesignView(APIView):
-    """PATCH your own design's markup/title; DELETE takes it out of your shop."""
+    """PATCH your own design's title (its markup is the same on every design); DELETE takes it out of your shop."""
 
     permission_classes = [IsAuthenticated]
     parser_classes = [JSONParser, FormParser]
@@ -128,13 +140,9 @@ class ShopDesignView(APIView):
         if not pd:
             return Response({"detail": "Not one of your designs."}, status=status.HTTP_404_NOT_FOUND)
         if "markup_cents" in request.data:
-            try:
-                m = int(request.data["markup_cents"])
-            except (TypeError, ValueError):
-                return Response({"detail": "Set your markup in cents."}, status=status.HTTP_400_BAD_REQUEST)
-            if not 0 <= m <= MAX_MARKUP:
-                return Response({"detail": f"Your markup can be $0 to ${MAX_MARKUP // 100}."}, status=status.HTTP_400_BAD_REQUEST)
-            pd.markup_cents = m
+            if not _standard(request.data["markup_cents"]):
+                return Response({"detail": MARKUP_NOTE}, status=status.HTTP_400_BAD_REQUEST)
+            pd.markup_cents = MARKUP_CENTS
         if str(request.data.get("title", "")).strip():
             pd.title = str(request.data["title"]).strip()[:120]
         pd.save()

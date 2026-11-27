@@ -57,7 +57,7 @@ class ShopApiTests(TestCase):
 
     def test_bad_product_and_markup_refused(self):
         self.assertEqual(self.post(product="teapot").status_code, 400)
-        self.assertEqual(self.post(markup_cents=str(merchshop.MAX_MARKUP + 1)).status_code, 400)
+        self.assertEqual(self.post(markup_cents=str(merchshop.MARKUP_CENTS + 500)).status_code, 400)
 
     def test_others_see_it_without_the_designers_range(self):
         self.post()
@@ -77,7 +77,8 @@ class ShopApiTests(TestCase):
         pk = self.post().data["design"]["id"]
         o = APIClient(); o.force_authenticate(self.b)
         self.assertEqual(o.delete(f"/api/economy/merch/shop/{pk}/").status_code, 404)
-        self.assertEqual(self.c.patch(f"/api/economy/merch/shop/{pk}/", {"markup_cents": 500}, format="json").data["design"]["markup_cents"], 500)
+        self.assertEqual(self.c.patch(f"/api/economy/merch/shop/{pk}/", {"markup_cents": 500}, format="json").status_code, 400)
+        self.assertEqual(self.c.patch(f"/api/economy/merch/shop/{pk}/", {"title": "Blue tee"}, format="json").data["design"]["title"], "Blue tee")
         self.assertEqual(self.c.delete(f"/api/economy/merch/shop/{pk}/").status_code, 204)
         self.assertFalse(PrintDesign.objects.get(pk=pk).active)
 
@@ -93,3 +94,33 @@ class ProductListTests(TestCase):
 class RateTests(TestCase):
     def test_coreys_rates_premium_six(self):
         self.assertEqual((DEV_TAX[TIER_FREE], DEV_TAX[TIER_PREMIUM], DEV_TAX[TIER_STATZ]), (0.10, 0.06, 0.03))
+
+
+class MarkupTests(TestCase):
+    """Every design carries the same $10 markup. The plans differ in the dev tax taken from it, not in the markup."""
+
+    def setUp(self):
+        U = get_user_model()
+        self.a = U.objects.create_user("cara", password="pw12345!x")
+        self.c = APIClient(); self.c.force_authenticate(self.a)
+
+    def test_the_markup_is_ten_dollars(self):
+        self.assertEqual(merchshop.MARKUP_CENTS, 1000)
+        self.assertEqual(merchshop.split("shirt", merchshop.MARKUP_CENTS, DEV_TAX[TIER_FREE])["price"], 2300)
+
+    def test_the_designer_keeps_the_ten_less_the_tier_tax(self):
+        keeps = {t: merchshop.split("shirt", merchshop.MARKUP_CENTS, DEV_TAX[t])["designer"]
+                 for t in (TIER_FREE, TIER_PREMIUM, TIER_STATZ)}
+        self.assertEqual(keeps, {TIER_FREE: 900, TIER_PREMIUM: 940, TIER_STATZ: 970})
+
+    def test_an_older_listing_still_shows_ten_dollars(self):
+        PrintDesign.objects.create(designer=self.a, product="shirt", title="Old", image="old.png", markup_cents=2500, own_art=True)
+        d = self.c.get("/api/economy/merch/shop/?mine=1").data["designs"][0]
+        self.assertEqual(d["markup_cents"], 1000)
+        self.assertEqual(d["split"]["price"], 2300)
+
+    def test_a_listing_with_no_markup_gets_the_standard_one(self):
+        r = self.c.post("/api/economy/merch/shop/", {"product": "shirt", "title": "No markup sent", "own_art": "1",
+                                                     "image": png(), "color": "#111111"}, format="multipart")
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data["design"]["markup_cents"], 1000)
