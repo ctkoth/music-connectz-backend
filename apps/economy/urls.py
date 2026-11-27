@@ -102,6 +102,8 @@ from .imagez_rate import ImageZRateView
 from .sharez import ShareZDetailView, ShareZView
 from .tonez import ToneZDetailView, ToneZView
 from .lilith_auto import LilithAutoView
+from .lilith_voice import LilithVoiceView
+from .lilith_suggest import LilithNotNowView
 from .ladders import LaddersView
 from .animez import AnimeConnectZView, AnimePlanView, AnimeRenderView, AnimeWorkView
 from .videostitch import VideoStitchDetailView, VideoStitchView
@@ -652,6 +654,8 @@ urlpatterns = [
     path("lilith/tasks/", LilithTaskListView.as_view(), name="economy-lilith-tasks"),
     path("lilith/starters/", LilithStarterAddView.as_view(), name="economy-lilith-starters"),
     path("lilith/auto/", LilithAutoView.as_view(), name="economy-lilith-auto"),
+    path("lilith/voice/", LilithVoiceView.as_view(), name="economy-lilith-voice"),
+    path("lilith/suggest/not-now/", LilithNotNowView.as_view(), name="economy-lilith-not-now"),
     path("lilith/move/", LilithMoveView.as_view(), name="economy-lilith-move"),
     path("lilith/budget/", LilithBudgetView.as_view(), name="economy-lilith-budget"),
     path("lilith/tasks/<int:task_id>/goahead/", LilithGoAheadView.as_view(), name="economy-lilith-goahead"),

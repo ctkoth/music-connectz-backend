@@ -27,15 +27,20 @@ from datetime import timedelta
 
 from django.core.cache import cache
 from django.utils import timezone
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from . import lilith_actions as A
 from . import lilith_starters as ST
+from . import lilith_voice as V
 
 WINDOW_DAYS = 14
 HABIT_AT = 3           # this many in the window and it is a habit waiting to be a streak
 MAX_SUGGESTIONS = 5
 MAX_TASK_SUGGESTIONS = 6
 CACHE_SECONDS = 600
+NOT_NOW_DAYS = 14      # "Not now" sets a suggestion aside this long, then it may come back
 
 # persona key (letters only, lower-case — `sentencez.persona_keys` form) → starter routines, in
 # the order they matter to that persona. Both the short key and the long name are listed because a
@@ -202,11 +207,13 @@ def suggest(user, on_board_routines=(), on_board_tasks=(), task_limit=MAX_TASK_S
     `on_board_*` are the template keys already on the member's board; those are dropped here, so
     a stale cache never re-offers what they have added."""
     have = set(on_board_routines)
+    skip = not_now_keys(user)                      # what the member set aside: not offered for a while
+    style = V.style_for(user)                      # the voice she speaks in to this member (lilith_voice)
     counts = recent_counts(user)
     scored = {}     # key → (score, reason_kind, why)
 
     def offer(key, score, kind, why):
-        if key in have or not ST.routine_by_key(key):
+        if key in have or f"routine:{key}" in skip or not ST.routine_by_key(key):
             return
         if key not in scored or score > scored[key][0]:
             scored[key] = (score, kind, why)
@@ -247,7 +254,7 @@ def suggest(user, on_board_routines=(), on_board_tasks=(), task_limit=MAX_TASK_S
     tasks = {}
 
     def offer_task(key, score, kind, why):
-        if key in have_t or not ST.task_by_key(key):
+        if key in have_t or f"task:{key}" in skip or not ST.task_by_key(key):
             return
         if key not in tasks or score > tasks[key][0]:
             tasks[key] = (score, kind, why)
@@ -294,7 +301,8 @@ def suggest(user, on_board_routines=(), on_board_tasks=(), task_limit=MAX_TASK_S
 
     ranked = sorted(scored.items(), key=lambda kv: -kv[1][0])[:MAX_SUGGESTIONS]
     if not ranked:                                   # a brand-new member with no signal at all
-        ranked = [(k, (1, "start", "A small place to begin.")) for k in DEFAULTS if k not in have][:MAX_SUGGESTIONS]
+        ranked = [(k, (1, "start", "A small place to begin.")) for k in DEFAULTS
+                  if k not in have and f"routine:{k}" not in skip][:MAX_SUGGESTIONS]
 
     inst = instruments_of(user)
     main = inst[0][0] if inst else ""
@@ -305,11 +313,40 @@ def suggest(user, on_board_routines=(), on_board_tasks=(), task_limit=MAX_TASK_S
         out.append({"kind": "routine", "key": key, "title": r["title"], "note": r["note"],
                     "cadence": r["cadence"], "app_key": app_key, "target": r["target"],
                     "action": r.get("action", ""), "goal": r.get("goal", 1),
-                    "why": why, "because": kind})
+                    "why": why, "because": kind, "say": V.say(style, kind, why)})
     for key, (score, kind, why) in sorted(tasks.items(), key=lambda kv: -kv[1][0])[:task_limit]:
         t = ST.task_by_key(key)
         app_key = main if (main and key in ST.INSTRUMENT_AWARE) else t["app_key"]
         out.append({"kind": "task", "key": key, "title": t["title"], "note": t["note"], "cadence": "",
                     "app_key": app_key, "target": t["target"], "action": t.get("action", ""),
-                    "goal": t.get("goal", 1), "why": why, "because": kind})
+                    "goal": t.get("goal", 1), "why": why, "because": kind, "say": V.say(style, kind, why)})
     return out
+
+
+def not_now_keys(user):
+    """What the member set aside with "Not now" in the last NOT_NOW_DAYS, as "routine:<key>" / "task:<key>"."""
+    from .models import OfferDismissal
+    since = timezone.now() - timedelta(days=NOT_NOW_DAYS)
+    rows = OfferDismissal.objects.filter(user=user, offer_key__startswith="lilith:", created_at__gte=since)
+    return {k[len("lilith:"):] for k in rows.values_list("offer_key", flat=True)}
+
+
+class LilithNotNowView(APIView):
+    """POST /api/economy/lilith/suggest/not-now/ {kind, key} — set one suggestion aside for NOT_NOW_DAYS.
+    Only a suggestion Lilith could make can be set aside; anything else is a 404. Nothing is said or pushed,
+    and it comes back on its own once the wait is over."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from .models import OfferDismissal
+        body = request.data or {}
+        kind = str(body.get("kind") or "")
+        key = str(body.get("key") or "")
+        known = (kind == "routine" and ST.routine_by_key(key)) or (kind == "task" and ST.task_by_key(key))
+        if not known:
+            return Response({"detail": "No such suggestion."}, status=404)
+        offer_key = f"lilith:{kind}:{key}"
+        # Pressing it again starts the wait afresh: the row's time is moved, never a second row made.
+        if not OfferDismissal.objects.filter(user=request.user, offer_key=offer_key).update(created_at=timezone.now()):
+            OfferDismissal.objects.create(user=request.user, offer_key=offer_key)
+        return Response({"dismissed": True, "back_in_days": NOT_NOW_DAYS})

@@ -38,6 +38,7 @@ from django.utils import timezone
 # imports models.py.
 from .models import (BUCKETS, KINDS, LilithPayout, LilithRoutine,  # noqa: E402
                      LilithSponsorship, LilithTask, SOURCES)
+from . import lilith_voice  # noqa: E402  (how she talks to a member; no import back, so no cycle)
 
 
 # ------------------------------------------------------------- the economy
@@ -202,6 +203,9 @@ def tier_limits(tier):
 VOICE = {
     "greet_morning": "Morning. Three things matter today — the rest can wait.",
     "greet_evening": "Late one. Pick the smallest thing and let the rest go.",
+    # Her greeting names the member by their own handle (ProfileZ username) — the one thing about them it names.
+    "greet_morning_named": "Morning, {name}. Three things matter today — the rest can wait.",
+    "greet_evening_named": "Late one, {name}. Pick the smallest thing and let the rest go.",
     "empty": "Nothing here. That's allowed.",
     "done_one": "Good. That one's closed.",
     "combo": "Three today. You're in it now.",
@@ -855,11 +859,16 @@ def starters_for(user, tasks, routines):
     }
 
 
-def _greeting():
+def _greeting(user=None):
     """Warm, brief, and never a scold. Hour is the server's, which is wrong for
     somebody in another timezone — so the copy never claims a clock, only a
-    mood, and being wrong about that costs nothing."""
-    return VOICE["greet_morning"] if timezone.localtime().hour < 17 else VOICE["greet_evening"]
+    mood, and being wrong about that costs nothing. It names the member by their
+    own handle when they have one, and nothing else about them (HealthZ is never read here)."""
+    morning = timezone.localtime().hour < 17
+    name = (getattr(user, "username", "") or "").strip() if user is not None else ""
+    if name:
+        return VOICE["greet_morning_named" if morning else "greet_evening_named"].format(name=name)
+    return VOICE["greet_morning"] if morning else VOICE["greet_evening"]
 
 
 def board(user):
@@ -890,7 +899,7 @@ def board(user):
     trashed_routines = list(LilithRoutine.objects.filter(user=user, trashed_at__isnull=False))
     since = timezone.now() - timedelta(hours=24)
     return {
-        "said": _greeting() if open_list else VOICE["empty"],
+        "said": _greeting(user) if open_list else VOICE["empty"],
         "tier": tier,
         "limits": limits,
         "buckets": buckets,
@@ -902,6 +911,8 @@ def board(user):
         "swept": swept,
         "actions": A.catalogue(),
         "suggested": _suggested(user, routines),
+        # How she talks to this member: the default for everyone, a StatZ member's own choice (lilith_voice).
+        "voice": lilith_voice.state(user),
         "auto": lilith_auto.state(user, auto_added),
         "starters": starters_for(user, [t for t in tasks if t.bucket != "trash"], routines),
         "rewards": rewards_table(),

@@ -8804,6 +8804,16 @@ class LilithAuto(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
 
+class LilithVoice(models.Model):
+    """Which way Lilith talks to this member when she suggests something (`lilith_voice`). Everyone hears the
+    default; only a StatZ member can choose another, and a choice survives a lapse (it rests, and the default
+    is what they hear meanwhile). One row per member, made the first time they choose."""
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="lilith_voice")
+    style = models.CharField(max_length=12, default="lilith")
+    updated_at = models.DateTimeField(auto_now=True)
+
+
 class AnimeWork(models.Model):
     """An Anime ConnectZ piece: the member's idea and characters planned into shots (editable before
     anything renders), then each shot rendered as an ordinary `VideoWork` (priced, held and refunded
