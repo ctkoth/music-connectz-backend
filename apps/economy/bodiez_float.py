@@ -8,7 +8,7 @@ The session itself has always lived on the server (an open `BodieZSession`), and
 while another is in front (`recordingHold.js` on the client). This module is the number that goes with the
 choice, and nothing else:
 
-* **A tier says how OFTEN, never whether.** Free 3, Premium 6, StatZ unlimited sessions a rolling 24 hours
+* **A tier says how OFTEN, never whether.** Free 3, Premium 6, StatZ 12 sessions a rolling 24 hours
   (`catalog.TIER_LIMITS["bodiez_float"]`, Corey's numbers). The session, its rest clock and its beep run in BodieZ at
   every tier; what a tier buys is how many sessions a day are kept running on screen over other apps. Past the number
   the session is untouched — the member reopens BodieZ and it is exactly where they left it.

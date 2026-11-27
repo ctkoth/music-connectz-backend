@@ -15,7 +15,7 @@ Three more things it does differently from what shipped:
 
 * **Free gets a board.** It was Premium-only, which is a limit that says
   "whether" — the one shape the tier rules forbid. Boards are Corey's numbers
-  (`BOARDS`: Free 3, Premium 6, StatZ unlimited); a member over the count keeps
+  (`BOARDS`: Free 3, Premium 6, StatZ 12); a member over the count keeps
   every board and only a NEW one is refused. The count is served before the
   New board button, not discovered by pressing it.
 * **Deleting is soft, and says so.** A board or card is stamped `deleted_at`
@@ -36,7 +36,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 
-from apps.economy.catalog import over_char_limit
+from apps.economy.catalog import higher_tiers_keep, over_char_limit
 from apps.economy.models import (
     TIER_FREE,
     TIER_PREMIUM,
@@ -52,7 +52,7 @@ from apps.economy.models import (
 
 User = get_user_model()
 
-BOARDS = {TIER_FREE: 3, TIER_PREMIUM: 6}          # StatZ (and debug): unlimited
+BOARDS = {TIER_FREE: 3, TIER_PREMIUM: 6, TIER_STATZ: 12}   # debug is not listed, so it is unlimited
 FREE_BOARDS = BOARDS[TIER_FREE]
 DEFAULT_COLUMNS = [
     ("draft", "Drafts"),
@@ -245,10 +245,10 @@ class SondayBoardViewSet(ViewSet):
     def create(self, request):
         q = quota_for(request.user)
         if q["left"] is not None and q["left"] <= 0:
+            words = higher_tiers_keep(BOARDS.get, q["tier"])
             return Response({
-                "detail": (f"{q['per_tier']} boards is your plan's ceiling — "
-                           + (f"Premium keeps {BOARDS[TIER_PREMIUM]}, StatZ as many as you like." if q["tier"] == TIER_FREE
-                              else "StatZ keeps as many as you like.")
+                "detail": (f"{q['per_tier']} boards is your plan's ceiling"
+                           + (f" — {words}." if words else ".")
                            + " Every board you have stays."),
                 "quota": q,
             }, status=status.HTTP_403_FORBIDDEN)

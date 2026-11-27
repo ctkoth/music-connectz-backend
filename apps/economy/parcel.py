@@ -23,7 +23,7 @@ newsletter into spam with our domain's name on it:
   with no way out is the definition of the thing spam filters exist for, and
   one sender doing it costs every member's mail its inbox.
 * **How often is a ladder.** `catalog.PARCEL_PER_WEEK` — Free 1, Premium 7,
-  StatZ 21 per rolling week — served with the form. Nothing capped it before:
+  StatZ 12 per rolling week — served with the form. Nothing capped it before:
   a member could DM 5,000 people in a loop.
 * **The body answers to the tier's character limit**, like every other
   member-authored field.

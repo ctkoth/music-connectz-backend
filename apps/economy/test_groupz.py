@@ -724,7 +724,7 @@ class CustomGroupLadderTests(TestCase):
         from .models import TIER_FREE, TIER_PREMIUM, TIER_STATZ
         self.assertEqual(
             [limits_for(t)["custom_groups"] for t in (TIER_FREE, TIER_PREMIUM, TIER_STATZ)],
-            [1, 5, 20])
+            [1, 5, 12])
 
     def test_premium_may_set_an_icon(self):
         from .models import TIER_PREMIUM, Group

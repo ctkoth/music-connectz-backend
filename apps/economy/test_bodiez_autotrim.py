@@ -1,4 +1,4 @@
-"""Auto-trim is counted by tier (Free 3, Premium 6, StatZ unlimited lifts a rolling 24h), a lift counts once per
+"""Auto-trim is counted by tier (Free 3, Premium 6, StatZ 12 lifts a rolling 24h), a lift counts once per
 session, a refusal writes nothing and says how to do it by hand, and only a live session of your own is trimmed."""
 from datetime import timedelta
 
@@ -31,7 +31,7 @@ class AutoTrimTests(TestCase):
                            {"exercise_ids": ids}, format="json")
 
     def test_the_tier_numbers_are_coreys(self):
-        self.assertEqual([limits_for(t)["bodiez_autotrim"] for t in ("free", "premium", "statz")], [3, 6, None])
+        self.assertEqual([limits_for(t)["bodiez_autotrim"] for t in ("free", "premium", "statz")], [3, 6, 12])
 
     def test_the_number_is_stated_before_anything_is_trimmed(self):
         d = self.c.get("/api/economy/bodiez/autotrim/").json()
@@ -52,13 +52,15 @@ class AutoTrimTests(TestCase):
         self.assertEqual(r["granted"], [1])
         self.assertEqual(r["autotrim"]["used"], 1)
 
-    def test_premium_six_statz_unlimited(self):
+    def test_premium_six_statz_twelve(self):
         self.tier("premium")
         self.assertEqual(self.trim(list(range(1, 9))).json()["granted"], list(range(1, 7)))
         self.tier("statz")
+        # Six were counted on Premium above, so StatZ's twelve leave six for 9..24.
         r = self.trim(list(range(9, 25))).json()
-        self.assertEqual(r["refused"], [])
-        self.assertIsNone(r["autotrim"]["limit"])
+        self.assertEqual(r["granted"], list(range(9, 15)))
+        self.assertEqual(r["refused"], list(range(15, 25)))
+        self.assertEqual(r["autotrim"]["limit"], 12)
 
     def test_the_window_rolls(self):
         self.trim([1, 2, 3])

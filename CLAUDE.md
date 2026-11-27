@@ -1595,7 +1595,7 @@ The three, and what each looked like from the inside:
 - **`PROMPT_ALLOWANCE["free"]` was 1** — one AI run a day across the coach, OCC,
   DirectZ and every Gemini surface combined. The ANONYMOUS trial door hands a
   stranger the same one (`TRIAL_PER_IP_HOURS`), so registering bought literally
-  nothing on the axis people arrive for. It was 3, and is 4 now (below).
+  nothing on the axis people arrive for. The audit raised it to 3, Oct 2026 set 4 (below), and Corey's Nov 2026 numbers set 3.
 - **Passive Energy was `reach_median // divisor` with no floor**, and
   `reach_median` is 0 until an external account is VERIFIED — so the app
   published "⚡ regenerates hourly at reach ÷ tier", showed a new member their
@@ -1634,11 +1634,11 @@ So, when adding or moving a limit:
 - **Never lower a live limit without a plan for the members already over it** —
   the `TIER_LIMITS` note says this about storage and it is true of all of them.
 
-### The free daily prompts are 4 / 7 / 12 (Corey's call, Oct 2026)
+### The free daily prompts are 3 / 6 / 12 (Corey's call, Nov 2026)
 
-`PROMPT_ALLOWANCE` is Free 4, Premium 7, StatZ 12. The ceiling, for a member who
-spends every free prompt every day at `DAILY_PROMPT_MAX_CENTS` (3c): $3.60/mo for
-Free, $6.30 of Premium's $7, $10.80 of StatZ's $15 — and $10.80 against a founding
+`PROMPT_ALLOWANCE` is Free 3, Premium 6, StatZ 12 (Oct 2026 was 4 / 7 / 12). The ceiling, for a member who
+spends every free prompt every day at `DAILY_PROMPT_MAX_CENTS` (3c): $2.70/mo for
+Free, $5.40 of Premium's $7, $10.80 of StatZ's $15 — and $10.80 against a founding
 month's $10.50, so a founding member who maxes it daily costs a little more than they
 pay. At the coach's ~2.75c a take the YEARLY founding seat ($105/yr, $8.47/mo after
 Stripe) is $1.43/month short for a member who maxes it daily — 50 seats, so ~$72/mo at
@@ -2268,7 +2268,7 @@ A member's `links` are their portfolio — the tracks, videos, pages and shops t
 they are — and they are the one thing on a profile a visitor came for. They had a flat
 **silent 50**: `clean_profile_field` cut the list there and answered 200, so somebody who
 pasted 60 saw a clean save and ten of them gone. `catalog.TIER_LIMITS["profile_links"]`
-is the ladder now (**Free 25, Premium 100, StatZ 300**) and it is **a recommendation,
+is the ladder now (**Free 25, Premium 100, StatZ unlimited**). StatZ is unlimited rather than 12, because 12 would sit below Premium's 100. It is **a recommendation,
 Corey's to move**.
 
 - **Generous at the bottom on purpose.** The work is the reason anybody visits a profile,
@@ -3339,9 +3339,8 @@ during a sample stays in the session and keeps playing and bouncing; only drawin
 
 ## Releases a month are the same numbers (Corey, Nov 2026)
 
-`releasez.PER_MONTH` is Free 3, Premium 6, StatZ unlimited tracks a calendar month (a release is one
-track), replacing 1 / 5 / 10. `quota_for` adds `next_unlimited` so Premium is told StatZ has no cap
-(None in `next_per_month` alone could not say that). LabelGrid is the planned distributor API; until
+`releasez.PER_MONTH` is Free 3, Premium 6, StatZ 12 tracks a calendar month (a release is one
+track), replacing 1 / 5 / 10. StatZ was unlimited until Corey's Nov 2026 numbers. `quota_for` adds `next_unlimited` only where the next plan has no number; none does now, so a refusal names StatZ's 12 (a None in `next_per_month` alone could not say that). LabelGrid is the planned distributor API; until
 then a submission still goes to the owner's queue, as `HOW_IT_WORKS` says.
 
 ## Lilith adds tasks by herself on StatZ, from personas and activity (Corey's call)
@@ -3380,20 +3379,20 @@ voiced dialogue. A client can never assign a render to a shot (PATCH clears `wor
 Each row READS the constant that gates the thing (`TIER_LIMITS`, `PROMPT_ALLOWANCE`, `MASTERING`, releases, Lilith,
 OCC, Sonday, `features.FEATURES`, the StatZ features), so the table MembershipZ draws and the gate cannot disagree.
 `test_ladders` fails when a `TIER_LIMITS` key, a plan feature or a StatZ feature has no row, and when a row's tab is
-not a real tab. Count rows carry `coreys_numbers` (Free 3 / Premium 6 / StatZ unlimited, true or false) so the limits
+not a real tab. Count rows carry `coreys_numbers` (Free 3 / Premium 6 / StatZ 12, true; false where StatZ is unlimited or a named exception) so the limits
 that differ are visible in one place; moving any of them is Corey's call, not this list's. Open logged-out; `mine` says
 which column is the caller's.
 
-## Lilith routines and Sonday boards are 3 / 6 / unlimited (Corey, Nov 2026)
+## Lilith routines and Sonday boards are 3 / 6 / 12 (Corey, Nov 2026)
 
-`lilith_taskz.tier_limits` routines and `sonday.BOARDS` are Free 3, Premium 6, StatZ unlimited (None;
+`lilith_taskz.tier_limits` routines and `sonday.BOARDS` are Free 3, Premium 6, StatZ 12 (Corey's numbers;
 `routines_full` is the one comparison). Premium routines dropped from 12 and Sonday Free rose from 1. A
 ceiling only refuses a NEW routine or board: anybody already over keeps every one, running and editable.
 Sonday's quota serves `next_tier` / `next_per_tier` so the screen states the next plan's number.
 
 ## EQ bands are the tier numbers (Corey, Nov 2026)
 
-`TIER_LIMITS["eq_bands"]` is Free 3, Premium 6, StatZ unlimited, for TrackZ's channel strip and every DAW's EQ effect
+`TIER_LIMITS["eq_bands"]` is Free 3, Premium 6, StatZ 12, for TrackZ's channel strip and every DAW's EQ effect
 (the frontend's `src/eqbands.js` is the one band model; 32 is the engine's bound). The low cut is a filter, not a band.
 Applied on the device, like tracks per session; an EQ over the count keeps playing every band. `tonez.clean_chain` keeps
 an EQ insert's `bands` (known type, finite f / gain / q, at most `MAX_BANDS`), so a saved tone keeps every band it had.
@@ -3403,13 +3402,13 @@ an EQ insert's `bands` (known type, finite f / gain / q, at most `MAX_BANDS`), s
 `TIER_LIMITS["album_songs"]` is Free 3, Premium 6, StatZ unlimited — how many songs one album master brings to one
 loudness and tone (the frontend's `src/mastering/album.js` does the work on the device; nothing is uploaded or charged).
 `tonez.KINDS["strip"]` is a TrackZ channel strip preset (`clean_strip`: low cut, EQ bands, compressor; the shape here,
-the ranges in the frontend's `strip.js`), with its own 3 / 6 / unlimited room like every other kind.
+the ranges in the frontend's `strip.js`), with its own 3 / 6 / 12 room like every other kind.
 
 ## Songs per album are the tier numbers + 5, and Premium may write in its own voices (Corey, Nov 2026)
 
 `album_songs` is Free 8, Premium 11, StatZ unlimited (Corey: the tier numbers plus five). `CUSTOM_VOICE_LIMITS` is
-Free 0, Premium 6, StatZ unlimited (None; `custom_voice_limit` returns `VOICES_MAX`, 50, so comparisons stay `>=`, and
-VoiceZ serves `voices: None` + `unlimited`). Corey's voice and the built-in voices stay every tier's. Premium was 0 and
+Free 0, Premium 6, StatZ 12 (Corey, Nov 2026; the owner's tier is None, and `custom_voice_limit` returns `VOICES_MAX`, 50, for it, so comparisons stay `>=`, and
+VoiceZ serves `voices` and `unlimited`, the latter true only for the owner's tier). Corey's voice and the built-in voices stay every tier's. Before this, Premium was 0 and
 StatZ 20; nobody loses a voice.
 
 ## Mix ConnectZ AI listen (`mixz_ai.py`, `GET/POST mixz/ai/`)
@@ -3444,7 +3443,7 @@ the letters will do before the voice is saved. Behaviour only: it never changes 
 
 `apps/economy/bodiez_float.py`, `BodieZSession.floated_at` (migration 0243, additive). A member keeps the session they are
 logging running on screen while other apps are open (the client holds BodieZ mounted and draws a bar). **Free 3, Premium 6,
-StatZ unlimited sessions a rolling 24 hours** (`TIER_LIMITS["bodiez_float"]`, a recommendation of Corey's usual numbers for
+StatZ 12 sessions a rolling 24 hours** (`TIER_LIMITS["bodiez_float"]`, Corey's numbers (Nov 2026) for
 "how many times used", reversible in one line; it has a `ladders.py` row).
 
 - **A tier says how often, never whether.** The session, its rest clock and its beep run in BodieZ at every tier; past the
@@ -3506,8 +3505,8 @@ your numbers", so these are recommendations he approved, reversible in `catalog.
 - **Opus and Fable coach takes cost `ENGINE_PROMPTZ` (6 and 12) and the free daily prompts never cover them**
   (`daily_prompt_covers` refuses them; Haiku and Sonnet stay covered). Premium on Opus every day was ~$10/mo of model
   fees against $6.50 kept. `crosspost.coach_price` and the coach GET read `engine_cost`, so the price is on the button.
-- **Not touched, on purpose:** the tier ladders (3/6/unlimited), the daily prompts, $7/$60, StatZ unlimited characters.
-  They are not where the money goes. Still open: StatZ storage (100 GB) on Render's disk costs ~$25/mo if filled; a
+- **Not touched, on purpose:** Premium's $7/mo and $60/yr, and StatZ's unlimited character limit. Both are Corey's fixed numbers, and neither is where the money goes. The ladders are Corey's Nov 2026 numbers, read from `catalog.py`.
+  Still open: StatZ storage (100 GB) on Render's disk costs ~$25/mo if filled; a
   bucket (R2) is the fix and needs Corey's account.
 
 ## The onboarding bonus pays for rows, not for the screen's word
@@ -3613,7 +3612,7 @@ viewer may open it, and the coach's read built the post-read-card way (`share_pa
   the coach, a FileZ file or a journal entry is never handed to anybody else; only the owner sees their kept file.
 - Nothing from a request reaches it; the paid gear advice (`upgrades`) and transcribed lyrics are not served. Free.
 
-## Auto-trim a lift you moved on from — Free 3, Premium 6, StatZ unlimited a day (`bodiez_autotrim.py`)
+## Auto-trim a lift you moved on from — Free 3, Premium 6, StatZ 12 a day (`bodiez_autotrim.py`)
 
 Logging a set on one lift trims any lift left part-done to the sets done (3/5 reads 3/3), today only. The WHEN is the
 frontend's (`src/autoTrim.js`: never between superset partners, never over a target set by hand); the NUMBER is here, Corey's
@@ -3623,3 +3622,39 @@ row per (session, lift), so a lift counts once a session; `POST sessions/<id>/au
 `refused` and a refusal writes nothing and says how to trim by hand. Spends no ⚡ 🍥 🏷️. The routine is never touched and **the
 end-of-session report still counts the routine's plan** — a completion number every session trims itself to 100% of would stop
 measuring anything. It was briefly a StatZ-only sampled feature; that row is gone (a limit is read from the tier, never the sample).
+
+## StatZ counts are 12, and the named exceptions (Corey, Nov 2026)
+
+Corey's call: wherever a StatZ count is a number, it is 12. There are two kinds of exception, each named below with its reason. Each is a recommendation for Nov 2026 and reversible in one line. The numbers live in `catalog.py` (`TIER_LIMITS`, and the separate tables its header lists) and reach the screens through `/api/economy/limits/`, `/tiers/` and `/ladders/`.
+
+- **The ladder rule.** Wherever Premium and StatZ are both numbers, StatZ holds strictly more. `test_ladders.StatZLadderRuleTests.test_statz_is_strictly_above_premium_wherever_both_are_numbers` pins it. Sizes (characters, MB, storage) and booleans are not counts and are excluded. Unlimited (`None`) is above every number, so where 12 would not clear Premium's number, StatZ is unlimited instead.
+
+- **Unlimited (`None`)**, where 12 would sit below Premium's number or would cut the work the feature exists for:
+  - `profile_links`: Premium 100. It was 300 at HEAD.
+  - `soundcloud_import`: Premium 25.
+  - `imagez_layers`: the same count is the number of DAW tracks, and a real session passes twelve.
+  - `imagez_fonts`: unlimited already. Twelve would cap a font list StatZ could use in full.
+  - `album_songs`: a deluxe album can pass twelve tracks, and a cap of twelve would split one album across two masters.
+  - `anime_shots`: a MovieZ scene is about sixty shots. Twelve would be 96 seconds.
+  - `clean_modes`: there are three ways to choose. Twelve would be a number nothing can reach.
+  - `glow_colors`: unlimited already. The palette has 12 colours, so twelve would match it today and lock out any colour added later.
+
+- **A number that stays**, where StatZ already held more than Premium and 12 would fall below Premium's number:
+  - `embeds_per_post` 999 (Premium 15).
+  - `widgets_open` 40 (Premium 12, so 12 would tie it, and a tie is not a ladder).
+  - `KEY_TRANSCRIBE_DAILY_CLIPS` 300 (Premium 60) and `KEY_SPEAK_DAILY_CHARS` 100,000 (Premium 20,000).
+  - `OCC_PROJECTS` 200 (Premium 20) and `OCC_PROJECT_FILES` 4,000 (Premium 400).
+  - `lilith_taskz` `active_tasks` 1,000 (Premium 250). The owner's tier also falls through to 1,000.
+  - `models.SUBMISSION_DAILY_CAP` 50 (Premium 15).
+
+- **Keep the data.** A number moving never deletes anything. Each gate counts what the member already holds and refuses only a new one. `characterz` refuses a create once a member's `Character` rows reach `limit_for`, and `social.links_over_cap` lets a member keep every link past a ceiling while refusing additions.
+
+- **Refusals read the same numbers.** `catalog.higher_tiers_keep(read, tier, verb, unit)` builds wording such as "Premium opens 6 a day, StatZ opens 12 a day" from the gate's own read, and says "as many as you like" only where the tier above is unlimited. `panez` uses it.
+
+- **Energy on `/api/auth/me/`.** `MeView.get` passes the tier it already read into `energy_rate_per_hour(request.user, tier=...)`, so the membership row is read once. `accounts.tests.test_me_does_not_fan_out_queries` holds the whole request to ten queries or fewer.
+
+- **Known gaps, reported and not fixed.**
+  - `mangaz.MAX_CHARACTERS` is 10, and a page's cast is `min(facez_faces, 10)`. StatZ therefore gets 10 characters on a page, not 12. Premium gets 6 there, so the page ladder holds. The bound is the drawing's consistency, and raising it is Corey's call.
+  - `characterz.CHARACTER_LIMIT` is Free 3, Premium 10, StatZ 12. Premium's 10 does not follow the 6 used elsewhere. It is flagged in the code and was left as it was.
+  - `models.SUBMISSION_DAILY_CAP` (Free 5, Premium 15) and the OCC Premium values (20 and 400) are off Corey's rung and were left as they were.
+  - The logged-out trial is `models.TRIAL_PER_BROWSER` = 2 a browser, unchanged from HEAD, and it is the frontend's "non-member 2". `TRIAL_PER_IP` (25) and `TRIAL_TAKES_PER_DAY` (200, a platform-wide pool) are abuse and cost ceilings, not tier numbers.

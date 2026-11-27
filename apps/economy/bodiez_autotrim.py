@@ -3,7 +3,7 @@
 The trimming itself is the client's (`src/autoTrim.js` in the frontend: when, and what it never touches). This module is
 the number that goes with it, the same shape as `bodiez_float`:
 
-* **A tier says how OFTEN, never whether.** Free 3, Premium 6, StatZ unlimited lifts trimmed a rolling 24 hours
+* **A tier says how OFTEN, never whether.** Free 3, Premium 6, StatZ 12 lifts trimmed a rolling 24 hours
   (`catalog.TIER_LIMITS["bodiez_autotrim"]`, Corey's numbers). Trimming a lift by hand (tapping its sets) is free and
   uncounted at every tier; what a tier buys is how often BodieZ does it FOR them. Past the number nothing is trimmed and
   the lift reads 3/5 as it always did.

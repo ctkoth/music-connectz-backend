@@ -9,7 +9,7 @@ list, `GET /api/economy/ladders/` serves it, and MembershipZ draws it as one tab
 Three rules hold it:
 
 * **No number is written here.** Every row is a reader over the constant that actually gates the
-  thing, so the table and the gate cannot disagree. A shared number (Corey's 3 / 6 / unlimited)
+  thing, so the table and the gate cannot disagree. A shared number (Corey's 3 / 6 / 12, with the StatZ exceptions that are unlimited)
   appears once per place it gates, because a member looks up "tracks in a DAW", not a key name.
 * **Nothing can be left off.** `test_ladders` fails when a `TIER_LIMITS` key, a `features.FEATURES`
   row or a StatZ feature has no row here, so a new gate cannot ship invisible.
@@ -26,7 +26,7 @@ from .models import TIER_FREE, TIER_PREMIUM, TIER_STATZ
 
 TIERS = (TIER_FREE, TIER_PREMIUM, TIER_STATZ)
 BIG = 10 ** 6
-COREYS = {TIER_FREE: "3", TIER_PREMIUM: "6", TIER_STATZ: "Unlimited"}        # anything this large is "unlimited" in practice (the owner's debug numbers sit above)
+COREYS = {TIER_FREE: "3", TIER_PREMIUM: "6", TIER_STATZ: "12"}        # anything this large is "unlimited" in practice (the owner's debug numbers sit above)
 
 
 def _lim(key):
@@ -113,8 +113,9 @@ def _rows():
         values = {t: _fmt(read(t), unit) for t in TIERS}
         out.append({"group": group, "key": key, "label": label, "kind": "count", "tab": tab, "target": target,
                     "source": source, "values": values,
-                    # Corey's numbers: Free 3, Premium 6, StatZ unlimited. Said per row so the ones that differ are
-                    # visible — whether they SHOULD move is his call, not this list's.
+                    # Corey's numbers (Nov 2026): Free 3, Premium 6, StatZ 12. Said per row so the ones that differ
+                    # are visible — the unlimited set and the numeric exceptions show here as their own values, and
+                    # whether they SHOULD move is his call, not this list's.
                     "coreys_numbers": values == COREYS})
     return out
 

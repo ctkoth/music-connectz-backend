@@ -21,7 +21,7 @@ class ToneZTests(TestCase):
         return self.c.post("/api/economy/tonez/", {"name": name, "chain": chain, **extra}, format="json")
 
     def test_the_ladder_is_coreys_numbers(self):
-        self.assertEqual([limits_for(t)["tone_presets"] for t in ("free", "premium", "statz")], [3, 6, None])
+        self.assertEqual([limits_for(t)["tone_presets"] for t in ("free", "premium", "statz")], [3, 6, 12])
 
     def test_save_list_update_delete(self):
         r = self.save("My vocal", note="for the verses")
@@ -61,12 +61,13 @@ class ToneZTests(TestCase):
         self.assertTrue(g["kinds"]["tone"]["full"])
         self.assertEqual(self.save("Another").status_code, 403)
 
-    def test_statz_is_unlimited(self):
+    def test_statz_keeps_twelve(self):
         membership_for(self.me)
         Membership.objects.filter(user=self.me).update(tier="statz")
-        for i in range(10):
+        for i in range(12):
             self.assertEqual(self.save(f"Tone {i}").status_code, 201)
-        self.assertIsNone(self.c.get("/api/economy/tonez/").data["limit"])
+        self.assertEqual(self.c.get("/api/economy/tonez/").data["limit"], 12)
+        self.assertEqual(self.save("Tone 12").status_code, 403)
 
     def test_names_are_unique_per_member_and_never_empty(self):
         self.save("My vocal")
@@ -144,7 +145,7 @@ class PresetKindTests(TestCase):
 
 class EqBandTests(TestCase):
     def test_eq_bands_are_coreys_numbers(self):
-        self.assertEqual([limits_for(t)["eq_bands"] for t in ("free", "premium", "statz")], [3, 6, None])
+        self.assertEqual([limits_for(t)["eq_bands"] for t in ("free", "premium", "statz")], [3, 6, 12])
 
     def test_a_preset_keeps_its_eq_bands_cleaned(self):
         chain = clean_chain([{"type": "eq", "params": {}, "bands": [
@@ -222,7 +223,7 @@ class PluginPresetTests(TestCase):
             self.assertEqual(self.save("x", self.COMP, state=bad).status_code, 400)
         self.assertEqual(self.save("x", "bad uid").status_code, 400)
 
-    def test_statz_is_unlimited_per_plugin(self):
+    def test_statz_saves_inside_its_count(self):
         membership_for(self.me)
         Membership.objects.filter(user=self.me).update(tier="statz")
         for i in range(8):

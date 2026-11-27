@@ -110,8 +110,8 @@ class PromptAllowanceMarginTests(TestCase):
                         f"${catalog.PREMIUM_MONTH_CENTS / 100:.2f}/mo plan.")
 
     def test_statz_still_gets_meaningfully_more_than_premium(self):
-        # Trimming the allowance must not flatten the tier it belongs to. It was
-        # 2x; Corey's 7 / 12 (Oct 2026) is 1.7x, so the floor is 1.5x — each
+        # Trimming the allowance must not flatten the tier it belongs to. Corey's
+        # 3 / 6 / 12 (Nov 2026) is 2x at each rung, so the floor is 1.5x — each
         # rung still worth climbing, and a flattening move still goes red.
         self.assertGreaterEqual(models.PROMPT_ALLOWANCE["statz"],
                                 models.PROMPT_ALLOWANCE["premium"] * 1.5)
@@ -122,9 +122,9 @@ class PromptAllowanceMarginTests(TestCase):
         # Free is 3, not 1: at 1 it was the same allowance the anonymous trial
         # door hands a stranger, so an account bought nothing on the axis
         # people arrive for.
-        # Then 4 / 7 / 12 (Corey's call, Oct 2026).
-        self.assertEqual(models.PROMPT_ALLOWANCE["free"], 4)
-        self.assertEqual(models.PROMPT_ALLOWANCE["premium"], 7)
+        # Then 3 / 6 / 12 (Corey's call, Nov 2026: the tier numbers, applied to the daily prompts).
+        self.assertEqual(models.PROMPT_ALLOWANCE["free"], 3)
+        self.assertEqual(models.PROMPT_ALLOWANCE["premium"], 6)
         self.assertEqual(models.PROMPT_ALLOWANCE["statz"], 12)
 
     def test_the_margin_math_above_describes_a_ladder_that_exists(self):

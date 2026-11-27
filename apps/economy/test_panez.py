@@ -18,8 +18,10 @@ class PaneZTests(TestCase):
         self.assertIn("frees up in", r.data["detail"]); self.assertIn("Premium opens 6", r.data["detail"])
         self.assertEqual(self.c.get("/api/economy/panez/").data["left"], 0)
 
-    def test_statz_is_unlimited(self):
+    def test_statz_opens_twelve_a_day_then_is_refused(self):
+        # StatZ is 12 (Corey, Nov 2026): above Premium's 6, and a limit, not unlimited.
         m = Membership.objects.get_or_create(user=self.u)[0]; m.tier = "statz"; m.save()
-        for _ in range(10):
+        for _ in range(12):
             self.assertEqual(self.c.post("/api/economy/panez/", {}, format="json").status_code, 200)
-        self.assertIsNone(self.c.get("/api/economy/panez/").data["left"])
+        self.assertEqual(self.c.get("/api/economy/panez/").data["left"], 0)
+        self.assertEqual(self.c.post("/api/economy/panez/", {}, format="json").status_code, 429)

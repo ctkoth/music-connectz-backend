@@ -30,11 +30,12 @@ def client(u):
 
 class FloatNumbersTests(TestCase):
     def test_the_ladder_is_coreys_numbers(self):
-        self.assertEqual([limits_for(t)["bodiez_float"] for t in ("free", "premium", "statz")], [3, 6, None])
+        self.assertEqual([limits_for(t)["bodiez_float"] for t in ("free", "premium", "statz")], [3, 6, 12])
 
     def test_it_is_on_the_ladder_list(self):
         row = next(r for r in ladders() if r["key"] == "bodiez_float")
-        self.assertEqual(row["values"], {"free": "3", "premium": "6", "statz": "Unlimited"})
+        self.assertEqual(row["values"], {"free": "3", "premium": "6", "statz": "12"})
+        self.assertTrue(row["coreys_numbers"])
 
 
 class FloatSessionTests(TestCase):
@@ -52,7 +53,7 @@ class FloatSessionTests(TestCase):
         self.assertTrue(st["can"])
         self.assertFalse(st["already"])
         self.assertEqual(st["next_limit"], 6)
-        self.assertEqual(st["ladder"], {"free": 3, "premium": 6, "statz": None})
+        self.assertEqual(st["ladder"], {"free": 3, "premium": 6, "statz": 12})
         self.assertIn("Free", st["cost"])
         self.assertEqual(st["session"], {"id": s.id, "floated": False})
         s.refresh_from_db()
@@ -110,18 +111,21 @@ class FloatSessionTests(TestCase):
         self.assertEqual(self.c.get("/api/economy/bodiez/float/").data["left"], 0)
         self.assertEqual(self.c.post(f"/api/economy/bodiez/sessions/{s.id}/float/").status_code, 200)
 
-    def test_premium_gets_six_and_statz_has_no_ceiling(self):
+    def test_premium_gets_six_and_statz_gets_twelve(self):
         p = member("prem", "premium")
         self.assertEqual(client(p).get("/api/economy/bodiez/float/").data["limit"], 6)
         z = member("zed", "statz")
-        for _ in range(10):
+        for _ in range(12):
             BodieZSession.objects.create(user=z, ended_at=timezone.now(), floated_at=timezone.now())
         s = self.open_session(z)
         st = client(z).get("/api/economy/bodiez/float/").data
-        self.assertTrue(st["unlimited"])
-        self.assertIsNone(st["left"])
-        self.assertIs(st["next_limit"], False)
-        self.assertEqual(client(z).post(f"/api/economy/bodiez/sessions/{s.id}/float/").status_code, 200)
+        self.assertFalse(st["unlimited"])
+        self.assertEqual((st["limit"], st["left"]), (12, 0))
+        self.assertIs(st["next_limit"], False)     # the top plan has nothing to step up to
+        r = client(z).post(f"/api/economy/bodiez/sessions/{s.id}/float/")
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("12", r.data["detail"])
+        self.assertIn("Nothing was charged", r.data["detail"])
 
     def test_only_a_live_session_of_your_own(self):
         done = BodieZSession.objects.create(user=self.u, ended_at=timezone.now())

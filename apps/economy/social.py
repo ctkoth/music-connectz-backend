@@ -183,6 +183,7 @@ class FaceZView(APIView):
         return Response({"mine": mine, "feed": feed, "feed_locked": why,
                          "rating_reward": rating_reward(request.user),
                          "faces_limit": cap, "faces_full": cap is not None and len(mine) >= cap,
+                         "faces_ladder": {t: limits_for(t)["facez_faces"] for t in ("free", "premium", "statz")},
                          "ratings_note": RATINGS_NOTE})
 
     def post(self, request):
@@ -191,10 +192,12 @@ class FaceZView(APIView):
             return Response({"detail": "image (multipart) required"}, status=status.HTTP_400_BAD_REQUEST)
         cap = faces_cap(request.user)
         if cap is not None and request.user.faces.count() >= cap:
-            from .catalog import limits_for
-            nxt = limits_for("premium")["facez_faces"]
-            return Response({"detail": f"Your tier keeps {cap} faces — delete one, or upgrade "
-                                       f"(Premium keeps {nxt}; StatZ is unlimited).", "faces_limit": cap},
+            from .catalog import higher_tiers_keep, limits_for
+            from .models import membership_for
+            words = higher_tiers_keep(lambda t: limits_for(t)["facez_faces"], membership_for(request.user).tier)
+            return Response({"detail": f"Your tier keeps {cap} faces — delete one"
+                                       + (f", or upgrade ({words})." if words else " to make room."),
+                             "faces_limit": cap},
                             status=status.HTTP_403_FORBIDDEN)
         tagged = None
         tname = str(request.data.get("tagged", "")).strip()
@@ -334,14 +337,20 @@ def links_over_cap(user, current, new):
     that is no longer than the one stored can never be refused.
     """
     cap = limits_for(membership_for(user).tier)["profile_links"]
-    allowed = max(cap, len(current or []))
+    if cap is None:
+        # Unlimited (StatZ): the only bound is the cleaner's own work bound, which is not a tier.
+        allowed = LINKS_CEILING
+    else:
+        allowed = max(cap, len(current or []))
     return None if len(new) <= allowed else allowed
 
 
 def _links_ceiling(p):
     """What the owner of this profile is told about their portfolio's ceiling."""
     tier_cap = limits_for(membership_for(p.user).tier)["profile_links"]
-    return {"links_limit": max(tier_cap, len(links_of(p))), "links_tier_cap": tier_cap}
+    if tier_cap is None:
+        return {"links_limit": None, "links_tier_cap": None, "links_unlimited": True}
+    return {"links_limit": max(tier_cap, len(links_of(p))), "links_tier_cap": tier_cap, "links_unlimited": False}
 
 
 INVENTORY_KINDS = ("instrument", "microphone", "interface", "monitors", "outboard", "software", "controller",
@@ -1269,6 +1278,15 @@ class ProfileView(APIView):
         # save and 10 of them gone. Like the bio, it is judged before anything is
         # written, so one over-long list does not lose the rest of the edit.
         if "links" in d:
+            # The cleaner stops at LINKS_CEILING without saying so, so a list past it is refused
+            # here, in words, before anything is cut. Unlimited tiers still meet this bound.
+            raw = d["links"] if isinstance(d["links"], list) else []
+            if len(raw) > LINKS_CEILING:
+                return Response(
+                    {"detail": (f"This list has {len(raw)} links, and one save takes up to {LINKS_CEILING}. "
+                                "Remove some and save again.")},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             incoming = clean_profile_field("links", d["links"])
             over = links_over_cap(request.user, links_of(p), incoming)
             if over is not None:
@@ -1823,10 +1841,13 @@ class MembersView(APIView):
             # Any badge whose effect is a discovery boost, read off the effect
             # rather than the key "sexy", so the next badge to carry it works
             # without a second edit here. Visible badges only, as before.
-            from .models import BADGES, Badge
-            boost_keys = [k for k, sp in BADGES.items() if sp.get("effects", {}).get("social_boost")]
-            boosted = set(Badge.objects.filter(key__in=boost_keys, visible=True)
-                          .values_list("user__username", flat=True))
+            # Read from the page's own worn badges, which are already loaded
+            # above. The query it replaces pulled every boosted holder on the
+            # platform into every search, and sorting only ever reaches `qs`.
+            from .models import BADGES
+            boost_keys = {k for k, sp in BADGES.items() if sp.get("effects", {}).get("social_boost")}
+            boosted = {p.user.username for p in qs
+                       if any(b.key in boost_keys for b in worn.get(p.user_id, []))}
             results.sort(key=lambda c: c.get("username") not in boosted)
         return Response({
             "members": results[:100],

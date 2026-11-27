@@ -21,7 +21,7 @@ def client(tier):
 class CleanDupesTests(TestCase):
     def test_every_plan_may_scan_the_tier_only_sets_how_often(self):
         got = {t: client(t)[0].get(URL).data for t in ("free", "premium", "statz")}
-        self.assertEqual([got[t]["limit"] for t in ("free", "premium", "statz")], [3, 6, None])
+        self.assertEqual([got[t]["limit"] for t in ("free", "premium", "statz")], [3, 6, 12])
         self.assertTrue(all(g["can"] for g in got.values()))                 # nobody is shut out
         self.assertEqual(got["free"]["next_limit"], 6)
         self.assertIs(got["statz"]["next_limit"], False)
@@ -36,12 +36,13 @@ class CleanDupesTests(TestCase):
         self.assertEqual(CleanDupeRun.objects.filter(user=u).count(), 3)
         self.assertEqual(c.get(URL).data["left"], 0)
 
-    def test_premium_gets_six_and_statz_has_no_ceiling(self):
+    def test_premium_gets_six_and_statz_gets_twelve(self):
         c, _ = client("premium")
         self.assertEqual([c.post(URL).status_code for _ in range(7)], [201] * 6 + [403])
         s, _ = client("statz")
-        self.assertTrue(all(s.post(URL).status_code == 201 for _ in range(10)))
-        self.assertTrue(s.get(URL).data["unlimited"])
+        self.assertEqual([s.post(URL).status_code for _ in range(13)], [201] * 12 + [403])
+        g = s.get(URL).data
+        self.assertEqual((g["limit"], g["unlimited"]), (12, False))
 
     def test_the_window_is_rolling_a_day_old_scan_stops_counting(self):
         c, u = client("free")

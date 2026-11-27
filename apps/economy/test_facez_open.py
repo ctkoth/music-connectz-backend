@@ -31,7 +31,7 @@ class FaceZOpenTests(TestCase):
         r = self.c.patch(f"/api/economy/facez/{fid}/", {"open_to_ratings": True}, format="json")
         self.assertTrue(r.data["face"]["open_to_ratings"])
 
-    def test_free_keeps_three_faces_and_statz_is_unlimited(self):
+    def test_free_keeps_three_faces_and_statz_keeps_twelve(self):
         for _ in range(3):
             self.assertEqual(up(self.c).status_code, 201)
         r = up(self.c)
@@ -39,5 +39,10 @@ class FaceZOpenTests(TestCase):
         self.assertIn("3 faces", r.data["detail"])
         self.assertEqual(Face.objects.filter(owner=self.me).count(), 3)
         Membership.objects.update_or_create(user=self.me, defaults={"tier": TIER_STATZ})
-        self.assertEqual(up(self.c).status_code, 201)
-        self.assertIsNone(self.c.get("/api/economy/facez/").data["faces_limit"])
+        for _ in range(9):
+            self.assertEqual(up(self.c).status_code, 201)
+        self.assertEqual(Face.objects.filter(owner=self.me).count(), 12)
+        r = up(self.c)
+        self.assertEqual(r.status_code, 403)
+        self.assertIn("12 faces", r.data["detail"])
+        self.assertEqual(self.c.get("/api/economy/facez/").data["faces_limit"], 12)
