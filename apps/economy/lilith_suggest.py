@@ -1,4 +1,4 @@
-"""Lilith suggests routines — from who the member says they are, and what they actually do.
+"""Lilith suggests RoutineZ — from who the member says they are, and what they actually do.
 
 Two honest signals, and nothing else:
 
@@ -10,10 +10,14 @@ Two honest signals, and nothing else:
   two weeks — a streak is the cheapest next step) and *close a gap* (they take but never post, they
   post but never rate, they rate but never message).
 
+Anything done on the platform on a rhythm is suggested as a RoutineZ. A one-off TASK is suggested
+only for a set-up step (a persona, a bio, a link, an age check) or a collab waiting on the member.
+
 It only SUGGESTS. Nothing is added to a board until the member taps it, so "auto-suggest" can never
 become "auto-add a routine you didn't ask for" — which would also be a way to hit the routine
-ceiling for them. Every suggestion carries `why`, in words, so a recommendation is never a
-mystery: a ranked list with no reasons is the unexplained score this codebase refuses.
+ceiling for them. (StatZ's automation is a separate, gated feature: `lilith_auto`.) Every suggestion
+carries `why`, in words, so a recommendation is never a mystery: a ranked list with no reasons is the
+unexplained score this codebase refuses.
 
 Counts are cached for ten minutes per member (one count query per verified action is too much to
 pay on every open of a screen people open all day) and the cache only ever makes a suggestion
@@ -64,27 +68,28 @@ GAPS = [
      "You post on your own. A collab puts a second pair of ears on the work."),
 ]
 
-# persona → one-off TASKS, in the order they matter (Corey: a Designer gets MangaZ, ImageZ and Image
-# ConnectZ tasks). A declaration only decides what is SUGGESTED (or, on StatZ, added — lilith_auto).
-PERSONA_TASKS = {
-    ("designer",): ["make_image", "edit_picture", "manga_page", "make_face"],
-    ("videographer", "director"): ["cut_video", "make_video", "make_image"],
-    ("producer",): ["make_instrumental", "master_mix", "post_finished"],
-    ("mixengineer",): ["master_mix", "post_finished"],
-    ("ghostwriter",): ["write_hook", "journal_one"],
-    ("indieartist", "independentartist"): ["post_finished", "weekly_challenge", "release_day"],
-    ("manager", "arscout"): ["message_member", "start_collab", "check_results"],
-    ("dancer", "actor", "actress", "mime"): ["cut_video", "post_finished"],
-    ("weightlifter",): ["log_workout"],
+# persona → the RoutineZ that suit what they make, in the order they matter. These were one-off tasks;
+# making things is a rhythm, so they are routines now. A declaration only decides what is SUGGESTED
+# (or, on StatZ, added — lilith_auto).
+PERSONA_MAKES = {
+    ("designer",): ["make_picture", "save_picture", "manga_page", "face_for_cast"],
+    ("videographer", "director"): ["cut_video", "make_video", "make_picture"],
+    ("producer",): ["make_instrumental", "master_mix", "ship_one"],
+    ("mixengineer",): ["master_mix", "ship_one"],
+    ("ghostwriter",): ["write_sixteen", "one_paragraph"],
+    ("indieartist", "independentartist"): ["ship_one", "weekly_challenge", "release_day"],
+    ("manager", "arscout"): ["reach_out", "start_collab", "read_the_room"],
+    ("dancer", "actor", "actress", "mime"): ["cut_video", "ship_one"],
+    ("weightlifter",): ["move_body"],
 }
 
-# (have, lack, task key, sentence): something they make, and the next app it opens in — the
-# cross-pollination rule as a to-do. `{n}` is how many of `have` in the window.
-TASK_GAPS = [
+# (have, lack, routine key, sentence): something they make, and the next app it opens in — the
+# cross-pollination rule as a habit. `{n}` is how many of `have` in the window.
+MAKE_GAPS = [
     ("image_made", "manga_page", "manga_page", "You've made {n} picture{s} lately. Put them on a manga page."),
     ("manga_page", "video_saved", "cut_video", "You've made {n} manga page{s}. Cut {them} into a motion comic in VideoZ."),
     ("instrumental_made", "mix_made", "master_mix", "You've made {n} instrumental{s}. Master one so it's ready to release."),
-    ("picture_saved", "post_made", "post_finished", "You've finished {n} picture{s} and posted none. A post is how anyone finds you."),
+    ("picture_saved", "post_made", "ship_one", "You've finished {n} picture{s} and posted none. A post is how anyone finds you."),
 ]
 
 DEFAULTS = ["daily_singz", "three_ears", "ship_one"]
@@ -107,7 +112,7 @@ def recent_counts(user):
         return got
     since = timezone.now() - timedelta(days=WINDOW_DAYS)
     needed = ({r["action"] for r in ST.ROUTINES if r.get("action")} | {g[0] for g in GAPS} | {g[1] for g in GAPS}
-              | {g[0] for g in TASK_GAPS} | {g[1] for g in TASK_GAPS})
+              | {g[0] for g in MAKE_GAPS} | {g[1] for g in MAKE_GAPS})
     out = {a: len(A.events(user, a, since)) for a in needed}
     cache.set(key, out, CACHE_SECONDS)
     return out
@@ -191,7 +196,8 @@ def instruments_of(user):
 
 
 def suggest(user, on_board_routines=(), on_board_tasks=(), task_limit=MAX_TASK_SUGGESTIONS):
-    """Up to MAX_SUGGESTIONS routines, best first, each with the reason it was picked.
+    """Up to MAX_SUGGESTIONS routines, best first, and up to `task_limit` set-up tasks, each with the
+    reason it was picked. Every routine here is a habit; every task is a one-off step.
 
     `on_board_*` are the template keys already on the member's board; those are dropped here, so
     a stale cache never re-offers what they have added."""
@@ -235,7 +241,7 @@ def suggest(user, on_board_routines=(), on_board_tasks=(), task_limit=MAX_TASK_S
         if n >= 1 and counts.get(lack_a, 0) == 0:
             offer(rk, 3 + min(n, 10) / 5, "gap", sentence.format(n=n, s="" if n == 1 else "s"))
 
-    # 4. one-off tasks — from the profile (what is missing) and from what just happened
+    # 4. one-off set-up tasks — from the profile (what is missing) and from what is waiting on them
     sig = signals(user)
     have_t = set(on_board_tasks)
     tasks = {}
@@ -258,30 +264,33 @@ def suggest(user, on_board_routines=(), on_board_tasks=(), task_limit=MAX_TASK_S
         offer_task("portfolio_links", 5.5, "profile", "You have no links on your profile for people to open.")
     if sig["adult"] and not sig["verified_18"]:
         offer_task("verify_18", 4, "profile", "You haven't verified 18+, which unlocks money battles.")
+
+    # 4b. RoutineZ from what they just did — a habit they can start, kept on a rhythm
     if sig["last_take"] is not None and sig["last_take"] < 5:
-        offer_task("fix_weakest", 8, "activity", f"Your last take scored {sig['last_take']:g}. One drill on the lowest dimension moves it fastest.")
+        offer("weak_spot", 8, "activity", f"Your last take scored {sig['last_take']:g}. One drill on the lowest dimension moves it fastest.")
     if sig["last_take"] is not None and not sig["ever_shared_card"]:
-        offer_task("share_card", 4.5, "activity", "You've been scored but never shared a card. Anyone who joins from it is a referral.")
+        offer("share_card", 4.5, "activity", "You've been scored but never shared a card. Anyone who joins from it is a referral.")
     if sig["ever_posted"] is False and sig["last_take"] is not None:
-        offer_task("post_finished", 5, "activity", "You've been scored but haven't posted anything yet.")
+        offer("ship_one", 5, "activity", "You've been scored but haven't posted anything yet.")
     if sig["ever_posted"] and not sig["ever_collab"]:
-        offer_task("start_collab", 4.5, "activity", "You post on your own. A collab puts a second pair of ears on the work.")
+        offer("start_collab", 4.5, "activity", "You post on your own. A collab puts a second pair of ears on the work.")
     if not sig["ever_invited"] and sig["ever_posted"]:
-        offer_task("invite_musician", 3, "activity", "You haven't invited anyone. Your handle is the code and you're both paid.")
-    # what they said they are (a Designer gets ImageZ, Image ConnectZ, MangaZ and FaceZ tasks)
+        offer("invite_musician", 3, "activity", "You haven't invited anyone. Your handle is the code and you're both paid.")
+    # what they said they are (a Designer gets a picture, a manga page and a face routine)
     for name, keys in _persona_names(user):
-        for plist, tkeys in PERSONA_TASKS.items():
+        for plist, rks in PERSONA_MAKES.items():
             if keys & set(plist):
-                for i, tk in enumerate(tkeys):
-                    offer_task(tk, 4.8 - i * 0.4, "persona", f"You're {_a(name)}.")
+                for i, rk in enumerate(rks):
+                    offer(rk, 4.8 - i * 0.4, "persona", f"You're {_a(name)}.")
     # what they made, and where it goes next
-    for have_a, lack_a, tk, sentence in TASK_GAPS:
+    for have_a, lack_a, rk, sentence in MAKE_GAPS:
         n = counts.get(have_a, 0)
         if n >= 1 and counts.get(lack_a, 0) == 0:
-            offer_task(tk, 7, "activity", sentence.format(n=n, s="" if n == 1 else "s", them="it" if n == 1 else "them"))
+            offer(rk, 7, "activity", sentence.format(n=n, s="" if n == 1 else "s", them="it" if n == 1 else "them"))
+    # the coach they work in: today's take is a daily routine now
     for app, how, n in instruments_of(user)[:1]:
-        if f"take_{app}" in ST.TASK_KEYS and how == "takes":
-            offer_task(f"take_{app}", 5, "instrument", f"You work in {ST._label(app)} — record today's take.")
+        if how == "takes":
+            offer(f"daily_{app}", 5, "instrument", f"You work in {ST._label(app)} — record today's take.")
 
     ranked = sorted(scored.items(), key=lambda kv: -kv[1][0])[:MAX_SUGGESTIONS]
     if not ranked:                                   # a brand-new member with no signal at all

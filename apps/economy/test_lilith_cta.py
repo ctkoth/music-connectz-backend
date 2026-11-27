@@ -65,11 +65,12 @@ class CatalogueTests(TestCase):
             self.assertTrue(t["title"] and len(t["note"]) > 20, t["key"])
         self.assertEqual({r["cadence"] for r in ST.ROUTINES}, set(L.CADENCES))     # daily, weekly AND monthly
 
-    def test_every_coach_has_its_own_take_action_task_and_daily_routine(self):
+    def test_every_coach_has_its_own_take_action_and_a_daily_routine(self):
         for app in A.coaches():
             self.assertIn(f"take_{app}", A.specs())
-            self.assertTrue(ST.task_by_key(f"take_{app}"))
             self.assertEqual(ST.routine_by_key(f"daily_{app}")["app_key"], app)
+            self.assertEqual(ST.routine_by_key(f"daily_{app}")["action"], f"take_{app}")
+            self.assertIsNone(ST.task_by_key(f"take_{app}"))         # a take is a rhythm: a routine, never a task
 
 
 class CadenceTests(TestCase):
@@ -229,9 +230,9 @@ class StarterTests(TestCase):
         r = self.c.post("/api/economy/lilith/starters/", {"kind": "routine", "key": "weekly_challenge", "app_key": "rapz"},
                         format="json").json()
         self.assertEqual(r["app_key"], "rapz")
-        r = self.c.post("/api/economy/lilith/starters/", {"kind": "task", "key": "write_sixteen", "app_key": "bugz"},
+        r = self.c.post("/api/economy/lilith/starters/", {"kind": "task", "key": "finish_profile", "app_key": "bugz"},
                         format="json").json()
-        self.assertEqual(r["app_key"], "sentenceconnectz")           # not instrument-aware: the server's own
+        self.assertEqual(r["app_key"], "profilez")                   # a task is not instrument-aware: the server's own
 
     def test_the_board_marks_what_is_already_on_it(self):
         self.c.post("/api/economy/lilith/starters/", {"kind": "routine", "key": "ship_one"}, format="json")
@@ -286,7 +287,9 @@ class SuggestionTests(TestCase):
             TakeScore.objects.create(user=u, app_key="guitarz", scores={"a": 6}, overall=6)
         sug = {s["key"]: s for s in SG.suggest(u)}
         self.assertIn("4", sug["daily_guitarz"]["why"])
-        self.assertEqual(sug["ship_one"]["because"], "gap")             # takes, never posts
+        # takes, never posts: named in words, whichever signal scores it higher (a gap or the activity)
+        self.assertIn(sug["ship_one"]["because"], {"gap", "activity"})
+        self.assertIn("post", sug["ship_one"]["why"].lower())
 
     def test_what_is_on_the_board_is_not_offered_again_and_it_only_suggests(self):
         u = member("have")
@@ -522,11 +525,13 @@ class RecommendedFromProfileAndActivityTests(TestCase):
         p.personas = [{"key": "indieartist", "name": "Independent Artist", "skills": [{"name": "any_rapping"}]}]
         p.save()                                                          # profile in order: only the activity speaks
         TakeScore.objects.create(user=u, app_key="rapz", scores={"flow": 3}, overall=3)
-        got = self._tasks(u)
-        self.assertEqual(list(got)[0], "fix_weakest")
-        self.assertIn("scored 3", got["fix_weakest"]["why"])
-        self.assertIn("take_rapz", got)                                  # and today's take, in the coach they use
-        self.assertIn("post_finished", got)                              # scored, never posted
+        from django.core.cache import cache
+        cache.clear()
+        got = {s["key"]: s for s in SG.suggest(u)}                       # the drill is a routine now, not a task
+        self.assertEqual(got["weak_spot"]["kind"], "routine")
+        self.assertIn("scored 3", got["weak_spot"]["why"])
+        self.assertIn("daily_rapz", got)                                 # and today's take, in the coach they use
+        self.assertLessEqual(sum(1 for s in got.values() if s["kind"] == "routine"), SG.MAX_SUGGESTIONS)   # the cap holds
 
     def test_a_collab_waiting_on_you_comes_first(self):
         from .models import CollabDeal

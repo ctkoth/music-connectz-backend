@@ -7306,7 +7306,10 @@ class LilithTask(models.Model):
     # records show the member did the thing `goal` times since this task was made.
     action = models.CharField(max_length=24, blank=True, default="")
     goal = models.PositiveSmallIntegerField(default=1)
-    due = models.DateTimeField(null=True, blank=True)
+    # The day it is due: a calendar day the member chose, or none. Outside Today only — Today is today.
+    # Date-only on purpose: a due day has no time or timezone in it (settings.TIME_ZONE is UTC, so a
+    # timestamp would turn over in the evening of the member's own day).
+    due = models.DateField(null=True, blank=True)
     # An upgrade that costs real money (a mic, a plugin, studio time). BudgetZ says whether it is
     # affordable THIS month and Lilith may then bring it to Today; nothing is spent or reserved.
     cost_cents = models.PositiveIntegerField(default=0)
@@ -7337,8 +7340,11 @@ class LilithRoutine(models.Model):
     note = models.TextField(blank=True, default="")
     # How often it is kept. The streak counts PERIODS in a row (days, ISO weeks, calendar
     # months), and `last_done` is the date it was last kept within one.
-    CADENCES = (("daily", "Daily"), ("weekly", "Weekly"), ("monthly", "Monthly"))
+    CADENCES = (("daily", "Daily"), ("weekly", "Weekly"), ("monthly", "Monthly"), ("yearly", "Yearly"))
     cadence = models.CharField(max_length=8, choices=CADENCES, default="daily")
+    # Who put it on the board, as SOURCES says for tasks. "auto" is an automation rule (StatZ only):
+    # it keeps its streak and pays no milestone coin — automation may never mint.
+    source = models.CharField(max_length=10, choices=SOURCES, default="self")
     template = models.CharField(max_length=40, blank=True, default="")
     # A routine in the Trash is out of the ceiling, the sweep and the board, and restorable.
     trashed_at = models.DateTimeField(null=True, blank=True)

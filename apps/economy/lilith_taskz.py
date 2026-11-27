@@ -25,7 +25,8 @@ Four numbers, anchored to the economy that already exists rather than
 invented: a referral pays 300/100, onboarding pays 150, a rating pays 1 ⚡
 against a 20/day cap, and a ZodiacZ bonus is 20/50 with a 3/day cap.
 """
-from datetime import timedelta
+import re
+from datetime import date, timedelta
 
 from django.conf import settings
 from django.db import models
@@ -66,22 +67,28 @@ ROUTINE_MILESTONES = {7: 20, 30: 50, 100: 150}                # daily (kept unde
 # streak reward rather than a trophy.
 ROUTINE_MILESTONE_ENERGY = {7: 10, 30: 25, 100: 50}
 
-# Weekly and monthly routines count PERIODS, so their rungs are fewer — but the same three payouts.
+# Weekly, monthly and yearly routines count PERIODS, so their rungs are fewer — but the same three payouts.
 # That is deliberate: what cannot be faked is TIME, and 26 weeks or 12 months takes longer than 100
 # days, with far fewer ticks to farm. Each rung is the same 20 / 50 / 150 🍥 (and ⚡) as the daily one.
+#
+# Yearly starts its first rung at THREE, not two. A streak counts calendar periods, so a keep on
+# 31 December and one on 1 January are two consecutive years a day apart: a rung at two could be
+# reached in a day. At three, the earliest it can land is about a year after the first keep.
 CADENCE_MILESTONES = {
     "daily": ROUTINE_MILESTONES,
     "weekly": {4: 20, 12: 50, 26: 150},
     "monthly": {3: 20, 6: 50, 12: 150},
+    "yearly": {3: 20, 5: 50, 10: 150},
 }
 CADENCE_MILESTONE_ENERGY = {
     "daily": ROUTINE_MILESTONE_ENERGY,
     "weekly": {4: 10, 12: 25, 26: 50},
     "monthly": {3: 10, 6: 25, 12: 50},
+    "yearly": {3: 10, 5: 25, 10: 50},
 }
-CADENCES = ("daily", "weekly", "monthly")
-PERIOD_NOUN = {"daily": "day", "weekly": "week", "monthly": "month"}
-PERIOD_NOW = {"daily": "today", "weekly": "this week", "monthly": "this month"}
+CADENCES = ("daily", "weekly", "monthly", "yearly")
+PERIOD_NOUN = {"daily": "day", "weekly": "week", "monthly": "month", "yearly": "year"}
+PERIOD_NOW = {"daily": "today", "weekly": "this week", "monthly": "this month", "yearly": "this year"}
 
 # Three in a day, and every Today task cleared. XP only: both are counts of
 # things already rewarded once, and paying coin again would be paying twice
@@ -310,11 +317,13 @@ def _combo_and_sweep(user):
 
 
 def period_start(d, cadence):
-    """The first day of the period `d` falls in: the day, the ISO week's Monday, the month's 1st."""
+    """The first day of the period `d` falls in: the day, the ISO week's Monday, the month's 1st, 1 January."""
     if cadence == "weekly":
         return d - timedelta(days=d.weekday())
     if cadence == "monthly":
         return d.replace(day=1)
+    if cadence == "yearly":
+        return d.replace(month=1, day=1)
     return d
 
 
@@ -323,6 +332,8 @@ def previous_period_start(start, cadence):
         return start - timedelta(days=7)
     if cadence == "monthly":
         return (start - timedelta(days=1)).replace(day=1)
+    if cadence == "yearly":
+        return start.replace(year=start.year - 1)
     return start - timedelta(days=1)
 
 
@@ -383,7 +394,8 @@ def keep_routine(routine, on=None):
     rungs = CADENCE_MILESTONES[cadence]
     reward = rungs.get(routine.streak)
     ref = _stable_ref(routine, routine.streak)
-    if reward and routine.streak not in (routine.paid_milestones or []) \
+    # An automation's routine keeps its streak and pays nothing: "automation may never mint" (lilith_auto).
+    if reward and routine.source != "auto" and routine.streak not in (routine.paid_milestones or []) \
             and not LilithPayout.objects.filter(user=routine.user, kind=LilithPayout.KIND_MILESTONE, ref=ref).exists():
         energy = CADENCE_MILESTONE_ENERGY[cadence].get(routine.streak, 0)
         _pay(routine.user, LilithPayout.KIND_MILESTONE, spinaz=reward, energy=energy, ref=ref)
@@ -786,6 +798,7 @@ def _routine_dict(r, progress=None):
     return {
         **_action_bits(r, progress),
         "id": r.pk, "title": r.title, "note": r.note, "streak": r.streak, "longest": r.longest,
+        "source": r.source,
         "cadence": cadence, "unit": PERIOD_NOUN[cadence], "period_now": PERIOD_NOW[cadence],
         "last_done": r.last_done.isoformat() if r.last_done else None,
         "app_key": r.app_key, "target": r.target,
@@ -868,9 +881,10 @@ def board(user):
 
     tasks = list(LilithTask.objects.filter(user=user).select_related()[:500])
     open_list = [t for t in tasks if not t.done_at and t.bucket != "trash"]
-    buckets = {key: [] for key, _ in BUCKETS}
+    grouped = {key: [] for key, _ in BUCKETS}
     for t in tasks:
-        buckets.setdefault(t.bucket, []).append(_task_dict(t, progress))
+        grouped.setdefault(t.bucket, []).append(t)
+    buckets = {key: [_task_dict(t, progress) for t in _in_order(key, rows)] for key, rows in grouped.items()}
 
     routines = list(live_routines(user))
     trashed_routines = list(LilithRoutine.objects.filter(user=user, trashed_at__isnull=False))
@@ -927,6 +941,45 @@ class LilithBoardView(APIView):
         return Response(board(request.user))
 
 
+DUE_MIN, DUE_MAX = date(2000, 1, 1), date(2100, 12, 31)
+_DUE_SHAPE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+NO_DATE_IN_TODAY = "Today is for today, so it has no date. Give a date to something in another list."
+
+
+class DueError(ValueError):
+    """A date the server will not take. The message is the sentence the screen shows."""
+
+
+def parse_due(raw):
+    """A day from a request: None for blank, otherwise a date. Raises DueError with the sentence to show.
+
+    Date-only on purpose: a due day is a calendar day, and a timestamp would carry a timezone into it
+    (settings.TIME_ZONE is UTC, so a timestamp would turn over in the evening of the member's own day).
+    """
+    if raw is None or raw == "":
+        return None
+    s = str(raw).strip()
+    if not _DUE_SHAPE.match(s):
+        raise DueError("A date looks like 2026-12-01.")
+    try:
+        d = date.fromisoformat(s)
+    except ValueError:
+        raise DueError("That isn't a real day.")
+    if not DUE_MIN <= d <= DUE_MAX:
+        raise DueError("Pick a day between 2000 and 2100.")
+    return d
+
+
+def _in_order(bucket, rows):
+    """The order a bucket is drawn in: dated tasks first, soonest first; undated after, newest first.
+    The Logbook keeps its own order. A due day is a calendar day, so this is the same on every server."""
+    if bucket == "logbook":
+        return rows
+    dated = sorted((t for t in rows if t.due), key=lambda t: (t.due, -t.created_at.timestamp()))
+    undated = sorted((t for t in rows if not t.due), key=lambda t: -t.created_at.timestamp())
+    return dated + undated
+
+
 def _clean_action(d, A):
     """(action, goal) from a request: only a key the server verifies, goal 1..50, else ("", 1)."""
     action = str(d.get("action") or "")
@@ -963,6 +1016,12 @@ class LilithTaskListView(APIView):
 
         kind = d.get("kind") if d.get("kind") in _KIND_KEYS else "standard"
         bucket = d.get("bucket") if d.get("bucket") in _BUCKET_KEYS else "inbox"
+        try:
+            due = parse_due(d.get("due"))
+        except DueError as e:
+            return Response({"detail": str(e)}, status=400)
+        if due and bucket == "today":
+            return Response({"detail": NO_DATE_IN_TODAY}, status=400)
         # A member may not declare their own task a `platform` one — that is
         # the flag that decides what it pays, and a client that could set it
         # could set its own price.
@@ -981,7 +1040,7 @@ class LilithTaskListView(APIView):
             note=str(d.get("note") or "")[:2000],
             kind=kind, bucket=bucket, source=source,
             app_key=app_key, target=target, action=action, goal=goal,
-            due=d.get("due") or None,
+            due=due,
             cost_cents=_cost_cents(d.get("cost")), budget_category=str(d.get("budget_category") or "")[:40],
         )
         return Response(_task_dict(t), status=status.HTTP_201_CREATED)
@@ -1006,6 +1065,7 @@ class LilithTaskDetailView(APIView):
         if "note" in d:
             t.note = str(d["note"] or "")[:2000]
             fields.append("note")
+        into = d["bucket"] if d.get("bucket") in _BUCKET_KEYS else t.bucket
         if d.get("bucket") in _BUCKET_KEYS:
             t.bucket = d["bucket"]
             t.trashed_at = timezone.now() if d["bucket"] == "trash" else None
@@ -1015,8 +1075,17 @@ class LilithTaskDetailView(APIView):
             t.kind = d["kind"]
             fields.append("kind")
         if "due" in d:
-            t.due = d["due"] or None
-            fields.append("due")
+            try:
+                due = parse_due(d["due"])
+            except DueError as e:
+                return Response({"detail": str(e)}, status=400)
+            if due and into == "today":
+                return Response({"detail": NO_DATE_IN_TODAY}, status=400)
+        else:
+            # Today is today: a task moved into it loses its date rather than keeping one nobody sees.
+            due = None if into == "today" else t.due
+        t.due = due
+        fields.append("due")
         if "cost" in d:
             t.cost_cents = _cost_cents(d["cost"])
             fields.append("cost_cents")
@@ -1228,7 +1297,7 @@ class LilithStarterAddView(APIView):
             # three, from the closed list: the title, action and goal still come from the server.
             cadence = str(request.data.get("cadence") or spec["cadence"])
             if cadence not in CADENCES:
-                return Response({"detail": "Choose daily, weekly or monthly."}, status=400)
+                return Response({"detail": "Choose daily, weekly, monthly or yearly."}, status=400)
             if live_routines(request.user).filter(template=key).exists():
                 return Response({"detail": "That one is already on your board.", "already": True}, status=200)
             back = LilithRoutine.objects.filter(user=request.user, template=key, trashed_at__isnull=False).first()
@@ -1243,7 +1312,7 @@ class LilithStarterAddView(APIView):
             r = LilithRoutine.objects.create(
                 user=request.user, title=spec["title"], note=spec["note"], cadence=cadence,
                 app_key=_coach_for(request, spec, key), target=spec["target"], template=key,
-                action=spec.get("action", ""), goal=spec.get("goal", 1))
+                action=spec.get("action", ""), goal=spec.get("goal", 1), source="platform")
             return Response(_routine_dict(r), status=status.HTTP_201_CREATED)
 
         return Response({"detail": "Say whether it is a task or a routine."}, status=400)
@@ -1294,7 +1363,8 @@ class LilithGoAheadView(APIView):
             return Response({"detail": v["reason"], "verdict": v}, status=status.HTTP_409_CONFLICT)
         if t.bucket != "today":
             t.bucket = "today"
-            t.save(update_fields=["bucket"])
+            t.due = None                    # Today is today: a go-ahead replaces any date
+            t.save(update_fields=["bucket", "due"])
         return Response({"task": _task_dict(t), "verdict": v})
 
 
@@ -1339,7 +1409,11 @@ class LilithMoveView(APIView):
                                     status=status.HTTP_402_PAYMENT_REQUIRED)
                 t.bucket = to
                 t.trashed_at = timezone.now() if to == "trash" else None
-                t.save(update_fields=["bucket", "trashed_at"])
+                fields = ["bucket", "trashed_at"]
+                if to == "today":
+                    t.due = None            # Today is today: the date is replaced, as the screen says
+                    fields.append("due")
+                t.save(update_fields=fields)
                 return Response({"moved": "trash" if to == "trash" else "bucket", "task": _task_dict(t)})
             if to in CADENCES:
                 if routines_full(live_routines(request.user).count(), limits):
