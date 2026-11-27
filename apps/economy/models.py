@@ -7324,6 +7324,34 @@ class LilithTask(models.Model):
         return f"{self.title[:40]} ({self.bucket})"
 
 
+class LilithTag(models.Model):
+    """One more door on a task: a tab and the control on it, the same pair a
+    task's own `app_key`/`target` names, for work that happens in more than one
+    place (record it in SingZ, post it in PostZ, enter it in BattleZ).
+
+    Owner-only, and there is deliberately no visibility column: a tag that could
+    be set to "shared" or "public" would promise a reader that nothing in the app
+    shows. It pays nothing and moves no rating, balance or XP. lilith_tags.clean_tag
+    checks the shape; the list of real tabs lives in the frontend.
+    """
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                             related_name="lilith_tags")
+    task = models.ForeignKey("LilithTask", on_delete=models.CASCADE, related_name="tags")
+    to_app_key = models.CharField(max_length=32)
+    to_target = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("id",)
+        constraints = [
+            models.UniqueConstraint(fields=["task", "to_app_key", "to_target"],
+                                    name="lilith_tag_once_per_task"),
+        ]
+
+    def __str__(self):
+        return f"{self.to_app_key}:{self.to_target} (task {self.task_id})"
+
+
 class LilithRoutine(models.Model):
     """A habit, and the streak that is the only unfakeable thing in this app.
 
